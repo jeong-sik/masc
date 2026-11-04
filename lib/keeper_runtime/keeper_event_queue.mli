@@ -461,10 +461,6 @@ val dequeue : t -> (stimulus * t) option
     empty. The Policy Layer must call this at the start of every
     [emit] turn to honour the KeeperEventQueue [TurnDequeue] action. *)
 
-val remove_by_post_id : post_id -> t -> stimulus list * t
-(** Remove all stimuli whose [post_id] matches the argument, returning the
-    removed stimuli in FIFO order plus the remaining queue. *)
-
 val contains : t -> stimulus -> bool
 (** [contains q s] is [true] when some stimulus already in [q] compares equal
     to [s] under {!stimulus_identity_equal}. Queue order is unchanged. *)

@@ -1343,10 +1343,3 @@ let replay_transition_outbox_entry entry state =
        Error "pending source-terminal ACK WAL must carry exactly one source"
     ))
 ;;
-
-let remove_by_post_id post_id state =
-  let removed, pending =
-    Keeper_event_queue.remove_by_post_id post_id (pending state)
-  in
-  Keeper_event_queue.uniq_stimuli removed, with_pending pending state
-;;

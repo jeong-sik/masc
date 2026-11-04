@@ -608,12 +608,6 @@ val project_accepted_transfer_guarded_result :
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
 
-val ack_consumed :
-  base_path:string ->
-  keeper_name:string ->
-  Keeper_event_queue.stimulus list ->
-  (unit, string) result
-
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded
   | Queue_observation_incomplete

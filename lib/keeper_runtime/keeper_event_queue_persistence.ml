@@ -1878,25 +1878,6 @@ let project_transition_outbox_result
          (Printexc.to_string exn))
 ;;
 
-let remove_post_ids stimuli state =
-  List.fold_left
-    (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
-       let newly_removed, state = State.remove_by_post_id stimulus.post_id state in
-       Keeper_event_queue.uniq_stimuli (removed @ newly_removed), state)
-    ([], state)
-    stimuli
-;;
-
-let ack_consumed ~base_path ~keeper_name stimuli =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       let _removed, state = remove_post_ids stimuli state in
-       Ok (state, ()))
-;;
-
 type queue_residence_unknown_reason =
   Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded

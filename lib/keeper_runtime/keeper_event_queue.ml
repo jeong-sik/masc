@@ -1028,14 +1028,6 @@ let dequeue (queue : t) : (stimulus * t) option =
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
 
-let remove_by_post_id post_id queue =
-  let removed, kept =
-    queue
-    |> to_list
-    |> List.partition (fun stimulus -> String.equal stimulus.post_id post_id)
-  in
-  removed, of_list kept
-
 (* Scans both halves of the queue directly instead of rebuilding it through
    repeated [dequeue], so membership stays allocation-free. *)
 let contains (queue : t) (stimulus : stimulus) : bool =

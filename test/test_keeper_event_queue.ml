@@ -1907,32 +1907,6 @@ let () =
       assert (String.equal only.post_id "bootstrap");
       assert (is_empty rest));
 
-  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
-         is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v19.json, mirroring a bootstrap enqueued
-         by supervisor launch; after ack, [load] must be empty. Without the
-         A-fix this returns length 1 and accumulates across restarts. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-drains-pending-test" in
-      Keeper_event_queue_persistence.persist
-        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
-      (* Genuine-ack path drains the acknowledged pending source. *)
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ bootstrap_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("pending acknowledgement failed: " ^ error));
-      (* Before the A-fix this returned length 1 (pending snapshot untouched);
-         after the fix the pending snapshot is drained. *)
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
-
   (* --- durable fleet summary: health can see pending work and oldest age. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary" in
   Fun.protect

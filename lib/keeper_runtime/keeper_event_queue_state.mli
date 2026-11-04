@@ -416,9 +416,6 @@ val schedule_occurrence_of_witness :
     witness is not a [Schedule_due] source. Used for a retired witness read
     back from the exact-id schedule occurrence receipt. *)
 
-val remove_by_post_id :
-  Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
-
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val transition_receipt_to_yojson : transition_receipt -> Yojson.Safe.t
 val transition_receipt_of_yojson : Yojson.Safe.t -> (transition_receipt, string) result

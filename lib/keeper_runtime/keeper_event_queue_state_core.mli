@@ -383,9 +383,6 @@ val mark_transition_projected
     non-disposition history is not retained indefinitely. Unknown transition
     ids fail closed. *)
 
-val remove_by_post_id :
-  Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
-
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result
 (** Replay one current source-bearing committed transition. *)

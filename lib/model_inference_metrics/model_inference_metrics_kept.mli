@@ -4,9 +4,15 @@
     cost day file the window touched. Kept, each file is read whole the first
     time and afterwards only the rows it gained
     ({!Dated_jsonl.fold_file_appended_entries_result}); a rotated or rewritten
-    file is read again from its start. Each read drops the rows that left the
-    window, so a reading equals what a one-pass read at the same moment
-    gives.
+    file is read again from its start. Each read drops the timestamped
+    readings that left the window, so a reading equals what a one-pass read at
+    the same moment gives.
+
+    Malformed JSON rows and timestamp-less schema violations are file-scoped
+    diagnostics instead: they count whenever their file remains listed, just
+    as the one-pass reader counts them. No timestamp is invented to expire
+    them. A file that leaves the inventory drops their diagnostics with its
+    other rows.
 
     The value is immutable: {!refresh} returns a new one. *)
 

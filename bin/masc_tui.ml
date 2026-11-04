@@ -8056,6 +8056,18 @@ let owe_tools_read_for_keeper state keeper =
 let owe_clients_read state =
   state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
 
+let owe_machine_live_read state machine =
+  let visible = match machine with
+    | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
+    | Masc.Machine_lane.Dos -> state.msx_open
+  in
+  if visible && state.machine_source = machine then
+    match machine with
+    | Masc.Machine_lane.Msx ->
+        state.msx_live_owed <- Masc_tui_owed_read.changed state.msx_live_owed
+    | Masc.Machine_lane.Dos ->
+        state.dos_live_owed <- Masc_tui_owed_read.changed state.dos_live_owed
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -9077,18 +9089,6 @@ let launch_owed_connectors state ~mailbox =
       | Changes | Runtime | Config | Resources | Tools | System_logs | Keepers _ ),
       (Some _ | None) ) ->
     state.connectors_owed <- Masc_tui_owed_read.settled
-
-let owe_machine_live_read state machine =
-  let visible = match machine with
-    | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
-    | Masc.Machine_lane.Dos -> state.msx_open
-  in
-  if visible && state.machine_source = machine then
-    match machine with
-    | Masc.Machine_lane.Msx ->
-        state.msx_live_owed <- Masc_tui_owed_read.changed state.msx_live_owed
-    | Masc.Machine_lane.Dos ->
-        state.dos_live_owed <- Masc_tui_owed_read.changed state.dos_live_owed
 
 let launch_owed_machine_live state ~mailbox =
   let launch machine visible owed in_flight set_owed launch_read =

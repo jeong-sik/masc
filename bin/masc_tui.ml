@@ -820,53 +820,43 @@ let store_preference state change =
        ~sw:(Eio_context.get_switch_opt ()) change
      : Masc_tui_preference_writer.request)
 
-let apply_chat_visit_completion state (completion : Masc_tui_preference_writer.completion) keeper =
-  let applied = accept_chat_visit state completion keeper in
-  let target = Keeper_id.Keeper_name.to_string keeper in
-  match completion.outcome with
-  | Ok (Masc_tui_preference_writer.Committed { durability = Runtime.Durable; _ })
-  | Ok Masc_tui_preference_writer.Unchanged -> applied
-  | Ok (Masc_tui_preference_writer.Committed { durability = Runtime.Durability_unconfirmed { detail }; _ }) ->
-      add_event state "error" ("Conversation " ^ target ^ " saved; durability unconfirmed: " ^ detail); true
-  | Error
-      ( Masc_tui_preference_writer.Refused detail
-      | Masc_tui_preference_writer.Not_permitted detail
-      | Masc_tui_preference_writer.Not_started detail ) ->
-      add_event state "error" ("Conversation " ^ target ^ " remembered only in this session: " ^ detail); true
-  | Error (Masc_tui_preference_writer.Unobserved detail) ->
-      add_event state "error" ("Conversation " ^ target ^ " save outcome unknown: " ^ detail); true
-
 let preference_name state = function
   | Masc.Tui_preference.Theme_chosen _ -> ui_text state ~ko:"테마" ~en:"Theme"
   | Masc.Tui_preference.Language_chosen _ -> ui_text state ~ko:"UI 언어" ~en:"UI language"
   | Masc.Tui_preference.Board_sort_chosen _ -> ui_text state ~ko:"Board 정렬" ~en:"Board sort"
   | Masc.Tui_preference.Candle_chosen _ -> ui_text state ~ko:"Candle" ~en:"Candle"
   | Masc.Tui_preference.Help_hint_retired -> ui_text state ~ko:"도움말 안내" ~en:"The help hint"
-  | Masc.Tui_preference.Chat_visited _ -> ui_text state ~ko:"대화" ~en:"Conversation"
+  | Masc.Tui_preference.Chat_visited keeper ->
+      let target = Keeper_id.Keeper_name.to_string keeper in
+      ui_text state ~ko:("대화 " ^ target) ~en:("Conversation " ^ target)
 
 (* A pick the screen already shows: only what did not go as shown is said. A
    credential that may not write runtime.toml is said once for the session. *)
 let report_preference_outcome state change outcome =
   let name = preference_name state change in
   match outcome with
-  | Ok Masc_tui_preference_writer.Unchanged
-  | Ok (Masc_tui_preference_writer.Committed { durability = Runtime.Durable; ignored_legacy_keys = [] }) ->
-      false
+  | Ok Masc_tui_preference_writer.Unchanged -> false
   | Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys }) ->
-      (match ignored_legacy_keys with
-       | [] -> ()
-       | keys ->
-           report_action state "warn"
-             (ui_text state
-                ~ko:(name ^ ": 저장했어요. 다만 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시돼요: " ^ String.concat ", " keys)
-                ~en:(name ^ " saved. Legacy keys left in the file are ignored from this release on: " ^ String.concat ", " keys)));
-      (match durability with
-       | Runtime.Durable -> ()
-       | Runtime.Durability_unconfirmed { detail } ->
-           report_action state "warn"
-             (ui_text state ~ko:(name ^ ": 저장했지만 디스크에 반영됐는지 확인하지 못했어요: " ^ detail)
-                ~en:(name ^ " saved; durability unconfirmed: " ^ detail)));
-      true
+      let legacy_said =
+        match ignored_legacy_keys with
+        | [] -> false
+        | keys ->
+            report_action state "warn"
+              (ui_text state
+                 ~ko:(name ^ ": 저장했어요. 다만 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시돼요: " ^ String.concat ", " keys)
+                 ~en:(name ^ " saved. Legacy keys left in the file are ignored from this release on: " ^ String.concat ", " keys));
+            true
+      in
+      let durability_said =
+        match durability with
+        | Runtime.Durable -> false
+        | Runtime.Durability_unconfirmed { detail } ->
+            report_action state "warn"
+              (ui_text state ~ko:(name ^ ": 저장했지만 디스크에 반영됐는지 확인하지 못했어요: " ^ detail)
+                 ~en:(name ^ " saved; durability unconfirmed: " ^ detail));
+            true
+      in
+      legacy_said || durability_said
   | Error (Masc_tui_preference_writer.Not_permitted reason) ->
       if state.preference_refusal_said then false
       else begin
@@ -892,15 +882,16 @@ let drain_preference_completions state ~can_take =
   let changed = ref false in
   Masc_tui_preference_writer.drain_completed state.preference_writer ~can_take
     ~apply:(fun (completion : Masc_tui_preference_writer.completion) ->
-      let applied =
-        match completion.request.change with
-        | Masc.Tui_preference.Chat_visited keeper -> apply_chat_visit_completion state completion keeper
-        | ( Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
-          | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _
-          | Masc.Tui_preference.Help_hint_retired ) as change ->
-            report_preference_outcome state change completion.outcome
+      let change = completion.request.change in
+      let accepted =
+        match change with
+        | Masc.Tui_preference.Chat_visited keeper -> accept_chat_visit state completion keeper
+        | Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
+        | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _
+        | Masc.Tui_preference.Help_hint_retired -> false
       in
-      changed := !changed || applied);
+      let said = report_preference_outcome state change completion.outcome in
+      changed := !changed || accepted || said);
   !changed
 
 let drain_keeper_preference_completions state ~can_take =

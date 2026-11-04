@@ -58,17 +58,16 @@ let read_keeper_preferences path =
                      | Unix.S_FIFO | Unix.S_SOCK); _ } ->
       Error "Keeper preference path is not a regular file"
 
-(* The reader's chosen theme name, [tui].theme. Kept pure so a test can hand it
-   a parsed doc without a file: every absence -- file gone, table missing, key
-   missing -- reads the same as "no stored choice", and the caller then follows
-   the terminal exactly as it did before this key existed. *)
-(* The [[tui]] table of runtime.toml, spelled once (#39539). *)
-
 let of_settings ~base_path reading =
   let (settings : Masc.Tui_preference.settings), settings_unread =
     match reading with
     | Ok settings -> settings, None
-    | Error reason -> Masc.Tui_preference.settings_of_reading (Ok None), Some reason
+    | Error reason ->
+        (* Unread settings start every pick at its default, but the last
+           conversation stays unread rather than shown as none. *)
+        { (Masc.Tui_preference.settings_of_reading (Ok None)) with
+          Masc.Tui_preference.last_chat_keeper = Error reason },
+        Some reason
   in
   let keeper_preferences =
     match read_keeper_preferences (keeper_preferences_path ~base_path) with

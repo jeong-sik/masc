@@ -11,18 +11,22 @@ let test_a_label_append_reports_once () =
   Fun.protect
     ~finally:(fun () ->
       Eval_calibration.install_written_observer (fun ~base_path:_ -> ());
-      Eval_calibration.For_testing.reset_store ();
       Fs_compat.remove_tree base_path)
     (fun () ->
-      Eval_calibration.For_testing.set_store ~base_path;
-      let written = ref 0 in
-      Eval_calibration.install_written_observer (fun ~base_path:_ -> incr written);
-      Eval_calibration.record_human_label ~notes_hash:"0123" ~human_verdict:Eval_calibration.Approve_label
+      (* The observer reports the workspace the store belongs to: the
+         announcement of a verdict names that workspace, so the test keeps
+         what it heard. *)
+      let heard = ref [] in
+      Eval_calibration.install_written_observer (fun ~base_path:seen ->
+        heard := seen :: !heard);
+      Eval_calibration.record_human_label ~base_path ~notes_hash:"0123"
+        ~human_verdict:Eval_calibration.Approve_label
         ~labeler:"operator" ~reason:"matches the evidence";
-      check int "the appended label is reported" 1 !written;
-      Eval_calibration.record_human_label ~notes_hash:"4567" ~human_verdict:Eval_calibration.Reject_label
+      Eval_calibration.record_human_label ~base_path ~notes_hash:"4567"
+        ~human_verdict:Eval_calibration.Reject_label
         ~labeler:"operator" ~reason:"missed a step";
-      check int "each append is reported" 2 !written)
+      check (list string) "each append reports the record's workspace"
+        [ base_path; base_path ] !heard)
 ;;
 
 let () =

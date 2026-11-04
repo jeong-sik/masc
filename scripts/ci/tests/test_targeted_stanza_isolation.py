@@ -381,5 +381,44 @@ raise SystemExit(0)
         self.assertIn("--force", calls[0])
 
 
+    def test_python_alias_reader_failure_is_reported_and_the_alias_still_runs(self):
+        # A silent fallback to "no deps" is indistinguishable in the log from
+        # the 601s in-budget TIMEOUT this preparation exists to prevent, so the
+        # run says it fell back. The alias is still built, under its budget.
+        alias_name = "test_reader_failure"
+        self.inc.write_text(f"""
+(rule
+ (alias runtest-{alias_name})
+ (deps {alias_name}.py)
+ (action (run python3 {alias_name}.py)))
+""")
+        (self.root / f"test/{alias_name}.py").write_text("print('body')\n")
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        commands = self.root / "commands"
+        commands.mkdir()
+        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "opam", "import sys\nraise SystemExit(0)\n")
+        # A reader that refuses this query: the alias-deps path exits non-zero.
+        reader = self.root / "scripts/ci/stanza_env.py"
+        reader.write_text(
+            "import sys\n"
+            "if '--alias-deps' in sys.argv:\n"
+            "    print('simulated reader refusal', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "print('test/x.py')\n"
+        )
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES=alias_name, DUNE_JOBS="2",
+                   CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("could not read the rule's deps", result.stdout)
+        self.assertIn("simulated reader refusal", result.stdout)
+        self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
+        self.assertNotIn("(prepare alias dependencies)", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

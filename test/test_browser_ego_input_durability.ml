@@ -22,7 +22,7 @@ let storage () =
   persistence,current,fault,active,writes
 let open_input persistence writer = ok (Input.create_persistent ~persistence ~writer ~space_id:51)
 let hold t command = ok (Input.within_command t ~command_id:command (fun () ->
-  Input.begin_holding t ~scope:Input.Space_scope ~tab_id:7 ~page_label:"p2" ~operation:"native_workflow"))
+  Input.begin_holding t ~now:100. ~scope:Input.Space_scope ~tab_id:7 ~page_label:"p2" ~operation:"native_workflow"))
 let pending t = match Input.status t with Input.Uncertain pending->pending|Ready _->fail "input unexpectedly available"
 let reopen () =
   let persistence,_,_,_,_=storage () in
@@ -75,7 +75,7 @@ let publication_failure () = List.iter (fun mode ->
   fault:=mode;
   let effects=ref 0 in
   let result=Input.within_command first ~command_id:"must-not-dispatch" (fun () ->
-    match Input.begin_holding first ~scope:Input.Page_scope ~tab_id:1 ~page_label:"p1" ~operation:"target_click" with
+    match Input.begin_holding first ~now:100. ~scope:Input.Page_scope ~tab_id:1 ~page_label:"p1" ~operation:"target_click" with
     | Error detail -> Error detail
     | Ok _ -> incr effects;Ok ()) |> ok in
   check bool "unconfirmed write refuses effect" true (Result.is_error result);

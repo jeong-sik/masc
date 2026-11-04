@@ -17,7 +17,7 @@ let attach store ~space_id ~writer =
     active=(fun ()->true)} in
   Input.create_persistent ~persistence ~writer ~space_id
 let hold input = ok (Input.within_command input ~command_id:"original" (fun ()->
-  Input.begin_holding input ~scope:Input.Page_scope ~tab_id:4 ~page_label:"p2" ~operation:"target_click")) |> ok
+  Input.begin_holding input ~now:100. ~scope:Input.Page_scope ~tab_id:4 ~page_label:"p2" ~operation:"target_click")) |> ok
 let proof () = match Browser_ego_release.judge [0,Browser_ego_release.answer_of_json (`Assoc [])] with
   | Settled (Released proof)->proof|Settled No_hold|Unconfirmed _->fail "fixture proof"
 let child_reopen root generation =
@@ -48,7 +48,7 @@ let write_failure_before_effect () = with_store (fun root store ->
   let path=Filename.concat root "ego-input/51.json" in Unix.unlink path;Unix.mkdir path 0o700;
   let effects=ref 0 in
   let result=ok (Input.within_command input ~command_id:"no-effect" (fun ()->
-    match Input.begin_holding input ~scope:Input.Page_scope ~tab_id:1 ~page_label:"p1" ~operation:"click" with
+    match Input.begin_holding input ~now:100. ~scope:Input.Page_scope ~tab_id:1 ~page_label:"p1" ~operation:"click" with
     | Ok _->incr effects;Ok ()|Error detail->Error detail)) in
   check bool "unwritable/nonregular authority refuses input" true (Result.is_error result);
   check int "no effect follows failed write-ahead" 0 !effects;

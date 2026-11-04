@@ -8,8 +8,26 @@ type pending = private {
   page_label : string;
   operation : string;
   scope : scope;
+  held_at : float option;
 }
-type readiness = Command_settled | Operator_reset_asserted of { pending:pending; at:float }
+(** [held_at] is when the lock was taken; [None] only for records written
+    before it was kept. *)
+type readiness =
+  | Command_settled
+  | Operator_reset_asserted of { pending:pending; at:float }
+  | Keeper_released of { pending:pending; at:float }
+(** [Keeper_released] is the owning agent's own assertion that it inspected the
+    Space and released the pending input. Like the operator assertion it is not
+    native release proof, and its provenance stays distinguishable. *)
+type rejection = {
+  requested : string;
+  current : string option;
+  held_at : float option;
+  at : float;
+  reason : string;
+}
+type reset_authority = Operator | Keeper
+type reset_outcome = Reset_applied | Reset_already_applied | Reset_rejected of rejection
 type status = Ready of readiness | Uncertain of pending
 type t
 val create : unit -> t
@@ -39,7 +57,7 @@ val admit : t -> (unit, string) result
 (** Also refuse a retired/replaced writer or an unreadable retained record,
     including for methods that do not hold input. Reads are not input admission. *)
 
-val begin_holding : t -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (pending, string) result
+val begin_holding : t -> now:float -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (pending, string) result
 (** Persist the complete intent before permitting the native effect. An
     unconfirmed publication keeps local admission blocked; it grants no effect.
     Space_scope preserves the originating Page identity without claiming that
@@ -58,9 +76,25 @@ val command_settled : t -> generation:string -> Browser_ego_release.proof -> (un
 val not_started : t -> generation:string -> (unit, string) result
 (** Restore the prior readiness, retaining its operator provenance. *)
 
+val reset : t -> authority:reset_authority -> generation:string -> now:float -> reset_outcome
+(** Record a human or owning-agent assertion for this exact pending generation.
+    [Operator] is the private authenticated path and rejects while any command
+    runs. [Keeper] must run inside its own command scope (the caller has
+    already checked that the Space is agent-owned) and is the only authority
+    that may do so. A rejection is never silent: it carries the requested and
+    current generation, when the lock was taken and why nothing was applied, and
+    is kept for [lock_report] until a later release succeeds. Repeating a
+    release for the same generation is [Reset_already_applied] and does not
+    rewrite who asserted it. No browser input is sent. *)
+
 val assert_reset : t -> generation:string -> now:float -> (unit, string) result
-(** Private authenticated-operator path only. Reject while any command runs,
-    or when the generation changed. Repeating the same assertion before new
-    input is idempotent; it sends no browser input. *)
+(** [reset] with [Operator] authority; the error is the rejection reason. *)
 
 val provenance : t -> string
+(** [command_settled], [operator_asserted], [keeper_asserted] or [release_uncertain]. *)
+
+val lock_report : t -> owner:string option -> Yojson.Safe.t
+(** Who and what holds (or held) the input lock, when it was taken, whether the
+    Keeper may release it now and with which action, and the last rejected
+    release. [owner] is the Space's native ownership; [keeperCallable] is true
+    only when it is [agent]. Read-only. *)

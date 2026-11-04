@@ -62,7 +62,13 @@ val keep_pages_to_json : keep_pages -> Yojson.Safe.t
 type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
-(** [Space_status] reads metadata on the exact bound numeric Space, even when
+  | Release_input of { generation : string }
+(** [Release_input] is the owning agent's assertion that it inspected the Space
+    and released the pending native input named by [generation] (from
+    [space_status]'s [inputLock]). It needs [confirmation=checked_and_released],
+    is served only by an ego connection on an agent-owned Space, never replays
+    the original command and is not native release proof. Backends other than
+    ego refuse it. [Space_status] reads metadata on the exact bound numeric Space, even when
     delegated, without Page calls or changing control. It is not admission.
     [Finish_space keep] explicitly completes a successful task through the SDK,
     closing only agent-created Pages whose labels are absent from [Keep_labels].

@@ -1562,18 +1562,25 @@ let test_nested_scope_integrity_and_invocation_conflict () =
 ;;
 
 let test_usage_reads_only_the_committed_session () =
-  with_session @@ fun config trace_one session_one ->
+  with_session @@ fun config trace_one _session_one ->
   let trace_two = trace_id "trace-two" in
   let session_two = Keeper_fs.keeper_session_dir config "trace-two" in
   Unix.mkdir session_two 0o700;
-  ignore (ok "alpha seed" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one (activation ())));
+  let seeded = activation () in
+  let reference = Skill_reference.make ~identity:seeded.identity
+      ~content_revision:seeded.content_revision in
+  ignore (ok "alpha seed" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one seeded));
   ignore (ok "beta seed" (Ledger.record ~keeper_name:"beta" ~config ~trace_id:trace_two
     (activation ~trace:"trace-two" ())));
   let loads = Hashtbl.create 2 in
   let count trace = let key = Keeper_id.Trace_id.to_string trace in
     Hashtbl.replace loads key (1 + Option.value ~default:0 (Hashtbl.find_opt loads key)) in
   let load_count key = Option.value ~default:0 (Hashtbl.find_opt loads key) in
+  let projections = ref 0 in
   Server_skill_usage_runtime.For_testing.with_runtime
+    ~usage_projection:(fun ledger reference ->
+      incr projections;
+      Ledger.usage_for_reference ledger reference)
     ~ledger_loader:(fun ~config ~trace_id -> count trace_id; Ledger.load ~config ~trace_id)
     (fun () ->
       let sessions = [ "alpha", trace_one; "beta", trace_two ] in
@@ -1582,23 +1589,34 @@ let test_usage_reads_only_the_committed_session () =
         check (list string) "both ledgers are readable" [] unavailable;
         List.map (fun (keeper, ledger) -> keeper, (Ledger.summarize ledger).instruction_invocations) ledgers
       in
+      let usage () =
+        match Server_skill_usage_runtime.usage_for_reference ~config ~trace_id:trace_one ~reference with
+        | Some usage -> usage.invocations
+        | None -> fail "the seeded reference has no usage"
+      in
       ignore (read ());
       ignore (read ());
       check int "alpha is cold once" 1 (load_count "trace-one");
       check int "beta is cold once" 1 (load_count "trace-two");
+      check int "one usage projection" 1 (usage ());
+      check int "the same projection is reused" 1 (usage ());
+      check int "one reference computation" 1 !projections;
       ignore (ok "alpha second activation" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
         (activation ~skill_tool_use_id:"call-two" ())));
       check (list (pair string int)) "the writer's latest ledger is visible"
         [ "alpha", 2; "beta", 1 ] (read ());
+      check int "the committed reference is recomputed once" 2 (usage ());
+      check int "only the changed session is recomputed" 2 !projections;
       check int "alpha did not reload" 1 (load_count "trace-one");
       check int "beta did not reload" 1 (load_count "trace-two");
       ignore (ok "alpha duplicate" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
         (activation ~skill_tool_use_id:"call-two" ())));
       check (list (pair string int)) "idempotent observation preserves usage"
         [ "alpha", 2; "beta", 1 ] (read ());
+      check int "idempotent projection is reused" 2 (usage ());
+      check int "idempotent observation does not recompute" 2 !projections;
       check int "idempotent alpha stays cached" 1 (load_count "trace-one");
-      check int "idempotent beta stays cached" 1 (load_count "trace-two");
-      ignore (session_one))
+      check int "idempotent beta stays cached" 1 (load_count "trace-two"))
 ;;
 
 let () =

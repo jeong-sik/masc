@@ -572,6 +572,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Workspace_dataset_event.install_store_observers ();
   Server_lane_inventory.install ();
   Server_dashboard_http_keeper_memory_health.install ();
+  Server_skill_usage_runtime.install ();
   Channel_gate_change.install (fun () ->
     Workspace_dataset_event.announce ~base_path:config.base_path
       Workspace_dataset_event.Connectors);

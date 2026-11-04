@@ -254,6 +254,11 @@ type store_error =
   | Invalid_action_observed_at of string
   | Event_log_failed of Fs_compat.private_jsonl_transaction_error
 
+val install_commit_observer :
+  (config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> t -> unit) ->
+  (unit -> unit)
+(** Retain the immutable ledger returned by a successful commit. *)
+
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string
 val decode_error_code : decode_error -> string

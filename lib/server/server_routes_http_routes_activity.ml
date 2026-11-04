@@ -1458,33 +1458,27 @@ let add_routes ~sw ~clock router =
                match Keeper_meta_store.keeper_names_result config with
                | Error _ -> [], [ "keeper catalog: unavailable" ]
                | Ok keeper_names ->
-                 List.fold_left
-                   (fun (loaded, unavailable) keeper_name ->
-                      match Keeper_meta_store.read_meta config keeper_name with
-                      | Error _ ->
-                        loaded, (keeper_name ^ ": metadata unavailable") :: unavailable
-                      | Ok None -> loaded, unavailable
-                      | Ok (Some meta) ->
-                        (match
-                           Keeper_skill_activation_ledger.load
-                             ~config
-                             ~trace_id:meta.runtime.trace_id
-                         with
-                         | Ok ledger -> (keeper_name, ledger) :: loaded, unavailable
-                         | Error error ->
-                           ( loaded
-                           , (keeper_name
-                              ^ ": "
-                              ^ Keeper_skill_activation_ledger.store_error_code
-                                  error)
-                             :: unavailable )))
-                   ([], [])
-                   keeper_names
+                 let sessions, metadata_unavailable = List.fold_left
+                     (fun (sessions, unavailable) keeper_name ->
+                       match Keeper_meta_store.read_meta config keeper_name with
+                       | Error _ ->
+                           sessions, (keeper_name ^ ": metadata unavailable") :: unavailable
+                       | Ok None -> sessions, unavailable
+                       | Ok (Some meta) ->
+                           (keeper_name, meta.Keeper_meta_contract.runtime.trace_id) :: sessions,
+                           unavailable)
+                     ([], []) keeper_names
+                 in
+                 let ledgers, unavailable =
+                   Server_skill_usage_runtime.read_sessions ~config (List.rev sessions)
+                 in
+                 ledgers, unavailable @ metadata_unavailable
              in
              let usage_for_reference reference =
                usage_ledgers
                |> List.filter_map (fun (keeper_name, ledger) ->
-                 Keeper_skill_activation_ledger.usage_for_reference ledger reference
+                 Server_skill_usage_runtime.usage_for_reference ~config
+                   ~trace_id:(Keeper_skill_activation_ledger.session_id ledger) ~reference
                  |> Option.map (fun (usage : Keeper_skill_activation_ledger.catalog_usage) ->
                    `Assoc
                      [ "keeper", `String keeper_name

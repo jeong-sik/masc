@@ -2407,9 +2407,16 @@ let commit_event_locked ~changed session_dir (log : session_log) event =
     Error (Event_log_failed error)
   | Ok cursor ->
     remember_session_log path { ledger; cursor; header_written = true };
+    !commit_observer ~config ~keeper_name ~trace_id ledger;
     changed ();
     Ok ledger
 ;;
+
+let commit_observer = ref (fun ~config:_ ~keeper_name:_ ~trace_id:_ (_ : t) -> ())
+let install_commit_observer observer =
+  let previous = !commit_observer in
+  commit_observer := observer;
+  fun () -> commit_observer := previous
 
 (* A committed row changes what the Skill record and usage views read for
    the Keeper whose turn wrote it. *)

@@ -17,4 +17,5 @@ val observe : base_path:string -> Yojson.Safe.t -> unit
 
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
 (** Takes and observes a snapshot now and then every {!compare_interval_s}.
-    A snapshot that raises is logged and compared again on the next turn. *)
+    A snapshot that raises is logged, and the next one waits twice as long as
+    the last wait, up to thirty seconds, until one succeeds. *)

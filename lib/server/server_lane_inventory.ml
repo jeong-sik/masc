@@ -257,12 +257,13 @@ let package_read_json t = `Assoc ["directory",str t.directory;"complete",`Bool t
   "owner_present",`Bool t.owner_present;"issues",`List (List.map (fun (path,detail) ->
     `Assoc ["source_path",str path;"message",str detail]) t.issues)]
 let schema_field = "schema",str "masc.lane-inventory/v1"
-let to_json t = `Assoc [schema_field;"observed_at",`Float t.observed_at;
-  "rows",`List (List.map row_to_json t.rows);"exact_snapshot",Exact_projection.observation_to_json t.exact;
-  "package_read",package_read_json t]
-let drawn_json t = `Assoc [schema_field;
-  "rows",`List (List.map row_to_json t.rows);"exact_snapshot",Exact_projection.observation_drawn_json t.exact;
-  "package_read",package_read_json t]
+(* The fields both readings share, around the exact snapshot each renders. *)
+let inventory_fields ~exact_snapshot t = ["rows",`List (List.map row_to_json t.rows);
+  "exact_snapshot",exact_snapshot;"package_read",package_read_json t]
+let to_json t = `Assoc (schema_field :: ("observed_at",`Float t.observed_at)
+  :: inventory_fields ~exact_snapshot:(Exact_projection.observation_to_json t.exact) t)
+let drawn_json t = `Assoc (schema_field
+  :: inventory_fields ~exact_snapshot:(Exact_projection.observation_drawn_json t.exact) t)
 module For_testing = struct
   let machine_publication = machine_publication
   let browser_state = browser_state

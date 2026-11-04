@@ -54,7 +54,9 @@ let test_only_a_moved_drawing_is_announced () =
       observe (drawing [ `String "librarian"; `String "verifier" ]);
       check int "a moved drawing is announced" 2 !heard;
       Server_lane_inventory_watch.observe ~base_path:"/elsewhere" (drawing []);
-      check int "another workspace's drawing is not announced here" 2 !heard))
+      check int "another workspace's drawing is not announced here" 2 !heard;
+      observe (drawing [ `String "librarian"; `String "verifier" ]);
+      check int "another workspace's drawing does not replace this one's last" 2 !heard))
 
 let () =
   run "lane_inventory_watch"

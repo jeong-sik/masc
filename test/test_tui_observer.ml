@@ -152,19 +152,14 @@ let summary = function
          | Masc.Workspace_dataset_event.Provider_usage
          | Masc.Workspace_dataset_event.Provider_standing
          | Masc.Workspace_dataset_event.Keeper_costs
-         | Masc.Workspace_dataset_event.Workspace_health -> "")
-  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
-  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
-         | Masc.Workspace_dataset_event.Provider_usage
-         | Masc.Workspace_dataset_event.Provider_standing
-         | Masc.Workspace_dataset_event.Keeper_costs
          | Masc.Workspace_dataset_event.Workspace_health
          | Masc.Workspace_dataset_event.Runtime_probe
          | Masc.Workspace_dataset_event.Runtime_metrics
          | Masc.Workspace_dataset_event.Lanes -> "")
-      ^ ")"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
+  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->

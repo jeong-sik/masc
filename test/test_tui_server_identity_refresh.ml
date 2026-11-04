@@ -1364,13 +1364,9 @@ let test_native_task_read_epoch_retirement () =
 
 let overview_snapshot health : Masc_tui_types.overview_snapshot =
   { ov_workspace_health = health
-  ; ov_keepers = 0
   ; ov_keeper_listing = Masc.Keeper_snapshot_unread.Not_listed
   ; ov_keeper_liveness =
       { klc_active = 0; klc_offline = 0; klc_idle = 0; klc_paused = 0; klc_unreadable = 0 }
-  ; ov_mcp_agents = 0
-  ; ov_attention_items = []
-  ; ov_generated_at = "fixture"
   }
 
 let overview_preview_fixture () =

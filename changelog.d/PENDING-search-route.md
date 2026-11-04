@@ -1,3 +1,0 @@
-### Added
-
-- `GET /api/v1/workspace/search?path=<dir>&q=<text>&ignore_case=0|1` 가 선택한 checkout 안에서 고정 문자열을 찾아 `{root, query, ignore_case, matches:[{path,line,text}], truncated}` 로 답한다. 파일 찾기와 같은 경로 검사(`vetted_regular_file`)를 거친 파일만 나오고, 일치는 최대 200개, 한 줄은 UTF-8 300바이트까지다. `q` 는 2~200바이트이며 줄바꿈·제어 문자가 있으면 400 이다.

@@ -3293,6 +3293,7 @@
 (include stanzas/test_candle_ledger_announce.inc)
 (include stanzas/test_provider_rest_announce.inc)
 (include stanzas/test_workspace_health_line.inc)
+(include stanzas/test_dashboard_runtime_probe_loop.inc)
 (include stanzas/test_turn_preview_announce.inc)
 (include stanzas/test_verification_request_announce.inc)
 (include stanzas/test_skill_catalog_announce.inc)

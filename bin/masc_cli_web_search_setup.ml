@@ -149,10 +149,20 @@ let runtime_config_path_of ~base_path =
     resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
     Config_dir_resolver.runtime_toml_filename
 
-let run
-    ~base_path ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec
-    ~cache_ttl_sec ~unset =
-  let refuse message = prerr_endline message; 1 in
+(* The settings the server will read, seeded the way it seeds them, so the
+   credential state shown is what a search resolves and not only what this
+   shell exports. *)
+let seed_process_settings ~base_path =
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok _ -> ()
+  | Error failure ->
+    Printf.eprintf
+      "Could not seed the settings into this process, so the state below is the \
+       environment only: %s\n"
+      (Keeper_runtime_config.load_failure_to_string failure)
+
+(* With no server for this workspace, the command writes the file itself. *)
+let run_locally ~refuse ~base_path changes =
   let runtime_config_path = runtime_config_path_of ~base_path in
   (* Web search settings are a section of the configuration [masc init] writes,
      so a directory that was never initialized has nowhere to put them. Checked
@@ -164,12 +174,6 @@ let run
           first, then this again."
          base_path runtime_config_path (Filename.quote base_path))
   else
-    match
-      changes ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec
-        ~unset
-    with
-    | Error message -> refuse message
-    | Ok changes ->
       (match Web_search_setup.observe ~runtime_config_path with
        | Error error -> refuse (Web_search_setup.error_message error)
        | Ok observation ->
@@ -184,16 +188,7 @@ let run
          (match written with
           | Error error -> refuse (Web_search_setup.error_message error)
           | Ok revision ->
-            (* The settings the server will read, seeded the way it seeds them,
-               so the plan and the credential state below are what a search
-               resolves and not only what this shell exports. *)
-            (match Keeper_runtime_config.load_and_apply ~base_path with
-             | Ok _ -> ()
-             | Error failure ->
-               Printf.eprintf
-                 "Could not seed the settings into this process, so the state below is \
-                  the environment only: %s\n"
-                 (Keeper_runtime_config.load_failure_to_string failure));
+            seed_process_settings ~base_path;
             (match Web_search_setup.observe ~runtime_config_path with
              | Error error ->
                (* The write, if there was one, has already landed. *)
@@ -218,3 +213,62 @@ let run
                   print_endline "");
                show ~runtime_config_path shown;
                0)))
+
+(* RFC-0482 §3.2: the running server is the writer. The state shown is the
+   text the server holds after the save. *)
+let run_through_server ~clock ~refuse ~base_path server changes =
+  let module Remote = Masc_cli_runtime_config_remote in
+  match Remote.fetch ~clock server with
+  | Error message -> refuse message
+  | Ok source ->
+    let written =
+      match changes with
+      | [] -> Ok (None, source.Remote.text)
+      | _ :: _ ->
+        (match Web_search_setup.edit_text changes source.Remote.text with
+         | Error error -> Error (Web_search_setup.error_message error)
+         | Ok edited ->
+           Result.map (fun saved -> Some saved, edited) (Remote.store ~clock server source ~edited))
+    in
+    (match written with
+     | Error message -> refuse message
+     | Ok (saved, text) ->
+       seed_process_settings ~base_path;
+       (match Web_search_setup.observe_text ~runtime_config_path:source.Remote.path text with
+        | Error error -> refuse (Web_search_setup.error_message error)
+        | Ok shown ->
+          (match saved with
+           | None -> ()
+           | Some Remote.Unchanged -> print_endline "web search settings already are as requested\n"
+           | Some (Remote.Saved _) ->
+             print_endline "web search settings are written through the running server";
+             if List.exists needs_restart changes
+             then print_endline "The running server applies these when it restarts.";
+             print_endline "");
+          show ~runtime_config_path:source.Remote.path shown;
+          0))
+
+let run
+    ~base_path ~port ~agent ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec
+    ~cache_ttl_sec ~unset =
+  let refuse message = prerr_endline message; 1 in
+  match
+    changes ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec ~unset
+  with
+  | Error message -> refuse message
+  | Ok changes ->
+    (match Unix.realpath base_path with
+     | exception Unix.Unix_error _ -> run_locally ~refuse ~base_path changes
+     | real_base_path ->
+       let route =
+         Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+           match Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent with
+           | Error message -> `Refused message
+           | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+           | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+             `Done (run_through_server ~clock ~refuse ~base_path server changes))
+       in
+       (match route with
+        | `Refused message -> refuse message
+        | `Local -> run_locally ~refuse ~base_path changes
+        | `Done code -> code))

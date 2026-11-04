@@ -2853,13 +2853,15 @@ let web_search_setup_cmd =
               of the process that starts the server."
          ])
     Term.(
-      const (fun base_path searxng_url provider provider_order fallbacks timeout_sec
+      const (fun base_path port agent searxng_url provider provider_order fallbacks timeout_sec
                  cache_ttl_sec unset ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
-        Masc_cli_web_search_setup.run ~base_path
+        Masc_cli_web_search_setup.run ~base_path ~port ~agent
           ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec
           ~unset)
       $ base_path
+      $ port
+      $ login_agent
       $ searxng_url
       $ provider
       $ provider_order

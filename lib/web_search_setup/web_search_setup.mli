@@ -129,6 +129,16 @@ type error =
 val error_message : error -> string
 
 val observe : runtime_config_path:string -> (observation, error) result
+
+val observe_text : runtime_config_path:string -> string -> (observation, error) result
+(** {!observe} of a runtime.toml text already read, such as the one a running
+    server answered; [runtime_config_path] names it in the revision. *)
+
+val edit_text : change list -> string -> (string, error) result
+(** The runtime.toml text with every change applied by the rules of {!apply},
+    without the revision check, reading or writing: a command that saves
+    through the running server edits the text the server answered, and the
+    server checks the revision when it saves. *)
 (** The current runtime.toml revision and the [\[web_search\]] settings, from
     one read so a caller cannot join a revision to a different observation. *)
 

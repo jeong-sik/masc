@@ -10,6 +10,8 @@ val provider_names : string
 
 val run
   :  base_path:string
+  -> port:int
+  -> agent:string
   -> searxng_url:string option
   -> provider:string option
   -> provider_order:string option
@@ -19,7 +21,13 @@ val run
   -> unset:Web_search_setup.key list
   -> int
 (** With every change option absent, writes nothing and prints the state. With
-    some, writes them in one commit and then prints the state. The file is the
-    one the server reads for [base_path], [MASC_CONFIG_DIR] included. The
-    result is the process exit code: [0] when it printed the state, [1] when it
-    refused and said why on stderr. *)
+    some, writes them in one commit and then prints the state.
+
+    When [base_path]'s server answers on [port] and is ready, the state is the
+    text it holds and the commit goes through it (RFC-0482 §3.2), with the
+    sign-in [masc login] keeps for [agent]; a server still starting or a
+    missing sign-in writes nothing. With no server for [base_path], the file
+    is the one the server reads for it, [MASC_CONFIG_DIR] included.
+
+    The result is the process exit code: [0] when it printed the state, [1]
+    when it refused and said why on stderr. *)

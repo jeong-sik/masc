@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   classifySkillEditorError,
   decodeAsyncRequestObservation,
+  decodeKeeperSkillUsage,
   decodeSkillCreateReceipt,
   decodeSkillEditorLoaded,
   decodeSkillEditorPreview,
@@ -1167,5 +1168,43 @@ describe('async request observation contract', () => {
       record_errors: [],
       startup_recovery: null,
     })).toThrow(SkillsContractError)
+  })
+})
+
+describe('keeper skill usage contract', () => {
+  const reference = {
+    identity: { source_id: 'workspace', package_id: 'review', name: 'review' },
+    content_revision: 'a'.repeat(64),
+  }
+
+  it('reads each closed usage state for the Keeper asked about', () => {
+    expect(decodeKeeperSkillUsage({
+      schema: 'masc.keeper-skill-usage/v1',
+      keeper: 'imp',
+      usage: { state: 'ready', rows: [{
+        reference, invocations: 1, deliveries: 1, actions: 0, last_used_at: '2026-11-04T00:00:00Z',
+      }] },
+    }, 'imp')).toEqual({ state: 'ready', rows: [{
+      reference, invocations: 1, deliveries: 1, actions: 0, last_used_at: '2026-11-04T00:00:00Z',
+    }] })
+    expect(decodeKeeperSkillUsage({
+      schema: 'masc.keeper-skill-usage/v1', keeper: 'imp', usage: { state: 'no_session' },
+    }, 'imp')).toEqual({ state: 'no_session' })
+    expect(decodeKeeperSkillUsage({
+      schema: 'masc.keeper-skill-usage/v1',
+      keeper: 'imp',
+      usage: { state: 'unavailable', reason: 'activation_ledger_unreadable', detail: 'decode failed' },
+    }, 'imp')).toEqual({ state: 'unavailable', reason: 'activation_ledger_unreadable', detail: 'decode failed' })
+  })
+
+  it('refuses another Keeper, another schema, an unknown state and an extra field', () => {
+    const answer = { schema: 'masc.keeper-skill-usage/v1', keeper: 'imp', usage: { state: 'no_session' } }
+    expect(() => decodeKeeperSkillUsage(answer, 'other')).toThrow(SkillsContractError)
+    expect(() => decodeKeeperSkillUsage({ ...answer, schema: 'masc.keeper-skill-activations/v1' }, 'imp'))
+      .toThrow(SkillsContractError)
+    expect(() => decodeKeeperSkillUsage({ ...answer, usage: { state: 'no_ledger' } }, 'imp'))
+      .toThrow(SkillsContractError)
+    expect(() => decodeKeeperSkillUsage({ ...answer, skill_activations: {} }, 'imp'))
+      .toThrow(SkillsContractError)
   })
 })

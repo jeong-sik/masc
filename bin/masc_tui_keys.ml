@@ -172,6 +172,9 @@ let config_bindings =
    has no lane row to act on. *)
 type runtime_key =
   | Every_reading of binding
+  | Detail_reading of binding
+      (** answers only with a detail open; the footer drawn for the readings
+          never names it, and the cheat sheet does *)
   | Keeper_lanes_only of binding
   | Reading_edit
   | Reading_walk
@@ -222,14 +225,16 @@ let runtime_keys =
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")
-  ; Every_reading (b Act "Left / Esc" "back")
+  ; Every_reading (b Act "Esc" "back" ~help:"back to Config")
+  ; Detail_reading
+      (b Act "Left / Esc" "list" ~help:"close the open detail, back to the list")
   ; Every_reading
       (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
   ; Every_reading (b Search "n / N" "next / previous match")
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Detail_reading binding | Keeper_lanes_only binding -> binding
   | Reading_edit ->
     b Act "e" "model settings / add candidate"
       ~help:"on all runtimes, open the selected binding in Config Models; \
@@ -240,6 +245,7 @@ let runtime_sheet_binding = function
 
 let runtime_footer_binding ~(mode : runtime_mode) = function
   | Every_reading binding -> Some binding
+  | Detail_reading _ -> None
   | Keeper_lanes_only binding ->
     (match mode with
      | Runtime_lanes -> Some binding
@@ -1025,7 +1031,13 @@ let for_surface = function
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
       ; b Act "Right / Enter" "written diff"
           ~help:"what the call wrote, as a diff"
-      ; b Act "Left / Esc" "back" ~help:"close the diff"
+        (* Left closes an open diff and does nothing on the list; Esc closes
+           the diff too and, on the list, goes back to the Keeper screen the
+           list was opened from. The diff footers are their own strings, so
+           this table's footer is the list's. *)
+      ; b Act "Esc" "back" ~detail:List_only
+          ~help:"back to the Keeper screen this list was opened from"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
       ; b Act "d" "tree diff" ~help:"what the tree holds now"
       ; b Act "v" "view code"
           ~help:"the file on the Code surface, read from the keeper's own \

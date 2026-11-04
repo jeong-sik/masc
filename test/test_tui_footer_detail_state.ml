@@ -19,6 +19,7 @@ let detail_surfaces =
   ; ("Schedules", Masc_tui_types.Schedules)
   ; ("Verification", Masc_tui_types.Verification)
   ; ("Harness", Masc_tui_types.Harness)
+  ; ("Changes", Masc_tui_types.Changes)
   ]
 
 let contains haystack needle =
@@ -118,6 +119,12 @@ let scoped_keys =
   @ back_keys_of_surface "Verification" Masc_tui_types.Verification
   @ back_keys_of_surface "Harness" Masc_tui_types.Harness
   @ back_keys_of_surface "System_logs" Masc_tui_types.System_logs
+  @ back_keys_of_surface "Changes" Masc_tui_types.Changes
+  (* Runtime draws its two states from two builders, not from one table read
+     twice: the readings' footer and the detail's own. *)
+  @ back_keys "Runtime"
+      ~list:(Keys.footer_hints_runtime ~mode:Masc_tui_types.Runtime_lanes)
+      ~detail:(Keys.footer_hints_runtime_detail ~ko:false ~routes:false ())
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter

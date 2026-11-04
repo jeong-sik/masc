@@ -683,6 +683,7 @@ count is drawn beyond the available space.
 | `j/k` | move |
 | `[ / ]` | previous / next keeper |
 | `Right / Enter` | what the call wrote, as a diff |
+| `Esc` | back to the Keeper screen this list was opened from |
 | `Left / Esc` | close the diff |
 | `d` | what the tree holds now |
 | `v` | the file on the Code surface, read from the keeper's own workspace |
@@ -711,7 +712,8 @@ count is drawn beyond the available space.
 | `m` | edit [runtime].media_failover in the slot editor; refused while boot dropped one of its entries |
 | `R` | give the lane under the cursor another name; the assignments that route to it and [runtime].default, when it names it, are rewritten in the same write. The field opens on the name it has now |
 | `D` | remove the lane under the cursor; press twice. Refused while a keeper is assigned to it |
-| `Left / Esc` | back |
+| `Esc` | back to Config |
+| `Left / Esc` | close the open detail, back to the list |
 | `/` | jump the cursor to a matching lane id or runtime id |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |

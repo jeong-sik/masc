@@ -2847,9 +2847,12 @@ reasoning-uncontrolled = true
 
 [models.opencode-go-deepseek-flash.capabilities]
 max-output-tokens = 384000
-# The Go gateway takes reasoning_effort low/high/max (probed 2026-11-04);
-# without this contract openai_compat refuses to send the effort.
-thinking-control-format = "reasoning-effort"
+# No effort ladder is expressible from runtime.toml, and a bare
+# enable_thinking has no encoding under the Reasoning_effort dialect, so no
+# control is declared at all. Default-on reasoning verified by probe
+# (reasoning_content without any effort param, 2026-11-04): the
+# No_thinking_control + supports_reasoning admission arm passes.
+thinking-control-format = "none"
 # SSE streams reasoning under delta.reasoning_content (probed 2026-11-04).
 reasoning-streaming-format = "delta:reasoning_content"
 

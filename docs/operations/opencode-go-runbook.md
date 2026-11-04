@@ -40,7 +40,7 @@ on independent quotas instead of running one candidate.
 | Auth | `Authorization: Bearer $OPENCODE_API_KEY` |
 | Required header | `x-opencode-session` (stable id per conversation; 400 without it) |
 | DeepSeek api-name | `deepseek-v4.1-flash` (1M context, 384k output) |
-| Reasoning control | `reasoning_effort` low/high/max accepted |
+| Reasoning control | gateway takes `reasoning_effort` low/high/max, but MASC sends none (no ladder key; default-on reasoning verified without it) |
 | Reasoning stream | `delta.reasoning_content` (SSE) |
 | Billing proof | `billing_source: "go-plus"` in usage |
 
@@ -82,8 +82,11 @@ key from a whole fleet risks the account, not just the allowance.
 - `MissingSessionID` 400 — the headers table was dropped. Restore
   `[providers.opencode_go.headers]`.
 - `requires Global regions` 400 — step 1.3 not done.
-- `has no declared categorical reasoning-effort contract` — a `reasoning-effort`
-  declaration needs an effort ladder no runtime.toml key expresses. Keep the
-  row uncontrolled (shipped shape) until the ladder is plumbable.
+- `has no declared categorical reasoning-effort contract`, or `cannot encode
+  enable_thinking=true` under the `Reasoning_effort` dialect — a
+  `reasoning-effort` declaration needs an effort ladder no runtime.toml key
+  expresses, and a bare enable has no encoding there either. Keep the shipped
+  shape (`reasoning-uncontrolled`, control format `none`) until the ladder is
+  plumbable.
 - Sub-cap rejection mid-month — expected at fleet scale; the lane's next
   candidate serves. Narrow the lane or add allowance; do not widen blindly.

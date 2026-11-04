@@ -26729,10 +26729,23 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Tools_async_detail_loaded (request,result) ->
       let current = tools_async_detail_current state request in
       complete_tools_async_detail state request result;
+      (* A nested manifest the read could not fetch comes back inside an
+         [Ok] reading; it is retried like a failed read. *)
       if current then
         state.tools_async_detail_owed <-
           (match result with
-           | Ok _ -> Masc_tui_owed_read.succeeded state.tools_async_detail_owed
+           | Ok Masc.Tui_decode_async_request.Absent
+           | Ok
+               (Masc.Tui_decode_async_request.Observed
+                 { Masc.Tui_decode_async_request.nested =
+                     ( Masc.Keeper_composition_observation.Absent
+                     | Masc.Keeper_composition_observation.Observed _
+                     | Masc.Keeper_composition_observation.Stored _ )
+                 ; _ }) ->
+               Masc_tui_owed_read.succeeded state.tools_async_detail_owed
+           | Ok
+               (Masc.Tui_decode_async_request.Observed
+                 { Masc.Tui_decode_async_request.nested = Masc.Keeper_composition_observation.Invalid _; _ })
            | Error _ -> failed_read state.tools_async_detail_owed)
   | Task_document_prepared (request,result) ->
       let _,terminal_cols=get_terminal_size () in

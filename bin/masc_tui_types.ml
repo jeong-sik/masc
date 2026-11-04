@@ -4515,6 +4515,9 @@ type surface_needs = {
   needs_provider_history : bool;
   needs_overview_goals : bool;
   needs_account_emails : bool;
+  (* The Dashboard briefing ([/api/v1/dashboard/briefing], about 120KB) feeds
+     only the Home Health line. *)
+  needs_overview_briefing : bool;
 }
 
 let nothing =
@@ -4531,6 +4534,7 @@ let nothing =
     needs_provider_history = false;
     needs_overview_goals = false;
     needs_account_emails = false;
+    needs_overview_briefing = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -4561,6 +4565,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
       { nothing with needs_operator_approvals = true; needs_asks = true
+      ; needs_overview_briefing = true
       ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -4639,6 +4644,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_overview_goals && not previous.needs_overview_goals
   ; needs_account_emails =
       next.needs_account_emails && not previous.needs_account_emails
+  ; needs_overview_briefing =
+      next.needs_overview_briefing && not previous.needs_overview_briefing
   }
 
 let surface_needs_any needs = needs <> nothing

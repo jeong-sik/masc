@@ -230,6 +230,23 @@ let test_usage_asks_for_keeper_usage () =
   check bool "Dashboard does not fetch Keeper detail" false
     (needs Types.Overview).Types.needs_keeper_usage
 
+(* The briefing feeds only Home's Health line, so no other surface asks for
+   its 120KB on the cadence. *)
+let test_only_home_asks_for_the_briefing () =
+  check bool "Home asks for it" true
+    (needs Types.Overview).Types.needs_overview_briefing;
+  List.iter
+    (fun (label, surface) ->
+      check bool (label ^ " does not") false
+        (needs surface).Types.needs_overview_briefing)
+    [ ("planning", Types.Planning)
+    ; ("board", Types.Board)
+    ; ("the keeper list", Types.Keepers Types.Keeper_list)
+    ; ("usage", Types.Metrics)
+    ; ("config", Types.Config)
+    ]
+;;
+
 (* Account emails are read on every Usage refresh, like its other readings,
    so a sign-in, a failed read or another server on the port shows on the
    next tick. Plan usage is on Usage, and the Models pane on Config names the
@@ -450,6 +467,8 @@ let () =
             test_usage_asks_for_keeper_usage
         ; test_case "Usage and Config ask for account emails" `Quick
             test_usage_and_config_ask_for_account_emails
+        ; test_case "only Home asks for the briefing" `Quick
+            test_only_home_asks_for_the_briefing
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

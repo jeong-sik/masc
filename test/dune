@@ -3028,6 +3028,7 @@
 (include stanzas/test_tui_chat_memory_journal_signal.inc)
 (include stanzas/test_tui_keeper_composite_signal.inc)
 (include stanzas/test_tui_planning_goal_signal.inc)
+(include stanzas/test_tui_briefing_on_home.inc)
 (include stanzas/test_tui_keeper_logs_metrics_signal.inc)
 (include stanzas/test_tui_keeper_calls_signal.inc)
 (include stanzas/test_tui_board_post_signal.inc)

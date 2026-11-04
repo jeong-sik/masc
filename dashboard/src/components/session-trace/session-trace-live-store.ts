@@ -25,6 +25,13 @@ export function ensureLiveTraceSlot(agentName: string): void {
   liveTraceFeeds.value = { ...liveTraceFeeds.value, [agentName]: [] }
 }
 
+/** Empty every open live feed and keep it open. */
+export function clearLiveTraceFeeds(): void {
+  liveTraceFeeds.value = Object.fromEntries(
+    Object.keys(liveTraceFeeds.value).map(agentName => [agentName, []]),
+  )
+}
+
 export function deleteLiveTraceSlot(agentName: string): void {
   const feeds = { ...liveTraceFeeds.value }
   delete feeds[agentName]

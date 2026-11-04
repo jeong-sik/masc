@@ -6,6 +6,7 @@
 // Each SessionTraceView instance passes its own agentName to derived helpers.
 
 import { signal } from '@preact/signals'
+import { subscribeStoredTokenChanges } from '../../api/core'
 import {
   fetchAgentTimeline,
   fetchKeeperToolCalls,
@@ -13,6 +14,7 @@ import {
 } from '../../api/dashboard'
 import { toolCallCompletion } from '../../api/dashboard-keeper-tool-calls'
 import {
+  clearLiveTraceFeeds,
   deleteLiveTraceSlot,
   ensureLiveTraceSlot,
   liveTraceFeeds,
@@ -102,7 +104,9 @@ interface TraceSlot {
   filter: TraceEventKind | 'all'
   statusFilter: TraceStatus | 'all'
   searchQuery: string
-  /** Monotonic fetch token — used to discard stale in-flight responses. */
+  /** Token of the load this slot accepts. Every load takes a new value from
+   *  one counter, so a response from before a close, a reopen or a
+   *  credential change never matches. */
   fetchToken: number
 }
 
@@ -808,11 +812,11 @@ const TOOL_CALL_LIMIT = 100
 const SESSION_TRACE_RELOAD_DEBOUNCE_MS = 1_000
 
 const sessionTraceReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let lastTraceFetchToken = 0
 
 export async function loadSessionTrace(agentName: string, isKeeper: boolean): Promise<void> {
-  // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
-  const prevSlot = getSlot(agentName)
-  const token = prevSlot.fetchToken + 1
+  // A new token makes any load still in flight for this agent stale.
+  const token = ++lastTraceFetchToken
   patchSlot(agentName, { loading: true, error: null, fetchToken: token })
   ensureLiveTraceSlot(agentName)
 
@@ -880,3 +884,24 @@ export function closeSessionTrace(agentName: string): void {
   traceSlots.value = next
   deleteLiveTraceSlot(agentName)
 }
+
+// What a slot holds was read under the credential stored at the time. When the
+// stored token changes, every open slot and live feed is emptied and the load in
+// flight is retired; filters stay, and the view loads again under the new
+// credential.
+function dropTraceReadUnderPreviousCredential(): void {
+  for (const timer of sessionTraceReloadTimers.values()) clearTimeout(timer)
+  sessionTraceReloadTimers.clear()
+  traceSlots.value = Object.fromEntries(
+    Object.entries(traceSlots.value).map(([agentName, slot]) => [agentName, {
+      ...slot,
+      events: [],
+      loading: false,
+      error: null,
+      fetchToken: ++lastTraceFetchToken,
+    }]),
+  )
+  clearLiveTraceFeeds()
+}
+
+subscribeStoredTokenChanges(dropTraceReadUnderPreviousCredential)

@@ -110,13 +110,6 @@ let request_force_json_response =
 let force_json_response = Server_mcp_transport_http.force_json_response
 
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
-  let mcp_eio_profile_of_transport_profile = function
-    | Server_mcp_transport_http.Full -> Mcp_server_eio.Full
-    | Server_mcp_transport_http.Managed_agent -> Mcp_server_eio.Managed_agent
-    | Server_mcp_transport_http.Operator_remote ->
-        Mcp_server_eio.Operator_remote
-    | Server_mcp_transport_http.Seat -> Mcp_server_eio.Seat
-  in
   {
     get_origin;
     cors_headers;
@@ -146,9 +139,6 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
                            ?otel_mcp_protocol_version
                            ?otel_transport_context
                            ?auth_token ?internal_keeper_runtime body_str ->
-                        let profile =
-                          mcp_eio_profile_of_transport_profile profile
-                        in
                         Mcp_server_eio.handle_request ~clock ~sw ~profile
                           ?mcp_session_id ?otel_mcp_protocol_version
                           ?otel_transport_context ?auth_token

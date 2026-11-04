@@ -128,7 +128,11 @@ let test_settings_read_as_the_terminal_read_them () =
   let unreadable = P.settings_of_reading (Error "denied") in
   check bool "an unreadable file opens on the overview" true (unreadable.opening = Ok P.Overview);
   check bool "an unreadable file does not pass for no history" true
-    (unreadable.last_chat_keeper = Error "Conversation history unavailable: denied");
+    (unreadable.last_chat_keeper
+     = Error "Conversation history unavailable: runtime.toml could not be read");
+  let broken = P.settings_of_reading (Ok (Some "[providers.secretive\nkey = 1\n")) in
+  check bool "a file that does not parse says so and names nothing in it" true
+    (broken.last_chat_keeper = Error "Conversation history unavailable: runtime.toml does not parse");
   let full = P.settings_of_reading (Ok (Some full_runtime_toml)) in
   check bool "opening" true (full.opening = Ok (P.Last (Some (keeper "analyst"))));
   check (option string) "theme" (Some "monokai") full.theme;
@@ -143,6 +147,11 @@ let test_settings_read_as_the_terminal_read_them () =
   check (option string) "a blank device is no pick" None
     (P.settings_of_reading (Ok (Some "[tui]\naudio_input_device = \"  \"\n"))).audio_input_device
 
+let contains ~sub text =
+  let n = String.length sub in
+  let rec scan i = i + n <= String.length text && (String.equal (String.sub text i n) sub || scan (i + 1)) in
+  scan 0
+
 let test_settings_travel_without_the_rest_of_the_file () =
   List.iter
     (fun (label, reading) ->
@@ -151,9 +160,16 @@ let test_settings_travel_without_the_rest_of_the_file () =
        check bool (label ^ " reads back as sent") true (P.settings_of_yojson json = Ok settings);
        let text = Yojson.Safe.to_string json in
        check bool (label ^ " carries no provider") false
-         (List.exists (fun word -> List.mem word [ "providers"; "secretive"; "example.invalid" ])
-            (String.split_on_char '"' text)))
-    [ "absent", Ok None; "unreadable", Error "denied"; "full", Ok (Some full_runtime_toml) ];
+         (List.exists (fun sub -> contains ~sub text) [ "providers"; "secretive"; "example.invalid" ]))
+    [ "absent", Ok None
+    ; "unreadable", Error "/private/path/runtime.toml: permission denied"
+    ; "unparsable", Ok (Some "[providers.secretive\nendpoint = \"https://example.invalid\"\n")
+    ; "full", Ok (Some full_runtime_toml)
+    ];
+  check bool "the path of an unreadable file is not sent" false
+    (contains ~sub:"/private/path"
+       (Yojson.Safe.to_string
+          (P.settings_to_yojson (P.settings_of_reading (Error "/private/path/runtime.toml: denied")))));
   let sent = P.settings_to_yojson (P.settings_of_reading (Ok (Some full_runtime_toml))) in
   let refused label json =
     match P.settings_of_yojson json with
@@ -167,7 +183,15 @@ let test_settings_travel_without_the_rest_of_the_file () =
      refused "another schema"
        (`Assoc (("schema", `String "other/v1") :: List.remove_assoc "schema" fields));
      refused "a theme that is not a string"
-       (`Assoc (("theme", `Int 1) :: List.remove_assoc "theme" fields))
+       (`Assoc (("theme", `Int 1) :: List.remove_assoc "theme" fields));
+     let reordered =
+       `Assoc
+         (("opening", `Assoc [ "keeper", `String "analyst"; "mode", `String "last" ])
+          :: List.remove_assoc "opening" fields)
+     in
+     check bool "an opening with its fields in another order reads the same" true
+       (Result.map (fun (settings : P.settings) -> settings.opening) (P.settings_of_yojson reordered)
+        = Ok (Ok (P.Last (Some (keeper "analyst")))))
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
      fail "the settings are not an object")
 

@@ -337,11 +337,20 @@ let settings_of_reading reading =
     | Ok text -> text
     | Error _ -> None
   in
+  (* The reason the history is unavailable says which step failed and no
+     more: a parse error quotes the file's own keys and tables, and a read
+     error names its path, neither of which belongs to the [tui] table this
+     answer is limited to. The server logs the detail. *)
   let doc_reading =
     match reading with
     | Ok None -> Ok None
-    | Error reason -> Error reason
-    | Ok (Some text) -> Result.map Option.some (Keeper_toml_loader.parse_toml text)
+    | Error _ -> Error "runtime.toml could not be read"
+    | Ok (Some text) ->
+      (match Keeper_toml_loader.parse_toml text with
+       | Ok doc -> Ok (Some doc)
+       | Error detail ->
+         Log.Server.warn "tui preferences: runtime.toml does not parse: %s" detail;
+         Error "runtime.toml does not parse")
   in
   let doc =
     match doc_reading with
@@ -375,13 +384,18 @@ let settings_of_reading reading =
   }
 
 let read_settings ~path =
-  settings_of_reading
-    (match Unix.stat path with
-     | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
-     | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-     | (_ : Unix.stats) ->
-       (try Ok (Some (Fs_compat.load_file path)) with
-        | Sys_error reason -> Error reason))
+  let reading =
+    match Unix.stat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+    | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+    | (_ : Unix.stats) ->
+      (try Ok (Some (Fs_compat.load_file path)) with
+       | Sys_error reason -> Error reason)
+  in
+  (match reading with
+   | Error detail -> Log.Server.warn "tui preferences: %s could not be read: %s" path detail
+   | Ok (Some _ | None) -> ());
+  settings_of_reading reading
 
 let settings_schema = "masc.tui-preferences/v1"
 
@@ -446,19 +460,26 @@ let error_or ~field ok_of = function
   | `Assoc [ ("error", `String reason) ] -> Ok (Error reason)
   | json -> Result.map Result.ok (ok_of json) |> Result.map_error (fun detail -> field ^ ": " ^ detail)
 
+(* Fields in name order, so a sender that orders keys differently reads the
+   same. *)
+let sorted_fields fields = List.sort (fun (a, _) (b, _) -> String.compare a b) fields
+
 let opening_of_json json =
+  let not_an_opening = Error "not an opening" in
   error_or ~field:"opening"
     (function
-      | `Assoc [ ("mode", `String "overview") ] -> Ok Overview
-      | `Assoc [ ("mode", `String "last"); ("keeper", keeper) ] ->
-        Result.map (fun keeper -> Last keeper) (keeper_of_json ~field:"keeper" keeper)
-      | `Assoc [ ("mode", `String "keeper"); ("keeper", keeper) ] ->
-        let* keeper = keeper_of_json ~field:"keeper" keeper in
-        (match keeper with
-         | Some keeper -> Ok (Keeper keeper)
-         | None -> Error "a keeper opening needs a Keeper")
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
-        Error "not an opening")
+      | `Assoc fields ->
+        (match sorted_fields fields with
+         | [ ("mode", `String "overview") ] -> Ok Overview
+         | [ ("keeper", keeper); ("mode", `String "last") ] ->
+           Result.map (fun keeper -> Last keeper) (keeper_of_json ~field:"keeper" keeper)
+         | [ ("keeper", keeper); ("mode", `String "keeper") ] ->
+           let* keeper = keeper_of_json ~field:"keeper" keeper in
+           (match keeper with
+            | Some keeper -> Ok (Keeper keeper)
+            | None -> Error "a keeper opening needs a Keeper")
+         | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ -> not_an_opening)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> not_an_opening)
     json
 
 let last_chat_keeper_of_json json =

@@ -18,6 +18,8 @@ type dataset =
   | Workspace_health
   | Runtime_probe
   | Runtime_metrics
+  | Lanes
+  | Lane_addons of { instance_id : string }
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -36,6 +38,8 @@ let keeper_costs_name = "keeper_costs"
 let workspace_health_name = "workspace_health"
 let runtime_probe_name = "runtime_probe"
 let runtime_metrics_name = "runtime_metrics"
+let lanes_name = "lanes"
+let lane_addons_name = "lane_addons"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -55,12 +59,15 @@ let dataset_name = function
   | Workspace_health -> workspace_health_name
   | Runtime_probe -> runtime_probe_name
   | Runtime_metrics -> runtime_metrics_name
+  | Lanes -> lanes_name
+  | Lane_addons _ -> lane_addons_name
 ;;
 
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Provider_usage | Provider_standing | Keeper_costs
-  | Workspace_health | Runtime_probe | Runtime_metrics -> []
+  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
+  | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
 ;;
@@ -69,6 +76,12 @@ let keeper_of_fields name fields =
   match List.assoc_opt "keeper" fields with
   | Some (`String keeper) when not (String.equal keeper "") -> Ok keeper
   | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no keeper")
+;;
+
+let instance_of_fields fields =
+  match List.assoc_opt "instance_id" fields with
+  | Some (`String instance_id) when not (String.equal instance_id "") -> Ok instance_id
+  | Some _ | None -> Error (event_type ^ " lane_addons names no instance")
 ;;
 
 let of_fields fields =
@@ -88,6 +101,9 @@ let of_fields fields =
   | Some (`String name) when String.equal name workspace_health_name -> Ok Workspace_health
   | Some (`String name) when String.equal name runtime_probe_name -> Ok Runtime_probe
   | Some (`String name) when String.equal name runtime_metrics_name -> Ok Runtime_metrics
+  | Some (`String name) when String.equal name lanes_name -> Ok Lanes
+  | Some (`String name) when String.equal name lane_addons_name ->
+    Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
   | Some (`String name) when String.equal name keeper_metrics_name ->
     Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->

@@ -734,6 +734,11 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    is released, with no yield in between. So no reader sees the commit
    without its wake, no later write names an earlier sequence, and a state
    change made while the write was in flight is not overwritten. *)
+let notify_commit m e =
+  Workspace_dataset_event.announce ~base_path:m.base_path Workspace_dataset_event.Lanes;
+  Workspace_dataset_event.announce ~base_path:m.base_path
+    (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
+
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
      The I/O thread sees only the immutable snapshot. Every write, including
@@ -756,7 +761,7 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
       if not e.stopping then e.state <- unconfirmed (settle e.state);
       wake_dependents m e) held in
     match offload (fun () -> write ~store:m.store ~instance_id:e.instance_id json) with
-    | Ok () -> commit ~unconfirmed:Fun.id; Ok ()
+    | Ok () -> commit ~unconfirmed:Fun.id; notify_commit m e; Ok ()
     | Error (Lane_addon_store.Binding_rejected detail) -> Error detail
     | Error (Lane_addon_store.Binding_publication_failed failure) ->
         let detail = Fs_compat.atomic_replace_failure_to_string failure in
@@ -766,6 +771,9 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
               let detail = "binding published with unconfirmed durability: " ^ detail in
               commit ~unconfirmed:(fun state -> failed_state state (Lifecycle.Persistence_failed detail));
               detail in
+        (match failure.Fs_compat.stage with
+         | Fs_compat.After_rename -> notify_commit m e
+         | Fs_compat.Before_rename -> ());
         (match failure.exception_ with
          | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
          | _ -> Error detail))

@@ -75,6 +75,13 @@ type dataset =
       (** What [GET /api/v1/runtime/metrics] answers: a Keeper decision row or
           a cost ledger row was written, or a kept row or cost day file left
           its 24-hour window. *)
+  | Lanes
+      (** The operator Lane inventory, [GET /api/v1/lanes]: the displayed
+          instance phase, presence, revision, application, or browser/machine
+          summary changed. *)
+  | Lane_addons of { instance_id : string }
+      (** The open Add-on Inspect of [instance_id] has a newly committed
+          observation. The event carries the instance only, never its rows. *)
 
 val event_type : string
 

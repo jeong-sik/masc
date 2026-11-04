@@ -159,7 +159,9 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_costs
          | Masc.Workspace_dataset_event.Workspace_health
          | Masc.Workspace_dataset_event.Runtime_probe
-         | Masc.Workspace_dataset_event.Runtime_metrics -> "")
+         | Masc.Workspace_dataset_event.Runtime_metrics
+         | Masc.Workspace_dataset_event.Lanes
+         | Masc.Workspace_dataset_event.Lane_addons _ -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"

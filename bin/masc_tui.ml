@@ -8145,6 +8145,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Workspace_health -> owe_overview_read state
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
+  | Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _ -> ()
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)

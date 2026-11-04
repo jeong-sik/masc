@@ -11965,6 +11965,16 @@ let ask_followup_unfinished (state : state) =
        | Some (Ok ()) -> false
        | Some (Error _) | None -> true)
 
+(* The follow-up is read until a read completes it. A change noted while the
+   completing read was out owes nothing more: reading again would start a
+   finished follow-up over. *)
+let ask_followup_read_due (state : state) ~now =
+  if ask_followup_unfinished state then Masc_tui_owed_read.due ~now state.ask_followup_owed
+  else begin
+    state.ask_followup_owed <- Masc_tui_owed_read.settled;
+    false
+  end
+
 let take_ask_followup_event (state : state) request submission event =
   if not (Snapshot_read.is_current state.ask_followup_read request
           && ask_followup_owner_current state submission)

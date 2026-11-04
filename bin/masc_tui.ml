@@ -5654,6 +5654,7 @@ let launch_connectors_load state ~mailbox =
   match begin_connectors_read state with
   | None -> ()
   | Some request ->
+    state.connectors_owed <- Masc_tui_owed_read.started state.connectors_owed;
     let enqueue_status = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
@@ -7986,6 +7987,12 @@ let owe_harness_read state =
 let owe_runtime_config_read state =
   state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed
 
+(* The connector list reads when the server says a connector's status, a
+   binding or a learned name changed, on a revalidation, and again after a
+   failed read (RFC-0480 §3.4). *)
+let owe_connectors_read state =
+  state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -7995,6 +8002,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
   | Masc.Workspace_dataset_event.Goals -> owe_goal_projection_reads state
   | Masc.Workspace_dataset_event.Runtime_config -> owe_runtime_config_read state
+  | Masc.Workspace_dataset_event.Connectors -> owe_connectors_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8916,6 +8924,37 @@ let launch_owed_runtime_config state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_runtime_config_load state ~mailbox
     end
+
+(* Runs on every loop iteration. The list owes nothing while a browser lane
+   holds the surface or the surface is elsewhere: arriving reads it. A read
+   already in flight is let finish first. *)
+let launch_owed_connectors state ~mailbox =
+  let on_screen =
+    match state.view, browser_lane_on_screen state with
+    | Connectors, None -> true
+    | Connectors, Some _ -> false
+    | ( ( Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board
+        | Planning | Schedules | Verification | Harness | Repositories | Fusion | Code
+        | Changes | Runtime | Config | Resources | Tools | System_logs | Keepers _ ),
+        (Some _ | None) ) ->
+        false
+  in
+  if not on_screen then state.connectors_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading =
+      match Connector_read.view state.connectors_read with
+      | Connector_read.Reading _ -> true
+      | Connector_read.Quiet | Connector_read.Waiting_after_write
+      | Connector_read.Failed_to_start -> false
+    in
+    let read =
+      if reading then state.connectors_owed
+      else Masc_tui_owed_read.abandoned state.connectors_owed
+    in
+    state.connectors_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_connectors_load state ~mailbox
+  end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -18483,6 +18522,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          (keeper_log_target state);
        owe_harness_read state;
        owe_runtime_config_read state;
+       owe_connectors_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -26716,6 +26756,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (match completion.Connector_read.follow_up with
          | Connector_read.No_follow_up -> ()
          | Read_after_write -> launch_connectors_load state ~mailbox);
+        state.connectors_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.connectors_owed
+           | Error _ -> failed_read state.connectors_owed);
         (match result with
         | Ok snapshot -> settle_connector_unbind_offers state snapshot
         | Error detail ->
@@ -32234,6 +32278,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_logs state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
+      launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40882,7 +40927,9 @@ Use relative paths for resources already held in the package. -->
          | Repositories -> ()
          | Connectors ->
              (match browser_lane_on_screen state with
-              | None -> launch_connectors_load state ~mailbox:async_messages
+              (* The list re-reads when the server says a connector changed
+                 and retries a failed read ([launch_owed_connectors]). *)
+              | None -> ()
               | Some view when not state.image_open ->
                   Option.iter (launch_browser_lane state ~mailbox:async_messages)
                     (Browser_lane_view.cadence_operation view)

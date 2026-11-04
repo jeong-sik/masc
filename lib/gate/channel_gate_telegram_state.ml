@@ -11,9 +11,14 @@ let ( let* )=Result.bind
 
 type poll_state = Not_configured | Starting | Polling of {bot_user_id:int64;next_offset:int64 option} | Degraded of string
 let state=Atomic.make Starting
-let record_not_configured () = Atomic.set state Not_configured
-let record_error detail = Atomic.set state (Degraded detail)
-let record_poll_ok ~bot_user_id ~next_offset = Atomic.set state (Polling {bot_user_id;next_offset})
+let record_not_configured () = Atomic.set state Not_configured; Channel_gate_change.notify ()
+let record_error detail = Atomic.set state (Degraded detail); Channel_gate_change.notify ()
+(* Every poll records its next offset; a status read shows only that the bot
+   polls, so only a change of that is announced. *)
+let record_poll_ok ~bot_user_id ~next_offset =
+  match Atomic.exchange state (Polling {bot_user_id;next_offset}) with
+  | Polling previous when Int64.equal previous.bot_user_id bot_user_id -> ()
+  | Polling _ | Not_configured | Starting | Degraded _ -> Channel_gate_change.notify ()
 let connected () = match Atomic.get state with Polling _ -> true | Not_configured | Starting | Degraded _ -> false
 let snapshot ?(audit_limit = 10) () : Channel_gate_connector.snapshot =
   let binding_read =

@@ -10598,6 +10598,8 @@ type state = {
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_read: Connector_read.t;
+  (* The read the connector list owes while it is on screen. *)
+  mutable connectors_owed: Masc_tui_owed_read.t;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
@@ -14540,6 +14542,7 @@ let suspend_workspace_readings state =
   state.keeper_composite_inflight <- None;
   state.keeper_composite_owed <- None;
   state.connectors_read <- Connector_read.suspend state.connectors_read;
+  state.connectors_owed <- Masc_tui_owed_read.settled;
   state.memory_health_inflight <- false;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
@@ -19816,6 +19819,7 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_read = Connector_read.empty;
+  connectors_owed = Masc_tui_owed_read.settled;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;

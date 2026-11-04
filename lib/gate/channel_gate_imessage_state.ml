@@ -102,19 +102,32 @@ let cursor_rowid_ref : int Atomic.t = Atomic.make 0
 let self_chat_guid_ref : string Atomic.t = Atomic.make ""
 let startup_error : string option Atomic.t = Atomic.make None
 
+(* Every poll moves the cursor; a status read shows only that the chat
+   database is polled, so only a change of that is announced. *)
 let record_poll_ok ~cursor_rowid =
   Atomic.set cursor_rowid_ref cursor_rowid;
-  Atomic.set poll_state_ref Polling
+  match Atomic.exchange poll_state_ref Polling with
+  | Polling -> ()
+  | Not_started | Degraded _ -> Channel_gate_change.notify ()
 ;;
 
-let record_poll_error message = Atomic.set poll_state_ref (Degraded message)
+let record_poll_error message =
+  Atomic.set poll_state_ref (Degraded message);
+  Channel_gate_change.notify ()
 
 let record_self_chat_guid guid =
-  Atomic.set self_chat_guid_ref (String.trim guid)
+  let guid = String.trim guid in
+  if not (String.equal (Atomic.exchange self_chat_guid_ref guid) guid) then
+    Channel_gate_change.notify ()
 ;;
 
-let record_startup_error message = Atomic.set startup_error (Some message)
-let clear_startup_error () = Atomic.set startup_error None
+let record_startup_error message =
+  Atomic.set startup_error (Some message);
+  Channel_gate_change.notify ()
+
+let clear_startup_error () =
+  Atomic.set startup_error None;
+  Channel_gate_change.notify ()
 
 let poll_state_connected = function
   | Polling -> true

@@ -64,6 +64,7 @@ let test_a_registry_row_reads_without_times () =
         ; "generated_at", `String "2026-11-04T04:00:00Z"
         ; "observation_only", `Bool true
         ; "clients", `List [ row times ]
+        ; "read_failures", `List []
         ])
   in
   (match snapshot [ "session_bound_at", `Null; "last_seen", `Null ] with

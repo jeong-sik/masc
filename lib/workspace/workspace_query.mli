@@ -99,7 +99,9 @@ val get_active_agents : config -> Masc_domain.agent list
 (** Which of the three merged sources a roster row came from. *)
 type agent_source =
   | Agent_record  (** A record under [.masc/agents/]. *)
-  | Workspace_state  (** A name in the workspace state's [active_agents]. *)
+  | Workspace_state
+      (** A name in the workspace state's [active_agents]. Its times are the
+          workspace's start. *)
   | Keeper_registry
       (** A Keeper of the live registry. Its [session_bound_at] and
           [last_seen] are the time of the read, not facts about the Keeper. *)

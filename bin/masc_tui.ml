@@ -8018,7 +8018,10 @@ let owe_harness_read state =
    revalidation, and again after a failed read (RFC-0480 §3.4). A CLI or a
    hand edit shows on arrival or [r]. *)
 let owe_runtime_config_read state =
-  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed
+  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed;
+  (* The account emails are read from the credentials a server-run login
+     rewrites, which announces runtime_config too. *)
+  owe_pushed_read state Surface_read_source.Account_emails
 
 (* The connector list reads when the server says a connector's status, a
    binding or a learned name changed, on a revalidation, and again after a

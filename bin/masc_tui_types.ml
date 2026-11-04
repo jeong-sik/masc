@@ -10317,6 +10317,9 @@ type state = {
   mutable ask_followup: (ask_submission * Masc_tui_ask_projection.followup) option;
   mutable ask_followup_cancel: (Snapshot_read.request * (string -> unit)) option;
   mutable ask_followup_error: Masc_tui_ask_projection.followup_failure option;
+  (* The follow-up read the current answer owes: until a read completes, and
+     again after a failed one, with backoff. *)
+  mutable ask_followup_owed: Masc_tui_owed_read.t;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -11906,6 +11909,7 @@ let finish_ask_followup_worker (state : state) request =
 let retire_ask_followup_read (state : state) =
   let detail = "answer follow-up observation withdrawn" in
   supersede_ask_followup_worker state None ~detail;
+  state.ask_followup_owed <- Masc_tui_owed_read.settled;
   state.ask_followup_read <- Snapshot_read.invalidate state.ask_followup_read;
   state.ask_followup <- Option.map (fun (owner, reading) ->
     owner, fst (Masc_tui_ask_projection.finish_followup reading (Error Masc_tui_ask_projection.Followup_withdrawn))) state.ask_followup
@@ -11918,32 +11922,48 @@ let ask_followup_owner_current (state : state) submission =
         && current.as_request == submission.as_request
     | None, _ | Some _, None -> false
 
-let begin_ask_followup_read (state : state) =
+(* The current answer whose follow-up can be read, and the Keeper it woke.
+   Only a Keeper's recorded answer has a follow-up: the wake it starts. An
+   installation's answer starts its host request cycle. *)
+let ask_followup_target (state : state) =
   match state.ask_answer_feedback with
   | Some (submission, feedback) when ask_followup_owner_current state submission ->
-      (* Only a Keeper's answer has a follow-up to read: the wake it
-         starts. An installation's answer starts its host request cycle. *)
       (match feedback.Masc_tui_ask_projection.af_asker, feedback.Masc_tui_ask_projection.af_receipt with
        | Masc.Tui_decode_asks.Ask_keeper keeper_name,
          Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded _ | Ask_answer_already_recorded _)) ->
-           let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
-           state.ask_followup_read <- reading;
-           Option.map (fun request ->
-             let previous = Option.bind state.ask_followup (fun (owner, reading) ->
-               if owner.as_request == submission.as_request then Some reading else None) in
-             state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
-             state.ask_followup_error <- None;
-             request, submission, keeper_name) request
+           Some (submission, keeper_name)
        | Masc.Tui_decode_asks.Ask_keeper _,
          (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
               | Masc.Tui_decode_asks.Installation_answer_receipt _) | Error _)
        | Masc.Tui_decode_asks.Ask_installation _, (Ok _ | Error _) -> None)
   | Some _ | None -> None
 
+let begin_ask_followup_read (state : state) =
+  match ask_followup_target state with
+  | Some (submission, keeper_name) ->
+      let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
+      state.ask_followup_read <- reading;
+      Option.map (fun request ->
+        let previous = Option.bind state.ask_followup (fun (owner, reading) ->
+          if owner.as_request == submission.as_request then Some reading else None) in
+        state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
+        state.ask_followup_error <- None;
+        request, submission, keeper_name) request
+  | None -> None
+
 let current_ask_followup (state : state) =
   match state.ask_followup with
   | Some (owner, observed) when ask_followup_owner_current state owner -> Some observed
   | Some _ | None -> None
+
+(* Whether the current answer has a follow-up no read has completed yet. *)
+let ask_followup_unfinished (state : state) =
+  match ask_followup_target state with
+  | None -> false
+  | Some _ ->
+      (match Option.bind (current_ask_followup state) Masc_tui_ask_projection.followup_completion with
+       | Some (Ok ()) -> false
+       | Some (Error _) | None -> true)
 
 let take_ask_followup_event (state : state) request submission event =
   if not (Snapshot_read.is_current state.ask_followup_read request
@@ -19995,6 +20015,7 @@ let create_state
   ask_followup = None;
   ask_followup_cancel = None;
   ask_followup_error = None;
+  ask_followup_owed = Masc_tui_owed_read.settled;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_tool_approvals_observed = false;

@@ -4769,3 +4769,11 @@ supports_prompt_caching = false
 input_per_million = 0.15
 output_per_million = 0.60
 cache_read_multiplier = 0.1
+
+# CANARY (task-3225 proof only, DO NOT MERGE): intentional duplicate of the
+# (opencode_go, deepseek-v4.1-flash) model row above. The uniqueness check
+# must refuse this file.
+[[models]]
+model_id = "deepseek-v4.1-flash"
+provider_name = "opencode_go"
+base = "openai_chat_extended"

@@ -160,7 +160,7 @@ val pending_selections : t -> pending_selection list
 
 val last_non_immediate_served : t -> Keeper_event_queue.urgency option
 (** Non-immediate urgency currently held in this state ([Normal] or [Low]),
-    used by {!peek_when} and {!select_when} for lane preference. On snapshot
+    used by {!peek_when} for lane preference. On snapshot
     load it is derived from retained transition evidence, which may not
     include every acknowledgement. *)
 
@@ -228,12 +228,6 @@ val peek_when :
     the signature for caller compatibility; selection is pure and independent
     of wall-clock elapsed time. *)
 
-val select_when :
-  now:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  t ->
-  pending_selection option
-(** See {!peek_when}. *)
 
 val validate_pending_selection :
   selection:pending_selection ->
@@ -267,23 +261,14 @@ val reprioritize_pending :
 (** Change only the exact selected source priority. A real change receives the
     next source incarnation; unrelated pending entries retain theirs. *)
 
-val defer_pending :
-  selection:pending_selection ->
-  t ->
-  (t * int64, string) result
-(** Move one exact selected source to the back of its current urgency lane and
-    assign a new source incarnation. This is the durable fairness primitive for
-    transient failures: no source is lost, but it cannot monopolize the head of
-    the active queue while independent work is waiting. *)
-
 val defer_pending_batch :
   selections:pending_selection list -> t -> (t * int64, string) result
 (** Validate every exact selection before rotating a batch within urgency
     lanes. A selected Connector conversation moves with all its currently
     pending rows, including an unadmitted suffix, in their existing queue
-    order. Other selected sources move individually. Payloads, execution
-    scopes, first admission and retention counts are preserved; moved rows
-    receive a new source incarnation. No source is acknowledged. *)
+    order. Other selected sources move individually. Payloads, first admission
+    and retention counts are preserved; moved rows receive a new source
+    incarnation. No source is acknowledged. *)
 
 val cancel_pending_accepted :
   applied_at:float ->

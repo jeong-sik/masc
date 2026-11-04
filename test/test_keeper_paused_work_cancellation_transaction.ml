@@ -95,6 +95,15 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused f =
        f config keeper_name source)
 ;;
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let with_pending_lane ?registered ?latched_reason ~paused f =
   with_seeded_owner
     ?registered
@@ -106,7 +115,7 @@ let with_pending_lane ?registered ?latched_reason ~paused f =
            ~base_path:config.Workspace.base_path
            ~keeper_name
          |> require_ok "load pending accepted source incarnation"
-         |> State.select_when
+         |> select_ready
               ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select pending accepted source"

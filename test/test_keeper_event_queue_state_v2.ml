@@ -4,10 +4,19 @@ module Persistence = Keeper_event_queue_persistence
 module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
 module Registry_event_queue = Masc.Keeper_registry_event_queue
 
-(* The production loader with the pure first-ready selection. *)
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
 let select_queue_entry ~base_path ~keeper_name ~now ~ready =
   Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+  |> Result.map (select_ready ~now ~ready)
 ;;
 
 (* Prompts moved from code into config/prompts; load them so keeper world event
@@ -45,7 +54,7 @@ let post_ids queue =
 ;;
 
 let select ?(now = Unix.gettimeofday ()) state =
-  State.select_when ~now ~ready:(fun _ -> true) state
+  select_ready ~now ~ready:(fun _ -> true) state
   |> require_some "pending selection"
 ;;
 
@@ -108,7 +117,7 @@ let test_fresh_state_prefers_normal_before_low () =
   let normal = stimulus "normal-item" 1000.0 in
   let state = State.with_pending (queue [ low; normal ]) State.empty in
   let selected =
-    State.select_when ~now:100_000.0 ~ready:(fun _ -> true) state
+    select_ready ~now:100_000.0 ~ready:(fun _ -> true) state
     |> require_some "pending selection"
   in
   Alcotest.(check string)
@@ -126,7 +135,7 @@ let test_normal_ack_alternates_to_low_without_aging_wait () =
   let normal_b = stimulus "normal-b" 0.0 in
   let state = State.with_pending (queue [ low; normal_a; normal_b ]) State.empty in
   let first =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) state
+    select_ready ~now:0.0 ~ready:(fun _ -> true) state
     |> require_some "first selection"
   in
   Alcotest.(check string) "first turn picks Normal" "normal-a" first.source.post_id;
@@ -152,7 +161,7 @@ let test_normal_ack_alternates_to_low_without_aging_wait () =
     |> require_ok "reload state after Normal completion"
   in
   let second =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) reloaded
+    select_ready ~now:0.0 ~ready:(fun _ -> true) reloaded
     |> require_some "second selection after Normal completion"
   in
   Alcotest.(check string)
@@ -164,7 +173,7 @@ let test_normal_ack_alternates_to_low_without_aging_wait () =
     |> require_ok "ack Low turn"
   in
   let third =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) after_low
+    select_ready ~now:0.0 ~ready:(fun _ -> true) after_low
     |> require_some "third selection after Low ack"
   in
   Alcotest.(check string)
@@ -192,7 +201,7 @@ let test_low_alternation_never_preempts_immediate () =
     State.with_pending (queue [ low; immediate; normal ]) after_normal
   in
   let selected_immediate =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) with_immediate
+    select_ready ~now:0.0 ~ready:(fun _ -> true) with_immediate
     |> require_some "Immediate selection"
   in
   Alcotest.(check string)
@@ -204,7 +213,7 @@ let test_low_alternation_never_preempts_immediate () =
     |> require_ok "ack Immediate"
   in
   let next_non_immediate =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) after_immediate
+    select_ready ~now:0.0 ~ready:(fun _ -> true) after_immediate
     |> require_some "post-Immediate selection"
   in
   Alcotest.(check string)
@@ -214,21 +223,21 @@ let test_low_alternation_never_preempts_immediate () =
 ;;
 
 (* Same-urgency [Low] entries keep FIFO arrival order and respect
-   [defer_pending] lane rotation regardless of [arrived_at] timestamps. *)
+   [defer_pending_batch] lane rotation regardless of [arrived_at] timestamps. *)
 let test_multiple_low_entries_keep_fifo_and_defer_order () =
   let low_a = { (stimulus "low-a" 0.0) with urgency = Queue.Low } in
   let low_b = { (stimulus "low-b" 100.0) with urgency = Queue.Low } in
   let state = State.with_pending (queue [ low_a; low_b ]) State.empty in
   let first =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) state
+    select_ready ~now:0.0 ~ready:(fun _ -> true) state
     |> require_some "first pending selection"
   in
   Alcotest.(check string) "earlier-arrived Low is picked first" "low-a" first.source.post_id;
   let deferred, _ =
-    State.defer_pending ~selection:first state |> require_ok "defer first Low"
+    State.defer_pending_batch ~selections:[ first ] state |> require_ok "defer first Low"
   in
   let after_defer =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) deferred
+    select_ready ~now:0.0 ~ready:(fun _ -> true) deferred
     |> require_some "selection after defer"
   in
   Alcotest.(check string)
@@ -239,7 +248,7 @@ let test_multiple_low_entries_keep_fifo_and_defer_order () =
     State.ack_pending ~selection:after_defer deferred |> require_ok "ack low-b"
   in
   let second =
-    State.select_when ~now:0.0 ~ready:(fun _ -> true) acked
+    select_ready ~now:0.0 ~ready:(fun _ -> true) acked
     |> require_some "remaining Low selection"
   in
   Alcotest.(check string) "deferred low-a is picked next" "low-a" second.source.post_id
@@ -734,7 +743,7 @@ let test_schedule_occurrences_reports_only_schedule_sources () =
   let cancellation : State.accepted_cancellation =
     { source = cancelled
     ; source_incarnation =
-        (State.select_when
+        (select_ready
            ~now:(Unix.gettimeofday ())
            ~ready:(Queue.stimulus_identity_equal cancelled)
            initial
@@ -773,7 +782,7 @@ let test_schedule_occurrences_reports_only_schedule_sources () =
     ]
     (schedule_occurrence_summaries projected_cancel);
   let completed_selection =
-    State.select_when
+    select_ready
       ~now:(Unix.gettimeofday ())
       ~ready:(Queue.stimulus_identity_equal completed)
       projected_cancel
@@ -838,7 +847,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
   let cancellation : State.accepted_cancellation =
     { source = cancelled_source
     ; source_incarnation =
-        (State.select_when
+        (select_ready
            ~now:(Unix.gettimeofday ())
            ~ready:(Queue.stimulus_identity_equal cancelled_source)
            initial
@@ -870,7 +879,7 @@ let test_projected_disposition_ledger_replays_older_operation () =
   let transfer : State.accepted_transfer =
     { source = transferred_source
     ; source_incarnation =
-        (State.select_when
+        (select_ready
            ~now:(Unix.gettimeofday ())
            ~ready:(Queue.stimulus_identity_equal transferred_source)
            projected_cancel
@@ -1048,7 +1057,9 @@ let test_arrival_follows_the_entry_through_edits () =
     State.reprioritize_pending ~selection:seen ~urgency:Queue.Low state
     |> require_ok "reprioritize"
   in
-  let deferred, _ = State.defer_pending ~selection:seen state |> require_ok "defer" in
+  let deferred, _ =
+    State.defer_pending_batch ~selections:[ seen ] state |> require_ok "defer"
+  in
   List.iter
     (fun (label, edited) ->
        let after = entry_named edited "first" in
@@ -1759,7 +1770,7 @@ let test_durable_reprioritize_is_source_incarnation_fenced () =
       |> require_ok "load priority state"
     in
     let selection =
-      State.select_when
+      select_ready
         ~now:(Unix.gettimeofday ())
         ~ready:(Queue.stimulus_identity_equal second)
         state

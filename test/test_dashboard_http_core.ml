@@ -797,6 +797,15 @@ let test_namespace_pause_status_reads_current_workspace () =
   check bool "another operator's pause remains observable" true
     (member "paused" (read ()) = `Bool true)
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
@@ -857,7 +866,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
     |> require_ok ("enqueue " ^ source.post_id)
   in
   let selection_for (source : Keeper_event_queue.stimulus) state =
-    Keeper_event_queue_state.select_when
+    select_ready
       ~now:(Unix.gettimeofday ())
       ~ready:(Keeper_event_queue.stimulus_identity_equal source)
       state

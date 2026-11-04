@@ -31,10 +31,19 @@ let ack_queued_post_id ~base_path ~keeper_name ~post_id =
      | _ :: _ :: _ -> Error ("queued source repeated " ^ post_id))
 ;;
 
-(* The production loader with the pure first-ready selection. *)
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
 let select_queue_entry ~base_path ~keeper_name ~now ~ready =
   Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+  |> Result.map (select_ready ~now ~ready)
 ;;
 
 (* Fixture tick for create and modify: the runner's floor tick, below every
@@ -2829,7 +2838,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Error detail -> fail detail
       in
       let selection =
-        Keeper_event_queue_state.select_when
+        select_ready
           ~now:(Unix.gettimeofday ())
           ~ready:(fun _ -> true)
           pending_state

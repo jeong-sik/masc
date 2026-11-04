@@ -163,6 +163,15 @@ let load_queue_state ~base_path ~keeper_name =
   | Ok state -> state
   | Error detail -> Alcotest.fail detail
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
@@ -175,7 +184,7 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
    | _ -> Alcotest.fail "failed to seed transfer recovery source");
   let selection =
     load_queue_state ~base_path ~keeper_name:from_keeper
-    |> Keeper_event_queue_state.select_when
+    |> select_ready
          ~now:(Unix.gettimeofday ())
          ~ready:(Keeper_event_queue.stimulus_identity_equal source)
     |> function

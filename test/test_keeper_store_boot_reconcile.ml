@@ -1529,6 +1529,15 @@ let test_a_half_finished_move_leaves_the_rejected_file_and_boot_refuses_again ()
   check_quarantine_refuses ~config ~snapshot
 ;;
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 (* One WAL row this build replays, encoded the way the writer does, so the
    quarantine tests below start from a genuine durable transition. *)
 let valid_transition_row ~base_path ~keeper_name =
@@ -1543,7 +1552,7 @@ let valid_transition_row ~base_path ~keeper_name =
   in
   let initial = State.with_pending (Queue.enqueue Queue.empty source) State.empty in
   let selection =
-    match State.select_when ~now:2.0 ~ready:(fun _ -> true) initial with
+    match select_ready ~now:2.0 ~ready:(fun _ -> true) initial with
     | Some selection -> selection
     | None -> fail "no pending selection for the durable transition"
   in

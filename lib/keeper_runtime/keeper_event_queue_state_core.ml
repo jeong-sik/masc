@@ -587,7 +587,7 @@ let transition_outbox_blocked state = state.transition_outbox <> []
 (* For this single-entry selection, rank [Immediate] first and use
    [last_non_immediate_served] to prefer a [Normal] or [Low] lane without
    wall-clock aging. Within a lane, the first ready entry in [pending_entries]
-   wins, preserving FIFO arrival order and [defer_pending] lane rotation.
+   wins, preserving FIFO arrival order and [defer_pending_batch] lane rotation.
    The lane preference does not bound an individual entry's wait. *)
 let first_ready_entry ~last_non_immediate_served ~ready entries =
   entries
@@ -616,13 +616,6 @@ let peek_when ~now:_ ~ready state =
        ~last_non_immediate_served:state.last_non_immediate_served
        ~ready
        state.pending_entries)
-;;
-
-let select_when ~now:_ ~ready state =
-  first_ready_entry
-    ~last_non_immediate_served:state.last_non_immediate_served
-    ~ready
-    state.pending_entries
 ;;
 
 let validate_pending_selection
@@ -713,27 +706,6 @@ let reprioritize_pending
       let sorted_pending =
         pending state |> Keeper_event_queue.sort_by_urgency
       in
-      Ok (with_pending sorted_pending state, next_revision)
-;;
-
-let defer_pending ~(selection : pending_selection) state =
-  match validate_pending_selection ~selection state with
-  | Error _ as error -> error
-  | Ok () ->
-    if Int64.equal state.revision Int64.max_int
-    then Error "event queue revision exhausted"
-    else
-      let next_revision = Int64.succ state.revision in
-      let deferred = { selection with admitted_revision = next_revision } in
-      let same_urgency, other_urgency =
-        state.pending_entries
-        |> List.filter (Fun.negate (( = ) selection))
-        |> List.partition (fun entry ->
-          entry.source.urgency = selection.source.urgency)
-      in
-      let pending_entries = same_urgency @ [ deferred ] @ other_urgency in
-      let state = { state with pending_entries } in
-      let sorted_pending = state |> pending |> Keeper_event_queue.sort_by_urgency in
       Ok (with_pending sorted_pending state, next_revision)
 ;;
 

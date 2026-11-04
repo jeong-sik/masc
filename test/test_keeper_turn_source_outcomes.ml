@@ -6,10 +6,19 @@ module State = Keeper_event_queue_state
 module Ledger = Keeper_reaction_ledger
 module Manifest = Keeper_runtime_manifest
 
-(* The production loader with the pure first-ready selection. *)
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
 let select_queue_entry ~base_path ~keeper_name ~now ~ready =
   Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+  |> Result.map (select_ready ~now ~ready)
 ;;
 
 let ok = function Ok value -> value | Error detail -> fail detail

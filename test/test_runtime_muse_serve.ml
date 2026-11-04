@@ -315,7 +315,7 @@ let test_turn_with_tool_and_approval () =
   let session_ready = ref None in
   let terminal_events = ref [] in
   run_scripted
-    ~on_session_ready:(fun ~session_id ~reported_turns:_ ->
+    ~on_session_ready:(fun ~session_id ~last_turn:_ ->
       session_ready := Some session_id;
       Ok ())
     ~on_stream_event:(function
@@ -659,7 +659,7 @@ let test_session_identity_is_verified_before_admission () =
     List.iter (fun (model, workspace, expected) ->
       let ready = ref false and sent = ref false in
       run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
-        ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> ready := true; Ok ())
+        ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> ready := true; Ok ())
         ~on_prompt_sent:(fun () -> sent := true)
         (prefix (frame ~model ~workspace))
         (fun result requests ->
@@ -691,7 +691,7 @@ let test_session_identity_is_verified_before_admission () =
         [Read; Write {|{"jsonrpc":"2.0","id":3,"result":{"commandId":"c-model","status":"accepted"}}|};
          Read; Write (approval_mode_result ~id:4 Msp.Prompt_unmatched)], 5 in
     run_scripted ~model:"requested-model" ~workspace_root:"/requested-workspace" ~session_mode
-      ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> incr ready; Ok ())
+      ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> incr ready; Ok ())
       (prefix (frame ~model:(`String "requested-model") ~workspace:(`String "/requested-workspace"))
        @ resume_steps @ [Read; Write (with_id turn_id turn_ack); Write turn_started;
                           Write agent_completed; Write turn_completed])
@@ -704,7 +704,7 @@ let test_session_identity_is_verified_before_admission () =
           (List.exists (fun json ->
              Yojson.Safe.Util.member "method" json = `String "session/setModel") requests);
         ignore (request_with_method "turn/start" requests)))
-    [Serve.Start; Serve.Resume {session_id="s-1"; expected_turns=Serve.Exactly 0}]
+    [Serve.Start; Serve.Resume {session_id="s-1"; expected_last_turn=Serve.Exactly None}]
 ;;
 
 (* Frames shaped as Muse Code 1.4.0 answered them on 2026-09-28. A session
@@ -737,8 +737,8 @@ let test_resumed_session_model_is_selected_before_admission () =
                           Write (session_frame ~id:2 reported)] in
   let run steps check_result =
     let ready = ref 0 and sent = ref false in
-    run_scripted ~model:requested ~session_mode:(Serve.Resume {session_id="s-1"; expected_turns=Serve.Exactly 0})
-      ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> incr ready; Ok ())
+    run_scripted ~model:requested ~session_mode:(Serve.Resume {session_id="s-1"; expected_last_turn=Serve.Exactly None})
+      ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> incr ready; Ok ())
       ~on_prompt_sent:(fun () -> sent := true)
       steps (fun result requests -> check_result result requests ~ready:!ready ~sent:!sent) in
   let refused ~name ~request_count steps check_error =
@@ -1047,7 +1047,7 @@ let test_session_approval_mode_is_verified_before_admission () =
     let refused ~session_mode ~expected ~request_count steps =
       let ready = ref false and sent = ref false in
       run_scripted ~native ~session_mode
-        ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> ready := true; Ok ())
+        ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> ready := true; Ok ())
         ~on_prompt_sent:(fun () -> sent := true) steps (fun result requests ->
           (match expected, result with
            | `Mismatch reported, Error (Serve.Session_approval_mode_mismatch actual) ->
@@ -1065,7 +1065,7 @@ let test_session_approval_mode_is_verified_before_admission () =
         (prefix (session mode)))
       ((None, `Mismatch None) :: (Some (effective_mode other), `Mismatch (Some other))
        :: List.map (fun mode -> mode, `Protocol "session/start") malformed);
-    let resumed = Serve.Resume {session_id="s-1"; expected_turns=Serve.Exactly 0} in
+    let resumed = Serve.Resume {session_id="s-1"; expected_last_turn=Serve.Exactly None} in
     List.iter (fun (result, expected) ->
       refused ~session_mode:resumed ~expected ~request_count:4
         (prefix (session (Some (effective_mode other))) @ [Read; Write (frame 3 result)]))
@@ -1086,7 +1086,7 @@ let test_session_approval_mode_is_verified_before_admission () =
         | Serve.Resume _ -> [Read; Write (approval_mode_result ~id:3 requested)], 4 in
       let ack = Yojson.Safe.Util.(Yojson.Safe.from_string turn_ack |> member "result") in
       run_scripted ~native ~session_mode
-        ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> incr ready; Ok ())
+        ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> incr ready; Ok ())
         ~on_prompt_sent:(fun () -> incr sent)
         (prefix (session prior) @ suffix @ [Read; Write (frame turn_id ack);
           Write turn_started; Write agent_completed; Write turn_completed])
@@ -1125,7 +1125,7 @@ let test_nondurable_handshake_never_begins_a_session () =
               |> Yojson.Safe.to_string in
             let session_ready = ref false in
             run_scripted ~session_mode
-              ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> session_ready := true; Ok ())
+              ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> session_ready := true; Ok ())
               [ Read; Write response ]
               (fun result requests ->
                  (match durability, result with
@@ -1137,80 +1137,118 @@ let test_nondurable_handshake_never_begins_a_session () =
                  check bool "session callback not reached" false !session_ready;
                  check int "initialize is the only dispatched request" 1 (List.length requests)))
          [ Some (`String "ephemeral"); Some `Null; Some (`String "future") ])
-    [ Serve.Start; Serve.Resume { session_id = "retained-session"; expected_turns=Serve.Exactly 0 } ]
+    [ Serve.Start; Serve.Resume { session_id = "retained-session"; expected_last_turn=Serve.Exactly None } ]
 ;;
 
-let test_resume_requires_the_retained_completed_turn_count () =
-  let frame count =
-    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
-      "result", `Assoc ["session", `Assoc
-        (["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
-          "approvalMode", effective_mode Msp.Prompt_unmatched]
-         @ (match count with None -> [] | Some count -> ["turnCount", count]))]]) in
-  let prefix count = [Read; Write (init_frame ~granted:[]); Read; Read; Write (frame count)] in
-  let session_mode = Serve.Resume {session_id="s-1"; expected_turns=Serve.Exactly 1} in
-  List.iter (fun count ->
-    let ready = ref false and sent = ref false in
-    run_scripted ~session_mode
-      ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> ready := true; Ok ())
-      ~on_prompt_sent:(fun () -> sent := true)
-      (prefix count)
-      (fun result requests ->
-        (match result with
-         | Error (Serve.Protocol_error {stage="session/resume"; _}) -> ()
-         | Error error -> fail (Serve.error_to_string error)
-         | Ok _ -> fail "unknown or changed retained history dispatched a turn");
-        check bool "unverified history never persists admission" false !ready;
-        check bool "unverified history never dispatches prompt" false !sent;
-        check (list string) "no approval mutation or turn after refused resume"
-          ["initialize"; "initialized"; "session/resume"]
-          (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string)) requests)))
-    [None; Some `Null; Some (`String "1"); Some (`Int (-1)); Some (`Int 0); Some (`Int 2)];
+let resume_frame ?(count = 0) last_turn =
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
+    "result", `Assoc
+      (["session", `Assoc
+          ["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
+           "approvalMode", effective_mode Msp.Prompt_unmatched; "turnCount", `Int count]]
+       @ (match last_turn with None -> [] | Some json -> ["lastTurn", json]))])
+
+(* [host_died] is the failed terminal a host synthesizes when it died mid-turn:
+   it carries [reason] instead of [error]. *)
+let last_turn_json turn_id terminal =
+  match terminal with
+  | "host_died" ->
+    `Assoc ["turnId", `String turn_id; "terminal", `String "failed"; "reason", `String "crash"]
+  | "failed" ->
+    `Assoc ["turnId", `String turn_id; "terminal", `String terminal;
+            "error", `Assoc ["kind", `String "modelError"; "message", `String "fixture";
+                             "retryable", `Bool true]]
+  | _ -> `Assoc ["turnId", `String turn_id; "terminal", `String terminal]
+
+let resumed_turn_frames =
   let acknowledged_turn = match Yojson.Safe.from_string turn_ack with
     | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int 4) :: List.remove_assoc "id" fields))
     | _ -> fail "fixture acknowledgement is not an object" in
+  [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched);
+   Read; Write acknowledged_turn; Write turn_started; Write agent_completed; Write turn_completed]
+
+let ended turn_id ending = Some ({ Serve.turn_id; ending } : Serve.ended_turn)
+
+(* A resume names the session MASC settled by its last ended turn. A missing,
+   malformed or different last turn is refused before anything changes, and
+   the host's completed-turn count is not read: a compacted session that
+   counts again from 0 still resumes when its last turn is the settled one. *)
+let test_resume_requires_the_retained_last_turn () =
+  let prefix last_turn =
+    [Read; Write (init_frame ~granted:[]); Read; Read; Write (resume_frame last_turn)] in
+  let session_mode = Serve.Resume {session_id="s-1";
+    expected_last_turn=Serve.Exactly (ended "t-1" Serve.Ended_completed)} in
+  List.iter (fun (label, last_turn) ->
+    let ready = ref false and sent = ref false in
+    run_scripted ~session_mode
+      ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> ready := true; Ok ())
+      ~on_prompt_sent:(fun () -> sent := true)
+      (prefix last_turn)
+      (fun result requests ->
+        (match result with
+         | Error (Serve.Protocol_error {stage="session/resume"; _}) -> ()
+         | Error error -> failf "%s: %s" label (Serve.error_to_string error)
+         | Ok _ -> failf "%s: an unknown or changed last turn dispatched a turn" label);
+        check bool (label ^ ": unverified history never persists admission") false !ready;
+        check bool (label ^ ": unverified history never dispatches prompt") false !sent;
+        check (list string) (label ^ ": no approval mutation or turn after refused resume")
+          ["initialize"; "initialized"; "session/resume"]
+          (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string)) requests)))
+    [ "no last turn", None
+    ; "null last turn", Some `Null
+    ; "another turn", Some (last_turn_json "t-2" "completed")
+    ; "the turn ended otherwise", Some (last_turn_json "t-1" "failed")
+    ; "no turn id", Some (`Assoc ["terminal", `String "completed"])
+    ; "an unrecognized terminal", Some (last_turn_json "t-1" "paused")
+    ; "a failed terminal with neither error nor reason",
+      Some (`Assoc ["turnId", `String "t-1"; "terminal", `String "failed"]) ];
   run_scripted ~session_mode
-    (prefix (Some (`Int 1)) @ [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched);
-      Read; Write acknowledged_turn; Write turn_started; Write agent_completed; Write turn_completed])
+    ([Read; Write (init_frame ~granted:[]); Read; Read;
+      Write (resume_frame ~count:0 (Some (last_turn_json "t-1" "completed")))]
+     @ resumed_turn_frames)
     (fun result requests ->
       (match result with
-       | Ok turn -> check bool "matching retained history resumes" true turn.resumed
+       | Ok turn -> check bool "a compacted session with the settled last turn resumes" true turn.resumed
        | Error error -> fail (Serve.error_to_string error));
       ignore (request_with_method "turn/start" requests))
 ;;
 
-(* The host is the authority on its own completed turns. [Exactly n] admits
-   only [n]. After a turn whose ending MASC did not observe,
-   [Reported_or_one_more n] admits [n] and [n + 1], the two counts that turn
-   can leave. Every other count is refused before admission, and an admitted
-   count reaches the caller to be stored. *)
-let test_resume_admits_only_the_counts_its_expectation_names () =
-  let frame count =
-    Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
-      "result", `Assoc ["session", `Assoc
-        ["sessionId", `String "s-1"; "workspaceRoot", `String "/w";
-         "approvalMode", effective_mode Msp.Prompt_unmatched; "turnCount", `Int count]]]) in
-  let acknowledged_turn = match Yojson.Safe.from_string turn_ack with
-    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (("id", `Int 4) :: List.remove_assoc "id" fields))
-    | _ -> fail "fixture acknowledgement is not an object" in
-  let admitted_turn = [Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched);
-    Read; Write acknowledged_turn; Write turn_started; Write agent_completed; Write turn_completed] in
-  List.iter (fun (label, expected_turns, reported, admitted) ->
+(* [Exactly] admits only the last turn MASC knows of. After a turn whose
+   ending MASC did not observe, [Last_or_dispatched] also admits that turn
+   however it ended, and any turn while MASC never learned its id; after an
+   operator retry, [Last_or_uncompleted] admits the failed turn only if it
+   ended uncompleted, and never a host that reports no last turn. Every other
+   last turn is refused before admission, and an admitted one reaches the
+   caller to be stored. *)
+let test_resume_admits_only_the_last_turns_its_expectation_names () =
+  let t7 = ended "t-7" Serve.Ended_completed in
+  List.iter (fun (label, expected_last_turn, reported, admitted) ->
     let ready = ref None and sent = ref false in
-    run_scripted ~session_mode:(Serve.Resume {session_id="s-1"; expected_turns})
-      ~on_session_ready:(fun ~session_id:_ ~reported_turns ->
-        ready := Some reported_turns; Ok ())
+    run_scripted ~session_mode:(Serve.Resume {session_id="s-1"; expected_last_turn})
+      ~on_session_ready:(fun ~session_id:_ ~last_turn ->
+        ready := Some last_turn; Ok ())
       ~on_prompt_sent:(fun () -> sent := true)
-      ([Read; Write (init_frame ~granted:[]); Read; Read; Write (frame reported)]
-       @ if admitted then admitted_turn else [])
+      ([Read; Write (init_frame ~granted:[]); Read; Read;
+        Write (resume_frame (Option.map (fun (turn_id, terminal) -> last_turn_json turn_id terminal) reported))]
+       @ if admitted then resumed_turn_frames else [])
       (fun result requests ->
         match admitted, result with
         | true, Ok turn ->
           check bool (label ^ " resumes") true turn.resumed;
-          check (option int) (label ^ " hands the host's count to the caller")
-            (Some reported) !ready
+          let handed = match !ready with
+            | Some (Some ({ turn_id; ending } : Serve.ended_turn)) ->
+              Some (turn_id, (match ending with
+                | Serve.Ended_completed -> "completed" | Serve.Ended_uncompleted -> "uncompleted"))
+            | Some None -> Some ("none", "none")
+            | None -> None in
+          let reported = match reported with
+            | Some (turn_id, "completed") -> Some (turn_id, "completed")
+            | Some (turn_id, _) -> Some (turn_id, "uncompleted")
+            | None -> Some ("none", "none") in
+          check (option (pair string string)) (label ^ " hands the host's last turn to the caller")
+            reported handed
         | false, Error (Serve.Protocol_error {stage="session/resume"; _}) ->
-          check (option int) (label ^ " never persists admission") None !ready;
+          check bool (label ^ " never persists admission") true (Option.is_none !ready);
           check bool (label ^ " never dispatches a prompt") false !sent;
           check (list string) (label ^ " sends nothing after the refused resume")
             ["initialize"; "initialized"; "session/resume"]
@@ -1220,23 +1258,57 @@ let test_resume_admits_only_the_counts_its_expectation_names () =
         | false, Error error -> failf "%s: refused for another reason: %s" label
             (Serve.error_to_string error)
         | false, Ok _ -> failf "%s dispatched a turn" label))
-    [ "exactly 7, host 7", Serve.Exactly 7, 7, true
-    ; "exactly 7, host 8", Serve.Exactly 7, 8, false
-    ; "exactly 7, host 6", Serve.Exactly 7, 6, false
-    ; "7 or 8, host 7", Serve.Reported_or_one_more 7, 7, true
-    ; "7 or 8, host 8", Serve.Reported_or_one_more 7, 8, true
-    ; "7 or 8, host 9", Serve.Reported_or_one_more 7, 9, false
-    ; "7 or 8, host 6", Serve.Reported_or_one_more 7, 6, false ];
-  List.iter (fun expected_turns ->
-    match Serve.validate_turn ~session_mode:(Serve.Resume {session_id="s-1"; expected_turns})
+    [ "none, host none", Serve.Exactly None, None, true
+    ; "none, host t-1", Serve.Exactly None, Some ("t-1", "completed"), false
+    ; "t-7, host t-7", Serve.Exactly t7, Some ("t-7", "completed"), true
+    ; "t-7, host t-7 failed", Serve.Exactly t7, Some ("t-7", "failed"), false
+    ; "t-7, host t-8", Serve.Exactly t7, Some ("t-8", "completed"), false
+    ; "t-7, host none", Serve.Exactly t7, None, false
+    ; "t-7 or t-8, host t-7", Serve.Last_or_dispatched {last=t7; dispatched=Some "t-8"},
+      Some ("t-7", "completed"), true
+    ; "t-7 or t-8, host t-8", Serve.Last_or_dispatched {last=t7; dispatched=Some "t-8"},
+      Some ("t-8", "completed"), true
+    ; "t-7 or t-8, host t-8 failed", Serve.Last_or_dispatched {last=t7; dispatched=Some "t-8"},
+      Some ("t-8", "failed"), true
+    ; "t-7 or t-8, host t-9", Serve.Last_or_dispatched {last=t7; dispatched=Some "t-8"},
+      Some ("t-9", "completed"), false
+    ; "t-7 or an unacknowledged turn, host t-8",
+      Serve.Last_or_dispatched {last=t7; dispatched=None}, Some ("t-8", "completed"), true
+    ; "t-7 or an unacknowledged turn, host none",
+      Serve.Last_or_dispatched {last=t7; dispatched=None}, None, false
+    ; "none or an unacknowledged turn, host none",
+      Serve.Last_or_dispatched {last=None; dispatched=None}, None, true
+    ; "retry after t-7, host t-7", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-7", "completed"), true
+    ; "retry after t-7, host t-8 failed", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-8", "failed"), true
+    ; "retry after t-7, host t-8 cancelled", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-8", "cancelled"), true
+    ; "retry after t-7, host t-8 completed", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-8", "completed"), false
+    ; "retry after t-7, host t-9 failed", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-9", "failed"), false
+    ; "retry after t-7, host t-8 died", Serve.Last_or_uncompleted {last=t7; failed=Some "t-8"},
+      Some ("t-8", "host_died"), true
+    ; "retry after none, host none", Serve.Last_or_uncompleted {last=None; failed=Some "t-8"},
+      None, false
+    ; "retry of an unacknowledged turn, host t-9 failed",
+      Serve.Last_or_uncompleted {last=t7; failed=None}, Some ("t-9", "failed"), true
+    ; "retry of an unacknowledged turn, host t-9 completed",
+      Serve.Last_or_uncompleted {last=t7; failed=None}, Some ("t-9", "completed"), false ];
+  List.iter (fun expected_last_turn ->
+    match Serve.validate_turn ~session_mode:(Serve.Resume {session_id="s-1"; expected_last_turn})
             (config ()) ~workspace_root:"/w" ~prompt:"p" ~images:[] with
     | Error (Serve.Invalid_config _) -> ()
     | Error error -> fail (Serve.error_to_string error)
-    | Ok () -> fail "a negative expected count was admitted")
-    [Serve.Exactly (-1); Serve.Reported_or_one_more (-1)];
-  (* Control: the same request with a count is admitted. *)
+    | Ok () -> fail "an empty expected turn id was admitted")
+    [ Serve.Exactly (ended "" Serve.Ended_completed)
+    ; Serve.Last_or_dispatched {last=None; dispatched=Some " "}
+    ; Serve.Last_or_uncompleted {last=t7; failed=Some ""} ];
+  (* Control: the same request with turn ids is admitted. *)
   match Serve.validate_turn
-          ~session_mode:(Serve.Resume {session_id="s-1"; expected_turns=Serve.Reported_or_one_more 0})
+          ~session_mode:(Serve.Resume {session_id="s-1";
+            expected_last_turn=Serve.Last_or_dispatched {last=t7; dispatched=Some "t-8"}})
           (config ()) ~workspace_root:"/w" ~prompt:"p" ~images:[] with
   | Ok () -> ()
   | Error error -> fail (Serve.error_to_string error)
@@ -1253,7 +1325,7 @@ let test_start_requires_an_empty_session () =
   List.iter (fun count ->
     let ready = ref false and sent = ref false in
     run_scripted ~session_mode:Serve.Start
-      ~on_session_ready:(fun ~session_id:_ ~reported_turns:_ -> ready := true; Ok ())
+      ~on_session_ready:(fun ~session_id:_ ~last_turn:_ -> ready := true; Ok ())
       ~on_prompt_sent:(fun () -> sent := true)
       (prefix count)
       (fun result requests ->
@@ -1781,10 +1853,10 @@ let () =
             test_nondurable_handshake_never_begins_a_session
         ; test_case "absent durability admits the v1 durable host" `Quick
             test_absent_durability_admits_the_v1_durable_host
-        ; test_case "resume requires retained completed-turn count" `Quick
-            test_resume_requires_the_retained_completed_turn_count
-        ; test_case "resume admits only the counts its expectation names" `Quick
-            test_resume_admits_only_the_counts_its_expectation_names
+        ; test_case "resume requires the retained last turn" `Quick
+            test_resume_requires_the_retained_last_turn
+        ; test_case "resume admits only the last turns its expectation names" `Quick
+            test_resume_admits_only_the_last_turns_its_expectation_names
         ; test_case "start requires an empty session" `Quick
             test_start_requires_an_empty_session
         ; test_case "run_turn returns when the owner is cancelled while the host exits" `Quick

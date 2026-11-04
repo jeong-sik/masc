@@ -223,6 +223,13 @@ type model_capabilities =
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
+  ; accepted_reasoning_efforts : Llm_provider.Reasoning_effort.t list option
+      (** Efforts a categorical reasoning-effort wire accepts from this model,
+          as probed against the operator's own endpoint. The dispatch check
+          refuses an effort until some layer declares this list; the Agent
+          Core catalog carries it for catalogued models, and this field is
+          how a runtime block declares it for a model the catalog does not
+          know. [None] preserves catalog resolution. *)
   ; anthropic_thinking_control : anthropic_thinking_control option
       (** Deployment-declared Anthropic thinking-control policy, for a binding
           the Agent Core catalog answers no policy for (operator-own pattern).

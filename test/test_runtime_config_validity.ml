@@ -1061,6 +1061,69 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
          (model.Runtime_schema.reasoning_effort = None)
      | _ -> fail "exactly one model must parse")
 
+(* [accepted-reasoning-efforts] answers the pre-dispatch refusal an
+   uncatalogued model on a categorical effort wire otherwise gets: the list
+   is what the dispatch check reads, so it has to reach the capabilities
+   block as the typed ladder rather than as loose strings. *)
+let test_model_accepted_reasoning_efforts_parse_into_the_typed_list () =
+  let config =
+    {|
+[models.probe]
+api-name = "probe"
+
+[models.probe.capabilities]
+accepted-reasoning-efforts = ["low", "high", "max"]
+|}
+  in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a capabilities block declaring accepted efforts must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       (match model.Runtime_schema.capabilities with
+        | None -> fail "the capabilities block must parse"
+        | Some caps ->
+          check
+            bool
+            "accepted-reasoning-efforts reaches the capabilities as the typed ladder"
+            true
+            (caps.Runtime_schema.accepted_reasoning_efforts
+             = Some
+                 [ Llm_provider.Reasoning_effort.Low
+                 ; Llm_provider.Reasoning_effort.High
+                 ; Llm_provider.Reasoning_effort.Max ]))
+     | _ -> fail "exactly one model must parse")
+
+let test_model_accepted_reasoning_efforts_reject_unknown_value_at_load () =
+  let config =
+    {|
+[models.probe]
+api-name = "probe"
+
+[models.probe.capabilities]
+accepted-reasoning-efforts = ["low", "turbo"]
+|}
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "an unknown accepted effort must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending value"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            let contains needle =
+              let n = String.length needle in
+              let rec scan i =
+                i + n <= String.length e.message
+                && (String.sub e.message i n = needle || scan (i + 1))
+              in
+              scan 0
+            in
+            contains "turbo")
+         errors)
+
 (* [reasoning-uncontrolled] is the other half of the same declaration: on a
    wire that turns reasoning on when the request carries no control, a row
    either names an effort or says out loud that it rides the provider's own
@@ -1747,6 +1810,7 @@ let catalog_decided_capability_pairs
       ; supports_parallel_tool_calls
       ; thinking_control_format = _
       ; declared_thinking_control_format = _
+      ; accepted_reasoning_efforts = _
       ; anthropic_thinking_control = _
       ; reasoning_streaming_format = _
       ; supports_image_input = _
@@ -7825,6 +7889,13 @@ let () =
         ; test_case
             "reasoning-effort rejects an unknown value at load"
             `Quick test_model_reasoning_effort_rejects_unknown_value_at_load
+        ; test_case
+            "accepted-reasoning-efforts parse into the typed ladder"
+            `Quick test_model_accepted_reasoning_efforts_parse_into_the_typed_list
+        ; test_case
+            "accepted-reasoning-efforts reject an unknown value at load"
+            `Quick
+            test_model_accepted_reasoning_efforts_reject_unknown_value_at_load
         ; test_case
             "a model without reasoning-effort leaves it unset"
             `Quick test_model_without_reasoning_effort_leaves_it_unset

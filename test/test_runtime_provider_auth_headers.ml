@@ -1370,6 +1370,73 @@ let check_vision_output_wire config =
     check int "vision request reaches wire within GLM image-model ceiling"
       32768 Yojson.Safe.Util.(body |> member "max_tokens" |> to_int))
 
+(* 2026-11-04: an uncatalogued model on a categorical reasoning-effort wire
+   whose row names an effort was refused before dispatch — "no declared
+   categorical reasoning-effort contract" — and no runtime.toml key could
+   answer that refusal. The accepted list now travels from the model's
+   capabilities block into the resolved contract; the without-half of this
+   test is the outage that motivated it. *)
+let uncatalogued_effort_binding ~runtime_caps =
+  let provider = { runpod_provider with id = "opencode_go" } in
+  let model =
+    { qwen_model with
+      id = "opencode-go-deepseek-flash"
+    ; api_name = "deepseek-v4.1-flash"
+    ; reasoning_effort = Some Llm_provider.Reasoning_effort.Low
+    ; capabilities = Some runtime_caps
+    }
+  in
+  let binding =
+    { runpod_binding with provider_id = provider.id; model_id = model.id }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]; models = [ model ]
+    ; bindings = [ binding ]; default_runtime_id = Some "opencode_go.opencode-go-deepseek-flash"
+    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; exact_output_lane_decls = []; exec_ssh_endpoints = []
+    ; browser = Browser_configuration.none; machines = Machine_configuration.default
+    ; typesafeai = Runtime_schema.default_typesafeai
+    ; egress_allowlists = []; lsp_servers = [] }
+  in
+  match provider_config_for_binding cfg binding with
+  | Ok config -> config
+  | Error detail -> failf "effort binding failed: %s" detail
+
+let test_accepted_reasoning_efforts_declared_on_the_runtime_block_admit_the_requested_effort () =
+  let config =
+    uncatalogued_effort_binding
+      ~runtime_caps:
+        { Runtime_schema.model_capabilities_default with
+          thinking_control_format = Runtime_schema.Reasoning_effort
+        ; accepted_reasoning_efforts =
+            Some
+              [ Llm_provider.Reasoning_effort.Low
+              ; Llm_provider.Reasoning_effort.High
+              ; Llm_provider.Reasoning_effort.Max ] }
+  in
+  (match Llm_provider.Provider_config.validate_reasoning_effort_request config with
+   | Ok () -> ()
+   | Error _ ->
+     check bool "a declared accepted list admits the requested effort" true false);
+  let refused =
+    uncatalogued_effort_binding
+      ~runtime_caps:
+        { Runtime_schema.model_capabilities_default with
+          thinking_control_format = Runtime_schema.Reasoning_effort }
+  in
+  (match Llm_provider.Provider_config.validate_reasoning_effort_request refused with
+   | Error message ->
+     let needle = "has no declared categorical reasoning-effort contract" in
+     let n = String.length needle in
+     let rec contains i =
+       i + n <= String.length message
+       && (String.sub message i n = needle || contains (i + 1))
+     in
+     check bool "without the list the refusal names the undeclared contract" true
+       (contains 0)
+   | Ok () ->
+     check bool "without the list the effort is still refused" true false)
+
 let test_runtime_max_only_capability_overrides_provider_base_on_wire () =
   with_model_catalog
     {|
@@ -3856,6 +3923,10 @@ let () =
             "declared thinking capabilities override catalog"
             `Quick
             test_declared_thinking_capabilities_override_catalog
+        ; test_case
+            "accepted reasoning efforts declared on the runtime block admit the requested effort"
+            `Quick
+            test_accepted_reasoning_efforts_declared_on_the_runtime_block_admit_the_requested_effort
         ; test_case
             "max-only runtime capability overrides provider base on wire"
             `Quick

@@ -138,20 +138,28 @@ let apple_container_needs_default_kernel ~run =
   | Service_ready -> not (apple_default_kernel_configured ~run)
   | Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _
   | Needs_configuration _ -> false
+let unsupported_host_reason = "Supported hosts are macOS and Linux on ARM64 or x64"
+(* What every Apple Container command needs before it runs: a host that can
+   run Apple Container, and a service that answers its inventory. The image
+   builder is [probe]'s further question; a command that builds nothing, such
+   as listing volumes, runs on a service whose builder cannot start. *)
+let apple_container_service ~host ~run =
+  match host with
+  | Unsupported -> Unsupported_host unsupported_host_reason
+  | Linux (Arm64) | Linux (X64) | Macos { architecture = X64; _ } ->
+    Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
+  | Macos {major; _} when major < 26 ->
+    Unsupported_host "Apple Container requires macOS 26 or newer"
+  | Macos _ -> apple_inventory ~run
 let probe ~host ~run ~require_rootless ~require_userns backend =
   let state = match backend, host with
   | Microsandbox, _ -> Unsupported_capability
       "microsandbox cannot express MASC's required cap-drop and read-only root filesystem constraints"
   | Remote_ssh, _ -> Needs_configuration
       "Select a configured SSH endpoint and verify its remote execution; SSH is not a disposable guest"
-  | _, Unsupported -> Unsupported_host "Supported hosts are macOS and Linux on ARM64 or x64"
-  | (Apple_container, Linux (Arm64)) | (Apple_container, Linux (X64))
-  | (Apple_container, Macos { architecture = X64; _ }) ->
-    Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
-  | Apple_container, Macos {major; _} when major < 26 ->
-    Unsupported_host "Apple Container requires macOS 26 or newer"
-  | Apple_container, Macos _ ->
-    (match apple_inventory ~run with
+  | _, Unsupported -> Unsupported_host unsupported_host_reason
+  | Apple_container, (Linux (Arm64) | Linux (X64) | Macos _) ->
+    (match apple_container_service ~host ~run with
      | Service_ready -> (match apple_builder_rosetta ~run with
        | Ok Rosetta_missing -> Missing_prerequisite rosetta_missing_reason
        | Ok (Rosetta_not_used | Rosetta_installed) ->

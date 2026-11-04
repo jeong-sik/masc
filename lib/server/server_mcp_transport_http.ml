@@ -753,7 +753,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
         (match machine, sse_kind with
          | Some _, (Sse.Agent_stream | Sse.Presence) ->
              Error "the machine query requires an observer stream"
-         | (Some _ | None), _ -> Ok machine)
+         | (Some _ | None), Sse.Observer -> Ok machine)
   in
   match machine with
   | Error detail ->
@@ -1035,7 +1035,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               let sw = runtime.sw in
               let clock = runtime.clock in
               Option.iter (fun machine ->
-                Option.iter (fun (_, scope) ->
+                Option.iter (fun (_, (scope : Mcp_server.workspace_scope)) ->
                   Server_machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
                     ~machine ~config:scope.config) observer_scope) machine;
               Option.iter (fun (_, scope) ->

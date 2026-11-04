@@ -1095,6 +1095,32 @@ let test_catalog_usage_preserves_exact_reference_and_time () =
     (Option.is_none (Ledger.usage_for_reference ledger unseen))
 ;;
 
+(* The kept counts answer what the ledger answers, and a committed row moves
+   the revision they are kept under, so the next read counts it. *)
+let test_kept_usage_follows_the_ledger_revision () =
+  with_session @@ fun config trace_id _session_dir ->
+  let keeper_name = "skill-keeper-fixture" in
+  let record value =
+    Ledger.record ~keeper_name ~config ~trace_id value |> Result.get_ok |> ignore in
+  let first = activation ~skill_tool_use_id:"kept-first" ~activated_at:"2026-08-26T01:00:00Z" () in
+  record first;
+  let reference = Skill_reference.make ~identity:first.identity ~content_revision:first.content_revision in
+  let invocations ledger =
+    Keeper_skill_usage_kept.usage ~base_path:config.Workspace.base_path ~keeper_name ledger reference
+    |> Option.map (fun (usage : Ledger.catalog_usage) -> usage.invocations) in
+  let ledger = Ledger.load ~config ~trace_id |> Result.get_ok in
+  check (option int) "the first read counts the ledger" (Some 1) (invocations ledger);
+  check (option int) "an unmoved ledger answers the kept count" (Some 1) (invocations ledger);
+  check (option int) "the kept count is the ledger's own"
+    (Option.map (fun (usage : Ledger.catalog_usage) -> usage.invocations)
+       (Ledger.usage_for_reference ledger reference))
+    (invocations ledger);
+  record (activation ~skill_tool_use_id:"kept-second" ~activated_at:"2026-08-26T02:00:00Z" ());
+  let moved = Ledger.load ~config ~trace_id |> Result.get_ok in
+  check (option int) "a committed row is counted" (Some 2) (invocations moved);
+  check (option int) "an older ledger is counted by its own revision" (Some 1) (invocations ledger)
+;;
+
 let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
   with_session @@ fun config trace_id _session_dir ->
   let first =
@@ -1597,6 +1623,8 @@ let () =
             test_action_before_delivery_is_durable_transition_evidence
         ; test_case "catalog usage preserves exact reference and time" `Quick
             test_catalog_usage_preserves_exact_reference_and_time
+        ; test_case "kept usage follows the ledger revision" `Quick
+            test_kept_usage_follows_the_ledger_revision
         ; test_case "scoped summaries preserve exact runtime and reference" `Quick
             test_scoped_summaries_do_not_mix_runtime_or_exact_reference
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed

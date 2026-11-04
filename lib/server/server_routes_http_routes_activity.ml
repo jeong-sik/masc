@@ -1484,7 +1484,8 @@ let add_routes ~sw ~clock router =
              let usage_for_reference reference =
                usage_ledgers
                |> List.filter_map (fun (keeper_name, ledger) ->
-                 Keeper_skill_activation_ledger.usage_for_reference ledger reference
+                 Keeper_skill_usage_kept.usage ~base_path:config.Workspace.base_path
+                   ~keeper_name ledger reference
                  |> Option.map (fun (usage : Keeper_skill_activation_ledger.catalog_usage) ->
                    `Assoc
                      [ "keeper", `String keeper_name

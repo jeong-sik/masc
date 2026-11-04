@@ -201,7 +201,7 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
   | None -> None
   | Some reason ->
     let blocker_fields =
-      Keeper_status_bridge.runtime_blocker_fields_json_of_surface meta runtime_blocker
+      Keeper_status_bridge.runtime_blocker_fields_json_of_surface runtime_blocker
     in
     let runtime_blocker_summary =
       Option.map

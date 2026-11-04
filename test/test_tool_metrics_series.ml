@@ -265,13 +265,15 @@ let test_json_carries_null_for_a_bucket_with_no_calls () =
   let series = series_of window [ sample ~ts:(utc_midnight +. hour) ~tool:"a" 40.0 ] in
   let json =
     S.to_json
-      ~window
       ~generated_at:utc_midnight
       ~tool_name:"a"
       ~public_names:(fun name -> [ "Public" ^ name ])
       series
   in
   let open Yojson.Safe.Util in
+  let since, until = S.window_bounds window in
+  Alcotest.(check (float 0.0)) "window since" since (json |> member "window" |> member "since" |> to_float);
+  Alcotest.(check (float 0.0)) "window until" until (json |> member "window" |> member "until" |> to_float);
   Alcotest.(check string) "tool filter is echoed" "a" (json |> member "tool" |> to_string);
   Alcotest.(check (list string))
     "the tool row lists the public names"

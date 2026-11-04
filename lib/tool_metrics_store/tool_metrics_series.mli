@@ -98,7 +98,8 @@ type tool_usage =
   }
 
 type t =
-  { buckets : bucket list  (** Oldest first, one per {!width} step. *)
+  { window : window  (** The window the samples were counted in. *)
+  ; buckets : bucket list  (** Oldest first, one per {!width} step. *)
   ; total : stat  (** Every sample in the window. *)
   ; top_by_time : tool_usage list
         (** The tools that spent the most time, longest first. *)
@@ -110,14 +111,13 @@ val top_tool_limit : int
 val finish : builder -> t
 
 val to_json
-  :  window:window
-  -> generated_at:float
+  :  generated_at:float
   -> ?tool_name:string
   -> ?public_names:(string -> string list)
   -> t
   -> Yojson.Safe.t
-(** The response body of the series endpoint. [generated_at] is when the
-    series was read, in epoch seconds. [tool_name] is the filter the samples
+(** The response body of the series endpoint. Its [window] is the window of
+    the series. [generated_at] is when the series was read, in epoch seconds. [tool_name] is the filter the samples
     were selected with, [None] for all tools. [public_names] lists the names
     under which a stored tool name is offered to a model; each row of
     [top_by_time] carries that list, empty by default. *)

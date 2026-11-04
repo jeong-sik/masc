@@ -55,6 +55,33 @@ let signed_int_reads_both_signs_and_rejects_the_rest () =
     [ "abc"; ""; "-"; "--3"; "+5"; "3.5"; "0x10"; "1_000"; " 5 "; "99999999999999999999" ]
 ;;
 
+let tool_name_result = result (option string) string
+
+(* The response cache trims every value and reads an empty one as absent, and
+   the scan filters on the name as sent. A name the cache would change must be
+   refused, or " " and an absent filter share one cache entry while the scan
+   matches no row for " ". *)
+let tool_name_is_kept_as_sent_or_refused () =
+  check tool_name_result "absent" (Ok None) (A.tool_name_param None);
+  check tool_name_result "plain" (Ok (Some "Execute")) (A.tool_name_param (Some "Execute"));
+  check tool_name_result "inner space" (Ok (Some "a b")) (A.tool_name_param (Some "a b"));
+  let longest = String.make A.tool_series_max_tool_name_bytes 'a' in
+  check tool_name_result "longest" (Ok (Some longest)) (A.tool_name_param (Some longest));
+  List.iter
+    (fun raw ->
+       match A.tool_name_param (Some raw) with
+       | Ok read -> failf "tool=%S must not read as %s" raw (Option.value read ~default:"none")
+       | Error msg -> check bool ("names the parameter: " ^ msg) true (String.length msg > 0))
+    [ ""
+    ; " "
+    ; " Execute"
+    ; "Execute "
+    ; "\tExecute"
+    ; "Execute\n"
+    ; String.make (A.tool_series_max_tool_name_bytes + 1) 'a'
+    ]
+;;
+
 let () =
   run
     "agent_api_query_params"
@@ -66,6 +93,10 @@ let () =
             "signed integers read both signs and reject the rest"
             `Quick
             signed_int_reads_both_signs_and_rejects_the_rest
+        ; test_case
+            "a tool filter is kept as sent or refused"
+            `Quick
+            tool_name_is_kept_as_sent_or_refused
         ] )
     ]
 ;;

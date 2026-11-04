@@ -36,6 +36,15 @@ val signed_int_param
 (** Read an absent value as [default], otherwise require decimal digits with
     an optional leading [-]. *)
 
+val tool_series_max_tool_name_bytes : int
+(** The longest [tool] filter of [GET /api/v1/tool-metrics/series]. *)
+
+val tool_name_param : string option -> (string option, string) Result.t
+(** Read an absent [tool] filter as no filter, otherwise require 1 to
+    {!tool_series_max_tool_name_bytes} bytes with no leading or trailing
+    whitespace. The response cache trims every value of a request, so a name
+    that trimming would change is refused instead of read as another name. *)
+
 val agent_activity_http_json :
   config:Masc.Workspace.config -> hours:float -> Yojson.Safe.t
 (** Per-agent tool-call rollup for [GET /api/v1/agent-activity], cached per

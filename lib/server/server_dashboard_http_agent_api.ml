@@ -131,6 +131,24 @@ let signed_int_param ~name ~default = function
 let tool_series_default_hours = 24.0
 let tool_series_max_tool_name_bytes = 128
 
+(* The cache key trims each value and reads an empty one as absent, while the
+   scan filters on the text as sent. A name with surrounding whitespace would
+   share a key with another request and match different rows, so such a name is
+   refused instead of trimmed. *)
+let tool_name_param = function
+  | None -> Ok None
+  | Some raw ->
+    if String.length raw > 0
+       && String.length raw <= tool_series_max_tool_name_bytes
+       && String.trim raw = raw
+    then Ok (Some raw)
+    else
+      Error
+        (Printf.sprintf
+           "tool must be 1 to %d bytes with no leading or trailing whitespace"
+           tool_series_max_tool_name_bytes)
+;;
+
 type tool_series_request =
   { since_hours : float
   ; width : Tool_metrics_series.width
@@ -168,18 +186,7 @@ let tool_series_request req =
       ~default:0
       (Server_utils.query_param req "utc_offset_min")
   in
-  let* tool_name =
-    match Server_utils.query_param req "tool" with
-    | None -> Ok None
-    | Some raw ->
-      if String.length raw = 0 || String.length raw > tool_series_max_tool_name_bytes
-      then
-        Error
-          (Printf.sprintf
-             "tool must be 1 to %d bytes"
-             tool_series_max_tool_name_bytes)
-      else Ok (Some raw)
-  in
+  let* tool_name = tool_name_param (Server_utils.query_param req "tool") in
   let request = { since_hours; width; utc_offset_min; tool_name } in
   let* (_ : Tool_metrics_series.window) =
     tool_series_window request ~until:(Time_compat.now ())
@@ -221,7 +228,6 @@ let tool_series_http_json ~(config : Workspace.config) request : Yojson.Safe.t =
           | Error detail -> raise (Tool_series_failed detail)
           | Ok series ->
             Tool_metrics_series.to_json
-              ~window
               ~generated_at:until
               ?tool_name:request.tool_name
               ~public_names:

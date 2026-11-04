@@ -276,7 +276,8 @@ type tool_usage =
   }
 
 type t =
-  { buckets : bucket list
+  { window : window
+  ; buckets : bucket list
   ; total : stat
   ; top_by_time : tool_usage list
   }
@@ -302,7 +303,7 @@ let finish builder =
     |> List.map (fun (name, accumulator) ->
       { name; usage = stat_of_accumulator accumulator })
   in
-  { buckets; total = stat_of_accumulator builder.overall; top_by_time }
+  { window = shape; buckets; total = stat_of_accumulator builder.overall; top_by_time }
 ;;
 
 let float_or_null = function
@@ -321,9 +322,10 @@ let stat_fields stat : (string * Yojson.Safe.t) list =
   ]
 ;;
 
-let to_json ~window ~generated_at ?tool_name ?(public_names = fun _ -> []) series
+let to_json ~generated_at ?tool_name ?(public_names = fun _ -> []) series
   : Yojson.Safe.t
   =
+  let window = series.window in
   let bucket_json (bucket : bucket) =
     `Assoc (("start", `Float bucket.start) :: stat_fields bucket.summary)
   in

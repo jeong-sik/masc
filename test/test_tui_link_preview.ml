@@ -242,6 +242,16 @@ let test_parse_single_quote_and_name_attr () =
   let p2 = parse_og_html ~url:"https://example.com/na" ~body:body2 in
   check (option string) "name= attribute accepted" (Some "Via Name Attr") p2.title
 
+let test_parse_og_without_metadata_does_not_allocate_per_scanned_byte () =
+  let body = String.make 100_000 'x' in
+  Gc.full_major ();
+  let before = Gc.allocated_bytes () in
+  let p = parse_og_html ~url:"https://example.com/bare" ~body in
+  let allocated = Gc.allocated_bytes () -. before in
+  check bool "does not fabricate has_metadata" false p.has_metadata;
+  check bool "substring search does not allocate for each scanned byte" true
+    (allocated < 400_000.)
+
 let test_parse_og_far_into_body () =
   (* Regression: real pages (YouTube's watch page, ~700 KB in) place og:* well
      past the first hundreds of KB, after large inline scripts. A head-window
@@ -337,6 +347,8 @@ let () =
         ; test_case "entity decode" `Quick test_parse_entities
         ; test_case "keeps kind" `Quick test_parse_keeps_kind
         ; test_case "single quote and name attr" `Quick test_parse_single_quote_and_name_attr
+        ; test_case "bare document does not allocate per scanned byte" `Quick
+            test_parse_og_without_metadata_does_not_allocate_per_scanned_byte
         ; test_case "og far into body (no head cap)" `Quick test_parse_og_far_into_body
         ; test_case "collapses newlines" `Quick test_parse_collapses_newlines
         ] )

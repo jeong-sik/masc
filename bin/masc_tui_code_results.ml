@@ -441,20 +441,6 @@ let apply_search (state : state) request result =
   | Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
   | Palette_choice _ | Palette_branches _ | Palette_worktrees _ -> ()
 
-(* Opens the file of one match of the answer the search palette shows, at the
-   match's line, the way a definition jump does. Only a match of that very
-   answer is accepted; anything else leaves the palette as it is. *)
-let choose_search_match (state : state) (found : Masc.Tui_decode.workspace_search_match) =
-  match code_search_current state with
-  | Some (key, Masc_tui_fetched.Ready search)
-    when List.exists (fun candidate -> candidate == found) search.Masc.Tui_decode.wss_matches ->
-      close_code_finder state;
-      follow_lsp_location state ~symbol:key.css_query
-        { Masc.Tui_decode.ll_path = found.wsm_path; ll_inside = true; ll_line = found.wsm_line }
-  | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
-             | Masc_tui_fetched.Stale (_, _) | Masc_tui_fetched.Failed _))
-  | None -> No_followup
-
 let apply_blame (state : state) request result =
   (* An answer that arrives after the operator moved on describes bytes
      that are no longer on screen, and a margin naming the wrong authors
@@ -552,6 +538,20 @@ let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_
     No_followup
   end
 ;;
+
+(* Opens the file of one match of the answer the search palette shows, at the
+   match's line, the way a definition jump does. Only a match of that very
+   answer is accepted; anything else leaves the palette as it is. *)
+let choose_search_match (state : state) (found : Masc.Tui_decode.workspace_search_match) =
+  match code_search_current state with
+  | Some (key, (Masc_tui_fetched.Ready search | Masc_tui_fetched.Stale (search, _)))
+    when List.exists (fun candidate -> candidate == found) search.Masc.Tui_decode.wss_matches ->
+      close_code_finder state;
+      follow_lsp_location state ~symbol:key.css_query
+        { Masc.Tui_decode.ll_path = found.wsm_path; ll_inside = true; ll_line = found.wsm_line }
+  | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
+             | Masc_tui_fetched.Stale (_, _) | Masc_tui_fetched.Failed _))
+  | None -> No_followup
 
 let apply_lsp_answer (state : state) request result =
   let query = Masc_tui_fetched.request_key request in

@@ -124,6 +124,11 @@ let launch_search state ~host ~deliver =
                   ~expected_workspace ~host ~port ~path:key.css_dir ~query:key.css_query
                   ~ignore_case:key.css_ignore_case ())
       end
+  | Palette_search _, Some _ ->
+      (* Confirmed workspace, but the file or directory the palette opened over
+         has changed since. *)
+      Masc_tui_loader.report_action state "error"
+        "The search no longer matches the file open on Code; Esc, then Ctrl-G opens it again"
   | (Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
     | Palette_choice _), (Some _ | None) ->
       Masc_tui_loader.report_action state "error" "Search needs a confirmed workspace"

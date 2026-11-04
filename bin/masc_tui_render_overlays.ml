@@ -553,9 +553,13 @@ let render_palette (state : state) =
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "   %s · %d/%d · type to filter"
+            (Printf.sprintf "   %s · %d/%d · %s"
               (palette_count state.palette_mode total)
-              (if total = 0 then 0 else cursor + 1) total);
+              (if total = 0 then 0 else cursor + 1) total
+              (match state.palette_mode with
+               | Palette_search _ -> "Enter searches the typed text"
+               | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ ->
+                   "type to filter"));
           let list_rows = max 0 (budget - 2 - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in
           matches
@@ -566,6 +570,9 @@ let render_palette (state : state) =
                else c.push ("   " ^ Terminal_text.single_line label));
           if total = 0 then
             (match state.palette_mode, code_finder_catalog state with
+             | Palette_search _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                 | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Failed _
+                 | Masc_tui_fetched.Stale _) -> ()
              | Palette_files _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                  | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) -> ()
              | Palette_branches _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading

@@ -1722,7 +1722,10 @@ let tasks_list_output_schema =
       [ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
 ;;
 
-(* Producer: Keeper_artifact_read.page_to_json — the single success path. *)
+(* Producers: Keeper_artifact_read.page_to_json for a page and
+   Keeper_artifact_read.search_to_json for a search. A search carries the page
+   fields and adds [match_count] and, when some lines were too long to search,
+   [skipped_lines]; neither is required. *)
 let artifact_read_output_schema =
   object_output_schema
     ~properties:
@@ -1734,6 +1737,8 @@ let artifact_read_output_schema =
       ; "eof", `Assoc [ "type", `String "boolean" ]
       ; "encoding", `Assoc [ "type", `String "string" ]
       ; "content", `Assoc [ "type", `String "string" ]
+      ; "match_count", `Assoc [ "type", `String "integer" ]
+      ; "skipped_lines", `Assoc [ "type", `String "integer" ]
       ]
     ~required:
       [ "ok"

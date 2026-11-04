@@ -62,6 +62,7 @@
 (include stanzas/test_runtime_response_identity.inc)
 (include stanzas/test_keeper_sandbox_observation.inc)
 (include stanzas/test_published_artifact.inc)
+(include stanzas/test_keeper_artifact_search.inc)
 (include stanzas/test_structured_response_evidence.inc)
 (include stanzas/test_fusion_judge_response_evidence_walk.inc)
 (include stanzas/test_keeper_trust_disposition.inc)

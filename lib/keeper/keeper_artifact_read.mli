@@ -56,6 +56,18 @@ type invalid_request =
   | Sha256_malformed of Tool_output.invalid_sha256
   | Offset_invalid of invalid_integer_field
   | Max_bytes_invalid of invalid_integer_field
+  | Contains_not_a_string of { kind : string }
+  | Contains_empty
+  | Contains_too_long of
+      { bytes : int
+      ; maximum : int
+      }
+  | Ignore_case_not_a_boolean of { kind : string }
+  | Max_matches_invalid of invalid_integer_field
+  | Search_field_without_contains of { field : string }
+      (** [ignore_case] or [max_matches] without [contains]. *)
+  | Max_bytes_with_contains
+      (** [max_bytes] is the page size; a search returns lines. *)
 
 val invalid_request_to_string : invalid_request -> string
 (** Renders one rejection into the [message] field of the
@@ -76,6 +88,25 @@ type page =
   }
 
 val page_to_json : page -> Yojson.Safe.t
+
+(** A request that carries [contains]: where does this text occur in the
+    artifact. Answered by {!Keeper_artifact_search}; the response has the page
+    fields, with [content] holding one ["<byte offset>\t<line>"] per hit, plus
+    [match_count] and, when some lines were too long to search,
+    [skipped_lines]. [next_offset] is where to continue and [eof] says whether
+    the scan reached the end. *)
+type search =
+  { sha256 : string
+  ; offset : int
+  ; needle : string
+  ; ignore_case : bool
+  ; max_matches : int
+  }
+
+type operation =
+  | Read_page of request
+  | Search_text of search
+
 val page :
   ?envelope:(Yojson.Safe.t -> Yojson.Safe.t) -> request -> string ->
   (page, string) result
@@ -100,6 +131,12 @@ val handle_with_page :
 
 module For_testing : sig
   val request_of_json : Yojson.Safe.t -> (request, invalid_request) result
+  val operation_of_json : Yojson.Safe.t -> (operation, invalid_request) result
   val page : request -> string -> (page, string) result
   val page_to_json : page -> Yojson.Safe.t
+
+  val search_page :
+    search -> Keeper_artifact_search.outcome -> (Yojson.Safe.t, string) result
+  (** The search response for a scan outcome, with hits dropped from the end
+      until it fits the wire ceiling. *)
 end

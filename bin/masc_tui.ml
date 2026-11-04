@@ -32121,6 +32121,9 @@ Use relative paths for resources already held in the package. -->
           observe_msx_carts state ~mailbox:async_messages;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
+          state.machine_interaction <- Observe_machine;
+          reconcile_observer_machine state ~host:server_peer_host ~port:state.port
+            ~mailbox:async_messages;
           (* A presentation token is not a mutation barrier. Never start a
              checkpoint while our earlier tick may still be running. *)
           (match !msx_pending_poll with

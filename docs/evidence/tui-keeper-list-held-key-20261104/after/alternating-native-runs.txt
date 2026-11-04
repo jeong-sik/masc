@@ -1,0 +1,24 @@
+== ab-old-1
+  build[keeper-list] frames=82 mean=8.79ms p50=2.27 p95=56.26 p99=93.18 max=110.50
+  present[keeper-list] frames=82 mean=3.52ms p50=0.08 p95=27.26 p99=45.13 max=82.32
+load_before [153.56396484375, 229.60205078125, 251.1904296875] frames_drawn_per_phase_output_chunks [114, 77] next_pty_output_ms_p50 [35.5, 45.5] binary /Users/dancer/.local/bin/masc-tui
+== ab-new-1
+  build[keeper-list] frames=151 mean=5.94ms p50=1.89 p95=25.06 p99=111.49 max=158.24
+  present[keeper-list] frames=151 mean=0.89ms p50=0.06 p95=3.56 p99=10.56 max=40.89
+load_before [156.5615234375, 228.9609375, 250.83740234375] frames_drawn_per_phase_output_chunks [105, 133] next_pty_output_ms_p50 [23.9, 14.9] binary /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-keeper-list-index-20261104/_build/default/bin/masc_tui.exe
+== ab-old-2
+  build[keeper-list] frames=108 mean=5.61ms p50=2.46 p95=13.02 p99=83.37 max=97.41
+  present[keeper-list] frames=108 mean=1.38ms p50=0.06 p95=5.51 p99=33.47 max=41.04
+load_before [161.759765625, 227.65380859375, 250.115234375] frames_drawn_per_phase_output_chunks [82, 120] next_pty_output_ms_p50 [43.4, 20.5] binary /Users/dancer/.local/bin/masc-tui
+== ab-new-2
+  build[keeper-list] frames=127 mean=9.18ms p50=2.55 p95=45.43 p99=86.98 max=122.42
+  present[keeper-list] frames=127 mean=1.65ms p50=0.10 p95=10.47 p99=14.45 max=27.40
+load_before [151.8447265625, 223.3134765625, 248.3095703125] frames_drawn_per_phase_output_chunks [164, 101] next_pty_output_ms_p50 [20.5, 28.7] binary /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-keeper-list-index-20261104/_build/default/bin/masc_tui.exe
+== ab-old-3
+  build[keeper-list] frames=73 mean=15.78ms p50=3.06 p95=97.16 p99=128.07 max=130.06
+  present[keeper-list] frames=73 mean=5.97ms p50=0.95 p95=28.34 p99=46.85 max=80.69
+load_before [150.4365234375, 220.6533203125, 247.0732421875] frames_drawn_per_phase_output_chunks [59, 88] next_pty_output_ms_p50 [54.2, 23.0] binary /Users/dancer/.local/bin/masc-tui
+== ab-new-3
+  build[keeper-list] frames=109 mean=9.04ms p50=2.26 p95=38.64 p99=139.37 max=174.25
+  present[keeper-list] frames=109 mean=2.70ms p50=0.06 p95=11.29 p99=54.74 max=72.88
+load_before [169.12548828125, 222.36962890625, 247.375] frames_drawn_per_phase_output_chunks [76, 95] next_pty_output_ms_p50 [28.7, 13.9] binary /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-keeper-list-index-20261104/_build/default/bin/masc_tui.exe

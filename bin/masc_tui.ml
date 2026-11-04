@@ -23386,7 +23386,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change;
-                   local_keepers_changed := true
+                   (match change with
+                    | Masc_tui_observer.Every_row_changed -> local_keepers_changed := true
+                    | Masc_tui_observer.Keeper_row_changed { keeper } ->
+                        if not !local_keepers_changed
+                           && Masc_tui_loader.local_keeper_meta_moved state.local_base_path keeper
+                        then local_keepers_changed := true)
                | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true
                | Masc_tui_observer.Agent_core
                    { kind = Masc_tui_observer.Relay_subscription_loss
@@ -23462,7 +23467,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-      if !local_keepers_changed || !observer_source_loss_seen then
+      (* The local Keeper list is the metadata files and the Keepers runtime
+         config declares without one. While the server or the feed is down
+         nothing is announced; the Keepers run in the server, so their files
+         hold still, and a CLI write shows on reopen or [r]. *)
+      if !local_keepers_changed || !observer_source_loss_seen
+         || List.mem Masc.Workspace_dataset_event.Runtime_config !datasets_owed then
         launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
       if !observer_source_loss_seen then begin

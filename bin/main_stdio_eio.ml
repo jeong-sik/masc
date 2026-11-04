@@ -39,7 +39,7 @@ let run_cmd cli_base_path =
         (Server_base_path_guard.format_canonicalization_error error);
       exit 1
   in
-  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv Env_config_core.base_path_env_key base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Eio_main.run @@ fun env ->
   Crypto_rng.ensure_default ();

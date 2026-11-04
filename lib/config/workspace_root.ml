@@ -129,7 +129,7 @@ let error_message = function
     let named =
       match source with
       | Flag -> "--base-path"
-      | Environment -> "MASC_BASE_PATH"
+      | Environment -> Env_config_core.base_path_env_key
       | Current_directory | Recorded _ -> "The workspace"
     in
     String.concat "\n"

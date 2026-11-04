@@ -153,7 +153,7 @@ let run_all () =
      ("." / "tmp" / "./logs") would resolve [tmp_dir] against the
      daemon's cwd and unlink unrelated files in whichever directory
      the binary was launched from — refuse to traverse it. *)
-  (match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
+  (match Sys.getenv_opt Env_config_core.base_path_env_key |> Option.map String.trim with
    | None | Some "" -> ()
    | Some base_path when Filename.is_relative base_path ->
      Log.Server.debug

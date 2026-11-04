@@ -100,7 +100,7 @@ let host () =
          Env_config_core.normalize_masc_base_path_input. *)
       base_path
   ; base_path_raw
-  ; config_dir = get_opt "MASC_CONFIG_DIR"
+  ; config_dir = get_opt Env_config_core.config_dir_env_key
   ; home = get_opt "HOME"
   ; assets_dir = get_opt "MASC_ASSETS_DIR"
   }
@@ -169,7 +169,7 @@ let resolve ?base_path () =
     | Some s -> if String.trim s = "" then None else Some s
   in
   let default_workspace_root fallback =
-    match get_opt "MASC_BASE_PATH" with
+    match get_opt Env_config_core.base_path_env_key with
     | Some root -> Env_config_core.normalize_masc_base_path_input root
     | None -> fallback
   in
@@ -208,13 +208,13 @@ let resolve ?base_path () =
         Option.value (get_opt "MASC_BASE_PATH_LEASE_DIR") ~default:tmp
     ; policy_dir = tmp
     ; base_path =
-        get_opt "MASC_BASE_PATH"
+        get_opt Env_config_core.base_path_env_key
         |> Option.map Env_config_core.normalize_masc_base_path_input
         |> (function
           | Some "" -> None
           | other -> other)
-    ; base_path_raw = get_opt "MASC_BASE_PATH"
-    ; config_dir = get_opt "MASC_CONFIG_DIR"
+    ; base_path_raw = get_opt Env_config_core.base_path_env_key
+    ; config_dir = get_opt Env_config_core.config_dir_env_key
     ; home = get_opt "HOME"
     ; assets_dir = get_opt "MASC_ASSETS_DIR"
     }

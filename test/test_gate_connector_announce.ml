@@ -6,6 +6,8 @@
 
 open Alcotest
 
+module Keeper_connector_names = Masc.Keeper_connector_names
+
 let with_workspace f =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let previous_fs = Fs_compat.get_fs_opt () in
@@ -25,9 +27,12 @@ let with_workspace f =
             Server_auth.For_testing.restore_server_state (Some state);
             let config = Masc.Mcp_server.workspace_config state in
             ignore (Workspace_core.init config ~agent_name:(Some "test"));
-            Gate_connector_announce.install
-              (Server_gate_connector_broadcast.observer ~base_path:config.base_path);
+            Server_gate_connector_broadcast.install ~sw ~base_path:config.base_path;
             f config))))
+
+(* The writer only records which connector changed; the announcing fiber
+   sends once the writer's fiber yields. *)
+let let_the_announcer_run () = Eio.Fiber.yield ()
 
 (* An observer session of the workspace, as a terminal reader holds one. Only
    changes made after the call are delivered. *)
@@ -60,17 +65,28 @@ let connector_changes stream =
 let test_a_new_connector_name_reaches_observers () =
   with_workspace @@ fun config ->
   observing ~config @@ fun stream ->
-  let remember name =
+  let remember ~id name =
     Keeper_connector_names.remember ~base_dir:config.base_path ~connector:"fixture"
-      ~scope:Keeper_connector_names.Channel ~id:"C1" ~name ()
+      ~scope:Keeper_connector_names.Channel ~id ~name ()
   in
-  remember "general";
+  remember ~id:"C1" "general";
+  let_the_announcer_run ();
   check (list string) "a new name announces its connector" [ "fixture" ]
     (connector_changes stream);
-  remember "general";
+  remember ~id:"C1" "general";
+  let_the_announcer_run ();
   check (list string) "a repeated name announces nothing" [] (connector_changes stream);
-  remember "random";
+  remember ~id:"C1" "random";
+  let_the_announcer_run ();
   check (list string) "a changed name announces again" [ "fixture" ]
+    (connector_changes stream);
+  (* A directory sync records names one after another under the writer's
+     lock; the connector is announced once for the burst. *)
+  remember ~id:"C2" "design";
+  remember ~id:"C3" "ops";
+  remember ~id:"C4" "random";
+  let_the_announcer_run ();
+  check (list string) "a burst of names announces once" [ "fixture" ]
     (connector_changes stream)
 
 let () =

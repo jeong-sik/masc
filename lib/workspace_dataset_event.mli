@@ -23,6 +23,10 @@ type dataset =
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
           The event names the Keeper only: no provider, attempt id, state,
           code or consent URL. *)
+  | Clients
+      (** What [GET /api/v1/dashboard/clients] lists from the workspace: an
+          agent record's row ({!Workspace_agent_record}) or a purge. Keeper
+          registry rows change with [keeper_row_changed] instead. *)
 
 val event_type : string
 
@@ -43,3 +47,8 @@ val announce : base_path:string -> dataset -> unit
     suspension point still sees a cancellation. *)
 
 val install_store_observers : unit -> unit
+(** Make the stores that live in libraries below this one report their writes
+    to {!announce}. {!Repo_store} reports every catalog write attempt, under
+    the catalog file lock. {!Keeper_oauth_pending} reports each attempt
+    change, under its table lock, as {!Keeper_oauth_attempts}.
+    {!Workspace_agent_record} reports a changed roster row as {!Clients}. *)

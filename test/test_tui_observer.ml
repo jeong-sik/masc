@@ -148,6 +148,9 @@ let summary = function
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts -> "")
+         | Masc.Workspace_dataset_event.Harness_verdicts
+         | Masc.Workspace_dataset_event.Runtime_config
+         | Masc.Workspace_dataset_event.Clients -> "")
       ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
@@ -941,6 +944,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   ( Masc.Workspace_dataset_event.Repositories
                   | Masc.Workspace_dataset_event.Harness_verdicts )
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1006,6 +1010,7 @@ let test_a_repository_push_reads_the_list () =
                   ( Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Harness_verdicts )
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1022,6 +1027,7 @@ let test_a_repository_push_reads_the_list () =
               ( Masc.Workspace_dataset_event.Repositories
               | Masc.Workspace_dataset_event.Harness_verdicts )
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+              | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
           | None -> true)

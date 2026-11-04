@@ -5,12 +5,37 @@ type dataset =
   | Verification_requests
   | Harness_verdicts
   | Keeper_oauth_attempts of { keeper : string }
+  | Clients
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
   | Verification_requests -> "verification_requests"
   | Harness_verdicts -> "harness_verdicts"
   | Keeper_oauth_attempts _ -> "keeper_oauth_attempts"
+let repositories_name = "repositories"
+let verification_requests_name = "verification_requests"
+let harness_verdicts_name = "harness_verdicts"
+let runtime_config_name = "runtime_config"
+let keeper_oauth_attempts_name = "keeper_oauth_attempts"
+let clients_name = "clients"
+
+let dataset_name = function
+  | Repositories -> repositories_name
+  | Verification_requests -> verification_requests_name
+  | Harness_verdicts -> harness_verdicts_name
+  | Runtime_config -> runtime_config_name
+  | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
+  | Clients -> clients_name
+;;
+
+let keeper_field = function
+    [ "keeper", `String keeper ]
+;;
+
+let keeper_of_fields name fields =
+  match List.assoc_opt "keeper" fields with
+  | Some (`String keeper) when not (String.equal keeper "") -> Ok keeper
+  | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no keeper")
 ;;
 
 (* The wire decoder reads the whole field list: a dataset that names a Keeper
@@ -27,6 +52,11 @@ let of_fields fields =
      | Some (`String keeper) when not (String.equal keeper "") ->
          Ok (Keeper_oauth_attempts { keeper })
      | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no keeper"))
+  | Some (`String name) when String.equal name harness_verdicts_name -> Ok Harness_verdicts
+  | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
+  | Some (`String name) when String.equal name clients_name -> Ok Clients
+  | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
+    Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)
   | Some _ | None -> Error (event_type ^ " carries no dataset name")
 ;;
@@ -58,4 +88,9 @@ let announce ~base_path dataset =
 
 let install_store_observers () =
   Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories)
+  Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);
+  Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
+    announce ~base_path (Keeper_oauth_attempts { keeper }));
+  Workspace_agent_record.install_rows_changed_observer (fun config ->
+    announce ~base_path:config.Workspace_utils_backend_setup.base_path Clients)
 ;;

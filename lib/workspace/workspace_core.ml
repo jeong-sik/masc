@@ -145,7 +145,7 @@ let clear_agent_current_task_cache config ~task_id =
                    ; last_seen = Masc_domain.now_iso ()
                    }
                  in
-                 write_json config path (Masc_domain.agent_to_yojson updated);
+                 Workspace_agent_record.write config path ~previous:(Some agent) updated;
                  log_event
                    config
                    (`Assoc

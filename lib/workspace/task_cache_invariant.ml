@@ -174,7 +174,7 @@ let clear_stale_agent_task_if_matching
       | Ok (Some agent) when agent.current_task = Some task_id ->
         let updated = { agent with status = Masc_domain.Active; current_task = None } in
         (Atomic.get before_cache_write) path;
-        (match write_json_commit_result config path (agent_to_yojson updated) with
+        (match Workspace_agent_record.write_commit_result config path ~previous:(Some agent) updated with
          | Error detail -> Unreadable detail
          | Ok {mirror_error=Some detail} -> Unreadable detail
          | Ok {mirror_error=None} ->

@@ -10597,6 +10597,8 @@ type state = {
   mutable clients_surface: Tui_decode.clients_snapshot option;
   mutable clients_surface_error: string option;
   mutable clients_surface_inflight: bool;
+  (* What the Clients roster owes after a client row or Keeper row changed. *)
+  mutable clients_owed: Masc_tui_owed_read.t;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
   mutable client_detail: Tui_decode.client_row option;
@@ -20125,6 +20127,7 @@ let create_state
   clients_surface = None;
   clients_surface_error = None;
   clients_surface_inflight = false;
+  clients_owed = Masc_tui_owed_read.settled;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
   client_detail = None;

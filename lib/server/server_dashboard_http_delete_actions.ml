@@ -333,7 +333,12 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
                  ])
             |> List.sort_uniq String.compare
           in
-          (match remove_paths_strict filesystem_paths with
+          let removed = remove_paths_strict filesystem_paths in
+          (* The unbind and the removed records change the Clients roster,
+             whether or not every path went. *)
+          Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+            Workspace_dataset_event.Clients;
+          (match removed with
            | Error _ as error -> error
            | Ok () ->
              (match delete_credentials config aliases with

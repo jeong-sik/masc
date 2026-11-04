@@ -912,8 +912,12 @@ val edit_config_text :
     calling {!save_config_text}, which leaves that gap open. *)
 
 type config_edit =
-  | Config_text_unchanged of config_observation
-      (** The edit returned the text already stored. *)
+  | Config_text_unchanged of
+      { observation : config_observation
+      ; lock_warnings : config_lock_warning list
+      }
+      (** The edit returned the text already stored. The lock warnings are
+          the ones a commit's receipt would have carried. *)
   | Config_text_committed of config_commit_receipt
 
 val edit_config_text_if_changed :

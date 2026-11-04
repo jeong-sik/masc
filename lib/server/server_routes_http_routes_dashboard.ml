@@ -1119,7 +1119,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-     | Ok (Runtime.Config_text_unchanged observation) ->
+     | Ok (Runtime.Config_text_unchanged { observation; lock_warnings }) ->
        Http.Response.json_value ~request:req
          (`Assoc
             [ "ok", `Bool true
@@ -1127,6 +1127,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
             ; "change", Tui_preference.change_to_yojson change
             ; ( "source_revision"
               , `String (Runtime.config_source_revision_to_string observation.source_revision) )
+            ; "warnings", `List (List.map Runtime.config_lock_warning_to_yojson lock_warnings)
             ])
          reqd
      | Ok (Runtime.Config_text_committed receipt) ->

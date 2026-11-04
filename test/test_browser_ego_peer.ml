@@ -2159,6 +2159,16 @@ let test_history_moves_one_entry () =
   stops_in_ms := margin;
   ignore (on_tab Lane.Action.Back);
   check int "with no time left it waits a millisecond, never without a bound" 1 (load_timeout ());
+  stops_in_ms := margin + 200;
+  navigation := "return {};";
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {tab_id; receipt; _}) ->
+     check int "a move that never lands answers for its tab" 1 tab_id;
+     check string "before its run is stopped, with where the tab still is"
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://b.test/","title":"B"}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a move that never landed was %s" (failure_kind other));
+  navigation := "";
   stops_in_ms := 10_000;
   current := 0;
   check string "no earlier page" "tab 1 has no earlier page in its history"

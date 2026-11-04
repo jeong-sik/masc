@@ -1,11 +1,5 @@
-(** Says that a connector's state changed (RFC-0480 §3.4).
-
-    The event is [{"type":"gate_connector_changed","connector":<id>,"ts_unix":...}]
-    and goes to the observers of [base_path]'s runtime. A reader that shows
-    connectors ([GET /api/v1/gate/connectors], [GET /api/v1/gate/connector/names])
-    reads that connector again. *)
-
-val changed_event : string
+(** Sends {!Gate_connector_changed_event} to the observers of [base_path]'s
+    runtime when a connector's state changes (RFC-0480 §3.4). *)
 
 val install : sw:Eio.Switch.t -> base_path:string -> unit
 (** Installs the observer into [Gate_connector_announce] and the fiber that

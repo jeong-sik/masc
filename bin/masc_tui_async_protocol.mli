@@ -222,6 +222,24 @@ type observer_recovery_origin =
   | Observer_existing_workspace of Masc.Tui_decode.server_identity
   | Observer_initial_workspace of local_workspace_paths
 
+(* The Tools screen's reads, one constructor for all of them: [async_msg]
+   is at OCaml's limit of non-constant constructors. *)
+type tools_read =
+  | Tools_inventory_loaded of
+      { generation : int
+      ; keeper : string option
+      ; result : (Masc.Tui_decode_tools.tool_snapshot, string) result
+      }
+  | Tools_catalog_loaded of
+      { generation : int
+      ; result : (Masc.Tui_decode_tools.skills_catalog, string) result
+      }
+  | Tools_activations_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.skill_activation_projection, string) result
+      }
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -483,8 +501,7 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Tools_read_loaded of tools_read
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result

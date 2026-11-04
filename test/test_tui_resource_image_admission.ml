@@ -131,7 +131,7 @@ let test_skill_image_owner () =
     esp_body_bytes=0; esp_discovery_bytes=0; esp_load_reasons=[]; esp_node_count=0;
     esp_batch_count=0; esp_max_parallelism=0; esp_flow=None; esp_io=Model_orchestrated } in
   let inventory ?(left_out=[]) selected : Tools.tool_snapshot = {
-    ts_tools=[]; ts_count=0; ts_freshness=Settled; ts_skill_activations=None;
+    ts_tools=[]; ts_count=0; ts_freshness=Settled;
     ts_effective=Some (Effective_surface_available {
       ets_keeper_name="keeper-a"; ets_runtime_id="runtime"; ets_official_client_kind="client";
       ets_tool_delivery=Effective_tools_delivered; ets_native_posture=None;

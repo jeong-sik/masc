@@ -5750,7 +5750,18 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
-type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
+type tools_read_part =
+  | Tools_inventory_read
+  | Tools_catalog_read
+  | Tools_activations_read
+  | Tools_async_read
+
+(* What the Activations pane has for the Keeper the Tools screen follows.
+   With no Keeper there is nothing to read, which the pane says instead of
+   "not loaded". *)
+type tools_activations =
+  | Activations_no_keeper
+  | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
 
 type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
@@ -10593,6 +10604,8 @@ type state = {
   mutable tools_request_generation: int;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
+  mutable tools_activations: tools_activations option;
+  mutable tools_activations_error: string option;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -19937,6 +19950,8 @@ let create_state
   tools_request_generation = 0;
   tools_read_inflight = None;
   tools_error = None;
+  tools_activations = None;
+  tools_activations_error = None;
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;

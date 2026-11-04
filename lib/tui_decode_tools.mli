@@ -271,11 +271,20 @@ type tool_snapshot = {
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
   ts_effective : effective_tool_surface option;
-  ts_skill_activations : skill_activation_projection option;
 }
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 (** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
+
+val skill_activation_keeper : skill_activation_projection -> string
+(** The Keeper a projection is for. *)
+
+val decode_keeper_skill_activations :
+  keeper:string -> Yojson.Safe.t -> (skill_activation_projection, string) result
+(** Reads the [GET /api/v1/keepers/skill-activations?keeper=] answer for
+    [keeper]: schema [masc.keeper-skill-activations/v1], the Keeper it
+    answers for, and its projection. An answer for another Keeper is an
+    error. *)
 
 val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
 (** Reads the /api/v1/skills snapshot: per-skill usage rows and flows. *)

@@ -61,23 +61,22 @@ let tools_state () =
     Some { Masc.Tui_decode_tools.ts_tools = []
          ; ts_count = 0
          ; ts_freshness = Masc.Tui_decode_tools.Settled
-         ; ts_effective = None
-         ; ts_skill_activations =
-             Some
-               (Masc.Tui_decode_tools.Skill_activations_available
-                  { sap_keeper_name = "imp"
-                  ; sap_ledger = ledger_of_json revision_solved }) };
+         ; ts_effective = None };
+  state.tools_activations <-
+    Some
+      (Activations_read
+         (Masc.Tui_decode_tools.Skill_activations_available
+            { sap_keeper_name = "imp"
+            ; sap_ledger = ledger_of_json revision_solved }));
   state.tools_async_observation <- Some (async_of_json ());
   state
 
 let test_wire_name_preserved () =
   let state = tools_state () in
-  match state.tools_inventory with
+  match state.tools_activations with
   | Some
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some
-            (Masc.Tui_decode_tools.Skill_activations_available { sap_ledger; _ });
-        _ } ->
+      (Activations_read
+         (Masc.Tui_decode_tools.Skill_activations_available { sap_ledger; _ })) ->
     (match Masc.Keeper_skill_activation_ledger.activations sap_ledger with
      | activation :: _ ->
        (match activation.actions with
@@ -86,7 +85,7 @@ let test_wire_name_preserved () =
             wire_name action.tool_name
         | [] -> Alcotest.fail "expected one action")
      | [] -> Alcotest.fail "expected one activation")
-  | _ -> Alcotest.fail "inventory should hold the ledger"
+  | _ -> Alcotest.fail "the Activations pane should hold the ledger"
 
 let () =
   let open Alcotest in

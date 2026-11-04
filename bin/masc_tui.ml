@@ -19278,9 +19278,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_keeper_schedules_read state;
     owe_chat_journal_reads state;
     Masc_tui_types.owe_every_identity_login_read state;
-    (* Under the same condition the tick sends them: a server that is not
-       booting, whether or not its workspace is this checkout's. *)
-    launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);
+    if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state;
     (* An explicit binding-write reread also survives while its surface is
        hidden. Recovery is one authority transition, not a retry timer. A read
        already started (or unable to start) above must not be launched again. *)

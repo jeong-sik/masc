@@ -138,6 +138,19 @@ type turn_change =
   | Turn_state
   | Turn_preview
 
+(* A workspace store that announces a write with a payload-less server
+   push. A reader that shows the store reads it again. *)
+type workspace_store =
+  | Schedule_store
+  (* A schedule ledger write was attempted, a runner tick changed the list,
+     or its status passed the staleness deadline. *)
+  | Pending_confirms
+  | Verification_requests
+  (* The Goal store, the verification ledger, the measurement store or the
+     verifier's observations. *)
+  | Goal_projection
+  | Repository_catalog
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -178,18 +191,8 @@ type event =
   (* Server push: the named run registry changed, and a reader that shows
      that registry's runs re-fetches them. *)
   | Internal_agent_runs_changed of Masc.Internal_agent_runs_event.registry
-  | Schedule_store_invalidated
-  | Pending_confirm_invalidated
-  (* Server push with no payload: the workspace's verification request store
-     was written, and a reader that shows the requests re-fetches them. *)
-  | Verification_requests_changed
-  (* Server push with no payload: a Goal projection source (the Goal store,
-     the verification ledger, the measurement store or the verifier's
-     observations) changed, and a reader that shows Goals re-fetches them. *)
-  | Goal_projection_changed
-  (* Server push with no payload: the workspace's repository catalog was
-     written, and a reader that lists repositories re-fetches them. *)
-  | Repositories_changed
+  (* Server push with no payload: the named workspace store was written. *)
+  | Workspace_store_changed of workspace_store
   (* Server push: a connector's bindings, recorded names or drawn connection
      state changed. A reader that shows connectors re-fetches them. *)
   | Gate_connector_changed of { connector : string }
@@ -239,7 +242,7 @@ let chat_appended_keeper = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -250,7 +253,7 @@ let composite_changed_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -261,7 +264,7 @@ let metrics_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -272,7 +275,7 @@ let tool_call_keeper = function
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -285,7 +288,7 @@ let memory_journal_appended_keeper = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -301,7 +304,7 @@ let held_calls_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -316,7 +319,7 @@ let tool_modes_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -327,12 +330,12 @@ let async_requests_changed = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let repositories_changed = function
-  | Repositories_changed -> true
+  | Workspace_store_changed Repository_catalog -> true
   | Gate_connector_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
@@ -340,40 +343,40 @@ let repositories_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Keeper_event_queue_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Verification_requests | Goal_projection) | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let gate_connector_changed = function
   | Gate_connector_changed _ -> true
-  | Repositories_changed
+  | Workspace_store_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Keeper_event_queue_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let goal_projection_changed = function
-  | Goal_projection_changed -> true
+  | Workspace_store_changed Goal_projection -> true
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Verification_requests | Repository_catalog) | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let verification_requests_changed = function
-  | Verification_requests_changed
+  | Workspace_store_changed Verification_requests
   | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification -> true
   | Internal_agent_runs_changed
       (Masc.Internal_agent_runs_event.Goal_verification | Masc.Internal_agent_runs_event.Exact_lane)
@@ -383,8 +386,8 @@ let verification_requests_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
-  | Schedule_store_invalidated | Pending_confirm_invalidated | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
+  | Fusion_run_status _ | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Repository_catalog) | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
 let roster_change = function
@@ -395,7 +398,7 @@ let roster_change = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_turn_changed _ | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -407,7 +410,7 @@ let turn_change = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
   | Keeper_roster_change _ | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -419,19 +422,19 @@ let runtime_journal_appended = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _
   | Approval_change _ | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
 let schedules_changed = function
-  | Schedule_store_invalidated -> true
+  | Workspace_store_changed Schedule_store -> true
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Pending_confirms | Verification_requests | Goal_projection | Repository_catalog) | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -443,12 +446,12 @@ let event_queue_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
 let pending_confirms_changed = function
-  | Pending_confirm_invalidated -> true
+  | Workspace_store_changed Pending_confirms -> true
   | Approval_change
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
@@ -459,7 +462,7 @@ let pending_confirms_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Verification_requests | Goal_projection | Repository_catalog) | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -475,7 +478,7 @@ let asks_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -487,7 +490,7 @@ let board_changed_post = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Approval_change _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Approval_change _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       None
 
@@ -505,7 +508,7 @@ let gate_snapshot_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Goal_projection_changed | Repositories_changed | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -903,15 +906,15 @@ let reading_of_type type_name =
                | Some registry -> Ok (Internal_agent_runs_changed registry)
                | None -> Error (type_name ^ " names an unknown registry " ^ wire)))
   | type_name when String.equal type_name Masc.Schedule_invalidation_event.event_type ->
-      Named Schedule_store_invalidated
+      Named (Workspace_store_changed Schedule_store)
   | type_name when String.equal type_name Masc.Pending_confirm_invalidation_event.event_type ->
-      Named Pending_confirm_invalidated
+      Named (Workspace_store_changed Pending_confirms)
   | type_name when String.equal type_name Masc.Verification_request_broadcast.changed_event ->
-      Named Verification_requests_changed
+      Named (Workspace_store_changed Verification_requests)
   | type_name when String.equal type_name Masc.Goal_projection_broadcast.changed_event ->
-      Named Goal_projection_changed
+      Named (Workspace_store_changed Goal_projection)
   | type_name when String.equal type_name Masc.Repository_catalog_broadcast.changed_event ->
-      Named Repositories_changed
+      Named (Workspace_store_changed Repository_catalog)
   | type_name when String.equal type_name Masc.Gate_connector_changed_event.event_type ->
       From_fields
         (fun fields ->

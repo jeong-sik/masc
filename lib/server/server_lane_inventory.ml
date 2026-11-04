@@ -319,11 +319,11 @@ let with_workspace_cache base_path f =
 
 let merge_inventory ~(live : Addon.inventory) ~(retained : Addon.inventory) =
   let live_ids = List.map (fun (item : Addon.inventory_instance) -> item.instance_id) live.instances in
-  let retained = List.filter (fun (item : Addon.inventory_instance) ->
+  let retained_filtered = List.filter (fun (item : Addon.inventory_instance) ->
     item.presence = Addon.Retained && not (List.mem item.instance_id live_ids)) retained.instances in
   { Addon.owner_present = live.owner_present
   ; instances = List.sort (fun (left : Addon.inventory_instance) right ->
-      String.compare left.instance_id right.instance_id) (live.instances @ retained)
+      String.compare left.instance_id right.instance_id) (live.instances @ retained_filtered)
   ; issues = live.issues @ retained.issues
   ; complete = live.complete && retained.complete
   ; applications = [] }

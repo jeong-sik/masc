@@ -747,7 +747,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
   let machine =
-    match Machine_spectator.machine_of_request_target request.target with
+    match Server_machine_spectator.machine_of_request_target request.target with
     | Error _ as error -> error
     | Ok machine ->
         (match machine, sse_kind with
@@ -1036,7 +1036,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               let clock = runtime.clock in
               Option.iter (fun machine ->
                 Option.iter (fun (_, scope) ->
-                  Machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
+                  Server_machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
                     ~machine ~config:scope.config) observer_scope) machine;
               Option.iter (fun (_, scope) ->
                 Eio.Fiber.fork_daemon ~sw (fun () ->

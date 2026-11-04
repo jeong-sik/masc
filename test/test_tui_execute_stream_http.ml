@@ -1224,8 +1224,8 @@ let test_observer_names_controlled_machine env =
     stream_response ~receipts:[ receipt ] [ "data: {}\n\n" ] reqd
   in
   with_server env ~handler (fun ~port ->
-    let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
-        ~machine:Masc.Machine_lane.Msx
+    let result = Http.observe_runtime_events_with_machine ~clock:(Eio.Stdenv.clock env)
+        ~machine:(Some Masc.Machine_lane.Msx)
         ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path
         ~expected_masc_root:identity.sid_masc_root ~host:"127.0.0.1" ~port
         ~session_id:"observer-machine" ~cursor:None ~on_open:(fun _ -> ())

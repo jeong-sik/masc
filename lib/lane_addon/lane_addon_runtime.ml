@@ -261,6 +261,7 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   mutable swept : runtime list;
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
   sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t;
+  machine_announced : (Machine_lane.t, Yojson.Safe.t) Hashtbl.t;
   gecko_sweep : Browser_gecko_sweep.t;
   (* What the latest Gecko profile pass kept, as the next reading's issues. *)
   mutable gecko_kept : string list }
@@ -740,14 +741,28 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    is released, with no yield in between. So no reader sees the commit
    without its wake, no later write names an earlier sequence, and a state
    change made while the write was in flight is not overwritten. *)
+let machine_live_changed ~previous ~current =
+  match previous with
+  | None -> true
+  | Some previous -> not (Yojson.Safe.equal previous current)
+
+let announce_machine m e machine exported_tool =
+  if List.mem exported_tool e.package.exported_tools then
+    match List.filter_map (fun (row : Lane_addon_types.row) ->
+      List.assoc_opt "machine_live" row.fields) e.output.rows with
+    | [current] ->
+        let previous = Hashtbl.find_opt m.machine_announced machine in
+        if machine_live_changed ~previous ~current then begin
+          Hashtbl.replace m.machine_announced machine current;
+          Workspace_dataset_event.announce ~base_path:m.base_path
+            (Workspace_dataset_event.Machine_live { machine })
+        end
+    | [] | _ :: _ :: _ -> ()
+
 let notify_commit m e =
   notify_inventory m Observation_commit;
-  if List.mem "masc_msx_screen" e.package.exported_tools then
-    Workspace_dataset_event.announce ~base_path:m.base_path
-      (Workspace_dataset_event.Machine_live { machine = Machine_lane.Msx });
-  if List.mem "masc_dos_screen" e.package.exported_tools then
-    Workspace_dataset_event.announce ~base_path:m.base_path
-      (Workspace_dataset_event.Machine_live { machine = Machine_lane.Dos });
+  announce_machine m e Machine_lane.Msx "masc_msx_screen";
+  announce_machine m e Machine_lane.Dos "masc_dos_screen";
   Workspace_dataset_event.announce ~base_path:m.base_path
     (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
 
@@ -1974,6 +1989,7 @@ let manager config =
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
                      swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
+                     machine_announced = Hashtbl.create 2;
                      gecko_sweep = Browser_gecko_sweep.create
                        ~termination_grace_seconds:Browser_gecko_sweep.termination_grace_seconds;
                      gecko_kept = [] } in
@@ -4935,6 +4951,7 @@ let installation_questions ~config =
       loop [] ids))
 
 module For_testing = struct
+  let machine_live_changed = machine_live_changed
   let with_inventory_change_observer observer f =
     let previous = !inventory_change_observer in
     inventory_change_observer := observer;

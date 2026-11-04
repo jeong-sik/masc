@@ -511,6 +511,7 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val machine_live_changed : previous:Yojson.Safe.t option -> current:Yojson.Safe.t -> bool
   val with_inventory_change_observer :
     (base_path:string -> inventory_change -> unit) -> (unit -> 'a) -> 'a
   val browser_source_table :

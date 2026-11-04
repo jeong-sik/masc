@@ -81,7 +81,6 @@ let runtime_probe_path = "/api/v1/dashboard/runtime-probe"
 let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
 let msx_load_path = "/api/v1/msx/load"
-let msx_tick_path = "/api/v1/msx/tick"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -1115,43 +1114,6 @@ let inspect_msx_checkpoint ~expected_workspace ~operation_id ~host ~port ~restor
 
 ;;
 
-(* Advance the shared machine one poll-cadence step and read back the frame it
-   lands on (RFC-0439 §3.2, poll-cadence tick). The spectator poll calls this
-   instead of a plain frame read so a game flows even when no keeper is pressing.
-   The step size is the server's default -- the cadence policy lives there, not
-   here -- so the body carries no frame count. Transport/shape errors remain
-   distinct from [Advanced (None, None)] (no machine) and [Not_started]
-   (known activity refusal); a lost mutation response must not
-   silently trigger another automatic tick. The operator bearer is captured once.
-   Only validated pixels are retained; every tick supplies fresh metadata. *)
-let msx_tick_cache = Masc_tui_msx_tick.create ()
-
-let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
-    ~(host : string) ~(port : int) :
-    (Masc_tui_msx_tick.response, string) result =
-  let headers = auth_headers () in
-  (* The tick names the workspace the terminal confirmed, so a server swapped
-     onto the same port after the check refuses it before stepping. *)
-  let body_fields = [ expected_workspace_field expected_workspace ] in
-  let request ~body =
-    match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers
-        ~host ~port ~path:msx_tick_path ~body with
-    | Error _ as error -> error
-    | Ok (status_code, body) ->
-        (* Only the tick decoder may interpret a typed refusal: 409 for the
-           activity and workspace gates, 503 for a worker that is unavailable
-           or whose result was lost. *)
-        let typed_refusal = status_code = 409 || status_code = 503 in
-        Result.map (fun json -> status_code,json)
-          (decode_msx_json ~allow_empty:false ~status_code:(if typed_refusal then 200 else status_code) ~body)
-  in
-  Masc_tui_msx_tick.fetch ~body_fields msx_tick_cache ~host ~port ~headers ~request
-;;
-
-let fetch_msx_activity ~host ~port =
-  Result.bind (get_msx_json ~host ~port ~path:"/api/v1/msx/activity") Masc_tui_msx_tick.decode_activity
-
-
 let keeper_chat_body ?expected_workspace ~admission_intent ~since_seq request =
   let payload = Masc_tui_keeper_chat_projection.request_to_yojson
       ~admission_intent ~since_seq request in
@@ -1781,7 +1743,7 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events ?machine ~on_identity ~clock ~expected_base_path ~expected_masc_root
+let observe_runtime_events_with_machine ~machine ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
@@ -1830,6 +1792,13 @@ let observe_runtime_events ?machine ~on_identity ~clock ~expected_base_path ~exp
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
+let observe_runtime_events ~on_identity ~clock ~expected_base_path ~expected_masc_root
+    ~(host : string) ~(port : int)
+    ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
+    ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
+  observe_runtime_events_with_machine ~machine:None ~on_identity ~clock
+    ~expected_base_path ~expected_masc_root ~host ~port ~session_id ~cursor ~on_open ~on_chunk
 
 (* A stream's server writes a keepalive comment at a fixed interval when it has
    nothing to say. The idle watcher compares the last chunk only at the end of

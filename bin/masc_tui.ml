@@ -3338,85 +3338,6 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
         ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
 
-let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
-  if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
-  match state.msx_live, state.msx_live_in_flight with
-  | _, Some pending
-    when pending.live_view == !msx_poll_view && pending.live_port = state.port -> ()
-  (* F5 can replace the view while its first observation is still pending.
-     Obtain a frame for the new owner without waiting for the old read before
-     enabling its clock; Unread must not become a permanent idle state. *)
-  | (Masc_tui_machine_live.Unread | Failed _), (Some _ | None) -> launch_msx_live_read state ~mailbox
-  | (Not_loaded | Showing _), (Some _ | None) ->
-  match !msx_pending_poll with
-  | Poll_observing (request,refusal) when request.poll_view != !msx_poll_view
-      || request.poll_port <> state.port || request.poll_authority <> state.workspace_authority ->
-      msx_pending_poll := Poll_ready (Observing refusal);
-      launch_msx_poll state ~mailbox
-  | Poll_pending _ | Poll_observing _ | Poll_ready Outcome_unknown -> ()
-  | Poll_ready (Observing Workspace_changed) ->
-      (* The typed refusal already proved this endpoint is another workspace.
-         Do not read its screen while a health refresh is still in flight. *)
-      state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice Workspace_changed)
-  | Poll_ready (Observing ((Masc_tui_msx_tick.Off | Masc_tui_msx_tick.Activity_unobserved) as refusal)) ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
-      let since = Masc_tui_machine_live.since state.msx_live in
-      msx_pending_poll := Poll_observing (request,refusal);
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Msx_activity_loaded (request,result))
-        (fun () ->
-          Result.map (fun activity -> activity,
-            Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
-            (Masc_tui_http.fetch_msx_activity ~host:server_peer_host ~port:request.poll_port))
-  | Poll_ready Advancing when not (machine_changes_allowed state) ->
-      state.machine_interaction <- Observe_machine;
-      state.msx_notice <- Some machine_change_refusal;
-      launch_msx_live_read state ~mailbox
-  | Poll_ready Advancing ->
-      let request = { poll_view = !msx_poll_view; poll_port = state.port; poll_authority = state.workspace_authority; poll_reading = state.workspace_read_authority } in
-      msx_pending_poll := Poll_pending request;
-      let check = capture_workspace_check state ~mailbox in
-      let identity = state.server_identity in
-      let run () =
-        let admission =
-          try match identity, check () with
-          | _, Error detail -> Error detail
-          | None, Ok () -> Error "Workspace identity unavailable; MSX tick withdrawn"
-          | Some expected, Ok () ->
-            if request.poll_authority <> state.workspace_authority
-               || request.poll_view != !msx_poll_view || request.poll_port <> state.port
-               || not (machine_changes_allowed state)
-               || not state.msx_open || state.msx_menu_open
-               || state.machine_source <> Masc.Machine_lane.Msx
-               || state.machine_interaction <> Control_machine
-            then Error "MSX control view or workspace authority withdrawn"
-            else Ok expected
-
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        match admission with
-        | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
-        | Ok expected_workspace ->
-          let frame =
-            try Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn)
-          in
-          enqueue_async mailbox (Msx_frame_loaded (request, frame))
-      in
-      (try
-         match Eio_context.get_switch_opt () with
-         | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-         | None -> enqueue_async mailbox (Msx_tick_withdrawn (request, "Eio switch is unavailable"))
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> enqueue_async mailbox
-           (Msx_tick_withdrawn (request, Printexc.to_string exn)))
-
-;;
-
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
   if server_authority_ready state then begin
   let current_view = !msx_poll_view in
@@ -18746,7 +18667,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events ?machine ~clock
+                Masc_tui_http.observe_runtime_events_with_machine ~machine ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
                   ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
                   ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)

@@ -397,27 +397,13 @@ module File = Authz_jsonl_file.Make (Store_format)
 type t = File.t
 type writer = File.writer
 
-type stop = Authz_jsonl_file.stop =
-  { path : string
-  ; reason : string
-  }
+type stop = Authz_jsonl_file.stop
 
-type contents = Authz_jsonl_file.contents =
-  | Missing
-  | Empty
-  | Lines of int
+type contents = Authz_jsonl_file.contents
 
-type tail = Authz_jsonl_file.tail =
-  | Complete
-  | Cut of
-      { kept_bytes : int
-      ; discarded_bytes : int
-      }
+type tail = Authz_jsonl_file.tail
 
-type recovered = Authz_jsonl_file.recovered =
-  { contents : contents
-  ; tail : tail
-  }
+type recovered = Authz_jsonl_file.recovered
 
 type 'reason open_error = 'reason File.open_error =
   | Locked of { path : string }

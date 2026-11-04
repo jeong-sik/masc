@@ -1,22 +1,10 @@
-type request_header = {
-  id : string;
-  task_id : string;
-  worker : string;
-  created_at : float;
-}
+type request_header = Workspace_verification_snapshot.request_header
 
-type evidence_read_failure =
-  | Evidence_missing
-  | Evidence_not_regular_file
-  | Evidence_outside_worker_playground
-  | Evidence_invalid_utf8
-  | Evidence_symbolic_link
-  | Evidence_changed_during_read
-  | Evidence_read_error of string
+type evidence_read_failure = Workspace_verification_snapshot.evidence_read_failure
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 
-type submitted_evidence_item =
+type submitted_evidence_item = Workspace_verification_snapshot.submitted_evidence_item =
   | Evidence_collaboration of { reference : string; content : string; sha256 : string }
   | Evidence_note of string
   | Evidence_artifact of
@@ -38,23 +26,9 @@ type submitted_evidence_item =
       ; body : string option
       }
 
-type evidence_access_failure =
-  | Completion_authority_identity_missing
-  | Request_not_found
-  | Request_header_invalid of string
-  | Evidence_snapshot_invalid of string
-  | Request_load_error of string
-  | Request_scope_mismatch
+type evidence_access_failure = Workspace_verification_snapshot.evidence_access_failure
 
-type submitted_evidence_access =
-  | Evidence_available of
-      { request : request_header
-      ; items : submitted_evidence_item list
-      }
-  | Evidence_unavailable of
-      { request_id : string
-      ; reason : evidence_access_failure
-      }
+type submitted_evidence_access = Workspace_verification_snapshot.submitted_evidence_access
 
 val request_header_of_yojson :
   Yojson.Safe.t -> (request_header, string) result

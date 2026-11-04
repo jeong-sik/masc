@@ -38,12 +38,7 @@ open Masc_board_handlers
 
 (** {1 Sort order} *)
 
-type sort_order = Board_dispatch.sort_order =
-  | Hot
-  | Trending
-  | Recent
-  | Updated
-  | Discussed
+type sort_order = Board_dispatch.sort_order
 (** Type re-export from {!Board_dispatch.sort_order}.
     Identity preserved so [Board_tool.sort_order] and
     [Board_dispatch.sort_order] are interchangeable. *)

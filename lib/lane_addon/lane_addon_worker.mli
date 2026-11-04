@@ -19,7 +19,7 @@ type error =
   | Invalid_observation of string
   | Stopped
 
-type mount = { source : string; destination : string }
+type mount = Lane_addon_engine.mount
 
 (** [on_created] runs as soon as the exact created-container ID is known,
     before waiting for inspect or protocol initialization. Store the handle to

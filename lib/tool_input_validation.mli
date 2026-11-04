@@ -18,20 +18,20 @@
     Must be called after all tool schemas are registered (server init). *)
 val register_pre_hook : unit -> unit
 
-type numeric_keyword =
+type numeric_keyword = Tool_input_contract.numeric_keyword =
   | Minimum
   | Maximum
   | Exclusive_minimum
   | Exclusive_maximum
 
-type count_keyword =
+type count_keyword = Tool_input_contract.count_keyword =
   | Min_length
   | Max_length
   | Min_items
   | Max_items
 
 (** A declared range or length bound. *)
-type bound_keyword =
+type bound_keyword = Tool_input_contract.bound_keyword =
   | Numeric_bound of numeric_keyword
   | Count_bound of count_keyword
 
@@ -40,7 +40,7 @@ type bound_keyword =
 
     [Field_errors] paths are JSON Pointers ([/query]); range paths are dotted
     property paths ([query], [items[0]]). *)
-type violation =
+type violation = Tool_input_contract.violation =
   | Schema_not_registered
   | Schema_declares_required_without_properties
   | Schema_unusable of { detail : string }
@@ -97,12 +97,7 @@ val validate_args :
   unit ->
   (Yojson.Safe.t, Tool_result.result) result
 
-type schema_shape =
-  { properties : string list
-  ; required : string list
-  ; one_of_required : string list list
-  ; errors : string list
-  }
+type schema_shape = Tool_input_contract.schema_shape
 
 val schema_shape : Yojson.Safe.t -> schema_shape
 (** Validated JSON-schema shape projection used by dispatch diagnostics and

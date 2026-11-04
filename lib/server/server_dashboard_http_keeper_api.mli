@@ -162,13 +162,7 @@ val offline_keeper_composite_json :
 
 (** {1 Keeper state diagram runtime projection} *)
 
-type state_diagram_runtime_projection =
-  { runtime_models : string list
-  ; last_provider_result : string option
-  ; runtime_models_source : string
-  ; last_provider_result_source : string
-  ; effective_runtime_reason : string option
-  }
+type state_diagram_runtime_projection = Server_dashboard_keeper_state_projection.state_diagram_runtime_projection
 
 val state_diagram_runtime_projection :
   Keeper_meta_contract.keeper_meta option -> state_diagram_runtime_projection

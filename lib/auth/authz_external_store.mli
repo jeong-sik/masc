@@ -174,32 +174,18 @@ type t
     {!Authz_jsonl_file.Make.with_writer}. *)
 type writer
 
-type stop = Authz_jsonl_file.stop =
-  { path : string
-  ; reason : string
-  }
+type stop = Authz_jsonl_file.stop
 
 (** [Some] once the store is stopped, for the caller that reports health. *)
 val stopped : t -> stop option
 
 (** These are the types of {!Authz_jsonl_file}, with their constructors listed
     so that a caller matches on them here. *)
-type contents = Authz_jsonl_file.contents =
-  | Missing
-  | Empty
-  | Lines of int
+type contents = Authz_jsonl_file.contents
 
-type tail = Authz_jsonl_file.tail =
-  | Complete
-  | Cut of
-      { kept_bytes : int
-      ; discarded_bytes : int
-      }
+type tail = Authz_jsonl_file.tail
 
-type recovered = Authz_jsonl_file.recovered =
-  { contents : contents
-  ; tail : tail
-  }
+type recovered = Authz_jsonl_file.recovered
 
 (** Why the file did not open. [Line_rejected] carries a {!line_error}. The other
     constructors are those of {!Authz_jsonl_file.Make}. *)

@@ -2,12 +2,7 @@
 
 open Masc_board_handlers
 
-type sort_order = Board_dispatch.sort_order =
-  | Hot
-  | Trending
-  | Recent
-  | Updated
-  | Discussed
+type sort_order = Board_dispatch.sort_order
 
 val format_timestamp_absolute : float -> string
 (** ISO8601 UTC rendering of the given instant. A function of its argument

@@ -1,7 +1,6 @@
 (** Original Curator admission, worker-result and domain-commit boundaries.
     The existing serialized workspace owner retains the process lease. *)
-type error = Lane_addon_submit_once.error =
-  | Unavailable of string | Rejected of string | Uncertain of string
+type error = Lane_addon_submit_once.error
 val error_to_string : error -> string
 val destination : config:Workspace.config -> (Lane_addon_runtime.tool_request_destination, error) result
 (** The live Add-on that provides [curate], read through the same fresh
@@ -21,8 +20,7 @@ val capture_briefing : config:Workspace.config -> prompt:Prompt_registry.prompt_
     prepared state to be saved and freshly confirmed first, by the serialized
     owner. An error may follow publication: discover original work before
     preparing another request. No model or domain save runs here. *)
-type wait = Lane_addon_submit_once.wait = Capacity | Worker_pending | Worker_unknown
-  | Worker_unreachable | Missing_after_dispatch | Journal_recheck
+type wait = Lane_addon_submit_once.wait
 type result =
   | Awaiting of wait * Lane_addon_tool_request_owner.retained
   | Judgment of { capture:Workspace_memory_execution_capture.t;

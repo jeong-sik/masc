@@ -36,10 +36,7 @@ type t
 type writer
 
 (** Why a log is stopped. *)
-type stop = Authz_jsonl_file.stop =
-  { path : string
-  ; reason : string
-  }
+type stop = Authz_jsonl_file.stop
 
 (** [Some] once the log is stopped, for the caller that reports health. *)
 val stopped : t -> stop option
@@ -50,25 +47,14 @@ val path_of_base_path : base_path:string -> string
 (** What the file was when it was opened. This is the type of
     {!Authz_jsonl_file}, with its constructors listed so that a caller matches
     on them here. *)
-type contents = Authz_jsonl_file.contents =
-  | Missing
-  | Empty
-  | Lines of int
+type contents = Authz_jsonl_file.contents
 
 (** How the file ended when it was opened. Same re-export as {!contents}. *)
-type tail = Authz_jsonl_file.tail =
-  | Complete
-  | Cut of
-      { kept_bytes : int
-      ; discarded_bytes : int
-      }
+type tail = Authz_jsonl_file.tail
 
 (** What opening found: the {!contents} after the cut, if there was one, and the
     {!tail}. Same re-export as {!contents}. *)
-type recovered = Authz_jsonl_file.recovered =
-  { contents : contents
-  ; tail : tail
-  }
+type recovered = Authz_jsonl_file.recovered
 
 (** Why the file did not open. [Line_rejected] means that {!Authz_record.of_line}
     refuses the line as the next line of the chain. The other constructors are

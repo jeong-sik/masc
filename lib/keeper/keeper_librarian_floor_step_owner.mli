@@ -3,12 +3,9 @@
     and ends at its answer: the answer stays the judgment of a [Judged] record,
     because the Memory commit belongs to the whole chain, not to one step.
     Caller holds the workspace process lease and serializes this Keeper owner. *)
-type error = Lane_addon_submit_once.error =
-  | Unavailable of string | Rejected of string | Uncertain of string
+type error = Lane_addon_submit_once.error
 val error_to_string : error -> string
-type wait = Lane_addon_submit_once.wait =
-  | Capacity | Worker_pending | Worker_unknown | Worker_unreachable
-  | Missing_after_dispatch | Journal_recheck
+type wait = Lane_addon_submit_once.wait
 type call = expected:Keeper_librarian_durable_request.destination ->
   original:Lane_addon_tool_request_owner.retained -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result

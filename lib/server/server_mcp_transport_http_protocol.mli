@@ -28,10 +28,7 @@ end
 module Http = Http_server_eio
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
-type auth_failure = Server_mcp_transport_http_types.auth_failure =
-  { message : string
-  ; auth_error_code : string option
-  }
+type auth_failure = Server_mcp_transport_http_types.auth_failure
 
 val auth_failure_data : auth_failure -> Yojson.Safe.t option
 (** JSON-RPC error data for a typed authentication failure. *)

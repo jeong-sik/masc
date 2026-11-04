@@ -31,10 +31,7 @@ val tool_allowed_in_profile :
   Mcp_server.server_state -> tool_profile -> string -> bool
 (** Apply the dispatcher's current profile policy to a transport profile. *)
 
-type auth_failure = Server_mcp_transport_http_types.auth_failure =
-  { message : string
-  ; auth_error_code : string option
-  }
+type auth_failure = Server_mcp_transport_http_types.auth_failure
 
 type deps = {
   get_origin : Httpun.Request.t -> string;

@@ -5,11 +5,10 @@ module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
 open Result.Syntax
 
-type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
+type error = Submit.error
 let error_to_string = Submit.error_to_string
 
-type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
-  | Missing_after_dispatch | Journal_recheck
+type wait = Submit.wait
 type result =
   | Pending of wait * Owner.retained
   | Answered of Exact.final * Owner.retained

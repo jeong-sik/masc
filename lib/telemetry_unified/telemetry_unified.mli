@@ -36,11 +36,7 @@ val source_of_string : string -> source option
 val all_sources : source list
 val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 
-type read_result = {
-  entries : Yojson.Safe.t list;
-  total_matching_entries : int;
-  truncated : bool;
-}
+type read_result = Telemetry_unified_source_meta.read_result
 
 (** How many entries one read may return.
 

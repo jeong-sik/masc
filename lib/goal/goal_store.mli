@@ -36,20 +36,7 @@ val validate_goal_id : string -> (unit, goal_id_error) result
 
 (** {1 Goal record} *)
 
-type goal = {
-  id : string;
-  criterion_revision : string;
-  title : string;
-  metric : string option;
-  target_value : string option;
-  due_date : string option;
-  priority : int;
-  phase : Goal_phase.t;
-  last_review_note : string option;
-  last_review_at : string option;
-  created_at : string;
-  updated_at : string;
-}
+type goal = Goal_document.goal
 (** A workspace-shared goal. Creation and transition actors are event
     provenance. [priority] is clamped to [1..5] on every write. *)
 

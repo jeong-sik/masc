@@ -282,8 +282,6 @@ let unique_present_paths paths =
        | _ -> None)
   |> Json_util.dedupe_keep_order
 
-let string_contains_substring = String_util.contains_substring
-
 let runtime_trace_keeps_provider_provenance_key = function
   | "model_source"
   | "resolved_model_source"
@@ -297,8 +295,8 @@ let runtime_trace_redacts_provider_model_key key =
   let key = String.lowercase_ascii key in
   (not (runtime_trace_keeps_provider_provenance_key key))
   &&
-  (string_contains_substring key "provider"
-   || string_contains_substring key "model")
+  (String_util.string_contains_substring ~needle:"provider" key
+   || String_util.string_contains_substring ~needle:"model" key)
 
 let rec runtime_trace_public_json = function
   | `Assoc fields ->

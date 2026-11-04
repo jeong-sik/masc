@@ -683,6 +683,31 @@ let test_grep_rows_keep_the_first_matches_and_say_when_cut () =
   | Ok _ -> Alcotest.fail "a third row must mark the answer truncated"
   | Error e -> Alcotest.fail e
 
+let test_grep_rows_survive_a_newline_in_a_path () =
+  let output =
+    grep_rows [ grep_row "b\nc.txt" 4 "needle k"; grep_row "lib/a.ml" 1 "needle" ]
+  in
+  match Repo_git.grep_result_of_z_output ~max_matches:5 output with
+  | Ok { gr_matches = [ first; second ]; gr_truncated = false } ->
+      Alcotest.(check string) "a path keeps its newline" "b\nc.txt" first.gm_path;
+      Alcotest.(check int) "line" 4 first.gm_line;
+      Alcotest.(check string) "text" "needle k" first.gm_text;
+      Alcotest.(check string) "next row" "lib/a.ml" second.gm_path
+  | Ok _ -> Alcotest.fail "expected two untruncated matches"
+  | Error e -> Alcotest.fail e
+
+let test_a_file_at_the_per_file_cap_marks_the_answer_cut () =
+  let rows count path = List.init count (fun i -> grep_row path (i + 1) "needle") in
+  let truncated output =
+    match Repo_git.grep_result_of_z_output ~max_matches:100 output with
+    | Ok { gr_truncated; _ } -> gr_truncated
+    | Error e -> Alcotest.fail e
+  in
+  Alcotest.(check bool) "19 rows in one file" false (truncated (grep_rows (rows 19 "a.ml")));
+  Alcotest.(check bool) "20 rows in one file" true (truncated (grep_rows (rows 20 "a.ml")));
+  Alcotest.(check bool) "20 rows spread over two files" false
+    (truncated (grep_rows (rows 10 "a.ml" @ rows 10 "b.ml")))
+
 let test_grep_rows_refuse_what_they_cannot_read () =
   let reject label output =
     Alcotest.(check bool) label true
@@ -921,6 +946,10 @@ let () =
 	        [
 	          Alcotest.test_case "keeps the first matches and says when cut" `Quick
 	            test_grep_rows_keep_the_first_matches_and_say_when_cut;
+	          Alcotest.test_case "survives a newline in a path" `Quick
+	            test_grep_rows_survive_a_newline_in_a_path;
+	          Alcotest.test_case "a file at the per-file cap marks the answer cut" `Quick
+	            test_a_file_at_the_per_file_cap_marks_the_answer_cut;
 	          Alcotest.test_case "refuses what it cannot read" `Quick
 	            test_grep_rows_refuse_what_they_cannot_read;
 	          Alcotest.test_case "reads a real checkout" `Quick

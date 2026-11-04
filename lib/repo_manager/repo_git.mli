@@ -284,13 +284,15 @@ type grep_match = {
 
 type grep_result = {
   gr_matches : grep_match list;
-  gr_truncated : bool;  (** More matches existed than [max_matches]. *)
+  gr_truncated : bool;
+      (** More matches may exist: rows passed [max_matches], or a file reached
+          the per-file cap of 20 rows, where git stops reading it. *)
 }
 
 val grep_result_of_z_output :
   max_matches:int -> string -> (grep_result, string) result
-(** Pure reader for [git grep -n -z] output ([path NUL line NUL text] per
-    line). Keeps the first [max_matches] rows. A malformed row, including the
+(** Pure reader for [git grep -n -z] output ([path NUL line NUL text LF] per
+    row; a path may contain a newline). Keeps the first [max_matches] rows. A malformed row, including the
     truncation marker the process capture inserts into oversized output, is an
     [Error _]; it is never skipped. *)
 

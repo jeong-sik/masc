@@ -919,52 +919,69 @@ type grep_result = {
   gr_truncated : bool;
 }
 
-(* One row of [git grep -n -z]: [path NUL line NUL text]. The text is a single
-   source line, so it holds no newline; it may hold any other byte. *)
-let grep_match_of_row row =
-  match String.index_opt row '\000' with
-  | None -> Stdlib.Error (Printf.sprintf "git grep row has no path separator: %S" row)
+(* Per file, so one generated file cannot fill the answer by itself. *)
+let grep_max_matches_per_file = 20
+
+(* One row of [git grep -n -z] starting at [pos]: [path NUL line NUL text LF].
+   Git prints the path verbatim under [-z], so a path may hold a newline; only
+   the text is a single source line. The row is therefore framed by its two NULs
+   and ends at the first newline after the second one. Returns the row and the
+   offset of the next one. *)
+let grep_row_at output pos =
+  let length = String.length output in
+  let describe () = String.escaped (String.sub output pos (min 80 (length - pos))) in
+  match String.index_from_opt output pos '\000' with
+  | None ->
+      Stdlib.Error (Printf.sprintf "git grep row has no path separator: %s" (describe ()))
   | Some first ->
-      let rest_start = first + 1 in
-      (match String.index_from_opt row rest_start '\000' with
+      (match String.index_from_opt output (first + 1) '\000' with
        | None ->
-           Stdlib.Error (Printf.sprintf "git grep row has no line separator: %S" row)
+           Stdlib.Error
+             (Printf.sprintf "git grep row has no line separator: %s" (describe ()))
        | Some second ->
-           let path = String.sub row 0 first in
-           let line_field = String.sub row rest_start (second - rest_start) in
-           let text = String.sub row (second + 1) (String.length row - second - 1) in
+           let path = String.sub output pos (first - pos) in
+           let line_field = String.sub output (first + 1) (second - first - 1) in
+           let text_end =
+             match String.index_from_opt output (second + 1) '\n' with
+             | Some newline -> newline
+             | None -> length
+           in
+           let text = String.sub output (second + 1) (text_end - second - 1) in
            (match int_of_string_opt line_field with
             | Some line when line > 0 && String.length path > 0 ->
-                Stdlib.Ok { gm_path = path; gm_line = line; gm_text = text }
+                Stdlib.Ok
+                  ({ gm_path = path; gm_line = line; gm_text = text }, min length (text_end + 1))
             | Some _ | None ->
                 Stdlib.Error
                   (Printf.sprintf "git grep row has a bad line number: %S" line_field)))
 
 (* Reads rows until [max_matches] are held. A row after that proves the answer
-   was cut, which is all [gr_truncated] says. A malformed row is an error, never a
-   skipped one: the captured output can carry a truncation marker when it
-   exceeds the process capture, and a silent skip would present a partial list
-   as the whole answer. *)
+   was cut. So does a file that reached the per-file cap, since git stops
+   reading it there. A malformed row is an error, never a skipped one: the
+   captured output can carry a truncation marker when it exceeds the process
+   capture, and a silent skip would present a partial list as the whole
+   answer. *)
 let grep_result_of_z_output ~max_matches output =
-  let rows =
-    match List.rev (String.split_on_char '\n' output) with
-    | "" :: rest -> List.rev rest
-    | _ -> String.split_on_char '\n' output
-  in
-  let rec take acc count = function
-    | [] -> Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = false }
-    | _ :: _ when count >= max_matches ->
-        Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = true }
-    | row :: rest ->
-        (match grep_match_of_row row with
-         | Stdlib.Error msg -> Stdlib.Error msg
-         | Stdlib.Ok found -> take (found :: acc) (count + 1) rest)
+  let length = String.length output in
+  let per_path = Hashtbl.create 16 in
+  let rec take acc count capped pos =
+    if pos >= length then Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = capped }
+    else if count >= max_matches then
+      Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = true }
+    else
+      match grep_row_at output pos with
+      | Stdlib.Error msg -> Stdlib.Error msg
+      | Stdlib.Ok (found, next) ->
+          let seen =
+            1 + Option.value ~default:0 (Hashtbl.find_opt per_path found.gm_path)
+          in
+          Hashtbl.replace per_path found.gm_path seen;
+          take (found :: acc) (count + 1)
+            (capped || seen >= grep_max_matches_per_file)
+            next
   in
   if max_matches < 1 then Stdlib.Error "git grep needs max_matches of at least 1"
-  else take [] 0 rows
-
-(* Per file, so one generated file cannot fill the answer by itself. *)
-let grep_max_matches_per_file = 20
+  else take [] 0 false 0
 
 let grep_at
     ?(timeout_sec = inspection_timeout_sec)

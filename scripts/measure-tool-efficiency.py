@@ -21,7 +21,15 @@ over time. `--json-out` keeps the full result for a before/after comparison:
 run it on a window before a change and a window after, then diff the two files.
 
 The identical re-read window is a measurement parameter, not a runtime limit.
-Nothing in the product reads it.
+Nothing in the product reads it. Days are read in parallel and each day starts
+with no earlier calls, so a repeat across 00:00 UTC is not counted. On the
+ledger of 2026-11-01 .. 2026-11-04, read at 2026-11-04T19:05Z, that was 26
+calls, 0.08% of the re-read calls.
+
+A line that is not a JSON object, holds NaN or Infinity, or is not valid UTF-8
+is skipped and counted under `skipped`. A tool call whose `ts` is missing or
+cannot name a UTC hour is counted in the totals and left out of the hourly and
+daily series.
 
 Usage:
     scripts/measure-tool-efficiency.py --base-path /srv/masc --from-date 2026-11-01 --to-date 2026-11-05
@@ -32,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -46,20 +55,24 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
 from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
+from tool_call_log_paths import tool_call_log_paths  # noqa: E402
 
 ARTIFACT_READ_TOOL = "keeper_artifact_read"
 EXECUTE_TOOL = "Execute"
 TOOL_CALL_RECORD_KIND = "tool_call"
 BLOB_KEY = "_blob"
 SECONDS_PER_HOUR = 3600
+# The latest instant datetime can name; a row stamped past it has no usable hour.
+MAX_TIMESTAMP = datetime(9999, 12, 31, 23, 59, 59, tzinfo=timezone.utc).timestamp()
 DEFAULT_REREAD_WINDOW_SEC = SECONDS_PER_HOUR
 DEFAULT_TOP = 12
 
 # A command that sleeps for a number of seconds, polls in a loop, or watches.
-# The match only labels a call in this report.
+# The match only labels a call in this report. `until` counts as the shell loop
+# `until cmd; do`: the bare word also appears in `gh api ...?until=` and in prose.
 WAIT_COMMAND = re.compile(
     r"\bsleep\s+[0-9]"
-    r"|\buntil\b"
+    r"|\buntil\b[^;\n]*;\s*do\b"
     r"|\bwhile\s+(?:true|:|\[)"
     r"|\bgh\s+run\s+watch\b"
     r"|--watch\b"
@@ -78,9 +91,25 @@ def as_text(value: object) -> str | None:
 
 
 def as_number(value: object) -> float | None:
-    if isinstance(value, bool):
+    """A finite JSON number, or None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value) if isinstance(value, (int, float)) else None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def as_timestamp(value: object) -> float | None:
+    """Epoch seconds that datetime can turn into a UTC hour, or None."""
+    number = as_number(value)
+    return number if number is not None and 0 <= number <= MAX_TIMESTAMP else None
+
+
+def reject_constant(token: str) -> object:
+    """NaN, Infinity and -Infinity are not JSON; the line that holds one is unreadable."""
+    raise ValueError(f"{token} is not a JSON number")
 
 
 def is_blob_reference(output: object) -> bool:
@@ -108,9 +137,17 @@ def command_text(value: object) -> str | None:
 
 
 def percentile(sorted_values: list[float], fraction: float) -> float | None:
+    """The sample at rank round((n - 1) * fraction), halves rounded up.
+
+    Tool_metrics.percentile and Tool_metrics_series use the same rule, so this
+    report and the dashboard name the same call.
+    """
     if not sorted_values:
         return None
-    return sorted_values[min(len(sorted_values) - 1, int(len(sorted_values) * fraction))]
+    position = (len(sorted_values) - 1) * fraction
+    whole = int(position)
+    rank = whole + 1 if position - whole >= 0.5 else whole
+    return sorted_values[max(0, min(len(sorted_values) - 1, rank))]
 
 
 @dataclass(slots=True)
@@ -167,6 +204,8 @@ class Burst:
 @dataclass(slots=True)
 class DayTotals:
     rows: int = 0
+    unreadable_lines: int = 0
+    rows_without_timestamp: int = 0
     tools: dict[str, ToolTotals] = field(default_factory=lambda: cast(dict[str, ToolTotals], {}))
     hourly: dict[str, Bucket] = field(default_factory=lambda: cast(dict[str, Bucket], {}))
     outcomes: Counter[str] = field(default_factory=lambda: cast(Counter[str], Counter()))
@@ -187,18 +226,8 @@ class DayTotals:
 
 def ledger_files(base: pathlib.Path, day: date) -> list[pathlib.Path]:
     """The day's rotated segments in order, then its live tail."""
-    directory = base / ".masc" / "tool_calls" / f"{day.year:04d}-{day.month:02d}"
-    stem = f"{day.day:02d}"
-    segments: list[tuple[int, pathlib.Path]] = []
-    for candidate in directory.glob(f"{stem}.*.jsonl"):
-        match = re.fullmatch(rf"{stem}\.([0-9]+)\.jsonl", candidate.name)
-        if match is not None and candidate.is_file() and not candidate.is_symlink():
-            segments.append((int(match[1]), candidate))
-    paths = [path for _, path in sorted(segments)]
-    live = directory / f"{stem}.jsonl"
-    if live.is_file() and not live.is_symlink():
-        paths.append(live)
-    return paths
+    live = base / ".masc" / "tool_calls" / f"{day.year:04d}-{day.month:02d}" / f"{day.day:02d}.jsonl"
+    return tool_call_log_paths(base, live)
 
 
 def measure_day(base: pathlib.Path, day: date, reread_window_sec: float) -> DayTotals:
@@ -207,12 +236,18 @@ def measure_day(base: pathlib.Path, day: date, reread_window_sec: float) -> DayT
     for path in ledger_files(base, day):
         with path.open("rb") as handle:
             for line in handle:
+                if not line.strip():
+                    continue
                 try:
-                    parsed: object = json.loads(line)
-                except json.JSONDecodeError:
+                    parsed: object = json.loads(line, parse_constant=reject_constant)
+                except ValueError:  # JSONDecodeError, UnicodeDecodeError and reject_constant
+                    totals.unreadable_lines += 1
                     continue
                 row = as_object(parsed)
-                if row is None or row.get("record_kind") != TOOL_CALL_RECORD_KIND:
+                if row is None:
+                    totals.unreadable_lines += 1
+                    continue
+                if row.get("record_kind") != TOOL_CALL_RECORD_KIND:
                     continue
                 observe_row(totals, row, last_seen, reread_window_sec)
     return totals
@@ -228,7 +263,7 @@ def observe_row(
     keeper = as_text(row.get("keeper")) or "?"
     profile = as_text(row.get("runtime_profile")) or "unrecorded"
     turn = f"{as_text(row.get('trace_id')) or '?'}#{row.get('keeper_turn_id')}"
-    ts = as_number(row.get("ts"))
+    ts = as_timestamp(row.get("ts"))
     duration = as_number(row.get("duration_ms")) or 0.0
     size = int(as_number(row.get("result_bytes")) or 0)
     outcome = recorded_call_outcome(row)
@@ -250,7 +285,9 @@ def observe_row(
         stat.spilled_bytes += size
 
     bucket = None
-    if ts is not None:
+    if ts is None:
+        totals.rows_without_timestamp += 1
+    else:
         hour = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H")
         bucket = totals.hourly.setdefault(hour, Bucket())
         bucket.calls += 1
@@ -318,6 +355,8 @@ def merge(parts: list[DayTotals]) -> DayTotals:
     merged = DayTotals()
     for part in parts:
         merged.rows += part.rows
+        merged.unreadable_lines += part.unreadable_lines
+        merged.rows_without_timestamp += part.rows_without_timestamp
         merged.outcomes.update(part.outcomes)
         merged.reread_same_turn += part.reread_same_turn
         merged.reread_later_turn += part.reread_later_turn
@@ -412,6 +451,10 @@ def summarize(totals: DayTotals, top: int) -> JsonObject:
         into.wait_ms += bucket.wait_ms
     return {
         "rows": totals.rows,
+        "skipped": {
+            "unreadable_lines": totals.unreadable_lines,
+            "tool_calls_without_timestamp": totals.rows_without_timestamp,
+        },
         "outcomes": dict(totals.outcomes),
         "tool_time_s": round(total_ms / 1000, 1),
         "result_bytes": total_bytes,
@@ -493,11 +536,15 @@ def render(summary: JsonObject, first: date, last: date, top: int) -> str:
     spilled = cast(JsonObject, summary["spilled_results"])
     waits = cast(JsonObject, summary["blocked_waits"])
     empty = cast(JsonObject, summary["empty_input_failures"])
+    skipped = cast(JsonObject, summary["skipped"])
     lines = [
         f"# Tool efficiency {first} .. {last} (UTC days)",
         "",
         f"- tool calls: {summary['rows']}, recorded tool time: {summary['tool_time_s']} s, "
         f"result bytes: {megabytes(summary['result_bytes'])} MB",
+        f"- skipped: {skipped['unreadable_lines']} unreadable lines, "
+        f"{skipped['tool_calls_without_timestamp']} tool calls without a usable timestamp "
+        "(counted in the totals, absent from the hourly and daily series)",
         f"- outcomes: {summary['outcomes']}",
         f"- identical re-reads: {rereads['calls']} calls ({rereads['calls_pct']}%), "
         f"{megabytes(rereads['bytes'])} MB ({rereads['bytes_pct']}% of result bytes); "

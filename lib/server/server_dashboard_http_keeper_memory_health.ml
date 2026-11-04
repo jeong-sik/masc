@@ -228,7 +228,7 @@ let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
     Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id
   in
   let last_failure_kind =
-    Option.map Keeper_memory_os_current.librarian_failure_kind_to_string last_failure
+    Option.map Keeper_memory_os_journal_codec.librarian_failure_kind_to_string last_failure
   in
   { state = Option.map (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.last_pass) measurement
   ; measured_at =

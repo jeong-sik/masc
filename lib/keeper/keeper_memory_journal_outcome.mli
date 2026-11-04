@@ -13,7 +13,7 @@
 
 type t =
   { last_success_at : float option
-  ; last_failure : Keeper_memory_os_current.librarian_failure_kind option
+  ; last_failure : Keeper_memory_os_current_types.librarian_failure_kind option
   }
 
 val read : keepers_dir:string -> keeper_id:string -> t

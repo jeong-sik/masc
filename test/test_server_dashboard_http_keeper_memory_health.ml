@@ -399,7 +399,7 @@ let test_journal_outcome_reads_appended_lines () =
   let keeper_id = "outcome-" ^ Filename.basename base in
   let read () = Masc.Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
   let failure_kind (outcome : Masc.Keeper_memory_journal_outcome.t) =
-    Option.map Current.librarian_failure_kind_to_string outcome.last_failure in
+    Option.map Masc.Keeper_memory_os_journal_codec.librarian_failure_kind_to_string outcome.last_failure in
   let empty = read () in
   Alcotest.(check bool) "no journal is no commit and no failure" true
     (Option.is_none empty.last_success_at && Option.is_none empty.last_failure);

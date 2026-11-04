@@ -1,8 +1,9 @@
 module Current = Keeper_memory_os_current
+module Current_types = Keeper_memory_os_current_types
 
 type t =
   { last_success_at : float option
-  ; last_failure : Current.librarian_failure_kind option
+  ; last_failure : Current_types.librarian_failure_kind option
   }
 
 let empty = { last_success_at = None; last_failure = None }
@@ -19,13 +20,13 @@ let step outcome = function
   | Dated_jsonl.Malformed_json _ -> outcome
   | Dated_jsonl.Parsed json ->
     (match Keeper_memory_os_journal_codec.journal_entry_of_json json with
-     | Ok (Current.Journal_committed { recorded_at; source = { kind = Current.Librarian; _ }; _ }) ->
+     | Ok (Current_types.Journal_committed { recorded_at; source = { kind = Current_types.Librarian; _ }; _ }) ->
        { last_success_at = Some recorded_at; last_failure = None }
-     | Ok (Current.Journal_failed { kind; _ }) -> { outcome with last_failure = Some kind }
+     | Ok (Current_types.Journal_failed { kind; _ }) -> { outcome with last_failure = Some kind }
      | Ok
-         (Current.Journal_committed
-            { source = { kind = Current.(Explicit_write | Explicit_retract); _ }; _ })
-     | Ok (Current.Journal_quarantined _)
+         (Current_types.Journal_committed
+            { source = { kind = Current_types.(Explicit_write | Explicit_retract); _ }; _ })
+     | Ok (Current_types.Journal_quarantined _)
      | Error _ -> outcome)
 ;;
 

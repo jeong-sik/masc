@@ -8106,13 +8106,30 @@ let owe_harness_read state =
 (* runtime.toml reads when the server says it committed the file, on a
    revalidation, and again after a failed read (RFC-0480 §3.4). A CLI or a
    hand edit shows on arrival or [r]. *)
+(* The Usage view's provider windows, runtime quota standing and provider
+   history read again when the server announces provider usage, on a
+   revalidation, after a failed read, and once the UTC day a history reading
+   was taken on has ended (RFC-0480 §3.4). *)
+let owe_provider_usage_reads state =
+  owe_pushed_read state Surface_read_source.Runtime_quota;
+  owe_pushed_read state Surface_read_source.Provider_history
+
+let owe_provider_history_day state ~now =
+  match state.provider_history_reread_at with
+  | Some at when at <= now ->
+      state.provider_history_reread_at <- None;
+      owe_pushed_read state Surface_read_source.Provider_history
+  | Some _ | None -> ()
+
 let owe_runtime_config_read state =
   state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed;
   (* The account emails are read from the credentials a server-run login
      rewrites, which announces runtime_config too, a cancelled login
      included. A login run in a terminal, or a client switching its own
      account, shows on arrival or [r], as a hand edit of runtime.toml does. *)
-  owe_pushed_read state Surface_read_source.Account_emails
+  owe_pushed_read state Surface_read_source.Account_emails;
+  (* The Usage view draws a quota row for each runtime the file declares. *)
+  owe_pushed_read state Surface_read_source.Runtime_quota
 
 (* The Clients roster reads again when a workspace client row changes, when
    a Keeper registry row or every row changes, on a revalidation, and after a
@@ -8131,6 +8148,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
   | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
+  | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -15798,8 +15816,14 @@ let apply_account_emails_load state = function
       state.overview_account_emails <- Account_emails_read { emails; unreadable_rows }
   | Error err -> state.overview_account_emails <- Account_emails_failed err
 
+let seconds_per_day = 86_400.0
+
+(* The first instant of the UTC day after [now]. *)
+let next_utc_day ~now = (Float.floor (now /. seconds_per_day) +. 1.0) *. seconds_per_day
+
 let apply_provider_history_load state (days, result) =
-  if days = state.provider_history_days then
+  if days = state.provider_history_days then begin
+    state.provider_history_reread_at <- Some (next_utc_day ~now:(Unix.gettimeofday ()));
     match result with
     | Ok (history : Masc.Tui_decode_usage.provider_usage_history)
       when history.puh_days = days ->
@@ -15811,6 +15835,7 @@ let apply_provider_history_load state (days, result) =
         state.provider_history <- Provider_history_error
             "history response window differs from request"
     | Error reason -> state.provider_history <- Provider_history_error reason
+  end
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
@@ -19682,6 +19707,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
    finish first. The due sources go out together in one surface bundle. *)
 let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
+  owe_provider_history_day state ~now:(Unix.gettimeofday ());
   let wanted = Surface_read_order.sources (current_surface_needs state) in
   let now = monotonic_now_s () in
   let due =

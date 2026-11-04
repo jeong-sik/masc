@@ -7,6 +7,7 @@ type dataset =
   | Runtime_config
   | Keeper_oauth_attempts of { keeper : string }
   | Clients
+  | Provider_usage
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -14,6 +15,7 @@ let harness_verdicts_name = "harness_verdicts"
 let runtime_config_name = "runtime_config"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 let clients_name = "clients"
+let provider_usage_name = "provider_usage"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -23,11 +25,13 @@ let dataset_name = function
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
 
   | Clients -> clients_name
+  | Provider_usage -> provider_usage_name
 ;;
 
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Runtime_config -> []
   | Keeper_oauth_attempts { keeper } -> [ "keeper", `String keeper ]
+    [ "keeper", `String keeper ]
 ;;
 
 let keeper_of_fields name fields =
@@ -45,6 +49,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
 
   | Some (`String name) when String.equal name clients_name -> Ok Clients
+  | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     (match keeper_of_fields name fields with
      | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

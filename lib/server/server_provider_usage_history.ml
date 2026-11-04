@@ -14,7 +14,11 @@ let install config =
   let journal = store config in
   Usage.set_record_observer (fun ~scope ~observed_at report ->
     Dated_jsonl.append journal
-      (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report)))
+      (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report));
+    (* The windows the resolved document draws and the history points both
+       moved. *)
+    Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+      Workspace_dataset_event.Provider_usage)
 
 type window = One_day | Seven_days | Fourteen_days
 

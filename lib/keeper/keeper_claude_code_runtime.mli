@@ -11,8 +11,11 @@ type attempt_outcome =
   }
 (** One Claude Code candidate result plus the explicit tool-effect observation
     available at its runtime boundary. Preflight failures remain
-    [No_effect_observed]; once the model turn is dispatched, the adapter fails
-    closed with [Observation_unavailable]. *)
+    [No_effect_observed]. Under [full] the adapter fails closed with
+    [Observation_unavailable] once the model turn is dispatched. Under [none]
+    and [read] every effect passes through a MASC handler, so the disposition
+    follows what was observed: an [Effect_possible] handler entered, response
+    text delivered, or a built-in the grant does not name. *)
 
 module For_testing : sig
   (** Typed carriage of Claude Code client errors into agent-core errors, the

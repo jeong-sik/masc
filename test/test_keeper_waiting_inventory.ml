@@ -401,7 +401,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
           ; content = sensitive_content
           ; hearth = None
           ; updated_at = None
-          ; audience = Some (Keeper_event_queue.Audience_targets [keeper_name])
+          ; audience = Keeper_event_queue.Audience_targets [keeper_name]
           }
           : Keeper_event_queue.board_stimulus))
   in

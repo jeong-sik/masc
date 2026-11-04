@@ -336,7 +336,7 @@ let () =
       ; content = "c"
       ; hearth = None
       ; updated_at = None
-      ; audience = Some Keeper_event_queue.Audience_discoverable
+      ; audience = Keeper_event_queue.Audience_discoverable
       }
   in
 
@@ -355,7 +355,7 @@ let () =
           ; content
           ; hearth = None
           ; updated_at = None
-      ; audience = Some Keeper_event_queue.Audience_discoverable
+      ; audience = Keeper_event_queue.Audience_discoverable
           }
       }
   in
@@ -397,7 +397,7 @@ let () =
       ; content = "body"
       ; hearth = Some "research"
       ; updated_at = Some 5.0
-      ; audience = Some Keeper_event_queue.Audience_thread_participants
+      ; audience = Keeper_event_queue.Audience_thread_participants
       }
   in
   (match
@@ -453,7 +453,7 @@ let () =
       ; content = "body"
       ; hearth = None
       ; updated_at = Some 6.0
-      ; audience = Some Keeper_event_queue.Audience_thread_participants
+      ; audience = Keeper_event_queue.Audience_thread_participants
       }
   in
   (match
@@ -493,11 +493,86 @@ let () =
                 ; "content", `String "body"
                 ; "hearth", `Null
                 ; "updated_at_unix", `Null
+                ; "audience", `Assoc [ "kind", `String "discoverable" ]
                 ] )
           ])
    with
    | Ok _ -> Alcotest.fail "vote_cast without vote payload fields must not decode"
    | Error _ -> ());
+
+  (* A durable Board stimulus carries the audience pinned when it was queued.
+     A row without one does not decode, for every Board event kind and for both
+     stimulus kinds that carry a Board signal. *)
+  let board_stimulus kind : Keeper_event_queue.board_stimulus =
+    { kind
+    ; author = "a"
+    ; title = "t"
+    ; content = "c"
+    ; hearth = None
+    ; updated_at = None
+    ; audience = Audience_discoverable
+    }
+  in
+  List.iter
+    (fun (label, payload_kind, payload) ->
+       let encoded =
+         stimulus_to_yojson
+           { post_id = "p-audience"; urgency = Normal; arrived_at = 8.0; payload }
+       in
+       (match stimulus_of_yojson encoded with
+        | Ok _ -> ()
+        | Error message ->
+          Alcotest.failf "%s with an audience must decode: %s" label message);
+       match
+         stimulus_of_yojson
+           (remove_payload_field ~kind:payload_kind ~field:"audience" encoded)
+       with
+       | Ok _ -> Alcotest.failf "%s without an audience must not decode" label
+       | Error message ->
+         Alcotest.(check bool)
+           (label ^ " refusal names the audience")
+           true
+           (String_util.string_contains_substring ~needle:"audience" message))
+    [ ( "post_created"
+      , "board_signal"
+      , Board_signal (board_stimulus Post_created) )
+    ; ( "post_updated"
+      , "board_signal"
+      , Board_signal (board_stimulus (Post_updated { content_updated_at = 2.0 })) )
+    ; ( "comment_added"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Comment_added
+                { comment_id = "c-" ^ String.make 32 'a'; parent_id = None })) )
+    ; ( "reaction_changed"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Reaction_changed
+                { target_type = Reaction_comment
+                ; target_id = "c1"
+                ; user_id = "reactor"
+                ; emoji = "x"
+                ; reacted = true
+                })) )
+    ; ( "vote_cast"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Vote_cast
+                { target = Vote_on_comment "c1"
+                ; target_author = "poster"
+                ; voter = "peer"
+                ; direction = Vote_up
+                })) )
+    ; ( "board attention"
+      , "board_attention"
+      , Board_attention
+          { candidate_id = "candidate-audience"
+          ; signal = board_stimulus Post_created
+          } )
+    ];
 
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =

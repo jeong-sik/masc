@@ -143,7 +143,6 @@ let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim
   | "start" -> Ok Start
-  | "done" -> Ok Done_action
   | "cancel" -> Ok Cancel
   | "release" -> Ok Release
   | "submit_for_verification" -> Ok Submit_for_verification
@@ -168,9 +167,9 @@ let task_action_to_string = function
   | Release -> "release"
   | Submit_for_verification -> "submit_for_verification"
 
-(** All valid task actions, derived from the ADT (single source of truth). *)
+(** The actions [task_action_of_string] parses. *)
 let all_task_actions =
-  [ Claim; Start; Done_action; Cancel; Release; Submit_for_verification ]
+  [ Claim; Start; Cancel; Release; Submit_for_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (** Provenance carried by a completion verdict. This type separates verdicts
@@ -456,7 +455,6 @@ let no_execution_links = { operation_id = None; session_id = None }
     supplied to the completion authority as task facts. The workspace FSM never
     interprets their prose, counts entries, or derives a completion verdict. *)
 type task_contract = {
-  strict : bool; [@default false]
   completion_contract : string list; [@default []]
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]

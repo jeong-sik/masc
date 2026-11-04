@@ -209,6 +209,9 @@ type event =
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
+  | Keeper_metrics_appended of { keeper : string; at : float }
+      (** The Keeper's metrics file gained a row ({!Masc.Keeper_metrics_broadcast}).
+          The logs view and the Info tab read it again. *)
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_memory_journal_appended of { keeper : string; at : float }
       (** The keeper's memory journal gained a row. The chat pane shows that
@@ -337,6 +340,11 @@ val composite_changed_keeper : event -> string option
 (** The keeper whose composite just changed — [Some] only for
     {!Keeper_composite_changed}. The Keeper detail reads that Keeper's
     composite again on this. *)
+
+val metrics_appended_keeper : event -> string option
+(** The Keeper whose metrics file just gained a row — [Some] only for
+    {!Keeper_metrics_appended}. The logs view and the Info tab read that
+    Keeper's metrics again on this. *)
 
 val tool_call_keeper : event -> string option
 (** The keeper a [keeper_tool_call] names — [Some] only for

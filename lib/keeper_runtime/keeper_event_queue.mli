@@ -89,7 +89,7 @@ type board_stimulus = {
   content : string;
   hearth : string option;
   updated_at : float option;
-  audience : board_audience option;
+  audience : board_audience;
 }
 (** Typed board-signal payload carried end-to-end (RFC-0020).
 
@@ -101,9 +101,8 @@ type board_stimulus = {
 
     The [audience] is the event-time audience the producer pinned to this
     event alongside its content, so Drain-side matching judges the event, not
-    the post's current audience. [None] is a legacy row written before
-    pinning (explicit unknown, never a default): audience-dependent judgments
-    refuse it at drain instead of re-reading the current post. *)
+    the post's current audience. Decoding a row without an [audience] is an
+    error. *)
 
 type stimulus_payload =
   | Board_signal of board_stimulus

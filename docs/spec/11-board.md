@@ -196,19 +196,19 @@ list admits no such candidates; exact targets, broadcast, and structurally
 matched thread participants still receive their typed delivery. Interest does
 not assign a Task or authorize an external effect.
 
-Board-attention candidate schema v7 preserves a comment's producer-issued
+Board-attention candidate schema v8 preserves a comment's producer-issued
 `comment_id` and optional `parent_id` from the `add_comment` boundary through
 candidate persistence and the judge request. Candidate identity for comments
 is `(keeper, kind, post_id, comment_id)`, never body text. A pending row stores
-only the current typed signal and
+only the current typed signal, its event-time `audience`, and
 `keeper_context {lane_keeper_name, board_interests}`; it stores no post/comment
 snapshot. The judge receives that signal plus
-`keeper_role {name, board_interests}`. The existing post-verdict Keeper event
-queue DTO remains unchanged. A `requeue_requested` or `requeued` quarantine
+`keeper_role {name, board_interests}`. The post-verdict Keeper event queue
+stimulus carries the same `audience`. A `requeue_requested` or `requeued` quarantine
 phase carries `requested_by`, the authenticated principal that asked for the
 operator requeue. Older candidate schemas are not decoded.
 Deployment preflight requires every non-empty candidate ledger to use schema
-v7. Candidate and partition stores follow the fresh-state hard-cut contract.
+v8. Candidate and partition stores follow the fresh-state hard-cut contract.
 
 | 이벤트 | 필드 |
 |--------|------|

@@ -190,7 +190,7 @@ TUI 가 켜진 뒤 처음 연결은 `Fresh` 라서, 시작할 때의 읽기와 �
 | L5 | 승인·gate 알림 → gate, tool-approvals, tool modes. `operator_snapshot` → operator 요약(승인 수). 스냅샷 문자열 비교를 생성자로 바꾼다(§3.2) | `approval:*` 가 gate 저장소의 모든 쓰기를 덮는지(아직 확인하지 못했다) |
 | L6 | Keeper_logs 의 Execute 출력도 SSE 로 받는다. snapshot 읽기를 지운다. 웹 대시보드도 그 경로를 쓰지 않으면 서버 경로도 지운다 | 화면 증거 |
 | L7 | 키퍼 행(RFC-0481 §5 의 층들). roster·turns 의 2초 읽기를 지운다 | RFC-0481 §5 |
-| L8~ | §1.4 데이터마다 서버 알림과 TUI 반응. 데이터 하나가 층 하나다. 로컬 파일(로컬 키퍼 목록, metrics 꼬리)은 파일 변경 감시로 바꾼다 | §3.4 의 세 조건 |
+| L8~ | §1.4 데이터마다 서버 알림과 TUI 반응. 데이터 하나가 층 하나다. 로컬 파일(로컬 키퍼 목록, metrics 꼬리)도 그 파일을 쓰는 서버의 저장 함수가 알린다. metrics 꼬리는 `append_keeper_metrics` 가 `keeper_metrics_appended` 를 낸다 | §3.4 의 세 조건 |
 | Ly | §3.5 의 읽기 아닌 일 옮기기(로그인 마감 타이머, 재시도 담당, 연결 상태) | 피드를 끊었다 열 때 다시 열리는지, 마감 시각에 대기가 끝나는지 |
 | Lz | §3.5 메인 루프 정리 | 2초 블록과 `--refresh` 가 없는지 |
 

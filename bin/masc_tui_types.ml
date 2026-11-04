@@ -10615,6 +10615,12 @@ type state = {
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
      Keeper that left the roster leaves this list at the next read. *)
   mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
+  (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
+     catalog, the selected Keeper's activations, and each roster Keeper's
+     usage. A roster Keeper with no entry has never been read. *)
+  mutable tools_catalog_owed: Masc_tui_owed_read.t;
+  mutable tools_activations_owed: Masc_tui_owed_read.t;
+  mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -14434,8 +14440,48 @@ let keep_roster_skill_usage state =
   if roster_complete state then begin
     let roster = List.map (fun (row : keeper) -> row.k_name) state.keepers in
     state.tools_keeper_usage <-
-      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage;
+    state.tools_usage_owed <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_usage_owed
   end
+
+(* What a roster Keeper's Usage answer owes; one never read owes a read. *)
+let keeper_skill_usage_owed state keeper =
+  match List.assoc_opt keeper state.tools_usage_owed with
+  | Some owed -> owed
+  | None -> Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+
+let set_keeper_skill_usage_owed state keeper owed =
+  state.tools_usage_owed <- (keeper, owed) :: List.remove_assoc keeper state.tools_usage_owed
+
+let owe_keeper_skill_usage_read state keeper =
+  set_keeper_skill_usage_owed state keeper
+    (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
+
+let owe_every_skill_usage_read state =
+  List.iter (fun (row : keeper) -> owe_keeper_skill_usage_read state row.k_name) state.keepers
+
+let owe_tools_catalog_read state =
+  state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
+
+let owe_tools_activations_read state =
+  state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
+
+(* The Tools parts that read on a push, owed together: arriving on Tools, a
+   refresh, a revalidation and a resumed authority read them all. *)
+let owe_tools_skill_reads state =
+  owe_tools_catalog_read state;
+  owe_tools_activations_read state;
+  owe_every_skill_usage_read state
+
+(* A Keeper's activation ledger changed: its Usage answer owes a read when it
+   is on the roster, and the Activations pane when it is the selected
+   Keeper. *)
+let owe_skill_activations_read state keeper =
+  if List.exists (fun (row : keeper) -> String.equal row.k_name keeper) state.keepers then
+    owe_keeper_skill_usage_read state keeper;
+  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state) then
+    owe_tools_activations_read state
 
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with
@@ -20007,6 +20053,9 @@ let create_state
   tools_activations = None;
   tools_activations_error = None;
   tools_keeper_usage = [];
+  tools_catalog_owed = Masc_tui_owed_read.settled;
+  tools_activations_owed = Masc_tui_owed_read.settled;
+  tools_usage_owed = [];
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;

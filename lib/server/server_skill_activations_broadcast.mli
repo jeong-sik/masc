@@ -8,7 +8,8 @@ val keeper_of_trace :
     [meta.runtime.trace_id]. *)
 
 val start :
-  sw:Eio.Switch.t -> config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit
+  sw:Eio.Switch.t ->
+  (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit)
 (** Starts the announcing fiber on [sw] and returns the observer that feeds
     it. {!install} hands it to the ledger. *)
 

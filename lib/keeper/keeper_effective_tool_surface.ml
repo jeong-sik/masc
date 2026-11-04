@@ -538,13 +538,10 @@ let skill_profile_to_yojson surface profile =
          else None)
     |> Option.value ~default:[]
   in
-  match Keeper_skill_observability.to_yojson profile with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       @ [ ( "load_reasons"
-           , `List (List.map skill_load_reason_to_yojson reasons) ) ])
-  | _ -> assert false
+  `Assoc
+    (Keeper_skill_observability.to_fields profile
+     @ [ ( "load_reasons"
+         , `List (List.map skill_load_reason_to_yojson reasons) ) ])
 ;;
 
 let tool_delivery_to_yojson = function

@@ -261,7 +261,7 @@ let of_catalog catalog =
   Keeper_skill_catalog.skills catalog |> List.filter_map of_skill
 ;;
 
-let to_yojson profile =
+let to_fields profile =
   let dependency_kind_to_string = function
     | Data -> "data"
     | Order -> "order"
@@ -307,72 +307,74 @@ let to_yojson profile =
                flow.batches) )
       ]
   in
-  `Assoc
-    [ "reference", Skill_reference.to_yojson profile.reference
-    ; "kind", `String (kind_label profile.surface)
-    ; "activation_tool", `String profile.activation_tool
-    ; "execution", `String (execution_label profile.surface)
-    ; ( "capabilities"
-      , `Assoc
-          [ "as_skill", `Bool true
-          ; ( "as_tool"
-            , `Bool
-                (match profile.surface with
-                 | Composition_skill _ -> true
-                 | Instruction_skill -> false) )
-          ; "batch", `Bool (profile.node_count > 1)
-          ; "parallel", `Bool (profile.max_parallelism > 1)
-          ; ( "async"
-            , `Bool
-                (match profile.surface with
-                 | Composition_skill Keeper_tool_composition_catalog.Async -> true
-                 | Composition_skill Keeper_tool_composition_catalog.Inline
-                 | Instruction_skill -> false) )
-          ; ( "tool_scope"
-            , `String
-                (match profile.surface with
-                 | Composition_skill _ -> "registered_tools_only"
-                 | Instruction_skill -> "model_orchestrated") )
+  [ "reference", Skill_reference.to_yojson profile.reference
+  ; "kind", `String (kind_label profile.surface)
+  ; "activation_tool", `String profile.activation_tool
+  ; "execution", `String (execution_label profile.surface)
+  ; ( "capabilities"
+    , `Assoc
+        [ "as_skill", `Bool true
+        ; ( "as_tool"
+          , `Bool
+              (match profile.surface with
+               | Composition_skill _ -> true
+               | Instruction_skill -> false) )
+        ; "batch", `Bool (profile.node_count > 1)
+        ; "parallel", `Bool (profile.max_parallelism > 1)
+        ; ( "async"
+          , `Bool
+              (match profile.surface with
+               | Composition_skill Keeper_tool_composition_catalog.Async -> true
+               | Composition_skill Keeper_tool_composition_catalog.Inline
+               | Instruction_skill -> false) )
+        ; ( "tool_scope"
+          , `String
+              (match profile.surface with
+               | Composition_skill _ -> "registered_tools_only"
+               | Instruction_skill -> "model_orchestrated") )
+        ] )
+  ; ( "context"
+    , `Assoc
+        [ "body_bytes", `Int profile.body_bytes
+        ; "discovery_bytes", `Int profile.discovery_bytes
+        ; ( "tool_schema_bytes"
+          , match profile.tool_schema_bytes with
+            | Some bytes -> `Int bytes
+            | None -> `Null )
+        ] )
+  ; ( "plan"
+    , `Assoc
+        [ "node_count", `Int profile.node_count
+        ; "batch_count", `Int profile.batch_count
+        ; "parallel_batch_count", `Int profile.parallel_batch_count
+        ; "max_parallelism", `Int profile.max_parallelism
+        ; ( "statically_read_only"
+          , match profile.statically_read_only with
+            | Some value -> `Bool value
+            | None -> `Null )
+        ] )
+  ; ( "declaration"
+    , match profile.declaration_span with
+      | None -> `Null
+      | Some span ->
+        `Assoc
+          [ "start_line", `Int span.start_line
+          ; "end_line", `Int span.end_line
           ] )
-    ; ( "context"
-      , `Assoc
-          [ "body_bytes", `Int profile.body_bytes
-          ; "discovery_bytes", `Int profile.discovery_bytes
-          ; ( "tool_schema_bytes"
-            , match profile.tool_schema_bytes with
-              | Some bytes -> `Int bytes
-              | None -> `Null )
-          ] )
-    ; ( "plan"
-      , `Assoc
-          [ "node_count", `Int profile.node_count
-          ; "batch_count", `Int profile.batch_count
-          ; "parallel_batch_count", `Int profile.parallel_batch_count
-          ; "max_parallelism", `Int profile.max_parallelism
-          ; ( "statically_read_only"
-            , match profile.statically_read_only with
-              | Some value -> `Bool value
-              | None -> `Null )
-          ] )
-    ; ( "declaration"
-      , match profile.declaration_span with
-        | None -> `Null
-        | Some span ->
-          `Assoc
-            [ "start_line", `Int span.start_line
-            ; "end_line", `Int span.end_line
-            ] )
-    ; ( "io", match profile.io with
-        | Model_orchestrated -> `Assoc ["kind", `String "model_orchestrated"]
-        | Composition_io { input_schema; exports } ->
-            `Assoc ["kind", `String "composition"; "input_schema", input_schema;
-              "exports", `List (List.map (fun (export : Keeper_tool_plan.export) ->
-                `Assoc ["name", `String export.name;
-                  "node_id", `String (Keeper_tool_plan.Node_id.to_string export.node_id);
-                  "pointer", `String (Keeper_tool_plan.Json_pointer.to_string export.pointer)]) exports)] )
-    ; ( "flow"
-      , match profile.flow with
-        | Some flow -> flow_to_yojson flow
-        | None -> `Null )
-    ]
+  ; ( "io", match profile.io with
+      | Model_orchestrated -> `Assoc ["kind", `String "model_orchestrated"]
+      | Composition_io { input_schema; exports } ->
+          `Assoc ["kind", `String "composition"; "input_schema", input_schema;
+            "exports", `List (List.map (fun (export : Keeper_tool_plan.export) ->
+              `Assoc ["name", `String export.name;
+                "node_id", `String (Keeper_tool_plan.Node_id.to_string export.node_id);
+                "pointer", `String (Keeper_tool_plan.Json_pointer.to_string export.pointer)]) exports)] )
+  ; ( "flow"
+    , match profile.flow with
+      | Some flow -> flow_to_yojson flow
+      | None -> `Null )
+  ]
+;;
+
+let to_yojson profile = `Assoc (to_fields profile)
 ;;

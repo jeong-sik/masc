@@ -37,6 +37,8 @@ let rows_changed_observer : (Workspace_utils_backend_setup.config -> unit) Atomi
 
 let install_rows_changed_observer observer = Atomic.set rows_changed_observer observer
 
+let report_roster_changed config = (Atomic.get rows_changed_observer) config
+
 let report config ~previous next =
   if not (Option.equal equal_row (Option.bind previous row_of) (row_of next))
   then (Atomic.get rows_changed_observer) config

@@ -8,7 +8,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile, RemoteSshEndpoint, RemoteSshEndpointCatalog, RemoteSshProbe } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperConstitutionLedgerPreview, KeeperConstitutionRejectedLine, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile, RemoteSshEndpoint, RemoteSshEndpointCatalog, RemoteSshProbe } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -86,6 +86,32 @@ function decodeRemoteSshEndpoints(value: unknown): RemoteSshEndpointCatalog {
   return { state: 'available', endpoints }
 }
 
+function decodeConstitutionRejectedLine(value: unknown): KeeperConstitutionRejectedLine | null {
+  if (!isRecord(value) || !isPositiveSafeInteger(value.line) || typeof value.detail !== 'string') return null
+  if (value.line_end !== 'newline_terminated' && value.line_end !== 'unterminated_final_line') return null
+  return { line: value.line, line_end: value.line_end, detail: value.detail }
+}
+
+// An absent or unknown ledger answer is a decode failure, never "no broken
+// lines": the panel would otherwise hide the lines the prompt left out.
+function decodeConstitutionLedgerPreview(value: unknown): KeeperConstitutionLedgerPreview | string {
+  if (!isRecord(value)) return `constitution_ledger is ${JSON.stringify(value) ?? 'absent'}`
+  if (value.state === 'read') {
+    if (!Array.isArray(value.rejected_lines)) return 'constitution_ledger has no rejected_lines array'
+    const lines: KeeperConstitutionRejectedLine[] = []
+    for (const raw of value.rejected_lines) {
+      const line = decodeConstitutionRejectedLine(raw)
+      if (line === null) return `constitution_ledger has an unreadable row ${JSON.stringify(raw)}`
+      lines.push(line)
+    }
+    return { state: 'read', rejected_lines: lines }
+  }
+  if (value.state === 'unreadable' && typeof value.path === 'string' && typeof value.detail === 'string') {
+    return { state: 'unreadable', path: value.path, detail: value.detail }
+  }
+  return `unknown constitution_ledger state ${JSON.stringify(value.state)}`
+}
+
 // Decodes only this field: an unknown shape becomes a visible decode failure
 // in the prompt preview instead of failing the whole keeper config.
 function decodeSystemPromptPreview(value: unknown): KeeperSystemPromptPreview {
@@ -93,10 +119,12 @@ function decodeSystemPromptPreview(value: unknown): KeeperSystemPromptPreview {
     return { state: 'decode_failed', detail: `prompt.system_prompt is ${JSON.stringify(value) ?? 'absent'}` }
   }
   if (value.state === 'available') {
-    if (typeof value.effective === 'string' && typeof value.assembled === 'string') {
-      return { state: 'available', effective: value.effective, assembled: value.assembled }
+    if (typeof value.effective !== 'string' || typeof value.assembled !== 'string') {
+      return { state: 'decode_failed', detail: 'available prompt without effective and assembled text' }
     }
-    return { state: 'decode_failed', detail: 'available prompt without effective and assembled text' }
+    const ledger = decodeConstitutionLedgerPreview(value.constitution_ledger)
+    if (typeof ledger === 'string') return { state: 'decode_failed', detail: ledger }
+    return { state: 'available', effective: value.effective, assembled: value.assembled, constitution_ledger: ledger }
   }
   if (value.state === 'unavailable') {
     if ((value.reason === 'prompt_unrenderable' || value.reason === 'workspace_unavailable')

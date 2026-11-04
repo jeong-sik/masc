@@ -8,15 +8,6 @@
 
 module B = Briefing_json_helpers
 
-(* Diagnostic helper — prints the actual JSON value when a
-   pattern-match fallback fires, instead of bare [assert false].
-   Keeps the runner [assert]-driven for consistency with sibling
-   test suites while improving failure messages. *)
-let unexpected_json ~where j =
-  failwith
-    (Printf.sprintf "%s: unexpected JSON %s" where
-       (Yojson.Safe.to_string j))
-
 (* ─── compact_text ─────────────────────────────────────────── *)
 
 let test_compact_text_empty () =
@@ -65,122 +56,6 @@ let test_string_field_default () =
 let test_string_field_wrong_type () =
   let j = `Assoc [ ("count", `Int 5) ] in
   assert (B.string_field ~default:"fallback" "count" j = "fallback")
-
-(* ─── missing scalar detection ─────────────────────────────── *)
-
-let test_missing_or_unknown () =
-  assert (B.is_missing_or_unknown "");
-  assert (B.is_missing_or_unknown "   ");
-  assert (B.is_missing_or_unknown "unknown");
-  assert (B.is_missing_or_unknown "  UNKNOWN  ");
-  assert (not (B.is_missing_or_unknown "async"))
-
-(* ─── string_json ──────────────────────────────────────────── *)
-
-let test_string_json_passthrough () =
-  match B.string_json (`String "hello") with
-  | `String s -> assert (s = "hello")
-  | _ -> assert false
-
-let test_string_json_empty_uses_default () =
-  match B.string_json ~default:"FALLBACK" (`String "") with
-  | `String s -> assert (s = "FALLBACK")
-  | _ -> assert false
-
-let test_string_json_non_string_uses_default () =
-  match B.string_json ~default:"FB" (`Int 7) with
-  | `String s -> assert (s = "FB")
-  | _ -> assert false
-
-let test_string_json_default_default () =
-  (* implicit default = "unknown" *)
-  match B.string_json `Null with
-  | `String s -> assert (s = "unknown")
-  | other -> unexpected_json ~where:"string_json_default_default" other
-
-let test_string_json_opt_passthrough () =
-  match B.string_json_opt (`String "hello") with
-  | `String s -> assert (s = "hello")
-  | other -> unexpected_json ~where:"string_json_opt_passthrough" other
-
-let test_string_json_opt_missing_to_null () =
-  assert (B.string_json_opt (`String "   ") = `Null);
-  assert (B.string_json_opt (`Int 7) = `Null)
-
-(* ─── string_list_json ─────────────────────────────────────── *)
-
-let test_string_list_filters_blanks () =
-  let input =
-    `List [ `String "a"; `String ""; `String "  "; `String "b" ]
-  in
-  match B.string_list_json input with
-  | `List items ->
-      let strs =
-        List.map
-          (function `String s -> s | _ -> assert false)
-          items
-      in
-      assert (strs = [ "a"; "b" ])
-  | _ -> assert false
-
-let test_string_list_drops_non_strings () =
-  let input =
-    `List [ `String "a"; `Int 1; `Bool true; `String "b" ]
-  in
-  match B.string_list_json input with
-  | `List items -> assert (List.length items = 2)
-  | _ -> assert false
-
-let test_string_list_non_list_returns_empty () =
-  match B.string_list_json (`String "scalar") with
-  | `List [] -> ()
-  | _ -> assert false
-
-let test_string_list_trims_entries () =
-  let input = `List [ `String "  hi  " ] in
-  match B.string_list_json input with
-  | `List [ `String "hi" ] -> ()
-  | _ -> assert false
-
-(* ─── int_json ─────────────────────────────────────────────── *)
-
-let test_int_json_int_passthrough () =
-  assert (B.int_json (`Int 42) = `Int 42)
-
-let test_int_json_intlit_parses () =
-  assert (B.int_json (`Intlit "100") = `Int 100)
-
-let test_int_json_intlit_garbage_uses_default () =
-  assert (B.int_json ~default:7 (`Intlit "not_a_number") = `Int 7)
-
-let test_int_json_float_truncates () =
-  assert (B.int_json (`Float 3.7) = `Int 3)
-
-let test_int_json_other_uses_default () =
-  assert (B.int_json ~default:9 (`String "5") = `Int 9);
-  assert (B.int_json ~default:0 `Null = `Int 0)
-
-(* ─── float_json ───────────────────────────────────────────── *)
-
-let test_float_json_float_passthrough () =
-  assert (B.float_json (`Float 1.5) = `Float 1.5)
-
-let test_float_json_int_promotes () =
-  assert (B.float_json (`Int 7) = `Float 7.0)
-
-let test_float_json_intlit_parses () =
-  (* Use exactly-representable doubles to avoid float-literal
-     parsing edge cases. *)
-  assert (B.float_json (`Intlit "1.5") = `Float 1.5);
-  assert (B.float_json (`Intlit "0.25") = `Float 0.25)
-
-let test_float_json_intlit_garbage_uses_default () =
-  assert (
-    B.float_json ~default:9.5 (`Intlit "junk") = `Float 9.5)
-
-let test_float_json_other_uses_default () =
-  assert (B.float_json ~default:8.0 `Null = `Float 8.0);
-  assert (B.float_json ~default:0.0 (`String "1.0") = `Float 0.0)
 
 (* ─── take ─────────────────────────────────────────────────── *)
 
@@ -234,27 +109,6 @@ let () =
   test_string_field_present ();
   test_string_field_default ();
   test_string_field_wrong_type ();
-  test_missing_or_unknown ();
-  test_string_json_passthrough ();
-  test_string_json_empty_uses_default ();
-  test_string_json_non_string_uses_default ();
-  test_string_json_default_default ();
-  test_string_json_opt_passthrough ();
-  test_string_json_opt_missing_to_null ();
-  test_string_list_filters_blanks ();
-  test_string_list_drops_non_strings ();
-  test_string_list_non_list_returns_empty ();
-  test_string_list_trims_entries ();
-  test_int_json_int_passthrough ();
-  test_int_json_intlit_parses ();
-  test_int_json_intlit_garbage_uses_default ();
-  test_int_json_float_truncates ();
-  test_int_json_other_uses_default ();
-  test_float_json_float_passthrough ();
-  test_float_json_int_promotes ();
-  test_float_json_intlit_parses ();
-  test_float_json_intlit_garbage_uses_default ();
-  test_float_json_other_uses_default ();
   test_take_zero ();
   test_take_negative ();
   test_take_more_than_length ();

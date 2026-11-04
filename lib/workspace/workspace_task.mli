@@ -234,13 +234,6 @@ type claim_next_result = Masc_domain.claim_next_result =
       title : string;
       priority : int;
       message : string;
-      scope_widened : bool;
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string

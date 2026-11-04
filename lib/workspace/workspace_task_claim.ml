@@ -144,7 +144,7 @@ let emit_auto_start_side_effects config ~agent_name ~task_id ~from_status ~to_st
          ()))
 ;;
 
-(** Result-returning version of claim_task for type-safe error handling. *)
+(** Claim [task_id] for [agent_name]. *)
 let claim_task_with_details_r
       config
       ~agent_name
@@ -405,13 +405,6 @@ let claim_task_r config ~agent_name ~task_id ?(auto_start = false) ()
   : string Masc_domain.masc_result
   =
   Result.map snd (claim_task_with_details_r config ~agent_name ~task_id ~auto_start ())
-;;
-
-(** String-returning convenience wrapper over [claim_task_r]. *)
-let claim_task config ~agent_name ~task_id =
-  match claim_task_r config ~agent_name ~task_id () with
-  | Ok message -> message
-  | Error e -> Masc_domain.to_string e
 ;;
 
 (** Collect typed release handoff text. Task ownership and orphan

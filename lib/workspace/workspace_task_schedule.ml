@@ -107,9 +107,6 @@ let reconcile_agent_current_task_with_prepared_backlog
 ;;
 
 (** Claim next highest priority unclaimed task.
-    Optional [exclude_task_ids] prevents re-claiming known bad tasks in the
-    same loop run.  Optional [task_filter] lets callers scope eligible work
-    while the backlog lock is held.
 
     Scheduling logic:
     - Preserves any active claim held by this agent; callers must explicitly
@@ -119,10 +116,7 @@ let reconcile_agent_current_task_with_prepared_backlog
 let claim_next_r
       config
       ~agent_name
-      ?(exclude_task_ids = [])
-      ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(hard_filter : Masc_domain.task -> bool = fun _ -> true)
-      ?(allow_scope_fallback = false)
       ?(auto_start = false)
       ()
   =
@@ -245,7 +239,6 @@ let claim_next_r
                    ; title = prev.title
                    ; priority = prev.priority
                    ; message
-                   ; scope_widened = false
                    })));
         let working_tasks = backlog.tasks in
         (* Eligibility and the claim outcome are one decision
@@ -270,62 +263,10 @@ let claim_next_r
         let unclaimed =
           prepared.claimable_ordered_tasks
           |> List.filter resolves_claimable
-          (* [hard_filter] is a hard exclusion (e.g. self-author ownership): unlike
-             [task_filter] it survives the [allow_scope_fallback] widening below,
-             because it expresses an invariant the scheduler must never relax, not
-             a goal scope that may be dropped to avoid starvation. Applying it here
-             at the base makes both [scoped_eligible] and the widened set respect
-             it. *)
           |> List.filter hard_filter
         in
-        let all_excluded_set = Task_id_set.of_list exclude_task_ids in
-        let is_excluded task_id = Task_id_set.mem task_id all_excluded_set in
-        let task_filter_excluded =
-          List.filter
-            (fun (t : task) ->
-               (not (is_excluded t.id)) && not (task_filter t))
-            unclaimed
-        in
-        let eligible_from candidates =
-          List.filter
-            (fun (t : task) ->
-               (not (is_excluded t.id)) && task_filter t)
-            candidates
-        in
-        let scoped_eligible = eligible_from unclaimed in
-        (* Goal-scope must not starve a keeper: when [allow_scope_fallback] and no
-           scoped task passes [task_filter], widen to all_tasks. [all_excluded] is
-           still enforced — only [task_filter] (the goal scope) is dropped — so an
-           unscoped task can be claimed. Schedule-level companion to the RFC-0067 §1
-           resolve-side fallback. *)
-        let eligible, scope_widened =
-          match scoped_eligible with
-          | _ :: _ -> scoped_eligible, false
-          | [] when allow_scope_fallback ->
-            let widened =
-              List.filter
-                (fun (t : task) -> not (is_excluded t.id))
-                unclaimed
-            in
-            (match widened with
-             | _ :: _ -> widened, true
-             | [] -> [], false)
-          | [] -> scoped_eligible, false
-        in
-        let explicit_excluded_count = List.length exclude_task_ids in
-        let no_eligible_excluded_count =
-          explicit_excluded_count + List.length task_filter_excluded
-        in
-        (match eligible with
-         | [] when unclaimed = [] ->
-           Claim_next_no_unclaimed
-         | [] ->
-           Claim_next_no_eligible
-             { excluded_count = no_eligible_excluded_count
-             ; scope_excluded_count = List.length task_filter_excluded
-             ; explicit_excluded_count
-             ; claim_pool_candidate_count = List.length unclaimed
-             }
+        (match unclaimed with
+         | [] -> Claim_next_no_unclaimed
          | task :: _ ->
            (* [unclaimed] admits only Todo tasks for which [resolve_claim]
               returns [Worker_claim]. The remaining arms are defensive and must
@@ -441,7 +382,6 @@ let claim_next_r
              ; title = task.title
              ; priority = task.priority
              ; message
-             ; scope_widened
              })
     with
     | Existing_claim result -> result

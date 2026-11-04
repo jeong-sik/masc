@@ -320,11 +320,6 @@ let claim_next config ~agent_name =
   match Workspace.claim_next_r config ~agent_name () with
   | Masc_domain.Claim_next_claimed { message; _ } -> message
   | Masc_domain.Claim_next_no_unclaimed -> "No unclaimed tasks."
-  | Masc_domain.Claim_next_no_eligible { excluded_count; scope_excluded_count; _ } ->
-    Printf.sprintf
-      "No eligible unclaimed tasks. excluded=%d (goal_scope_or_filter=%d)."
-      excluded_count
-      scope_excluded_count
   | Masc_domain.Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;
 
@@ -359,7 +354,7 @@ let test_claim_next_empty_backlog () =
 let test_claim_next_all_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Only Task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result = claim_next config ~agent_name:"claude" in
     Alcotest.(check bool) "no unclaimed tasks" true (str_contains result "No unclaimed"))
 ;;
@@ -369,7 +364,7 @@ let test_claim_next_skips_done_and_cancelled () =
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
     let _ = Workspace.add_task config ~title:"Todo Task" ~priority:3 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     let _ =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
@@ -406,7 +401,7 @@ let test_claim_next_terminal_only_backlog () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Cancelled Task" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     let _ =
       transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done"
     in
@@ -451,7 +446,7 @@ let test_claim_next_reconciles_stale_agent_current_task () =
       | _ -> Alcotest.fail "expected exactly one bound agent"
     in
     let _ = Workspace.add_task config ~title:"Cancelled already" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r
          config
@@ -506,7 +501,7 @@ let test_status_hides_stale_agent_current_task_without_writing () =
       let _ =
         Workspace.add_task config ~title:"Awaiting verifier" ~priority:1 ~description:""
       in
-      let _ = Workspace.claim_task config ~agent_name ~task_id:"task-001" in
+      let _ = Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () in
       (match
          Workspace.transition_task_r
            config
@@ -666,7 +661,7 @@ let test_release_hard_stop_todo_stays_claimable () =
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     let handoff_context : Masc_domain.task_handoff_context =
       { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
@@ -727,7 +722,7 @@ let test_release_hard_stop_allows_direct_todo_reclaim () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     let handoff_context : Masc_domain.task_handoff_context =
       { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
@@ -890,8 +885,6 @@ let test_claim_next_done_allow_reclaim_is_terminal () =
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "Done task must be terminal (RFC-0323 G-10), got claim of %s" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "Done task must not be counted as blocked — reclaim gate is retired"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -918,9 +911,6 @@ let test_claim_next_done_block_reclaim_is_terminal () =
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.failf "Block_reclaim completed task must not be claimed, got %s" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail
-        "Done task must not be counted as blocked — the reclaim claim gate is retired (RFC-0323 G-10)"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -952,8 +942,6 @@ let test_claim_next_ignores_non_authoritative_auto_cycle_text () =
         "narrative text cleared after claim"
         None
         task.do_not_reclaim_reason
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "non-authoritative auto-cycle text should be claimable"
     | Workspace.Claim_next_no_unclaimed ->
       Alcotest.fail "expected one claimable task"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
@@ -988,8 +976,6 @@ let test_claim_next_ignores_routing_handoff_text () =
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
       Alcotest.(check string) "free-text routing handoff remains claimable" "task-001" task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "normal unblocked task should remain claimable"
     | Workspace.Claim_next_no_unclaimed ->
       Alcotest.fail "expected normal unblocked task"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
@@ -1029,8 +1015,6 @@ let test_claim_next_does_not_deprioritize_narrative_text () =
         "priority still wins despite narrative text"
         "task-001"
         task_id
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "normal unblocked task should be claimed before fallback"
     | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
@@ -1216,7 +1200,7 @@ config
 let test_cancel_task_claimed_by_self () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
 config
@@ -1249,7 +1233,7 @@ config
 let test_cancel_task_claimed_by_other () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
 config
@@ -1283,7 +1267,7 @@ config
 let test_cancel_done_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     let result =
       Workspace.transition_task_r
@@ -1326,7 +1310,7 @@ let test_transition_claim () =
 let test_transition_start () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       Workspace.transition_task_r
         config
@@ -1457,7 +1441,7 @@ let test_operator_task_recovery_requires_exact_owner_and_version () =
 let test_transition_release_rejects_name_shape_aliases () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     List.iter
       (fun alias ->
          match
@@ -1545,7 +1529,7 @@ let test_transition_submit_for_verification_requires_notes () =
   (
     with_test_env (fun config ->
       let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-      let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+      let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
       let result =
         Workspace.transition_task_r
           config
@@ -1585,7 +1569,7 @@ let test_transition_version_mismatch () =
 let test_transition_done_idempotent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let _ =
       transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:""
     in
@@ -1985,8 +1969,8 @@ let test_transition_done_from_claimed_emits_observability () =
     let _ =
       Workspace.add_task config ~title:"Claimed Done Task" ~priority:1 ~description:""
     in
-    let claim_result = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
-    Alcotest.(check bool) "claim succeeds" true (contains_check claim_result);
+    let claim_result = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
+    Alcotest.(check bool) "claim succeeds" true (Result.is_ok claim_result);
     let done_result =
       transition_done
         config
@@ -2390,7 +2374,7 @@ let test_is_agent_session_bound () =
 let test_transition_done_r_success () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let result =
       transition_done_r config ~agent_name:"claude" ~task_id:"task-001" ~notes:"Done!"
     in
@@ -2480,44 +2464,11 @@ let test_claim_task_r_done_allow_reclaim_is_terminal () =
 let test_claim_task_r_already_claimed () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
     let result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     match result with
     | Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _)) -> ()
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
-;;
-
-(* Schedule-level scope fallback (#20673): a keeper must not idle when no
-   in-scope task passes [task_filter] while an out-of-scope task is claimable.
-   Hard scope returns no_eligible; [allow_scope_fallback] widens to all_tasks
-   and flags [scope_widened]. *)
-let test_scope_widen_claims_unscoped_when_scope_blocks_all () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~title:"only open" ~priority:1 ~description:""
-    in
-    let agent_name = "claude" in
-    (* task_filter rejects everything -> no scoped task is eligible. *)
-    let task_filter (_t : Masc_domain.task) = false in
-    (* Hard scope (default allow_scope_fallback=false): scope excludes the task
-       -> no eligible. *)
-    (match Workspace.claim_next_r config ~agent_name ~task_filter () with
-     | Workspace.Claim_next_no_eligible _ -> ()
-     | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.failf "hard scope must not claim, got %s" task_id
-     | _ -> Alcotest.fail "expected no_eligible under hard scope");
-    (* Fallback: widen drops scope -> claims the out-of-scope task and flags
-       scope_widened. *)
-    match
-      Workspace.claim_next_r config ~agent_name ~task_filter
-        ~allow_scope_fallback:true ()
-    with
-    | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
-      Alcotest.(check string) "claimed via widen" "task-001" task_id;
-      Alcotest.(check bool) "scope_widened flag set" true scope_widened
-    | Workspace.Claim_next_no_eligible _ ->
-      Alcotest.fail "fallback must claim the out-of-scope task, got no_eligible"
-    | _ -> Alcotest.fail "expected claim under fallback")
 ;;
 
 (* ============================================================ *)
@@ -3585,7 +3536,7 @@ let test_predecessor_terminal_accepted_and_persisted () =
     (* Todo -> Done is not a legal transition even under System authority;
        walk the task to InProgress first (this test was added by #23668
        during a compile-red main, so the invalid setup never ran). *)
-    let _ = Workspace.claim_task config ~agent_name:claude ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r
          config
@@ -4114,10 +4065,6 @@ let () =
             "claim_task_r already claimed"
             `Quick
             test_claim_task_r_already_claimed
-        ; Alcotest.test_case
-            "scope fallback claims out-of-scope when scope blocks all"
-            `Quick
-            test_scope_widen_claims_unscoped_when_scope_blocks_all
         ] )
     ; (* === GC === *)
       ( "gc"

@@ -1751,7 +1751,7 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     skills = [];
   } in
   match Masc_domain.task_claim_decision t with
-  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_available -> ()
   | Masc_domain.Claim_unavailable
       (Masc_domain.Claim_block_pending_verdict _) ->
     fail "todo task must not be blocked by a pending verdict"
@@ -1778,7 +1778,7 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     skills = [];
   } in
   match Masc_domain.task_claim_decision t with
-  | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
+  | Masc_domain.Claim_available -> ()
   | Masc_domain.Claim_unavailable
       (Masc_domain.Claim_block_pending_verdict _) ->
     fail "todo task must not be blocked by a pending verdict"
@@ -1813,60 +1813,13 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
    | Masc_domain.Claim_unavailable
        (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
      check string "verification id" "vrf-006" verification_id
-   | Masc_domain.Claim_available _
+   | Masc_domain.Claim_available
    | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
      fail "awaiting_verification must be blocked by its pending verdict");
   check bool
-    "awaiting_verification is not claim-ready"
+    "awaiting_verification is not claimable"
     false
-    (Masc_domain.task_claim_decision_is_available t);
-  match Masc_domain.task_claim_next_action t with
-  | Masc_domain.Skip_claim
-      (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
-    check string "next action verification id" "vrf-006" verification_id;
-    check bool
-      "awaiting_verification is not claimable"
-      false
-      (Masc_domain.task_claim_next_action_is_claimable t)
-  | Masc_domain.Claim_now
-  | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
-    fail "awaiting_verification must not enter the claim action"
-
-
-
-
-let test_task_claim_next_action_todo_policy_block_still_claims () =
-  (* task-1869 (#23661): a Todo task carrying a reclaim_policy stays
-     claimable. RFC-0323 G-10 (#23731) then retired the typed reclaim claim
-     gate entirely — [Claim_block_reclaim_policy] no longer exists, so the
-     only skip reason left is [Claim_block_not_todo]; this pin survives as
-     the Todo-always-claimable half. *)
-  let t : Masc_domain.task = {
-    id = "task-009";
-    title = "Operator stop";
-    description = "";
-    task_status = Masc_domain.Todo;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    created_by = None;
-    predecessor_task_id = None;
-    contract = None;
-    handoff_context = None;
-    cycle_count = 0;
-    reclaim_policy = Some Masc_domain.Block_reclaim;
-    execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = Some "operator hard stop";
-    skills = [];
-  } in
-  match Masc_domain.task_claim_next_action t with
-  | Masc_domain.Claim_now ->
-    check bool "claimable" true (Masc_domain.task_claim_next_action_is_claimable t)
-  | Masc_domain.Skip_claim
-      (Masc_domain.Claim_block_pending_verdict _) ->
-    fail "todo task should not be classified as pending verdict"
-  | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
-    fail "todo task should not be classified as not-todo"
+    (Masc_domain.task_claim_next_action_is_claimable t)
 
 (* ============================================================
    Test Runners
@@ -2173,8 +2126,6 @@ let () =
       test_case "to_yojson" `Quick test_task_to_yojson;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
-      test_case "claim next action: todo stays claimable under policy block" `Quick
-        test_task_claim_next_action_todo_policy_block_still_claims;
     ];
     "task_claim", [
       test_case "awaiting verification waits for verdict" `Quick

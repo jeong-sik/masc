@@ -52,7 +52,7 @@ type claim_resolution =
 
 let resolve_claim ~same_actor ~agent_name ~now (task : Masc_domain.task) =
   match Masc_domain.task_claim_decision_for_status task.task_status with
-  | Masc_domain.Claim_available Masc_domain.Claim_ready ->
+  | Masc_domain.Claim_available ->
     Worker_claim (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })
   | Masc_domain.Claim_unavailable
       (Masc_domain.Claim_block_pending_verdict { verification_id }) ->
@@ -85,7 +85,7 @@ let decide
   match action, task_status with
   | Masc_domain.Claim, task_status ->
     (match Masc_domain.task_claim_decision_for_status task_status with
-     | Masc_domain.Claim_available Masc_domain.Claim_ready ->
+     | Masc_domain.Claim_available ->
        ok
          ~set_current:task_id
          (Masc_domain.Claimed { assignee = agent_name; claimed_at = now })

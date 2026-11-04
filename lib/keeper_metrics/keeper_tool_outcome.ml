@@ -4,18 +4,8 @@ type t =
   | Error of { reason : string }
 
 and no_progress_reason =
-  | No_eligible_tasks of claim_scope_exclusions
   | Resource_conflict of { resource : string }
   | No_work_available
-
-and claim_scope_exclusions = {
-  scope_excluded_count : int;
-}
-
-let claim_scope_exclusions_to_json (e : claim_scope_exclusions) : Yojson.Safe.t =
-  `Assoc
-    [ "scope_excluded_count", `Int e.scope_excluded_count ]
-;;
 
 let to_json (outcome : t) : Yojson.Safe.t =
   match outcome with
@@ -23,11 +13,6 @@ let to_json (outcome : t) : Yojson.Safe.t =
   | No_progress { reason } ->
     let reason_json =
       match reason with
-      | No_eligible_tasks exclusions ->
-        `Assoc
-          [ "kind", `String "No_eligible_tasks"
-          ; "exclusions", claim_scope_exclusions_to_json exclusions
-          ]
       | Resource_conflict { resource } ->
         `Assoc [ "kind", `String "Resource_conflict"; "resource", `String resource ]
       | No_work_available -> `Assoc [ "kind", `String "No_work_available" ]
@@ -52,19 +37,6 @@ let of_json (json : Yojson.Safe.t) : t option =
        (match List.assoc_opt "reason" fields with
         | Some (`Assoc reason_fields) ->
           (match List.assoc_opt "kind" reason_fields with
-           | Some (`String "No_eligible_tasks") ->
-             (match List.assoc_opt "exclusions" reason_fields with
-              | Some (`Assoc exc_fields) ->
-                (match List.assoc_opt "scope_excluded_count" exc_fields with
-                 | Some (`Int scope_excluded_count)
-                   when scope_excluded_count >= 0 ->
-                   Some
-                     (No_progress
-                        { reason =
-                            No_eligible_tasks { scope_excluded_count }
-                        })
-                 | _ -> None)
-              | _ -> None)
            | Some (`String "Resource_conflict") ->
              (match List.assoc_opt "resource" reason_fields with
               | Some (`String resource) ->

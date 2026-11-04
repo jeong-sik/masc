@@ -51,7 +51,7 @@ required = true
 name = "notes"
 type = "string"
 description = """
-Evidence summary for submit_for_verification, or completion notes for done"""
+Evidence summary for submit_for_verification"""
 
 [[params]]
 name = "reason"
@@ -63,7 +63,7 @@ name = "handoff_context"
 type = "object"
 description = """
 Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
-actions (submit_for_verification / done / release / cancel). On \
+actions (submit_for_verification / release / cancel). On \
 action='submit_for_verification', every 'evidence_refs' entry must use \
 'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
 'note:<text>' for narrative evidence, 'board:<post-id>' for a frozen thread, or \

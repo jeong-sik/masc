@@ -303,19 +303,13 @@ val task_decode_diagnostics_is_unreadable : task_decode_diagnostics -> bool
 val task_of_yojson_with_diagnostics :
   Yojson.Safe.t -> (task * task_decode_diagnostics, string) result
 
-type task_claim_readiness =
-  | Claim_ready
-
-(** RFC-0323 G-10: the typed reclaim claim gate is retired (#23661 removed
-    the Todo producer, G-10 the Done producer). Claim blocks describe the
-    task-status fact that prevents an agent claim; [reclaim_policy] survives
-    as release/cancel data plumbing. *)
+(** The task-status fact that prevents an agent claim. *)
 type task_claim_block =
   | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
-  | Claim_available of task_claim_readiness
+  | Claim_available
   | Claim_unavailable of task_claim_block
 
 val task_claim_decision_for_status :
@@ -329,17 +323,6 @@ val task_claim_decision :
 (** Deterministic claim decision for queue/admission surfaces. An
     [AwaitingVerification] task is unavailable to agents until a completion
     authority commits its verdict. *)
-
-val task_claim_decision_is_available :
-  task -> bool
-
-type task_claim_next_action =
-  | Claim_now
-  | Skip_claim of task_claim_block
-
-val task_claim_next_action :
-  task -> task_claim_next_action
-(** Scheduler-facing claim action. *)
 
 val task_claim_next_action_is_claimable :
   task -> bool
@@ -551,13 +534,6 @@ type claim_next_result =
       ; title : string
       ; priority : int
       ; message : string
-      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string

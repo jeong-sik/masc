@@ -100,18 +100,17 @@ let with_test_workspace f =
    tool_task: done transition on nonexistent task → "[task]" on stderr
    ============================================================ *)
 
-(** handle_done with a task_id that does not exist.
-    Workspace.transition_task_r returns Error (TaskNotFound ...) and
-    the notification path fires the [task] eprintf. *)
+(** A transition on a task_id that does not exist is refused and the
+    refusal is logged with the [Task] prefix. *)
 let test_tool_task_done_nonexistent_logs () =
   with_test_workspace @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-does-not-exist-xyz");
-    ("notes", `String "");
+    ("action", `String "done");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
+    ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
   ) in
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")

@@ -432,7 +432,6 @@ let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
 let claimed_title = function
   | Masc_domain.Claim_next_claimed { title; _ } -> Some title
   | Masc_domain.Claim_next_no_unclaimed
-  | Masc_domain.Claim_next_no_eligible _
   | Masc_domain.Claim_next_error _ -> None
 ;;
 
@@ -457,30 +456,6 @@ let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun (
   let result =
     Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~hard_filter:self_excluding ()
-  in
-  assert (claimed_title result = None))
-
-(* Regression for the adversarial P1 on #25460: the self-author exclusion must
-   SURVIVE the scope fallback. The keeper auto-claim passes
-   [allow_scope_fallback:true]; a keeper whose backlog holds only its own
-   routing/report tasks has no goal-scoped task ([task_filter:(fun _ -> false)]
-   forces that here), so [claim_next_r] widens — and the widening used to drop
-   [task_filter], claiming the keeper's own task right back. With the exclusion
-   moved to [hard_filter] the widening still respects it, so the own-task is NOT
-   claimed. Reverting the exclusion back into [task_filter] turns this RED. *)
-let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
-  let ctx = make_test_ctx_with_agent "fixture-keeper" in
-  let _ =
-    Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
-      ~description:""
-  in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
-  let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
-      ~task_filter:(fun _ -> false)
-      ~hard_filter:self_excluding
-      ~allow_scope_fallback:true ()
   in
   assert (claimed_title result = None))
 
@@ -630,7 +605,6 @@ let () = test "dispatch_claim_next" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test handle_done triggers calibration logging (#3164) *)
 let () = test "handle_add_task_persists_contract" (fun () ->
   let ctx = make_test_ctx () in
   let result =
@@ -1451,7 +1425,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_completion_ga
               ] );
         ])
   in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () in
   let result =
     Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx
       (`Assoc
@@ -1560,7 +1534,7 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
                 ] );
           ])
     in
-    let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" () in
     (* A strict submit must carry evidence (#23719/#23740 strict precheck) or
        the task never reaches AwaitingVerification and this test would assert
        against the precheck error instead (main red #23901, family A). *)
@@ -1603,7 +1577,7 @@ let () = test "agent verdict verbs remain refused after terminal completion" (fu
   let ctx = make_test_ctx_with_agent "worker" in
   let verifier_ctx = { ctx with Task.Tool.agent_name = "verifier" } in
   let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"worker" ~task_id:"task-001" () in
   let _ =
     Workspace.transition_task_r
       ctx.config
@@ -1659,7 +1633,7 @@ let () = test "operator verdict path replaces verifier agent actions" (fun () ->
         (`Assoc [ ("title", `String "Verifier may approve") ])
     in
     let _ =
-      Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
+      Workspace.claim_task_r worker_ctx.config ~agent_name:"worker" ~task_id:"task-001" ()
     in
     let submit_result =
       Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ())
@@ -1749,7 +1723,7 @@ let resubmit_fixture () =
       ctx
       (`Assoc [ "title", `String "Resubmittable deliverable" ])
   in
-  let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" () in
   let first =
     submit_for_verification
       ctx
@@ -1810,7 +1784,7 @@ let held_task_ctx ~started =
       ctx
       (`Assoc [ "title", `String "Held by worker" ])
   in
-  let _ = Workspace.claim_task ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.Task.Tool.config ~agent_name:"worker" ~task_id:"task-001" () in
   if started
   then
     ignore
@@ -1958,10 +1932,10 @@ let () =
          ~goal_id
          ~title:"Complete through verification";
        ignore
-         (Workspace.claim_task
+         (Workspace.claim_task_r
             worker_ctx.config
             ~agent_name:"worker"
-            ~task_id:"task-001");
+            ~task_id:"task-001" ());
        let submit_result =
          Task.Tool.handle_transition
            ~tool_name:"test_tool"
@@ -2299,21 +2273,6 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
           = "claim_verified");
   assert (payload |> member "todo_claim" |> member "winner_actor_id" |> to_string
           = ctx.agent_name)
-)
-
-(* scope_widened is threaded from Claim_next_claimed through
-   build_claim_observation_payload into the todo_claim fragment. Assert both
-   boolean values so a regression that drops the field (or hardcodes it) is
-   caught. *)
-let () = test "claim_observation_payload_carries_scope_widened" (fun () ->
-  let open Yojson.Safe.Util in
-  let scope_widened_of b =
-    Task.Tool.build_claim_observation_payload ~now:0.0 ~agent_name:"agent-x"
-      ~task_id:"task-001" ~scope_widened:b
-    |> member "todo_claim" |> member "scope_widened" |> to_bool
-  in
-  assert (scope_widened_of true = true);
-  assert (scope_widened_of false = false)
 )
 
 let () =
@@ -2744,24 +2703,12 @@ let () = test "transition_rejects_caller_controlled_agent_name" (fun () ->
        "Unknown argument(s): agent_name")
 )
 
-(* Test handle_done returns owner guidance when another agent owns the task *)
-let () = test "handle_done_owned_by_other_guidance" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "currently owned by other-agent")
-)
-
-(* Test handle_done on a todo task reports typed state without choosing a tool. *)
-let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
+(* Test the done action on a todo task reports typed state without choosing a tool. *)
+let () = test "transition_done_todo_rejection_is_tool-neutral" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Todo test")]) in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "still todo");
@@ -2777,11 +2724,11 @@ let () = test "handle_done_todo_rejection_is_tool-neutral" (fun () ->
   assert (Json_util.assoc_member_opt "alternatives" data = None)
 )
 
-(* Test handle_done reports already-done guidance instead of generic not-claimed *)
-let () = test "handle_done_already_done_guidance" (fun () ->
+(* Test the done action reports already-done guidance instead of generic not-claimed *)
+let () = test "transition_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () in
   let _ =
     Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
       ~task_id:"task-001" ~action:Masc_domain.Start ()
@@ -2800,19 +2747,19 @@ let () = test "handle_done_already_done_guidance" (fun () ->
       ()
   in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "already done by other-agent")
 )
 
-(* Test handle_done reports cancelled-task guidance instead of generic not-claimed *)
-let () = test "handle_done_cancelled_guidance" (fun () ->
+(* Test the done action reports cancelled-task guidance instead of generic not-claimed *)
+let () = test "transition_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("title", `String "Cancelled test")]) in
   let _ = Workspace.transition_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"stop" () in
   let result =
-    Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx (`Assoc [("task_id", `String "task-001"); ("action", `String "done")])
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "was cancelled by test-agent")

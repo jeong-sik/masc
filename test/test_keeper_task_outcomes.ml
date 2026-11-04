@@ -88,7 +88,7 @@ let test_keeper_broadcast_forwards_typed_cache_signal () =
             ~title:"Terminal cache fixture"
             ~priority:1
             ~description:"");
-       ignore (Masc.Workspace.claim_task config ~agent_name:subject ~task_id:"task-001");
+       ignore (Masc.Workspace.claim_task_r config ~agent_name:subject ~task_id:"task-001" ());
        let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
        let terminal_backlog =
          { backlog with

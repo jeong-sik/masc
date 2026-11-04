@@ -194,10 +194,10 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
            ~priority:3
            ~description:"");
       ignore
-        (Masc.Workspace.claim_task
+        (Masc.Workspace.claim_task_r
            config
            ~agent_name:fixture.agent_name
-           ~task_id:"task-001");
+           ~task_id:"task-001" ());
       let result =
         Cases.execute_tool
           fixture

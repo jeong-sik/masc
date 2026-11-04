@@ -558,7 +558,7 @@ let () =
     let ctx = make_test_ctx () in
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     let _ = Workspace.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok";
     let args = `Assoc [] in
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
@@ -626,7 +626,7 @@ let () =
       let actual_name = Workspace.resolve_agent_name ctx.config "test-agent" in
       ignore
         (Workspace.add_task ctx.config ~title:"Awaiting verifier" ~priority:2 ~description:"");
-      ignore (Workspace.claim_task ctx.config ~agent_name:actual_name ~task_id:"task-001");
+      ignore (Workspace.claim_task_r ctx.config ~agent_name:actual_name ~task_id:"task-001" ());
       (match
          Workspace.transition_task_r
            ctx.config
@@ -672,7 +672,7 @@ let () =
     let _ =
       Workspace.add_task ctx.config ~title:"Completed elsewhere" ~priority:2 ~description:""
     in
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok";
     let actual_name = actual_test_agent_name ctx.config in
     write_agent_state ctx.config actual_name (fun agent ->
@@ -701,7 +701,7 @@ let () =
       (Workspace.add_task ctx.config ~title:"Live assignment" ~priority:2 ~description:"");
     ignore
       (Workspace.add_task ctx.config ~title:"Old registry focus" ~priority:2 ~description:"");
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     let actual_name = actual_test_agent_name ctx.config in
     write_agent_state ctx.config actual_name (fun agent ->
       { agent with status = Masc_domain.Busy; current_task = Some "task-002" });
@@ -823,7 +823,7 @@ let () =
     let _ =
       Workspace.add_task ctx.config ~title:"Secondary lane" ~priority:2 ~description:""
     in
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     let actual_name = actual_test_agent_name ctx.config in
     force_claim_task ctx.config ~agent_name:actual_name ~task_id:"task-002";
     set_current_task_ok ctx.config ~task_id:"task-002";
@@ -880,7 +880,7 @@ let () =
     ignore (Workspace.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
     ignore
       (Workspace.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     set_current_task_ok ctx.config ~task_id:"task-002";
     match
       Tool_workspace.dispatch
@@ -922,7 +922,7 @@ let () =
     ignore (Workspace.add_task ctx.config ~title:"Owned task" ~priority:3 ~description:"");
     ignore
       (Workspace.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
-    ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+    ignore (Workspace.claim_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ());
     set_current_task_ok ctx.config ~task_id:"task-002";
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some r -> let result = status_message r in let success = Tool_result.is_success r in

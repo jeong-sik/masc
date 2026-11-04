@@ -18382,6 +18382,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_keeper_turns_read state;
        owe_verification_read state;
        owe_repositories_read state;
+       (* A row written while the feed was gone has no push left to say so. *)
+       Option.iter (fun (keeper : keeper) -> owe_keeper_log_read state keeper.k_name)
+         (keeper_log_target state);
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;

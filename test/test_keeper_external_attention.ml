@@ -902,21 +902,21 @@ let test_cursor_observation_preserves_complete_preparation () =
    | _ -> Alcotest.fail "cursor observation envelope missing")
 ;;
 
-let test_prescan_refuses_malformed_over_capacity_backlog () =
+let test_prescan_refuses_selectable_over_capacity_before_tail () =
   with_temp_base "keeper-counterpart-capacity-malformed" @@ fun base_path ->
   let module Sources = Masc.Keeper_librarian_input_sources in
   let keeper_name = "capacity-malformed" in
   let path = A.attention_path ~base_path ~keeper_name in
-  (* 100 decodable rows followed by garbage: the prescan must refuse on row
-     count alone without surfacing a decode error. *)
-  let valid =
-    item ~keeper_name ~dedupe_key:"cap-valid" ~received_at:10. ()
+  (* 4200 selectable rows followed by garbage: the prescan must refuse on the
+     row cap before reaching the tail, so no decode error surfaces. *)
+  let valid i =
+    item ~keeper_name ~dedupe_key:(Printf.sprintf "cap-valid-%d" i) ~received_at:10. ()
     |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
   in
   let garbage = String.make 120 'x' ^ "\n" in
-  let lines = Buffer.create (512 * 1024) in
-  for _ = 1 to 100 do Buffer.add_string lines valid done;
-  for _ = 1 to 4200 do Buffer.add_string lines garbage done;
+  let lines = Buffer.create (4 * 1024 * 1024) in
+  for i = 1 to 4200 do Buffer.add_string lines (valid i) done;
+  for _ = 1 to 100 do Buffer.add_string lines garbage done;
   write_file path (Buffer.contents lines);
   match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
   | Ok _ -> Alcotest.fail "over-capacity backlog with malformed tail was captured"
@@ -928,7 +928,7 @@ let test_prescan_refuses_malformed_over_capacity_backlog () =
     Alcotest.(check int) "row cap" 4096 row_cap;
     Alcotest.(check int) "byte cap" 1048576 byte_cap
   | Error error ->
-    Alcotest.failf "prescan did not fire before decoding: %s" (Sources.read_error_to_string error)
+    Alcotest.failf "prescan did not fire before the tail: %s" (Sources.read_error_to_string error)
 
 let test_selection_refuses_rows_over_bytes_unmeasured () =
   with_temp_base "keeper-counterpart-capacity-selection" @@ fun base_path ->
@@ -977,10 +977,15 @@ let test_prescan_refuses_bytes_over_rows_under_backlog () =
   let module Sources = Masc.Keeper_librarian_input_sources in
   let keeper_name = "capacity-bytes" in
   let path = A.attention_path ~base_path ~keeper_name in
-  (* 100 fat rows: past the byte cap while staying under the row cap. *)
-  let garbage = String.make 20000 'z' ^ "\n" in
-  let lines = Buffer.create (2 * 1024 * 1024) in
-  for _ = 1 to 100 do Buffer.add_string lines garbage done;
+  (* 100 fat but decodable rows: past the byte cap on the rendered
+     projection while staying under the row cap. *)
+  let fat i =
+    item ~keeper_name ~dedupe_key:(Printf.sprintf "cap-fat-%d" i) ~received_at:10.
+      ~preview:(String.make 20000 'z') ()
+    |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
+  in
+  let lines = Buffer.create (3 * 1024 * 1024) in
+  for i = 1 to 100 do Buffer.add_string lines (fat i) done;
   write_file path (Buffer.contents lines);
   match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
   | Ok _ -> Alcotest.fail "bytes-over backlog was captured"
@@ -997,25 +1002,34 @@ let test_at_cap_backlog_reaches_strict_reader () =
   let module Sources = Masc.Keeper_librarian_input_sources in
   let keeper_name = "capacity-boundary" in
   let path = A.attention_path ~base_path ~keeper_name in
-  let garbage = String.make 100 'w' ^ "\n" in
+  let valid i =
+    item ~keeper_name ~dedupe_key:(Printf.sprintf "cap-at-%d" i) ~received_at:10. ~preview:"c" ()
+    |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
+  in
+  (* Blank lines ride along: both the prescan and the strict loader skip
+     them, so cursor offsets stay aligned. *)
   let write_rows count =
-    let lines = Buffer.create (count * 110) in
-    for _ = 1 to count do Buffer.add_string lines garbage done;
+    let lines = Buffer.create (count * 500) in
+    for i = 1 to count do
+      Buffer.add_string lines (valid i);
+      if i mod 100 = 0 then Buffer.add_char lines '\n'
+    done;
     write_file path (Buffer.contents lines)
   in
   let capture () =
     Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20.
   in
-  (* Exactly 4096 rows past the cursor is within cap: the prescan passes and
-     the strict pipeline starts (the garbage then fails strict decoding, and
-     the chat store was never written, so any non-capacity error proves the
-     prescan did not refuse). *)
+  (* Exactly 4096 selectable rows is within cap: the prescan passes and the
+     capture succeeds (the chat store was never written, which reads as no
+     chat rows). *)
   write_rows 4096;
   (match capture () with
-  | Ok _ -> Alcotest.fail "malformed at-cap backlog was captured"
-  | Error (Sources.Counterpart_backlog_over_capacity _) ->
-    Alcotest.fail "prescan refused an exactly-at-cap backlog"
-  | Error _ -> ());
+  | Ok snapshot ->
+    Alcotest.(check int)
+      "at-cap capture selects every row" 4096
+      (List.length (Sources.counterpart_observations snapshot))
+  | Error error ->
+    Alcotest.failf "prescan refused an exactly-at-cap backlog: %s" (Sources.read_error_to_string error));
   (* One more row trips the prescan. *)
   write_rows 4097;
   (match capture () with
@@ -1023,6 +1037,60 @@ let test_at_cap_backlog_reaches_strict_reader () =
   | Error (Sources.Counterpart_backlog_over_capacity _) -> ()
   | Error error ->
     Alcotest.failf "prescan did not fire past the cap: %s" (Sources.read_error_to_string error))
+
+let test_post_before_backlog_does_not_block_selection () =
+  with_temp_base "keeper-counterpart-capacity-post-before" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let keeper_name = "capacity-post-before" in
+  let path = A.attention_path ~base_path ~keeper_name in
+  (* 10 selectable rows followed by 5000 rows past [before]: rows this pass
+     cannot select must not trip the prescan, so a lagging Keeper keeps
+     draining its backlog turn by turn. *)
+  let row i received_at =
+    item ~keeper_name ~dedupe_key:(Printf.sprintf "cap-pb-%d" i) ~received_at ~preview:"c" ()
+    |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
+  in
+  let lines = Buffer.create (3 * 1024 * 1024) in
+  for i = 1 to 10 do Buffer.add_string lines (row i 10.) done;
+  for i = 11 to 5010 do Buffer.add_string lines (row i 30.) done;
+  write_file path (Buffer.contents lines);
+  Alcotest.(check bool)
+    "fixture exceeds the prescan fast path" true
+    ((Unix.stat path).st_size > 262144);
+  match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
+  | Ok snapshot ->
+    Alcotest.(check int)
+      "only rows within the window are selected" 10
+      (List.length (Sources.counterpart_observations snapshot))
+  | Error error ->
+    Alcotest.failf "post-before rows blocked selection: %s" (Sources.read_error_to_string error)
+
+let test_torn_tail_fails_open_to_strict_reader () =
+  with_temp_base "keeper-counterpart-capacity-torn-tail" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let keeper_name = "capacity-torn-tail" in
+  let path = A.attention_path ~base_path ~keeper_name in
+  (* 700 small rows plus a torn final fragment without a trailing newline:
+     the prescan must fail open so the strict loader reports the torn tail
+     authoritatively instead of a capacity refusal. *)
+  let row i =
+    item ~keeper_name ~dedupe_key:(Printf.sprintf "cap-tt-%d" i) ~received_at:10. ~preview:"c" ()
+    |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
+  in
+  let lines = Buffer.create (512 * 1024) in
+  for i = 1 to 700 do Buffer.add_string lines (row i) done;
+  Buffer.add_string lines "{";
+  write_file path (Buffer.contents lines);
+  Alcotest.(check bool)
+    "fixture exceeds the prescan fast path" true
+    ((Unix.stat path).st_size > 262144);
+  match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
+  | Ok _ -> Alcotest.fail "torn tail backlog was captured"
+  | Error (Sources.Counterpart_backlog_over_capacity _) ->
+    Alcotest.fail "prescan refused a torn tail instead of failing open"
+  | Error (Sources.External_attention_unreadable _) -> ()
+  | Error error ->
+    Alcotest.failf "wrong error for torn tail: %s" (Sources.read_error_to_string error)
 
 let () =
   Alcotest.run "keeper_external_attention"
@@ -1070,13 +1138,17 @@ let () =
             test_discord_channel_and_thread_conversation_ids_stay_distinct;
         ] );
       ( "capacity",
-        [ Alcotest.test_case "prescan refuses over-capacity backlog before decoding" `Quick
-            test_prescan_refuses_malformed_over_capacity_backlog;
+        [ Alcotest.test_case "prescan refuses selectable over-capacity backlog before the tail" `Quick
+            test_prescan_refuses_selectable_over_capacity_before_tail;
           Alcotest.test_case "rows-over selection refuses with bytes unmeasured" `Quick
             test_selection_refuses_rows_over_bytes_unmeasured;
           Alcotest.test_case "bytes-over backlog refuses while rows stay under cap" `Quick
             test_prescan_refuses_bytes_over_rows_under_backlog;
           Alcotest.test_case "at-cap backlog reaches the strict reader" `Quick
             test_at_cap_backlog_reaches_strict_reader;
+          Alcotest.test_case "post-before backlog does not block selection" `Quick
+            test_post_before_backlog_does_not_block_selection;
+          Alcotest.test_case "torn tail fails open to the strict reader" `Quick
+            test_torn_tail_fails_open_to_strict_reader;
         ] );
     ]

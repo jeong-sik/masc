@@ -27,7 +27,7 @@ let read_error_to_string = function
   | Counterpart_backlog_over_capacity
       { path; rows_past_cursor; bytes_past_cursor; row_cap; byte_cap } ->
     Printf.sprintf
-      "counterpart backlog over capacity: %s has %d rows past cursor (%d bytes), caps are %d rows / %d bytes"
+      "counterpart backlog over capacity: %s has %d selectable rows past cursor (%d rendered bytes), caps are %d rows / %d bytes"
       path rows_past_cursor bytes_past_cursor row_cap byte_cap
   | Counterpart_selection_over_capacity { rows; bytes; row_cap; byte_cap } ->
     (match bytes with
@@ -225,16 +225,26 @@ let counterpart_row_cap = 4096
 let counterpart_byte_cap = 1_048_576
 let counterpart_prescan_fast_path_bytes = 262_144
 
-(* Streaming pre-read gate over the external attention log. Counts rows and
-   their exact consumed bytes past the admission cursor without decoding
-   rows, stopping early once a cap is exceeded. Small files skip the scan:
-   the strict load right below stays cheap. Any I/O doubt fails open to the
-   strict load, which reports the authoritative error; only a proven
-   over-capacity backlog refuses. The prescan counts every row including
-   undecodable ones, so a log with corrupt rows can refuse on row count
-   before the strict decoder runs; the strict load would fail on the first
-   malformed line instead. *)
-let prescan_external_backlog ~path ~cursor =
+(* Streaming pre-read gate over the external attention log. Mirrors the
+   selection in [selected_external_with_offsets] without building it: skips
+   the first [cursor] decoded rows (blank lines skipped exactly like the
+   strict loader, so cursor offsets align), then counts only rows this pass
+   would select — [received_at <= before] with an early stop at the first row
+   past [before] when a cursor is set ([List.take_while] in the selection), or
+   [in_interval] over every row without a cursor. Bytes are the rendered
+   prompt projection ([Keeper_counterpart_observation.to_yojson] per counted
+   row plus list framing), the same basis the post-selection backstop below
+   measures, so a refusal proves the selectable prefix alone exceeds a cap.
+   Small files skip the scan: the strict load right below stays cheap. Any
+   decode or I/O doubt fails open to the strict load, which reports the
+   authoritative error (malformed line, torn tail, scope mismatch); only a
+   proven over-capacity selectable prefix refuses, and the remainder of the
+   file is not read past the refusal or the [before] boundary. A refusal stops
+   the same wake like other capacity refusals ([publication_unfinished]);
+   rows past [before] never cause it, so a lagging Keeper keeps draining its
+   backlog turn by turn while the selectable prefix stays within caps. *)
+let prescan_external_backlog ~path ~external_after ~after ~before =
+  let cursor = match external_after with None -> 0 | Some cursor -> cursor in
   if cursor < 0
   then Ok ()
   else (
@@ -250,19 +260,53 @@ let prescan_external_backlog ~path ~cursor =
           if small
           then Ok ()
           else (
+            let decode_line line =
+              match Yojson.Safe.from_string line with
+              | json -> (
+                match Attention.event_of_json json with
+                | Ok (Attention.Recorded (item : Attention.item)) ->
+                  let observation = Keeper_counterpart_observation.of_external_attention item in
+                  let rendered =
+                    String.length
+                      (Yojson.Safe.to_string
+                         (Keeper_counterpart_observation.to_yojson observation))
+                  in
+                  Some (item.received_at, rendered)
+                | Error _ -> None)
+              | exception Yojson.Json_error _ -> None
+            in
             let rows_seen = ref 0 in
-            let bytes_past = ref 0 in
+            let rows_counted = ref 0 in
+            let bytes_sum = ref 0 in
             let over = ref None in
+            let stopped = ref false in
             (try
-               while Option.is_none !over do
-                 let pos_before = pos_in ic in
-                 let _line = input_line ic in
-                 let consumed = pos_in ic - pos_before in
-                 rows_seen := !rows_seen + 1;
-                 if !rows_seen > cursor then bytes_past := !bytes_past + consumed;
-                 let rows_past = !rows_seen - cursor in
-                 if rows_past > counterpart_row_cap || !bytes_past > counterpart_byte_cap
-                 then over := Some (rows_past, !bytes_past)
+               while Option.is_none !over && not !stopped do
+                 let line = String.trim (input_line ic) in
+                 if String.equal line ""
+                 then ()
+                 else (
+                   match decode_line line with
+                   | None -> stopped := true
+                   | Some (received_at, rendered) ->
+                     rows_seen := !rows_seen + 1;
+                     if !rows_seen > cursor
+                     then (
+                       let selected =
+                         match external_after with
+                         | None -> in_interval ~after ~before received_at
+                         | Some _ -> received_at <= before
+                       in
+                       if selected
+                       then (
+                         rows_counted := !rows_counted + 1;
+                         bytes_sum := !bytes_sum + rendered;
+                         let bytes_past = !bytes_sum + !rows_counted + 1 in
+                         if !rows_counted > counterpart_row_cap
+                         || bytes_past > counterpart_byte_cap
+                         then over := Some (!rows_counted, bytes_past))
+                       else if Option.is_some external_after
+                       then stopped := true))
                done
              with
              | End_of_file | Sys_error _ -> ());
@@ -295,10 +339,9 @@ let capture_counterparts_read
     if not enforce_capacity
     then Ok ()
     else (
-      let cursor = match external_after with None -> 0 | Some cursor -> cursor in
       prescan_external_backlog
         ~path:(Attention.attention_path ~base_path:base_dir ~keeper_name)
-        ~cursor)
+        ~external_after ~after ~before)
   in
   let* chat_rows = match after with
     | Some lower when Float.compare lower before >= 0 -> Ok []

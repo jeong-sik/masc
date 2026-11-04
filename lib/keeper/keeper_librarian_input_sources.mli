@@ -13,12 +13,16 @@ type read_error =
       ; byte_cap : int
       }
   (** A streaming prescan over the external log past the admission cursor
-      proved the backlog exceeds a capacity cap before the full strict load
-      ran. [rows_past_cursor] counts rows past the cursor and
-      [bytes_past_cursor] their exact consumed bytes (a final line without a
-      trailing newline counts without it); the remainder of the file was not
-      read. At least one of the two counts exceeds its cap. The strict load
-      never ran, so cursor validity and row decoding are still unknown. *)
+      proved the selectable prefix exceeds a capacity cap before the full
+      strict load ran. [rows_past_cursor] counts only rows this pass would
+      select past the cursor ([received_at <= before] with an early stop at
+      the first row past [before] when a cursor is set, the capture interval
+      otherwise; blank lines skipped like the strict loader), and
+      [bytes_past_cursor] is their rendered prompt projection in bytes,
+      the same basis as [Counterpart_selection_over_capacity]. At least one
+      of the two counts exceeds its cap; the remainder of the file was not
+      read. Decode or I/O doubt fails open to the strict load instead, so
+      cursor validity and row decoding are still unknown until it runs. *)
   | Counterpart_selection_over_capacity of
       { rows : int
       ; bytes : int option

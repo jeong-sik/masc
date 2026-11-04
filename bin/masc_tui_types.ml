@@ -7089,6 +7089,29 @@ module Browser_lane_view = struct
                Some (Scene_follow_refresh {tab_id;guard;scene_view})
            | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
+  let observation_scope ?(image_open = false) ?viewport t =
+    let operation =
+      cadence_operation ?viewport:(if image_open then viewport else None) t
+    in
+    match t.selected_tab, operation with
+    | Some tab_id, Some Read_refresh ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Read }
+    | Some tab_id, Some (Scene_refresh { scene_view; scope; _ }) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Scene { scene_view; scope } }
+    | Some tab_id, Some (Scene_follow_refresh { scene_view; _ }) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Scene { scene_view; scope = None } }
+    | Some tab_id, Some (Viewport_cadence _) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Viewport }
+    | (Some _ | None),
+      (None | Some
+        ( Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+        | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+        | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+        | Viewport_cadence _ | Viewport_pointer _ )) -> None
   (* [Viewport_refresh] stays loading: the operator's own [r] key in the viewport
      launches it (bin/masc_tui.ml), [cadence_operation] never does. *)
   let yield_refresh_to_input t =
@@ -10957,6 +10980,7 @@ type state = {
   mutable observer_retry_owner: unit ref option;
   mutable observer_stream_owner: unit ref option;
   mutable observer_machine: Masc.Machine_lane.t option;
+  mutable observer_browser: Masc.Workspace_dataset_event.browser_scope option;
   (* While the server cannot be reached, booting or unconfirmed, a timer
      tries a revalidation again, waiting longer after each failure. *)
   mutable contact_retry_owner: unit ref option;
@@ -14445,6 +14469,7 @@ let suspend_workspace_readings state =
   state.observer_retry_owner <- None;
   state.observer_stream_owner <- None;
   state.observer_machine <- None;
+  state.observer_browser <- None;
   (* The withdrawal cancelled the contact timer with every other job. *)
   state.contact_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
@@ -20093,6 +20118,7 @@ let create_state
   observer_retry_owner = None;
   observer_stream_owner = None;
   observer_machine = None;
+  observer_browser = None;
   contact_retry_owner = None;
   contact_failures = 0;
   observer_recovery_owner = None;
@@ -20200,6 +20226,11 @@ let observer_machine_of_state state =
      && state.machine_interaction = Control_machine
   then Some state.machine_source
   else None
+
+let observer_browser_scope_of_state state =
+  Option.bind (browser_lane_on_screen state) (fun view ->
+    Browser_lane_view.observation_scope ~image_open:state.image_open
+      ?viewport:(Option.map fst state.browser_viewport) view)
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =

@@ -753,6 +753,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
         (match machine, sse_kind with
          | Some _, (Sse.Agent_stream | Sse.Presence) ->
              Error "the machine query requires an observer stream"
+         | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
          | (Some _ | None), Sse.Observer -> Ok machine)
   in
   let browser =
@@ -762,6 +763,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
         (match browser, sse_kind with
          | Some _, (Sse.Agent_stream | Sse.Presence) ->
              Error "a browser query requires an observer stream"
+         | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
          | (Some _ | None), Sse.Observer -> Ok browser)
   in
   match machine, browser with

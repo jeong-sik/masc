@@ -8090,14 +8090,12 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
   | Masc.Workspace_dataset_event.Machine_live { machine } -> owe_machine_live_read state machine
-  | Masc.Workspace_dataset_event.Browser_observation _ -> ()
+  | Masc.Workspace_dataset_event.Browser_observation observation ->
+      if Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope then
+        state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health _ ->
       state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
-      (match dataset with
-       | Masc.Workspace_dataset_event.Lanes when Option.is_some (browser_lane_on_screen state) ->
-           state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
-       | Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _ -> ());
       let module Decision = Masc_tui_lane_read_decision in
       let addon = Option.bind state.lane_addons (fun (view : Masc_tui_lane_addons.t) ->
         match view.screen with
@@ -16896,6 +16894,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.observer_retry_owner <- None;
   state.observer_stream_owner <- None;
   state.observer_machine <- None;
+  state.observer_browser <- None;
   state.contact_retry_owner <- None;
   state.observer_recovery_owner <- None;
   state.observer_scope_binding <- Observer_scope_unbound;
@@ -18632,8 +18631,10 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
   in
   let owner = ref () in
   let machine = Masc_tui_types.observer_machine_of_state state in
+  let browser = Masc_tui_types.observer_browser_scope_of_state state in
   state.observer_stream_owner <- Some owner;
   state.observer_machine <- machine;
+  state.observer_browser <- browser;
   state.observer_retry_owner <- None;
   state.observer <- Observer_opening;
   let session = state.mcp_session in
@@ -18669,7 +18670,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events_with_machine ~machine ~browser:None ~clock
+                Masc_tui_http.observe_runtime_events_with_machine ~machine ~browser ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
                   ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
                   ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)
@@ -18706,12 +18707,14 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
     | Workspace_identity_match | Workspace_identity_mismatch _), _ -> ()
 
 let reconcile_observer_machine state ~host ~port ~mailbox =
-  let wanted = Masc_tui_types.observer_machine_of_state state in
-  if wanted <> state.observer_machine then begin
+  let machine = Masc_tui_types.observer_machine_of_state state in
+  let browser = Masc_tui_types.observer_browser_scope_of_state state in
+  if machine <> state.observer_machine || browser <> state.observer_browser then begin
     Option.iter (fun owner -> Masc_tui_workspace_job.cancel_observation state ~key:owner)
       state.observer_stream_owner;
     state.observer_stream_owner <- None;
     state.observer_machine <- None;
+    state.observer_browser <- None;
     state.observer_retry_owner <- None;
     state.observer <- Observer_off;
     open_observer_if_due state ~retry_closed:false ~host ~port ~mailbox
@@ -23602,6 +23605,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_async_protocol.observer_close_owned state owner then begin
       state.observer_stream_owner <- None;
       state.observer_machine <- None;
+      state.observer_browser <- None;
       state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
       let was_opening = state.observer = Observer_opening in
       let reason =

@@ -710,7 +710,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
-          (Masc.Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
+          (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Keeper_event_queue_changed { keeper } ->

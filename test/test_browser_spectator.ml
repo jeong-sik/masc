@@ -9,14 +9,14 @@ let revision_a = String.make 64 'a'
 let revision_b = String.make 64 'b'
 
 let viewport client_id : Dataset.browser_scope =
-  { source = Masc.Browser_lane.Lane_name.Live; client_id = Some client_id; tab_id = 2
+  { source = Browser_lane.Lane_name.Live; client_id = Some client_id; tab_id = 2
   ; view = Dataset.Viewport }
 
 let region : Dataset.browser_scope =
-  { source = Masc.Browser_lane.Lane_name.Live; client_id = Some client_a; tab_id = 7
+  { source = Browser_lane.Lane_name.Live; client_id = Some client_a; tab_id = 7
   ; view = Dataset.Scene
-      { scene_view = Masc.Browser_lane.Regions
-      ; scope = Some { Masc.Browser_lane.document_id = "document-a"; node_id = "region-4" } } }
+      { scene_view = Browser_lane.Regions
+      ; scope = Some { Browser_lane.document_id = "document-a"; node_id = "region-4" } } }
 
 let browser_event (scope : Dataset.browser_scope) revision =
   Dataset.browser_scope_fields scope @ [ "revision", `String revision ]
@@ -36,7 +36,7 @@ let test_scope_round_trip_and_strict_identity () =
       | Ok (Some actual) -> check bool "the observer query preserves the same scope" true (actual = scope)
       | Ok None | Error _ -> fail "a browser observer lost its scope")
     [ viewport client_a; region
-    ; { source = Masc.Browser_lane.Lane_name.Automation; client_id = None; tab_id = 4; view = Dataset.Read } ];
+    ; { source = Browser_lane.Lane_name.Automation; client_id = None; tab_id = 4; view = Dataset.Read } ];
   (match Spectator.scope_of_request_target "/mcp?sse_kind=observer" with
    | Ok None -> ()
    | Ok (Some _) | Error _ -> fail "an ordinary observer acquired a browser watcher");
@@ -50,7 +50,7 @@ let test_scope_round_trip_and_strict_identity () =
     ; ("tabId", `String "2")
       :: List.remove_assoc "tabId" (browser_event (viewport client_a) revision_a)
     ; ("clientId", `String client_a)
-      :: browser_event { source = Masc.Browser_lane.Lane_name.Automation
+      :: browser_event { source = Browser_lane.Lane_name.Automation
                        ; client_id = None; tab_id = 4; view = Dataset.Read } revision_a
     ; ("revision", `String "short")
       :: List.remove_assoc "revision" (browser_event (viewport client_a) revision_a) ]

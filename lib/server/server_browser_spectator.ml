@@ -120,9 +120,6 @@ let observe watcher payload =
            Ok (Some { Event.scope = watcher.scope; revision }))
   | _ -> Error "browser observation must be an object"
 
-let reserved_names () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-
 let read ~config scope =
   let operation host =
     match scope.Event.view with
@@ -167,5 +164,5 @@ let start ~sw ~clock ~stop_promise ~scope ~config =
       in
       ignore
         (Eio.Fiber.first
-           (fun () -> sample (); `Sampling_stopped)
+           (fun () -> sample ())
            (fun () -> Eio.Promise.await stop_promise; `Observer_closed)))

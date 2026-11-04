@@ -126,7 +126,7 @@ type activation = private
 
 type t
 
-type summary =
+type summary = Keeper_skill_activation_types.summary =
   { instruction_invocations : int
   ; skill_bodies_served : int
   ; skill_resources_served : int
@@ -140,14 +140,14 @@ type summary =
   ; invalid_transitions : int
   }
 
-type summary_scope =
+type summary_scope = Keeper_skill_activation_types.summary_scope =
   { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
   ; invocation_runtime_id : string
   ; reference : Skill_reference.t
   }
 
-type runtime_count =
+type runtime_count = Keeper_skill_activation_types.runtime_count =
   { runtime_id : string
   ; count : int
   }

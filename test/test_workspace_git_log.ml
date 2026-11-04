@@ -1,6 +1,7 @@
 (* The /api/v1/git/log row format, pinned at the parser. *)
 
 module W = Server_routes_http_routes_workspace.For_testing_log
+module D = Server_routes_http_routes_workspace.For_testing_diff
 
 let check_json = Alcotest.(check string)
 
@@ -73,6 +74,46 @@ let test_every_branch_state_decodes_in_every_scope () =
            }))
     scopes
 
+let args ?base_ref ?commit () = D.git_args_of_params ~base_ref ~commit ~rel:"lib/a.ml"
+
+let test_commit_names_are_lowercase_hex_of_a_usable_length () =
+  List.iter
+    (fun (label, value, expected) ->
+      Alcotest.(check bool) label expected (D.valid_commit_hash value))
+    [ "short abbreviation", "abc1234", true
+    ; "four digits", "abcd", true
+    ; "a SHA-1 name", String.make 40 'a', true
+    ; "a SHA-256 name", String.make 64 '0', true
+    ; "three digits are too ambiguous", "abc", false
+    ; "past a SHA-256 name", String.make 65 'a', false
+    ; "uppercase", "ABCD1234", false
+    ; "a revision expression", "abcd1234^", false
+    ; "an option", "--output=x", false
+    ; "a branch name", "main", false
+    ; "empty", "", false
+    ]
+
+let test_diff_query_picks_exactly_one_target () =
+  Alcotest.(check (result (list string) string)) "no parameter reads the working tree"
+    (Ok [ "diff"; "HEAD"; "--"; "lib/a.ml" ])
+    (args ());
+  Alcotest.(check (result (list string) string)) "base_ref reads the working tree"
+    (Ok [ "diff"; "origin/main"; "--"; "lib/a.ml" ])
+    (args ~base_ref:"origin/main" ());
+  Alcotest.(check (result (list string) string)) "commit reads that commit's own change"
+    (Ok
+       [ "show"; "--format="; "--diff-merges=first-parent"; "abc1234"; "--"
+       ; "lib/a.ml" ])
+    (args ~commit:"abc1234" ())
+
+let test_diff_query_refuses_what_it_cannot_place () =
+  Alcotest.(check bool) "commit with base_ref is refused" true
+    (Result.is_error (args ~base_ref:"HEAD" ~commit:"abc1234" ()));
+  Alcotest.(check bool) "an invalid commit is refused" true
+    (Result.is_error (args ~commit:"HEAD~1" ()));
+  Alcotest.(check bool) "an option-shaped base_ref is refused" true
+    (Result.is_error (args ~base_ref:"-L1,9" ()))
+
 let () =
   Alcotest.run "workspace-git-log"
     [ ( "rows"
@@ -80,5 +121,17 @@ let () =
             test_a_row_splits_on_the_first_three_tabs
         ; Alcotest.test_case "a malformed row is dropped" `Quick
             test_a_malformed_row_is_dropped
+        ] )
+    ; ( "git changes snapshot"
+      , [ Alcotest.test_case "every branch state decodes in every scope" `Quick
+            test_every_branch_state_decodes_in_every_scope
+        ] )
+    ; ( "diff query"
+      , [ Alcotest.test_case "commit names are lowercase hex" `Quick
+            test_commit_names_are_lowercase_hex_of_a_usable_length
+        ; Alcotest.test_case "exactly one target" `Quick
+            test_diff_query_picks_exactly_one_target
+        ; Alcotest.test_case "refuses what it cannot place" `Quick
+            test_diff_query_refuses_what_it_cannot_place
         ] )
     ]

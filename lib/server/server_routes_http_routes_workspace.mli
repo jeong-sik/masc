@@ -242,6 +242,24 @@ module For_testing_log : sig
   val git_log_row_of_line : string -> Yojson.Safe.t option
 end
 
+module For_testing_diff : sig
+  (** White-box helpers for the [/api/v1/git/diff] query contract. Not part
+      of the stable/public workspace API. *)
+
+  (** Lowercase hex, 4 to 64 digits. *)
+  val valid_commit_hash : string -> bool
+
+  (** [git_args_of_params ~base_ref ~commit ~rel] is the Git argument list the
+      route runs for the optional [base_ref] and [commit] query parameters, or
+      the message of the 400 it answers. [commit] and [base_ref] are exclusive;
+      neither means the working tree against [HEAD]. *)
+  val git_args_of_params
+    :  base_ref:string option
+    -> commit:string option
+    -> rel:string
+    -> (string list, string) result
+end
+
 module For_testing_blame : sig
   (** White-box helpers for [git blame --porcelain] parsing regression
       tests. Not part of the stable/public workspace API. *)

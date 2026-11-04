@@ -613,6 +613,43 @@ let valid_git_ref s =
        || c = '{' || c = '}')
        s
 
+(* Object names as [git log --pretty=%h] prints them: lowercase hex, at least
+   four digits so a short name still has a chance of being unique, at most the
+   64 digits of a SHA-256 name. Narrower than [valid_git_ref] on purpose: a
+   commit is never a revision expression. *)
+let valid_commit_hash s =
+  let n = String.length s in
+  n >= 4 && n <= 64
+  && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) s
+
+(* What [/api/v1/git/diff] compares. [Worktree_against] is the working tree
+   against a revision. [Commit_changes] is what one commit itself changed,
+   against its first parent (against nothing for a root commit). *)
+type git_diff_target =
+  | Worktree_against of string
+  | Commit_changes of string
+
+let git_diff_target_of_params ~base_ref ~commit =
+  match base_ref, commit with
+  | Some _, Some _ -> Error "commit cannot be combined with base_ref"
+  | None, Some commit ->
+      if valid_commit_hash commit then Ok (Commit_changes commit)
+      else Error "Invalid commit"
+  | Some base_ref, None ->
+      if valid_git_ref base_ref then Ok (Worktree_against base_ref)
+      else Error "Invalid base_ref"
+  | None, None -> Ok (Worktree_against "HEAD")
+
+let git_diff_target_key = function
+  | Worktree_against base_ref -> "base:" ^ base_ref
+  | Commit_changes commit -> "commit:" ^ commit
+
+let git_diff_args ~target ~rel =
+  match target with
+  | Worktree_against base_ref -> [ "diff"; base_ref; "--"; rel ]
+  | Commit_changes commit ->
+      [ "show"; "--format="; "--diff-merges=first-parent"; commit; "--"; rel ]
+
 (* --- Recursive file tree --- *)
 
 let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
@@ -1018,6 +1055,15 @@ let git_log_row_of_line line =
 
 module For_testing_log = struct
   let git_log_row_of_line = git_log_row_of_line
+end
+
+module For_testing_diff = struct
+  let valid_commit_hash = valid_commit_hash
+
+  let git_args_of_params ~base_ref ~commit ~rel =
+    Result.map
+      (fun target -> git_diff_args ~target ~rel)
+      (git_diff_target_of_params ~base_ref ~commit)
 end
 
 (* --- Diff parsing --- *)
@@ -1676,15 +1722,14 @@ let add_routes router =
            if file_path = "" then
              json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            else
-             let base_ref =
-               match Uri.get_query_param uri "base_ref" with
-               | Some r -> r
-               | None -> "HEAD"
-             in
-             if not (valid_git_ref base_ref) then
-               json_response ~status:`Bad_request request reqd
-                 (json_error "Invalid base_ref")
-             else
+             match
+               git_diff_target_of_params
+                 ~base_ref:(Uri.get_query_param uri "base_ref")
+                 ~commit:(Uri.get_query_param uri "commit")
+             with
+             | Error message ->
+               json_response ~status:`Bad_request request reqd (json_error message)
+             | Ok target ->
              (match resolve_workspace_file base file_path with
               | Error _ ->
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
@@ -1702,7 +1747,7 @@ let add_routes router =
                   Printf.sprintf "git:diff:%s:%s:%s:%s"
                     repo_root
                     (source_to_string source)
-                    base_ref
+                    (git_diff_target_key target)
                     rel
                 in
                 let payload =
@@ -1710,7 +1755,7 @@ let add_routes router =
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                     (Pool_work.io ~name:__FUNCTION__ (fun () ->
                        match git_run_lines_or_error ~cwd:repo_root
-                               ["diff"; base_ref; "--"; rel]
+                               (git_diff_args ~target ~rel)
                        with
                        | Error _ ->
                          observe_workspace_route_failure

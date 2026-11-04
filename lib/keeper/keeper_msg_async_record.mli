@@ -16,4 +16,4 @@ val same_entry_record : entry -> entry -> bool
 val normalize_request_context : (string * Yojson.Safe.t) list option -> ((string * Yojson.Safe.t) list option, string) result
 val same_request_identity : entry -> entry -> bool
 val entry_of_record_json : base_path:string -> request_id:string -> Yojson.Safe.t -> (entry, string) result
-val entry_to_json : now:float -> entry -> Yojson.Safe.t
+val entry_to_fields : now:float -> entry -> (string * Yojson.Safe.t) list

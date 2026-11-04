@@ -2319,13 +2319,16 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
   Ok entries
 ;;
 
-let entry_to_json (e : entry) =
+let entry_to_fields (e : entry) =
   let now =
     match e.completed_at with
     | Some completed_at -> completed_at
     | None -> Time_compat.now ()
   in
-  Keeper_msg_async_record.entry_to_json ~now e
+  Keeper_msg_async_record.entry_to_fields ~now e
+;;
+
+let entry_to_json (e : entry) = `Assoc (entry_to_fields e)
 ;;
 
 let cancel_disk_record ~base_path ~caller ~request_id =

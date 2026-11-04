@@ -9026,17 +9026,6 @@ let note_pushed_reads_started state (needs : Masc_tui_types.surface_needs) =
         set_pushed_read state source (Masc_tui_owed_read.started (pushed_read state source)))
     Masc_tui_types.pushed_sources
 
-(* The cadence leaves a pushed source out only while it owes nothing. A full
-   bundle supersedes the answers of a scoped read already out, so a source
-   with a read in flight or due rides the cadence's bundle instead of being
-   dropped by it; that bundle then holds the read. *)
-let pushed_read_rides_cadence state source =
-  let read = pushed_read state source in
-  match read with
-  | Masc_tui_owed_read.Reading _ -> true
-  | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ | Masc_tui_owed_read.Settled ->
-      Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
-
 (* An answer for a pushed source, whichever bundle asked, moves its owed
    read: a failure waits and reads again, and a success settles a read that
    was in flight. A success that lands while a change is still owed leaves it
@@ -9050,7 +9039,7 @@ let settle_pushed_dataset state dataset ~received =
 
 (* The questions a Keeper or an installation puts to the operator read again
    when their log changes, on a resumed authority, and after a failed read
-   (RFC-0480 §3.1). Every full refresh but the cadence reads them too. *)
+   (RFC-0480 §3.1). Every full refresh reads them too. *)
 let owe_asks_read state = state.asks_owed <- Masc_tui_owed_read.changed state.asks_owed
 
 (* The confirmations waiting for an operator read again under the same rules:
@@ -16152,9 +16141,8 @@ let starting_rows_due roster =
       | Some _ | None -> None)
     rows
 
-(* No cadence reads the roster again, so a failed whole read is owed: it
-   reads again after a wait that grows with each failure in a row, whatever
-   started it (RFC-0481 §3.3). *)
+(* A failed whole read is owed: it reads again after a wait that grows with
+   each failure in a row, whatever started it (RFC-0481 §3.3). *)
 let owe_failed_whole_roster_read state =
   let read = Masc_tui_roster_owed.Read_roster in
   state.keeper_roster_owed <-
@@ -17743,7 +17731,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     end
   | Masc_tui_types.Workspace_identity_match ->
     (* The same workspace read as a match again leaves the keeper rows and
-       tasks as the cadence tick last loaded them, a refresh ago. A reload
+       tasks as they were last loaded. A reload
        here ran the whole directory read on the UI thread a second time for
        the same answer. A workspace that just changed, or one that was not
        a match a moment ago, has had its rows put away above and needs it. *)
@@ -18969,6 +18957,60 @@ let schedule_observer_retry state ~mailbox owner =
   | (None, _) | (_, None) ->
       unavailable "Eio switch or clock is unavailable"
 
+(* The longest wait between two attempts to reach a server that does not
+   answer. *)
+let contact_retry_max_s = 30.0
+
+(* Two seconds after the first failure, doubling, up to [contact_retry_max_s]. *)
+let contact_retry_delay_s ~failures =
+  Float.min contact_retry_max_s (stream_reconnect_s *. Float.pow 2.0 (Float.of_int failures))
+
+(* Runs on every loop iteration. While the server cannot be reached, is
+   booting, or has not confirmed the workspace, and no revalidation is out,
+   one timer waits and then revalidates; each attempt that ends the same way
+   waits longer. A reached server opens the observer feed from the
+   revalidation's answer, and the feed says what changes after that. *)
+let reconcile_contact_retry state ~mailbox ~refresh_inflight =
+  match state.connection_status with
+  | Connected | Degraded ->
+      state.contact_failures <- 0;
+      state.contact_retry_owner <- None
+  | Disconnected | Connecting | Booting ->
+      if Option.is_none state.contact_retry_owner && not refresh_inflight then
+        match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+        | Some sw, Some clock ->
+            let owner = ref () in
+            let delay = contact_retry_delay_s ~failures:state.contact_failures in
+            let authority = state.workspace_authority in
+            state.contact_retry_owner <- Some owner;
+            state.contact_failures <- state.contact_failures + 1;
+            (try
+               fork_workspace_job ~observation:true state ~sw (fun () ->
+                 Eio.Time.sleep clock delay;
+                 enqueue_async mailbox (Contact_retry_due (authority, owner)))
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+                 state.contact_retry_owner <- None;
+                 Log.Transport.warn "tui_contact_retry_unavailable: %s" (Printexc.to_string exn))
+        | (None, _) | (_, None) -> ()
+
+(* The fleet stream job reconnects by itself and ends only on a failure of
+   the job; another starts after [stream_reconnect_s]. *)
+let schedule_fleet_stream_retry state ~mailbox =
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+      let authority = state.workspace_authority in
+      (try
+         fork_workspace_job ~observation:true state ~sw (fun () ->
+           Eio.Time.sleep clock stream_reconnect_s;
+           enqueue_async mailbox (Fleet_stream_retry_due authority))
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Transport.warn "tui_fleet_stream_retry_unavailable: %s" (Printexc.to_string exn))
+  | (None, _) | (_, None) ->
+      Log.Transport.warn "tui_fleet_stream_retry_unavailable: Eio switch or clock is unavailable"
+
 (* Follow the fleet stream (RFC-0477) on a daemon fiber. The job owns the
    connection and the reader: when a connection ends it opens the next one
    after [stream_reconnect_s], and it posts the reader's view to the
@@ -19181,16 +19223,17 @@ let log_http_surface_read_finished state context =
     (Mtime_clock.elapsed_ns ()) (Surface_read_order.navigation_count state.http_surface_reads)
     (Yojson.Safe.to_string (Surface_read_context.to_yojson context))
 
-let start_http_refresh state ~host ~port ~intent ~refresh_inflight
+(* A revalidation: the workspace identity and every read the screen draws,
+   for when the observer feed cannot say what changed -- startup, a reopened
+   feed that missed events, a recovered workspace, an operator's [r], and a
+   server that could not be reached. *)
+let start_http_refresh state ~host ~port ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   (* The chat pane's history comes down its own generation-guarded path, not
-     in the surface bundle. A revalidation owes it a read; the cadence does
-     not, because an appended turn announces itself (RFC-0480 §4 L2). Owed,
-     so a pane scrolled into older rows or a read in flight takes it when it
-     can; the owed read brings the tool details with it. *)
-  (match intent with
-   | Revalidate ->
-       Option.iter
+     in the surface bundle. Owed, so a pane scrolled into older rows or a read
+     in flight takes it when it can; the owed read brings the tool details
+     with it. *)
+  (    Option.iter
          (fun keeper_name ->
            update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
            launch_owed_history state ~mailbox)
@@ -19230,8 +19273,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        Masc_tui_types.revalidate_ask_followup_read state
        owe_overview_read state;
    | Cadence -> ());
+       if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state);
   scoped_refresh_followup :=
-    note_full_refresh_intent ~intent
+    note_full_refresh_intent
       ~full_refresh_inflight:!refresh_inflight
       ~scoped_refresh_inflight:!scoped_refresh_inflight
       !scoped_refresh_followup;
@@ -19245,15 +19289,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        its addresses one after another and can outlive several ticks, and an
        answer read early in it is still kept when the next pass asks. *)
     Masc_tui_http.start_read_generation ();
-    (* The cadence leaves the confirmations and the questions out: they read
-       again when they change ([launch_owed_pending_confirms],
-       [launch_owed_asks]). *)
-    let approval_ticket = match intent with
-      | Revalidate -> dispatch_approvals_listing state
-      | Cadence -> None in
-    let ask_request = match intent with
-      | Revalidate -> Masc_tui_types.begin_asks_read state
-      | Cadence -> None in
+    let approval_ticket = dispatch_approvals_listing state in
+    let ask_request = Masc_tui_types.begin_asks_read state in
     state.connection_status <-
       (match state.connection_status with
        | Connected -> Masc_tui_types.Connected
@@ -19285,6 +19322,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
             ; needs_planning = false; needs_overview_goals = false }
             Masc_tui_types.pushed_sources
     in
+    (* This newer bundle supersedes an inflight scoped read, so it replaces
+       every dataset currently drawn rather than omit that read. *)
+    let needs = current_surface_needs state in
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
       else None in
@@ -19450,8 +19490,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
         if state.task_detail_id = Some task_id then begin
           launch_task_history_load state ~mailbox task_id
         end;
-        start_http_refresh state ~host:server_peer_host ~port:state.port
-          ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
+        start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight ~scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox) run
 
 (* A proof read is separate from the confirmation key: recovery must never
@@ -19566,7 +19605,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
   if moved && server_authority_ready state then begin
     (* Read withdrawal also stops the Observer and Fleet streams. A later
        confirmed identity can arrive through a discarded bundle or a scoped
-       read, so restore both under that authority without a cadence tick. *)
+       read, so restore both under that authority here. *)
     stop_observer_recovery state;
     open_observer_if_due state ~retry_closed:false
       ~host:server_peer_host ~port:state.port ~mailbox;
@@ -19804,8 +19843,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        foreign approval and question results remain subject to their existing
        workspace admission rules. *)
     if revalidate_workspace_surfaces state ~workspace_moved ~needs:(current_surface_needs state) then
-      start_http_refresh state ~host:server_peer_host ~port:state.port
-        ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
+      start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight ~scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   end
 ;;
@@ -20054,7 +20092,7 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
   in
   scoped_refresh_followup := next;
   if launch then
-    start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
+    start_http_refresh state ~host ~port ~refresh_inflight
       ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
 
 let open_board_post_id state ~mailbox ~focus post_id =
@@ -22421,7 +22459,7 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     start_masc_server_here ~base_path ~host ~port
       ~note:(fun msg -> add_event state "system" msg)
       ~on_ready:(fun () ->
-        start_http_refresh state ~host ~port ~intent:Revalidate
+        start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox)
@@ -22642,7 +22680,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Contact_retry_due _ | Fleet_stream_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -23354,7 +23392,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          listing request, so its confirm-queue answer was refused as
          superseded before it could ever be drawn. The other approval
          sources relaunch above for the same reason; the count's own source
-         re-reads here instead of sitting unread until the next cadence. *)
+         re-reads here instead of sitting unread. *)
       if identity_recovered then enqueue_async mailbox Approvals_listing_superseded;
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
@@ -23394,8 +23432,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.keeper_interactive_waiting <- retained.ski_waiting;
         state.connection_status <- Degraded;
         add_event state "observer" detail;
-        start_http_refresh state ~host:server_peer_host ~port:state.port
-          ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+        start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
       end else begin
@@ -23426,8 +23463,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            connection replays every event since the last applied one, the
            visible surfaces read once more (RFC-0480 §3.3). *)
         if not (Masc_tui_types.observer_replay_is_complete handshake) then
-          start_http_refresh state ~host:server_peer_host ~port:state.port
-            ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+          start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox
       end
@@ -23746,7 +23782,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Option.iter
           (fun (keeper : keeper) -> owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
           (selected_keeper state);
-        start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+        start_http_refresh state ~host:server_peer_host ~port:state.port
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
@@ -23956,7 +23992,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let reason =
         match outcome with
         | Ok () -> "the server closed the stream"
-        | Error (Masc_tui_http.Transport_failed detail) -> detail
+        | Error (Masc_tui_http.Transport_failed detail) ->
+            (* Nothing else reads the server between revalidations, so a feed
+               that cannot reach it says the server is unreachable until a
+               revalidation answers ([reconcile_contact_retry]). *)
+            state.connection_status <- Masc_tui_types.Disconnected;
+            detail
         | Error (Masc_tui_http.Invalid_handshake detail) ->
             state.observer_replay <- Observer_replay_rejected detail;
             "observer stream handshake rejected: " ^ detail
@@ -23973,10 +24014,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                not the MCP session. Only a session conflict reinitializes it. *)
             if Masc_tui_http.observer_workspace_refused ~status ~detail then begin
               apply_refused_workspace_identity state ~mailbox ~detail None;
-              (* A refused scope must be re-established without waiting for
-                 the periodic refresh that this reconnect will replace. *)
-              start_http_refresh state ~host:server_peer_host ~port:state.port
-                ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+              (* A refused scope is re-established by a revalidation at once. *)
+              start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
                 ~scoped_refresh_inflight:http_scoped_refresh_inflight
                 ~scoped_refresh_followup ~mailbox
             end
@@ -24006,7 +24045,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Observer_recovery_ready (authority, owner, session_id) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
-        start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+        start_http_refresh state ~host:server_peer_host ~port:state.port
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
       end
@@ -24052,9 +24091,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Fleet_stream_reader_ended detail ->
       (* The job reconnects by itself and ends only when withdrawn, so an end
          it reports is a failure of the job: say so, draw nothing more from
-         it, and let the next refresh start another. *)
+         it, and start another after a wait. *)
       Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
-      state.fleet_stream_reader <- Fleet_stream_idle
+      state.fleet_stream_reader <- Fleet_stream_idle;
+      schedule_fleet_stream_retry state ~mailbox
+  | Fleet_stream_retry_due authority ->
+      if authority = state.workspace_authority then
+        open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox
+  | Contact_retry_due (authority, owner) ->
+      (match state.contact_retry_owner with
+       | Some current when current == owner && authority = state.workspace_authority ->
+           state.contact_retry_owner <- None;
+           (match state.connection_status with
+            | Disconnected | Connecting | Booting ->
+                start_http_refresh state ~host:server_peer_host ~port:state.port
+                  ~refresh_inflight:http_refresh_inflight
+                  ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                  ~scoped_refresh_followup ~mailbox
+            | Connected | Degraded -> ())
+       | Some _ | None -> ())
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
@@ -24300,8 +24355,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    state.view <- Keepers Keeper_message;
                    launch_keeper_history_load state ~mailbox ~keeper_name:request.kcr_keeper
                  end;
-                 start_http_refresh state ~host:server_peer_host ~port:state.port
-                   ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                 start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
                    ~scoped_refresh_inflight:http_scoped_refresh_inflight
                    ~scoped_refresh_followup ~mailbox
                end;
@@ -24380,7 +24434,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          now means the row stops offering the action that just ran without
          waiting out the refresh interval. *)
       start_http_refresh state ~host:(server_peer_host)
-        ~port:state.port ~intent:Revalidate
+        ~port:state.port
         ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
@@ -24390,7 +24444,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
-            ~port:state.port ~intent:Revalidate
+            ~port:state.port
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
@@ -24400,7 +24454,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
-            ~port:state.port ~intent:Revalidate
+            ~port:state.port
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
@@ -24409,7 +24463,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
-            ~port:state.port ~intent:Revalidate
+            ~port:state.port
             ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
@@ -24424,7 +24478,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "system" (label ^ message);
            (* Even a superseded response may have changed the workspace. *)
            start_http_refresh state ~host:(server_peer_host)
-             ~port:state.port ~intent:Revalidate
+             ~port:state.port
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
@@ -24448,7 +24502,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | true, Ok _ ->
            report_action state "system" (label ^ "confirmation response received; inspect the current proof and request history");
            start_http_refresh state ~host:(server_peer_host)
-             ~port:state.port ~intent:Revalidate
+             ~port:state.port
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
@@ -24496,7 +24550,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (match changed_owner, selected_planning_goal_id state with
             | Some owner, Some selected when String.equal goal_id selected
                 && take_goal_confirmation_revalidation state ~goal_id ~owner ->
-              start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+              start_http_refresh state ~host:server_peer_host ~port:state.port
                 ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                 ~scoped_refresh_followup ~mailbox
             | (Some _ | None), (Some _ | None) -> ());
@@ -24561,7 +24615,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if accepted then clear_goal_candle_revalidation state ~goal_id;
       (match server_changed with
        | Some owner when take_goal_candle_revalidation state ~goal_id ~owner ->
-         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+         start_http_refresh state ~host:server_peer_host ~port:state.port
            ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
            ~scoped_refresh_followup ~mailbox
        | Some _ | None -> ())
@@ -29582,6 +29636,18 @@ let main
      tokenless process cannot dispatch, and cannot reconcile a dispatch an
      authenticated predecessor left behind. *)
   start_http_refresh state ~host ~port ~intent:Revalidate
+  (* Bind the bearer to the workspace actually opened, before any request is
+     built. Reported before the recovery load as well, so when neither source
+     holds one the operator sees the cause ahead of the symptom: a tokenless
+     process cannot dispatch, and cannot reconcile a dispatch an authenticated
+     predecessor left behind. *)
+  (* HTTP workers await this original installer, independently of input and
+     UI consumption. A quick installation can still begin the health probe
+     while the terminal capability probe runs. *)
+  Masc_tui_http.install_credential_preparation state.credential_preparation;
+  launch_credential_preparation state
+    ~purpose:Masc_tui_credential_preparation.Initial ~base_path ~host ~port;
+  start_http_refresh state ~host ~port
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
     ~scoped_refresh_followup ~mailbox:async_messages;
@@ -33237,6 +33303,8 @@ Use relative paths for resources already held in the package. -->
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
+      reconcile_contact_retry state ~mailbox:async_messages
+        ~refresh_inflight:!http_refresh_inflight;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
@@ -33523,7 +33591,7 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
-        start_http_refresh state ~host ~port ~intent:Revalidate
+        start_http_refresh state ~host ~port
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
@@ -36145,8 +36213,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_cursor <- 0;
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
-                     start_http_refresh state ~host:server_peer_host ~port:state.port
-                       ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                     start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_board_post post_id) ->
@@ -36825,8 +36892,7 @@ Use relative paths for resources already held in the package. -->
            (* History's [r] reloads observations. [R] rechecks workspace
               authority even when retained rows cannot authorize that read.
               Do not refresh the live browser hidden underneath history. *)
-           start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+           start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
        | Some key
@@ -39145,7 +39211,7 @@ Use relative paths for resources already held in the package. -->
               end)
        | Some key when state.view = Planning && String.equal key Masc_tui_keys.goal_candle_refresh_key ->
            let read_candle goal_id =
-             start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
+             start_http_refresh state ~host:server_peer_host ~port:state.port
                ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
                ~scoped_refresh_followup ~mailbox:async_messages;
              clear_goal_candle_revalidation state ~goal_id;
@@ -40683,8 +40749,7 @@ Use relative paths for resources already held in the package. -->
              (match state.board_hearth with
               | None -> "Board: every hearth"
               | Some hearth -> "Board hearth: " ^ hearth);
-           start_http_refresh state ~host:server_peer_host ~port:state.port
-             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+           start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox:async_messages
         | Some "f" | Some "F" when state.view = Planning ->
@@ -41325,7 +41390,7 @@ Use relative paths for resources already held in the package. -->
                        ~note:(fun msg -> add_event state "system" msg)
                        ~on_ready:(fun () ->
                          start_http_refresh state ~host:server_peer_host
-                           ~port:state.port ~intent:Revalidate
+                           ~port:state.port
                            ~refresh_inflight:http_refresh_inflight
                            ~scoped_refresh_inflight:http_scoped_refresh_inflight
                            ~scoped_refresh_followup ~mailbox:async_messages)
@@ -41346,7 +41411,7 @@ Use relative paths for resources already held in the package. -->
                        ("Board order: "
                         ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
-                       ~port:state.port ~intent:Revalidate
+                       ~port:state.port
                        ~refresh_inflight:http_refresh_inflight
                        ~scoped_refresh_inflight:http_scoped_refresh_inflight
                        ~scoped_refresh_followup
@@ -41838,31 +41903,6 @@ Use relative paths for resources already held in the package. -->
           | Server -> ()
           | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
         end;
-        let host = server_peer_host in
-        let port = state.port in
-        (* Closed feeds normally retry on their own timer. The cadence can
-           recover one only when no retry owner could be installed. *)
-        open_observer_if_due state
-          ~retry_closed:(Option.is_none state.observer_retry_owner) ~host ~port
-          ~mailbox:async_messages;
-        open_fleet_stream_if_due state ~host ~port ~mailbox:async_messages;
-        start_http_refresh state ~host ~port ~intent:Cadence
-          ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight
-          ~scoped_refresh_followup
-          ~mailbox:async_messages;
-        (* The Changes tab is not reloaded here. Its answer comes from
-           [GET /api/v1/keepers/<name>/file-changes], which parses every row
-           in the date files the window touches -- that endpoint's own
-           comment records 4.4s for 24h, and this server answered 1.8-8.8s
-           per call on 2026-09-06. On the cadence, an open tab kept one of
-           those in flight continuously and the whole server felt it.
-
-           The observer already reloads the tab when the feed shows the
-           selected keeper finish a tool call, which is when the list can
-           change; opening the tab or moving the cursor loads it too. What
-           this line added was coverage for a change with no feed event, and
-           that is not worth a seconds-long scan on a timer. *)
         (* The visible Add-ons pane follows the existing refresh cadence.
            Status reads reuse the accepted request; they never submit it again. *)
         (match state.lane_addons with

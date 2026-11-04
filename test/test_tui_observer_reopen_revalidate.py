@@ -2,9 +2,9 @@
 everything that was published while it was closed (RFC-0480 §3.3).
 
 The fixture serves one observer stream that ends, then a second whose replay
-header is the case under test and which stays open. The refresh cadence is
-pushed out of the test's lifetime, so a dashboard read after the second stream
-opens can only come from the reopen.
+header is the case under test and which stays open. Only a revalidation reads
+the Home Health line, so a read after the second stream opens can only come
+from the reopen.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [0.68.0] - 2026-11-03
+## [0.68.0] - 2026-11-04
 
 ### Known issues
 
@@ -212,11 +212,9 @@
 - Bind Board stores and initialization to an explicit existing BasePath. Reject foreign `.masc` aliases before installing recipient lookup or starting a flusher, while allowing aliases of the same physical BasePath. (#47388)
 - Retain physical workspace observations across reloads and persistence retries. Refuse replaced roots and state directories in posts, auxiliary loaders and directory preparation; preserve original reserved read-cleanup failures after a Missing-source refusal. (#47388)
 - Capture the indexed sort fixture's owned BasePath while keeping its index-only lifecycle free of persisted-source initialization. (#47388)
-- Require a real initialized guard and complete Present posts source before live Board posts writes; retain accepted guard history across failed reads and revalidate it for posts and auxiliary writers. (#47511)
-- Preserve unadmitted rows for display, rebuild both feed indexes after complete/partial projection, and keep unknown posts effects unsettled without further source IO. (#47511)
+- Rebuild both feed indexes after complete/partial projection, and keep unknown posts effects unsettled without further source IO. (#47511)
 - Retain ordered filesystem diagnostics and reserved cleanup causes across Board locks; report the actual built-in live policy in offline tooling. (#47511)
 - Preserve state-mutex poisoning for uncertain model projection, count observed reserved diagnostics before propagation, and stop snapshot batches at the first reserved settlement while retaining unattempted retry work. (#47511)
-- Keep exact Fusion-row recognition available from unadmitted display data without granting source authority or a new publication receipt. (#47511)
 - Bind Board detail and comment-page reads to the observed server workspace so a different workspace cannot replace their content. 가이드 없음(문서 없음) (#47518)
 - Redraw open colour-cell image previews after terminal resize and preserve their observed source across partial refreshes. (#47560)
 - Let deployment preflight inspect a retained Librarian answer using its original consumer shape when strict decoding rejects an extra working-context field, while still requiring the gate proposal to match (#47567).
@@ -346,6 +344,11 @@
   `masc_tui` compiles on main again (#47952).
 - Fill the `input_provenance`/`provenance` fields #47874 added in 8 test
   fixtures so `dune build @check` passes on main again (#47958).
+- The macOS release's bundled Python trusts a pinned Mozilla CA bundle
+  (certifi 2026.10.23) instead of only the operating system's static
+  certificate file, so `masc setup` and provider logins can verify servers
+  whose chains need newer roots. `SSL_CERT_FILE` or `SSL_CERT_DIR` set by the
+  user still take precedence (#48014).
 
 ### Performance
 
@@ -404,7 +407,6 @@
   Reloads reuse the same initialized source and keep their existing assertions. (#47450)
 - test(board): Explicitly Bootstrap the real fresh Board source before consumer fixtures install live owners, bind HTTP/TUI readers, or publish verification notices. Keep generic helpers, malformed/foreign source subjects and retained reloads unchanged; scope notification fixtures to their own root and detach globals before cleanup. (#47478)
 - test(board): Split app transport checks into their own gateway fixture, seed reachable Fusion provenance through public author transfer, and wait for the actual upstream TUI response. Install the trial driver's captured Keeper recipients and native runtime, and verify informational results survive their checkpoint until a subsequent heartbeat completes and records durable ACKs. (#47478)
-- Isolate actual guard transactions from pure guard-row validation, use distinct immutable guard/posts IO seams, and exercise public admission, diagnostic and uncertainty boundaries with explicitly prepared positive fixtures. (#47511)
 - Update runtime and Keeper test fixtures for the current catalog, account and Antigravity interfaces, and link the required test helper. (#47582)
 - Repair the Kimi replay fixture and scope catalog test helpers to inline tests so development and release builds can compile (#47583).
 - Prepare an isolated Board in Goal verifier tests so stalled-review notices can be verified. (#47590)
@@ -436,6 +438,14 @@
 - `test_keeper_microvm_boot_plan` reads the `container inspect` of a guest
   that Apple container 1.6.1 booted from an agent plan's rendered argv, and
   checks that the boot plan assessment reads it as `Matches_plan` (#47912).
+- Each server-state test in `test_server_runtime_bootstrap` starts with no
+  Board bound and unbinds on exit, so a later test no longer meets a Board
+  bound to an earlier test's removed directory (#47992).
+- A live Board store opens a workspace without a posts file as empty and
+  refuses a posts file that disappears after the store observed it (#48004).
+- Each `test_completion_trust_harness` case starts with no Board bound and
+  unbinds on exit, so a later case no longer writes its Task Board posts into
+  an earlier case's removed directory (#48064).
 
 ## [0.67.0] - 2026-11-02
 

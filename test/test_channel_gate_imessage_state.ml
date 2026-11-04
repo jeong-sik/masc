@@ -197,6 +197,25 @@ let test_malformed_binding_store_is_explicit () =
          (IMessage_state.resolve_keeper_for_channel_result
             ~channel_id:"user@example.com")))
 
+(* A write tells readers only when what the connector list draws changes;
+   the cursor alone does not (RFC-0480 §3.4). *)
+let test_a_changed_poll_state_announces_once () =
+  let heard = ref 0 in
+  Gate_connector_announce.install (fun ~connector_id ->
+    if String.equal connector_id IMessage_state.connector_id then incr heard);
+  Fun.protect ~finally:(fun () -> Gate_connector_announce.install (fun ~connector_id:_ -> ()))
+  @@ fun () ->
+  IMessage_state.record_poll_error "fixture: before";
+  let before = !heard in
+  IMessage_state.record_poll_ok ~cursor_rowid:1;
+  check int "a poll that recovers announces" (before + 1) !heard;
+  IMessage_state.record_poll_ok ~cursor_rowid:2;
+  check int "a poll that only moves the cursor announces nothing" (before + 1) !heard;
+  IMessage_state.record_poll_error "fixture: chat.db read failed";
+  check int "a failed poll announces" (before + 2) !heard;
+  IMessage_state.record_poll_error "fixture: chat.db read failed";
+  check int "the same failure again announces nothing" (before + 2) !heard
+
 let () =
   run "channel_gate_imessage_state"
     [ ( "in-process state"
@@ -216,5 +235,7 @@ let () =
             test_binding_resolution_is_exact
         ; test_case "malformed binding store is explicit" `Quick
             test_malformed_binding_store_is_explicit
+        ; test_case "a changed poll state announces once" `Quick
+            test_a_changed_poll_state_announces_once
         ] )
     ]

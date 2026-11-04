@@ -68,7 +68,8 @@ let retain_committed ~config ~trace_id ledger =
     Hashtbl.reset entry.usage)
 
 let install () =
-  ignore (Keeper_skill_activation_ledger.install_commit_observer retain_committed)
+  let _ = Keeper_skill_activation_ledger.install_commit_observer retain_committed in
+  ()
 
 module For_testing = struct
   let with_runtime ?usage_projection:projection ~ledger_loader:loader f =

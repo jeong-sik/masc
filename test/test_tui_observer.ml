@@ -885,6 +885,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
+                  | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -966,6 +967,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
+                  | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -995,6 +997,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
+                  | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
           | None -> true)
      | _ -> false);

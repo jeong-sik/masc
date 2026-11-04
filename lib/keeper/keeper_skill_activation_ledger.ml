@@ -2377,6 +2377,12 @@ let load_existing ~config ~trace_id =
    builds. The header goes first when the store has none. A failed append
    leaves the store's end unknown to this process, so the next read replays
    it from the first byte. *)
+let commit_observer = ref (fun ~config:_ ~keeper_name:_ ~trace_id:_ (_ : t) -> ())
+let install_commit_observer observer =
+  let previous = !commit_observer in
+  commit_observer := observer;
+  fun () -> commit_observer := previous
+
 let commit_event_locked ~changed session_dir (log : session_log) event =
   let row = event_to_yojson event in
   let* ledger =
@@ -2411,12 +2417,6 @@ let commit_event_locked ~changed session_dir (log : session_log) event =
     changed ();
     Ok ledger
 ;;
-
-let commit_observer = ref (fun ~config:_ ~keeper_name:_ ~trace_id:_ (_ : t) -> ())
-let install_commit_observer observer =
-  let previous = !commit_observer in
-  commit_observer := observer;
-  fun () -> commit_observer := previous
 
 (* A committed row changes what the Skill record and usage views read for
    the Keeper whose turn wrote it. *)

@@ -435,6 +435,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper })
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Approval_change change -> approval_change_keeper change

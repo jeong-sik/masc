@@ -64,6 +64,12 @@ let clear_reported_problem ~config ~keeper_name ~site =
     Hashtbl.remove reported_problems key)
 ;;
 
+let change_observer = ref (fun ~config:_ ~keeper_name:_ -> ())
+let install_change_observer observer =
+  let previous = !change_observer in
+  change_observer := observer;
+  fun () -> change_observer := previous
+
 let last_measurement ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt measurements key)
@@ -151,12 +157,6 @@ let forget_input_capacity ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
 ;;
-
-let change_observer = ref (fun ~config:_ ~keeper_name:_ -> ())
-let install_change_observer observer =
-  let previous = !change_observer in
-  change_observer := observer;
-  fun () -> change_observer := previous
 
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in

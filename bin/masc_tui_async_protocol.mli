@@ -133,7 +133,6 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
   http_approvals: approval_observation option;
   http_scoped: http_scoped_surface_results;
   (* Mandatory on every refresh: the same endpoint may name a different
@@ -294,7 +293,6 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   (** A verified read-only preview. It does not finish the full refresh or
       grant workspace authority; the terminal bundle still owns both. *)
-  | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
@@ -415,6 +413,7 @@ type async_msg =
       string * int * (Measurement.t, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
+  | Overview_loaded of (overview_snapshot, string) result
   | Fusion_runs_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
   | Fusion_detail_loaded of

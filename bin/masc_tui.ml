@@ -27597,7 +27597,9 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
      back. *)
   at_exit write_exit_reason;
   at_exit Masc_tui_frame_timing.report;
+  at_exit Masc_tui_alloc_profile.report;
   at_exit cleanup;
+  Masc_tui_alloc_profile.start ();
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
      session is over. Neither ends the process from the handler: the loop
      leaves through [Break], so the switch release that stops a server this

@@ -1,0 +1,81 @@
+alloc estimated_words=71220000 sampling_rate=0.0001
+  site  15.9% 11300000 words lib/time_codec/time_codec.ml:37
+  site   6.4% 4550000 words bin/masc_tui_grapheme_segmentation.ml:335
+  site   5.3% 3810000 words bin/masc_tui_keeper_list_model.ml:302
+  site   3.1% 2240000 words bin/masc_tui_types.ml:12535
+  site   2.5% 1750000 words bin/masc_tui_types.ml:12438
+  site   2.4% 1740000 words bin/masc_tui_keeper_list_model.ml:146
+  site   1.7% 1230000 words bin/masc_tui_ansi.ml:890
+  site   1.6% 1170000 words bin/masc_tui_types.ml:12437
+  site   1.6% 1110000 words lib/tui_terminal_text.ml:153
+  site   1.5% 1050000 words bin/masc_tui_message_layout.ml:277
+  site   1.4% 1020000 words bin/masc_tui_render_keepers.ml:896
+  site   1.4% 1010000 words bin/masc_tui_render_prim.ml:274
+  site   1.3% 960000 words bin/masc_tui_render_prim.ml:265
+  site   1.2% 890000 words bin/masc_tui_render_prim.ml:1316
+  site   1.1% 780000 words bin/masc_tui_keeper_list_model.ml:299
+  site   1.0% 700000 words bin/masc_tui_types.ml:12397
+  site   1.0% 690000 words bin/masc_tui_types.ml:12509
+  site   0.9% 660000 words bin/masc_tui_render_keepers.ml:898
+  site   0.9% 630000 words bin/masc_tui_grapheme_segmentation.ml:77
+  site   0.9% 630000 words bin/masc_tui_render_prim.ml:993
+  site   0.9% 620000 words bin/masc_tui_grapheme_segmentation.ml:95
+  site   0.8% 590000 words bin/masc_tui_hit.ml:41
+  site   0.8% 580000 words bin/masc_tui_types.ml:12556
+  site   0.8% 540000 words bin/masc_tui_keeper_control.ml:210
+  site   0.7% 530000 words bin/masc_tui_keeper_control.ml:191
+  site   0.7% 520000 words bin/masc_tui_agenda.ml:93
+  site   0.7% 520000 words bin/masc_tui_types.ml:12522
+  site   0.7% 510000 words lib/time_codec/time_codec.ml:53
+  site   0.7% 500000 words bin/masc_tui_types.ml:12587
+  site   0.7% 500000 words bin/masc_tui_types.ml:12513
+  site   0.7% 470000 words bin/masc_tui_message_layout.ml:833
+  site   0.6% 460000 words bin/masc_tui_render_prim.ml:303
+  site   0.6% 450000 words bin/masc_tui.ml:40857
+  site   0.6% 440000 words bin/masc_tui_hit.ml:151
+  site   0.6% 440000 words lib/tui_decode.ml:61
+  site   0.6% 420000 words bin/masc_tui_types.ml:12473
+  site   0.6% 410000 words bin/masc_tui_keeper_list_model.ml:149
+  site   0.6% 400000 words bin/masc_tui_grapheme_segmentation.ml:252
+  site   0.5% 390000 words bin/masc_tui_keeper_list_model.ml:152
+  site   0.5% 360000 words bin/masc_tui_render_prim.ml:990
+  stack   1.6% bin/masc_tui_grapheme_segmentation.ml:335 < bin/masc_tui_grapheme_segmentation.ml:339 < bin/masc_tui_grapheme_segmentation.ml:342 < bin/masc_tui_message_layout.ml:833 < bin/masc_tui_message_layout.ml:853 < bin/masc_tui_render_keepers.ml:283 < bin/masc_tui_render_keepers.ml:883 < list.ml:114
+  stack   1.1% src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89 < list.ml:90
+  stack   1.0% src/ptime.ml:137 < src/ptime.ml:414 < src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547
+  stack   0.9% src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88 < list.ml:90
+  stack   0.9% buffer.ml:96 < buffer.ml:156 < bin/masc_tui_render_keepers.ml:898 < list.ml:114 < bin/masc_tui_render_keepers.ml:873 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34
+  stack   0.9% buffer.ml:96 < buffer.ml:156 < buffer.ml:176 < bin/masc_tui_render_prim.ml:1316 < list.ml:114 < bin/masc_tui_render_prim.ml:1314 < bin/masc_tui_render_prim.ml:1383 < bin/masc_tui_render.ml:818
+  stack   0.9% buffer.ml:96 < buffer.ml:169 < buffer.ml:182 < bin/masc_tui_render_prim.ml:993 < bin/masc_tui_frame_timing.ml:524 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34
+  stack   0.8% src/ptime.ml:107 < src/ptime.ml:117 < src/ptime.ml:359 < src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424
+  stack   0.8% src/ptime.ml:521 < src/ptime.ml:614 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.7% src/ptime.ml:113 < src/ptime.ml:117 < src/ptime.ml:359 < src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424
+  stack   0.6% buffer.ml:96 < buffer.ml:156 < buffer.ml:176 < bin/masc_tui_render_prim.ml:303 < bin/masc_tui_render_prim.ml:1383 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:616 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.6% bin/masc_tui_keeper_list_model.ml:146 < bin/masc_tui_keeper_list_model.ml:201 < bin/masc_tui_keeper_list_model.ml:298 < list.ml:89 < list.ml:90 < bin/masc_tui_keeper_list_model.ml:302 < bin/masc_tui_types.ml:12556 < bin/masc_tui_types.ml:12559
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:618 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:622 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.6% list.ml:60 < bin/masc_tui_message_layout.ml:833 < bin/masc_tui_message_layout.ml:853 < bin/masc_tui_render_keepers.ml:283 < bin/masc_tui_render_keepers.ml:883 < list.ml:114 < bin/masc_tui_render_keepers.ml:873 < bin/masc_tui_render.ml:818
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:624 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:620 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:624 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.6% src/ptime.ml:643 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88 < list.ml:90
+  stack   0.6% src/ptime.ml:521 < src/ptime.ml:614 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.5% src/ptime.ml:115 < src/ptime.ml:117 < src/ptime.ml:359 < src/ptime.ml:631 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424
+  stack   0.5% src/ptime.ml:521 < src/ptime.ml:616 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.5% src/ptime.ml:521 < src/ptime.ml:618 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.5% buffer.ml:43 < bin/masc_tui_render_prim.ml:990 < bin/masc_tui_frame_timing.ml:524 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34 < bin/masc_tui_frame_timing.ml:572 < bin/masc_tui.ml:40751
+  stack   0.5% src/ptime.ml:643 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89 < list.ml:90
+  stack   0.5% bytes.ml:68 < bytes.ml:73 < buffer.ml:46 < bin/masc_tui_render_prim.ml:265 < bin/masc_tui_render_prim.ml:332 < bin/masc_tui_frame_timing.ml:524 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564
+  stack   0.5% bytes.ml:68 < string.ml:45 < bin/masc_tui_render_prim.ml:274 < bin/masc_tui_render_prim.ml:332 < bin/masc_tui_frame_timing.ml:524 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34
+  stack   0.5% bin/masc_tui_grapheme_segmentation.ml:335 < bin/masc_tui_grapheme_segmentation.ml:339 < bin/masc_tui_grapheme_segmentation.ml:326 < bin/masc_tui_grapheme_segmentation.ml:342 < bin/masc_tui_message_layout.ml:277 < bin/masc_tui_message_layout.ml:563 < bin/masc_tui_render_prim.ml:1316 < list.ml:114
+  stack   0.5% src/ptime.ml:521 < src/ptime.ml:620 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:89
+  stack   0.4% bin/masc_tui_keeper_list_model.ml:146 < bin/masc_tui_keeper_list_model.ml:201 < bin/masc_tui_keeper_list_model.ml:298 < list.ml:88 < list.ml:90 < bin/masc_tui_keeper_list_model.ml:302 < bin/masc_tui_types.ml:12556 < bin/masc_tui_types.ml:12559
+  stack   0.4% bin/masc_tui_keeper_list_model.ml:146 < bin/masc_tui_keeper_list_model.ml:204 < bin/masc_tui_keeper_list_model.ml:298 < list.ml:88 < list.ml:90 < bin/masc_tui_keeper_list_model.ml:302 < bin/masc_tui_types.ml:12556 < bin/masc_tui_types.ml:12559
+  stack   0.4% src/ptime.ml:521 < src/ptime.ml:622 < lib/time_codec/time_codec.ml:37 < lib/time_codec/time_codec.ml:43 < lib/time_codec/time_codec.ml:53 < bin/masc_tui_types.ml:12424 < bin/masc_tui_types.ml:12547 < list.ml:88
+  stack   0.4% src/uucp_rmap.ml:16 < src/uucp__hangul.ml:9 < bin/masc_tui_grapheme_segmentation.ml:252 < bin/masc_tui_grapheme_segmentation.ml:261 < bin/masc_tui_grapheme_segmentation.ml:281 < bin/masc_tui_grapheme_segmentation.ml:326 < bin/masc_tui_grapheme_segmentation.ml:342 < bin/masc_tui_message_layout.ml:277
+  stack   0.4% bytes.ml:68 < string.ml:45 < bin/masc_tui_render_prim.ml:274 < bin/masc_tui_render_prim.ml:288 < bin/masc_tui_render_prim.ml:1383 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564 < fun.ml:34
+  stack   0.4% lib/tui_terminal_text.ml:153 < lib/tui_terminal_text.ml:211 < lib/tui_terminal_text.ml:309 < bin/masc_tui_render_keepers.ml:199 < bin/masc_tui_render_keepers.ml:250 < bin/masc_tui_render_keepers.ml:335 < bin/masc_tui_render_keepers.ml:888 < list.ml:114
+  stack   0.4% bin/masc_tui_keeper_list_model.ml:146 < bin/masc_tui_keeper_list_model.ml:204 < bin/masc_tui_keeper_list_model.ml:298 < list.ml:89 < list.ml:90 < bin/masc_tui_keeper_list_model.ml:302 < bin/masc_tui_types.ml:12556 < bin/masc_tui_types.ml:12559
+  stack   0.4% bytes.ml:68 < bytes.ml:73 < buffer.ml:46 < bin/masc_tui_render_prim.ml:265 < bin/masc_tui_render_prim.ml:288 < bin/masc_tui_render_prim.ml:1383 < bin/masc_tui_render.ml:818 < bin/masc_tui_frame_timing.ml:564
+  stack   0.4% lib/tui_terminal_text.ml:153 < lib/tui_terminal_text.ml:211 < lib/tui_terminal_text.ml:309 < bin/masc_tui_render_keepers.ml:199 < bin/masc_tui_render_keepers.ml:250 < bin/masc_tui_render_keepers.ml:323 < bin/masc_tui_render_keepers.ml:883 < list.ml:114
+  stack   0.4% lib/tui_terminal_text.ml:153 < lib/tui_terminal_text.ml:211 < lib/tui_terminal_text.ml:309 < bin/masc_tui_render_keepers.ml:224 < bin/masc_tui_render_keepers.ml:250 < bin/masc_tui_render_keepers.ml:335 < bin/masc_tui_render_keepers.ml:888 < list.ml:114

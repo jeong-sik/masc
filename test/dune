@@ -6510,7 +6510,7 @@
 (test
  (name test_lane_addon_actions)
  (modules test_lane_addon_actions)
- (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix masc.server))
 
 (test
  (name test_lane_addon_subscription)

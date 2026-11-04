@@ -213,7 +213,6 @@ type entry = {
   mutable current_action : Lane_addon_action.receipt option;
   mutable host_due : bool;
   mutable host_status : host_status;
-  mutable lanes_signal : Yojson.Safe.t option;
 }
 let retire_admission e =
   e.stopping <- true;
@@ -723,6 +722,12 @@ let failed_state state cause = match state with
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ ->
       Lifecycle.Failed (Lifecycle.failed cause)
 let fail_state (e : entry) cause = failed_state e.state cause
+type inventory_change = Observation_commit | Configuration_changed | Retained_changed
+
+let inventory_change_observer = ref (fun ~base_path:_ (_ : inventory_change) -> ())
+let install_inventory_change_observer observer = inventory_change_observer := observer
+let notify_inventory m kind = !inventory_change_observer ~base_path:m.base_path kind
+
 type binding_writer = store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t ->
   (unit, Lane_addon_store.binding_write_error) result
 let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
@@ -735,45 +740,8 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    is released, with no yield in between. So no reader sees the commit
    without its wake, no later write names an earlier sequence, and a state
    change made while the write was in flight is not overwritten. *)
-let lanes_signal (e : entry) =
-  let browser =
-    match e.package.worker_service with
-    | Lane_addon_types.Mcp_tools -> []
-    | Lane_addon_types.Browser_service _ ->
-        (match Browser_addon_observation.read e.output with
-         | Ok published ->
-             [ "clients", `Int (List.length published.clients)
-             ; "automation", `Bool published.automation.registered
-             ; "stagehand", `Bool published.stagehand.registered ]
-         | Error detail -> [ "unavailable", `String detail ])
-  in
-  let machine_loaded = List.filter_map (fun (row : Lane_addon_types.row) ->
-    List.assoc_opt "machine_loaded" row.fields) e.output.rows in
-  let refreshing = e.state = Lifecycle.Observing || e.pending <> Idle
-    || e.active_tool_calls > 0 || Option.is_some e.current_action in
-  `Assoc
-    [ "instance_id", `String e.instance_id
-    ; "run_id", `String e.run_id
-    ; "package", `String e.package.id
-    ; "revision", `String e.package.revision
-    ; "phase", phase_to_json (phase_of e)
-    ; "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration
-    ; "running", `Bool e.running
-    ; "started", `Bool e.started
-    ; "stopping", `Bool e.stopping
-    ; "cleanup_running", `Bool e.cleanup_running
-    ; "browser", `Assoc browser
-    ; "machine_loaded", `List machine_loaded
-    ; "machine_refreshing", `Bool refreshing ]
-
 let notify_commit m e =
-  let signal = lanes_signal e in
-  let inventory_changed = match e.lanes_signal with
-    | Some previous -> not (Yojson.Safe.equal previous signal)
-    | None -> true in
-  e.lanes_signal <- Some signal;
-  if inventory_changed then
-    Workspace_dataset_event.announce ~base_path:m.base_path Workspace_dataset_event.Lanes;
+  notify_inventory m Observation_commit;
   Workspace_dataset_event.announce ~base_path:m.base_path
     (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
 
@@ -3146,6 +3114,32 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
            application=configuration_application m ~reading ~inventory:(Some inventory) d})
           reading.snapshot.declarations in
   {inventory with applications})
+
+let inventory_live ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> { owner_present = false; instances = []; issues = []; complete = true; applications = [] }
+  | Some m ->
+      let instances = entries m |> List.map (fun (e : entry) ->
+        { instance_id = e.instance_id; incarnation = e.instance_id; run_id = e.run_id
+        ; package_id = e.package.id; title = e.package.title; package_revision = e.package.revision
+        ; ui_category = e.package.ui_category; configuration = e.configuration
+        ; presence = Live; phase = phase_of e }) in
+      { owner_present = true; instances; issues = []; complete = true; applications = [] })
+
+let configuration_applications ~config ~inventory = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> []
+  | Some m ->
+      (match m.configuration_status with
+       | None -> []
+       | Some reading -> List.map (fun (d : Lane_addon_config.declaration) ->
+         { owner = { id = d.id; source_path = d.source_path; revision = d.revision }
+         ; source_revision = d.source_revision; enabled = d.enabled
+         ; application = configuration_application m ~reading ~inventory:(Some inventory) d })
+         reading.snapshot.declarations))
+
 let persisted_binding m id =
   let* reading = runtime_result (read_retained_binding m ~instance_id:id) in
   let named (binding : retained_binding) = match text binding.binding_fields "instance_id" with
@@ -3172,6 +3166,7 @@ let publish_cleanup m ~id ~writer publication =
   match persisted with
   | Ok () ->
       Hashtbl.remove m.recovering id;
+      notify_inventory m Retained_changed;
       if is_detached publication.terminal_state then m.configuration_nudge ()
   | Error message ->
       (* Keep the owner even after rename/unlink. The next maintenance beat
@@ -3669,7 +3664,6 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; exact_waiting = []; observed_at = None; issue = None };
-    lanes_signal = None;
     cancel_worker = None; cancel_exact = None; exact_request_id = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
@@ -4844,6 +4838,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
           | Kept _ -> Some text)
         outcomes)
     gecko_plan;
+  notify_inventory m Configuration_changed;
   Ok result)
 
 let fleet_services : (string,unit -> unit) Hashtbl.t = Hashtbl.create 4
@@ -4934,6 +4929,10 @@ let installation_questions ~config =
       loop [] ids))
 
 module For_testing = struct
+  let with_inventory_change_observer observer f =
+    let previous = !inventory_change_observer in
+    inventory_change_observer := observer;
+    Fun.protect ~finally:(fun () -> inventory_change_observer := previous) f
   let browser_source_table = browser_source_table
   type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string
   type nonrec 'service document_service = 'service document_service =

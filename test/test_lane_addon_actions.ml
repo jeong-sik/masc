@@ -754,6 +754,7 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   detach clock fixture id)
 
 let test_observation_commit_announces_lane_inventory () = with_fixture (fun clock fixture ->
+  Runtime.For_testing.with_inventory_change_observer Server_lane_inventory.refresh (fun () ->
   let heard = ref [] in
   let subscription = "lane-inventory-announce" in
   Sse.subscribe_external
@@ -796,7 +797,7 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
       (List.filter (fun (name, _) -> String.equal name "lanes") !heard |> List.length);
     check int "every committed observation still announces Inspect" 2
       (List.filter (fun (name, _) -> String.equal name "lane_addons") !heard |> List.length);
-    detach clock fixture instance))
+    detach clock fixture instance)))
 
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];

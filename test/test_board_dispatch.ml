@@ -53,6 +53,11 @@ let with_eio f () =
    a refused workspace and latch Posts_refused — every write then stayed
    refused even after the fixture restored the directory (#47727). *)
 let with_blocked_board_masc_dir f =
+  (* Root ignores file permission bits, so a permission-denied fixture would
+     silently stop denying writes and the blocked-phase assertions would
+     fail for the opposite reason. The previous regular-file fixture stayed
+     effective under root; this one skips instead of lying. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let store = Board.global () in
   let masc_dir = (Board.workspace_masc_dir store) in
   let paths =

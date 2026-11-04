@@ -31,6 +31,11 @@ let fresh_test_base_path () =
    duplicated locally per this suite's existing per-file fixture convention
    (see [fresh_test_base_path] above). *)
 let with_blocked_board_masc_dir f =
+  (* Root ignores file permission bits, so a permission-denied fixture would
+     silently stop denying writes and the blocked-phase assertions would
+     fail for the opposite reason. The previous regular-file fixture stayed
+     effective under root; this one skips instead of lying. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let store = Board.global () in
   let masc_dir = (Board.workspace_masc_dir store) in
   let paths =

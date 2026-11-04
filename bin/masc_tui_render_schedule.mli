@@ -269,15 +269,25 @@ type verification_row_values = {
 
 val verification_minimum_title_width : int
 
-val verification_title_width : inner_width:int -> submitter_width:int -> int
-(** Cells the title may occupy: what the named columns leave, never below
-    {!verification_minimum_title_width}. *)
+type verification_column
 
-val verification_header_row : submitter_width:int -> title_width:int -> string
+val verification_layout :
+  inner_width:int ->
+  submitter_width:int ->
+  verification_column Masc_tui_table.layout
+(** Keep the task and its title. When the title would fall below
+    {!verification_minimum_title_width}, fold the submitter, then the evidence
+    counts, then the automatic verification state. [submitter_width] is the
+    width the submitter column takes when it is shown. *)
+
+val verification_header_row :
+  submitter_width:int ->
+  layout:verification_column Masc_tui_table.layout ->
+  string
 
 val verification_row :
   submitter_width:int ->
-  title_width:int ->
+  layout:verification_column Masc_tui_table.layout ->
   verification_row_values ->
   string
 (** One request, on the same columns as {!verification_header_row}. The widths

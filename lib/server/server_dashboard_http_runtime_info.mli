@@ -75,42 +75,36 @@ val server_workspace_mismatch_for_tests :
 
 val dashboard_runtime_probe_http_json :
   ?force:bool -> unit -> Yojson.Safe.t
-(** Returns the dashboard runtime-probe envelope. The route never blocks: on a
-    cache hit it returns the cached value; on a miss it schedules a non-blocking
-    background refresh and returns the best value available now (a stale cache
-    value, or a cold-start warming-up placeholder).
+(** Returns the dashboard runtime-probe envelope with the probe loop's latest
+    value ({!start_dashboard_runtime_probe_loop}). No read runs a probe.
 
-    [?force:true] (the dashboard "Live probe" button) bypasses the per-call TTL
-    gate and uses the shorter recent-value window
-    ([dashboard_runtime_probe_force_min_refresh_sec]); past that window it still
-    only schedules a background refresh — it does NOT block for an immediate
-    fresh probe. Callers that expect "force = instant fresh value" must instead
-    read [refresh_state] and re-poll.
+    [?force:true] (the dashboard "Live probe" button) serves a value younger
+    than [dashboard_runtime_probe_force_min_refresh_sec] as it is; past that
+    window it wakes the loop and serves the value it has. The probe it asked
+    for is announced as [runtime_probe] when it lands.
 
     Output fields:
-    - [cache_hit]: the returned [probe] came from cache (it was not freshly
-      scheduled this call).
-    - [refresh_state]: one of [fresh] (TTL-fresh hit), [recent] (force=1 inside
-      the recent window), [served_stale] (stale value returned + background
-      refresh scheduled), or [warming_up] (cold-start placeholder + background
-      refresh scheduled). [served_stale]/[warming_up] mean the refreshed value
-      arrives on the next poll. *)
+    - [cache_hit]: the value is inside the window the read asked for.
+    - [refresh_state]: one of [fresh] (younger than the TTL), [recent]
+      (force=1 inside the recent window), [served_stale] (older than the
+      window: the loop is probing, or this forced read woke it), or
+      [warming_up] (no probe has landed since the server started). *)
 
 val dashboard_runtime_probe_failure_envelope_of_exn :
   exn -> Yojson.Safe.t
 (** Pure builder for the failure envelope persisted to the cache when a
-    background refresh raises ([probe_ok=false], status [unreachable], the
+    probe raises ([probe_ok=false], status [unreachable], the
     exception message in [errors]). Exposed so the failure-visibility contract
     is unit-testable independent of the cache/atomic plumbing. *)
 
-val maybe_fork_dashboard_runtime_probe_refresh : unit -> unit
-(** Schedule a non-blocking background refresh of the runtime-probe cache.
-    Single-flight via an internal CAS: a no-op when a refresh is already
-    running, when no server switch is reachable, or on Domain_pool worker
-    domains where a background [Eio.Fiber.fork] is not permitted. Called by
-    {!dashboard_runtime_probe_http_json} on cache miss / soft-TTL expiry, and by
-    the server boot path to warm the cache before the first dashboard request
-    so the first response is not a [warming_up] placeholder. *)
+val start_dashboard_runtime_probe_loop :
+  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+(** Probes the runtimes now, then every [dashboard_runtime_probe_cache_ttl_sec]
+    and whenever a forced read asks, keeping the latest value for
+    {!dashboard_runtime_probe_http_json}. A probe a read asked for is announced
+    as [runtime_probe]; a periodic one when what it found differs from the
+    last probe, the times it was checked aside. A probe that raises keeps
+    {!dashboard_runtime_probe_failure_envelope_of_exn} as the value. *)
 
 val dashboard_runtime_probe_payload_json_of_runtimes :
   ?default_id:string -> Runtime_instance.t list -> Yojson.Safe.t

@@ -139,6 +139,7 @@ let summary = function
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
+  | Observer.Event Observer.Repositories_changed -> "repositories"
   | Observer.Event Observer.Schedules_changed -> "schedules"
   | Observer.Event (Observer.Approval_change change) ->
       Printf.sprintf "approval(%s)"
@@ -817,6 +818,24 @@ let test_a_verification_or_run_push_reads_the_requests () =
   check int "both owe the verification requests a read" 2 (count verification_frames);
   check int "no roster or turns push does" 0 (count (turn_frame :: roster_frames))
 
+let repositories_frame =
+  {|data: {"type":"repositories_changed","ts_unix":100.0}
+
+|}
+
+let test_a_repository_push_reads_the_list () =
+  check (list string) "it decodes without a payload" [ "repositories" ]
+    (List.map summary (decode_all [ repositories_frame ]));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.repositories_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
+  check int "a verification or run push does not" 0 (count verification_frames)
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1274,6 +1293,8 @@ let () =
             test_a_turns_push_names_its_keeper
         ; test_case "a verification or run push reads the requests" `Quick
             test_a_verification_or_run_push_reads_the_requests
+        ; test_case "a repository push reads the list" `Quick
+            test_a_repository_push_reads_the_list
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "only a schedule change reads the schedules" `Quick

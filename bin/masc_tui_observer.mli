@@ -279,6 +279,9 @@ type event =
   | Verification_requests_changed
       (** The workspace's verification request store was written. A server
           push with no payload, named by {!Masc.Verification_request_broadcast}. *)
+  | Repositories_changed
+      (** The workspace's repository catalog was written. A server push with
+          no payload, named by {!Masc.Repository_catalog_broadcast}. *)
   | Schedules_changed
       (** The workspace's schedules changed. A server push with no payload,
           named by {!Masc.Schedules_changed_event}: the reader re-fetches
@@ -352,6 +355,9 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val repositories_changed : event -> bool
+(** The repository catalog changed. *)
 
 val verification_requests_changed : event -> bool
 (** The verification request store, or a run registry a request row reads

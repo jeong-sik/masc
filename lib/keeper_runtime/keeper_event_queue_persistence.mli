@@ -80,7 +80,6 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -174,23 +173,6 @@ val ack_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   unit ->
   (unit, string) result
-
-val bind_pending_repetition_scope_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selections:Keeper_event_queue_state.pending_selection list ->
-  scope:Keeper_execution_scope_id.t ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection list, string) result
-(** Bind under the owner lock with strict snapshot durability. The producer
-    supplies identity once; this function never invents identity or infers a
-    parent from event payloads. Success returns fresh selection authority only
-    after the durable commit. A replay of a binding this process already
-    confirmed writes nothing and does not run [after_commit] again (see
-    {!enqueue_stimulus_once_result}). This is not a complete continuation
-    contract. *)
-
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -311,13 +293,6 @@ module For_testing : sig
       The writer is used for the first publication and for same-source
       retries until one of its writes is confirmed; a retry after that writes
       nothing. *)
-
-  val bind_pending_repetition_scope_with_confirmation :
-    confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
-    base_path:string -> keeper_name:string ->
-    selections:Keeper_event_queue_state.pending_selection list ->
-    scope:Keeper_execution_scope_id.t -> unit ->
-    (Keeper_event_queue_state.pending_selection list, string) result
 
   val load_state_with_read_interleave
     : after_read:(unit -> unit)
@@ -513,22 +488,6 @@ val ack_pending_source_terminal_result :
 (** Append and fsync the canonical source-bearing ACK transition before
     checkpointing removal of the exact pending source. *)
 
-val terminalize_pending_turn_attempt_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  applied_at:float ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  detail:string ->
-  unit ->
-  (pending_turn_terminal_result, string) result
-(** Atomically construct and commit a source-bearing terminal receipt for one
-    failed admitted turn. The selection carries the exact source incarnation;
-    no caller-provided prose or counter controls admission. An entry another
-    transition removed while the turn ran answers [Turn_selection_withdrawn]
-    under the same lock, and nothing is written
-    ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
-
 val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -538,8 +497,10 @@ val terminalize_pending_turn_completed_result :
   unit ->
   (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing completion receipt for one
-    successful admitted turn, or answer [Turn_selection_withdrawn] like
-    {!terminalize_pending_turn_attempt_result}. *)
+    successful admitted turn. The selection carries the exact source
+    incarnation. An entry another transition removed while the turn ran
+    answers [Turn_selection_withdrawn] under the same lock, and nothing is
+    written ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
 
 val project_transition_outbox_result :
   append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->
@@ -646,12 +607,6 @@ val project_accepted_transfer_guarded_result :
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-val ack_consumed :
-  base_path:string ->
-  keeper_name:string ->
-  Keeper_event_queue.stimulus list ->
-  (unit, string) result
 
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded

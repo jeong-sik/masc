@@ -66,18 +66,11 @@ type turn_failure =
     The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
-type checkpoint_reason =
-  | Durable_stimulus_arrived
-      (** A newer durable stimulus arrived; the turn yielded so the next
-          turn carries it. *)
-(** Why a healthy turn checkpointed before [Completed]. *)
-
 type turn_success =
   | Turn_completed of { meta : Keeper_meta_contract.keeper_meta }
-  | Turn_checkpointed of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; checkpoint_reason : checkpoint_reason
-      }
+  | Turn_checkpointed of { meta : Keeper_meta_contract.keeper_meta }
+      (** A newer durable stimulus arrived; the turn yielded so the next
+          turn carries it. *)
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta

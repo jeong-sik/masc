@@ -35,14 +35,13 @@ describe('queueDrainStatusOf', () => {
     ['terminal_projection_pending', 'settling'],
     ['transfer_projection_pending', 'settling'],
     ['matched_terminal_completed', 'drained'],
-    ['matched_terminal_failed', 'failed'],
     ['matched_terminal_cancelled', 'cancelled'],
     ['evidence_invalid', 'evidence_invalid'],
   ] as const)('uses durable %s independently of a dispatch-only ledger', (queue, expected) => {
     const row = req(queue, 'matched_stimulus')
     expect(queueDrainStatusOf(row)?.state).toBe(expected)
     expect(countQueueDrainMisses([row])).toBe(0)
-    if (expected === 'settling' || expected === 'failed') {
+    if (expected === 'settling') {
       expect(isCalendarVisible(queueDrainStatusOf(row)!)).toBe(true)
     }
     expect(row.keeper_reaction_evidence?.projection_status).toBe('matched_stimulus')
@@ -50,7 +49,7 @@ describe('queueDrainStatusOf', () => {
 
   it.each([
     'terminal_projection_pending', 'transfer_projection_pending',
-    'matched_terminal_completed', 'matched_terminal_failed', 'matched_terminal_cancelled',
+    'matched_terminal_completed', 'matched_terminal_cancelled',
   ] as const)('keeps an explicit ledger contradiction visible for %s', (status) => {
     const row = req(status, 'conflicting_terminal_evidence')
     expect(queueDrainStatusOf(row)?.state).toBe('evidence_invalid')

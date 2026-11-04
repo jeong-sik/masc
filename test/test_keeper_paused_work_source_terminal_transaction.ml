@@ -67,6 +67,15 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let with_source_terminal_lane f =
   let base_path = Filename.temp_dir "keeper-paused-source-terminal" "" in
   Fun.protect
@@ -131,7 +140,7 @@ let with_source_terminal_lane f =
        let source_incarnation =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load source-terminal incarnation"
-         |> State.select_when
+         |> select_ready
               ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select source-terminal event"
@@ -300,8 +309,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-2" }
       | State.Fusion_terminal _
-      | State.Turn_completed
-      | State.Turn_attempt_terminal _ ->
+      | State.Turn_completed ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
     let second_source : Queue.stimulus =
@@ -313,7 +321,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
     in
     let second_state = State.with_pending (Queue.enqueue Queue.empty second_source) reloaded in
     let second_selection =
-      State.select_when
+      select_ready
         ~now:(Unix.gettimeofday ())
         ~ready:(Queue.stimulus_identity_equal second_source)
         second_state
@@ -631,8 +639,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-after-projection" }
       | State.Fusion_terminal _
-      | State.Turn_completed
-      | State.Turn_attempt_terminal _ ->
+      | State.Turn_completed ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
     let second_source : Queue.stimulus =
@@ -704,7 +711,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
     let second_request : Transaction.request =
       { source = second_source
       ; source_incarnation =
-          (State.select_when
+          (select_ready
              ~now:(Unix.gettimeofday ())
              ~ready:(Queue.stimulus_identity_equal second_source)
              recovered

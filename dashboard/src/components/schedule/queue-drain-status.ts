@@ -38,7 +38,6 @@ import type { StatusChipTone } from '../common/status-chip'
 export type QueueDrainState =
   | 'pending' // in the pending queue — awaiting drain
   | 'settling' // durable transition committed, reaction projection still pending
-  | 'failed' // exact durable occurrence ended in a failed attempt
   | 'drained' // durable completion or recorded keeper reaction
   | 'cancelled' // left the queue through an accepted cancellation — no turn ran
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
@@ -73,11 +72,6 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
     label: '처리 반영 중',
     tone: 'info',
     title: 'durable 종결 또는 이관은 커밋됐고 반응 기록 반영이 대기 중',
-  },
-  failed: {
-    label: '실행 실패',
-    tone: 'warn',
-    title: '해당 occurrence의 durable 실패 종결이 기록됨',
   },
   drained: {
     label: '완료',
@@ -124,8 +118,6 @@ export function queueDrainStateOfEvidence(
       return 'settling'
     case 'matched_terminal_completed':
       return 'drained'
-    case 'matched_terminal_failed':
-      return 'failed'
     case 'matched_terminal_cancelled':
     case 'withdrawn_at_cancel':
       return 'cancelled'
@@ -188,7 +180,6 @@ export function queueDrainStatusOf(
 const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
   'pending',
   'settling',
-  'failed',
   'cancelled',
   'missed',
   'read_error',

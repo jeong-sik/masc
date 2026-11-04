@@ -6,10 +6,19 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_transfer_transaction
 
-(* The production loader with the pure first-ready selection. *)
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
 let select_queue_entry ~base_path ~keeper_name ~now ~ready =
   Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
-  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+  |> Result.map (select_ready ~now ~ready)
 ;;
 
 let test_switch : Eio.Switch.t option ref = ref None
@@ -166,7 +175,7 @@ let with_transfer_lane f =
        let source_incarnation =
          Persistence.load_state_result ~base_path ~keeper_name:from_keeper
          |> require_ok "load transfer source incarnation"
-         |> State.select_when
+         |> select_ready
               ~now:(Unix.gettimeofday ())
               ~ready:(Queue.stimulus_identity_equal source)
          |> require_some "select transfer source"

@@ -1035,10 +1035,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
-          (Keeper_heartbeat_loop_cycle.Checkpointed
-             { meta
-             ; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-             }))
+          (Keeper_heartbeat_loop_cycle.Checkpointed { meta }))
    with
    | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
    | _ ->
@@ -1333,10 +1330,7 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
       s.source.post_id) selections in
     check (list string) "bounded intake admits A's prefix in FIFO order"
       [a1.post_id;a2.post_id] (ids (Batch.selections original));
-    let scope = Keeper_chat_operation.Operation_id.of_string "original-A-consumer"
-      |> require |> Keeper_execution_scope_id.direct_operation in
-    let admitted = Keeper_event_queue_persistence.bind_pending_repetition_scope_result
-      ~base_path ~keeper_name ~selections:(Batch.selections original) ~scope () |> require in
+    let admitted = Batch.selections original in
     let b1 = make "conversation-B" "b1" 4. in
     enqueue_exn ~base_path keeper_name b1;
     let pending () =
@@ -1352,9 +1346,6 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
       let admitted = s.source.post_id=a1.post_id || s.source.post_id=a2.post_id in
       check int "only exact admitted sources count the checkpoint" (if admitted then 1 else 0)
         s.checkpoint_retentions;
-      check bool "only admitted sources retain the original consumer binding" true
-        (Option.equal Keeper_execution_scope_id.equal
-           (if admitted then Some scope else None) s.repetition_scope);
       let original = List.find (fun (source : Q.stimulus) -> source.post_id=s.source.post_id)
         [a1;a2;a3;b1] in
       check bool "conversation rotation retains the exact original payload" true
@@ -1471,10 +1462,7 @@ let test_checkpoint_preserves_results_and_services_successors () =
     let selections () =
       Persistence.For_testing.reset_snapshot_cache_for_testing ();
       Persistence.pending_selections_result ~base_path ~keeper_name |> require "cold queue reload" in
-    let scope = Keeper_chat_operation.Operation_id.of_string "original-consumer"
-      |> require "consumer operation" |> Keeper_execution_scope_id.direct_operation in
-    let admitted = Persistence.bind_pending_repetition_scope_result
-      ~base_path ~keeper_name ~selections:(selections ()) ~scope () |> require "bind original consumer" in
+    let admitted = selections () in
     let successor : Q.stimulus =
       {post_id="independent-successor";urgency=Immediate;arrived_at=2.;
        payload=Delegate_completed {dc_operation_id="independent-operation";dc_keeper="another-delegate";
@@ -1491,8 +1479,6 @@ let test_checkpoint_preserves_results_and_services_successors () =
         let original = List.find (fun (s : Q.stimulus) -> s.post_id=selection.source.post_id) originals in
         check bool "original complete payload and source identity survive cold reload" true
           (Q.stimulus_identity_equal original selection.source);
-        check bool "original consumer execution scope survives rotation" true
-          (Option.equal Keeper_execution_scope_id.equal (Some scope) selection.repetition_scope);
         check int "checkpoint retention is durable" 1 selection.checkpoint_retentions;
         check bool "post-checkpoint ACK policy cannot discard the result" false
           (Keeper_heartbeat_loop.For_testing.checkpoint_source_may_ack selection.source.payload))) retained;
@@ -1611,8 +1597,8 @@ let test_batch_completion_acks_every_member () =
       (Q.length queued))
 ;;
 
-let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
-  with_ctx "mixed-scope-transport" (fun ~base_path ~keeper_name ~meta ~ctx ->
+let test_exact_batch_reaches_dispatch_and_settlement () =
+  with_ctx "exact-batch-transport" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let module Batch = Keeper_heartbeat_source_batch in
     let module Persistence = Keeper_event_queue_persistence in
     let require label = function
@@ -1625,34 +1611,16 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
       ; arrived_at = Float.of_int index
       ; payload = Q.Bootstrap }) in
     List.iter (enqueue_exn ~base_path keeper_name) sources;
-    let initial = Persistence.pending_selections_result ~base_path ~keeper_name
-      |> require "initial selections" in
-    let first, second = match initial with
-      | first :: second :: _ -> first, second
-      | _ -> fail "fixture did not enqueue three sources"
-    in
-    let direct = Keeper_chat_operation.Operation_id.of_string "originating-direct"
-      |> require "operation ID" |> Keeper_execution_scope_id.direct_operation in
-    let autonomous =
-      match Uuidm.of_string "fde5c983-7a6f-4d87-bdad-53a51316f40d" with
-      | Some id -> Keeper_execution_scope_id.autonomous_admission id
-      | None -> fail "fixture UUID is invalid"
-    in
-    List.iter (fun (selection, scope) ->
-      let (_ : Keeper_event_queue_state.pending_selection list) =
-        Persistence.bind_pending_repetition_scope_result
-          ~base_path ~keeper_name ~selections:[selection] ~scope ()
-        |> require "bind distinct scopes" in
-      ()) [first, direct; second, autonomous];
     let expected = Persistence.pending_selections_result ~base_path ~keeper_name
-      |> require "bound selections" in
+      |> require "pending selections" in
+    check int "fixture enqueued three sources" 3 (List.length expected);
     let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     check bool "successful intake has no diagnostic authority" true
       (Option.is_none intake.diagnostic_selection);
     let input = Batch.for_turn ~reactive:false intake.source_batch in
     let batch = Batch.sources input in
-    check bool "all exact identities and mixed bindings reach turn input" true
+    check bool "all exact identities reach turn input" true
       (Batch.selections batch = expected);
     (match Batch.wake input with
      | Keeper_registry.Woken payloads ->
@@ -1806,8 +1774,8 @@ let () =
             test_checkpoint_preserves_results_and_services_successors
         ; test_case "stale checkpoint source preserves healthy sibling progress" `Quick
             test_checkpoint_stale_source_does_not_discard_healthy_sibling
-        ; test_case "exact mixed bindings reach dispatch and settlement" `Quick
-            test_exact_mixed_bindings_reach_dispatch_and_settlement
+        ; test_case "exact batch reaches dispatch and settlement" `Quick
+            test_exact_batch_reaches_dispatch_and_settlement
         ; test_case
             "scheduled work owns one occurrence, separate from attention"
             `Quick

@@ -3,7 +3,7 @@ import type { TurnIntakeSource } from './keeper-turn-flow'
 
 const schema = 'masc.keeper.turn-source-outcomes/v1'
 const receiptKinds = [
-  'ack_turn_completed', 'ack_turn_attempt_terminal', 'ack_fusion_terminal',
+  'ack_turn_completed', 'ack_fusion_terminal',
   'ack_hitl_terminal', 'cancelled', 'transferred',
 ] as const
 export type SourceReceiptKind = typeof receiptKinds[number]

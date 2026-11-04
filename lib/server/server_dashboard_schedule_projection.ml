@@ -548,8 +548,6 @@ let schedule_keeper_queue_evidence_dashboard_json
           | Some _, [], Error reason -> encode "read_error" [ "reason", `String reason ]
           | Some _, [], Ok (Server_schedule_consumers.Terminal_completed_at (owner, source, evidence)) ->
             terminal owner source evidence "completed" None
-          | Some _, [], Ok (Server_schedule_consumers.Terminal_failed_at (owner, source, reason, evidence)) ->
-            terminal owner source evidence "failed" (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Terminal_cancelled_at (owner, source, reason, evidence)) ->
             terminal owner source evidence "cancelled" (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target, source)) ->

@@ -385,20 +385,12 @@ let test_recorded_settlement_follows_the_batch_disposition () =
    | Loop.Continuation_settled_recorded -> ()
    | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
      fail "a completed turn did not record its continuation");
-  List.iter
-    (fun (label, checkpoint_reason) ->
-       match
-         Loop.continuation_settlement_of_cycle_outcome
-           (Some
-              (Cycle.Checkpointed
-                 { meta
-                 ; checkpoint_reason
-                 }))
-       with
-       | Loop.Continuation_settled_recorded -> ()
-       | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
-         failf "%s: a checkpoint did not record its continuation" label)
-    [ "durable stimulus arrived", Turn.Durable_stimulus_arrived ];
+  (match
+     Loop.continuation_settlement_of_cycle_outcome (Some (Cycle.Checkpointed { meta }))
+   with
+   | Loop.Continuation_settled_recorded -> ()
+   | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
+     fail "a checkpoint did not record its continuation");
   List.iter
     (fun outcome ->
        match Loop.continuation_settlement_of_cycle_outcome outcome with
@@ -418,64 +410,26 @@ let test_nonterminal_outcomes_preserve_batch () =
       fail "an unfinished turn incorrectly authorized Event Queue ACK")
 ;;
 
-(* Every checkpoint reason is produced after the model ran with the admitted
-   batch projected, so each one advances already-observed attention. The
-   regression this pins: a turn that ended on a Gate-deferred tool call left
-   its admitted HITL resolution at the queue head, and with one resolution
-   admitted per turn the same spent grant cost a turn on every wake while the
-   resolutions queued behind it never reached the model (edgar.a.poe,
-   2026-09-02: eight turns on one Execute over ten minutes). *)
-let every_checkpoint_reason =
-  [ "durable stimulus arrived", Turn.Durable_stimulus_arrived ]
-;;
-
-let test_every_checkpoint_reason_acks_admitted_attention () =
+(* A checkpoint is produced after the model ran with the admitted batch
+   projected. An admitted HITL resolution still needs its continuation
+   receipt before the ACK, so a spent grant does not stay at the queue head
+   and cost a turn on every wake (edgar.a.poe, 2026-09-02: eight turns on
+   one Execute over ten minutes). *)
+let test_checkpoint_records_hitl_continuation () =
   let meta = test_meta () in
-  List.iter
-    (fun (label, checkpoint_reason) ->
-       match
-         Loop.batch_disposition_of_cycle_outcome
-           (Some
-              (Cycle.Checkpointed
-                 { meta
-                 ; checkpoint_reason
-                 }))
-       with
-       | Loop.Batch_ack_attention_only -> ()
-       | Loop.Batch_ack_completed ->
-         failf "%s: a checkpoint was treated as a completed connector disposition" label
-       | Loop.Batch_no_action ->
-         failf "%s: a checkpoint retained attention the turn already projected" label)
-    every_checkpoint_reason
-;;
-
-let test_every_checkpoint_reason_records_hitl_continuation () =
-  let meta = test_meta () in
-  List.iter
-    (fun (label, checkpoint_reason) ->
-       check
-         bool
-         (label ^ ": HITL continuation projection is required before ACK")
-         true
-         (Loop.batch_disposition_of_cycle_outcome
-            (Some
-               (Cycle.Checkpointed
-                  { meta
-                  ; checkpoint_reason
-                  }))
-          |> Loop.For_testing.batch_disposition_records_continuation))
-    every_checkpoint_reason
+  check
+    bool
+    "HITL continuation projection is required before ACK"
+    true
+    (Loop.batch_disposition_of_cycle_outcome (Some (Cycle.Checkpointed { meta }))
+     |> Loop.For_testing.batch_disposition_records_continuation)
 ;;
 
 let test_durable_stimulus_checkpoint_acks_admitted_batch () =
   let meta = test_meta () in
   match
     Loop.batch_disposition_of_cycle_outcome
-      (Some
-         (Cycle.Checkpointed
-            { meta
-            ; checkpoint_reason = Turn.Durable_stimulus_arrived
-            }))
+      (Some (Cycle.Checkpointed { meta }))
   with
   | Loop.Batch_ack_attention_only -> ()
   | Loop.Batch_ack_completed ->
@@ -501,13 +455,9 @@ let () =
             `Quick
             test_durable_stimulus_checkpoint_acks_admitted_batch
         ; test_case
-            "every checkpoint reason advances admitted attention"
+            "a checkpoint projects HITL continuation"
             `Quick
-            test_every_checkpoint_reason_acks_admitted_attention
-        ; test_case
-            "every checkpoint reason projects HITL continuation"
-            `Quick
-            test_every_checkpoint_reason_records_hitl_continuation
+            test_checkpoint_records_hitl_continuation
         ] )
     ; ( "failed turn settles the continuation only after an answer"
       , [ test_case

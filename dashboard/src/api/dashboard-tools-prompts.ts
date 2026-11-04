@@ -215,12 +215,12 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   resolved_owner?: string
   transfer_target?: string
   transition_id?: string
-  terminal_outcome?: 'completed' | 'failed' | 'cancelled'
+  terminal_outcome?: 'completed' | 'cancelled'
   terminal_reason?: string | null
   projection_status:
     | 'matched_pending' | 'not_found' | 'read_error' | 'unrecognized_receipt'
     | 'terminal_projection_pending' | 'transfer_projection_pending'
-    | 'matched_terminal_completed' | 'matched_terminal_failed' | 'matched_terminal_cancelled'
+    | 'matched_terminal_completed' | 'matched_terminal_cancelled'
     | 'evidence_invalid' | 'retained_terminal_wake' | 'withdrawn_at_cancel'
   source?: string
   queue?: string

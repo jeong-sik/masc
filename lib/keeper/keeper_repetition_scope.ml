@@ -7,20 +7,6 @@ let observation_of_call (call : Keeper_agent_result.tool_call_detail) =
     ~input_fingerprint:call.input_fingerprint
     ~output_fingerprint:call.output_fingerprint
 
-let tool_calls state ~scope =
-  let* calls = Snapshot.observations state ~scope in
-  Ok (List.map (fun (observation : Snapshot.observation) ->
-    { Keeper_agent_result.tool_name = observation.tool_name
-    ; provider = "repetition_checkpoint"
-    ; execution_outcome = Tool_result.Unknown
-    ; typed_outcome = None
-    ; latency_ms = 0.
-    ; task_id = None
-    ; route_evidence = None
-    ; input_fingerprint = observation.input_fingerprint
-    ; output_fingerprint = observation.output_fingerprint
-    }) calls)
-
 let load = Keeper_repetition_context.load
 let save = Keeper_repetition_context.save
 let restore = Keeper_repetition_context.restore
@@ -51,8 +37,7 @@ module Execution = struct
       Ok state
     in
     execution.current <- Some result;
-    let* state = result in
-    tool_calls state ~scope:execution.scope
+    Result.map (fun (_ : snapshot) -> ()) result
 
   let observe execution ~target call =
     let result =

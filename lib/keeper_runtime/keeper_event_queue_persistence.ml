@@ -61,7 +61,6 @@ type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -1532,15 +1531,6 @@ let ack_pending_with ~before_write
 let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
 ;;
 
-let bind_pending_repetition_scope_result
-      ?(after_commit = fun _ -> ())
-      ~base_path ~keeper_name ~selections ~scope () =
-  commit_transform ~strict_snapshot_durability:true
-    ~base_path ~keeper_name ~after_commit (fun state ->
-      State.bind_pending_repetition_scope ~selections ~scope state
-      |> Result.map_error State.scope_binding_error_to_string)
-;;
-
 let commit_transition_unlocked_with
       ?(before_wal_write = fun () -> ())
       ~save_checkpoint
@@ -1824,28 +1814,6 @@ let terminalize_pending_turn_result
             (Printexc.to_string exn)))
 ;;
 
-let terminalize_pending_turn_attempt_result
-      ?after_commit
-      ~base_path
-      ~keeper_name
-      ~applied_at
-      ~selection
-      ~detail
-      ()
-  =
-  terminalize_pending_turn_result
-    ?after_commit
-    ~base_path
-    ~keeper_name
-    ~selection
-    ~transition:
-      (State.terminalize_pending_turn_attempt
-         ~applied_at
-         ~selection
-         ~detail)
-    ()
-;;
-
 let terminalize_pending_turn_completed_result
       ?after_commit
       ~base_path
@@ -1908,25 +1876,6 @@ let project_transition_outbox_result
          "event queue transition projection raised keeper=%s: %s"
          keeper_name
          (Printexc.to_string exn))
-;;
-
-let remove_post_ids stimuli state =
-  List.fold_left
-    (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
-       let newly_removed, state = State.remove_by_post_id stimulus.post_id state in
-       Keeper_event_queue.uniq_stimuli (removed @ newly_removed), state)
-    ([], state)
-    stimuli
-;;
-
-let ack_consumed ~base_path ~keeper_name stimuli =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       let _removed, state = remove_post_ids stimuli state in
-       Ok (state, ()))
 ;;
 
 type queue_residence_unknown_reason =
@@ -2038,13 +1987,5 @@ module For_testing = struct
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
     Atomic.set snapshot_cache_read_counter 0;
     Atomic.set snapshot_cache_hit_counter 0
-  ;;
-  let bind_pending_repetition_scope_with_confirmation
-        ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
-    commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
-      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
-      ~base_path ~keeper_name ~after_commit:ignore (fun state ->
-        State.bind_pending_repetition_scope ~selections ~scope state
-        |> Result.map_error State.scope_binding_error_to_string)
   ;;
 end

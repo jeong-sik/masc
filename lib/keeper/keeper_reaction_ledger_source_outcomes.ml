@@ -63,7 +63,6 @@ let receipt_kind (receipt : State.transition_receipt) =
   | State.Ack_source_terminal value ->
     (match value.source_receipt with
      | State.Turn_completed -> "ack_turn_completed"
-     | State.Turn_attempt_terminal _ -> "ack_turn_attempt_terminal"
      | State.Fusion_terminal _ -> "ack_fusion_terminal"
      | State.Hitl_terminal _ -> "ack_hitl_terminal")
 

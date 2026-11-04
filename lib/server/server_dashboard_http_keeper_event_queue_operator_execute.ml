@@ -139,8 +139,7 @@ let prior_cancellation_for_request
      | Keeper_event_queue_state.Projected_transfer _
      | Keeper_event_queue_state.Projected_fusion_terminal
      | Keeper_event_queue_state.Projected_hitl_terminal
-     | Keeper_event_queue_state.Projected_turn_completed
-     | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
+     | Keeper_event_queue_state.Projected_turn_completed ->
        Error
          ("event queue operator operation ID conflicts with cancellation request: "
           ^ operator_operation_id))
@@ -213,8 +212,7 @@ let prior_transfer_for_request
      | Keeper_event_queue_state.Projected_transfer _
      | Keeper_event_queue_state.Projected_fusion_terminal
      | Keeper_event_queue_state.Projected_hitl_terminal
-     | Keeper_event_queue_state.Projected_turn_completed
-     | Keeper_event_queue_state.Projected_turn_attempt_terminal ->
+     | Keeper_event_queue_state.Projected_turn_completed ->
        Error
          ("event queue operator operation ID conflicts with transfer request: "
           ^ operator_operation_id))

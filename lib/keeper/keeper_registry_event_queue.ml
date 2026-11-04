@@ -40,7 +40,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -999,24 +998,6 @@ let ack_pending_source_terminal_result
     ~after_commit:(publish_pending ~base_path name)
     ()
   |> project_source_ack_result ~base_path ~keeper_name:name
-;;
-
-let terminalize_pending_turn_attempt_result
-      ~base_path
-      name
-      ~applied_at
-      ~selection
-      ~detail
-  =
-  Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
-    ~base_path
-    ~keeper_name:name
-    ~applied_at
-    ~selection
-    ~detail
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-  |> project_turn_terminal_result ~base_path ~keeper_name:name
 ;;
 
 let terminalize_pending_turn_completed_result

@@ -26,7 +26,6 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -167,18 +166,6 @@ val ack_pending_source_terminal_result :
 (** Commit one exact terminal source ACK, publish the post-commit pending
     projection when the owner is registered, and project its durable reaction
     evidence before another source can settle. *)
-
-val terminalize_pending_turn_attempt_result :
-  base_path:string ->
-  string ->
-  applied_at:float ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  detail:string ->
-  (turn_ack_result, string) result
-(** Commit a source-bearing terminal receipt for one failed admitted turn,
-    publish the post-commit pending projection, and project its durable reaction
-    evidence before another source can settle. An entry already withdrawn
-    answers [Turn_selection_withdrawn]. *)
 
 val terminalize_pending_turn_completed_result :
   base_path:string ->

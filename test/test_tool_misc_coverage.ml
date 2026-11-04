@@ -1370,7 +1370,6 @@ let connector_selection ~event_id ~arrived_at =
   ; admitted_revision = 1L
   ; arrival = 1L
   ; checkpoint_retentions = 0
-      ; repetition_scope = None
   ; first_admitted_at = None
   }
 
@@ -1386,7 +1385,6 @@ let () =
       ; admitted_revision = 1L
       ; arrival = 1L
       ; checkpoint_retentions = 0
-      ; repetition_scope = None
   ; first_admitted_at = None
       }
     in
@@ -1458,7 +1456,6 @@ let schedule_selection ~schedule_id ~occurrence ~due_at ~arrived_at =
   ; admitted_revision = Int64.of_string occurrence
   ; arrival = Int64.of_string occurrence
   ; checkpoint_retentions = 0
-  ; repetition_scope = None
   ; first_admitted_at = None
   }
 

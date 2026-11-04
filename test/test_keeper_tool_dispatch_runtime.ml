@@ -10165,10 +10165,16 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let continuation = Gate.official_client admission |> Option.get in
          let execution = Masc.Keeper_repetition_scope.Execution.direct_operation operation_id in
          Masc.Keeper_repetition_scope.Execution.resume execution continuation.frame |> require "restore original native scope";
-         let prior = Masc.Keeper_repetition_scope.Execution.prepare execution ~source:original.context
-           ~target:(Agent_core.Context.create ()) |> require "original observations survive stale canonical scope" in
+         let prepared_target = Agent_core.Context.create () in
+         Masc.Keeper_repetition_scope.Execution.prepare execution ~source:original.context
+           ~target:prepared_target |> require "original observations survive stale canonical scope";
+         let prior = Masc.Keeper_repetition_scope.load prepared_target |> require "prepared scope frame"
+           |> fun frame -> Keeper_repetition_snapshot.observations frame
+             ~scope:(Masc.Keeper_repetition_scope.Execution.scope execution)
+           |> require "original scope observations" in
          check bool "prior applied effect remains in original scope" true
-           (List.map (fun (call : Masc.Keeper_agent_result.tool_call_detail) -> call.tool_name) prior = ["Write"]);
+           (List.map (fun (observation : Keeper_repetition_snapshot.observation) ->
+              observation.tool_name) prior = ["Write"]);
          let prepared_prompt = "Finish the original research\n\n[Retained paste correction]\nExact pasted context remains in this turn." in
          let model = Masc.Keeper_gate_replay.compose_model_message ~base_path
            ~user_message:prepared_prompt ~hitl_resolution:(Some (Gate.resolution admission))

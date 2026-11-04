@@ -230,7 +230,7 @@ type measure =
 - `Load_validate_wall_ms`: 측정 브랜치에 읽기 전용 프로브를 둔다. `Keeper_event_queue_persistence.validate_state_read_only_result` 를 파일 복사본에 20 회 돌려 p50 / p95 를 적는다.
   2.8 MB 실물 하나와 witness 를 4 배로 늘린 합성 파일(라벨 "synthetic") 하나. 프로브는 측정 브랜치와 함께 지운다.
 - `Replay_hit`: 있는 로그로 센다. `Hitl_delivery_replay` 는 `hitl resolution committed approval=… signal=` 줄,
-  `Schedule_runner_dispatch` 는 `durable_occurrence_index` 가 `already_acked` / `already_failed` / `already_cancelled` 로 답한 줄.
+  `Schedule_runner_dispatch` 는 `durable_occurrence_index` 가 `already_acked` / `already_cancelled` 로 답한 줄.
   `Terminal_ack_replay` 와 `Operation_replay` 는 지금 로그 줄이 없다. 측정 브랜치에서 `Transition_already_applied` 반환 자리에 DEBUG 한 줄을 붙이고, 브랜치와 함께 지운다.
   이 줄은 제품 코드가 아니다. main 에 올리지 않는다.
 

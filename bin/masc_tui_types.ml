@@ -3127,7 +3127,7 @@ let schedule_row_queue_keepers row =
         [ owner ]
     | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Missing | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
     | Unknown _ ->
         []
   in
@@ -3154,7 +3154,7 @@ let chat_schedule_entries ~keeper_name snapshot =
     match row.sch_occurrence.Tui_schedule_observation.stage with
     | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _ | Transferring _ | Unknown _
     | Dispatching -> true
-    | No_occurrence | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> false in
+    | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false in
   let observed row =
     match row.sch_reaction_latest_at_iso, row.sch_last_wake_started_at_iso with
     | Some at, _ | None, Some at -> Time_codec.parse_rfc3339_opt at
@@ -3166,7 +3166,7 @@ let chat_schedule_entries ~keeper_name snapshot =
              (match Schedule_domain.schedule_status_of_string row.sch_status with
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
-         | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> true
+         | Dispatch_failed _ | Completed | Cancelled _ -> true
          | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _
          | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
@@ -25449,7 +25449,6 @@ let keeper_message_schedule_rows state ~now ~max_rows =
               | Turn_ended -> Schedule_pending, "최근 회차 턴 종료 · 결과 확인 중"
               | Consumed -> Schedule_pending, "최근 회차 소비 확인 · 결과 미확인"
               | Completed -> Schedule_settled, "최근 회차 턴 완료"
-              | Failed error -> Schedule_failed, reason "최근 회차 처리 실패" error
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
               | Settling _ -> Schedule_pending, "최근 회차 결과 기록 중"
               | Transferring _ -> Schedule_pending, "최근 회차 인계 기록 중"
@@ -25474,11 +25473,11 @@ let keeper_message_schedule_rows state ~now ~max_rows =
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                         | Failed _ | Cancelled _ | Settling _ | Transferring _) ->
+                         | Cancelled _ | Settling _ | Transferring _) ->
                   " · 다음 예정 " ^ plain at
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                      | Failed _ | Cancelled _ | Settling _ | Transferring _) -> "" in
+                      | Cancelled _ | Settling _ | Transferring _) -> "" in
             tone, occurrence ^ hold ^ " · " ^ plain title ^ " · " ^ clock ^ next in
           let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
           match entries with

@@ -94,7 +94,6 @@ let test_turn_boundary_is_not_completion () =
   stage Observation.Completed (terminal "completed" consumed)
 
 let test_durable_results_and_projection () =
-  stage (Observation.Failed (Some "producer evidence")) (terminal "failed" (pending ()));
   stage (Observation.Cancelled (Some "producer evidence")) (terminal "cancelled" (pending ()));
   stage (Observation.Settling "reviewer")
     (pending () |> terminal "completed" |> nested "keeper_queue_evidence"
@@ -127,7 +126,7 @@ let test_unavailable_is_not_a_negative () =
   let unknown row = match (decoded row).stage with
     | Observation.Unknown _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
     | Settling _ | Transferring _ -> Alcotest.fail "unavailable evidence became confirmed progress" in
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "read_error")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "projection_status" (`String "quarantined")));
@@ -144,7 +143,7 @@ let test_terminal_contradiction_cannot_become_completed () =
     (match result with
      | Observation.Unknown _ -> true
      | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-     | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+     | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
      | Settling _ | Transferring _ -> false)
 
 let test_cross_source_terminal_disagreement () =
@@ -158,13 +157,12 @@ let test_cross_source_terminal_disagreement () =
       (match result.stage with
        | Observation.Unknown _ -> true
        | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started
-       | Turn_ended | Consumed | Completed | Failed _ | Cancelled _ | Settling _ | Transferring _ -> false))
-    ["completed"; "failed"];
+       | Turn_ended | Consumed | Completed | Cancelled _ | Settling _ | Transferring _ -> false))
+    ["completed"];
   let consumed = pending () |> nested "keeper_reaction_evidence"
     (replace "event_queue_ack_seen" (`Bool true)) in
   Alcotest.(check bool) "ack does not hide cancellation conflict" false
-    ((decoded (terminal "cancelled" consumed)).stage = Observation.Cancelled (Some "producer evidence"));
-  stage (Observation.Failed (Some "producer evidence")) (terminal "failed" consumed)
+    ((decoded (terminal "cancelled" consumed)).stage = Observation.Cancelled (Some "producer evidence"))
 
 let test_queue_absence_is_not_pending_delivery () =
   let row = pending () |> nested "keeper_queue_evidence"
@@ -206,7 +204,7 @@ let test_missing_stimulus_receipt_is_unconfirmed () =
   let unknown row = match (decoded row).stage with
     | Observation.Unknown _ -> ()
     | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-    | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
+    | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
     | Settling _ | Transferring _ -> Alcotest.fail "missing identity became confirmed progress" in
   unknown row;
   unknown (row |> nested "last_wake" (nested "detail"

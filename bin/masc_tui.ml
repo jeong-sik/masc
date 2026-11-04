@@ -19169,7 +19169,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_schedules_read state;
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state;
-       if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state
+       Masc_tui_types.revalidate_ask_followup_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -19543,7 +19543,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_keeper_schedules_read state;
     owe_chat_journal_reads state;
     Masc_tui_types.owe_every_identity_login_read state;
-    if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state;
+    Masc_tui_types.revalidate_ask_followup_read state;
     (* An explicit binding-write reread also survives while its surface is
        hidden. Recovery is one authority transition, not a retry timer. A read
        already started (or unable to start) above must not be launched again. *)

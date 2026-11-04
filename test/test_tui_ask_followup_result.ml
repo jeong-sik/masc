@@ -1205,6 +1205,44 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   check bool "observation and persistence do not mutate canonical Task resources" true
     (before=Masc.Workspace.get_tasks_raw config)
 
+let test_revalidate_preserves_failure_backoff () = with_answer @@ fun _base _config _ask _resolution _task_id state ->
+  let open Masc_tui_owed_read in
+  let first = failed ~retry_s:2.0 ~max_retry_s:30.0 ~now:10.0 (started (changed settled)) in
+  state.ask_followup_owed <- first;
+  Ui.revalidate_ask_followup_read state;
+  check bool "the first failed read keeps its two-second retry" true (state.ask_followup_owed = first);
+  check bool "the first retry is not due early" false (Ui.ask_followup_read_due state ~now:11.0);
+  let second = failed ~retry_s:2.0 ~max_retry_s:30.0 ~now:12.0 (started first) in
+  state.ask_followup_owed <- second;
+  Ui.revalidate_ask_followup_read state;
+  check bool "the second failed read keeps its four-second retry" true (state.ask_followup_owed = second);
+  check bool "the second retry is not due early" false (Ui.ask_followup_read_due state ~now:15.0);
+  check bool "the preserved second retry becomes due" true (Ui.ask_followup_read_due state ~now:16.0);
+  match second with
+  | Waiting { failures = 2; retry_at = 16.0 } -> ()
+  | Settled | Owed _ | Reading _ | Waiting _ -> fail "revalidation lost the original failure count or retry clock"
+
+let test_revalidate_preserves_reading_and_rearms_settled () = with_answer @@ fun _base _config _ask _resolution _task_id state ->
+  let open Masc_tui_owed_read in
+  let changed_during_read = Reading { failures = 0; changed_since = true } in
+  state.ask_followup_owed <- changed_during_read;
+  Ui.revalidate_ask_followup_read state;
+  check bool "revalidation preserves an actual change during the read" true
+    (state.ask_followup_owed = changed_during_read);
+  state.ask_followup_owed <- succeeded state.ask_followup_owed;
+  check bool "the actual change still owes a follow-up" true (Ui.ask_followup_read_due state ~now:0.0);
+  let clean_read = Reading { failures = 0; changed_since = false } in
+  state.ask_followup_owed <- clean_read;
+  Ui.revalidate_ask_followup_read state;
+  check bool "revalidation does not manufacture a change during a clean read" true
+    (state.ask_followup_owed = clean_read);
+  state.ask_followup_owed <- succeeded state.ask_followup_owed;
+  check bool "the clean read settles without another read" true
+    (state.ask_followup_owed = settled && not (Ui.ask_followup_read_due state ~now:0.0));
+  state.ask_followup_owed <- settled;
+  Ui.revalidate_ask_followup_read state;
+  check bool "an unfinished follow-up re-arms from settled" true (Ui.ask_followup_read_due state ~now:0.0)
+
 let () = Eio_main.run @@ fun env ->
   let original=Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1221,4 +1259,6 @@ let () = Eio_main.run @@ fun env ->
       test_case "retained original submitted Task preserves selection provenance and proof" `Quick test_retained_task_submission_keeps_selection_basis;
       test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw;
       test_case "actual comparison artifacts retain missing attempts and corrupted input" `Quick test_actual_followup_report_keeps_unobserved_and_bad_artifacts;
-      test_case "actual structured observations survive daily JSONL and dashboard decode" `Quick test_actual_followup_structured_sink_and_export]])
+      test_case "actual structured observations survive daily JSONL and dashboard decode" `Quick test_actual_followup_structured_sink_and_export;
+      test_case "revalidation preserves two-second and four-second failure backoff" `Quick test_revalidate_preserves_failure_backoff;
+      test_case "revalidation preserves reading state and re-arms settled unfinished follow-up" `Quick test_revalidate_preserves_reading_and_rearms_settled]])

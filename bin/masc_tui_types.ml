@@ -11965,6 +11965,17 @@ let ask_followup_unfinished (state : state) =
        | Some (Ok ()) -> false
        | Some (Error _) | None -> true)
 
+(* Revalidation recovers an unfinished follow-up that has no active read or
+   retry. It is not a new change: keep an existing retry clock and any change
+   already observed during the current read. *)
+let revalidate_ask_followup_read (state : state) =
+  if ask_followup_unfinished state then
+    match state.ask_followup_owed with
+    | Masc_tui_owed_read.Settled ->
+        state.ask_followup_owed <- Masc_tui_owed_read.changed state.ask_followup_owed
+    | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Reading _ | Masc_tui_owed_read.Waiting _ ->
+        ()
+
 (* The follow-up is read until a read completes it. A change noted while the
    completing read was out owes nothing more: reading again would start a
    finished follow-up over. *)

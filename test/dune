@@ -3290,6 +3290,7 @@
 (include stanzas/test_skill_catalog_announce.inc)
 (include stanzas/test_lane_addon_exports_announce.inc)
 (include stanzas/test_goal_projection_announce.inc)
+(include stanzas/test_skill_activations_broadcast.inc)
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)

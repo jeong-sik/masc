@@ -104,11 +104,6 @@ let log_effect level message =
   | `Warn -> Log.Discord.warn "%s" message
   | `Error -> Log.Discord.error "%s" message
 
-(* RFC-0223 P2: the run loop's connection state, published so presence
-   derivation (Channel_gate_discord_state.connected) can read it without
-   file indirection. One gateway per process (single bot token), so a
-   module-level register is unambiguous. Written only by [run]'s
-   state-machine step; everyone else reads. *)
 (* Whether a status read would show a different gateway state. *)
 let published_state_changed ~(previous : Discord_gateway_state.connection_state)
     (next : Discord_gateway_state.connection_state) =
@@ -125,6 +120,11 @@ let published_state_changed ~(previous : Discord_gateway_state.connection_state)
       ( Disconnected | Awaiting_hello | Identifying | Resuming | Connected _
       | Reconnect_pending _ | Failed _ ) ) -> true
 
+(* RFC-0223 P2: the run loop's connection state, published so presence
+   derivation (Channel_gate_discord_state.connected) can read it without
+   file indirection. One gateway per process (single bot token), so a
+   module-level register is unambiguous. Written only by [run]'s
+   state-machine step; everyone else reads. *)
 let published_connection_state : Discord_gateway_state.connection_state Atomic.t
   =
   Atomic.make Discord_gateway_state.Disconnected

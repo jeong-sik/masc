@@ -8925,36 +8925,40 @@ let launch_owed_runtime_config state ~mailbox =
       launch_runtime_config_load state ~mailbox
     end
 
-(* Runs on every loop iteration. The list owes nothing while a browser lane
-   holds the surface or the surface is elsewhere: arriving reads it. A read
-   already in flight is let finish first. *)
+(* Runs on every loop iteration. Off the surface nothing is owed: arriving
+   reads it. Under a browser lane the list keeps what it owes and reads when
+   the lane closes. A read already in flight is let finish first. *)
 let launch_owed_connectors state ~mailbox =
-  let on_screen =
-    match state.view, browser_lane_on_screen state with
-    | Connectors, None -> true
-    | Connectors, Some _ -> false
-    | ( ( Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board
-        | Planning | Schedules | Verification | Harness | Repositories | Fusion | Code
-        | Changes | Runtime | Config | Resources | Tools | System_logs | Keepers _ ),
-        (Some _ | None) ) ->
-        false
-  in
-  if not on_screen then state.connectors_owed <- Masc_tui_owed_read.settled
-  else begin
+  match state.view, browser_lane_on_screen state with
+  (* The browser lane covers the list; what is owed waits until it closes. *)
+  | Connectors, Some _ -> ()
+  | Connectors, None ->
+    let view = Connector_read.view state.connectors_read in
     let reading =
-      match Connector_read.view state.connectors_read with
+      match view with
       | Connector_read.Reading _ -> true
       | Connector_read.Quiet | Connector_read.Waiting_after_write
       | Connector_read.Failed_to_start -> false
     in
     let read =
-      if reading then state.connectors_owed
-      else Masc_tui_owed_read.abandoned state.connectors_owed
+      match view with
+      | Connector_read.Reading _ -> state.connectors_owed
+      (* A read that could not start backs off like one that failed. *)
+      | Connector_read.Failed_to_start ->
+        Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+          ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+          state.connectors_owed
+      | Connector_read.Quiet | Connector_read.Waiting_after_write ->
+        Masc_tui_owed_read.abandoned state.connectors_owed
     in
     state.connectors_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_connectors_load state ~mailbox
-  end
+  | ( ( Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board
+      | Planning | Schedules | Verification | Harness | Repositories | Fusion | Code
+      | Changes | Runtime | Config | Resources | Tools | System_logs | Keepers _ ),
+      (Some _ | None) ) ->
+    state.connectors_owed <- Masc_tui_owed_read.settled
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -26753,13 +26757,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match complete_connectors_read state request result with
        | None -> ()
        | Some completion -> begin
-        (match completion.Connector_read.follow_up with
-         | Connector_read.No_follow_up -> ()
-         | Read_after_write -> launch_connectors_load state ~mailbox);
+        (* The finished read settles what it owed before an after-write
+           follow-up starts the next one. *)
         state.connectors_owed <-
           (match result with
            | Ok _ -> Masc_tui_owed_read.succeeded state.connectors_owed
            | Error _ -> failed_read state.connectors_owed);
+        (match completion.Connector_read.follow_up with
+         | Connector_read.No_follow_up -> ()
+         | Read_after_write -> launch_connectors_load state ~mailbox);
         (match result with
         | Ok snapshot -> settle_connector_unbind_offers state snapshot
         | Error detail ->

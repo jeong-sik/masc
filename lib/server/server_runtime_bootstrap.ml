@@ -571,7 +571,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Workspace_dataset_event.announce ~base_path:config.base_path
       Workspace_dataset_event.Connectors);
   (* Connector trigger policies are runtime parameters. *)
-  Runtime_params.install_change_observer (fun ~key:_ -> Channel_gate_change.notify ());
+  Runtime_params.install_change_observer Connector_trigger_params.announce_param_change;
   Runtime.install_config_commit_observer (fun ~runtime_config_path:_ ->
     Workspace_dataset_event.announce ~base_path:config.base_path
       Workspace_dataset_event.Runtime_config);

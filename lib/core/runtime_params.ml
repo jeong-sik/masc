@@ -140,13 +140,14 @@ let ensure_dir path =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir
 
-(** Atomic write via rename.  Errors are logged but do not propagate
-    — callers should not fail just because persistence is unavailable. *)
 let change_observer : (key:string -> unit) Atomic.t = Atomic.make (fun ~key:_ -> ())
 
 let install_change_observer observer = Atomic.set change_observer observer
 
 let notify_changed ~key = (Atomic.get change_observer) ~key
+
+(** Atomic write via rename.  Errors are logged but do not propagate
+    — callers should not fail just because persistence is unavailable. *)
 
 let persist ~base_path =
   try

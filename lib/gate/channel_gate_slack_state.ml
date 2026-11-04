@@ -115,12 +115,10 @@ let workspace_id : string option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
 
 let record_startup_error message =
-  Atomic.set startup_error (Some message);
-  Channel_gate_change.notify ()
+  Channel_gate_change.store ~equal:(Option.equal String.equal) startup_error (Some message)
 
 let clear_startup_error () =
-  Atomic.set startup_error None;
-  Channel_gate_change.notify ()
+  Channel_gate_change.store ~equal:(Option.equal String.equal) startup_error None
 
 let record_ready ~bot_user_id =
   Atomic.set last_ready
@@ -132,16 +130,14 @@ let record_ready ~bot_user_id =
 
 let record_workspace_id value =
   let value = String.trim value in
-  if not (String.equal value "") then begin
-    Atomic.set workspace_id (Some value);
-    Channel_gate_change.notify ()
-  end
+  (* Called for every inbound message and ambient event. *)
+  if not (String.equal value "") then
+    Channel_gate_change.store ~equal:(Option.equal String.equal) workspace_id (Some value)
 
 let current_workspace_id () = Atomic.get workspace_id
 
 let clear_workspace_id () =
-  Atomic.set workspace_id None;
-  Channel_gate_change.notify ()
+  Channel_gate_change.store ~equal:(Option.equal String.equal) workspace_id None
 
 (* One reading of the connector, rendered by [status_json] and
    [connector_json] alike so the two views cannot disagree. Values computed

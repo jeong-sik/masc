@@ -18,7 +18,13 @@ val remember :
   unit ->
   unit
 (** Record a non-blank name for a non-blank id. Repeating the current name does
-    not append another durable row. *)
+    not append another durable row. A name it learns is announced through
+    {!Channel_gate_change.notify}. *)
+
+val remember_all :
+  base_dir:string -> connector:string -> scope:scope -> (string * string) list -> unit
+(** {!remember} for each [(id, name)], announcing once if any name was
+    learned: a directory page of a thousand members is one announcement. *)
 
 val recall :
   base_dir:string -> connector:string -> scope:scope -> id:string -> string option

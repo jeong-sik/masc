@@ -11,3 +11,8 @@ val install : (unit -> unit) -> unit
     recording functions, some under a store lock. *)
 
 val notify : unit -> unit
+
+val store : equal:('a -> 'a -> bool) -> 'a Atomic.t -> 'a -> unit
+(** Put [value] in [cell] and {!notify} only when [equal] says it differs
+    from what [cell] held: a recorder called on every message or every poll
+    then announces only what a status read would show differently. *)

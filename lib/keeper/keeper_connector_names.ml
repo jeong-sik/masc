@@ -127,40 +127,58 @@ let directory_for_path file_path =
     directory
 ;;
 
-let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
+(* Appends [name] for [id] unless the table already holds it, and says
+   whether it learned something. The caller holds [directories_lock]. *)
+let learn_locked ~base_dir ~connector ~scope ~(id : string) ~(name : string) =
   let id = String.trim id in
   let name = String.trim name in
   if String.equal id "" || String.equal name ""
-  then ()
-  else
+  then false
+  else (
+    let file_path = names_path ~base_dir ~connector ~scope in
+    let directory = directory_for_path file_path in
+    match Hashtbl.find_opt directory id with
+    | Some known when String.equal known name -> false
+    | Some _ | None ->
+      (try
+         ignore (Keeper_fs.ensure_dir (names_dir base_dir));
+         let line =
+           Yojson.Safe.to_string
+             (`Assoc
+               [ "id", `String id
+               ; "name", `String name
+               ; "ts", `Float (Time_compat.now ())
+               ])
+         in
+         Fs_compat.append_file file_path (line ^ "\n");
+         Hashtbl.replace directory id name;
+         Hashtbl.remove sorted_directories file_path;
+         true
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn "connector_names: append failed for %s/%s: %s"
+           (sanitize_name connector)
+           (scope_segment scope)
+           (Printexc.to_string exn);
+         false))
+;;
+
+let remember_all ~base_dir ~connector ~scope entries =
+  let learned =
     Cross_context_mutex.with_durable_lock directories_lock (fun () ->
-      let file_path = names_path ~base_dir ~connector ~scope in
-      let directory = directory_for_path file_path in
-      match Hashtbl.find_opt directory id with
-      | Some known when String.equal known name -> ()
-      | Some _ | None ->
-        (try
-           ignore (Keeper_fs.ensure_dir (names_dir base_dir));
-           let line =
-             Yojson.Safe.to_string
-               (`Assoc
-                 [ "id", `String id
-                 ; "name", `String name
-                 ; "ts", `Float (Time_compat.now ())
-                 ])
-           in
-           Fs_compat.append_file file_path (line ^ "\n");
-           Hashtbl.replace directory id name;
-           Hashtbl.remove sorted_directories file_path;
-           (* The connectors surface lists the learned names. *)
-           Channel_gate_change.notify ()
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Log.Keeper.warn "connector_names: append failed for %s/%s: %s"
-             (sanitize_name connector)
-             (scope_segment scope)
-             (Printexc.to_string exn)))
+      List.fold_left
+        (fun learned (id, name) ->
+           learn_locked ~base_dir ~connector ~scope ~id ~name || learned)
+        false entries)
+  in
+  (* The connectors surface lists the learned names: one announcement for
+     the batch, however many it learned. *)
+  if learned then Channel_gate_change.notify ()
+;;
+
+let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
+  remember_all ~base_dir ~connector ~scope [ id, name ]
 ;;
 
 let recall ~base_dir ~connector ~scope ~(id : string) =

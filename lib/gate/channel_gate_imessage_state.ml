@@ -111,9 +111,12 @@ let record_poll_ok ~cursor_rowid =
   | Not_started | Degraded _ -> Channel_gate_change.notify ()
 ;;
 
+(* A degraded poll records its error on every attempt; only another error,
+   or a change from polling, is announced. *)
 let record_poll_error message =
-  Atomic.set poll_state_ref (Degraded message);
-  Channel_gate_change.notify ()
+  match Atomic.exchange poll_state_ref (Degraded message) with
+  | Degraded previous when String.equal previous message -> ()
+  | Degraded _ | Not_started | Polling -> Channel_gate_change.notify ()
 
 let record_self_chat_guid guid =
   let guid = String.trim guid in
@@ -122,12 +125,10 @@ let record_self_chat_guid guid =
 ;;
 
 let record_startup_error message =
-  Atomic.set startup_error (Some message);
-  Channel_gate_change.notify ()
+  Channel_gate_change.store ~equal:(Option.equal String.equal) startup_error (Some message)
 
 let clear_startup_error () =
-  Atomic.set startup_error None;
-  Channel_gate_change.notify ()
+  Channel_gate_change.store ~equal:(Option.equal String.equal) startup_error None
 
 let poll_state_connected = function
   | Polling -> true

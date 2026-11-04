@@ -15,7 +15,14 @@ type accepted_cancellation =
     [source_incarnation] fences the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
-type accepted_transfer = Keeper_event_queue_state_core.accepted_transfer
+type accepted_transfer = Keeper_event_queue_state_core.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  ; target_trace_id : Keeper_id.Trace_id.t
+  }
 (** Exact causal authority for terminally transferring one accepted event.
     [target_trace_id] prevents delayed outbox replay
     from projecting into a purged or same-name replacement Keeper. *)
@@ -118,7 +125,14 @@ type outbox_entry =
 
 type t
 
-type pending_selection = Keeper_event_queue_state_core.pending_selection
+type pending_selection = Keeper_event_queue_state_core.pending_selection =
+  { source : Keeper_event_queue.stimulus
+  ; admitted_revision : int64
+  ; arrival : int64
+  ; checkpoint_retentions : int
+  ; repetition_scope : Keeper_execution_scope_id.t option
+  ; first_admitted_at : float option
+  }
 (** One exact durable queue entry. [admitted_revision] is the current
     exact-selection fence; deferral and reprioritization advance it. Exact
     selection combines it with {!source_snapshot_ref}. *)

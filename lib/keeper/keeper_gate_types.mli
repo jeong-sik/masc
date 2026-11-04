@@ -50,7 +50,11 @@ type authorization_source =
 (* The closed reading of the shim's refusal, the same type the approval row
    stores. The child names which of its rules could not be installed over the
    boundary pipe, so nothing is read back out of stderr here. *)
-type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind
+type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
 
 type observation =
   | Observed_result of boxed_execution

@@ -193,7 +193,11 @@ val cycle_grant_of_resolution :
     always keeps the judge. See
     {!Keeper_approval_queue_rules_types.observed_refusal_kind} for what each
     kind means. *)
-type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind
+type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
 
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only

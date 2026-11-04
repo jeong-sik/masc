@@ -53,7 +53,25 @@ val is_terminal : phase -> bool
     [restart_requested]: supervisor requested immediate restart of a
     stopped fiber. [drain_complete]: current turn finished, no pending
     work. *)
-type conditions = Keeper_state_machine_types.conditions
+type conditions = Keeper_state_machine_types.conditions = {
+  launch_pending : bool;
+  (** Fresh registration exists, but the keepalive fiber has not started yet. *)
+  fiber_alive : bool;
+  (** [done_p] unresolved AND [fiber_stop] not set *)
+  heartbeat_healthy : bool;
+  (** Result of the latest heartbeat observation. *)
+  turn_healthy : bool;
+  (** Result of the latest completed turn observation. *)
+  context_handoff_needed : bool;
+  operator_paused : bool;
+  (** [meta.paused = true] *)
+  stop_requested : bool;
+  (** [Atomic.get fiber_stop = true] *)
+  restart_requested : bool;
+  (** Supervisor has requested immediate restart of a stopped fiber. *)
+  drain_complete : bool;
+  (** Current turn finished, no pending work *)
+}
 
 val default_conditions : conditions
 (** All false — the "zero state" for initialization. *)
@@ -61,7 +79,7 @@ val default_conditions : conditions
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type context_actions = Keeper_state_machine_types.context_actions
+type context_actions = Keeper_state_machine_types.context_actions = { handoff : bool }
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.

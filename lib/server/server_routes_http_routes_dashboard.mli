@@ -70,6 +70,10 @@ module For_testing : sig
   (** The [tui] table POST after authentication: one parsed change, written
       through Runtime's config commit (RFC-0482 §3.1). *)
 
+  val handle_tui_preferences_get :
+    Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  (** The [tui] table GET after authentication: the settings only. *)
+
   val handle_runtime_assignment_post_with :
     set_assignment:
       (runtime_config_path:string ->

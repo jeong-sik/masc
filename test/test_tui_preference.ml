@@ -111,6 +111,90 @@ let test_a_chat_visit_moves_the_opening_target_only_on_last () =
   check (option string) "an overview opening gets no target" None
     (stored P.Key.Opening_keeper (visit ""))
 
+let full_runtime_toml =
+  "[providers.secretive]\nprotocol = \"openai-compatible-http\"\nendpoint = \"https://example.invalid\"\n\n\
+   [tui]\nopening = \"last\"\nlast_chat_keeper = \"analyst\"\ntheme = \"monokai\"\nlanguage = \"en\"\n\
+   board_sort = \"discussed\"\ncandle = \"dotted\"\nreduce_motion = true\nlift_colours = false\n\
+   table_frame = true\nhints_visible = false\nhelp_hint_shown = true\ncoalesce_queued_input = true\n\
+   user_input_priority_next = true\nmidi_soundfont = \"/sf2/a.sf2\"\naudio_input_device = \"  mic  \"\n\n\
+   [voice.stt]\ndefault_model = \"scribe_v1\"\nsend_on_stop = true\n\n\
+   [[voice.stt.endpoints]]\nid = \"eleven\"\nkind = \"elevenlabs_direct\"\n"
+
+let test_settings_read_as_the_terminal_read_them () =
+  let absent = P.settings_of_reading (Ok None) in
+  check bool "an absent file opens on the overview" true (absent.opening = Ok P.Overview);
+  check bool "an absent file has no last chat" true (absent.last_chat_keeper = Ok None);
+  check (option string) "an absent file has no theme" None absent.theme;
+  let unreadable = P.settings_of_reading (Error "denied") in
+  check bool "an unreadable file opens on the overview" true (unreadable.opening = Ok P.Overview);
+  check bool "an unreadable file does not pass for no history" true
+    (unreadable.last_chat_keeper
+     = Error "Conversation history unavailable: runtime.toml could not be read");
+  let broken = P.settings_of_reading (Ok (Some "[providers.secretive\nkey = 1\n")) in
+  check bool "a file that does not parse says so and names nothing in it" true
+    (broken.last_chat_keeper = Error "Conversation history unavailable: runtime.toml does not parse");
+  let full = P.settings_of_reading (Ok (Some full_runtime_toml)) in
+  check bool "opening" true (full.opening = Ok (P.Last (Some (keeper "analyst"))));
+  check (option string) "theme" (Some "monokai") full.theme;
+  check (option string) "language as stored" (Some "en") full.language;
+  check (option string) "board sort" (Some "discussed") full.board_sort;
+  check (option string) "candle" (Some "dotted") full.candle;
+  check (option bool) "reduce motion" (Some true) full.reduce_motion;
+  check (option bool) "lift colours" (Some false) full.lift_colours;
+  check (option bool) "hints" (Some false) full.hints_visible;
+  check (option bool) "send on stop through the voice section" (Some true) full.send_on_stop;
+  check (option string) "a stored device is trimmed" (Some "mic") full.audio_input_device;
+  check (option string) "a blank device is no pick" None
+    (P.settings_of_reading (Ok (Some "[tui]\naudio_input_device = \"  \"\n"))).audio_input_device
+
+let contains ~sub text =
+  let n = String.length sub in
+  let rec scan i = i + n <= String.length text && (String.equal (String.sub text i n) sub || scan (i + 1)) in
+  scan 0
+
+let test_settings_travel_without_the_rest_of_the_file () =
+  List.iter
+    (fun (label, reading) ->
+       let settings = P.settings_of_reading reading in
+       let json = P.settings_to_yojson settings in
+       check bool (label ^ " reads back as sent") true (P.settings_of_yojson json = Ok settings);
+       let text = Yojson.Safe.to_string json in
+       check bool (label ^ " carries no provider") false
+         (List.exists (fun sub -> contains ~sub text) [ "providers"; "secretive"; "example.invalid" ]))
+    [ "absent", Ok None
+    ; "unreadable", Error "/private/path/runtime.toml: permission denied"
+    ; "unparsable", Ok (Some "[providers.secretive\nendpoint = \"https://example.invalid\"\n")
+    ; "full", Ok (Some full_runtime_toml)
+    ];
+  check bool "the path of an unreadable file is not sent" false
+    (contains ~sub:"/private/path"
+       (Yojson.Safe.to_string
+          (P.settings_to_yojson (P.settings_of_reading (Error "/private/path/runtime.toml: denied")))));
+  let sent = P.settings_to_yojson (P.settings_of_reading (Ok (Some full_runtime_toml))) in
+  let refused label json =
+    match P.settings_of_yojson json with
+    | Ok _ -> failf "%s was taken" label
+    | Error _ -> ()
+  in
+  (match sent with
+   | `Assoc fields ->
+     refused "an extra field" (`Assoc (("font", `String "mono") :: fields));
+     refused "a missing field" (`Assoc (List.remove_assoc "theme" fields));
+     refused "another schema"
+       (`Assoc (("schema", `String "other/v1") :: List.remove_assoc "schema" fields));
+     refused "a theme that is not a string"
+       (`Assoc (("theme", `Int 1) :: List.remove_assoc "theme" fields));
+     let reordered =
+       `Assoc
+         (("opening", `Assoc [ "keeper", `String "analyst"; "mode", `String "last" ])
+          :: List.remove_assoc "opening" fields)
+     in
+     check bool "an opening with its fields in another order reads the same" true
+       (Result.map (fun (settings : P.settings) -> settings.opening) (P.settings_of_yojson reordered)
+        = Ok (Ok (P.Last (Some (keeper "analyst")))))
+   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+     fail "the settings are not an object")
+
 let () =
   run "tui_preference"
     [ ( "wire"
@@ -118,6 +202,12 @@ let () =
             test_every_change_reads_back_as_written
         ; test_case "a change outside the shape is refused" `Quick
             test_a_change_outside_the_shape_is_refused
+        ] )
+    ; ( "settings"
+      , [ test_case "settings read as the terminal read them" `Quick
+            test_settings_read_as_the_terminal_read_them
+        ; test_case "settings travel without the rest of the file" `Quick
+            test_settings_travel_without_the_rest_of_the_file
         ] )
     ; ( "edit"
       , [ test_case "each change writes its key" `Quick test_each_change_writes_its_key

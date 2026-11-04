@@ -7391,6 +7391,18 @@ let test_tui_preference_route_writes_one_parsed_change () =
   check bool "the answer carries the commit" true
     (String.length (json |> member "commit" |> member "source_revision" |> to_string) > 0);
   check (option string) "the pick is stored" (Some "ayu-dark") (stored_theme ());
+  let read_raw, read_json =
+    post_to_handler ~target:"/api/v1/tui/preferences"
+      (fun request reqd _body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_tui_preferences_get state request reqd)
+      ""
+  in
+  expect_http_status "the settings read answers" 200 read_raw;
+  check (option string) "the settings read returns the stored pick" (Some "ayu-dark")
+    (read_json |> member "theme" |> to_string_option);
+  let sent = Yojson.Safe.to_string read_json in
+  check bool "the settings read carries no provider" false
+    (List.exists (String_util.contains_substring sent) [ "test_provider"; "127.0.0.1"; "providers" ]);
   check int "a committed pick is audited once" (rows_before + 1) (audit_rows ());
   check string "the same pick again is unchanged" "unchanged"
     (state_of {|{"change":"theme","theme":"ayu-dark"}|});

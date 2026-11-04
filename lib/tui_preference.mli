@@ -3,7 +3,8 @@
     (RFC-0482 §3.1). A change names one key and carries the value already
     parsed, so the server takes a change only in a shape it can write. *)
 
-(** The keys of the [tui] table a change writes. *)
+(** The keys of the [tui] table a terminal reader reads, some of which a
+    change writes. *)
 module Key : sig
   type t =
     | Opening
@@ -14,6 +15,14 @@ module Key : sig
     | Board_sort
     | Candle
     | Help_hint_shown
+    | Reduce_motion
+    | Lift_colours
+    | Table_frame
+    | Hints_visible
+    | Coalesce_queued_input
+    | User_input_priority_next
+    | Midi_soundfont
+    | Audio_input_device
 
   val name : t -> string
   (** The key's spelling inside the [tui] table. *)
@@ -80,3 +89,47 @@ val change_of_yojson : Yojson.Safe.t -> (change, string) result
 
 val change_kind : change -> string
 (** The [change] field's value for this change; audit records it. *)
+
+(** What a terminal reader starts with, read from runtime.toml by the rules
+    the terminal used when it read the file itself. *)
+type settings =
+  { opening : (opening, string) result
+      (** [Ok Overview] when the file is absent or does not parse. *)
+  ; last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result
+      (** [Error] when the file cannot be read or parsed: unread history is
+          not presented as none. The reason names the failed step only;
+          the detail, which can quote other tables or the file's path, goes
+          to the server log. *)
+  ; theme : string option
+  ; language : string option
+      (** As stored; the reader reports a value it does not know. *)
+  ; board_sort : string option
+  ; candle : string option
+  ; reduce_motion : bool option
+  ; lift_colours : bool option
+  ; table_frame : bool option
+  ; hints_visible : bool option
+  ; help_hint_shown : bool option
+  ; coalesce_queued_input : bool option
+  ; send_on_stop : bool option
+      (** [voice.stt].send_on_stop, through {!Voice_config}; a [voice]
+          section that does not parse reads as [None]. *)
+  ; user_input_priority_next : bool option
+  ; midi_soundfont : string option
+  ; audio_input_device : string option
+      (** A blank value reads as [None]; a stored one is trimmed. *)
+  }
+
+val settings_of_reading : (string option, string) result -> settings
+(** The settings in a runtime.toml text: [Ok None] is an absent file, [Error]
+    a file that could not be read. *)
+
+val read_settings : path:string -> settings
+(** {!settings_of_reading} over the file at [path]. *)
+
+val settings_to_yojson : settings -> Yojson.Safe.t
+(** The settings only; nothing else in runtime.toml is carried. *)
+
+val settings_of_yojson : Yojson.Safe.t -> (settings, string) result
+(** The reverse of {!settings_to_yojson}: exactly its fields, its schema and
+    value shapes; anything else is [Error]. *)

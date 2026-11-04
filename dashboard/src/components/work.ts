@@ -395,14 +395,6 @@ function taskEvidenceLedgerRows(task: Task): TaskEvidenceLedgerRow[] {
   if (links?.operation_id) rows.push({ key: 'execution:operation', label: 'operation', value: links.operation_id })
 
   const contract = task.contract
-  if (contract?.strict !== undefined) {
-    rows.push({
-      key: 'contract:strict',
-      label: 'contract',
-      value: contract.strict ? 'strict' : 'advisory',
-      tone: contract.strict ? 'warn' : undefined,
-    })
-  }
   appendEvidenceList(rows, 'completion', contract?.completion_contract, 'completion')
   appendEvidenceList(rows, 'required evidence', contract?.required_evidence, 'required')
   appendEvidenceList(rows, 'inspect evidence', contract?.inspect_gate_evidence, 'inspect')

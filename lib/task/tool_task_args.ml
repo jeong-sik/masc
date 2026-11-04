@@ -16,8 +16,7 @@ let parse_task_creation_request_id = function
   | _ -> Error "task arguments must be an object"
 
 let task_contract_keys =
-  [ "strict"
-  ; "completion_contract"
+  [ "completion_contract"
   ; "required_evidence"
   ; "inspect_gate_evidence"
   ; "verify_gate_evidence"
@@ -65,8 +64,8 @@ let unknown_args ~valid_keys args =
    a non-empty [reason] or [notes] but forget the nested summary field —
    rejecting the call in that case burned 76/132 masc_transition calls
    on 2026-04-17/18 (see memory/handoff-2026-04-18-masc-tool-failure-
-   investigation.md). Prefer [notes] when present (it's the canonical
-   done-note) then fall back to [reason] (release blocker note). Truncate
+   investigation.md). Prefer [notes] when present then fall back to
+   [reason] (release blocker note). Truncate
    to keep the synthesized summary single-line. *)
 let synthesize_summary_from_siblings args =
   let pick key =

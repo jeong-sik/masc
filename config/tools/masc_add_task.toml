@@ -58,10 +58,6 @@ What counts as done for this task, and what evidence shows it. Recorded at \
 creation and never rewritten. Omit it and the task carries no criteria."""
 
 [[params.params]]
-name = "strict"
-type = "boolean"
-
-[[params.params]]
 name = "completion_contract"
 type = "array"
 items = { type = "string" }

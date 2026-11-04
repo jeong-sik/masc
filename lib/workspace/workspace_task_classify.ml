@@ -86,9 +86,9 @@ let same_task_actor _config left right =
     reading it learns nothing and falls back to a standard of its own, which
     the worker never sees. A task states its criteria or has none, and
     [contract = None] says which. *)
-let normalize_task_contract (contract : Masc_domain.task_contract) =
-  { contract with
-    completion_contract = normalized_string_list contract.completion_contract
+let normalize_task_contract (contract : Masc_domain.task_contract) :
+    Masc_domain.task_contract =
+  { completion_contract = normalized_string_list contract.completion_contract
   ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence

@@ -80,7 +80,6 @@ export function normalizeTask(raw: unknown): Task | null {
   if (raw.detail_level !== undefined && raw.detail_level !== 'summary' && raw.detail_level !== 'full') return null
   const contract = isRecord(raw.contract)
     ? {
-        strict: asBoolean(raw.contract.strict),
         completion_contract: asStringArray(raw.contract.completion_contract),
         required_evidence: asStringArray(raw.contract.required_evidence),
         inspect_gate_evidence: asStringArray(raw.contract.inspect_gate_evidence),

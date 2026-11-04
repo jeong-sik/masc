@@ -47,10 +47,6 @@ Optional persisted task contract for deterministic completion and \
 verification evidence."""
 
 [[params.params]]
-name = "strict"
-type = "boolean"
-
-[[params.params]]
 name = "completion_contract"
 type = "array"
 items = { type = "string" }

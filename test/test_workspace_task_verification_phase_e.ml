@@ -48,8 +48,7 @@ let test_placeholder_like_notes_reach_llm_evidence () =
 
 let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
   let contract : Masc_domain.task_contract =
-    { strict = false
-    ; completion_contract = []
+    { completion_contract = []
     ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
     ; verify_gate_evidence = [ "PR #18810 merged" ]

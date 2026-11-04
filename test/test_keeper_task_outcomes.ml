@@ -1140,9 +1140,8 @@ let test_done_failed_transition_emits_typed_error () =
             | Some (Outcome.No_progress _) -> "No_progress"
             | Some (Outcome.Error _) -> "Error"))
 
-let strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "peer verification required" ]
+let peer_review_contract : Masc_domain.task_contract =
+  { completion_contract = [ "peer verification required" ]
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
@@ -1164,7 +1163,7 @@ let with_verification_persistence f =
     f
 ;;
 
-let test_strict_done_submits_for_verification () =
+let test_contract_done_submits_for_verification () =
   with_verification_persistence @@ fun () ->
   let base_path = temp_dir () in
   Fun.protect
@@ -1176,7 +1175,7 @@ let test_strict_done_submits_for_verification () =
        ignore
          (Masc.Workspace.add_task
             config
-            ~contract:strict_contract
+            ~contract:peer_review_contract
             ~title:"Evidence-bearing completion"
             ~priority:1
             ~description:"");
@@ -1333,7 +1332,7 @@ let test_default_done_is_terminal () =
           fail ("default completion failed: " ^ execution.raw_output));
        (* [keeper_task_done] submits evidence; it does not end the Task. The
           handler picks [submit_for_verification] unconditionally
-          (keeper_tool_task_runtime.ml), with no strict/advisory branch, and
+          (keeper_tool_task_runtime.ml), and
           [Workspace_task_lifecycle] refuses to resolve an
           [AwaitingVerification] obligation from any agent action. This case
           used to assert the default path was terminal, which stopped being
@@ -1813,8 +1812,8 @@ let () =
             `Quick test_done_failed_transition_emits_typed_error
         ; test_case "submission receipt stays bound across notifications and resubmissions" `Quick
             test_done_receipt_is_bound_to_the_captured_request
-        ; test_case "strict done submits for verification"
-            `Quick test_strict_done_submits_for_verification
+        ; test_case "contract done submits for verification"
+            `Quick test_contract_done_submits_for_verification
         ; test_case "default done submits for verification"
             `Quick test_default_done_is_terminal
         ; test_case

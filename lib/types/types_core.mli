@@ -74,6 +74,8 @@ type task_action =
   | Claim
   | Start
   | Done_action
+      (** Not parsed from tool input. A verdict that produces Done records its
+          transition observation under this action. *)
   | Cancel
   | Release
   | Submit_for_verification
@@ -188,8 +190,7 @@ type task_execution_links =
 val no_execution_links : task_execution_links
 
 type task_contract =
-  { strict : bool [@default false]
-  ; completion_contract : string list [@default []]
+  { completion_contract : string list [@default []]
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]

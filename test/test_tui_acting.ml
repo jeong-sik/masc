@@ -225,8 +225,8 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "brand_new_push"
     ; Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane
-    ; Observer.Schedule_store_invalidated
-    ; Observer.Goal_projection_changed
+    ; Observer.Workspace_store_changed Observer.Schedule_store
+    ; Observer.Workspace_store_changed Observer.Goal_projection
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -261,12 +261,12 @@ let test_the_internal_runs_push_is_not_a_keepers_act () =
     (row.Acting.glyph = Acting.Quiet);
   check string "and it says which registry changed" "the exact_lane run registry changed"
     row.Acting.detail;
-  let schedule_push = Observer.Schedule_store_invalidated in
+  let schedule_push = Observer.Workspace_store_changed Observer.Schedule_store in
   check bool "schedule changes are not keeper actions" false
     (Acting.visible Acting.Actions schedule_push);
   check bool "schedule changes remain visible under everything" true
     (Acting.visible Acting.Everything schedule_push);
-  let confirm_push = Observer.Pending_confirm_invalidated in
+  let confirm_push = Observer.Workspace_store_changed Observer.Pending_confirms in
   check bool "pending confirmation changes are not keeper actions" false
     (Acting.visible Acting.Actions confirm_push);
   check bool "pending confirmation changes remain visible under everything" true
@@ -554,7 +554,7 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
     [ ("an unknown type", Observer.Other "brand_new_push")
     ; ( "the internal runs push"
       , Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification )
-    ; ("the schedules push", Observer.Schedule_store_invalidated)
+    ; ("the schedules push", Observer.Workspace_store_changed Observer.Schedule_store)
     ; ("a snapshot", Observer.Snapshot "execution_snapshot")
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
@@ -1094,7 +1094,7 @@ let test_measuring_reads_what_the_row_draws () =
     ; ("a heartbeat", heartbeat "keeper-one")
     ; ( "a registry push"
       , Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane )
-    ; ("a schedules push", Observer.Schedule_store_invalidated)
+    ; ("a schedules push", Observer.Workspace_store_changed Observer.Schedule_store)
     ];
   (* The dividing case: the drawn row names the keeper, and that is not the
      name [row_of_entry] gives it. Drawing without the rename would leave the

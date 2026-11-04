@@ -202,6 +202,28 @@ type turn_change =
   | Turn_preview
       (** [keeper_turn_preview_changed]: the running turn's preview. *)
 
+(** A workspace store that announces a write with a payload-less server
+    push. A reader that shows the store reads it again. Each is named by one
+    server module's event type. *)
+type workspace_store =
+  | Schedule_store
+      (** A schedule ledger write was attempted, a runner tick changed the
+          list, or its status passed the staleness deadline
+          ({!Masc.Schedule_invalidation_event}). *)
+  | Pending_confirms
+      (** Pending confirmations may have changed
+          ({!Masc.Pending_confirm_invalidation_event}). *)
+  | Verification_requests
+      (** The verification request store was written
+          ({!Masc.Verification_request_broadcast}). *)
+  | Goal_projection
+      (** A Goal projection source changed: the Goal store, the verification
+          ledger, the measurement store or the verifier's observations
+          ({!Masc.Goal_projection_broadcast}). *)
+  | Repository_catalog
+      (** The repository catalog was written
+          ({!Masc.Repository_catalog_broadcast}). *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -274,23 +296,9 @@ type event =
       (** The named internal agent run registry -- verification, goal
           verification or exact lanes -- changed. A server push named by
           {!Masc.Internal_agent_runs_event}. *)
-  | Schedule_store_invalidated
-      (** The subscribed workspace's schedule list may have changed: a
-          schedule ledger write was attempted, or a runner tick changed the
-          list or its status passed the staleness deadline. *)
-  | Pending_confirm_invalidated
-      (** Pending confirmations may have changed in the subscribed workspace. *)
-  | Verification_requests_changed
-      (** The workspace's verification request store was written. A server
-          push with no payload, named by {!Masc.Verification_request_broadcast}. *)
-  | Goal_projection_changed
-      (** A Goal projection source changed: the Goal store, the verification
-          ledger, the measurement store or the verifier's observations. A
-          server push with no payload, named by
-          {!Masc.Goal_projection_broadcast}. *)
-  | Repositories_changed
-      (** The workspace's repository catalog was written. A server push with
-          no payload, named by {!Masc.Repository_catalog_broadcast}. *)
+  | Workspace_store_changed of workspace_store
+      (** The named workspace store was written: a server push with no
+          payload. *)
   | Gate_connector_changed of { connector : string }
       (** [connector]'s bindings, recorded names or drawn connection state
           changed. A server push named by {!Masc.Gate_connector_changed_event}. *)
@@ -382,7 +390,7 @@ val gate_connector_changed : event -> bool
     channels tab read the connectors again on it. *)
 
 val goal_projection_changed : event -> bool
-(** Whether [event] is {!Goal_projection_changed}. The Planning screen reads
+(** Whether [event] is a {!Goal_projection} store change. The Planning screen reads
     its Goals again on this. *)
 val verification_requests_changed : event -> bool
 (** The verification request store, or the verification run registry a
@@ -400,14 +408,14 @@ val runtime_journal_appended : event -> (string * runtime_journal) option
 (** The Keeper and journal a runtime journal push names. *)
 
 val schedules_changed : event -> bool
-(** The workspace's schedules changed: a {!Schedule_store_invalidated}. *)
+(** The workspace's schedules changed: a {!Schedule_store} change. *)
 
 val event_queue_changed : event -> string option
 (** The Keeper whose event queue or reaction record a push names. *)
 
 val pending_confirms_changed : event -> bool
 (** The confirmations waiting for an operator changed or one passed its
-    deadline: a {!Pending_confirm_invalidated}. *)
+    deadline: a {!Pending_confirms} change. *)
 
 val asks_changed : event -> bool
 (** The questions a Keeper or a Lane Add-on installation puts to the operator
@@ -439,8 +447,8 @@ val feed : t -> string -> delivery list
     not acknowledge an event.
 
     A frame whose first member is a [type] that decides the event by itself
-    -- a {!Snapshot}, {!Internal_agent_runs_changed}, {!Schedule_store_invalidated},
-    {!Pending_confirm_invalidated} or {!Other} -- is
+    -- a {!Snapshot}, {!Internal_agent_runs_changed}, a {!Schedule_store} or
+    {!Pending_confirms} change, or {!Other} -- is
     delivered as that event without the rest of the frame being read, so the
     rest is not checked either. Every other frame is parsed whole, and one
     that is not JSON is {!Undecodable}. *)

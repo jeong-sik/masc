@@ -139,12 +139,12 @@ let summary = function
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event (Observer.Internal_agent_runs_changed registry) ->
       "internal_runs(" ^ Masc.Internal_agent_runs_event.registry_to_wire registry ^ ")"
-  | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
-  | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
-  | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
-  | Observer.Event Observer.Repositories_changed -> "repositories"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Schedule_store) -> "schedule_store_invalidated"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Pending_confirms) -> "pending_confirm_invalidated"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Verification_requests) -> "verification_requests"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Repository_catalog) -> "repositories"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
-  | Observer.Event Observer.Goal_projection_changed -> "goal_projection"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -434,6 +434,18 @@ let test_a_frame_its_type_decides_is_not_read_past_the_type () =
        (decode_all
           [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
 
+(* The Goal sources' announcement: the Planning screen reads its Goals on it. *)
+let test_a_goal_projection_change_is_named () =
+  check (list string) "the push reads as a Goal projection change"
+    [ "goal_projection" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+              Masc.Goal_projection_broadcast.changed_event ]));
+  check bool "and only it is a Goal projection change" true
+    (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Goal_projection)
+     && not (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Repository_catalog)))
+
 (* The metrics file's own announcement, not the heartbeat: the in-turn pulse
    sends [keeper_heartbeat] without writing a row. *)
 let test_a_metrics_append_names_its_keeper () =
@@ -455,18 +467,6 @@ let test_a_metrics_append_names_its_keeper () =
      with
      | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
      | _ -> None)
-
-(* The Goal sources' announcement: the Planning screen reads its Goals on it. *)
-let test_a_goal_projection_change_is_named () =
-  check (list string) "the push reads as a Goal projection change"
-    [ "goal_projection" ]
-    (List.map summary
-       (decode_all
-          [ Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
-              Masc.Goal_projection_broadcast.changed_event ]));
-  check bool "and only it is a Goal projection change" true
-    (Observer.goal_projection_changed Observer.Goal_projection_changed
-     && not (Observer.goal_projection_changed Observer.Repositories_changed))
 
 (* A delta has a slice too, and reading the table for "does this have one"
    rather than "does it replace a projection" would swallow this one: the

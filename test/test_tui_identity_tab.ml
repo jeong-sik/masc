@@ -126,12 +126,14 @@ let workspace_identity ~base_path ~masc_root : Decode.server_identity =
   | Ok identity -> identity
   | Error detail -> failwith ("test fixture: " ^ detail)
 
-let hold_expectation state ~keeper ~provider ~base_path ~masc_root =
+let hold_expectation ?(expires_at = Float.infinity) state ~keeper ~provider ~base_path
+      ~masc_root =
   Masc_tui_types.remember_identity_login_expectation state
     { Masc_tui_types.ile_origin = workspace_identity ~base_path ~masc_root
     ; Masc_tui_types.ile_keeper = keeper
     ; Masc_tui_types.ile_provider = provider
-    ; Masc_tui_types.ile_attempt_id = "attempt-" ^ provider }
+    ; Masc_tui_types.ile_attempt_id = "attempt-" ^ provider
+    ; Masc_tui_types.ile_expires_at = expires_at }
 
 let held_expectations state keeper =
   Masc_tui_types.identity_expectations_for_keeper state keeper
@@ -144,7 +146,7 @@ let complete_attempt state keeper provider =
   | Some expectation ->
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
         ~attempts:[expectation, Ok (Masc_tui_identity_model.Credentials_published (Ok 0))]
         (reading (Ok (Masc_tui_types.identity_expectations_for_keeper state keeper
           |> List.map (fun held -> declared ~tools:[] held.Masc_tui_types.ile_provider held.ile_provider))))
@@ -161,25 +163,25 @@ let test_withdrawal_retires_the_display_but_keeps_the_wait () =
   check (Alcotest.list Alcotest.string) "the login is still owed" [ "slack" ]
     (held_expectations state "A")
 
-let test_only_its_own_workspace_reopens_the_poll () =
+let test_only_its_own_workspace_reopens_the_wait () =
   let state = identity_state () in
   let admitted = workspace_identity ~base_path:"/w/a" ~masc_root:"/r" in
   hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
     ~masc_root:"/r";
   state.server_identity <- Some (workspace_identity ~base_path:"/w/next" ~masc_root:"/r");
-  check Alcotest.bool "a different workspace does not reopen the poll" false
+  check Alcotest.bool "a different workspace does not reopen the wait" false
     (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state);
   state.server_identity <- Some admitted;
   check Alcotest.bool "the same workspace returning does" true
     (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state);
   state.server_identity <- None;
-  check Alcotest.bool "an unread workspace polls nothing" false
+  check Alcotest.bool "an unread workspace reads nothing" false
     (Masc_tui_types.identity_expectation_workspace_matches ~origin:admitted state)
 
-(* The tick asks after every Keeper a login waits on, wherever the operator
+(* Every Keeper a login waits on is read, wherever the operator
    is: consent happens in a browser, and the Identity tab of one Keeper is
    rarely what is on screen when it lands. *)
-let test_every_waiting_keeper_is_polled_from_any_surface () =
+let test_every_waiting_keeper_is_read_from_any_surface () =
   let state = identity_state () in
   let pending () = Masc_tui_types.identity_login_pending_keepers state ~now:10. in
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
@@ -197,10 +199,10 @@ let test_every_waiting_keeper_is_polled_from_any_surface () =
   Masc_tui_types.retire_identity_logins state ~keeper_name:"B"
     ~providers:[declared ~tools:[ "sendMessage" ] "slack" "Slack"];
   complete_attempt state "B" "slack";
-  check (Alcotest.list Alcotest.string) "a completed login stops being polled"
+  check (Alcotest.list Alcotest.string) "a completed login stops being read"
     [ "A" ] (pending ());
   state.server_identity <- None;
-  check (Alcotest.list Alcotest.string) "an unread workspace polls nobody" []
+  check (Alcotest.list Alcotest.string) "an unread workspace reads nobody" []
     (pending ())
 
 (* A provider removed while consent was pending never attaches. Its absence
@@ -262,7 +264,7 @@ let test_failed_read_forgets_the_previous_callback () =
   let load result =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
       result
   in
   load (Ok ([], Some (Masc_tui_identity_model.Callback_url "https://example.org/cb")));
@@ -283,12 +285,12 @@ let test_removed_provider_retires_display_and_late_start () =
     ~keeper_name:"A" ~provider_id:"slack" in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
     (reading (Ok []));
   apply_login state pending ~now:10. (login_result ());
   check (Alcotest.list Alcotest.string) "removed provider cannot restore its URL" []
     (pending_urls state "A");
-  check (Alcotest.list Alcotest.string) "removed provider cannot restore its poll" []
+  check (Alcotest.list Alcotest.string) "removed provider cannot restore its wait" []
     (held_expectations state "A");
   check (Alcotest.list Alcotest.string) "other Keeper's consent survives" ["https://auth/B"]
     (pending_urls state "B")
@@ -312,10 +314,10 @@ let test_deleted_keeper_retires_only_after_a_complete_roster () =
   check (Alcotest.list Alcotest.string) "deleted Keeper's URL retires" [] (pending_urls state "A");
   check (Alcotest.list Alcotest.string) "a late first response cannot resurrect deletion" []
     (pending_urls state "C");
-  check (Alcotest.list Alcotest.string) "only the surviving Keeper is polled" ["B"]
+  check (Alcotest.list Alcotest.string) "only the surviving Keeper is read" ["B"]
     (Masc_tui_types.identity_login_pending_keepers state ~now:10.)
 
-let test_expiry_stops_polling_and_retires_consent () =
+let test_expiry_stops_waiting_and_retires_consent () =
   let state = identity_state () in
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
   Masc_tui_types.remember_identity_login state
@@ -347,7 +349,7 @@ let test_admitted_callback_outlives_consent_deadline () =
   let apply json =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
       ~attempts:[expectation, Masc_tui_identity_model.decode_identity_login_status json]
       (reading (Ok [declared "slack" "Slack"])) in
   apply (`Assoc ["kind", `String "callback_admitted"]);
@@ -360,10 +362,77 @@ let test_admitted_callback_outlives_consent_deadline () =
   check (Alcotest.list Alcotest.string) "catalog does not elect completion" ["slack"] (held_expectations state "A");
   apply (`Assoc ["kind", `String "completed"; "credential_publication", `String "published";
     "tool_discovery", `Assoc ["kind", `String "failed"]]);
-  check (Alcotest.list Alcotest.string) "actual completion ends polling" [] (held_expectations state "A");
+  check (Alcotest.list Alcotest.string) "actual completion ends the wait" [] (held_expectations state "A");
   check Alcotest.bool "credential success remains distinct from discovery failure" true
     (match state.identity_attempt_error with
      | Some (_, detail) -> contains "credentials attached" detail | None -> false)
+
+(* The server applies a consent deadline only when the attempt is read and
+   announces nothing as it passes, so each waited attempt owes its Keeper one
+   read once the deadline is behind the TUI's clock. *)
+let test_a_passed_consent_deadline_owes_one_read () =
+  let state = identity_state () in
+  hold_expectation state ~expires_at:20. ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
+    ~masc_root:"/r";
+  let owed () = Masc_tui_owed_read.due ~now:0. (Masc_tui_types.identity_login_read state "A") in
+  Masc_tui_types.owe_identity_deadline_reads state ~now:19.;
+  check Alcotest.bool "nothing is owed before the deadline" false (owed ());
+  Masc_tui_types.owe_identity_deadline_reads state ~now:20.;
+  check Alcotest.bool "the deadline owes its Keeper a read" true (owed ());
+  Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.started;
+  Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.succeeded;
+  Masc_tui_types.owe_identity_deadline_reads state ~now:30.;
+  check Alcotest.bool "one deadline owes one read" false (owed ())
+
+(* An announcement names a Keeper; only a Keeper this workspace waits on a
+   login for holds a read record, and the record goes with its last wait. *)
+let test_only_a_waited_keeper_owes_attempt_reads () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a" ~masc_root:"/r";
+  Masc_tui_types.owe_identity_login_read state "B";
+  Masc_tui_types.owe_identity_login_read state "A";
+  check (Alcotest.list Alcotest.string) "only the waited Keeper owes a read" [ "A" ]
+    (List.map fst state.identity_login_reads);
+  Masc_tui_types.forget_identity_login state ~keeper_name:"A" ~provider_id:"slack";
+  Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.succeeded;
+  check (Alcotest.list Alcotest.string) "a Keeper whose wait ended holds none" []
+    (List.map fst state.identity_login_reads)
+
+(* A reading settles the read that owed it: a consent the server still calls
+   waiting past its deadline, or a status it could not read, is a failure to
+   retry; a callback in progress or an outcome settles it. *)
+let test_a_reading_reports_how_it_settles () =
+  let state = identity_state () in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  Masc_tui_types.remember_identity_login state
+    (pending_login ~expires_at:20. ~keeper:"A" ~provider:"slack" ~url:"https://auth/A" ());
+  let expectation = List.hd (Masc_tui_types.identity_expectations_for_keeper state "A") in
+  let settle ~now ?(providers = reading (Ok [ declared "slack" "Slack" ])) json =
+    let read = Masc_tui_types.mark_detail_read_started state
+      ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
+    let settled = ref None in
+    Masc_tui_identity_updates.providers_loaded ~now ~settle:(fun outcome -> settled := Some outcome)
+      state read ~report:ignore
+      ~attempts:[ expectation, Masc_tui_identity_model.decode_identity_login_status json ]
+      providers;
+    !settled in
+  let waiting = `Assoc [ "kind", `String "awaiting_consent"; "expires_at", `Float 20. ] in
+  check Alcotest.bool "a consent still before its deadline settles" true
+    (settle ~now:19. waiting = Some Masc_tui_identity_updates.Reading_succeeded);
+  check Alcotest.bool "a consent past its deadline the server still holds fails" true
+    (settle ~now:21. waiting = Some Masc_tui_identity_updates.Reading_failed);
+  check Alcotest.bool "an unreadable status fails" true
+    (settle ~now:19. (`Assoc [ "kind", `String "elsewhere" ])
+     = Some Masc_tui_identity_updates.Reading_failed);
+  check Alcotest.bool "an unreadable catalog fails" true
+    (settle ~now:19. ~providers:(Error "HTTP 503") waiting
+     = Some Masc_tui_identity_updates.Reading_failed);
+  check Alcotest.bool "an admitted callback settles past the deadline" true
+    (settle ~now:21. (`Assoc [ "kind", `String "callback_admitted" ])
+     = Some Masc_tui_identity_updates.Reading_succeeded);
+  state.server_identity <- None;
+  check Alcotest.bool "a reading without authority is superseded" true
+    (settle ~now:19. waiting = Some Masc_tui_identity_updates.Reading_superseded)
 
 let assert_an_offscreen_login_failure_is_reported outcome =
   let state = identity_state () in
@@ -379,7 +448,7 @@ let assert_an_offscreen_login_failure_is_reported outcome =
   let reported = ref [] in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-  Masc_tui_identity_updates.providers_loaded state read
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read
     ~report:(fun line -> reported := line :: !reported)
     ~attempts:[expectation, Ok outcome]
     (reading (Ok [declared "slack" "Slack"]));
@@ -408,7 +477,7 @@ let test_a_lost_attempt_is_read_against_the_catalog () =
     let apply catalog =
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
         ~attempts:[expectation, Ok Masc_tui_identity_model.Attempt_unavailable]
         (reading catalog) in
     state, apply in
@@ -446,7 +515,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
       "tool_discovery", `Assoc ["kind", `String "discovered"; "count", `Int 0]]) in
   let start ns = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:ns in
-  let apply read providers = Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+  let apply read providers = Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
     ~attempts:[expectation,completed] (reading providers) in
   let stale = start 1L in
   let current = start 2L in
@@ -467,7 +536,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
   check (Alcotest.list Alcotest.string) "old attempt cannot retire replacement under current read"
     ["slack"] (held_expectations state "A");
   let read = start 5L in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
     ~attempts:[replacement,Ok Masc_tui_identity_model.Consent_expired]
     (reading (Error "catalog unavailable"));
   check (Alcotest.list Alcotest.string) "immutable consent expiry needs no catalog"
@@ -497,7 +566,7 @@ let test_previous_expiry_preserves_a_replacement_request () =
   apply_login state replacement ~now:21. (login_result ~expires_at:40. ());
   check (Alcotest.list Alcotest.string) "replacement uses its own deadline" ["https://auth/new"]
     (pending_urls state "A");
-  check (Alcotest.list Alcotest.string) "replacement still polls" ["A"]
+  check (Alcotest.list Alcotest.string) "replacement is still read" ["A"]
     (Masc_tui_types.identity_login_pending_keepers state ~now:21.)
 
 let test_login_that_expires_while_queued_cannot_start () =
@@ -511,7 +580,7 @@ let test_login_that_expires_while_queued_cannot_start () =
     (login_result ~expires_at:20. ());
   check Alcotest.bool "expiry is explained" true (contains "expired" !noticed);
   check (Alcotest.list Alcotest.string) "expired queued URL never appears" [] (pending_urls state "A");
-  check (Alcotest.list Alcotest.string) "expired queued login never starts polling" []
+  check (Alcotest.list Alcotest.string) "expired queued login is never read" []
     (held_expectations state "A")
 
 let test_the_recovery_read_retires_only_the_landed_login () =
@@ -616,8 +685,8 @@ let test_late_callback_is_observed_after_authority_recovery () =
   Masc_tui_types.withdraw_identity_readings state;
   check (Alcotest.list Alcotest.string) "unread hides the consent" []
     (pending_urls state "A");
-  check Alcotest.bool "unread workspace cannot poll" false
-    (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A");
+  check Alcotest.bool "an unread workspace cannot read" false
+    (Masc_tui_types.identity_login_read_ready state ~now:10. "A");
 
   state.server_identity <- Some origin;
   let recovery_read =
@@ -625,20 +694,20 @@ let test_late_callback_is_observed_after_authority_recovery () =
       ~keeper:"A" ~now_ns:1L
   in
   check Alcotest.bool "pending recovery read blocks a second read" false
-    (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A");
-  Masc_tui_identity_updates.providers_loaded state recovery_read ~report:ignore ~attempts:[]
+    (Masc_tui_types.identity_login_read_ready state ~now:10. "A");
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state recovery_read ~report:ignore ~attempts:[]
     (reading (Ok [ declared "slack" "Slack" ]));
   check (Alcotest.list Alcotest.string)
     "incomplete provider read keeps the browser wait" [ "slack" ]
     (held_expectations state "A");
-  check Alcotest.bool "the next tick can re-read the same workspace" true
-    (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A");
+  check Alcotest.bool "an owed read can re-read the same workspace" true
+    (Masc_tui_types.identity_login_read_ready state ~now:10. "A");
 
   let late_callback_read =
     Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
       ~keeper:"A" ~now_ns:2L
   in
-  Masc_tui_identity_updates.providers_loaded state late_callback_read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state late_callback_read ~report:ignore ~attempts:[]
     (reading (Ok [ declared ~tools:[ "postMessage" ] "slack" "Slack" ]));
   check Alcotest.bool "the attached provider is visible" true
     (match state.identity_view with
@@ -650,8 +719,8 @@ let test_late_callback_is_observed_after_authority_recovery () =
   complete_attempt state "A" "slack";
   check (Alcotest.list Alcotest.string) "the completed wait retires" []
     (held_expectations state "A");
-  check Alcotest.bool "the tick stops after attachment" false
-    (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A")
+  check Alcotest.bool "nothing is waited on after attachment" false
+    (Masc_tui_types.identity_login_read_ready state ~now:10. "A")
 
 let test_workspace_withdrawal_retires_identity_consent () =
   let state = identity_state () in
@@ -662,7 +731,7 @@ let test_workspace_withdrawal_retires_identity_consent () =
   let old = Masc_tui_types.start_identity_login_request state
     ~keeper_name:"A" ~provider_id:"slack" in
   Masc_tui_types.withdraw_identity_readings state;
-  check (Alcotest.list Alcotest.string) "new workspace neither shows nor polls old consent"
+  check (Alcotest.list Alcotest.string) "new workspace neither shows nor reads old consent"
     [] (pending_urls state "A");
   check Alcotest.bool "old provider list withdrawn" true (state.identity_view = None);
   check Alcotest.bool "old GitHub reading withdrawn" true (state.github_identity_view = None);
@@ -673,7 +742,7 @@ let test_workspace_withdrawal_retires_identity_consent () =
   check Alcotest.bool "new workspace request remains current" true
     (Masc_tui_types.finish_identity_login_request state successor)
 
-let test_oauth_polling_survives_unread_authority () =
+let test_oauth_wait_survives_unread_authority () =
   let state = identity_state () in
   let origin : Masc.Tui_decode.server_identity =
     { sid_version = "test"; sid_binary_commit = "test";
@@ -689,7 +758,7 @@ let test_oauth_polling_survives_unread_authority () =
   check Alcotest.bool "accepted login participates in cadence" true (pending ());
   Masc_tui_types.withdraw_identity_readings state;
   state.server_identity <- None;
-  check Alcotest.bool "unread authority cannot poll" false (pending ());
+  check Alcotest.bool "unread authority cannot read" false (pending ());
   check (Alcotest.list Alcotest.string) "withdrawal removes consent URL" [] (pending_urls state "A");
   Masc_tui_types.reconcile_detail_intent_origins state (Error "unread");
   Masc_tui_types.reconcile_detail_intent_origins state
@@ -700,7 +769,7 @@ let test_oauth_polling_survives_unread_authority () =
      There is no URL left to drive the old cadence, but waiting must continue. *)
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[declared "slack" "Slack"];
-  check Alcotest.bool "pending recovery reading keeps polling" true (pending ());
+  check Alcotest.bool "pending recovery reading keeps the wait" true (pending ());
   check (Alcotest.list Alcotest.string) "recovery cannot resurrect URL" [] (pending_urls state "A");
   Masc_tui_types.retire_identity_logins state ~keeper_name:"A"
     ~providers:[unreadable "slack" "temporarily unavailable"];
@@ -783,7 +852,7 @@ let test_restarting_and_forgetting_only_change_the_matching_login () =
   check (Alcotest.list Alcotest.string) "a failed read keeps consent evidence"
     ["https://auth/A/slack"] (pending_urls state "A")
 
-let test_login_receipt_during_unconfirmation_keeps_polling () =
+let test_login_receipt_during_unconfirmation_keeps_waiting () =
   let state = identity_state () in
   let origin = workspace_identity ~base_path:"/w/a" ~masc_root:"/r" in
   state.server_identity <- Some origin;
@@ -798,13 +867,13 @@ let test_login_receipt_during_unconfirmation_keeps_polling () =
          expires_at = 100.; attempt_id = "attempt-slack" });
   check (Alcotest.list Alcotest.string) "late receipt retains its wait" ["slack"]
     (held_expectations state "A");
-  check Alcotest.bool "unconfirmed workspace cannot poll" false
+  check Alcotest.bool "unconfirmed workspace cannot read" false
     (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A");
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
-  check Alcotest.bool "same workspace resumes poll" true
+  check Alcotest.bool "same workspace resumes reading" true
     (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A");
   state.server_identity <- Some (workspace_identity ~base_path:"/w/b" ~masc_root:"/other");
-  check Alcotest.bool "replacement workspace cannot inherit poll" false
+  check Alcotest.bool "replacement workspace cannot inherit the wait" false
     (Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A")
 
 let test_inverse_retry_responses_keep_the_newest_consent () =
@@ -1082,7 +1151,7 @@ let test_a_read_keeps_the_servers_callback () =
   let callback =
     Masc_tui_identity_model.Callback_url "http://127.0.0.1:8935/api/v1/keepers/oauth/callback"
   in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
     (Ok ([ declared "slack" "Slack" ], Some callback));
   check Alcotest.bool "the callback the server named is held" true
     (state.Masc_tui_types.identity_callback = Some callback)
@@ -1304,7 +1373,7 @@ let test_a_reading_keeps_the_cursor_on_its_service () =
   let load providers =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
       (reading (Ok providers))
   in
   load [ declared "airtable" "Airtable"; declared "box" "Box"; declared "canva" "Canva" ];
@@ -1462,8 +1531,8 @@ let () =
             test_removed_provider_retires_display_and_late_start;
           Alcotest.test_case "deleted Keeper needs a complete roster" `Quick
             test_deleted_keeper_retires_only_after_a_complete_roster;
-          Alcotest.test_case "expiry stops polling and retires consent" `Quick
-            test_expiry_stops_polling_and_retires_consent;
+          Alcotest.test_case "expiry stops waiting and retires consent" `Quick
+            test_expiry_stops_waiting_and_retires_consent;
           Alcotest.test_case "expiry survives authority loss" `Quick
             test_expiry_survives_authority_loss_without_resurrection;
           Alcotest.test_case "expiry preserves a replacement request" `Quick
@@ -1472,10 +1541,10 @@ let () =
             test_login_that_expires_while_queued_cannot_start;
           Alcotest.test_case "workspace withdrawal retires identity consent"
             `Quick test_workspace_withdrawal_retires_identity_consent;
-          Alcotest.test_case "OAuth polling survives unread authority"
-            `Quick test_oauth_polling_survives_unread_authority;
-          Alcotest.test_case "late login receipt retains polling origin"
-            `Quick test_login_receipt_during_unconfirmation_keeps_polling;
+          Alcotest.test_case "OAuth wait survives unread authority"
+            `Quick test_oauth_wait_survives_unread_authority;
+          Alcotest.test_case "late login receipt retains its origin"
+            `Quick test_login_receipt_during_unconfirmation_keeps_waiting;
           Alcotest.test_case "switching Keepers retains each consent URL"
             `Quick test_switching_keepers_retains_each_consent_url;
           Alcotest.test_case "multiple providers complete independently"
@@ -1490,10 +1559,16 @@ let () =
       ( "a login survives a transient authority loss",
         [ Alcotest.test_case "withdrawal retires the display but keeps the wait"
             `Quick test_withdrawal_retires_the_display_but_keeps_the_wait;
-          Alcotest.test_case "only its own workspace reopens the poll" `Quick
-            test_only_its_own_workspace_reopens_the_poll;
-          Alcotest.test_case "every waiting Keeper is polled from any surface"
-            `Quick test_every_waiting_keeper_is_polled_from_any_surface;
+          Alcotest.test_case "only its own workspace reopens the wait" `Quick
+            test_only_its_own_workspace_reopens_the_wait;
+          Alcotest.test_case "a passed consent deadline owes one read" `Quick
+            test_a_passed_consent_deadline_owes_one_read;
+          Alcotest.test_case "only a waited Keeper owes attempt reads" `Quick
+            test_only_a_waited_keeper_owes_attempt_reads;
+          Alcotest.test_case "a reading reports how it settles" `Quick
+            test_a_reading_reports_how_it_settles;
+          Alcotest.test_case "every waiting Keeper is read from any surface"
+            `Quick test_every_waiting_keeper_is_read_from_any_surface;
           Alcotest.test_case "a removed provider ends the wait" `Quick
             test_a_removed_provider_ends_the_wait;
           Alcotest.test_case "the recovery read retires only the landed login"

@@ -648,6 +648,72 @@ let remember_held table ~now ~ttl_sec held =
   | Error Keeper_oauth_pending.Newer_start_admitted ->
       Alcotest.fail "a lone start was refused as stale"
 
+(* Every change a status reader would see reaches the change observer, named
+   by the table's workspace and the Keeper; reads, refused starts and replayed
+   or unadmitted calls change nothing and report nothing. *)
+let test_attempt_changes_reach_the_change_observer () =
+  let provider = load_or_fail atlassian_toml in
+  let provider_id = provider.Keeper_oauth_provider.id in
+  let heard = ref [] in
+  Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
+    heard := (base_path, keeper) :: !heard);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_oauth_pending.install_change_observer (fun ~base_path:_ ~keeper:_ -> ()))
+    (fun () ->
+      let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
+      let reports () = List.length !heard in
+      let held = in_flight_for provider in
+      let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
+      let stale = admit_held table held in
+      let attempt_id = remember_held table ~now:0. ~ttl_sec:600. held in
+      check Alcotest.int "holding an attempt reports it" 1 (reports ());
+      (match
+         Keeper_oauth_pending.remember table stale ~now:0. ~ttl_sec:600.
+           (in_flight_for provider)
+       with
+       | Error Keeper_oauth_pending.Newer_start_admitted -> ()
+       | Ok _ -> Alcotest.fail "an earlier admission replaced a later start");
+      check Alcotest.int "a refused start reports nothing" 1 (reports ());
+      ignore
+        (Keeper_oauth_pending.status table ~now:1. ~attempt_id ~keeper:"oauth-fixture"
+           ~provider_id);
+      ignore (Keeper_oauth_pending.waiting table ~now:1.);
+      check Alcotest.int "reading reports nothing" 1 (reports ());
+      ignore (Keeper_oauth_pending.take table ~now:1. ~state);
+      check Alcotest.int "admitting the callback reports it" 2 (reports ());
+      ignore (Keeper_oauth_pending.take table ~now:2. ~state);
+      check Alcotest.int "a replayed callback reports nothing" 2 (reports ());
+      ignore
+        (Keeper_oauth_pending.publish_credentials table ~state ~write:(function
+           | Keeper_oauth_pending.Client -> Error "fixture storage failure"
+           | Keeper_oauth_pending.Refresh_token | Keeper_oauth_pending.Access_token
+           | Keeper_oauth_pending.Expiry -> Ok ()));
+      check Alcotest.int "an interrupted publication reports it" 3 (reports ());
+      check Alcotest.bool "the interrupted attempt admits no finish" true
+        (Keeper_oauth_pending.finish table ~state (Error ())
+         = Keeper_oauth_pending.Not_admitted);
+      check Alcotest.int "a finish that records nothing reports nothing" 3 (reports ());
+      let next = in_flight_for provider in
+      let next_state = next.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
+      ignore (remember_held table ~now:3. ~ttl_sec:600. next);
+      ignore (Keeper_oauth_pending.take table ~now:4. ~state:next_state);
+      check Alcotest.bool "the next attempt's outcome is recorded" true
+        (Keeper_oauth_pending.finish table ~state:next_state
+           (Ok (Keeper_oauth_pending.Tools_discovered 2))
+         = Keeper_oauth_pending.Recorded);
+      check Alcotest.int "holding, admitting and finishing each report" 6 (reports ());
+      ignore
+        (Keeper_oauth_pending.retire_scope table ~keeper:"oauth-fixture" ~provider_id
+           ~local_delete:(fun () -> Ok ()));
+      check Alcotest.int "retiring the scope reports it" 7 (reports ());
+      check Alcotest.bool "every report names the workspace and the Keeper" true
+        (List.for_all
+           (fun (base_path, keeper) ->
+             String.equal base_path "isolated-oauth-test"
+             && String.equal keeper "oauth-fixture")
+           !heard))
+
 let test_a_state_is_redeemed_once () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create ~base_path:"isolated-oauth-test" () in
@@ -2272,6 +2338,8 @@ let () =
         [ Alcotest.test_case "admitted exchange survives consent deadline" `Quick test_admitted_exchange_status_outlives_deadline;
           Alcotest.test_case "a state is redeemed once" `Quick
             test_a_state_is_redeemed_once;
+          Alcotest.test_case "attempt changes reach the change observer" `Quick
+            test_attempt_changes_reach_the_change_observer;
           Alcotest.test_case "an abandoned login expires" `Quick
             test_an_abandoned_login_expires;
           Alcotest.test_case "two logins do not collide" `Quick

@@ -69,6 +69,14 @@ let with_lock (t : t) f =
   Mutex.lock t.mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 
+let changed_observer : (base_path:string -> keeper:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~keeper:_ -> ())
+
+let install_change_observer observer = Atomic.set changed_observer observer
+
+(* Called under [t]'s lock, after the change it reports. *)
+let notify_changed (t : t) ~keeper = (Atomic.get changed_observer) ~base_path:t.base_path ~keeper
+
 let registry_mutex = Mutex.create ()
 let by_workspace = Hashtbl.create 1
 let for_base_path base_path =
@@ -159,7 +167,7 @@ let retire_scope t ~keeper ~provider_id ~local_delete =
         | Completed _ | Failed | Credential_publication_incomplete _ | Expired
         | Superseded -> entry
       else entry) t.entries;
-    local_delete ())
+    Fun.protect ~finally:(fun () -> notify_changed t ~keeper) local_delete)
 
 let expire ~now entry = match entry.status with
   | Awaiting_consent deadline when deadline <= now ->
@@ -217,6 +225,7 @@ let remember t admission ~now ~ttl_sec in_flight =
       t.entries <- {attempt_id; keeper=flow.Keeper_oauth_flow.keeper;
         provider_id=flow.Keeper_oauth_flow.provider_id; state=flow.Keeper_oauth_flow.state;
         in_flight=Some in_flight; status=Awaiting_consent (now +. ttl_sec)} :: entries;
+      notify_changed t ~keeper:flow.Keeper_oauth_flow.keeper;
       Ok attempt_id
     end)
 
@@ -233,6 +242,8 @@ let take t ~now ~state =
       | (Awaiting_consent _ | Callback_admitted | Completed _ | Failed
         | Credential_publication_incomplete _
         | Expired | Superseded), (Some _ | None) -> entry) t.entries;
+    Option.iter (fun (held : in_flight) ->
+      notify_changed t ~keeper:held.pending.Keeper_oauth_flow.keeper) !found;
     !found)
 
 let status t ~now ~attempt_id ~keeper ~provider_id =
@@ -246,13 +257,15 @@ type settlement = Recorded | Not_admitted
 
 let finish t ~state outcome =
   with_lock t (fun () ->
-    let recorded = ref false in
+    let recorded = ref None in
     t.entries <- List.map (fun entry ->
       if entry.state=state && entry.status=Callback_admitted
-      then (recorded := true;
+      then (recorded := Some entry.keeper;
         {entry with status=(match outcome with Ok completion -> Completed completion | Error () -> Failed)})
       else entry) t.entries;
-    if !recorded then Recorded else Not_admitted)
+    match !recorded with
+    | Some keeper -> notify_changed t ~keeper; Recorded
+    | None -> Not_admitted)
 
 let waiting t ~now = with_lock t (fun () ->
   t.entries <- List.map (expire ~now) t.entries;
@@ -275,7 +288,8 @@ let publish_credentials t ~state ~write =
         t.entries <- List.map (fun entry ->
           if entry.state=state && entry.status=Callback_admitted
           then {entry with status=Credential_publication_incomplete progress}
-          else entry) t.entries in
+          else entry) t.entries;
+        notify_changed t ~keeper:(fst key) in
       let rec publish completed = function
         | [] -> Published (attachment_for t key)
         | stage :: rest ->

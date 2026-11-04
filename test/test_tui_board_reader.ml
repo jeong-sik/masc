@@ -67,7 +67,7 @@ let test_binary_workspace_admission () = Eio_main.run (fun _ ->
     sid_binary_commit_age_s=None; sid_runtime_instance_id = None;sid_base_path=Decode.Canonical_path.of_path "/owned-workspace";
     sid_masc_root=Decode.Canonical_path.of_path "/owned-workspace/.masc";
     sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
-    sid_sse_clients=None;sid_gc=None;sid_scheduler=None} in
+    sid_sse_clients=None;sid_gc=None;sid_scheduler=None;sid_operator_action=None} in
   let bound f=Masc_tui_workspace_read.with_binding ~host:"localhost" ~port:8935
     ~expected ~proof:Request_precondition f in
   let receipt=Masc.Workspace.read_precondition_admission_header in

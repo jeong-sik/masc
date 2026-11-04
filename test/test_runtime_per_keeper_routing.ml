@@ -655,6 +655,70 @@ let test_codex_runtime_has_no_agent_core_thinking_seed () =
       seed.Runtime_inference.preserve_thinking)
 ;;
 
+(* Two rows on one OpenAI-compatible provider, both saying the model thinks.
+   Only the second also says it sends no thinking control. *)
+let uncontrolled_thinking_runtime_config =
+  {|
+[runtime]
+default = "openai.asks"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
+
+[models.asks]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+thinking-support = true
+
+[models.free]
+api-name = "small"
+max-context = 32000
+tools-support = true
+thinking-support = true
+reasoning-uncontrolled = true
+
+[openai.asks]
+is-default = true
+max-concurrent = 1
+
+[openai.free]
+max-concurrent = 1
+|}
+;;
+
+let test_uncontrolled_row_sends_no_thinking_request () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-uncontrolled-thinking" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path uncontrolled_thinking_runtime_config;
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "uncontrolled runtime init failed: %s" msg
+       | Ok () ->
+         let seed name = (Runtime_inference.for_runtime ~name).Runtime_inference.thinking_enabled in
+         let request name = match Runtime.get_runtime_by_id name with
+           | Some runtime -> Runtime_schema.thinking_request runtime.Runtime_instance.model
+           | None -> Alcotest.failf "runtime %s is not materialized" name in
+         Alcotest.(check (option bool))
+           "a row with thinking-support asks for thinking" (Some true) (seed "openai.asks");
+         Alcotest.(check (option bool))
+           "the shared rule agrees for that row" (Some true) (request "openai.asks");
+         Alcotest.(check (option bool))
+           "a reasoning-uncontrolled row asks for nothing" None (seed "openai.free");
+         Alcotest.(check (option bool))
+           "the shared rule agrees for the uncontrolled row" None (request "openai.free");
+         Alcotest.(check (option bool))
+           "the uncontrolled row still says the model thinks" (Some true)
+           (Runtime.thinking_support_of_runtime_id "openai.free"))
+;;
+
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
@@ -4323,6 +4387,10 @@ let () =
             "Codex official-client runtime has no AGENT_CORE thinking seed"
             `Quick
             test_codex_runtime_has_no_agent_core_thinking_seed
+        ; Alcotest.test_case
+            "a reasoning-uncontrolled row sends no thinking request"
+            `Quick
+            test_uncontrolled_row_sends_no_thinking_request
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

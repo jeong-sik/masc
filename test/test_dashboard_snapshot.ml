@@ -172,8 +172,7 @@ let test_tools_component_reuses_complete_representations () =
     [ "version", `Int version
     ; "tool_inventory", `List (List.init 200 (fun _ -> `String "tool-with-repeated-description"))
     ; "keeper_waiting_inventory", `Assoc [ "waiting", `List [ `String "keeper-a" ] ]
-    ; "effective_keeper_surface", `Null
-    ; "skill_activations", `Null ] in
+    ; "effective_keeper_surface", `Null ] in
   let refresh f = Dashboard_snapshot.For_testing.refresh_tools
     ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config
       (fun () -> Dashboard_snapshot.Tools_ready (f ())) in

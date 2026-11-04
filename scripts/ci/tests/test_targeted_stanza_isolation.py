@@ -290,6 +290,135 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EX
         result = self.run_custom_action("test/test_browser_activity", build_exit_code=23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
 
+    def alias_deps(self, suite="test_stdio_browser_activity"):
+        return subprocess.run(
+            [sys.executable, str(self.reader), "--dir", "test", "--alias-deps", suite],
+            cwd=self.root, text=True, capture_output=True, timeout=10,
+        )
+
+    def test_alias_deps_reads_the_rule_that_declares_the_alias(self):
+        # A Python suite is a (rule (alias runtest-NAME) (deps ...)), and the
+        # runner runs it by building the alias. Building the alias compiles its
+        # deps, so a runner that does not name them first spends the suite
+        # budget compiling: run 41730441832 used 601s of 600s and printed no
+        # "Ran N tests" line. This query is what lets the runner build them
+        # outside the budget.
+        (self.root / "test/stdio.py").write_text("print('body')\n")
+        result = self.alias_deps()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["bin/main_stdio_eio.exe"])
+
+    def test_alias_deps_includes_the_executable_named_only_by_an_action(self):
+        # Six rules declare no (deps ...) at all and name their executable only
+        # as %{exe:PATH} in the action. Without that path the alias still
+        # compiles inside the budget.
+        self.inc.write_text("""
+(rule
+ (alias runtest-test_browser_activity)
+ (action (run %{exe:../packages/agent_core/bench/bench.exe} test "a name")))
+""")
+        result = self.alias_deps("test_browser_activity")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         ["packages/agent_core/bench/bench.exe"])
+
+    def test_alias_deps_of_a_missing_alias_is_empty_not_the_whole_file(self):
+        # A sibling rule must not donate its deps to a name it does not carry.
+        result = self.alias_deps("test_absent_alias")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def run_python_alias_runner(self, alias_name="test_stdio_browser_activity",
+                               with_deps=True):
+        suite_path = f"test/{alias_name}.py"
+        deps_field = f"(deps {alias_name}.py ../bin/main_stdio_eio.exe)" if with_deps else ""
+        self.inc.write_text(f"""
+(rule
+ (alias runtest-{alias_name})
+ {deps_field}
+ (action (run python3 {alias_name}.py)))
+""")
+        (self.root / f"test/{alias_name}.py").write_text("print('body')\n")
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        commands = self.root / "commands"
+        commands.mkdir()
+        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "opam", """
+import json,os,sys
+from pathlib import Path
+with Path('opam-calls.jsonl').open('a') as handle:
+    handle.write(json.dumps(sys.argv[1:]) + "\\n")
+raise SystemExit(0)
+""")
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES=alias_name, DUNE_JOBS="2",
+                   CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        calls = [json.loads(line) for line in
+                 (self.root / "opam-calls.jsonl").read_text().splitlines()]
+        return suite_path, result, calls
+
+    def test_python_alias_runner_prepares_deps_before_the_timed_alias(self):
+        suite_path, result, calls = self.run_python_alias_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(calls), 2, calls)
+        # Dependencies first, outside any timeout wrapper.
+        self.assertEqual(calls[0][-2:], ["test/test_stdio_browser_activity.py",
+                                         "bin/main_stdio_eio.exe"])
+        # Then the alias itself, still under the suite budget.
+        self.assertIn("--force", calls[1])
+        self.assertEqual(calls[1][-1], f"@runtest-test_stdio_browser_activity")
+        self.assertIn("(prepare alias dependencies)", result.stdout)
+
+    def test_python_alias_whose_rule_declares_no_deps_still_runs(self):
+        # No (deps ...) and no %{exe:...}: the preparation step must add no
+        # build call at all rather than one with an empty target.
+        _, result, calls = self.run_python_alias_runner("test_bare_alias", with_deps=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn("--force", calls[0])
+
+
+    def test_python_alias_reader_failure_is_reported_and_the_alias_still_runs(self):
+        # A silent fallback to "no deps" is indistinguishable in the log from
+        # the 601s in-budget TIMEOUT this preparation exists to prevent, so the
+        # run says it fell back. The alias is still built, under its budget.
+        alias_name = "test_reader_failure"
+        self.inc.write_text(f"""
+(rule
+ (alias runtest-{alias_name})
+ (deps {alias_name}.py)
+ (action (run python3 {alias_name}.py)))
+""")
+        (self.root / f"test/{alias_name}.py").write_text("print('body')\n")
+        runner = self.root / "scripts/ci-run-targeted-tests.sh"
+        shutil.copyfile(SCRIPTS / runner.name, runner)
+        commands = self.root / "commands"
+        commands.mkdir()
+        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "opam", "import sys\nraise SystemExit(0)\n")
+        # A reader that refuses this query: the alias-deps path exits non-zero.
+        reader = self.root / "scripts/ci/stanza_env.py"
+        reader.write_text(
+            "import sys\n"
+            "if '--alias-deps' in sys.argv:\n"
+            "    print('simulated reader refusal', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "print('test/x.py')\n"
+        )
+        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
+                   TARGET_SUITES=alias_name, DUNE_JOBS="2",
+                   CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
+                                text=True, capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("could not read the rule's deps", result.stdout)
+        self.assertIn("simulated reader refusal", result.stdout)
+        self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
+        self.assertNotIn("(prepare alias dependencies)", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

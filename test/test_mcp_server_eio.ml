@@ -56,6 +56,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+(* [Board_dispatch] auto-inits the process-wide Board backend against the
+   workspace of the first call that reaches it, and [Board_dispatch.init_jsonl]
+   refuses a different workspace while one is bound. A test case that reaches
+   the board binds the global to its temporary directory and then removes the
+   directory, so the next board call fails with "Board BasePath is missing"
+   (run 41827897543, eio #54: tools/call logs structured MCP details). Every
+   test that can reach the board starts with no Board bound and leaves none
+   behind, as test_server_runtime_bootstrap does with with_server_state_dir. *)
+let reset_board_test_globals () =
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ()
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -2951,6 +2963,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
   Eio_context.set_switch sw;
 
   let base_path = temp_dir () in
+  reset_board_test_globals ();
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
@@ -2974,6 +2987,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
     Yojson.Safe.Util.(structured |> member "content" = `Null);
   Alcotest.(check string) "board author" "tester"
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
+  reset_board_test_globals ();
   cleanup_dir base_path
 
 let test_handle_request_tools_call_logs_structured_mcp_details () =
@@ -2987,8 +3001,11 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
   let base_path = temp_dir () in
   let request_id = "1201" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      reset_board_test_globals ();
+      cleanup_dir base_path)
     (fun () ->
+      reset_board_test_globals ();
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
       let request =

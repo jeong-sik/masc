@@ -492,6 +492,7 @@ let test_auth_config_roundtrip () =
     workspace_secret_hash = Some (String.make 64 'a');
     require_token = true;
     token_expiry_hours = 48;
+    account_mode = None;
   } in
   let json = Masc_domain.auth_config_to_yojson cfg in
   let result = Masc_domain.auth_config_of_yojson json in

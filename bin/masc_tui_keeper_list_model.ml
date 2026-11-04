@@ -17,6 +17,7 @@ type waiting_source = Masc.Tui_decode.waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -70,6 +71,7 @@ type badge =
   | Badge_delegate
   | Badge_verification
   | Badge_schedule
+  | Badge_quota_spent
 
 type waiting_reading =
   | Waiting_observed of Masc.Tui_decode.keeper_waiting_row
@@ -243,6 +245,7 @@ let badges_of_row row =
        Some Badge_verification
      else None)
   ; (if waiting_has_source Waiting_source_schedule_waiting items then Some Badge_schedule else None)
+  ; (if waiting_has_source Waiting_source_runtime_quota_spent items then Some Badge_quota_spent else None)
   ]
   |> List.filter_map Fun.id
 

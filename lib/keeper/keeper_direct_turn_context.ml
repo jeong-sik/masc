@@ -71,7 +71,7 @@ let project_partition prepared ~workspace_memory_access =
     | Active_goals -> prepared.goal_context
     | Goal_observations -> prepared.goal_observations
     | Current_task | Approval_authority | Connected_surfaces | Namespace_state
-    | Workspace_memory | Wiki | Lane_updates | Repository_freshness | Autonomous_trigger
+    | Workspace_memory | Wiki | Lane_updates | Autonomous_trigger
     | Scheduled_automation | Completion_authority | Task_cancellations | Pending_mentions
     | Scope_messages | Own_board_posts | Board_activity | Own_recent_actions | Recent_work
     | Fleet_messages -> None) in

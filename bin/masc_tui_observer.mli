@@ -220,6 +220,9 @@ type workspace_store =
   | Runtime_config
       (** The server committed a runtime.toml text
           ({!Masc.Runtime_config_changed_event}). *)
+  | Skill_catalog
+      (** A workspace skill catalog snapshot was published
+          ({!Masc.Skill_catalog_published_event}). *)
 
 (** A whole-projection push. The TUI re-reads what [Transport_health]
     measures ([/api/v1/dashboard/transport-health]); the others are named for
@@ -284,8 +287,14 @@ type event =
           [keeper_name], not [name]. *)
   | Keeper_async_requests_changed of { keeper : string }
       (** [keeper_async_requests_changed]: the Keeper's durable async message
-          requests changed. A server push: the reader re-fetches
-          [/api/v1/async-requests]. *)
+          requests, or one of its composition execution journals, changed. A
+          server push: the reader re-fetches [/api/v1/async-requests] and an
+          open request detail of that Keeper. *)
+  | Keeper_skill_activations_changed of { keeper : string }
+      (** [keeper_skill_activations_changed]: the Keeper's skill activation
+          ledger changed ({!Masc.Keeper_skill_activations_changed_event}). A
+          reader re-fetches that Keeper's
+          [/api/v1/keepers/skill-activations] and [/api/v1/keepers/skill-usage]. *)
   | Keeper_roster_change of roster_change
       (** Named by {!Masc.Keeper_row_broadcast}. A server push: the roster
           reads the named row, or the whole roster, again. *)
@@ -392,6 +401,16 @@ val tool_modes_changed : event -> bool
 
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
+
+val async_requests_keeper : event -> string option
+(** The Keeper whose async requests, or the execution journal of one, changed. *)
+
+val skill_activations_keeper : event -> string option
+(** The Keeper whose skill activation ledger changed. *)
+
+val skill_catalog_published : event -> bool
+(** Whether [event] is a {!Skill_catalog} store change: a workspace skill
+    catalog snapshot was published. *)
 
 val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
 (** The workspace dataset a push owes a read: the dataset it names as

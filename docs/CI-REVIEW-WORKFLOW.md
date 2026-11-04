@@ -190,14 +190,29 @@ If a named test declares a custom `action`, the targeted runner selects Dune's
 nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
 Dune owns that action's arguments, wrappers, variables and dependencies; the
 runner does not translate them. The selected OCaml executables are built before
-starting the alias timeout. Dune still resolves any additional action dependencies
-inside the timed alias. These per-test aliases have existed since Dune
+starting the alias timeout. For a Python suite declared as
+`(rule (alias runtest-NAME) (deps ...) (action ...))`, the runner reads that
+rule's `(deps ...)` and any `%{exe:...}` its action names, and builds those
+before the alias timeout starts; the alias itself still runs inside the timeout.
+A suite whose body really hangs therefore still ends as `TIMEOUT`, and one whose
+body only needed compiling reaches `Ran N tests` instead of spending the whole
+budget on the build. If the reader fails, the run names the alias, prints the
+reason and falls back to building the alias inside its budget. These per-test
+aliases have existed since Dune
 3.20, below this repository's 3.22 minimum. See the
 [Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
 Its shell-runner fixture substitutes the build command; it is not a product
 test result. Keep this focused CI self-check separate from product behavior suites.
+
+Reading a run's own log needs a writable cache directory. `gh run view RUN --log`
+writes under `$HOME/.cache/gh`, so on a lane whose home is read-only it fails with
+`mkdir /home/opam/.cache/gh: read-only file system` before fetching anything — an
+error that looks like "the log is unreadable" but is only the cache path. Set
+`XDG_CACHE_HOME` to a writable directory for the read, for example
+`XDG_CACHE_HOME=/tmp/ghcache gh run view RUN --log`. A review that says a log line
+could not be read should name which of the two failed: the fetch or the cache.
 
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,

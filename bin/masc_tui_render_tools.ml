@@ -1333,40 +1333,37 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         @ tool_lines
     end
   in
-  let activation_lines =
+  let activation_reading_lines =
     lazy begin
-    match state.tools_inventory with
-    | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
-    | Some { Masc.Tui_decode_tools.ts_skill_activations = None; _ } ->
+    match state.tools_activations with
+    | None ->
+        (match state.tools_activations_error with
+         | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
+         | Some _ -> [ Theme.warn (), " Skill Activations — unavailable (no reading)" ])
+    | Some Masc_tui_types.Activations_no_keeper ->
         [ Theme.warn (), " Skill Activations — no Keeper selected" ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_no_session
-                 { sap_keeper_name });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_no_session
+              { sap_keeper_name })) ->
         [ Theme.warn (),
           Printf.sprintf " Skill Activations — %s — no session"
             (Terminal_text.single_line sap_keeper_name) ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_unavailable
-                 { sap_keeper_name; sap_reason; sap_detail });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_unavailable
+              { sap_keeper_name; sap_reason; sap_detail })) ->
         [ Theme.bad (),
           Printf.sprintf " Skill Activations — %s — unavailable (%s)"
             (Terminal_text.single_line sap_keeper_name)
             (Terminal_text.single_line sap_reason);
           Theme.bad (), "   " ^ Terminal_text.single_line sap_detail ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_available
-                 { sap_keeper_name
-                 ; sap_ledger
-                 });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_available
+              { sap_keeper_name
+              ; sap_ledger
+              })) ->
         let sap_activations =
           Masc.Keeper_skill_activation_ledger.activations sap_ledger
         in
@@ -1662,6 +1659,17 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         @ receipt_lines
     end
   in
+  (* The Activations pane has its own read, so its failure is drawn here;
+     [error_lines] below speaks for the tool inventory. *)
+  let activation_lines =
+    lazy begin
+      (match state.tools_activations_error with
+       | None -> []
+       | Some error ->
+           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line error ])
+      @ Lazy.force activation_reading_lines
+    end
+  in
   let catalog_lines =
     lazy begin
     match state.tools_inventory with
@@ -1741,87 +1749,179 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         ; sc_shadows
         ; sc_sources
         ; sc_config
-        ; sc_usage_coverage
         ; _
         }
       ->
-        let used =
+        (* Each Keeper's answer is its own read (RFC-0483). A failed read
+           keeps the Keeper's last answer, so its counts stay in the totals. *)
+        let answered_rows =
+          List.concat_map
+            (fun (keeper, reading) ->
+               match Masc_tui_types.skill_usage_answer reading with
+               | Some (Masc.Tui_decode_tools.Keeper_usage_ready rows) ->
+                 List.map (fun row -> keeper, row) rows
+               | Some
+                   ( Masc.Tui_decode_tools.Keeper_usage_no_session
+                   | Masc.Tui_decode_tools.Keeper_usage_unavailable _
+                   | Masc.Tui_decode_tools.Keeper_usage_no_catalog )
+               | None -> [])
+            state.tools_keeper_usage
+        in
+        let names_surface (surface : Masc.Tui_decode_tools.skills_catalog_surface)
+            ((_ : string), (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) =
+          Skill_reference.equal row.ksu_reference surface.scs_reference
+        in
+        (* One surface's usage: a row for each Keeper whose ledger used its
+           exact revision, in Keeper name order. *)
+        let usage_of surface = List.filter (names_surface surface) answered_rows in
+        (* A Keeper answered against a catalog this reading does not hold, so
+           its row names a revision outside it. Such a row is drawn on its
+           own. *)
+        let outside =
           List.filter
-            (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
-               surface.scs_usage <> [])
+            (fun usage -> not (List.exists (fun surface -> names_surface surface usage) sc_surfaces))
+            answered_rows
+        in
+        let used =
+          List.filter_map
+            (fun surface ->
+               match usage_of surface with
+               | [] -> None
+               | usage -> Some (surface, usage))
             sc_surfaces
         in
-        let total field rows =
-          List.fold_left (fun sum (row : Masc.Tui_decode_tools.skill_usage_row) ->
-            sum + field row) 0 rows
+        let total field usage =
+          List.fold_left
+            (fun sum (_, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) -> sum + field row)
+            0 usage
         in
-        let invocations rows =
-          total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_invocations) rows
+        let invocations usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_invocations) usage
         in
-        let compare_surface (a : Masc.Tui_decode_tools.skills_catalog_surface)
-            (b : Masc.Tui_decode_tools.skills_catalog_surface) =
-          let count = Int.compare (invocations b.scs_usage) (invocations a.scs_usage) in
+        let deliveries usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_deliveries) usage
+        in
+        let actions usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_actions) usage
+        in
+        let surface_name (surface : Masc.Tui_decode_tools.skills_catalog_surface) =
+          Skill_reference.(surface.scs_reference.identity.name)
+        in
+        let compare_surface ((a : Masc.Tui_decode_tools.skills_catalog_surface), a_usage)
+            ((b : Masc.Tui_decode_tools.skills_catalog_surface), b_usage) =
+          let count = Int.compare (invocations b_usage) (invocations a_usage) in
           if count <> 0 then count else
-          let name = String.compare a.scs_name b.scs_name in
+          let name = String.compare (surface_name a) (surface_name b) in
           if name <> 0 then name else String.compare a.scs_kind b.scs_kind
         in
         let used = List.stable_sort compare_surface used in
-        let all_rows = List.concat_map
-          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) -> surface.scs_usage) used in
-        let keepers = all_rows |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_keeper)
-          |> List.sort_uniq String.compare |> List.length in
+        let all_usage = List.concat_map snd used @ outside in
+        let keepers = all_usage |> List.map fst |> List.sort_uniq String.compare |> List.length in
+        (* Per Keeper: whether its answer is counted, whether it comes from an
+           earlier read, and what the operator needs to know about it. A
+           Keeper with no answer at all is not counted. *)
+        let ledgers_read, earlier, excluded, notes =
+          List.fold_left
+            (fun (read, earlier, excluded, notes) (keeper, reading) ->
+               let failure, answer =
+                 match reading with
+                 | Masc_tui_types.Skill_usage_read answer -> None, Some answer
+                 | Masc_tui_types.Skill_usage_read_failed { last; detail } -> Some detail, last
+               in
+               let counted, left_out, answer_note =
+                 match answer with
+                 | Some
+                     ( Masc.Tui_decode_tools.Keeper_usage_ready _
+                     | Masc.Tui_decode_tools.Keeper_usage_no_catalog ) ->
+                   true, false, None
+                 | Some Masc.Tui_decode_tools.Keeper_usage_no_session -> false, false, None
+                 | Some (Masc.Tui_decode_tools.Keeper_usage_unavailable { kua_reason; kua_detail }) ->
+                   false, true, Some (Printf.sprintf "%s (%s)" kua_reason kua_detail)
+                 | None -> false, true, None
+               in
+               let note =
+                 match failure, answer_note with
+                 | None, None -> None
+                 | None, Some note -> Some (Printf.sprintf "Unavailable: %s: %s" keeper note)
+                 | Some detail, None when counted ->
+                   Some (Printf.sprintf "Read failed, counts from the earlier answer: %s: %s" keeper detail)
+                 | Some detail, None -> Some (Printf.sprintf "Read failed: %s: %s" keeper detail)
+                 | Some detail, Some note ->
+                   Some (Printf.sprintf "Read failed: %s: %s; earlier answer: %s" keeper detail note)
+               in
+               ( (if counted then read + 1 else read)
+               , (if counted && Option.is_some failure then earlier + 1 else earlier)
+               , (if left_out then excluded + 1 else excluded)
+               , match note with
+                 | None -> notes
+                 | Some note -> note :: notes ))
+            (0, 0, 0, []) state.tools_keeper_usage
+        in
+        let notes = List.rev notes in
         let coverage_lines =
-          match sc_usage_coverage with
-          | None -> [ Theme.warn (), "Activation ledger coverage: unavailable; totals may be partial." ]
-          | Some coverage ->
+          match state.keepers, state.tools_keeper_usage with
+          | [], [] ->
+              if Masc_tui_types.roster_complete state
+              then [ Ansi.dim, "No Keepers in the roster." ]
+              else []
+          | _ :: _, [] -> [ Theme.warn (), "Activation ledger coverage: not read yet; totals may be partial." ]
+          | ([] | _ :: _), _ :: _ ->
               ( Ansi.dim,
-                Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d"
-                  coverage.suc_ledgers_loaded (List.length coverage.suc_unavailable) )
-              :: (match coverage.suc_unavailable with
-                  | [] -> []
-                  | _ -> [Theme.warn (), "Partial totals: unavailable ledgers are excluded."])
+                Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d%s"
+                  ledgers_read excluded
+                  (if earlier > 0 then Printf.sprintf "; %d from an earlier read" earlier else "") )
+              :: (if excluded > 0
+                  then [Theme.warn (), "Partial totals: unavailable ledgers are excluded."]
+                  else [])
+              @ (if earlier > 0
+                 then [Theme.warn (), "Some totals come from an earlier read."]
+                 else [])
+        in
+        (* The ledgers read are the roster's Keepers; a roster not read yet,
+           or read with an error, may list only some of them. *)
+        let roster_lines =
+          match state.keepers_error, state.local_keepers with
+          | Some detail, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
+          | None, Local_workspace_failed detail ->
+              [ Theme.warn (),
+                "Keeper roster read failed: " ^ Terminal_text.single_line detail
+                ^ "; totals cover only the Keepers listed." ]
+          | None, Local_workspace_unread -> [ Ansi.dim, "Keeper roster not read yet." ]
+          | None, Local_workspace_read -> []
         in
         let heading = skill_usage_box ~cols
           ([ Ansi.bold,
              Printf.sprintf "Skill Usage — %d of %d catalog Skills observed"
                (List.length used) (List.length sc_surfaces)
            ; Theme.info (), Printf.sprintf "Keepers %d · TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-               keepers (invocations all_rows)
-               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) all_rows)
-               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) all_rows)
+               keepers (invocations all_usage) (deliveries all_usage) (actions all_usage)
            ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
            ; Ansi.dim, "ACTIONS: counted per Skill invocation; several invocations may share one tool call"
            ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
                (List.length sc_surfaces - List.length used)
-           ] @ coverage_lines)
+           ] @ coverage_lines @ roster_lines)
         in
         let rows = List.concat_map
-          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
-            let keeper_readings = surface.scs_usage
-              |> List.stable_sort
-                   (fun (a : Masc.Tui_decode_tools.skill_usage_row)
-                        (b : Masc.Tui_decode_tools.skill_usage_row) ->
-                      String.compare a.su_keeper b.su_keeper)
-              |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) ->
-                  let last_used = match row.su_last_used_at with
-                    | Some at when String.trim at <> "" -> Terminal_text.single_line at
-                    | Some _ | None -> skill_last_used_label None in
+          (fun ((surface : Masc.Tui_decode_tools.skills_catalog_surface), usage) ->
+            let keeper_readings = usage
+              |> List.map (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
+                  let last_used = Terminal_text.single_line row.ksu_last_used_at in
                   let line = Tool_table.skill_usage_keeper_line
-                    ~keeper:(Terminal_text.single_line row.su_keeper)
-                    ~invocations:row.su_invocations ~deliveries:row.su_deliveries
-                    ~actions:row.su_actions ~last_used in
-                  row, last_used, line)
+                    ~keeper:(Terminal_text.single_line keeper)
+                    ~invocations:row.ksu_invocations ~deliveries:row.ksu_deliveries
+                    ~actions:row.ksu_actions ~last_used in
+                  (keeper, row), last_used, line)
             in
             let fits line = Masc_tui_message_layout.display_width line
               <= Masc_tui_frame.inner_width ~cols - 4 in
             let table_mode = fits Tool_table.skill_usage_keeper_header
               && List.for_all (fun (_, _, line) -> fits line) keeper_readings in
             let keeper_rows = List.concat_map
-              (fun ((row : Masc.Tui_decode_tools.skill_usage_row), last_used, line) ->
+              (fun ((keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)), last_used, line) ->
                   if table_mode then [Ansi.dim, line]
-                  else [ Ansi.bold, Terminal_text.single_line row.su_keeper
+                  else [ Ansi.bold, Terminal_text.single_line keeper
                        ; Ansi.dim, Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-                           row.su_invocations row.su_deliveries row.su_actions
+                           row.ksu_invocations row.ksu_deliveries row.ksu_actions
                        ; Ansi.dim, "LAST USED " ^ last_used ]) keeper_readings
             in
             let flow_rows = match surface.scs_flow with
@@ -1831,22 +1931,39 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                    | None -> [] | Some line -> [Ansi.dim, line])
                   @ skill_flow_detail_lines flow in
             skill_usage_box ~cols
-              ([ Ansi.bold, Terminal_text.single_line surface.scs_name ^ "  "
+              ([ Ansi.bold, Terminal_text.single_line (surface_name surface) ^ "  "
                    ^ Terminal_text.single_line surface.scs_kind
                ; Theme.info (), Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-                   (invocations surface.scs_usage)
-                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) surface.scs_usage)
-                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) surface.scs_usage)
+                   (invocations usage) (deliveries usage) (actions usage)
                ]
                @ (if table_mode
                   then [Ansi.dim, Tool_table.skill_usage_keeper_header] else [])
                @ keeper_rows @ flow_rows)) used
         in
-        let unavailable_rows = match sc_usage_coverage with
-          | None -> []
-          | Some coverage -> List.map (fun detail ->
-              Theme.warn (), " Unavailable: " ^ Terminal_text.single_line detail)
-              coverage.suc_unavailable
+        let outside_rows =
+          match outside with
+          | [] -> []
+          | _ :: _ ->
+              skill_usage_box ~cols
+                (( Ansi.bold,
+                   Printf.sprintf "Usage rows outside this catalog reading — %d" (List.length outside) )
+                 :: List.concat_map
+                      (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
+                         [ ( Ansi.bold,
+                             Terminal_text.single_line Skill_reference.(row.ksu_reference.identity.name)
+                             ^ " · rev "
+                             ^ Terminal_text.single_line
+                                 (Skill_reference.content_revision_to_string
+                                    row.ksu_reference.content_revision) )
+                         ; ( Ansi.dim,
+                             Printf.sprintf "%s · TRIGGERED %d · DELIVERED %d · ACTIONS %d · LAST USED %s"
+                               (Terminal_text.single_line keeper) row.ksu_invocations row.ksu_deliveries
+                               row.ksu_actions (Terminal_text.single_line row.ksu_last_used_at) )
+                         ])
+                      outside)
+        in
+        let unavailable_rows =
+          List.map (fun note -> Theme.warn (), " " ^ Terminal_text.single_line note) notes
         in
         let rejection_rows =
           match sc_rejections with
@@ -1926,7 +2043,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                     ])
                  shadows
         in
-        heading @ rows @ unavailable_rows
+        heading @ rows @ outside_rows @ unavailable_rows
         @ skill_source_lines ~config:sc_config ~sources:sc_sources
         @ rejection_rows @ shadow_rows
     in
@@ -1978,9 +2095,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   (* Each pane follows its own independent read. Retained rows are still
      useful during refresh; neither unread nor failed means a successful zero. *)
   let part, source, observed, error = match state.tools_pane with
-    | Tools_surface | Tools_activations | Tools_catalog ->
+    | Tools_surface | Tools_catalog ->
         Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
         state.tools_error
+    | Tools_activations ->
+        Tools_activations_read, "Skill activations", Option.is_some state.tools_activations,
+        state.tools_activations_error
     | Tools_usage ->
         Tools_catalog_read, "Skills catalog", Option.is_some state.skills_catalog,
         state.skills_catalog_error
@@ -1988,12 +2108,21 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         Tools_async_read, "async broker", Option.is_some state.tools_async_observation,
         state.tools_async_observation_error
   in
+  (* The Usage pane draws the catalog and every Keeper's usage read. *)
+  let reads_this_pane pending =
+    match state.tools_pane with
+    | Tools_usage ->
+        (match pending with
+         | Tools_catalog_read | Tools_usage_read _ -> true
+         | Tools_inventory_read | Tools_activations_read | Tools_async_read -> false)
+    | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> pending = part
+  in
   let pending =
     if state.tools_pane = Tools_async then state.tools_async_observation_inflight
     else
       match state.tools_read_inflight with
       | Some request when request.tri_generation = state.tools_request_generation ->
-          List.mem part request.tri_pending
+          List.exists reads_this_pane request.tri_pending
       | Some _ | None -> false
   in
   let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with

@@ -275,6 +275,67 @@ let test_the_worst_grade_wins () =
   in
   check string "the worst cached grade is the overall status" "blocked" status
 
+(* RFC-0484 §3.2: the typesafeai section and what the rollup carries of it. *)
+module Client = Masc.Typesafeai_client
+module Typesafeai_health = Server_typesafeai_health
+
+let typesafe : Client.destination_id =
+  { destination_uri = "https://api.typesafe.ai/v1/systemone"; model = "jev-latest" }
+;;
+
+let openrouter : Client.destination_id =
+  { destination_uri = "https://openrouter.ai/api/v1/systemone"; model = "~typesafe/jev-latest" }
+;;
+
+(* 2026-11-04T06:45:51Z, the first 402 of the 11-04 outage. *)
+let out_of_credit =
+  Client.Refusing
+    { since = 1793774751.; last_at = 1793775000.; last = Client.Payment_required; last_answer_at = None }
+;;
+
+let section_status json = Yojson.Safe.Util.(json |> member "status" |> to_string)
+let section_list name json = Yojson.Safe.Util.(json |> member name |> to_list |> filter_string)
+
+let test_typesafeai_section_grades_its_destinations () =
+  let section configured outcomes = Typesafeai_health.section_json ~configured ~outcomes in
+  check string "a lane with nothing to ask is not graded" "disabled"
+    (section_status (section (Error Masc.Typesafeai_config.Lane_disabled) []));
+  check string "no destination asked yet" "idle"
+    (section_status (section (Ok (typesafe, [])) []));
+  let spent = section (Ok (typesafe, [])) [ typesafe, out_of_credit ] in
+  check string "every destination refusing" "degraded" (section_status spent);
+  check (list string) "only the operator can add credit"
+    [ "payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" ]
+    (section_list "operator_action_reasons" spent);
+  let covered =
+    section (Ok (typesafe, [ openrouter ]))
+      [ typesafe, out_of_credit; openrouter, Client.Answered { at = 1793775001. } ]
+  in
+  check string "a fallback still answering" "warning" (section_status covered);
+  check int "the spent account is still the operator's to fix" 1
+    (List.length (section_list "operator_action_reasons" covered));
+  let busy =
+    section (Ok (typesafe, []))
+      [ typesafe
+      , Client.Refusing { since = 1.; last_at = 2.; last = Client.Server_error; last_answer_at = None } ]
+  in
+  check (list string) "a 5xx asks nothing of the operator" []
+    (section_list "operator_action_reasons" busy);
+  check (list string) "but says what is happening"
+    [ "server_error https://api.typesafe.ai/v1/systemone" ] (section_list "status_reasons" busy);
+  check (list string) "a destination the table no longer names is left out" []
+    (section_list "status_reasons" (section (Ok (openrouter, [])) [ typesafe, out_of_credit ]))
+;;
+
+let test_typesafeai_payment_refusal_reaches_the_operator () =
+  let section = Typesafeai_health.section_json ~configured:(Ok (typesafe, [])) ~outcomes:[ typesafe, out_of_credit ] in
+  let _, required, reasons = summary ~sections:[ "typesafeai", section ] () in
+  check bool "the operator is asked to act" true required;
+  check (list string) "the rollup names the section and the destination"
+    [ "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" ]
+    reasons
+;;
+
 let () =
   run
     "server_health_rollup"
@@ -316,6 +377,12 @@ let () =
             test_a_section_declaring_no_action_reasons_falls_back
         ; test_case "status_reasons win over the fallback" `Quick
             test_status_reasons_win_over_the_fallback
+        ] )
+    ; ( "typesafeai"
+      , [ test_case "the section grades its destinations" `Quick
+            test_typesafeai_section_grades_its_destinations
+        ; test_case "a payment refusal reaches the operator" `Quick
+            test_typesafeai_payment_refusal_reaches_the_operator
         ] )
     ]
 ;;

@@ -24,7 +24,7 @@ let identity base : Masc.Tui_decode.server_identity =
   ; sid_runtime_instance_id = None
   ; sid_base_path = canonical base; sid_masc_root = canonical (Filename.concat base ".masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None
-  ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+  ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
 
 let run_json =
   `Assoc [ "run_id", `String "a"; "keeper", `String "analyst"; "preset", `String "trio"

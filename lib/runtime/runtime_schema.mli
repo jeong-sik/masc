@@ -296,6 +296,11 @@ type model_spec =
   }
 [@@deriving show, eq]
 
+val thinking_request : model_spec -> bool option
+(** The thinking request a model row asks for: [thinking_support], except
+    [None] on a [reasoning_uncontrolled] row, which sends no thinking control
+    at all. Every request built from a model row reads this. *)
+
 (** {1 Layer 3: Binding} *)
 
 type binding =

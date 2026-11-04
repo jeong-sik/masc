@@ -408,6 +408,23 @@ let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
   else mutate_and_apply_effects ()
 ;;
 
+(* RFC-0483: a read of one Keeper's skill activation ledger, named by the
+   [keeper] query parameter. Loading and encoding the ledger keeps a core
+   busy, so it runs on the pool like the tools projection that read it
+   before. *)
+let keeper_ledger_read answer state request reqd =
+  match Server_utils.query_param request "keeper" with
+  | Some keeper_name when not (String.equal (String.trim keeper_name) "") ->
+    let config = Mcp_server.workspace_config state in
+    let keeper_name = String.trim keeper_name in
+    Http.Response.json_value
+      (Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> answer ~config ~keeper_name)))
+      reqd
+  | Some _ | None ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (`Assoc [ "error", `String "keeper is required" ])
+;;
+
 let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
@@ -1454,46 +1471,6 @@ let add_routes ~sw ~clock router =
              let catalog, diagnostics =
                Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in
-             let usage_ledgers, usage_unavailable =
-               match Keeper_meta_store.keeper_names_result config with
-               | Error _ -> [], [ "keeper catalog: unavailable" ]
-               | Ok keeper_names ->
-                 List.fold_left
-                   (fun (loaded, unavailable) keeper_name ->
-                      match Keeper_meta_store.read_meta config keeper_name with
-                      | Error _ ->
-                        loaded, (keeper_name ^ ": metadata unavailable") :: unavailable
-                      | Ok None -> loaded, unavailable
-                      | Ok (Some meta) ->
-                        (match
-                           Keeper_skill_activation_ledger.load
-                             ~config
-                             ~trace_id:meta.runtime.trace_id
-                         with
-                         | Ok ledger -> (keeper_name, ledger) :: loaded, unavailable
-                         | Error error ->
-                           ( loaded
-                           , (keeper_name
-                              ^ ": "
-                              ^ Keeper_skill_activation_ledger.store_error_code
-                                  error)
-                             :: unavailable )))
-                   ([], [])
-                   keeper_names
-             in
-             let usage_for_reference reference =
-               usage_ledgers
-               |> List.filter_map (fun (keeper_name, ledger) ->
-                 Keeper_skill_activation_ledger.usage_for_reference ledger reference
-                 |> Option.map (fun (usage : Keeper_skill_activation_ledger.catalog_usage) ->
-                   `Assoc
-                     [ "keeper", `String keeper_name
-                     ; "invocations", `Int usage.invocations
-                     ; "deliveries", `Int usage.received_invocations
-                     ; "actions", `Int usage.observed_actions
-                     ; "last_used_at", `String usage.last_activated_at
-                     ]))
-             in
              let surface_profile_json reference skill =
                match
                  Keeper_skill_observability.of_skill_with_reference reference skill
@@ -1531,7 +1508,6 @@ let add_routes ~sw ~clock router =
                    [ ("reference", Skill_reference.to_yojson reference) ]
                    @ [ ( "profile"
                        , surface_profile_json reference skill )
-                     ; "usage", `List (usage_for_reference reference)
                      ]
                    @ diagnostic_fields reference.identity
                  in
@@ -1583,19 +1559,18 @@ let add_routes ~sw ~clock router =
                ; ("state", `String "ready")
                ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
                ; ("surfaces", `List surfaces)
-               ; ( "usage_coverage"
-                 , `Assoc
-                     [ "ledgers_loaded", `Int (List.length usage_ledgers)
-                     ; ( "unavailable"
-                       , `List
-                           (List.map
-                              (fun detail -> `String detail)
-                              (List.rev usage_unavailable)) )
-                     ] )
                ]
          in
          Http.Response.json_value json reqd
        )
+
+  (* RFC-0483: one Keeper's ledger, read on its own. The activations answer
+     carries the projection; the usage answer carries only the per-surface
+     counts, so a reader of every Keeper does not receive every ledger. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-activations"
+       (keeper_ledger_read Server_keeper_skill_activations_read.activations_json)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-usage"
+       (keeper_ledger_read Server_keeper_skill_activations_read.usage_json)
 
   |> Server_route.post (Server_route.Tool { tool_name = "masc_prompt_override" }) "/api/v1/prompts" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

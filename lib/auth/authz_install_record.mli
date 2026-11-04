@@ -9,8 +9,7 @@
     The record sits in the config directory of the user, outside the base
     path, so that a restore of the base path from a backup does not take it
     back in time. The module knows the file and nothing about what the
-    external store holds or when a boot reads the record. It has no caller
-    yet.
+    external store holds or when a boot reads the record.
 
     {b File.} [<config dir>/authz-install-<16 hex>.json]. The hex is the start
     of the SHA-256 of the canonical base path ([Unix.realpath]), so two base
@@ -52,9 +51,10 @@
     treats either as an absent record. The file is read with the owner-checked
     read of [Fs_compat], which checks the file and its directory before and
     after the read ([Fs_compat.load_owned_regular_file_with_snapshot]). Design
-    8.4 reads the record for a [Fresh_bootstrap] and for an installation that
-    has a mode event. A boot of any other installation does not call {!read},
-    so a config directory that fails the test stops only those two.
+    8.4 reads the record for a [Fresh_bootstrap], and the boot reads it on
+    every start ({!Authz_boot_mode_read}): a base path with no mode event and a
+    store that holds one was restored to before its bootstrap (design 5.1, row
+    2). So a config directory that fails the test stops every boot.
 
     {b Blocking.} {!read} and {!write} are blocking and meant for the boot
     sequence, not for a request path. The file replacement and the read of the

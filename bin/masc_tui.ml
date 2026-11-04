@@ -3871,6 +3871,7 @@ let close_tools_async_task state =
     state.tools_async_task_history_request;
   suspend_tools_async_task state;
   state.tools_async_task_source <- None;
+  state.tools_async_task_owed <- Masc_tui_owed_read.settled;
   tools_task_user_scroll state 0
 
 let reconcile_task_documents state ~mailbox =
@@ -3915,6 +3916,8 @@ let close_tools_async_detail state =
     state.tools_async_detail_request;
   suspend_tools_async_detail state;
   state.tools_async_detail_open <- false;
+  (* The next detail opened is another request; it owes nothing yet. *)
+  state.tools_async_detail_owed <- Masc_tui_owed_read.settled;
   tools_task_user_scroll state 0
 
 let launch_tools_async_detail ?(force=false) state ~mailbox =
@@ -3924,6 +3927,7 @@ let launch_tools_async_detail ?(force=false) state ~mailbox =
     match begin_tools_async_detail state ~force with
     | None -> ()
     | Some request ->
+      state.tools_async_detail_owed <- Masc_tui_owed_read.started state.tools_async_detail_owed;
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.tad_job) previous;
       let host = server_peer_host and port = state.port in
       let target = Masc_tui_fetched.request_key request.tad_ticket in
@@ -3955,6 +3959,7 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
     (match begin_tools_async_task_body state ~force with
      | None -> ()
      | Some request ->
+       state.tools_async_task_owed <- Masc_tui_owed_read.started state.tools_async_task_owed;
        Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.atr_job) previous;
        let source=Masc_tui_fetched.request_key request.atr_ticket in
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
@@ -3993,6 +3998,91 @@ let launch_tools_async_observation_load state ~mailbox =
           ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
           (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
 
+(* Starts the named Tools parts for the selected Keeper under the current
+   generation, beside the parts already in flight, and marks each part's owed
+   read started. The async broker part has its own read and in-flight flag. *)
+let launch_tools_parts state ~mailbox parts =
+  if server_authority_ready state then begin
+  let keeper =
+    Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
+  in
+  let generation = state.tools_request_generation in
+  (* The Activations pane draws no ledger without a selected Keeper. *)
+  let parts =
+    match keeper with
+    | Some _ -> parts
+    | None ->
+        if List.mem Tools_activations_read parts then begin
+          state.tools_activations <- Some Activations_no_keeper;
+          state.tools_activations_error <- None;
+          state.tools_activations_owed <- Masc_tui_owed_read.settled
+        end;
+        List.filter (fun part -> part <> Tools_activations_read) parts
+  in
+  let tracked = List.filter (fun part -> part <> Tools_async_read) parts in
+  (match tracked with
+   | [] -> ()
+   | _ :: _ ->
+       state.tools_read_inflight <- Some
+         (match state.tools_read_inflight with
+          | Some request when request.tri_generation = generation ->
+              { request with
+                tri_pending =
+                  request.tri_pending
+                  @ List.filter (fun part -> not (List.mem part request.tri_pending)) tracked }
+          | Some _ | None ->
+              { tri_generation = generation; tri_keeper = keeper; tri_pending = tracked }));
+  let host = server_peer_host in
+  let port = state.port in
+  List.iter
+    (function
+      | Tools_inventory_read ->
+          launch_workspace_json_read state ~mailbox
+            ~deliver:(fun result -> Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result }))
+            (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+      | Tools_catalog_read ->
+          state.tools_catalog_owed <- Masc_tui_owed_read.started state.tools_catalog_owed;
+          launch_workspace_json_read state ~mailbox
+            ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation;
+              result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result }))
+            (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port)
+      | Tools_activations_read ->
+          (* The Activations pane draws the selected Keeper's ledger, which its
+             own route answers (RFC-0483). *)
+          Option.iter
+            (fun keeper ->
+               (* A reading held for no Keeper or for another one is not this
+                  Keeper's, so it is not kept on screen while this read runs. *)
+               (match state.tools_activations with
+                | Some (Activations_read projection)
+                  when String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper -> ()
+                | Some (Activations_read _ | Activations_no_keeper) ->
+                    state.tools_activations <- None;
+                    state.tools_activations_error <- None
+                | None -> ());
+               state.tools_activations_owed <- Masc_tui_owed_read.started state.tools_activations_owed;
+               launch_workspace_json_read state ~mailbox
+                 ~deliver:(fun result ->
+                   Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }))
+                 (fun () -> Masc_tui_loader.load_keeper_skill_activations ~host ~port ~keeper))
+            keeper
+      | Tools_usage_read keeper ->
+          (* The Usage pane counts every Keeper's use of the catalog, one
+             Keeper's ledger per read (RFC-0483). *)
+          set_keeper_skill_usage_owed state keeper
+            (Masc_tui_owed_read.started (keeper_skill_usage_owed state keeper));
+          launch_workspace_json_read state ~mailbox
+            ~deliver:(fun result ->
+              Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }))
+            (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper)
+      | Tools_async_read -> launch_tools_async_observation_load state ~mailbox)
+    parts
+  end
+
+(* Reads what depends on the selected Keeper: its tool inventory and
+   effective surface, and its activations. A new generation drops the
+   answers still in flight. The skills catalog and the Usage answers read on
+   their pushes ([launch_owed_tools]). *)
 let launch_tools_load ?(force = true) state ~mailbox =
   if server_authority_ready state then begin
   let keeper =
@@ -4005,21 +4095,8 @@ let launch_tools_load ?(force = true) state ~mailbox =
   in
   if force || not already_reading then begin
     state.tools_request_generation <- state.tools_request_generation + 1;
-    let generation = state.tools_request_generation in
-    state.tools_read_inflight <- Some
-      { tri_generation = generation
-      ; tri_keeper = keeper
-      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read ]
-      };
-    let host = server_peer_host in
-    let port = state.port in
-    launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Skills_catalog_loaded (generation,
-        Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
-      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
-    launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
-      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+    state.tools_read_inflight <- None;
+    launch_tools_parts state ~mailbox [ Tools_inventory_read; Tools_activations_read ]
   end
   end
 
@@ -4056,6 +4133,8 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.keeper_cursor <- next;
     state.tools_inventory <- None;
     state.tools_error <- None;
+    state.tools_activations <- None;
+    state.tools_activations_error <- None;
     tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
@@ -8089,6 +8168,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
   | Tools ->
       owe_async_requests_read state;
+      owe_tools_skill_reads state;
       launch_tools_load state ~mailbox
   | Config -> (
       (* Each pane loads its own source. Named rather than left to an
@@ -9082,6 +9162,111 @@ let launch_owed_async_requests state ~mailbox =
       state.async_requests_owed <- Masc_tui_owed_read.started read;
       launch_tools_async_observation_load state ~mailbox
     end
+  end
+
+(* The open async request detail reads again when its Keeper's requests or
+   one of its execution journals change, on a revalidation, and after a
+   failed read (RFC-0480 §3.4). *)
+let owe_tools_async_detail_read state keeper =
+  if Option.exists (fun (target : Masc.Tui_decode_async_request.target) ->
+       String.equal target.keeper_name keeper) state.tools_async_selection
+  then state.tools_async_detail_owed <- Masc_tui_owed_read.changed state.tools_async_detail_owed
+
+let owe_selected_tools_async_detail_read state =
+  Option.iter (fun (target : Masc.Tui_decode_async_request.target) ->
+      owe_tools_async_detail_read state target.keeper_name)
+    state.tools_async_selection
+
+(* Runs on every loop iteration. Only an open request detail owes a read;
+   opening it reads it. A detail left open under another view keeps what it
+   owes, so a push that came meanwhile reads it on return. *)
+let launch_owed_tools_async_detail state ~mailbox =
+  if not (state.tools_async_detail_open && Option.is_none state.tools_async_task_source) then
+    state.tools_async_detail_owed <- Masc_tui_owed_read.settled
+  else if state.view = Tools && state.tools_pane = Tools_async then begin
+    let reading = Option.is_some state.tools_async_detail_request in
+    let read =
+      if reading then state.tools_async_detail_owed
+      else Masc_tui_owed_read.abandoned state.tools_async_detail_owed
+    in
+    state.tools_async_detail_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_tools_async_detail state ~mailbox
+  end
+
+(* The open source Task's body reads again when the backlog changes, on a
+   revalidation, and after a failed read (RFC-0480 §3.4). Its history reads
+   its first page on opening and more on request; [r] reads it again. *)
+let owe_tools_async_task_read state =
+  state.tools_async_task_owed <- Masc_tui_owed_read.changed state.tools_async_task_owed
+
+(* Runs on every loop iteration. Only an open source Task owes a read. A
+   Task left open under another view keeps what it owes. *)
+let launch_owed_tools_async_task state ~mailbox =
+  if not (state.tools_async_detail_open && Option.is_some state.tools_async_task_source) then
+    state.tools_async_task_owed <- Masc_tui_owed_read.settled
+  else if state.view = Tools && state.tools_pane = Tools_async then begin
+    let reading = Option.is_some state.tools_async_task_body_request in
+    let read =
+      if reading then state.tools_async_task_owed
+      else Masc_tui_owed_read.abandoned state.tools_async_task_owed
+    in
+    state.tools_async_task_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_tools_async_task state ~mailbox
+  end
+
+(* Runs on every loop iteration. The skills catalog and each roster Keeper's
+   Usage answer read while the Usage pane is on screen, the selected
+   Keeper's activations while the Activations pane is, each when a push, an
+   arrival or a failed read owes it (RFC-0483 §4.3). A part in flight is let
+   finish first; one that will not deliver is owed again. What is owed off
+   screen waits for its pane. *)
+let launch_owed_tools state ~mailbox =
+  let async_open =
+    Option.is_some state.tools_async_task_source
+    || (state.tools_pane = Tools_async && state.tools_async_detail_open)
+  in
+  if state.view = Tools && not async_open then begin
+    let pending =
+      match state.tools_read_inflight with
+      | Some request -> request.tri_pending
+      | None -> []
+    in
+    let now = monotonic_now_s () in
+    let due part owed set =
+      let reading = List.mem part pending in
+      let read = if reading then owed else Masc_tui_owed_read.abandoned owed in
+      set read;
+      Masc_tui_owed_read.due ~now read && not reading
+    in
+    let parts =
+      match state.tools_pane with
+      | Tools_usage ->
+          (* A Keeper that left the roster leaves its readings with it. *)
+          keep_roster_skill_usage state;
+          (if due Tools_catalog_read state.tools_catalog_owed
+                (fun owed -> state.tools_catalog_owed <- owed)
+           then [ Tools_catalog_read ]
+           else [])
+          @ List.filter_map
+              (fun (row : keeper) ->
+                 let part = Tools_usage_read row.k_name in
+                 if due part (keeper_skill_usage_owed state row.k_name)
+                      (set_keeper_skill_usage_owed state row.k_name)
+                 then Some part
+                 else None)
+              state.keepers
+      | Tools_activations ->
+          if due Tools_activations_read state.tools_activations_owed
+               (fun owed -> state.tools_activations_owed <- owed)
+          then [ Tools_activations_read ]
+          else []
+      | Tools_surface | Tools_async | Tools_catalog -> []
+    in
+    match parts with
+    | [] -> ()
+    | _ :: _ -> launch_tools_parts state ~mailbox parts
   end
 
 (* The schedule list behind the agenda strip, drawn on every surface, and the
@@ -16464,6 +16649,12 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_read_inflight <- None;
   state.tools_inventory <- None;
   state.tools_error <- None;
+  state.tools_activations <- None;
+  state.tools_activations_error <- None;
+  state.tools_keeper_usage <- [];
+  state.tools_catalog_owed <- Masc_tui_owed_read.settled;
+  state.tools_activations_owed <- Masc_tui_owed_read.settled;
+  state.tools_usage_owed <- [];
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
   state.tools_skill_source_picker <- None;
@@ -17931,7 +18122,15 @@ let enter_metrics_section state section =
 let enter_tools_pane state pane =
   if pane <> Tools_async then close_tools_async_detail state;
   state.tools_pane <- pane;
-  tools_task_user_scroll state 0
+  tools_task_user_scroll state 0;
+  (* Opening the Usage pane reads the catalog and every Keeper's usage once,
+     and the Activations pane the selected Keeper's ledger (RFC-0483 §4.3). *)
+  match pane with
+  | Tools_usage ->
+      owe_tools_catalog_read state;
+      owe_every_skill_usage_read state
+  | Tools_activations -> owe_tools_activations_read state
+  | Tools_surface | Tools_async | Tools_catalog -> ()
 ;;
 
 (* The cursor restarts because the row under it belongs to the listing being
@@ -18609,6 +18808,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        owe_runtime_config_read state;
        owe_async_requests_read state;
+       owe_selected_tools_async_detail_read state;
+       owe_tools_async_task_read state;
+       owe_tools_skill_reads state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state
@@ -18995,6 +19197,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_gate_snapshot_read state;
     owe_asks_read state;
     owe_async_requests_read state;
+    owe_selected_tools_async_detail_read state;
+    owe_tools_async_task_read state;
+    owe_tools_skill_reads state;
     owe_whole_keeper_roster_read state;
     owe_keeper_turns_read state;
     owe_pending_confirms_read state;
@@ -21908,7 +22113,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
         | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _
         | Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-        | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _) | Skill_evidence_loaded (_, _, _)
+        | Tools_read_loaded _ | Skill_evidence_loaded (_, _, _)
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
         | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
@@ -22757,6 +22962,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let held_calls_changed = ref false in
       let asks_changed = ref false in
       let async_requests_changed = ref false in
+      let async_request_keepers = ref [] in
+      let skill_activation_keepers = ref [] in
+      let skill_catalog_published = ref false in
       let pending_confirms_changed = ref false in
       let schedules_changed = ref false in
       let runtime_config_changed = ref false in
@@ -22859,6 +23067,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
+              Option.iter (fun keeper -> async_request_keepers := keeper :: !async_request_keepers)
+                (Masc_tui_observer.async_requests_keeper event);
+              Option.iter (fun keeper -> skill_activation_keepers := keeper :: !skill_activation_keepers)
+                (Masc_tui_observer.skill_activations_keeper event);
+              if Masc_tui_observer.skill_catalog_published event then skill_catalog_published := true;
               if Masc_tui_observer.transport_health_measured event then
                 transport_measured := true;
               (match Masc_tui_observer.dataset_owed event with
@@ -22897,7 +23110,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
-               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_skill_activations_changed _
                | Masc_tui_observer.Fusion_run_status _
                | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
@@ -22951,7 +23164,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
-               | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
+               | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_skill_activations_changed _ | Masc_tui_observer.Keeper_turn_changed _
                | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
@@ -23104,6 +23317,21 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !asks_changed && not !observer_source_loss_seen then owe_asks_read state);
       (if !async_requests_changed && not !observer_source_loss_seen then
          owe_async_requests_read state);
+      (if not !observer_source_loss_seen then
+         List.iter (owe_tools_async_detail_read state) !async_request_keepers);
+      (* A Keeper's ledger write owes its Usage answer and, for the selected
+         Keeper, its activations. A published catalog owes the catalog and
+         every Usage answer, which the server counts against it. *)
+      (if not !observer_source_loss_seen then
+         List.iter (owe_skill_activations_read state) !skill_activation_keepers);
+      (if !skill_catalog_published && not !observer_source_loss_seen then begin
+         owe_tools_catalog_read state;
+         owe_every_skill_usage_read state
+       end);
+      (* An open source Task reads its body from the task backlog, which a
+         task write announces as [execution_snapshot]. *)
+      (if !execution_snapshot_seen && not !observer_source_loss_seen then
+         owe_tools_async_task_read state);
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);
       (if !schedules_changed && not !observer_source_loss_seen then begin
@@ -23291,7 +23519,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             sid_uptime = None;
             sid_sse_clients = None;
             sid_gc = None;
-            sid_scheduler = None } in
+            sid_scheduler = None; sid_operator_action = None } in
         let before = read_authority state in
         state.connection_status <- Masc_tui_types.Degraded;
         apply_server_identity_reading state ~mailbox (Ok identity);
@@ -26650,7 +26878,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.compact_request_id journal_id)
                (Keeper_chat.terminal_safe_text detail)));
       read_again ())
-  | Tools_loaded (generation, keeper_name, result) ->
+  | Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result }) ->
       settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
@@ -26676,21 +26904,74 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         match result with
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
-  | Skills_catalog_loaded (generation, result) ->
+  | Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }) ->
+      settle_tools_read state ~generation Tools_activations_read;
+      let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
+      if generation = state.tools_request_generation
+         && Option.equal String.equal (Some keeper) selected_name then (
+      match result with
+      | Ok projection ->
+          state.tools_activations <- Some (Activations_read projection);
+          state.tools_activations_error <- None;
+          state.tools_activations_owed <- Masc_tui_owed_read.succeeded state.tools_activations_owed
+      | Error detail ->
+          state.tools_activations_error <- Some detail;
+          state.tools_activations_owed <- failed_read state.tools_activations_owed)
+  | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
+      settle_tools_read state ~generation (Tools_usage_read keeper);
+      if generation = state.tools_request_generation then begin
+        record_keeper_skill_usage state ~keeper result;
+        set_keeper_skill_usage_owed state keeper
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded (keeper_skill_usage_owed state keeper)
+           | Error _ -> failed_read (keeper_skill_usage_owed state keeper))
+      end
+  | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->
           state.skills_catalog <- Some catalog;
-          state.skills_catalog_error <- None
-      | Error detail -> state.skills_catalog_error <- Some detail)
+          state.skills_catalog_error <- None;
+          state.tools_catalog_owed <- Masc_tui_owed_read.succeeded state.tools_catalog_owed
+      | Error detail ->
+          state.skills_catalog_error <- Some detail;
+          state.tools_catalog_owed <- failed_read state.tools_catalog_owed)
   | Tools_async_detail_loaded (request,result) ->
-      complete_tools_async_detail state request result
+      let current = tools_async_detail_current state request in
+      complete_tools_async_detail state request result;
+      (* A nested manifest the read could not fetch comes back inside an
+         [Ok] reading; it is retried like a failed read. *)
+      if current then
+        state.tools_async_detail_owed <-
+          (match result with
+           | Ok Masc.Tui_decode_async_request.Absent
+           | Ok
+               (Masc.Tui_decode_async_request.Observed
+                 { Masc.Tui_decode_async_request.nested =
+                     ( Masc.Keeper_composition_observation.Absent
+                     | Masc.Keeper_composition_observation.Observed _
+                     | Masc.Keeper_composition_observation.Stored _ )
+                 ; _ }) ->
+               Masc_tui_owed_read.succeeded state.tools_async_detail_owed
+           | Ok
+               (Masc.Tui_decode_async_request.Observed
+                 { Masc.Tui_decode_async_request.nested = Masc.Keeper_composition_observation.Invalid _; _ })
+           | Error _ -> failed_read state.tools_async_detail_owed)
   | Task_document_prepared (request,result) ->
       let _,terminal_cols=get_terminal_size () in
       complete_task_document state ~cols:(task_document_columns state ~terminal_cols) request result
   | Tools_async_task_body_loaded (request,result) ->
-      complete_tools_async_task_body state request result
+      let current =
+        tools_async_task_request_current state request state.tools_async_task_body_request
+          state.tools_async_task_body
+      in
+      complete_tools_async_task_body state request result;
+      if current then
+        state.tools_async_task_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.tools_async_task_owed
+           | Error _ -> failed_read state.tools_async_task_owed)
   | Tools_async_task_history_loaded (request,result) ->
       complete_tools_async_task_history state request result
   | Tools_async_observation_loaded (generation, result) ->
@@ -32442,6 +32723,9 @@ Use relative paths for resources already held in the package. -->
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
       launch_owed_async_requests state ~mailbox:async_messages;
+      launch_owed_tools_async_detail state ~mailbox:async_messages;
+      launch_owed_tools_async_task state ~mailbox:async_messages;
+      launch_owed_tools state ~mailbox:async_messages;
       launch_owed_keeper_roster state ~mailbox:async_messages;
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
@@ -38491,6 +38775,7 @@ Use relative paths for resources already held in the package. -->
                   launch_tools_async_detail ~force:true state ~mailbox:async_messages
                 else begin
                   owe_async_requests_read state;
+                  owe_tools_skill_reads state;
                   launch_tools_load state ~mailbox:async_messages
                 end
             | Config -> (
@@ -41122,13 +41407,20 @@ Use relative paths for resources already held in the package. -->
              launch_runtime_surface_load state ~mailbox:async_messages
                ~force:false
          | Tools ->
-             (* A slow current read must finish before the next automatic
-                poll; explicit refresh still replaces it. *)
-             if Option.is_some state.tools_async_task_source then
-               launch_tools_async_task state ~mailbox:async_messages
-             else if state.tools_pane=Tools_async && state.tools_async_detail_open then
-               launch_tools_async_detail state ~mailbox:async_messages
-             else launch_tools_load ~force:false state ~mailbox:async_messages
+             (* An open async request reads on its Keeper's request and
+                journal pushes ([launch_owed_tools_async_detail]), an open
+                source Task on the backlog's execution snapshot
+                ([launch_owed_tools_async_task]), the skills catalog,
+                activations and Usage answers on their pushes
+                ([launch_owed_tools]); each retries a failed read. The
+                selected Keeper's tool inventory still reads on this tick,
+                one read at a time. *)
+             if Option.is_none state.tools_async_task_source
+                && not (state.tools_pane=Tools_async && state.tools_async_detail_open)
+                && not (Option.exists
+                          (fun request -> List.mem Tools_inventory_read request.tri_pending)
+                          state.tools_read_inflight)
+             then launch_tools_parts state ~mailbox:async_messages [ Tools_inventory_read ]
          (* runtime.toml re-reads on [runtime_config_changed], which the
             server sends for every text it commits, and retries a failed read
             ([launch_owed_runtime_config]). Every writer saves through the

@@ -68,20 +68,31 @@ type skill_flow = {
   sf_batches : skill_flow_batch list;
 }
 
-type skill_usage_row = {
-  su_keeper : string;
-  su_invocations : int;
-  su_deliveries : int;
-  su_actions : int;
-  su_last_used_at : string option;
-}
-
 type skills_catalog_surface = {
-  scs_name : string;
+  scs_reference : Skill_reference.t;
   scs_kind : string;
-  scs_usage : skill_usage_row list;
   scs_flow : skill_flow option;
 }
+
+(** One catalog surface one Keeper used, from
+    [GET /api/v1/keepers/skill-usage?keeper=]. *)
+type keeper_skill_usage_row = {
+  ksu_reference : Skill_reference.t;
+  ksu_invocations : int;
+  ksu_deliveries : int;
+  ksu_actions : int;
+  ksu_last_used_at : string;
+}
+
+(** One Keeper's usage of the catalog, read from its current ledger. *)
+type keeper_skill_usage =
+  | Keeper_usage_ready of keeper_skill_usage_row list
+  | Keeper_usage_no_session  (** No current session, so nothing recorded. *)
+  | Keeper_usage_unavailable of { kua_reason : string; kua_detail : string }
+      (** Its metadata or its ledger could not be read. *)
+  | Keeper_usage_no_catalog
+      (** The ledger was read but there is no ready catalog to count it
+          against. *)
 
 type skill_rejection_diagnostic = {
   srd_diagnostic : Agent_core.Skill_document.diagnostic;
@@ -151,12 +162,6 @@ type skills_catalog_state =
   | Skills_uninitialized
   | Skills_invalid_workspace
 
-(** Coverage of current Keeper trace activation ledgers, not lifetime usage. *)
-type skill_usage_coverage = {
-  suc_ledgers_loaded : int;
-  suc_unavailable : string list;
-}
-
 (** One Skill name two catalog entries declare. The first entry for the name
     in catalog order wins (Skill_catalog_snapshot.effective_projection):
     [scsh_winner]. The two can sit in different sources, or in one source
@@ -178,7 +183,6 @@ type skills_catalog = {
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
   sc_shadows : skill_catalog_shadow list;
-  sc_usage_coverage : skill_usage_coverage option;
 }
 
 val skills_catalog_state_to_string : skills_catalog_state -> string
@@ -271,14 +275,28 @@ type tool_snapshot = {
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
   ts_effective : effective_tool_surface option;
-  ts_skill_activations : skill_activation_projection option;
 }
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 (** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
 
+val skill_activation_keeper : skill_activation_projection -> string
+(** The Keeper a projection is for. *)
+
+val decode_keeper_skill_activations :
+  keeper:string -> Yojson.Safe.t -> (skill_activation_projection, string) result
+(** Reads the [GET /api/v1/keepers/skill-activations?keeper=] answer for
+    [keeper]: schema [masc.keeper-skill-activations/v1], the Keeper it
+    answers for, and its projection. An answer for another Keeper is an
+    error. *)
+
 val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
-(** Reads the /api/v1/skills snapshot: per-skill usage rows and flows. *)
+(** Reads the /api/v1/skills snapshot: its surfaces and their flows. *)
+
+val decode_keeper_skill_usage :
+  keeper:string -> Yojson.Safe.t -> (keeper_skill_usage, string) result
+(** Reads the [GET /api/v1/keepers/skill-usage?keeper=] answer for
+    [keeper]. An answer for another Keeper is an error. *)
 
 val skill_flow_mermaid : skill_flow -> (string, string) result
 (** Pure declared topology for Pele. Diagram-local identifiers are generated;

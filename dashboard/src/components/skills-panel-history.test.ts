@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchSkillEvidence: vi.fn(
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
-  return { executionWorkspaceAuthority: signal({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }) }
+  return { executionWorkspaceAuthority: signal({ epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }), keepers: signal([]), executionLoaded: signal(false) }
 })
 const reference = { identity: { source_id: 'workspace', package_id: 'proof', name: 'proof' }, content_revision: 'a'.repeat(64) }
 const profile: SkillSurfaceProfile = {

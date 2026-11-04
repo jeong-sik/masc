@@ -191,6 +191,7 @@ let keeper_badge_text (badge : Keeper_list_model.badge) =
   | Badge_delegate -> glyph ^ " delegate result"
   | Badge_verification -> glyph ^ " verify"
   | Badge_schedule -> glyph ^ " schedule"
+  | Badge_quota_spent -> glyph ^ " quota spent"
 
 let keeper_task_detail (row : Keeper_list_model.row) =
   match row.task with

@@ -2265,7 +2265,7 @@
 (test
  (name test_server_health_rollup)
  (modules test_server_health_rollup)
- (libraries alcotest masc_server yojson))
+ (libraries alcotest masc masc_server yojson))
 
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
@@ -3035,6 +3035,8 @@
 (include stanzas/test_tui_keeper_logs_execute_stream.inc)
 (include stanzas/test_tui_asks_signal.inc)
 (include stanzas/test_tui_async_requests_signal.inc)
+(include stanzas/test_tui_async_detail_signal.inc)
+(include stanzas/test_tui_tools_skill_signal.inc)
 (include stanzas/test_tui_pending_confirms_signal.inc)
 (include stanzas/test_tui_workspace_dataset_signal.inc)
 (include stanzas/test_tui_transport_signal.inc)
@@ -3291,6 +3293,8 @@
 (include stanzas/test_skill_catalog_announce.inc)
 (include stanzas/test_lane_addon_exports_announce.inc)
 (include stanzas/test_goal_projection_announce.inc)
+(include stanzas/test_skill_activations_broadcast.inc)
+(include stanzas/test_keeper_skill_activations_read.inc)
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
@@ -7237,6 +7241,9 @@
 (include stanzas/test_authz_log.inc)
 
 (include stanzas/test_authz_install_record.inc)
+
+(include stanzas/test_authz_boot_mode.inc)
+(include stanzas/test_authz_boot_mode_read.inc)
 
 (include stanzas/test_endpoint_process_gate.inc)
 

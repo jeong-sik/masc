@@ -14,6 +14,7 @@ import type {
 
 const editorApiMocks = vi.hoisted(() => ({
   fetchAsyncRequestObservation: vi.fn(),
+  fetchKeeperSkillUsage: vi.fn(),
   fetchSkills: vi.fn(),
   previewSkillSource: vi.fn(),
   readSkillSource: vi.fn(),
@@ -23,12 +24,13 @@ const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<Executi
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
   workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
-  return { executionWorkspaceAuthority: workspace.current }
+  return { executionWorkspaceAuthority: workspace.current, keepers: signal([]), executionLoaded: signal(false) }
 })
 
 vi.mock('../api/dashboard-skills', async importOriginal => ({
   ...await importOriginal<typeof import('../api/dashboard-skills')>(),
   fetchAsyncRequestObservation: editorApiMocks.fetchAsyncRequestObservation,
+  fetchKeeperSkillUsage: editorApiMocks.fetchKeeperSkillUsage,
   fetchSkills: editorApiMocks.fetchSkills,
   previewSkillSource: editorApiMocks.previewSkillSource,
   readSkillSource: editorApiMocks.readSkillSource,
@@ -40,6 +42,7 @@ import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
 import {
   capabilityLabel,
   formatBytes,
+  keeperUsageReading,
   kindLabel,
   mergeSkillRows,
   rejectionDiagnostics,
@@ -49,6 +52,7 @@ import {
   SkillsPanel,
   sortSkillRows,
   stateMessage,
+  usageFor,
   usageLabel,
 } from './skills-panel'
 
@@ -521,18 +525,41 @@ describe('labels', () => {
         declaration: { start_line: 3, end_line: 30 },
         flow: null,
       },
-      usage: [{
-        keeper: 'rondo',
-        invocations: 9,
-        deliveries: 9,
-        actions: 134,
-        last_used_at: '2026-08-27T01:00:00Z',
-      }],
     }
     expect(capabilityLabel(profiled)).toBe('async · 4 nodes · 2 batches · parallel ×3')
-    expect(usageLabel(profiled)).toBe(
+    expect(usageLabel([{
+      keeper: 'rondo',
+      invocations: 9,
+      deliveries: 9,
+      actions: 134,
+      last_used_at: '2026-08-27T01:00:00Z',
+    }])).toBe(
       'rondo 9 invoked / 9 received / 134 observed actions · last activation 2026-08-27T01:00:00Z',
     )
+    expect(usageLabel([])).toBe('No invocation observed in retained sessions')
+    expect(usageLabel(null)).toBe('Usage observation unavailable')
+  })
+
+  it('joins each Keeper\'s usage to the catalog by exact reference', () => {
+    const used = reference(priorArt)
+    const row = { reference: used, invocations: 2, deliveries: 1, actions: 3, last_used_at: '2026-11-04T00:00:00Z' }
+    const reading = keeperUsageReading([
+      { keeper: 'zeta', result: { status: 'fulfilled', value: { state: 'ready', rows: [row] } } },
+      { keeper: 'alpha', result: { status: 'fulfilled', value: { state: 'ready', rows: [{ ...row, invocations: 5 }] } } },
+      { keeper: 'idle', result: { status: 'fulfilled', value: { state: 'no_session' } } },
+      { keeper: 'uncatalogued', result: { status: 'fulfilled', value: { state: 'no_catalog' } } },
+      { keeper: 'broken', result: { status: 'fulfilled', value: {
+        state: 'unavailable', reason: 'activation_ledger_unreadable', detail: 'decode failed' } } },
+      { keeper: 'gone', result: { status: 'rejected', reason: new Error('HTTP 503') } },
+    ])
+    expect(reading.ledgersRead).toBe(3)
+    expect(reading.unavailable).toEqual([
+      'broken: activation_ledger_unreadable (decode failed)',
+      'gone: HTTP 503',
+    ])
+    expect(usageFor(reading, used).map(usage => [usage.keeper, usage.invocations]))
+      .toEqual([['alpha', 5], ['zeta', 2]])
+    expect(reading.byReference.size).toBe(1)
   })
 
   it('shows the parsed kind, refusal, or unavailable projection', () => {

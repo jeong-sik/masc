@@ -145,6 +145,7 @@ let summary = function
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -162,6 +163,8 @@ let summary = function
              "installation_asks:" ^ declaration_id)
   | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
       "async_requests:" ^ keeper
+  | Observer.Event (Observer.Keeper_skill_activations_changed { keeper }) ->
+      "skill_activations:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
       "roster_row:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change Observer.Every_row_changed) -> "roster_all"
@@ -765,6 +768,38 @@ let test_only_a_schedule_change_reads_the_schedules () =
           || Observer.pending_confirms_changed event || Observer.async_requests_changed event)
        [ schedules_frame ])
 
+(* A Keeper's skill activation ledger change names that Keeper, and a
+   published skill catalog is a store change of its own (RFC-0483 §4.3). *)
+let test_skill_pushes_name_their_reads () =
+  let activations_frame =
+    {|data: {"type":"keeper_skill_activations_changed","name":"lane-smith","trace_id":"trace-1","ts_unix":1.0}
+
+|}
+  in
+  let catalog_frame = {|data: {"type":"skill_catalog_published","ts_unix":1.0}
+
+|} in
+  check (list string) "both decode" [ "skill_activations:lane-smith"; "skill_catalog_published" ]
+    (List.map summary (decode_all [ activations_frame; catalog_frame ]));
+  let events frames =
+    List.filter_map
+      (function Observer.Event event -> Some event | Observer.Undecodable _ -> None)
+      (decode_all frames)
+  in
+  check (list (option string)) "the ledger change names its Keeper"
+    [ Some "lane-smith"; None ]
+    (List.map Observer.skill_activations_keeper (events [ activations_frame; catalog_frame ]));
+  check (list bool) "only the catalog push is a published catalog" [ false; true ]
+    (List.map Observer.skill_catalog_published (events [ activations_frame; catalog_frame ]));
+  check bool "a ledger change is not an async request change" false
+    (List.exists Observer.async_requests_changed (events [ activations_frame ]));
+  check bool "a ledger change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_skill_activations_changed","ts_unix":1.0}
+
+|} ] with
+     | [ Observer.Undecodable _ ] -> true
+     | [] | Observer.Event _ :: _ | Observer.Undecodable _ :: _ :: _ -> false)
+
 let test_only_an_async_request_change_reads_the_async_requests () =
   check (list string) "an async request change decodes with its Keeper"
     [ "async_requests:lane-smith" ]
@@ -780,6 +815,17 @@ let test_only_an_async_request_change_reads_the_async_requests () =
     (count Observer.async_requests_changed [ async_requests_frame ]);
   check int "no question, Gate, held call or mode change does" 0
     (count Observer.async_requests_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  let keepers frames =
+    List.filter_map
+      (function
+        | Observer.Event event -> Some (Observer.async_requests_keeper event)
+        | Observer.Undecodable _ -> None)
+      (decode_all frames)
+  in
+  check (list (option string)) "it names the Keeper whose open detail reads again"
+    [ Some "lane-smith" ] (keepers [ async_requests_frame ]);
+  check bool "no question, Gate, held call or mode change names one" true
+    (List.for_all Option.is_none (keepers (asks_frames @ gate_frames @ tool_approval_frames)));
   check bool "a change without its Keeper says why it was not read" true
     (match decode_all [ {|data: {"type":"keeper_async_requests_changed"}
 
@@ -1456,6 +1502,7 @@ let () =
             test_only_a_question_change_reads_the_questions
         ; test_case "only an async request change reads the async requests" `Quick
             test_only_an_async_request_change_reads_the_async_requests
+        ; test_case "Skill pushes name their reads" `Quick test_skill_pushes_name_their_reads
         ; test_case "a roster push names the row or every row" `Quick
             test_a_roster_push_names_the_row_or_every_row
         ; test_case "a turns or preview push names its Keeper" `Quick

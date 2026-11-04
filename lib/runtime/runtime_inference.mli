@@ -38,7 +38,8 @@ val seed_of_thinking_support
 
 val for_runtime : name:string -> seed
 (** Per-model thinking seed for runtime [name]. [Masc_agent_core] executions resolve
-    runtime.toml [thinking-support] and explicit [preserve-thinking].
+    runtime.toml [thinking-support] ({!Runtime_schema.thinking_request}: none on a
+    [reasoning-uncontrolled] row) and explicit [preserve-thinking].
     [Official_client] executions return an empty seed because their typed
     effort is owned by the client boundary, not the AGENT_CORE boolean controls.
     Unknown runtimes preserve the existing all-absent result. *)

@@ -1143,14 +1143,6 @@ let keeper_chat_mode_labels ~yolo
   chat_mode, Option.map gate_mode_reading_word gate_mode
 ;;
 
-(* Usage coverage can be warming independently of the catalog. Missing time
-   therefore means unavailable, not "never used" -- the latter would claim a
-   lifetime fact from a bounded retained ledger. *)
-let skill_last_used_label = function
-  | Some value when String.trim value <> "" -> value
-  | Some _ | None -> "time unavailable"
-;;
-
 type chat_turn_phase =
   | Turn_input
   | Turn_progress
@@ -5750,7 +5742,32 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
-type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
+type tools_read_part =
+  | Tools_inventory_read
+  | Tools_catalog_read
+  | Tools_activations_read
+  | Tools_usage_read of string  (** One Keeper's usage, named. *)
+  | Tools_async_read
+
+(* What the Activations pane has for the Keeper the Tools screen follows.
+   With no Keeper there is nothing to read, which the pane says instead of
+   "not loaded". *)
+type tools_activations =
+  | Activations_no_keeper
+  | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
+
+(* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
+   beside the failure. *)
+type keeper_skill_usage_reading =
+  | Skill_usage_read of Masc.Tui_decode_tools.keeper_skill_usage
+  | Skill_usage_read_failed of
+      { last : Masc.Tui_decode_tools.keeper_skill_usage option
+      ; detail : string
+      }
+
+let skill_usage_answer = function
+  | Skill_usage_read usage -> Some usage
+  | Skill_usage_read_failed { last; detail = _ } -> last
 
 type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
@@ -10597,6 +10614,17 @@ type state = {
   mutable tools_request_generation: int;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
+  mutable tools_activations: tools_activations option;
+  mutable tools_activations_error: string option;
+  (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
+     Keeper that left the roster leaves this list at the next read. *)
+  mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
+  (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
+     catalog, the selected Keeper's activations, and each roster Keeper's
+     usage. A roster Keeper with no entry has never been read. *)
+  mutable tools_catalog_owed: Masc_tui_owed_read.t;
+  mutable tools_activations_owed: Masc_tui_owed_read.t;
+  mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -10625,11 +10653,16 @@ type state = {
   mutable tools_async_detail_open: bool;
   mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
   mutable tools_async_detail_request: tools_async_detail_request option;
+  (* What the open async request detail owes after its Keeper's requests or
+     execution journal changed. *)
+  mutable tools_async_detail_owed: Masc_tui_owed_read.t;
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable tools_async_task_source: tools_async_task_source option;
   mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
   mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable tools_async_task_body_request: tools_async_task_request option;
+  (* What the open source Task body owes after a backlog write. *)
+  mutable tools_async_task_owed: Masc_tui_owed_read.t;
   mutable tools_async_task_history_request: tools_async_task_source task_history_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
@@ -14378,6 +14411,82 @@ let move_tools_async_selection state delta =
     state.tools_async_selection <- Some target
   end
 
+(* Records one Keeper's Usage read in Keeper name order. A failed read keeps
+   the Keeper's last answer beside the failure. *)
+let record_keeper_skill_usage state ~keeper result =
+  let reading =
+    match result with
+    | Ok usage -> Skill_usage_read usage
+    | Error detail ->
+        Skill_usage_read_failed
+          { last = Option.bind (List.assoc_opt keeper state.tools_keeper_usage) skill_usage_answer
+          ; detail
+          }
+  in
+  state.tools_keeper_usage <-
+    List.sort
+      (fun (left, _) (right, _) -> String.compare left right)
+      ((keeper, reading) :: List.remove_assoc keeper state.tools_keeper_usage)
+
+(* Whether [state.keepers] is the whole roster: read from this workspace,
+   with no error beside it. *)
+let roster_complete state =
+  match state.keepers_error, state.local_keepers with
+  | None, Local_workspace_read -> true
+  | Some _, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
+  | None, (Local_workspace_unread | Local_workspace_failed _) ->
+      false
+
+(* Keeps the Usage readings of the Keepers on the roster. Only a whole roster
+   drops a reading: one not read yet, or read with an error, may lack Keepers
+   that still exist. *)
+let keep_roster_skill_usage state =
+  if roster_complete state then begin
+    let roster = List.map (fun (row : keeper) -> row.k_name) state.keepers in
+    state.tools_keeper_usage <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage;
+    state.tools_usage_owed <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_usage_owed
+  end
+
+(* What a roster Keeper's Usage answer owes; one never read owes a read. *)
+let keeper_skill_usage_owed state keeper =
+  match List.assoc_opt keeper state.tools_usage_owed with
+  | Some owed -> owed
+  | None -> Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+
+let set_keeper_skill_usage_owed state keeper owed =
+  state.tools_usage_owed <- (keeper, owed) :: List.remove_assoc keeper state.tools_usage_owed
+
+let owe_keeper_skill_usage_read state keeper =
+  set_keeper_skill_usage_owed state keeper
+    (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
+
+let owe_every_skill_usage_read state =
+  List.iter (fun (row : keeper) -> owe_keeper_skill_usage_read state row.k_name) state.keepers
+
+let owe_tools_catalog_read state =
+  state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
+
+let owe_tools_activations_read state =
+  state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
+
+(* The Tools parts that read on a push, owed together: arriving on Tools, a
+   refresh, a revalidation and a resumed authority read them all. *)
+let owe_tools_skill_reads state =
+  owe_tools_catalog_read state;
+  owe_tools_activations_read state;
+  owe_every_skill_usage_read state
+
+(* A Keeper's activation ledger changed: its Usage answer owes a read when it
+   is on the roster, and the Activations pane when it is the selected
+   Keeper. *)
+let owe_skill_activations_read state keeper =
+  if List.exists (fun (row : keeper) -> String.equal row.k_name keeper) state.keepers then
+    owe_keeper_skill_usage_read state keeper;
+  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state) then
+    owe_tools_activations_read state
+
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with
   | None -> None
@@ -14390,13 +14499,17 @@ let begin_tools_async_detail state ~force =
       let request = {tad_ticket;tad_reading=state.workspace_read_authority;tad_job=ref ()} in
       state.tools_async_detail_request <- Some request; Some request
 
+(* Whether [request] is the detail read the open selection is waiting on. *)
+let tools_async_detail_current state request =
+  request.tad_reading == state.workspace_read_authority
+  && Option.exists (fun current -> current == request) state.tools_async_detail_request
+  && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
+       (Some (Masc_tui_fetched.request_key request.tad_ticket))
+  && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
+       state.tools_async_detail request.tad_ticket
+
 let complete_tools_async_detail state request result =
-  if request.tad_reading == state.workspace_read_authority
-      && Option.exists (fun current -> current == request) state.tools_async_detail_request
-      && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
-          (Some (Masc_tui_fetched.request_key request.tad_ticket))
-      && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
-          state.tools_async_detail request.tad_ticket then begin
+  if tools_async_detail_current state request then begin
     state.tools_async_detail_request <- None;
     let result = Result.bind result (fun reading ->
       let module Detail = Masc.Tui_decode_async_request in
@@ -19943,6 +20056,12 @@ let create_state
   tools_request_generation = 0;
   tools_read_inflight = None;
   tools_error = None;
+  tools_activations = None;
+  tools_activations_error = None;
+  tools_keeper_usage = [];
+  tools_catalog_owed = Masc_tui_owed_read.settled;
+  tools_activations_owed = Masc_tui_owed_read.settled;
+  tools_usage_owed = [];
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;
@@ -19965,11 +20084,13 @@ let create_state
   tools_async_detail_open = false;
   tools_async_detail = Masc_tui_fetched.initial;
   tools_async_detail_request = None;
+  tools_async_detail_owed = Masc_tui_owed_read.settled;
   tools_async_last_logical = None;
   tools_async_task_source = None;
   tools_async_task_body = Masc_tui_fetched.initial;
   tools_async_task_history = Masc_tui_fetched.initial;
   tools_async_task_body_request = None;
+  tools_async_task_owed = Masc_tui_owed_read.settled;
   tools_async_task_history_request = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;

@@ -34,6 +34,29 @@ let test_global_inventory_errors_are_not_targets () =
   Alcotest.(check bool) "missing global inventory is not an empty workspace" true
     (Result.is_error (Inbox.waiting_items ~now:1000. (`Assoc ["keepers", `List []])))
 
+(* RFC-0484: a Keeper whose every candidate spent its quota dispatches again
+   at the earliest reset a provider stated, so the row reads as scheduled for
+   that time; with no stated reset it is pending. Neither row is an operation
+   an operator can select. *)
+let test_quota_spent_rows_are_scheduled_for_the_reset () =
+  let rows =
+    [ inventory_row ~due_at:2000. "runtime_quota_spent" "quota-lane spent"
+    ; inventory_row "runtime_quota_spent" "other-lane spent"
+    ]
+  in
+  let items = get (Inbox.waiting_items ~now:1000. (inventory rows)) in
+  let has needle (item : Inbox.item) =
+    let n = String.length needle and h = String.length item.text in
+    let rec go i = i + n <= h && (String.equal (String.sub item.text i n) needle || go (i + 1)) in
+    go 0
+  in
+  Alcotest.(check bool) "a quota wait is not an operation target" true
+    (List.for_all (fun (item : Inbox.item) -> item.id = None) items);
+  Alcotest.(check bool) "the stated reset is when it is scheduled for" true
+    (List.exists (fun item -> has "quota-lane spent" item && has "scheduled for 1970-01-01T00:33:20Z" item) items);
+  Alcotest.(check bool) "a wait with no stated reset is still listed" true
+    (List.exists (has "other-lane spent") items)
+
 let test_edit_retains_media_and_turn_context () =
   let module Input = Masc.Keeper_multimodal_input in
   let image = Input.User_image (Input.Url_ref {value="https://example.test/frame.png";mime_type=Some "image/png"}) in
@@ -102,7 +125,7 @@ let test_peer_page_workspace_admission () = Eio_main.run (fun _ ->
       sid_base_path = Decode.Canonical_path.of_path "/owned-workspace";
       sid_masc_root = Decode.Canonical_path.of_path "/owned-workspace/.masc";
       sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
-      sid_sse_clients = None; sid_gc = None; sid_scheduler = None } in
+      sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None } in
   let host = "localhost" and port = 8935 in
   let kept_reads = Masc_tui_kept_reads.create () in
   let seen = ref [] in
@@ -366,6 +389,7 @@ let test_operation_items_keep_distinct_exact_ids () =
 
 let () = Alcotest.run "TUI queue controls"
   ["inbox", [Alcotest.test_case "global source failures cannot be operation targets" `Quick test_global_inventory_errors_are_not_targets;
+             Alcotest.test_case "quota spent rows are scheduled for the reset" `Quick test_quota_spent_rows_are_scheduled_for_the_reset;
     Alcotest.test_case "unknown inventory data is not pending" `Quick test_unknown_inventory_data_is_not_pending;
     Alcotest.test_case "editing preserves media and context" `Quick test_edit_retains_media_and_turn_context;
     Alcotest.test_case "event controls address an exact source" `Quick test_exact_event_commands;

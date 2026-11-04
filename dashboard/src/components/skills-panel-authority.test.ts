@@ -12,7 +12,7 @@ const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<Executi
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
   workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
-  return { executionWorkspaceAuthority: workspace.current }
+  return { executionWorkspaceAuthority: workspace.current, keepers: signal([]), executionLoaded: signal(false) }
 })
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
 vi.mock('../api/composition-observation', async original => ({ ...await original<typeof import('../api/composition-observation')>(), ...exactRequests }))

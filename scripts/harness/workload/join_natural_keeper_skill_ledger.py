@@ -26,7 +26,9 @@ import produce_natural_keeper_skill_proof as natural_producer
 import skill_activation_events
 
 
-JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
+JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v4"
+ACTIVATIONS_BEFORE = "keeper-skill-activations-before.json"
+ACTIVATIONS_AFTER = "keeper-skill-activations-after.json"
 HISTORICAL_PROJECTION_SCHEMA = "masc.dashboard.skill-activations/v1"
 DURABLE_EVENTS_BEFORE = "durable-skill-activation-events-before.jsonl"
 DURABLE_EVENTS_AFTER = "durable-skill-activation-events-after.jsonl"
@@ -421,13 +423,12 @@ def health_identity(
     return identity
 
 
-def validate_dashboard_ledger(
-    dashboard: dict[str, Any],
+def validate_projection_ledger(
+    projection: dict[str, Any],
     *,
     durable_ledger: dict[str, Any],
     keeper: str,
 ) -> dict[str, Any]:
-    projection = required_object(dashboard, "skill_activations", "dashboard")
     require(
         projection.get("status") == "available",
         "Skill ledger projection is unavailable",
@@ -438,7 +439,7 @@ def validate_dashboard_ledger(
         ledger.get("schema") == skill_activation_events.LEDGER_SCHEMA,
         "Skill ledger schema is unsupported",
     )
-    require(ledger == durable_ledger, "Dashboard ledger differs from durable ledger")
+    require(ledger == durable_ledger, "Keeper activations ledger differs from durable ledger")
     require(
         required_string(ledger, "revision", "Skill ledger")
         == skill_activation_events.ledger_revision(ledger),
@@ -470,20 +471,15 @@ def validate_dashboard_ledger(
 
 
 def validate_current_skill_projection(
-    dashboard: dict[str, Any],
+    activations: dict[str, Any],
     *,
     durable_ledger: dict[str, Any],
     keeper: str,
     trace_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    if "skill_activations" not in dashboard:
-        return {"status": "missing"}, None
-    projection_value = dashboard["skill_activations"]
-    require(
-        isinstance(projection_value, dict),
-        "current Skill projection is not an object",
+    projection = proof.keeper_skill_projection(
+        activations, keeper=keeper, context="current Skill activations"
     )
-    projection = cast(dict[str, Any], projection_value)
     status = required_string(projection, "status", "current Skill projection")
     require(
         status in {"available", "unavailable", "no_session"},
@@ -515,8 +511,8 @@ def validate_current_skill_projection(
     current = required_object(projection, "ledger", "current Skill projection")
     current_session = required_string(current, "session_id", "Skill ledger projection")
     expected_current = durable_ledger if current_session == trace_id else current
-    validated = validate_dashboard_ledger(
-        dashboard,
+    validated = validate_projection_ledger(
+        projection,
         durable_ledger=expected_current,
         keeper=keeper,
     )
@@ -764,6 +760,8 @@ def validate_join(
     health_after: dict[str, Any],
     dashboard_before: dict[str, Any],
     dashboard_after: dict[str, Any],
+    activations_before: dict[str, Any],
+    activations_after: dict[str, Any],
     historical_before: dict[str, Any],
     historical_after: dict[str, Any],
     durable_ledger: dict[str, Any],
@@ -842,13 +840,13 @@ def validate_join(
         expected_runtime_id=expected_runtime_id,
     )
     projection_before, current_before = validate_current_skill_projection(
-        dashboard_before,
+        activations_before,
         durable_ledger=ledger,
         keeper=producer["keeper"],
         trace_id=producer["trace_id"],
     )
     projection_after, current_after = validate_current_skill_projection(
-        dashboard_after,
+        activations_after,
         durable_ledger=durable_ledger_after,
         keeper=producer["keeper"],
         trace_id=producer["trace_id"],
@@ -859,7 +857,7 @@ def validate_join(
     if current_before is not None and current_after is not None:
         require(
             current_after == current_before,
-            "Dashboard ledger changed during join",
+            "Keeper activations ledger changed during join",
         )
 
     result = exact_turn_join(ledger=ledger, turn_ref=producer["turn_ref"])
@@ -868,20 +866,20 @@ def validate_join(
         projected_session = required_string(
             current_ledgers[0], "session_id", "Skill ledger projection"
         )
-        dashboard_equals_durable = projected_session == producer["trace_id"]
-        dashboard_projection_kind = (
+        projection_equals_durable = projected_session == producer["trace_id"]
+        projection_kind = (
             "exact_session"
-            if dashboard_equals_durable
+            if projection_equals_durable
             else "current_session_differs_historical_exact"
         )
     else:
-        dashboard_equals_durable = False
+        projection_equals_durable = False
         if projection_statuses[0] == projection_statuses[1]:
-            dashboard_projection_kind = (
+            projection_kind = (
                 f"current_projection_{projection_statuses[0]}_historical_exact"
             )
         else:
-            dashboard_projection_kind = "current_projection_changed_historical_exact"
+            projection_kind = "current_projection_changed_historical_exact"
     return {
         "producer": producer,
         "server": before_identity,
@@ -890,8 +888,8 @@ def validate_join(
             "workspace_key": required_string(ledger, "workspace_key", "Skill ledger"),
             "session_id": required_string(ledger, "session_id", "Skill ledger"),
             "revision": required_string(ledger, "revision", "Skill ledger"),
-            "dashboard_equals_durable": dashboard_equals_durable,
-            "dashboard_projection_kind": dashboard_projection_kind,
+            "projection_equals_durable": projection_equals_durable,
+            "projection_kind": projection_kind,
         },
         "current_surface": {
             "before": surface_before,
@@ -1015,8 +1013,12 @@ def main() -> int:
         health_before, health_raw = request_json(
             health_url, token=token, timeout=args.timeout
         )
+        activations_url = proof.keeper_skill_activations_url(base_url, producer["keeper"])
         dashboard_before, dashboard_raw = request_json(
             dashboard_url, token=token, timeout=args.timeout
+        )
+        activations_before, activations_raw = request_json(
+            activations_url, token=token, timeout=args.timeout
         )
         historical_before, historical_raw = request_json(
             historical_url, token=token, timeout=args.timeout
@@ -1030,6 +1032,9 @@ def main() -> int:
         )
         dashboard_after, dashboard_after_raw = request_json(
             dashboard_url, token=token, timeout=args.timeout
+        )
+        activations_after, activations_after_raw = request_json(
+            activations_url, token=token, timeout=args.timeout
         )
         historical_after, historical_after_raw = request_json(
             historical_url, token=token, timeout=args.timeout
@@ -1053,6 +1058,8 @@ def main() -> int:
             health_after=health_after,
             dashboard_before=dashboard_before,
             dashboard_after=dashboard_after,
+            activations_before=activations_before,
+            activations_after=activations_after,
             historical_before=historical_before,
             historical_after=historical_after,
             durable_ledger=durable,
@@ -1066,6 +1073,8 @@ def main() -> int:
             "health-after.json": health_after_raw,
             "dashboard-tools-before.json": dashboard_raw,
             "dashboard-tools-after.json": dashboard_after_raw,
+            ACTIVATIONS_BEFORE: activations_raw,
+            ACTIVATIONS_AFTER: activations_after_raw,
             "historical-skill-activations-before.json": historical_raw,
             "historical-skill-activations-after.json": historical_after_raw,
             DURABLE_EVENTS_BEFORE: durable_raw,

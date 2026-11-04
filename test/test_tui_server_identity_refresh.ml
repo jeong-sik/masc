@@ -14,7 +14,7 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_uptime = None
   ; sid_sse_clients = None
   ; sid_gc = None
-  ; sid_scheduler = None
+  ; sid_scheduler = None; sid_operator_action = None
   }
 
 let test_goal_candle_read_rejects_stale_authority_and_refusals () =

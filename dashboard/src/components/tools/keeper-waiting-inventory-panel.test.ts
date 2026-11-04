@@ -281,6 +281,7 @@ describe('KeeperWaitingInventoryPanel', () => {
     render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
 
     expect(sourceTone('observation_unavailable')).toBe('bad')
+    expect(sourceTone('runtime_quota_spent')).toBe('bad')
     expect(container.textContent).toContain('unmapped confirmsunknown')
     expect(container.textContent).toContain('운영자 확인 기한 관측 불가')
   })

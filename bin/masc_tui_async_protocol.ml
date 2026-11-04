@@ -235,6 +235,29 @@ type observer_recovery_origin =
   | Observer_existing_workspace of Masc.Tui_decode.server_identity
   | Observer_initial_workspace of local_workspace_paths
 
+(* The Tools screen's reads, one constructor for all of them: [async_msg]
+   is at OCaml's limit of non-constant constructors. *)
+type tools_read =
+  | Tools_inventory_loaded of
+      { generation : int
+      ; keeper : string option
+      ; result : (Masc.Tui_decode_tools.tool_snapshot, string) result
+      }
+  | Tools_catalog_loaded of
+      { generation : int
+      ; result : (Masc.Tui_decode_tools.skills_catalog, string) result
+      }
+  | Tools_activations_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.skill_activation_projection, string) result
+      }
+  | Tools_usage_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
+      }
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -493,8 +516,7 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Tools_read_loaded of tools_read
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
@@ -1004,8 +1026,7 @@ let rec workspace_message_is_read = function
   | Connectors_status_loaded _
   | Connectors_loaded _
   | Runtime_surface_loaded _
-  | Tools_loaded _
-  | Skills_catalog_loaded _
+  | Tools_read_loaded _
   | Skill_evidence_loaded _
   | Tools_async_observation_loaded _
   | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)
@@ -1197,7 +1218,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Browser_lane_clients_loaded _ | Browser_lane_loaded _ | Browser_lane_action_done _
   | Browser_lane_scene_loaded _ | Browser_lane_follow_loaded _ | Browser_lane_screenshot_ready _
   | Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _
-  | Runtime_surface_loaded _ | Tools_loaded _ | Skills_catalog_loaded _
+  | Runtime_surface_loaded _ | Tools_read_loaded _
   | Skill_evidence_loaded _ | Tools_async_observation_loaded _ | Tools_async_detail_loaded _
   | Task_document_prepared _ | Tools_async_task_body_loaded _
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
@@ -1347,7 +1368,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Browser_lane_scene_loaded (_, Error _) | Browser_lane_follow_loaded (_, _)
     | Browser_lane_screenshot_ready _ | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
     | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-    | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
+    | Tools_read_loaded _
     | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _)
@@ -1485,7 +1506,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
   | Browser_lane_follow_loaded (_, Error _) | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
   | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-  | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
+  | Tools_read_loaded _
   | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _)

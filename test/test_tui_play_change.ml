@@ -7,7 +7,7 @@ let identity name : Masc.Tui_decode.server_identity =
    sid_base_path = Masc.Tui_decode.Canonical_path.of_path ("/fixture/" ^ name);
    sid_masc_root = Masc.Tui_decode.Canonical_path.of_path ("/fixture/" ^ name ^ "/.masc");
    sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
-   sid_sse_clients = None; sid_gc = None; sid_scheduler = None}
+   sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None}
 let current state name =
   state.T.server_identity <- Some (identity name);
   state.T.workspace_identity <- T.Workspace_identity_match

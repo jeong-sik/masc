@@ -188,7 +188,6 @@ val prepare_prompt :
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit -> prepared_prompt
 (** Render common layers, frame provenance and durable user input once from
@@ -224,7 +223,6 @@ val build_prompt :
   ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
@@ -247,9 +245,6 @@ val build_prompt :
     - [?recent_work]: recent attributed conversation and the latest autonomous
       conclusion, read from the selected Keeper trace. Historical context only;
       missing history and unavailable sources do not infer work completion.
-    - [?repository_freshness]: rows for the Repository Checkouts layer,
-      measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
-      or empty, the layer is absent.
     - [?wiki_contents]: the Wiki layer, {!format_wiki_observation} with the
       request's [?workspace_memory_access]. Omitted, the layer is absent. *)
 
@@ -261,7 +256,6 @@ val build_prompt_preview :
   ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

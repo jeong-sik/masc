@@ -117,11 +117,29 @@ val agent_credential_of_yojson :
 
 (** {1 Auth configuration} *)
 
+(** The account model an installation asks for (multi-account design 5.1).
+    The value is a request: the boot judgment ([Authz_boot_mode]) compares it
+    with the authorization log and the external store before a mode is used. *)
+type account_mode =
+  | Single_user
+  | Multi_account
+[@@deriving show]
+
+(** The spelling on disk: [Single_user] or [Multi_account]. *)
+val account_mode_label : account_mode -> string
+
+(** Exactly the JSON string [Single_user] or [Multi_account]. Any other value,
+    [null], another case or another JSON kind, is [None]. *)
+val account_mode_of_json : Yojson.Safe.t -> account_mode option
+
 type auth_config = {
   enabled : bool;
   workspace_secret_hash : string option;  [@default None]
   require_token : bool;  [@default true]
   token_expiry_hours : int;  [@default 24]
+  account_mode : account_mode option;  [@default None]
+      (** [None] when the file has no [account_mode] member. The encoder writes
+          the member only for [Some], so a file without it stays without it. *)
 }
 [@@deriving show]
 
@@ -134,7 +152,7 @@ val max_token_expiry_hours : int
 
 val default_auth_config : auth_config
 (** [enabled = true; workspace_secret_hash = None; require_token = true;
-       token_expiry_hours = 24]. Decoding accepts a workspace hash only as 64
+       token_expiry_hours = 24; account_mode = None]. Decoding accepts a workspace hash only as 64
     lowercase hexadecimal characters and an expiry only in [1..8760]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t

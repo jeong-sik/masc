@@ -430,7 +430,7 @@ let scenario mode =
           check bool "take_over without a clientId reopens the configured name" true
             (answered (dispatch (W.Issue {route=B.Live_route None;
               verb=B.Page_act (B.Action.Control B.Action.Take_over);actor=None;timeout_sec=30.;only_if_idle=false}))
-             =`Assoc ["action",`String "take_over";"spaceName",`String "masc";"reopening",`Bool true]);
+             =`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceName",`String "masc";"reopening",`Bool true]);
           let rec reconnected deadline = match B.connected_clients () with
             | [client] -> client
             | [] ->
@@ -468,7 +468,7 @@ let scenario mode =
               verb=B.Page_act (B.Action.Control B.Action.Take_over);actor=None;timeout_sec=30.;only_if_idle=false}) with
            | reply ->
                check bool "the reclaim receipt names the Space it took back" true
-                 (answered reply=`Assoc ["action",`String "take_over";"spaceId",`Int 36;
+                 (answered reply=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 36;
                    "spaceName",`String "masc";"reclaimed",`Bool true]));
           (* Each cycle starts an SDK process, so the wait is on the clock,
              not on scheduler passes. *)

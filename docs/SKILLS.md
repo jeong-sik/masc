@@ -327,7 +327,10 @@ fence 문법 오류, fence 두 개 이상, 이름 불일치, 합성 plan 거부�
 ## 6. 관측
 
 - `GET /api/v1/skills` — 발행 스냅샷의 valid entry와 typed rejection, 종류·합성 도구
-  이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
+  이름/실행 모드를 돌려준다.
+- `GET /api/v1/keepers/skill-usage?keeper=` — 그 Keeper 가 catalog surface 마다 부르고
+  받고 행동한 횟수와 마지막 사용 시각. `GET /api/v1/keepers/skill-activations?keeper=` —
+  그 Keeper 의 활성화 기록 전체(RFC-0483).
 - document rejection은 안정적인 diagnostic `code`와 사람용 `message`를 함께 내보낸다.
   Monitor › Skills는 valid Skill이 하나도 없어도 source candidate별 code를 표시하며,
   message 문자열을 재파싱해 상태를 추측하지 않는다.

@@ -579,6 +579,7 @@ let test_the_fleet_section_escapes_the_probe_word () =
             ; ssch_stalls = 0
             ; ssch_pool_domains = None
             }
+      ; sid_operator_action = None
       };
   let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
   check bool "the probe row carries no escape" false (contains output escape)

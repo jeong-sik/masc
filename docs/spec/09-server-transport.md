@@ -467,7 +467,8 @@ let make_routes ~port ~host:_ ~sw ~clock =
 
 ```
 .masc/auth/
-  config.json          -- auth_config (enabled, require_token, token_expiry_hours)
+  config.json          -- auth_config (enabled, require_token, token_expiry_hours, account_mode)
+  authz.jsonl          -- 권한 기록. 첫 줄은 Fresh_bootstrap 모드 사건
   workspace_secret.hash     -- workspace-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/

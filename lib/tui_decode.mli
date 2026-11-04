@@ -1329,6 +1329,7 @@ type waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -1558,6 +1559,12 @@ type server_identity = {
       (** [/health] [gc] quick GC counters and heap sizes. *)
   sid_scheduler : server_scheduler_health option;
       (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
+  sid_operator_action : string list option;
+      (** [/health] [operator_action_reasons], the server's last full-health
+          rollup (RFC-0484 §3.3). [Some []] when nothing needs the operator.
+          [None] when the probe carries no rollup: an older server, the time
+          before its first snapshot, or a value that is not the rollup's
+          shape. *)
 }
 (** Which server the TUI is talking to, from [/health] or an attested scoped
     Observer response. Fields absent from the latter remain unknown.

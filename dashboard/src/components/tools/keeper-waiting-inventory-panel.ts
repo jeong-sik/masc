@@ -42,6 +42,7 @@ export function sourceTone(source: string | null | undefined): StatusChipTone {
   switch (source) {
     case 'read_error':
     case 'observation_unavailable':
+    case 'runtime_quota_spent':
       return 'bad'
     case 'hitl_pending':
     case 'operator_pending_confirm':

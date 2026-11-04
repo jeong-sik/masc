@@ -69,8 +69,7 @@ val notify_reject_verification :
 
 (** How soon an armed retry fires. [Full_interval] is a timer this stall
     armed itself: it fires after [seconds]. [Shared_timer] is a timer that
-    was already running when this stall joined its batch; the post names no
-    number it does not hold. *)
+    was already running when this stall joined its batch. *)
 type retry_delay =
   | Full_interval of { seconds : float }
   | Shared_timer
@@ -80,49 +79,12 @@ type retry_delay =
     [Retry_scheduled] means a retry of this verification is armed;
     [No_retry_armed] means this attempt armed nothing, so the next look
     comes from the producer resubmitting, an operator verdict, or the
-    authority's whole-backlog sweep. The Board sentence is rendered from
-    this value, so the post cannot describe a timer the lane did not arm. *)
+    authority's whole-backlog sweep. *)
 type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
   | Original_observation_scheduled of { delay : retry_delay }
   | Original_repair_required
   | No_retry_armed
-
-(** Each review carries its durable identity and the scheduling owner's actual
-    retry disposition. Notices never schedule work themselves. *)
-type stalled_subject =
-  | Goal_review of { goal_id : string; request_id : string; disposition : stall_disposition }
-
-val notify_stalled_verification_with_runtime :
-  authority:Masc_domain.completion_authority ->
-  subject:stalled_subject ->
-  gate:string ->
-  detail:string ->
-  evaluator_runtime:string option ->
-  unit
-
-val notify_stalled_verification :
-  authority:Masc_domain.completion_authority ->
-  subject:stalled_subject ->
-  gate:string ->
-  detail:string ->
-  unit
-(** Board projection for every deferral of a Goal request that still
-    stands, whether or not a retry is armed. The post names the subject, its
-    request, the gate, and what happens next. Under [Retry_scheduled] it says
-    a retry is armed and how soon. A post with [No_retry_armed] describes
-    [request_complete] as conditional on the current Goal and retained review
-    state.
-
-    One post per disposition change: for a (subject, gate) the notice
-    compares against the disposition of the latest post on the Board
-    (chronological by [created_at]) and posts only when that differs or no
-    post decodes. The subject is compared by its identity fields
-    [goal_id]/[request_id]. [detail] travels as evidence and is not part of
-    the comparison. Visibility only: the post schedules nothing and gates
-    nothing. A board write that returns an error is logged here and does not
-    affect the review outcome; an exception out of the Board is the caller's
-    to contain. *)
 
 module For_testing : sig
   val verdict_event_json :
@@ -133,37 +95,4 @@ module For_testing : sig
     notes:string ->
     timestamp:float ->
     Yojson.Safe.t
-
-  val stalled_board_content :
-    subject:stalled_subject ->
-    gate:string ->
-    detail:string ->
-    string
-
-  val stalled_board_content_with_runtime :
-    subject:stalled_subject ->
-    gate:string ->
-    detail:string ->
-    evaluator_runtime:string option ->
-    now:float ->
-    string
-
-  val stalled_metadata :
-    authority:Masc_domain.completion_authority ->
-    subject:stalled_subject ->
-    gate:string ->
-    detail:string ->
-    Yojson.Safe.t
-
-  val stalled_metadata_with_runtime :
-    authority:Masc_domain.completion_authority ->
-    subject:stalled_subject ->
-    gate:string ->
-    detail:string ->
-    evaluator_runtime:string option ->
-    Yojson.Safe.t
-
-  val stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option
-  (** The strict inverse of the [disposition] field [stalled_metadata]
-      writes: [None] for any shape the encoder does not produce. *)
 end

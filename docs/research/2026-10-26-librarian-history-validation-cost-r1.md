@@ -30,12 +30,12 @@ Keeper_librarian_queue_refresh.run_durable
       ├─ Journal.validate_chain ─┐
       ├─ Journal.root ───────────┤
       ├─ Journal.latest ─────────┼─ read_chain → Owner.load_scope   gate scope 전부 + 본문
-      ├─ restore_size_evidence ──┘      └─ 맞는 gate 기록마다 restore_record → load_parent
+      ├─ restore_latest_result ──┘      └─ 맞는 gate 기록마다 restore_record → load_parent
       │                                     (부모 history 기록과 본문을 다시 읽음)
       └─ original_answer, confirm_final …
 ```
 
-Finished original 하나에 `read_chain` 이 4번 돈다. `validate_chain`, `root`, `latest`, 그리고 `restore_size_evidence` 안의 `latest` 다.
+Finished original 하나에 `read_chain` 이 4번 돈다. `validate_chain`, `root`, `latest`, 그리고 `restore_latest_result` 안의 `latest` 다.
 
 기록 하나를 읽을 때 하는 일(`Lane_addon_store.read_owned_tool_request_bytes`, `Lane_addon_tool_request_owner.request_of_body`):
 

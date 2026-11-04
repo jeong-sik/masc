@@ -118,10 +118,13 @@ them in the claim's `evidence` (RFC-0456 §4.1): the conversation positions it r
 as `turn=N`, the tool executions by the `index` the prompt shows, and whether it
 used the counterpart block or the historical task contexts. The runtime takes
 those entries from the observations it built for the pass; it does not read the
-claim text to find them. A claim that cites nothing has no observation behind its
-absorptions, so its pairs are asked the pair-only question. That is the question
-for such a pair, not a fallback. An answer that omits `evidence`, or a field of
-it, cites nothing there, as an omitted `absorbs` absorbs nothing.
+claim text to find them. In an admission pass, a pending explicit-write candidate
+whose own judgment names a claim (`admission_recall_bindings`, `target_memory_id`)
+is one more observation that claim cites. A claim that cites nothing, and has no
+such candidate, has no observation behind its absorptions, so its pairs are asked
+the pair-only question. That is the question for such a pair, not a fallback. An
+answer that omits `evidence`, or a field of it, cites nothing there, as an omitted
+`absorbs` absorbs nothing.
 
 Adding `evidence` changes the output schema every retained Librarian request
 captured, and a retained request is restored only when its captured schema
@@ -149,15 +152,10 @@ which the pair-only question refuses more often (see Validation). Such a refusal
 retains the original, so the cost is a redundant current record, not lost
 knowledge.
 
-Implementation state (2026-11-03, main `09c019bbc23`): none of this runs. Every
-question carries all observations of the pass (`Keeper_librarian_absorb_gate`
-`classify`), and one pair that does not fit fails the whole pass (`judge`). The
-durable commit keeps that refusal as a publication wait, and the consumer does not
-count a wait as a failed range, so the same pass waits on every wake. The
-floor-step gate waits the same way. On 2026-11-02, 23 Keepers had such a refusal.
-sangsu's Librarian has read no official turn since 2026-10-26: its last two passes
-carried 4.36 MB and 5.11 MB of observations against a 32,000-byte request
-boundary, and its Keeper requests outgrew the model window (#42211, #47789).
+Implementation: the runtime builds each applied claim's cited observations once
+per accepted answer (`Keeper_librarian_runtime.absorption_input`), and
+`Keeper_librarian_absorb_gate` `classify` decides per pair how it is asked. An
+absorbing claim with no entry is a broken input and fails the judgment.
 
 Measurement for this change: run the six development scenarios of #41922 again
 with the Librarian's own citations and compare the decisions with every

@@ -65,8 +65,8 @@ let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
 let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
   if port < 1 || port > 65535 then Error Invalid_health else
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
-  let url path = Printf.sprintf "http://127.0.0.1:%d%s" port path in
-  let observe () = match Masc_http_client.get_sync ~clock ~url:(url "/health?full=1") ~headers:[] () with
+  let url path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path in
+  let observe () = match Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.full) ~headers:[] () with
     | Ok (200, body) -> Ok body | Ok _ | Error _ -> Error Invalid_health in
   let authorize () = match Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () with
     | Ok (200, _) -> true | Ok _ | Error _ -> false in

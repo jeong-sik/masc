@@ -21,6 +21,7 @@ suites=()
 exes=()
 aliases=()
 alias_exes=()
+alias_deps=()
 unresolved=()
 stanza_env_reader="${repo_root}/scripts/ci/stanza_env.py"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
@@ -123,6 +124,31 @@ status="${resolution_status}"
 if [ "${#alias_exes[@]}" -gt 0 ]; then
   log "[targeted] dune build ${alias_exes[*]} (prepare alias executables)"
   opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${alias_exes[@]}" \
+    2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+fi
+# A Python suite is a (rule (alias runtest-NAME) (deps ...)), so the loop
+# below runs it by building the alias, and building the alias compiles its
+# deps inside the suite budget. Measured: run 41730441832 spent 601s of a
+# 600s budget compiling and printed no "Ran N tests" line at all. Build the
+# rule's deps here, outside the budget, as the OCaml aliases above are
+# prepared. The alias itself is not built: building it is running the suite.
+if [ "${#aliases[@]}" -gt 0 ]; then
+  for alias in "${aliases[@]}"; do
+    case "${alias}" in
+      '@runtest-'*) ;;
+      *) continue ;;
+    esac
+    alias_name="${alias#@runtest-}"
+    alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>/dev/null) || alias_dep_lines=""
+    while IFS= read -r alias_dep; do
+      [ -n "${alias_dep}" ] || continue
+      alias_deps+=("${alias_dep}")
+    done <<< "${alias_dep_lines}"
+  done
+fi
+if [ "${#alias_deps[@]}" -gt 0 ]; then
+  log "[targeted] dune build ${alias_deps[*]} (prepare alias dependencies)"
+  opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${alias_deps[@]}" \
     2>&1 | tee -a "${CI_TEST_LOG_FILE}"
 fi
 # Stream fixture records directly to tee: buffered Dune output can

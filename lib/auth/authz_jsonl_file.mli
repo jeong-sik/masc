@@ -35,9 +35,10 @@
     returns [Stopped], until the process restarts and opens the file again.
     While the file is stopped, the in-memory state is not trusted, and the file
     is the only truth. {!confirm_end} stops the file as well when the end is
-    not where this process left it. A refusal that wrote nothing
-    ([Write_locked], [Rejected], [Would_not_read_back], [Read_back_changed], and
-    [End_locked] and [End_unread] of {!confirm_end}) does not stop the file. *)
+    not where this process left it, or the file or its lock is not one regular
+    file under one name. A refusal that wrote no line ([Write_locked],
+    [Rejected], [Would_not_read_back], [Read_back_changed], and [End_locked]
+    and [End_unread] of {!confirm_end}) does not stop the file. *)
 
 (** Why a file is stopped. *)
 type stop =
@@ -270,28 +271,38 @@ module Make (F : Line_format) : sig
             stopped. *)
     | End_moved of { path : string }
         (** The file holds bytes after the end that this process left, or is not
-            the file it left: another writer appended, the file was cut or
-            replaced, or another path names it. The file is stopped, as for
-            [Diverged]. *)
+            the file it left: another writer appended, or the file was cut or
+            replaced. The file is stopped, as for [Diverged]. *)
+    | End_not_one_file of
+        { path : string
+        ; detail : string
+        }
+        (** The file or its lock is not one regular file under one name: it has
+            another kind, or a second link, or the path names another file than
+            the one opened. [Fs_compat] does not say which of the two it was.
+            The file is stopped, as {!append} stops it on the same error. *)
     | End_unread of
         { path : string
         ; detail : string
         }
-        (** The read itself failed: a lock file that is not as [Fs_compat] makes
-            it, or a system call. Nothing was written, the file is not stopped,
-            and where it ends was not judged. The next {!append} checks the end
-            on its own. *)
+        (** The read itself failed: a lock file with permissions or a state that
+            [Fs_compat] does not make, or a system call. No line was written,
+            the file is not stopped, and where it ends was not judged. A cut
+            that a writer outside the lock makes while the read runs ends here
+            too. The next {!append} checks the end on its own. *)
 
   val end_error_to_string : end_error -> string
 
   (** Says whether the file still ends where this process left it, and writes
-      nothing. It reads, under the lock of [Fs_compat], whatever follows that
-      end, and that end is the identity and size that {!append} checks. A file
-      that [append] would find [Diverged] is [End_moved] here, unless the read
-      itself fails ([End_unread]).
+      no line. Like every call of [Fs_compat] it makes the directory and the
+      lock file when they are missing. It reads, under that lock, whatever
+      follows that end, and that end is the identity and size that {!append}
+      checks. A file that [append] would find [Diverged] is [End_moved] here,
+      unless the read itself fails ([End_unread]).
 
       It is for a caller about to write elsewhere something that holds only
-      while nothing follows the end. The answer holds when the lock is let go:
+      while nothing follows the end. The answer holds only until the lock is
+      let go:
       a process that appends after that is found by the next {!append}. An
       exception from the read goes on to the caller and does not stop the
       file. *)

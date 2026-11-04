@@ -282,6 +282,7 @@ let end_error_name : L.end_error -> string = function
   | L.End_stopped _ -> "End_stopped"
   | L.End_locked _ -> "End_locked"
   | L.End_moved _ -> "End_moved"
+  | L.End_not_one_file _ -> "End_not_one_file"
   | L.End_unread _ -> "End_unread"
 ;;
 
@@ -439,9 +440,12 @@ let commits_follow_one_another () =
 
 (* Commits from fibers that run at once take turns in the zone. A fiber holds
    the zone while a write runs on a system thread, so the others start and
-   wait, and [Eio.Mutex] lets them in in the order they came, which is the
-   order of the events. So every event goes in, each one appends one record,
-   and a restart reads the state that was published last. *)
+   wait. Each event goes in only if the one before it in the list went in
+   first, so this test leans on what Eio does today and its interfaces do not
+   promise: [Fiber.fork] runs the new fiber until it waits, and [Eio.Mutex]
+   wakes fibers in the order they waited. A commit refused with [Refused Mode]
+   after an Eio upgrade means that the order changed, not that the zone let
+   two commits in at once. *)
 let commits_from_fibers_take_turns () =
   with_dirs (fun dirs ->
     ignore (bootstrap dirs : B.completed);
@@ -461,7 +465,7 @@ let commits_from_fibers_take_turns () =
           result)
         (List.mapi (fun index event -> index, event) events)
     in
-    Alcotest.(check bool) "the commits waited for each other" true (!most_in_flight > 1);
+    Alcotest.(check bool) "the commits ran at once" true (!most_in_flight > 1);
     let committed =
       List.map
         (function
@@ -632,6 +636,19 @@ let a_locked_log_leaves_an_intent_that_the_next_commit_aborts () =
         (mode_draft ~at_ms:(at_ms + 3) M.Off);
       release ());
     check_files "the abort that was not confirmed wrote nothing" after_failure dirs;
+    (* The superuser reads a file of mode 0000. *)
+    if Unix.geteuid () <> 0
+    then (
+      Unix.chmod (log_file dirs) 0o000;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod (log_file dirs) 0o600)
+        (fun () ->
+          check_error
+            "a commit while the log cannot be read"
+            "Abort_not_confirmed End_unread"
+            zone
+            (mode_draft ~at_ms:(at_ms + 3) M.Off));
+      check_files "the abort that was not read wrote nothing" after_failure dirs);
     with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path dirs.store_file) (fun release ->
       check_error
         "a commit while another process holds the store"

@@ -166,8 +166,9 @@ type error =
           record is in the log and in the snapshot as well. *)
   | Abort_not_confirmed of Authz_log.end_error
       (** An earlier commit left an intent to abort, and the end of the log was
-          not confirmed. Nothing was written. [End_moved] stops the log, and
-          the next start judges the intent from the file. After [End_locked]
+          not confirmed. Nothing was written. [End_moved] and
+          [End_not_one_file] stop the log, and the next start judges the intent
+          from the file. After [End_locked]
           or [End_unread] the log is not stopped and the next commit asks
           again. *)
   | Settlement_not_written of Authz_external_store.append_error

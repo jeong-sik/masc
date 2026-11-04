@@ -186,6 +186,7 @@ let numbers_end_error_name : Numbers.end_error -> string = function
   | Numbers.End_stopped _ -> "End_stopped"
   | Numbers.End_locked _ -> "End_locked"
   | Numbers.End_moved _ -> "End_moved"
+  | Numbers.End_not_one_file _ -> "End_not_one_file"
   | Numbers.End_unread _ -> "End_unread"
 ;;
 
@@ -458,6 +459,22 @@ let a_moved_end_stops_the_file () =
     ]
 ;;
 
+(* [Fs_compat] wants the file and its lock each to be one regular file under
+   one name, and its error does not say which of the two failed. *)
+let a_file_or_lock_with_a_second_name_stops_the_file () =
+  List.iter
+    (fun (label, named) ->
+      with_path (fun path ->
+        let file, _, _ = open_ok ~path in
+        ignore (append_ok file [ 1 ] : int);
+        let bytes = read_file path in
+        Unix.link (named path) (path ^ ".second-name");
+        Alcotest.(check string) label "End_not_one_file" (confirm_end_name file);
+        Alcotest.(check string) (label ^ ": nothing was written") bytes (read_file path);
+        Alcotest.(check bool) (label ^ ": the file is stopped") true (Option.is_some (Numbers.stopped file))))
+    [ "the file", Fun.id; "its lock", Fs_compat.private_jsonl_lock_path ]
+;;
+
 let an_end_that_was_not_read_leaves_the_file_open () =
   (* The superuser reads a file of mode 0000. *)
   if Unix.geteuid () = 0 then Alcotest.skip ();
@@ -526,6 +543,9 @@ let texts_name_the_file_the_line_and_the_format () =
       , [ "counter file"; path; "why" ] )
     ; "End_locked", Numbers.end_error_to_string (Numbers.End_locked { path }), [ "counter file"; path ]
     ; "End_moved", Numbers.end_error_to_string (Numbers.End_moved { path }), [ "counter file"; path ]
+    ; ( "End_not_one_file"
+      , Numbers.end_error_to_string (Numbers.End_not_one_file { path; detail = "boom" })
+      , [ "counter file"; path; "boom" ] )
     ; ( "End_unread"
       , Numbers.end_error_to_string (Numbers.End_unread { path; detail = "boom" })
       , [ "counter file"; path; "boom" ] )
@@ -567,6 +587,10 @@ let () =
             `Quick
             an_end_that_did_not_move_is_confirmed
         ; Alcotest.test_case "a moved end stops the file" `Quick a_moved_end_stops_the_file
+        ; Alcotest.test_case
+            "a file or lock with a second name stops the file"
+            `Quick
+            a_file_or_lock_with_a_second_name_stops_the_file
         ; Alcotest.test_case
             "an end that was not read leaves the file open"
             `Quick

@@ -382,6 +382,10 @@ module Make (F : Line_format) = struct
     | End_stopped of stop
     | End_locked of { path : string }
     | End_moved of { path : string }
+    | End_not_one_file of
+        { path : string
+        ; detail : string
+        }
     | End_unread of
         { path : string
         ; detail : string
@@ -395,30 +399,40 @@ module Make (F : Line_format) = struct
       Printf.sprintf "%s %s is locked by another process" F.description path
     | End_moved { path } ->
       Printf.sprintf "%s %s does not end where this process left it" F.description path
+    | End_not_one_file { path; detail } ->
+      Printf.sprintf
+        "%s %s or its lock is not one regular file under one name: %s"
+        F.description
+        path
+        detail
     | End_unread { path; detail } ->
       Printf.sprintf "where %s %s ends was not read: %s" F.description path detail
   ;;
 
   (* How a failed read after the end bears on the file. Every failure is named,
      as in [failure_kind]. The cursor of this process always ends after a
-     complete line, so a cut tail, a suffix that does not read, or a path that
-     no longer names the same file means that the file is not the one this
-     process left. A failure of the read itself says nothing about the file,
-     and the read wrote nothing. *)
+     complete line, so a cursor that does not match, a cut tail, or a suffix
+     that does not read means that the file is not the one this process left.
+     [Fs_compat] gives the same three errors for the file and for its lock
+     when a path is not one regular file under one name, and does not say
+     which path it was, so those are a case of their own. Every other failure
+     is of the read itself, which wrote no line, and is not taken as a
+     judgment of the file. *)
   type read_failure =
     | Read_locked
     | Read_moved
+    | Read_not_one_file
     | Read_not_done
 
   let rec read_failure : Fs_compat.private_jsonl_transaction_error -> read_failure = function
     | Fs_compat.Stable_lock_contended _ -> Read_locked
     | Fs_compat.Cursor_mismatch _
-    | Fs_compat.Unexpected_transaction_file_kind _
-    | Fs_compat.Ambiguous_transaction_file_identity _
-    | Fs_compat.Transaction_path_binding_changed _
     | Fs_compat.Transaction_content_changed _
     | Fs_compat.Incomplete_transaction_tail _
     | Fs_compat.Invalid_transaction_suffix -> Read_moved
+    | Fs_compat.Unexpected_transaction_file_kind _
+    | Fs_compat.Ambiguous_transaction_file_identity _
+    | Fs_compat.Transaction_path_binding_changed _ -> Read_not_one_file
     | Fs_compat.Transaction_settlement_failed { primary = Fs_compat.Transaction_failed error; cleanup_failures = _ }
       -> read_failure error
     | Fs_compat.Transaction_settlement_failed
@@ -461,6 +475,10 @@ module Make (F : Line_format) = struct
            (match read_failure error with
             | Read_locked -> Error (End_locked { path = log.path })
             | Read_moved -> moved ()
+            | Read_not_one_file ->
+              let detail = store_error error in
+              log.stopped <- Some detail;
+              Error (End_not_one_file { path = log.path; detail })
             | Read_not_done -> Error (End_unread { path = log.path; detail = store_error error }))))
   ;;
 

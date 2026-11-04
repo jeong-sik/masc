@@ -204,6 +204,10 @@ type end_error =
   | End_stopped of stop
   | End_locked of { path : string }
   | End_moved of { path : string }
+  | End_not_one_file of
+      { path : string
+      ; detail : string
+      }
   | End_unread of
       { path : string
       ; detail : string

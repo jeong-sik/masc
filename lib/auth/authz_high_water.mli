@@ -170,12 +170,10 @@ val settle : Probe.t -> (settlement, reason) result
     and after a promoted [Fresh_bootstrap] that state holds the workspace. *)
 val settlement_entry : settlement -> Authz_external_store.entry option
 
-(** Whether a store and a log that agree hold an answer, with what settles the
-    intent that an earlier writer left. *)
+(** Whether a store and a log that agree hold an answer, and for one that
+    does, what settles the intent that an earlier writer left. *)
 type agreement =
-  | Nothing_answered of { to_abort : Authz_external_store.intent option }
-      (** The value is {!Absent}: the store holds no [Committed]. [to_abort] is
-          a [Fresh_bootstrap] intent that the log never got. *)
+  | Nothing_answered  (** The value is {!Absent}: the store holds no [Committed]. *)
   | Answered of settlement  (** The value is {!Matches}. *)
 
 (** Items 2 to 5, as a writer reads them each time it enters its zone (design

@@ -1,0 +1,42 @@
+{
+  "schema": "masc.tui.smoothness-evidence.v1",
+  "captured_on": "2026-11-04",
+  "pr": 48149,
+  "production_source": "d1d1efe159fdff85ad23010359a00c156ca2caaf",
+  "production_proof_run": 41820715822,
+  "production_binary_sha256": "5f68b8f66a635255027f47e8c81555bcaadcf68d0a5d57e1396870331eaebf5f",
+  "baseline_binary_sha256": "30097752da2bea774d0ac48ecf2663c7ca9d74c601016cc37f01508b036999ae",
+  "chat_build_comparable_80_scroll": {
+    "before": { "count": 337, "mean_ms": 5.06, "p50_ms": 1.22, "p95_ms": 16.41, "p99_ms": 60.00, "max_ms": 84.37 },
+    "after": { "count": 292, "mean_ms": 3.86, "p50_ms": 1.14, "p95_ms": 11.74, "p99_ms": 23.23, "max_ms": 33.22 }
+  },
+  "chat_build_initial_comparison": {
+    "before": { "count": 187, "p50_ms": 2.672291, "p95_ms": 13.596, "max_ms": 33.0645 },
+    "after": { "count": 292, "p50_ms": 1.14, "p95_ms": 11.74, "max_ms": 33.22 },
+    "comparison_limit": "Different background load and retained-frame counts; not a controlled latency improvement estimate."
+  },
+  "allocation_profile": {
+    "before_estimated_words": 261360000,
+    "after_estimated_words": 228560000,
+    "sampling_rate": 0.0001,
+    "before_opengraph_site": { "source": "bin/masc_tui_link_preview.ml:256", "share": 0.07, "estimated_words": 18410000 },
+    "after_opengraph_site_present_in_reported_sites": false
+  },
+  "environment": {
+    "host": "macOS",
+    "terminal": "ghostty",
+    "term": "xterm-256color",
+    "rows": 55,
+    "columns": 200,
+    "base_path": "/Users/dancer/me",
+    "server_commit_during_final_measurement": "c509984848166ea131638b7d9f133856c9e1c956",
+    "live_server": true
+  },
+  "limits": [
+    "Frame Build/Present timings do not prove causal key-to-physical-display latency.",
+    "Some PTY observations are capped at 4096 records and 512 Build frames; observation_complete=false is retained rather than hidden.",
+    "Tail latency varies with the live server's background load; maxima are not generalized.",
+    "These measurements do not show that this PR or a new server was installed into the running product.",
+    "SSE read-rate, Memory and Skill server caches, and full SSE conversion are not verified by this bundle."
+  ]
+}

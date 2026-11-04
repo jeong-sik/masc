@@ -271,7 +271,7 @@
   trace. (#47665)
 - Owner 입력 대기 테스트의 실행 예외를 테스트 부모에게도 전달해, 실패한 자식을 기다리며 멈추지 않게 해요. (#47669)
 - Let Gate approval details show decoded top-level string bytes and page through long inputs. (#47670)
-- Settle unknown Board posts writes in-process instead of trapping the store until restart: retain the pending write evidence and re-verify guard, path and cursor under the stable lock, proving landed bytes durable before admitting them (#47672).
+- Settle unknown Board posts writes in-process instead of trapping the store until restart: retain the pending write evidence and re-verify workspace, path and cursor under the stable lock, proving landed bytes durable before admitting them (#47672).
 - Ten identity providers that accept only an RFC 8252 loopback redirect
   (Asana, Canva, CircleCI, Prismic, RudderStack, Shortcut, Square,
   Storyblok, Turso, Vercel) now get `http://127.0.0.1:<bound port>/api/v1/keepers/oauth/callback`

@@ -41,7 +41,7 @@ let binding_audit_path () =
 
 (* iMessage has no Discord-style guild, so audit events omit guild_id. *)
 let binding_store =
-  Store.create ~binding_store_path ~binding_store_read_path:binding_store_path
+  Store.create ~connector_id ~binding_store_path ~binding_store_read_path:binding_store_path
     ~binding_audit_path ~binding_audit_read_path:binding_audit_path
     ~guild_id_field:Store.Omit
 ;;

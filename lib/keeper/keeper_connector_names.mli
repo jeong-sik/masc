@@ -18,7 +18,9 @@ val remember :
   unit ->
   unit
 (** Record a non-blank name for a non-blank id. Repeating the current name does
-    not append another durable row. *)
+    not append another durable row. A new or changed name calls
+    [Gate_connector_announce.changed ~connector_id:connector] after the row is
+    written. *)
 
 val recall :
   base_dir:string -> connector:string -> scope:scope -> id:string -> string option

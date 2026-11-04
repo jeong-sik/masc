@@ -114,8 +114,15 @@ let last_ready : ready_info option Atomic.t = Atomic.make None
 let workspace_id : string option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
 
-let record_startup_error message = Atomic.set startup_error (Some message)
-let clear_startup_error () = Atomic.set startup_error None
+(* A startup error decides whether the connector is available and is its
+   whole error, so a write that changes it tells readers (RFC-0480 §3.4). *)
+let publish_startup_error next =
+  let previous = Atomic.exchange startup_error next in
+  if not (Option.equal String.equal previous next) then
+    Gate_connector_announce.changed ~connector_id
+
+let record_startup_error message = publish_startup_error (Some message)
+let clear_startup_error () = publish_startup_error None
 
 let record_ready ~bot_user_id =
   Atomic.set last_ready

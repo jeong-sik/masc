@@ -22,6 +22,7 @@ val run :
   trigger_policy:(unit -> trigger_policy) ->
   on_event:(slack_event -> (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result) ->
   on_ambient:(slack_event -> (Slack_gateway_state.ingress_receipt, Slack_gateway_state.ingress_refusal) result) ->
+  on_phase_change:(unit -> unit) ->
   unit ->
   unit
 (** Connect to Slack Socket Mode and dispatch events that pass
@@ -39,6 +40,9 @@ val run :
       [Message_create] events that failed the trigger policy and
       [Reaction_added] events from users other than the bot itself. It must
       not start a turn.
+    - [on_phase_change] runs after the published connection state moves to
+      another phase ({!Slack_gateway_state.same_phase}), inside the step that
+      moved it. It must not yield and must not raise.
 
     Event callbacks must return actual durable host acceptance (or a deliberate
     typed ignore), never an asynchronous handoff receipt. A refusal or callback

@@ -214,6 +214,11 @@ type connection_state =
   | Reconnect_pending of { backoff_until_mono : float; resumable : bool }
   | Failed of string     (** Non-recoverable. Supervisor escalates. *)
 
+val same_phase : connection_state -> connection_state -> bool
+(** Whether two states are the same phase for a reader: the same constructor,
+    and the same reason when both failed. A new sequence number in
+    [Connected], or a new backoff in [Reconnect_pending], is the same phase. *)
+
 (** {1 Input — what feeds the state machine} *)
 
 (** Discord presence status values for STATUS_UPDATE (opcode 3).

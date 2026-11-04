@@ -186,6 +186,19 @@ type connection_state =
   | Reconnect_pending of { backoff_until_mono : float; resumable : bool }
   | Failed of string
 
+let same_phase previous next =
+  match previous, next with
+  | Disconnected, Disconnected
+  | Awaiting_hello, Awaiting_hello
+  | Identifying, Identifying
+  | Resuming, Resuming
+  | Connected _, Connected _
+  | Reconnect_pending _, Reconnect_pending _ ->
+    true
+  | Failed previous, Failed next -> String.equal previous next
+  | (Disconnected | Awaiting_hello | Identifying | Resuming | Connected _ | Reconnect_pending _ | Failed _),
+    (Disconnected | Awaiting_hello | Identifying | Resuming | Connected _ | Reconnect_pending _ | Failed _) -> false
+
 (* ── Inputs and effects ────────────────────────────────────────── *)
 
 (* Discord presence status values for STATUS_UPDATE (opcode 3). *)

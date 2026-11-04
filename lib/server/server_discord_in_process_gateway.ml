@@ -1081,6 +1081,8 @@ let start ~sw ~env ~clock ~state =
           ~sw ~env ~token
           ~intents:default_intents
           ~trigger_policy:current_trigger_policy
+          ~on_phase_change:(fun () ->
+            Gate_connector_announce.changed ~connector_id:State.connector_id)
           ~on_event:(fun ev ->
             let config = Mcp_server.workspace_config state in
             submit_triggered_event

@@ -42,9 +42,9 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
      emulation, request blocking, Space hand-off) goes back to the model with
      the browser's answer: refused before any effect, a partial effect with
      the tab's receipt, or an unknown outcome with no receipt. Either way the
-     model can read the tabs with BrowserRead before another step. Page input
-     through BrowserInteract and navigation through BrowserGoto go back the
-     same way. *)
+     model can read the tabs with BrowserRead before another step. Failures
+     of page input through BrowserInteract and navigation through BrowserGoto
+     also go back to the model. *)
   | Keeper_tool_descriptor.Tool_browser_act -> Failure_returns_to_model
   (* A Skill publish only creates: the editor refuses an existing package, so
      a repeat after a written-but-unpublished SKILL.md commits nothing and

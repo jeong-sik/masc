@@ -7,8 +7,6 @@
 
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 let () = Mirage_crypto_rng_unix.use_default ()
 
 (* test_fusion_official_client_panel 의 런타임 표와 같다. 경로 셋을 준다: HTTP 런타임
@@ -272,7 +270,6 @@ let test_accepted_roster_reaches_compute_obligation_and_registry () =
     with_temp_base (fun base_path registry ->
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Eio.Switch.run (fun sw ->
           let computed, resolve_computed = Eio.Promise.create () in
           (* 계산은 도구가 돌려준 뒤 뒤쪽 fiber 에서 돈다. 계산이 끝나면 배달 투영이

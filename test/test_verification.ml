@@ -99,8 +99,6 @@ let with_prepared_board ~base_path f =
     (fun () ->
       Masc.Board_dispatch.reset_for_test ();
       Masc.Board.reset_global_for_test ();
-      Masc_test_deps.Board_test_preparation.prepare ~base_path
-        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       f ())
 
 (* A fresh listing per call, so every scan reads every file. *)
@@ -1669,8 +1667,6 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
         Unix.putenv "MASC_BASE_PATH" base_path;
         Masc.Board.reset_global_for_test ();
         Masc.Board_dispatch.reset_for_test ();
-        Masc_test_deps.Board_test_preparation.prepare ~base_path
-          ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
         Atomic.set

@@ -1,6 +1,5 @@
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
 let require label = function Ok value -> value | Error _ -> fail label
 let rejected = function Error _ -> () | Ok _ -> fail "unauthorized decision accepted"
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -48,7 +47,6 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
-      Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
       let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
       let contract : Masc_domain.task_contract = {completion_contract=["Decision must preserve measured behavior"];
         required_evidence=["artifact:expected-proof.json"]; inspect_gate_evidence=[]; verify_gate_evidence=["Run acceptance scenario"]} in

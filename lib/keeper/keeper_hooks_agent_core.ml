@@ -325,6 +325,10 @@ let make_hooks
       match event with
       | Agent_core.Hooks.BeforeTurn _ ->
         record_progress "agent_core_before_turn";
+        (* Every agent-core turn sends one provider request. Without this the
+           preview kept the previous turn's tool as its activity for the
+           whole wait. *)
+        Keeper_turn_preview.note_request ~writer:preview ~now:(Unix.gettimeofday ());
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 

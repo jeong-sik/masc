@@ -119,6 +119,24 @@ let test_live_attempt_failover_and_new_turn () =
   Alcotest.(check (option string)) "new turn cannot inherit old failure" None (current ()).last_failure
 ;;
 
+(* The provider request after a tool is a wait on the provider. The tool stays
+   the last observed tool, and the turn's activity is the wait. *)
+let test_a_request_after_a_tool_waits_on_the_provider () =
+  let keeper_name = "request-after-tool" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  Keeper_turn_preview.note_attempt ~writer ~now:2. ~runtime_id:"glm";
+  Keeper_turn_preview.note_tool ~writer ~now:3. "Execute";
+  Keeper_turn_preview.note_request ~writer ~now:4.;
+  Alcotest.(check bool) "the turn waits on the provider" true
+    ((current ()).activity = Keeper_turn_preview.Awaiting_response);
+  Alcotest.(check (option string)) "the tool stays the last observed tool" (Some "Execute")
+    (current ()).last_tool;
+  Keeper_turn_preview.note_stream ~writer ~now:5. (text_delta "next\n");
+  Alcotest.(check bool) "the request's stream moves the activity on" true
+    ((current ()).activity = Keeper_turn_preview.Receiving_response)
+;;
+
 let test_overlapping_and_rejected_tools_remain_observations () =
   let keeper_name = "overlapping-tools" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
@@ -638,6 +656,8 @@ let () =
             test_overlapping_and_rejected_tools_remain_observations
         ; Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick
             test_live_attempt_failover_and_new_turn
+        ; Alcotest.test_case "a provider request after a tool is a wait" `Quick
+            test_a_request_after_a_tool_waits_on_the_provider
         ; Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
             test_tail_cuts_on_utf8_boundary
         ; Alcotest.test_case "blank text does not erase the last words" `Quick

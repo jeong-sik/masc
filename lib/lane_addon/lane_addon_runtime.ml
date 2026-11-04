@@ -1359,11 +1359,16 @@ let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
       match changed with
       | Ok state -> if not e.stopping then (wake_host e;watch (Some state.revision))
       | Error detail -> if not e.stopping then (
+          (* The worker exit's order: the entry stops, records why, and
+             announces that its exports are no longer ready. A cleanup that
+             fails afterwards keeps this cause as the earliest one. *)
+          let cause = Lifecycle.Worker_failed ("model request watcher: " ^ detail) in
           retire_admission e;
-          failed m e (Lifecycle.Worker_failed ("model request watcher: " ^ detail));
-          (* Retiring the admission makes the entry unready; [failed] skips
-             its own announcement once the entry is stopping. *)
+          e.state <- fail_state e cause;
           notify_exports m e;
+          (match persist m e with Ok () -> wake_dependents m e | Error persist_detail ->
+            Log.Misc.error "Lane Add-on instance %s watcher failure state persistence: %s"
+              e.instance_id persist_detail);
           wake e;
           stop_entry ~sw:cleanup_sw ~backend m e) in
     watch None)

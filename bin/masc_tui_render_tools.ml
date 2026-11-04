@@ -789,14 +789,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     | Some
         { Masc.Tui_decode_tools.ts_effective =
             Some
-              (Masc.Tui_decode_tools.Effective_surface_warming { ets_keeper_name });
-          _ } ->
-        [ (Theme.warn ()),
-          Printf.sprintf " Effective Keeper Surface — %s — warming"
-            (Terminal_text.single_line ets_keeper_name) ]
-    | Some
-        { Masc.Tui_decode_tools.ts_effective =
-            Some
               (Masc.Tui_decode_tools.Effective_surface_unavailable
                  { ets_keeper_name; ets_reason; ets_detail });
           _ } ->

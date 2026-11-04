@@ -457,6 +457,33 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
       (text "request_id" (List.hd !(worker.delivered)));
     check int "events admit a later request without replaying the first" 2 !(state.resolutions))
 
+(* The entry a failed watcher stops names the watcher's failure while its
+   cleanup runs, so a cleanup that fails afterwards keeps it as the first. *)
+let test_a_failed_watcher_names_its_cause_during_cleanup () =
+  let broken, break = Eio.Promise.create () in
+  let stopping, stop = Eio.Promise.create () and released, release = Eio.Promise.create () in
+  let await_change ~after:_ = Eio.Promise.await broken; Error "watch stream closed" in
+  let before_stop () = ignore (Eio.Promise.try_resolve stop ()); Eio.Promise.await released in
+  with_installation ~await_change ~before_stop (fun clock config _worker _state _root ->
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
+    await clock (fun () -> cycles config >= 1);
+    Eio.Promise.resolve break ();
+    Eio.Promise.await stopping;
+    let expected =
+      Lane_addon_lifecycle.failed
+        (Lane_addon_lifecycle.Worker_failed "model request watcher: watch stream closed")
+      |> Lane_addon_lifecycle.failed_to_string
+      |> (fun message -> Lane_addon_types.phase_to_json (Lane_addon_types.Failed message))
+    in
+    let phases =
+      Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Inspect (`Assoc [])
+      |> Result.map_error Runtime.error_to_string |> unwrap
+      |> member "instances" |> Yojson.Safe.Util.to_list
+      |> List.map (fun instance -> Yojson.Safe.to_string (member "phase" instance))
+    in
+    check (list string) "the stopping entry names the watcher's failure"
+      [ Yojson.Safe.to_string expected ] phases))
+
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
@@ -1733,6 +1760,7 @@ let () =
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:true)
         ; test_case "model events admit and withdraw one exact scope" `Quick test_model_events_admit_and_withdraw_an_exact_scope
         ; test_case "withdrawal event can precede a stale listing" `Quick test_withdrawal_event_before_stale_listing
+        ; test_case "a failed watcher names its cause during cleanup" `Quick test_a_failed_watcher_names_its_cause_during_cleanup
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "original tool destination survives replacement and reattachment" `Quick
             test_original_tool_destination_survives_replacement_and_reattachment

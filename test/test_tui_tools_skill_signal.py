@@ -194,7 +194,7 @@ class ToolsSkillSignalTest(unittest.TestCase):
 
         self.run_tools(3, scenario)
 
-    def test_the_surface_reads_the_inventory_on_its_pushes(self) -> None:
+    def test_every_pane_but_async_reads_the_inventory_on_its_pushes(self) -> None:
         def scenario(server: SkillServer, step: Callable[..., None]) -> None:
             server.set_phase("other")
             server.events.put(row_changed("bravo"))
@@ -220,7 +220,10 @@ class ToolsSkillSignalTest(unittest.TestCase):
                 step("drain", 1.5)
                 self.assertEqual(server.count(phase, INVENTORY_PATH), 1, phase)
 
-        self.run_tools(0, scenario)
+        # Surface, Activations and Usage. Catalog shares Surface's reading.
+        for panes in (0, 2, 3):
+            with self.subTest(panes=panes):
+                self.run_tools(panes, scenario)
 
     def test_the_cadence_reads_no_tools_part(self) -> None:
         def scenario(server: SkillServer, step: Callable[..., None]) -> None:
@@ -229,8 +232,9 @@ class ToolsSkillSignalTest(unittest.TestCase):
             for path in (INVENTORY_PATH,) + SKILL_PATHS:
                 self.assertEqual(server.count("quiet", path), 0, path)
 
-        for panes in (0, 3):
-            self.run_tools(panes, scenario, refresh_seconds=1.0)
+        for panes in (0, 2, 3):
+            with self.subTest(panes=panes):
+                self.run_tools(panes, scenario, refresh_seconds=1.0)
 
 
 if __name__ == "__main__":

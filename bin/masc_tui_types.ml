@@ -15218,8 +15218,7 @@ let tools_skill_profiles (state : state) =
       { Masc.Tui_decode_tools.ts_effective =
           ( None
           | Some
-              ( Masc.Tui_decode_tools.Effective_surface_unavailable _
-              | Masc.Tui_decode_tools.Effective_surface_warming _ ) )
+              Masc.Tui_decode_tools.Effective_surface_unavailable _ )
       ; _ }
   | None -> []
 
@@ -18624,7 +18623,7 @@ let tools_skill_inventory_matches_keeper (state : state) keeper_name =
       String.equal expected ets_keeper_name
   | None, (Some _ | None)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> false
+      Effective_surface_unavailable _);_}) -> false
 
 (* Local files, drafts and explicit remote URLs survive peer reconfirmation
    but never a workspace replacement. Peer images retain their exact reading.
@@ -18685,7 +18684,7 @@ let tools_skill_may_be_unread (state : state) (origin : sent_image_read) =
         Skill_reference.equal_identity expected.identity
           profile.Masc.Tui_decode_tools.esp_reference.identity) ets_skill_profiles)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_})
+      Effective_surface_unavailable _);_})
   | None, (Some _ | None) -> false
 
 (* A displayed observation outlives the request epoch that admitted it. A
@@ -18706,7 +18705,7 @@ let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image
         List.exists (fun profile -> Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           ets_skill_profiles
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   let keeper_changed = match origin.sir_view, origin.sir_skill_reference, selected_keeper state with
     | Tools, Some _, (Some _ | None) ->
         (* As with the Skill cursor, roster reconciliation can move the
@@ -18799,7 +18798,7 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
           Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           (selected_tools_skill_profile state)))
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
   | Peer_image_read _ ->

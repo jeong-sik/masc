@@ -9263,10 +9263,11 @@ let activations_held_for_another state selected =
   | Some _, Some Activations_no_keeper | None, Some (Activations_read _) -> true
   | Some _, None | None, (Some Activations_no_keeper | None) -> false
 
-(* Runs on every loop iteration. The skills catalog and each roster Keeper's
-   Usage answer read while the Usage pane is on screen, the selected
-   Keeper's activations while the Activations pane is, each when a push, an
-   arrival or a failed read owes it (RFC-0483 §4.3). A part in flight is let
+(* Runs on every loop iteration. The selected Keeper's inventory reads while
+   any pane but Async is on screen, the skills catalog and each roster
+   Keeper's Usage answer while the Usage pane is, the selected Keeper's
+   activations while the Activations pane is, each when a push, an arrival
+   or a failed read owes it (RFC-0483 §4.3). A part in flight is let
    finish first; one that will not deliver is owed again. What is owed off
    screen waits for its pane. *)
 let launch_owed_tools state ~mailbox =
@@ -9294,15 +9295,33 @@ let launch_owed_tools state ~mailbox =
       if read != owed then set read;
       Masc_tui_owed_read.due ~now read && not reading
     in
+    (* Every pane but Async draws the selected Keeper's Skill heading from
+       the inventory's skill profiles, and its Skill keys act on them. The
+       inventory follows the selected Keeper however the selection moved,
+       like the activations. *)
+    let inventory_parts () =
+      (match state.tools_inventory_owed with
+       | Masc_tui_owed_read.(Settled | Waiting _)
+         when Option.is_some state.tools_inventory
+              && not (Option.equal String.equal state.tools_inventory_keeper selected) ->
+           state.tools_inventory_owed <-
+             Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+       | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
+      if due Tools_inventory_read state.tools_inventory_owed
+           (fun owed -> state.tools_inventory_owed <- owed)
+      then [ Tools_inventory_read ]
+      else []
+    in
     let parts =
       match state.tools_pane with
       | Tools_usage ->
           (* A Keeper that left the roster leaves its readings with it. *)
           keep_roster_skill_usage state;
-          (if due Tools_catalog_read state.tools_catalog_owed
-                (fun owed -> state.tools_catalog_owed <- owed)
-           then [ Tools_catalog_read ]
-           else [])
+          inventory_parts ()
+          @ (if due Tools_catalog_read state.tools_catalog_owed
+                  (fun owed -> state.tools_catalog_owed <- owed)
+             then [ Tools_catalog_read ]
+             else [])
           @ List.filter_map
               (fun (row : keeper) ->
                  let part = Tools_usage_read row.k_name in
@@ -9322,24 +9341,12 @@ let launch_owed_tools state ~mailbox =
                state.tools_activations_owed <-
                  Masc_tui_owed_read.changed Masc_tui_owed_read.settled
            | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
-          if due Tools_activations_read state.tools_activations_owed
-               (fun owed -> state.tools_activations_owed <- owed)
-          then [ Tools_activations_read ]
-          else []
-      | Tools_surface | Tools_catalog ->
-          (* The inventory follows the selected Keeper however the selection
-             moved, like the activations. *)
-          (match state.tools_inventory_owed with
-           | Masc_tui_owed_read.(Settled | Waiting _)
-             when Option.is_some state.tools_inventory
-                  && not (Option.equal String.equal state.tools_inventory_keeper selected) ->
-               state.tools_inventory_owed <-
-                 Masc_tui_owed_read.changed Masc_tui_owed_read.settled
-           | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
-          if due Tools_inventory_read state.tools_inventory_owed
-               (fun owed -> state.tools_inventory_owed <- owed)
-          then [ Tools_inventory_read ]
-          else []
+          inventory_parts ()
+          @ (if due Tools_activations_read state.tools_activations_owed
+                  (fun owed -> state.tools_activations_owed <- owed)
+             then [ Tools_activations_read ]
+             else [])
+      | Tools_surface | Tools_catalog -> inventory_parts ()
       | Tools_async -> []
     in
     match parts with

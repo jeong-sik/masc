@@ -17,24 +17,31 @@ let keeper_of_trace entries trace_id =
 ;;
 
 let announce (base_path, trace_id) =
-  match keeper_of_trace (Keeper_registry.all ~base_path ()) trace_id with
-  | None -> count_failure ~reason:"unnamed_trace"
-  | Some name ->
-    (match
-       let authority = Sse.runtime_authority_exn ~base_path in
-       Sse.broadcast_to (Sse.Runtime_observers authority)
-         (Keeper_skill_activations_changed_event.json ~name
-            ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~ts_unix:(Time_compat.now ()))
-     with
-     | () -> ()
-     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-     | exception exn ->
-       count_failure ~reason:"broadcast";
-       Log.Server.warn "skill activations: broadcast %s for %s failed: %s" site name
-         (Printexc.to_string exn))
+  let trace = Keeper_id.Trace_id.to_string trace_id in
+  (* The fiber outlives any one write; whatever fails here is counted and
+     logged, and the fiber goes on to the next change. *)
+  match
+    match keeper_of_trace (Keeper_registry.all ~base_path ()) trace_id with
+    | None -> `Unnamed
+    | Some name ->
+      let authority = Sse.runtime_authority_exn ~base_path in
+      Sse.broadcast_to (Sse.Runtime_observers authority)
+        (Keeper_skill_activations_changed_event.json ~name ~trace_id:trace
+           ~ts_unix:(Time_compat.now ()));
+      `Sent
+  with
+  | `Sent -> ()
+  | `Unnamed ->
+    count_failure ~reason:"unnamed_trace";
+    Log.Server.debug "skill activations: no registry entry holds trace %s" trace
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn ->
+    count_failure ~reason:"broadcast";
+    Log.Server.warn "skill activations: announcing trace %s failed: %s" trace
+      (Printexc.to_string exn)
 ;;
 
-let install ~sw =
+let start ~sw =
   let wake = Eio.Stream.create 1 in
   let pending_mu = Stdlib.Mutex.create () in
   let pending : (string * string, string * Keeper_id.Trace_id.t) Hashtbl.t = Hashtbl.create 8 in
@@ -58,5 +65,12 @@ let install ~sw =
       loop ()
     in
     loop ());
-  Keeper_skill_activation_ledger.install_commit_observer observer
+  observer
+;;
+
+let install ~sw =
+  Keeper_skill_activation_ledger.install_commit_observer (start ~sw);
+  (* Nothing drains the changes once the fiber's switch ends. *)
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_skill_activation_ledger.install_commit_observer (fun ~config:_ ~trace_id:_ -> ()))
 ;;

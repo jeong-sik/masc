@@ -70,14 +70,14 @@ TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에
 
 ## 2. 장부를 쓰는 곳
 
-추가 기록은 모두 `commit_event_locked`(`lib/keeper/keeper_skill_activation_ledger.ml:2380`) 하나를 지난다. 이 함수는 세션 잠금 안에서 한 줄을 붙이고 프로세스 안의 장부 캐시를 고친다. 이 함수를 부르는 공개 함수는 이렇다.
+추가 기록은 모두 `commit_event_locked`(`lib/keeper/keeper_skill_activation_ledger.ml:2407`) 하나를 지난다. 이 함수는 세션 잠금 안에서 한 줄을 붙이고 프로세스 안의 장부 캐시를 고친다. 이 함수를 부르는 공개 함수는 이렇다.
 
 | 함수 | 기록 | 부르는 곳 |
 |---|---|---|
 | `record` | `Activation_recorded` | `keeper_skill_activation_recorder.ml:279` |
 | `record_original_invocation` | `Activation_recorded` | 같은 파일 :245 |
-| `observe_delivery` | `Deliveries_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2583) | recorder :345 |
-| `observe_action` | `Action_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2726) | recorder :369, :386 |
+| `observe_delivery` | `Deliveries_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2613) | recorder :345 |
+| `observe_action` | `Action_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2756) | recorder :369, :386 |
 | `observe_async_result_delivery` | `Async_result_delivered` | `keeper_composition_result_delivery.ml:375` |
 | `observe_async_action` | `Async_action_observed` | `keeper_skill_async_action_observer.ml:65` |
 
@@ -111,9 +111,10 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 ### 4.2 서버: Keeper 이름을 붙여 알린다
 
 - 장부의 쓰기는 모두 쓰기 잠금(`with_write_lock`)을 지난다. `commit_event_locked` 는 그 잠금이 만든 writer 를 받아야 부를 수 있고, 기록하면 writer 에 표시한다. 그래서 새 기록 종류가 생겨도 표시에서 빠지지 않는다(RFC-0480 §3.4).
-- 기록이 하나라도 있었으면 쓰기 잠금은 세션 잠금을 푼 뒤 commit observer 를 한 번 부른다. 장부는 trace 만 넘긴다. 장부 함수의 시그니처와 저장 형식은 그대로다.
+- 한 줄이라도 붙이려 했으면 쓰기 잠금은 세션 잠금을 푼 뒤 commit observer 를 한 번 부른다. 붙이기가 실패하거나 쓰기가 예외로 끝나도 부른다. 행이 디스크에 남았을 수 있고, 알림은 다시 읽으라는 뜻뿐이라 한 번 더 읽는 것밖에 잃지 않는다. 장부는 trace 만 넘긴다. 장부 함수의 시그니처와 저장 형식은 그대로다.
 - 서버는 시작할 때 observer 를 설치한다. observer 는 바뀐 trace 를 기록하고 fiber 를 깨운다. fiber 는 registry 에서 그 trace 의 Keeper 를 찾아 `keeper_skill_activations_changed {name, trace_id}` 를 보낸다. 기다리는 동안 들어온 기록은 Keeper 마다 한 번으로 묶인다.
 - registry 에 없는 trace(턴 도중에 지워진 Keeper)는 보여 줄 곳이 없어 알리지 않고, `keeper_sse_broadcast_failures` 에 `unnamed_trace` 로 센다.
+- 알리는 fiber 는 쓰기 하나보다 오래 산다. 이름 찾기나 보내기가 실패하면 `broadcast` 로 세고 로그를 남긴 뒤 다음 변경으로 넘어간다. fiber 의 switch 가 끝나면 observer 를 빈 함수로 되돌린다.
 - 쓰지 않은 관찰(새로 볼 것이 없음)은 알리지 않는다.
 
 ### 4.3 TUI: pane 이 보이는 동안 그 pane 의 원천만 읽는다

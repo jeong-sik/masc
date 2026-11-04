@@ -2370,18 +2370,12 @@ let load_existing ~config ~trace_id =
   | ownership_root -> load_existing_read_only_from_root ~ownership_root ~trace_id
 ;;
 
-(* Append [event] after the rows [log] was read to and keep the ledger it
-   makes. The row is decoded before it is written, and the decoded event is
-   the one applied: a replay reads every row this appends, so a row it could
-   not read is never written, and what this process holds is what a replay
-   builds. The header goes first when the store has none. A failed append
-   leaves the store's end unknown to this process, so the next read replays
-   it from the first byte. *)
-(* A write transaction. Every commit goes through [commit_event_locked], which
-   takes the writer of its transaction, so a write that commits is announced
-   once its session lock is released (RFC-0483 §4.2). A write that only
-   re-observes what is stored commits nothing and announces nothing. *)
-type writer = { mutable committed : bool }
+(* A write transaction. Every append goes through [commit_event_locked], which
+   takes the writer of its transaction and marks it, so a write that may have
+   changed the store is announced once its session lock is released
+   (RFC-0483 §4.2). A write that only re-observes what is stored appends
+   nothing and announces nothing. *)
+type writer = { mutable appended : bool }
 
 let commit_observer : (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit) Atomic.t =
   Atomic.make (fun ~config:_ ~trace_id:_ -> ())
@@ -2389,12 +2383,27 @@ let commit_observer : (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t 
 let install_commit_observer observer = Atomic.set commit_observer observer
 
 let with_write_lock ~config ~trace_id operation =
-  let writer = { committed = false } in
-  let result = with_lock ~config ~trace_id (operation writer) in
-  if writer.committed then (Atomic.get commit_observer) ~config ~trace_id;
-  result
+  let writer = { appended = false } in
+  (* The observer only records the trace, so it runs on a raise too: a row
+     appended before the raise is on disk all the same. *)
+  let announce () = if writer.appended then (Atomic.get commit_observer) ~config ~trace_id in
+  match with_lock ~config ~trace_id (operation writer) with
+  | result ->
+    announce ();
+    result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    announce ();
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
+(* Append [event] after the rows [log] was read to and keep the ledger it
+   makes. The row is decoded before it is written, and the decoded event is
+   the one applied: a replay reads every row this appends, so a row it could
+   not read is never written, and what this process holds is what a replay
+   builds. The header goes first when the store has none. A failed append
+   leaves the store's end unknown to this process, so the next read replays
+   it from the first byte. *)
 let commit_event_locked (writer : writer) session_dir (log : session_log) event =
   let row = event_to_yojson event in
   let* ledger =
@@ -2421,11 +2430,13 @@ let commit_event_locked (writer : writer) session_dir (log : session_log) event 
          (header ^ event_row row))
   with
   | Error error ->
+    (* The row may be on disk; a reader told to read again loses one read. *)
     forget_session_log path;
+    writer.appended <- true;
     Error (Event_log_failed error)
   | Ok cursor ->
     remember_session_log path { ledger; cursor; header_written = true };
-    writer.committed <- true;
+    writer.appended <- true;
     Ok ledger
 ;;
 

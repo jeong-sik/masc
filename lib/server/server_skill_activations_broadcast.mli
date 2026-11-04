@@ -7,6 +7,11 @@ val keeper_of_trace :
     ledger knows only the trace; the registry holds each Keeper's trace in
     [meta.runtime.trace_id]. *)
 
+val start :
+  sw:Eio.Switch.t -> config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit
+(** Starts the announcing fiber on [sw] and returns the observer that feeds
+    it. {!install} hands it to the ledger. *)
+
 val install : sw:Eio.Switch.t -> unit
 (** Installs the ledger's commit observer and the fiber that announces for
     it. The observer runs on the writer after its session lock is released;
@@ -15,4 +20,6 @@ val install : sw:Eio.Switch.t -> unit
     commits made while it waits are announced together. A trace no registry
     entry holds, as for a Keeper removed mid-turn, has no reader and is not
     announced; it is counted on [keeper_sse_broadcast_failures] with reason
-    [unnamed_trace]. A failed broadcast is counted and logged the same way. *)
+    [unnamed_trace]. A failed lookup or broadcast is counted with reason
+    [broadcast] and logged; the fiber goes on. When [sw] ends the ledger's
+    observer is reset, since nothing drains the changes after that. *)

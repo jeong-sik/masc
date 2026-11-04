@@ -3218,16 +3218,16 @@ let test_datasets_settle_independently_under_original_request () =
   let authority = state.workspace_authority in
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   begin_http_refresh_state state ~ticket ~started_ns:0L;
-  let needs = {nothing with needs_board=true;needs_planning=true;needs_system_logs=true} in
+  let needs = {nothing with needs_transport=true;needs_board=true;needs_planning=true} in
   let reads, original = Surface_read_order.dispatch ~kind:Surface_read_order.Full
       ~needs ~started_ns:0L state.http_surface_reads in
   state.http_surface_reads <- reads;
   let take request dataset = take_early_surface_dataset state ~ticket ~authority
       ~identity:observed ~request ~dataset in
-  Alcotest.(check bool) "ready Planning settles while Board and logs remain pending" true
+  Alcotest.(check bool) "ready Planning settles while transport and Board remain pending" true
     (take original Surface_read_order.Planning_data
      && Surface_read_order.pending ~needs state.http_surface_reads
-        = [Surface_read_order.Board;Surface_read_order.System_logs]
+        = [Surface_read_order.Transport;Surface_read_order.Board]
      && state.http_refresh_started_ns = Some 0L);
   Alcotest.(check bool) "a second result cannot replace that settlement" false
     (take original Surface_read_order.Planning_data);
@@ -3235,17 +3235,17 @@ let test_datasets_settle_independently_under_original_request () =
   let reads, navigation = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
       ~needs:navigation_needs ~started_ns:1L state.http_surface_reads in
   state.http_surface_reads <- reads;
-  Alcotest.(check bool) "navigation owns Board without retiring the original logs" true
+  Alcotest.(check bool) "navigation owns Board without retiring the original transport" true
     (not (take original Surface_read_order.Board_posts)
      && take navigation Surface_read_order.Board_posts
      && take navigation Surface_read_order.Board_hearths
      && Surface_read_order.navigation_active state.http_surface_reads navigation
-     && Surface_read_order.pending ~needs state.http_surface_reads = [Surface_read_order.System_logs]);
+     && Surface_read_order.pending ~needs state.http_surface_reads = [Surface_read_order.Transport]);
   (* Error is an owned settlement too: a later success cannot overwrite it.
      Payload application retains the existing dataset-specific error policy. *)
-  Alcotest.(check bool) "the original failed logs read settles once" true
-    (take original Surface_read_order.System_logs_data
-     && not (take original Surface_read_order.System_logs_data));
+  Alcotest.(check bool) "the original failed transport read settles once" true
+    (take original Surface_read_order.Transport_data
+     && not (take original Surface_read_order.Transport_data));
   let reads, remaining = Surface_read_order.take state.http_surface_reads original in
   state.http_surface_reads <- reads;
   Alcotest.(check bool) "final bundle has no dataset left to apply again" true

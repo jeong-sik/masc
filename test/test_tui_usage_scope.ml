@@ -197,15 +197,9 @@ let test_shared_accounts_and_server_logs_revalidate () =
   state.overview_account_emails <- Account_emails_failed "accounts unavailable";
   check bool "a settled account failure does not reread hidden Usage" false
     (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:config_needs);
-  let logs_needs = surface_needs_of_surface System_logs in
-  check bool "unread server logs are also recovered" true
-    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:logs_needs);
-  check bool "local TUI logs do not request server logs" false
+  check bool "the System logs view asks the bundle for nothing" false
     (revalidate_workspace_surfaces state ~workspace_moved:true
-       ~needs:{logs_needs with needs_system_logs=false});
-  state.system_logs <- System_logs_view.apply Server (Error "logs unavailable") state.system_logs;
-  check bool "a settled server-log failure does not retry" false
-    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:logs_needs)
+       ~needs:(surface_needs_of_surface System_logs))
 
 let test_window_change_replaces_only_its_history_request () =
   let state = state () in

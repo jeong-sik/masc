@@ -370,12 +370,11 @@ end = struct
 end
 
 module Surface_read_source = struct
-  type t = Transport | Board | Planning | System_logs
+  type t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
 
   let name = function
     | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
-    | System_logs -> "logs"
     | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
     | Provider_history -> "provider history" | Overview_goals -> "Goals"
     | Account_emails -> "accounts"
@@ -4521,7 +4520,6 @@ type surface_needs = {
   needs_keeper_roster : bool;
   needs_board : bool;
   needs_planning : bool;
-  needs_system_logs : bool;
   needs_keeper_chat : bool;
   needs_operator_approvals : bool;
   needs_asks : bool;
@@ -4540,7 +4538,6 @@ let nothing =
     needs_keeper_roster = false;
     needs_board = false;
     needs_planning = false;
-    needs_system_logs = false;
     needs_keeper_chat = false;
     needs_operator_approvals = false;
     needs_asks = false;
@@ -4608,7 +4605,9 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Board -> { nothing with needs_board = true }
   | Planning ->
       { nothing with needs_planning = true; needs_overview_goals = true }
-  | System_logs -> { nothing with needs_system_logs = true }
+  (* The server logs arrive over their own stream while the view shows them;
+     the local page reads this process's ring. *)
+  | System_logs -> nothing
   (* Approvals is where a human answers things, so the questions Keepers put
      to one belong on the same surface: an operator should not have to know
      that "may I run this" and "which way should I go" arrived through
@@ -4641,8 +4640,6 @@ let surface_needs_delta ~previous ~next =
       next.needs_keeper_roster && not previous.needs_keeper_roster
   ; needs_board = next.needs_board && not previous.needs_board
   ; needs_planning = next.needs_planning && not previous.needs_planning
-  ; needs_system_logs =
-      next.needs_system_logs && not previous.needs_system_logs
   ; needs_keeper_chat =
       next.needs_keeper_chat && not previous.needs_keeper_chat
   ; needs_operator_approvals =
@@ -4671,7 +4668,6 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
   | Surface_read_source.Transport -> { needs with needs_transport = wanted }
   | Surface_read_source.Board -> { needs with needs_board = wanted }
   | Surface_read_source.Planning -> { needs with needs_planning = wanted }
-  | Surface_read_source.System_logs -> { needs with needs_system_logs = wanted }
   | Surface_read_source.Runtime_quota -> { needs with needs_runtime_quota = wanted }
   | Surface_read_source.Keeper_usage -> { needs with needs_keeper_usage = wanted }
   | Surface_read_source.Provider_history -> { needs with needs_provider_history = wanted }
@@ -4693,10 +4689,10 @@ let pushed_sources : Surface_read_source.t list =
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
   type kind = Full | Navigation | Independent
-  type source = Surface_read_source.t = Transport | Board | Planning | System_logs
+  type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
-    | System_logs_data | Runtime_quota_data | Keeper_usage_data
+    | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
   type t
   type request
@@ -4729,10 +4725,10 @@ module Surface_read_order : sig
   val latest_navigation : t -> request -> bool
 end = struct
   type kind = Full | Navigation | Independent
-  type source = Surface_read_source.t = Transport | Board | Planning | System_logs
+  type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
-    | System_logs_data | Runtime_quota_data | Keeper_usage_data
+    | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
   type request = { id: int; kind: kind; started_ns: int64; datasets: dataset list; owner: unit ref }
   type t = {
@@ -4744,26 +4740,26 @@ end = struct
   let initial = {next=0; owners=[]; active_navigation=[]; latest_navigation=None}
   let sources needs =
     [Transport, needs.needs_transport; Board, needs.needs_board;
-     Planning, needs.needs_planning; System_logs, needs.needs_system_logs;
+     Planning, needs.needs_planning;
      Runtime_quota, needs.needs_runtime_quota;
      Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
      Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
     |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
   let source_datasets = function
     | Transport -> [Transport_data] | Board -> [Board_posts;Board_hearths]
-    | Planning -> [Planning_data] | System_logs -> [System_logs_data]
+    | Planning -> [Planning_data]
     | Runtime_quota -> [Runtime_quota_data]
     | Keeper_usage -> [Keeper_usage_data] | Provider_history -> [Provider_history_data]
     | Overview_goals -> [Overview_goals_data] | Account_emails -> [Account_emails_data]
   let dataset_source = function
     | Transport_data -> Transport | Board_posts | Board_hearths -> Board
-    | Planning_data -> Planning | System_logs_data -> System_logs
+    | Planning_data -> Planning
     | Runtime_quota_data -> Runtime_quota
     | Keeper_usage_data -> Keeper_usage | Provider_history_data -> Provider_history
     | Overview_goals_data -> Overview_goals | Account_emails_data -> Account_emails
   let dataset_name = function
     | Board_posts -> "Board posts" | Board_hearths -> "Board hearths"
-    | (Transport_data | Planning_data | System_logs_data
+    | (Transport_data | Planning_data
       | Runtime_quota_data | Keeper_usage_data | Provider_history_data
       | Overview_goals_data | Account_emails_data) as dataset ->
         Surface_read_source.name (dataset_source dataset)
@@ -4985,6 +4981,21 @@ type keeper_execute_follow = {
   kxf_reading : unit ref;
   kxf_owner : unit ref;
 }
+
+(* The server log stream the System logs view follows while it shows the
+   server's logs. [slf_level] is the floor it was opened with, [slf_reading]
+   the workspace reading it was opened under; [slf_owner] tells this job from
+   the next one. *)
+type system_log_follow = {
+  slf_level : string option;
+  slf_reading : unit ref;
+  slf_owner : unit ref;
+}
+
+type system_log_follow_event =
+  | System_log_frame of Masc_tui_system_log_stream.frame
+  | System_log_frame_unread of string
+  | System_log_stream_down of string
 
 type keeper_execute_failure =
   | Execute_read_failed of string
@@ -10260,6 +10271,7 @@ type state = {
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
   mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float, keeper_execute_failure) Masc_tui_fetched.source;
   mutable keeper_execute_stream: (keeper_execute_follow * (unit -> unit)) option;
+  mutable system_log_stream: (system_log_follow * (unit -> unit)) option;
   mutable keeper_terminal: keeper_terminal_frozen Masc_tui_execute_terminal.hold;
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
@@ -18593,9 +18605,7 @@ let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : sur
   workspace_moved && match state.workspace_identity with
   | Workspace_identity_match -> true
   | Workspace_identity_mismatch _ ->
-      let server_logs = System_logs_view.page Server state.system_logs in
       (needs.needs_transport && Option.is_none state.transport && Option.is_none state.transport_error)
-      || (needs.needs_system_logs && Option.is_none server_logs.lp_snapshot && Option.is_none server_logs.lp_error)
       || (needs.needs_runtime_quota &&
           ((match state.overview_quota with Quota_unread -> true | Quota_read _ | Quota_failed _ -> false)
            || (match state.overview_providers with Providers_unread -> true | Providers_read _ | Providers_failed _ -> false)))
@@ -19959,6 +19969,7 @@ let create_state
   keeper_logs = Masc_tui_fetched.initial;
   keeper_execute_output = Masc_tui_fetched.initial;
   keeper_execute_stream = None;
+  system_log_stream = None;
   keeper_terminal = Masc_tui_execute_terminal.Following;
   keeper_log_read = None;
   keeper_log_cancel = None;

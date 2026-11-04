@@ -3216,6 +3216,7 @@
 (include stanzas/test_provider_usage_history_snapshots.inc)
 (include stanzas/test_dated_jsonl_kept_days.inc)
 (include stanzas/test_log_stream_frames.inc)
+(include stanzas/test_tui_system_log_stream.inc)
 (include stanzas/test_provider_usage_snapshots.inc)
 
 (include stanzas/test_runtime_resolved_fleet.inc)

@@ -1571,7 +1571,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          ~on_context_submission:(fun observation ->
            (match observation.Runtime_codex_app_server.method_ with
             | Thread_start | Thread_resume -> thread_request_transmitted := true
-            | Thread_inject_items | Turn_start | Turn_steer | Dynamic_tool_response -> ());
+            | Thread_inject_items | Turn_start | Dynamic_tool_response -> ());
            let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              match observation.Runtime_codex_app_server.method_ with
              | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json

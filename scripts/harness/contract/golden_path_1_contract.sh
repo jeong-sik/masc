@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Golden Path 1 Contract — Strict workspace collaboration e2e verification.
+# Golden Path 1 Contract — workspace collaboration e2e verification.
 #
 # Tests the fundamental 10-step external MCP workflow:
 #   producer join → add_task → claim → plan_set_task → heartbeat → broadcast
 #   → status → direct-done rejection → submit_for_verification
 #   → post-submission producer projection
 #
-# This is the opt-in strict verification path. Advisory/default task completion
-# remains direct and is covered by the workspace and Keeper outcome suites.
+# Task completion always goes through verification submission: step 8 pins that
+# the removed direct done action stays off the agent surface (unknown action).
 #
 # Usage:
 #   MCP_URL=http://127.0.0.1:8935/mcp MCP_TOKEN=... ./golden_path_1_contract.sh
@@ -80,7 +80,7 @@ ensure_contract_goal
 # ── Step 2/10: add_task ──
 echo "[2/10] masc_add_task"
 task_title="GP1 contract task $(date +%s)"
-r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "$task_title" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated strict golden path contract verification", contract:{strict:true,completion_contract:["distinct verifier approval"]}}')")"
+r2="$(call_tool 1002 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" --arg task_title "$task_title" '{title: $task_title, goal_id: $goal_id, priority: 2, description: "Automated golden path contract verification", contract:{completion_contract:["distinct verifier approval"]}}')")"
 if require_ok "$r2"; then
   step_pass
 else
@@ -158,11 +158,10 @@ r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg 
 if require_ok "$r8" >/dev/null 2>&1; then
   step_fail "direct done unexpectedly succeeded"
   echo "$r8"
-elif [[ "$r8" == *"Task completion must be submitted for verification"* ]] \
-  && [[ "$r8" != *"Configured LLM completion verifier"* ]]; then
+elif [[ "$r8" == *"Unknown task action: done"* ]]; then
   step_pass
 else
-  step_fail "direct done did not return Verification_submission_required"
+  step_fail "direct done was not rejected as an unknown action"
   echo "$r8"
 fi
 

@@ -296,6 +296,14 @@ and `:17371` — a finding that became a P1 task with a repair instruction befor
 was refuted. Use `git grep -n SYMBOL` across the tree; a hit set from one file
 answers only what that file does, not what the module does.
 
+A failure block belongs to one test case, and a suite file holds several. A
+counter read from a failing test was quoted as `changed: 0` and `5 requests`;
+the failing test never calls `set_phase`, so its phase is the default, and the
+`5` came from a sibling test's block in the same artifact — the real count was
+`6`. Before quoting a number out of a log, confirm which test case's block it
+came from, and read the test's own key sequence before treating a phase or a
+count as evidence about it.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

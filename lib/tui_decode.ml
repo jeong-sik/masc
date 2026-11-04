@@ -1817,8 +1817,18 @@ type repository_change_scope =
   | Repository_change_project
   | Repository_change_repository of string
 
+type repository_upstream =
+  | Repository_no_upstream
+  | Repository_upstream_gone of string
+  | Repository_tracking of { upstream : string; ahead : int; behind : int }
+
+type repository_branch =
+  | Repository_detached
+  | Repository_on_branch of { name : string; upstream : repository_upstream }
+
 type repository_change_snapshot = {
   rcs_scope : repository_change_scope;
+  rcs_branch : repository_branch;
   rcs_changes : repository_change list;
   rcs_total : int;
 }
@@ -2353,15 +2363,46 @@ let decode_repository_change_scope json =
   | unknown ->
       Error (Printf.sprintf "repository change scope has unknown kind %S" unknown)
 
+let json_field fields key =
+  Option.value (List.assoc_opt key fields) ~default:`Null
+
+let decode_repository_upstream = function
+  | `Null -> Ok Repository_no_upstream
+  | `Assoc fields as json ->
+      let* upstream = required_string_field json "name" in
+      (match json_field fields "ahead", json_field fields "behind" with
+       | `Null, `Null -> Ok (Repository_upstream_gone upstream)
+       | `Int ahead, `Int behind when ahead >= 0 && behind >= 0 ->
+           Ok (Repository_tracking { upstream; ahead; behind })
+       | _ ->
+           Error
+             "repository branch upstream needs ahead and behind as \
+              non-negative integers, or both null")
+  | _ -> Error "repository branch upstream must be an object or null"
+
+let decode_repository_branch = function
+  | `Assoc fields ->
+      (match json_field fields "head" with
+       | `Null -> Ok Repository_detached
+       | `String name ->
+           let* upstream =
+             decode_repository_upstream (json_field fields "upstream")
+           in
+           Ok (Repository_on_branch { name; upstream })
+       | _ -> Error "repository branch head must be a string or null")
+  | _ -> Error "repository branch must be an object"
+
 let decode_repository_change_snapshot json =
   let* scope_json = required_object_field json "scope" in
   let* rcs_scope = decode_repository_change_scope scope_json in
+  let* branch_json = required_object_field json "branch" in
+  let* rcs_branch = decode_repository_branch branch_json in
   let* changes_json = required_list_field json "changes" in
   let* rcs_changes =
     decode_list "changes" decode_repository_change changes_json
   in
   let* rcs_total = required_int_field json "total" in
-  Ok { rcs_scope; rcs_changes; rcs_total }
+  Ok { rcs_scope; rcs_branch; rcs_changes; rcs_total }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in

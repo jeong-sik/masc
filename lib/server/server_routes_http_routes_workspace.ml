@@ -862,15 +862,6 @@ let workspace_file_catalog ~base ~path =
   | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
       Error (Catalog_scan_failed (Printexc.to_string ex))
 
-let git_status_file_json (change : Repo_git.status_file) =
-  `Assoc
-    [ ("path", `String change.path)
-    ; ("staged", `Bool change.staged)
-    ; ("unstaged", `Bool change.unstaged)
-    ; ("untracked", `Bool change.untracked)
-    ; ("conflicted", `Bool change.conflicted)
-    ]
-
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
@@ -1219,18 +1210,13 @@ let add_routes router =
                  json_response ~status:`Not_found request reqd
                    (json_error "No Git repository at this workspace root")
                else
-                 (match Repo_git.status_files_at ~local_path:base () with
+                 (match Repo_git.status_snapshot_at ~local_path:base () with
                   | Error detail ->
                       json_response ~status:`Internal_server_error request reqd
                         (json_error detail)
-                  | Ok changes ->
+                  | Ok (changes, branch) ->
                       json_response_with_source ~status:`OK ~source request reqd
-                        (`Assoc
-                           [ ("scope", scope)
-                           ; ( "changes"
-                             , `List (List.map git_status_file_json changes) )
-                           ; ("total", `Int (List.length changes))
-                           ])))
+                        (Server_git_status_json.snapshot ~scope ~branch ~changes)))
 
   (* Lazy tree: return exactly one level of a directory's entries so the
      IDE can expand deep trees on demand instead of relying on the single

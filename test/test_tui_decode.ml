@@ -6398,6 +6398,8 @@ let test_decode_repository_changes_keeps_git_axes () =
             [ ("kind", `String "repository")
             ; ("repository_id", `String "masc")
             ] )
+      ; ( "branch"
+        , `Assoc [ ("head", `String "main"); ("upstream", `Null) ] )
       ; ( "changes"
         , `List
             [ `Assoc
@@ -6415,6 +6417,8 @@ let test_decode_repository_changes_keeps_git_axes () =
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
       { Tui_decode.rcs_scope = Repository_change_repository "masc"
+      ; rcs_branch =
+          Repository_on_branch { name = "main"; upstream = Repository_no_upstream }
       ; rcs_changes = [ row ]
       ; rcs_total = 1
       } ->
@@ -6425,7 +6429,76 @@ let test_decode_repository_changes_keeps_git_axes () =
       Alcotest.(check bool) "not conflicted" false row.rc_conflicted
   | Ok _ -> Alcotest.fail "unexpected repository changes shape"
 
-let test_decode_project_changes_keeps_project_scope () =
+let changes_json_with_branch branch =
+  `Assoc
+    [ ("scope", `Assoc [ ("kind", `String "project") ])
+    ; ("branch", branch)
+    ; ("changes", `List [])
+    ; ("total", `Int 0)
+    ]
+
+let decode_branch branch =
+  Result.map
+    (fun (snapshot : Tui_decode.repository_change_snapshot) -> snapshot.rcs_branch)
+    (Tui_decode.decode_repository_change_snapshot (changes_json_with_branch branch))
+
+let test_decode_changes_branch_tracking_counts () =
+  let branch =
+    `Assoc
+      [ ("head", `String "feat/x")
+      ; ( "upstream"
+        , `Assoc
+            [ ("name", `String "origin/feat/x"); ("ahead", `Int 2); ("behind", `Int 1) ] )
+      ]
+  in
+  match decode_branch branch with
+  | Ok
+      (Tui_decode.Repository_on_branch
+         { name = "feat/x"
+         ; upstream =
+             Repository_tracking { upstream = "origin/feat/x"; ahead = 2; behind = 1 }
+         }) ->
+      ()
+  | Ok _ -> Alcotest.fail "unexpected branch shape"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_changes_branch_gone_upstream_has_no_counts () =
+  let branch =
+    `Assoc
+      [ ("head", `String "old")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/old"); ("ahead", `Null); ("behind", `Null) ] )
+      ]
+  in
+  match decode_branch branch with
+  | Ok
+      (Tui_decode.Repository_on_branch
+         { name = "old"; upstream = Repository_upstream_gone "origin/old" }) ->
+      ()
+  | Ok _ -> Alcotest.fail "gone upstream must not carry counts"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_changes_branch_refuses_half_counts () =
+  let half =
+    `Assoc
+      [ ("head", `String "main")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/main"); ("ahead", `Int 1); ("behind", `Null) ] )
+      ]
+  in
+  let negative =
+    `Assoc
+      [ ("head", `String "main")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/main"); ("ahead", `Int (-1)); ("behind", `Int 0) ] )
+      ]
+  in
+  Alcotest.(check bool) "one count without the other is an error" true
+    (Result.is_error (decode_branch half));
+  Alcotest.(check bool) "a negative count is an error" true
+    (Result.is_error (decode_branch negative))
+
+let test_decode_changes_requires_branch () =
   let json =
     `Assoc
       [ ("scope", `Assoc [ ("kind", `String "project") ])
@@ -6433,9 +6506,22 @@ let test_decode_project_changes_keeps_project_scope () =
       ; ("total", `Int 0)
       ]
   in
+  Alcotest.(check bool) "a status answer without branch is an error" true
+    (Result.is_error (Tui_decode.decode_repository_change_snapshot json))
+
+let test_decode_project_changes_keeps_project_scope () =
+  let json =
+    `Assoc
+      [ ("scope", `Assoc [ ("kind", `String "project") ])
+      ; ("branch", `Assoc [ ("head", `Null); ("upstream", `Null) ])
+      ; ("changes", `List [])
+      ; ("total", `Int 0)
+      ]
+  in
   match Tui_decode.decode_repository_change_snapshot json with
   | Ok
       { Tui_decode.rcs_scope = Repository_change_project
+      ; rcs_branch = Repository_detached
       ; rcs_changes = []
       ; rcs_total = 0
       } ->
@@ -14356,6 +14442,14 @@ let () =
           test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick
           test_decode_project_changes_keeps_project_scope;
+        Alcotest.test_case "changes branch keeps tracking counts" `Quick
+          test_decode_changes_branch_tracking_counts;
+        Alcotest.test_case "changes branch gone upstream has no counts" `Quick
+          test_decode_changes_branch_gone_upstream_has_no_counts;
+        Alcotest.test_case "changes branch refuses half counts" `Quick
+          test_decode_changes_branch_refuses_half_counts;
+        Alcotest.test_case "changes require a branch" `Quick
+          test_decode_changes_requires_branch;
       ] );
     ( "decode_keeper_lane",
       [

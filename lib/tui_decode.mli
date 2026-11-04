@@ -543,8 +543,20 @@ type repository_change_scope =
   | Repository_change_project
   | Repository_change_repository of string
 
+(** How the checked-out branch relates to the one it tracks. *)
+type repository_upstream =
+  | Repository_no_upstream
+  | Repository_upstream_gone of string
+      (** Configured, but its ref no longer exists: no counts exist. *)
+  | Repository_tracking of { upstream : string; ahead : int; behind : int }
+
+type repository_branch =
+  | Repository_detached
+  | Repository_on_branch of { name : string; upstream : repository_upstream }
+
 type repository_change_snapshot = {
   rcs_scope : repository_change_scope;
+  rcs_branch : repository_branch;
   rcs_changes : repository_change list;
   rcs_total : int;
 }

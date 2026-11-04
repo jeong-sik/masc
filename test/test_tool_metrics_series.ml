@@ -10,6 +10,8 @@ let hour = 3600.0
 let day = 86400.0
 let seoul_offset_min = 540
 let kolkata_offset_min = 330
+let new_york_offset_min = -300
+let st_johns_offset_min = -210
 
 (* 2026-11-04 00:00:00 UTC *)
 let utc_midnight = 1793750400.0
@@ -111,6 +113,40 @@ let test_hour_buckets_follow_a_half_hour_offset () =
     [ since; since +. hour; since +. (2.0 *. hour) ]
     (starts series);
   Alcotest.(check (list int)) "12:10 UTC and 12:40 UTC are in different hours" [ 1; 1; 0 ] (calls series)
+;;
+
+(* West of Greenwich the offset is negative and a local day starts after UTC
+   midnight. A bucket start that applied the offset with the wrong sign would
+   be off by twice the offset here, and the east cases above would not show it. *)
+let test_buckets_west_of_utc_start_after_utc_midnight () =
+  let new_york_midnight = utc_midnight +. (5.0 *. hour) in
+  let day_since = new_york_midnight -. day in
+  let days =
+    series_of
+      (window_exn ~since:day_since ~until:(day_since +. (3.0 *. day)) ~width:S.Day ~offset:new_york_offset_min)
+      [ sample ~ts:(new_york_midnight -. 1.0) ~tool:"a" 10.0
+      ; sample ~ts:new_york_midnight ~tool:"a" 20.0
+      ]
+  in
+  Alcotest.(check (list (float 0.0)))
+    "each day starts at midnight in New York, 05:00 UTC"
+    [ day_since; day_since +. day; day_since +. (2.0 *. day) ]
+    (starts days);
+  Alcotest.(check (list int)) "the calls on either side of local midnight land in different days" [ 1; 1; 0 ] (calls days);
+  (* St. John's is UTC-03:30, so its hours start 30 minutes into a UTC hour. *)
+  let hour_since = utc_midnight +. (11.5 *. hour) in
+  let hours =
+    series_of
+      (window_exn ~since:hour_since ~until:(hour_since +. (3.0 *. hour)) ~width:S.Hour ~offset:st_johns_offset_min)
+      [ sample ~ts:(utc_midnight +. (12.0 *. hour) +. 600.0) ~tool:"a" 1.0
+      ; sample ~ts:(utc_midnight +. (12.0 *. hour) +. 2400.0) ~tool:"a" 1.0
+      ]
+  in
+  Alcotest.(check (list (float 0.0)))
+    "hours start at :30 UTC"
+    [ hour_since; hour_since +. hour; hour_since +. (2.0 *. hour) ]
+    (starts hours);
+  Alcotest.(check (list int)) "12:10 UTC and 12:40 UTC are in different hours" [ 1; 1; 0 ] (calls hours)
 ;;
 
 let test_a_window_that_starts_mid_bucket_includes_that_bucket () =
@@ -372,6 +408,10 @@ let () =
       , [ Alcotest.test_case "rejects what it cannot chart" `Quick test_window_rejects_what_it_cannot_chart
         ; Alcotest.test_case "day buckets follow the viewer's clock" `Quick test_day_buckets_follow_the_viewers_clock
         ; Alcotest.test_case "hour buckets follow a half-hour offset" `Quick test_hour_buckets_follow_a_half_hour_offset
+        ; Alcotest.test_case
+            "buckets west of UTC start after UTC midnight"
+            `Quick
+            test_buckets_west_of_utc_start_after_utc_midnight
         ; Alcotest.test_case
             "a window that starts mid-bucket includes that bucket"
             `Quick

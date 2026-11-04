@@ -8,12 +8,21 @@ every recorded `masc_keeper_delegate_status` call and measures how many bytes
 Definitions:
 
 - before: the ledger's `result_bytes` for the call, the size of the result the
-  model received. The ledger clips long text in the stored `output` (a clipped
-  object carries `"_truncated": true`), so the stored output can be shorter than
-  `result_bytes`; this script never sizes a result from the stored output alone.
+  model received. The ledger shrinks a long `output` before it stores it: an
+  object that was shrunk gets a last member `"_truncated": true`, and the
+  members or text cut away are not stored. The stored output can therefore be
+  shorter than `result_bytes`; this script never sizes a result from the stored
+  output alone.
 - dropped: compact-JSON bytes of the stored output, minus the same after keeping
-  only the projection's fields (plus `completed_reply`). The dropped fields are
-  the request echo, so a clipped reply does not change them.
+  only the projection's fields (plus `completed_reply`), in two steps.
+  1. The `_truncated` members the ledger added are not part of what the model
+     received, so their bytes are not counted as dropped.
+  2. When a field the projection drops was shrunk (an `input` that was cut) and
+     no kept field was, the bytes the ledger did not store belonged to dropped
+     fields too and are counted as dropped. When a kept field was shrunk, the cut
+     bytes are not attributed to either side, so `after` keeps them. The
+     top-level object carries the marker whenever anything inside it was
+     shrunk, so that marker does not decide the side.
 - after: before minus dropped.
 
 The projection is applied by field name only. Nothing here reads message text.
@@ -53,10 +62,39 @@ KEPT_FIELDS = (
     "completed_reply",
 )
 NO_STATE = "(no state)"
+# lib/observability_redact.ml appends this member to an object it shrank.
+TRUNCATED_KEY = "_truncated"
+TRUNCATED_MEMBER_BYTES = len(f',"{TRUNCATED_KEY}":true'.encode("utf-8"))
 
 
 def compact_bytes(value: object) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def count_truncated_members(value: object) -> int:
+    """Number of objects inside `value` (itself included) that carry the ledger's shrink marker."""
+    if isinstance(value, dict):
+        own = 1 if value.get(TRUNCATED_KEY) is True else 0
+        return own + sum(count_truncated_members(child) for child in value.values())
+    if isinstance(value, list):
+        return sum(count_truncated_members(child) for child in value)
+    return 0
+
+
+def dropped_bytes(obj: dict[str, object], result_bytes: int) -> int:
+    """Bytes of the received result that the projection leaves out, for one stored output."""
+    kept = {key: value for key, value in obj.items() if key in KEPT_FIELDS}
+    dropped_part = {key: value for key, value in obj.items() if key not in KEPT_FIELDS}
+    marker_bytes_in_dropped = TRUNCATED_MEMBER_BYTES * count_truncated_members(dropped_part)
+    dropped = compact_bytes(obj) - compact_bytes(kept) - marker_bytes_in_dropped
+    # The top-level object carries the marker as soon as anything inside it was
+    # shrunk, so the top-level marker does not say where the cut was.
+    shrunk_in_dropped = sum(count_truncated_members(value) for key, value in dropped_part.items() if key != TRUNCATED_KEY)
+    shrunk_in_kept = count_truncated_members(kept)
+    if shrunk_in_dropped > 0 and shrunk_in_kept == 0:
+        stored_without_markers = compact_bytes(obj) - TRUNCATED_MEMBER_BYTES * count_truncated_members(obj)
+        dropped += max(result_bytes - stored_without_markers, 0)
+    return dropped
 
 
 def parse_day(text: str) -> date:
@@ -124,8 +162,7 @@ def main() -> int:
                     state = str(obj.get("state")) if obj is not None and "state" in obj else NO_STATE
                     drop = 0
                     if obj is not None and state != NO_STATE:
-                        kept = {k: v for k, v in obj.items() if k in KEPT_FIELDS}
-                        drop = compact_bytes(obj) - compact_bytes(kept)
+                        drop = dropped_bytes(obj, rb)
                     out = row.get("output")
                     if isinstance(out, str) and rb != len(out.encode("utf-8")):
                         clipped_rows += 1

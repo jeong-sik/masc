@@ -1,9 +1,6 @@
 name = "masc_keeper_delegate_status"
 description = """
-Read your Keeper chat operation by exact target and operation_id. The result \
-carries the operation id, its state with the times it reached, the failure \
-facts of a failed operation and, after success, completed_reply. The request \
-you submitted is not repeated.
+Read your Keeper chat operation by exact target and operation_id.
 
 For a succeeded operation, completed_reply returns the original full assistant \
 reply for its exact outcome_ref, or an explicit unavailable reason. Queue \

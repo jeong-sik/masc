@@ -139,15 +139,21 @@ let record_file dirs =
   | I.No_config_dir -> Alcotest.fail "the config directory is known"
 ;;
 
+let store_path text =
+  match I.Store_path.of_string text with
+  | Ok store -> store
+  | Error problem -> Alcotest.failf "%S is not a store path: %s" text (I.Store_path.problem_to_string problem)
+;;
+
 let write_record dirs ~base_path ~external_store =
-  match I.write (locate dirs ~base_path) ~external_store with
+  match I.write (locate dirs ~base_path) ~external_store:(store_path external_store) with
   | Ok () -> ()
   | Error error -> Alcotest.fail (I.write_error_to_string error)
 ;;
 
 let read_record dirs =
   match I.read (locate dirs ~base_path:dirs.base) with
-  | Ok recorded -> recorded
+  | Ok recorded -> Option.map (fun store -> (store : I.Store_path.t :> string)) recorded
   | Error error -> Alcotest.fail (I.read_error_to_string error)
 ;;
 
@@ -216,9 +222,10 @@ let request dirs : B.request =
 let run dirs = B.fresh_bootstrap (request dirs)
 
 let problem_name = function
-  | B.Not_absolute -> "Not_absolute"
-  | B.Holds_nul -> "Holds_nul"
-  | B.Not_normal -> "Not_normal"
+  | B.Store_path I.Store_path.Not_absolute -> "Not_absolute"
+  | B.Store_path I.Store_path.Holds_nul -> "Holds_nul"
+  | B.Store_path I.Store_path.Not_normal -> "Not_normal"
+  | B.Store_path I.Store_path.Not_utf_8 -> "Not_utf_8"
   | B.Inside_base_path -> "Inside_base_path"
   | B.Is_install_record -> "Is_install_record"
 ;;
@@ -614,6 +621,31 @@ let refusals =
   ; { label = "a dot at the end of the path of the store"
     ; expected = "External_store_path_invalid Not_normal"
     ; prepare = (fun dirs -> { (request dirs) with B.external_store = dirs.store ^ "/." })
+    }
+  ; { label = "a path of the store that is not UTF-8"
+    ; expected = "External_store_path_invalid Not_utf_8"
+    ; prepare = (fun dirs -> { (request dirs) with B.external_store = dirs.store ^ "\xff" })
+    }
+  ; { label = "a link that leads nowhere on the way to the store that the install record names"
+    ; expected = "Path_not_inspected"
+    ; prepare =
+        (fun dirs ->
+          (* A volume that is not mounted: the store may be there once it is. *)
+          let volume = Filename.concat dirs.root "unmounted-volume" in
+          Unix.symlink (Filename.concat dirs.root "nowhere") volume;
+          write_record
+            dirs
+            ~base_path:dirs.base
+            ~external_store:(Filename.concat volume "external.jsonl");
+          request dirs)
+    }
+  ; { label = "a link that leads nowhere on the way to the new store"
+    ; expected = "Path_not_inspected"
+    ; prepare =
+        (fun dirs ->
+          let volume = Filename.concat dirs.root "unmounted-volume" in
+          Unix.symlink (Filename.concat dirs.root "nowhere") volume;
+          { (request dirs) with B.external_store = Filename.concat volume "external.jsonl" })
     }
   ; { label = "a link that leads nowhere at the path that the install record names"
     ; expected = "External_store_in_the_way"
@@ -1191,14 +1223,19 @@ let texts_name_what_they_are_about () =
         (error_name error ^ " names " ^ needle)
         true
         (contains ~sub:needle (B.error_to_string error)))
-    [ ( B.External_store_path_invalid { path = "relative/store"; problem = B.Not_absolute }
+    [ ( B.External_store_path_invalid
+          { path = "relative/store"; problem = B.Store_path I.Store_path.Not_absolute }
       , "relative/store" )
     ; B.Path_not_inspected { path = "/p/store"; detail = "detail" }, "/p/store"
     ; B.External_store_in_the_way { path = "/p/store" }, "/p/store"
     ; B.Log_not_empty { lines = 7 }, "7"
     ; B.Not_a_fresh_installation { store = "/p/store"; value = H.Absent }, "/p/store"
-    ; B.Install_record_changed { expected = Some "/p/before"; found = Some "/p/after" }, "/p/before"
-    ; B.Install_record_changed { expected = Some "/p/before"; found = Some "/p/after" }, "/p/after"
+    ; ( B.Install_record_changed
+          { expected = Some (store_path "/p/before"); found = Some (store_path "/p/after") }
+      , "/p/before" )
+    ; ( B.Install_record_changed
+          { expected = Some (store_path "/p/before"); found = Some (store_path "/p/after") }
+      , "/p/after" )
     ; B.External_store_not_created { path = "/p/store"; detail = "detail" }, "/p/store"
     ; B.Answer_not_written { record_hash = hash; error = S.Writer_expired }, R.Hash.to_hex hash
     ]

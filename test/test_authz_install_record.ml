@@ -48,15 +48,28 @@ let record_of = function
   | I.No_config_dir -> Alcotest.fail "expected a located record"
 ;;
 
+let describe_problem = function
+  | I.Store_path.Not_absolute -> "not_absolute"
+  | I.Store_path.Holds_nul -> "holds_nul"
+  | I.Store_path.Not_normal -> "not_normal"
+  | I.Store_path.Not_utf_8 -> "not_utf_8"
+;;
+
+let store_path text =
+  match I.Store_path.of_string text with
+  | Ok store -> store
+  | Error problem -> Alcotest.failf "%S is not a store path: %s" text (describe_problem problem)
+;;
+
 let write_ok located ~external_store =
-  match I.write located ~external_store with
+  match I.write located ~external_store:(store_path external_store) with
   | Ok () -> ()
   | Error error -> Alcotest.fail (I.write_error_to_string error)
 ;;
 
 let read_ok located =
   match I.read located with
-  | Ok value -> value
+  | Ok value -> Option.map (fun store -> (store : I.Store_path.t :> string)) value
   | Error error -> Alcotest.fail (I.read_error_to_string error)
 ;;
 
@@ -64,8 +77,7 @@ let describe_corruption = function
   | I.Not_json -> "not_json"
   | I.Wrong_members -> "wrong_members"
   | I.Base_path_differs _ -> "base_path_differs"
-  | I.Store_path_not_absolute -> "store_path_not_absolute"
-  | I.Store_path_not_normal -> "store_path_not_normal"
+  | I.Store_path_invalid { problem; recorded = _ } -> "store_path_invalid:" ^ describe_problem problem
 ;;
 
 let describe_read_error = function
@@ -75,7 +87,6 @@ let describe_read_error = function
 
 let describe_write_error = function
   | I.No_config_dir_to_write -> "no_config_dir_to_write"
-  | I.Store_path_invalid _ -> "store_path_invalid"
   | I.Config_dir_unusable _ -> "config_dir_unusable"
   | I.Not_replaced _ -> "not_replaced"
   | I.Replaced_but_not_durable _ -> "replaced_but_not_durable"
@@ -88,7 +99,7 @@ let check_read_error label expected located =
 ;;
 
 let check_write_error label expected located ~external_store =
-  match I.write located ~external_store with
+  match I.write located ~external_store:(store_path external_store) with
   | Ok () -> Alcotest.failf "%s: the write succeeded" label
   | Error error -> Alcotest.(check string) label expected (describe_write_error error)
 ;;
@@ -419,20 +430,33 @@ let corrupt_records () =
       ; "other names", object_of [ member "base" "\"/b\""; member "store" "\"/s\"" ], "corrupt:wrong_members"
       ; "a number", object_of [ member "base_path" "1"; store ], "corrupt:wrong_members"
       ; "null store", object_of [ base_path; member "external_store" "null" ], "corrupt:wrong_members"
-      ; "relative store", object_of [ base_path; member "external_store" "\"stores/one\"" ], "corrupt:store_path_not_absolute"
-      ; "empty store", object_of [ base_path; member "external_store" "\"\"" ], "corrupt:store_path_not_absolute"
+      ; ( "relative store"
+        , object_of [ base_path; member "external_store" "\"stores/one\"" ]
+        , "corrupt:store_path_invalid:not_absolute" )
+      ; ( "empty store"
+        , object_of [ base_path; member "external_store" "\"\"" ]
+        , "corrupt:store_path_invalid:not_absolute" )
       ; ( "a store that ends in a separator"
         , object_of [ base_path; member "external_store" "\"/stores/one/\"" ]
-        , "corrupt:store_path_not_normal" )
+        , "corrupt:store_path_invalid:not_normal" )
       ; ( "a store with a NUL byte"
         , object_of [ base_path; member "external_store" "\"/stores/o\\u0000ne\"" ]
-        , "corrupt:store_path_not_normal" )
+        , "corrupt:store_path_invalid:holds_nul" )
       ; ( "a store with a .."
         , object_of [ base_path; member "external_store" "\"/stores/../one\"" ]
-        , "corrupt:store_path_not_normal" )
+        , "corrupt:store_path_invalid:not_normal" )
+      ; ( "a store with a ."
+        , object_of [ base_path; member "external_store" "\"/stores/./one\"" ]
+        , "corrupt:store_path_invalid:not_normal" )
       ; ( "a store with an empty segment"
         , object_of [ base_path; member "external_store" "\"/stores//one\"" ]
-        , "corrupt:store_path_not_normal" )
+        , "corrupt:store_path_invalid:not_normal" )
+      ; ( "the root as the store"
+        , object_of [ base_path; member "external_store" "\"/\"" ]
+        , "corrupt:store_path_invalid:not_normal" )
+      ; ( "a store that is not UTF-8"
+        , object_of [ base_path; member "external_store" "\"/stores/\xff\"" ]
+        , "corrupt:store_path_invalid:not_utf_8" )
       ; ( "another base path"
         , object_of [ member "base_path" "\"/somewhere/else\""; store ]
         , "corrupt:base_path_differs" )
@@ -453,21 +477,33 @@ let leftover_temporary_file_is_not_a_record () =
 
 (* ---- writes that fail ---- *)
 
-let store_path_must_be_absolute_utf8 () =
-  with_dirs (fun dirs ->
-    let located = locate_in dirs ~base_path:dirs.base in
-    List.iter
-      (fun (label, external_store) ->
-        check_write_error label "store_path_invalid" located ~external_store)
-      [ "relative", "stores/one"
-      ; "empty", ""
-      ; "not UTF-8", "/stores/\xff"
-      ; "a separator at the end", "/stores/one/"
-      ; "a NUL byte", "/stores/o\000ne"
-      ; "a ..", "/stores/../one"
-      ; "an empty segment", "/stores//one"
-      ];
-    Alcotest.(check bool) "nothing was created" false (Sys.file_exists dirs.config))
+(* The parser is the only way to a store path, so a path that [write] would
+   write and [read] would refuse cannot be built. *)
+let store_path_names_its_first_problem () =
+  List.iter
+    (fun (label, text, expected) ->
+      let found =
+        match I.Store_path.of_string text with
+        | Ok store -> "ok " ^ (store : I.Store_path.t :> string)
+        | Error problem -> describe_problem problem
+      in
+      Alcotest.(check string) label expected found)
+    [ "absolute", "/stores/one", "ok /stores/one"
+    ; "relative", "stores/one", "not_absolute"
+    ; "empty", "", "not_absolute"
+    ; "relative with a NUL byte", "stores/o\000ne", "not_absolute"
+    ; "a NUL byte", "/stores/o\000ne", "holds_nul"
+    ; "a NUL byte and a separator at the end", "/stores/o\000ne/", "holds_nul"
+    ; "a separator at the end", "/stores/one/", "not_normal"
+    ; "the root", "/", "not_normal"
+    ; "a ..", "/stores/../one", "not_normal"
+    ; "a .", "/stores/./one", "not_normal"
+    ; "an empty segment", "/stores//one", "not_normal"
+    ; "not UTF-8", "/stores/\xff", "not_utf_8"
+    ; "not UTF-8 and a separator at the end", "/stores/\xff/", "not_normal"
+    ; "UTF-8 beyond ASCII", "/stores/\xed\x95\x9c", "ok /stores/\xed\x95\x9c"
+    ]
+;;
 ;;
 
 let failed_write_leaves_the_old_record () =
@@ -557,9 +593,9 @@ let () =
             `Quick
             dangling_ancestor_link_is_unreadable
         ] )
+    ; "store path", [ Alcotest.test_case "first problem" `Quick store_path_names_its_first_problem ]
     ; ( "writes that fail"
-      , [ Alcotest.test_case "store path" `Quick store_path_must_be_absolute_utf8
-        ; Alcotest.test_case "old record stays" `Quick failed_write_leaves_the_old_record
+      , [ Alcotest.test_case "old record stays" `Quick failed_write_leaves_the_old_record
         ; Alcotest.test_case "error text" `Quick error_texts_name_the_file
         ] )
     ]

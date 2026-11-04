@@ -464,12 +464,37 @@ let test_not_a_file_where_the_log_is () =
     check_refused_by "a dangling link" log_unreadable dirs)
 ;;
 
+(* A restore of the base path from before its bootstrap, with an install record
+   whose store path ends in a separator and a dangling link where the store was.
+   [lstat] follows the link behind the last separator and answers ENOENT, and
+   [Filename.dirname] steps over that name, so a reader that took the path as
+   it is would find no store and boot as a single user. *)
+let test_record_with_a_separator_at_the_end () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    Sys.remove (L.path_of_base_path ~base_path:dirs.base);
+    Sys.remove dirs.store;
+    Unix.symlink (Filename.concat (Filename.dirname dirs.store) "unmounted") dirs.store;
+    write_file
+      (install_record_file dirs)
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ "base_path", `String (Unix.realpath dirs.base)
+             ; "external_store", `String (dirs.store ^ "/")
+             ])
+       ^ "\n");
+    check_refused_by "a store path that ends in a separator" store_unreadable dirs)
+;;
+
 (* The store is judged against the log, so a log that cannot be read leaves the
    store unjudged as well. The decision stops at the log first, so the column is
    checked on the input. *)
 let test_corrupt_log_beside_a_store () =
   with_dirs (fun dirs ->
     bootstrap dirs;
+    (match (input dirs).B.high_water with
+     | B.Judged _ -> ()
+     | B.Store_unreadable reason -> Alcotest.failf "the store of the bootstrap was not judged: %s" reason);
     write_log_line dirs "not a record";
     check_refused_by "the log is unreadable" log_unreadable dirs;
     match (input dirs).B.high_water with
@@ -508,6 +533,10 @@ let () =
         ; Alcotest.test_case "boot entry" `Quick test_boot_entry
         ; Alcotest.test_case "same, with no record" `Quick test_config_dir_others_can_write_without_record
         ; Alcotest.test_case "store behind a dangling link" `Quick test_store_behind_a_dangling_link
+        ; Alcotest.test_case
+            "record with a separator at the end"
+            `Quick
+            test_record_with_a_separator_at_the_end
         ; Alcotest.test_case "log behind a dangling link" `Quick test_log_behind_a_dangling_link
         ; Alcotest.test_case "log cannot be checked" `Quick test_log_cannot_be_checked
         ; Alcotest.test_case "not a file where the log is" `Quick test_not_a_file_where_the_log_is

@@ -101,7 +101,8 @@ let store_state ~config_dir ~base_path : (S.State.t option, string) result =
     (match I.read located with
      | Error error -> Error (I.read_error_to_string error)
      | Ok None -> Ok None
-     | Ok (Some path) ->
+     | Ok (Some store) ->
+       let path = (store : I.Store_path.t :> string) in
        (match P.of_path path with
         | P.Not_there -> Ok None
         | P.Cannot_check detail -> Error (Printf.sprintf "the external store %s: %s" path detail)

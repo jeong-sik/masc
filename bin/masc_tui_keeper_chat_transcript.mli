@@ -75,8 +75,14 @@ val received_marker : string
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
 
-(** Last provider progress observation projected onto its native tool row. *)
-type native_progress =
+(** Last provider progress observation projected onto its native tool row.
+    [output_bytes]: cumulative received output bytes; no raw output.
+    [message]: latest redacted full MCP message; sanitized at render.
+    [provider_elapsed_seconds]: provider report, independent of local
+    elapsed; may decrease. [updated_at]: consumer-supplied event time;
+    normal live input uses SSE time or receipt fallback. [elapsed]: time
+    between observed start and update, if ordered; not provider duration. *)
+type native_progress = Masc_tui_keeper_chat_activity_projection.native_progress =
   { output_bytes : int option (** Cumulative received output bytes; no raw output. *)
   ; message : string option (** Latest redacted full MCP message; sanitized at render. *)
   ; provider_elapsed_seconds : int option (** Provider report, independent of local elapsed; may decrease. *)
@@ -293,7 +299,7 @@ val native_completion_summary : Runtime_native_tools.completion -> string
 (** The ended native steps of one block that share a tool and a provider
     report. The key is what {!native_completion_status} draws: the
     unrecognized-status word is left out, and a result with an error flag is
-    the error report. *)
+    the error report. [status_tool] is the display name of the tool. *)
 type native_status_group =
   { status_tool : string  (** Display name of the tool. *)
   ; status_completion : Runtime_native_tools.completion

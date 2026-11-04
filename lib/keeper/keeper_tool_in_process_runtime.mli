@@ -55,7 +55,7 @@ val network_read_call_summary : network_read_replay -> string option
     and the replay engine both state it through this function. [None] when
     the leaf's argument is absent, not a string, or blank. *)
 
-type connector_post_replay =
+type connector_post_replay = Keeper_connector_post_replay.connector_post_replay =
   | Replay_native_post of
       { input : Yojson.Safe.t; route : Keeper_native_origin_reply.t; content : string }
   | Replay_discord_post of

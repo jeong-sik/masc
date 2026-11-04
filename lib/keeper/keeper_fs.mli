@@ -41,7 +41,7 @@ type durable_write_stage =
   | Parent_directory_fsync_after_rename
   | Temp_directory_fsync_after_rename
 
-type directory_chain_error =
+type directory_chain_error = Keeper_fs_durable_directory.chain_error =
   | Non_directory_ancestor of { path : string }
   | Outside_ownership_root of
       { ownership_root : string

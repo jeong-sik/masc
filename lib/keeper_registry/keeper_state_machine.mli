@@ -44,7 +44,7 @@ val is_terminal : phase -> bool
 (** Observable boolean conditions computed from keeper state.
     Phase is DERIVED from conditions via [derive_phase].
     Conditions are the primitive; phase is the projection. *)
-type conditions = {
+type conditions = Keeper_state_machine_types.conditions = {
   launch_pending : bool;
   (** Fresh registration exists, but the keepalive fiber has not started yet. *)
   fiber_alive : bool;
@@ -70,13 +70,13 @@ val default_conditions : conditions
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type context_actions = { handoff : bool }
+type context_actions = Keeper_state_machine_types.context_actions = { handoff : bool }
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.
     Non-deterministic measurements become typed events at the boundary. *)
 
-type event =
+type event = Keeper_state_machine_types.event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int }
   | Turn_succeeded

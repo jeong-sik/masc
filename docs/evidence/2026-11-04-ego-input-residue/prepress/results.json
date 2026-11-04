@@ -1,0 +1,250 @@
+{
+  "ego_browser": "0.6.2.5",
+  "chromium": "156.0.8078.74",
+  "measured_at": "2026-11-04",
+  "cases": [
+    {
+      "label": "control click #ok",
+      "ms": 43,
+      "receipt": {},
+      "error": null,
+      "events": [
+        {
+          "type": "pointerdown",
+          "id": "ok",
+          "buttons": 1
+        },
+        {
+          "type": "mousedown",
+          "id": "ok",
+          "buttons": 1
+        },
+        {
+          "type": "pointerup",
+          "id": "ok",
+          "buttons": 0
+        },
+        {
+          "type": "mouseup",
+          "id": "ok",
+          "buttons": 0
+        },
+        {
+          "type": "click",
+          "id": "ok",
+          "buttons": 0
+        }
+      ]
+    },
+    {
+      "label": "click ambiguous text",
+      "ms": 13,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "Locator text=\"dev-frontend\" matched 8 elements (8 visible, 0 hidden). Candidates: 1. span \"dev-frontend\" (visible); 2. span \"dev-frontend\" (visible); 3. span \"dev-frontend\" (visible). Use a current sn"
+      },
+      "events": []
+    },
+    {
+      "label": "click missing",
+      "ms": 1074,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.click failed: Locator loc=css:#missing matched 0 elements. The page has been idle for 540ms with no DOM changes and no network requests in flight, so the target is not about to appear. Check the "
+      },
+      "events": []
+    },
+    {
+      "label": "click hidden",
+      "ms": 3004,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "transient",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.click timed out after 3002ms: Locator loc=css:#hidden matched 1 elements, but none can receive input; element has a zero-sized bounding box"
+      },
+      "events": []
+    },
+    {
+      "label": "click disabled",
+      "ms": 3005,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "transient",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.click timed out after 3002ms: Locator loc=css:#disabled matched 1 elements, but none can receive input; element is disabled"
+      },
+      "events": []
+    },
+    {
+      "label": "click covered by overlay",
+      "ms": 3004,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "transient",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.click timed out after 3002ms: Locator loc=css:#covered matched 1 elements, but none can receive input; <div id=\"overlay\"> intercepts pointer events"
+      },
+      "events": []
+    },
+    {
+      "label": "click stale ref",
+      "ms": 3,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "Unknown ref: 99999; take a new snapshot"
+      },
+      "events": []
+    },
+    {
+      "label": "dblclick missing",
+      "ms": 530,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.dblclick failed: Locator loc=css:#missing matched 0 elements. The page has been idle for 10095ms with no DOM changes and no network requests in flight, so the target is not about to appear. Check"
+      },
+      "events": []
+    },
+    {
+      "label": "dblclick ambiguous text",
+      "ms": 4,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "Locator text=\"dev-frontend\" matched 8 elements (8 visible, 0 hidden). Candidates: 1. span \"dev-frontend\" (visible); 2. span \"dev-frontend\" (visible); 3. span \"dev-frontend\" (visible). Use a current sn"
+      },
+      "events": []
+    },
+    {
+      "label": "dragAndDrop missing source",
+      "ms": 526,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.dragAndDrop failed: Locator loc=css:#missing matched 0 elements. The page has been idle for 10626ms with no DOM changes and no network requests in flight, so the target is not about to appear. Ch"
+      },
+      "events": []
+    },
+    {
+      "label": "dragAndDrop missing destination",
+      "ms": 543,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.dragAndDrop failed: Locator loc=css:#missing matched 0 elements. The page has been idle for 11175ms with no DOM changes and no network requests in flight, so the target is not about to appear. Ch"
+      },
+      "events": []
+    },
+    {
+      "label": "press missing (excluded, info only)",
+      "ms": 529,
+      "receipt": null,
+      "error": {
+        "ctor": "ElementResolutionError",
+        "name": "ElementResolutionError",
+        "kind": "permanent",
+        "keys": [
+          "kind",
+          "name"
+        ],
+        "message": "page.press failed: Locator loc=css:#missing matched 0 elements. The page has been idle for 11705ms with no DOM changes and no network requests in flight, so the target is not about to appear. Check th"
+      },
+      "events": []
+    },
+    {
+      "label": "final control click #ok",
+      "ms": 1015,
+      "receipt": {},
+      "error": null,
+      "events": [
+        {
+          "type": "pointerdown",
+          "id": "ok",
+          "buttons": 1
+        },
+        {
+          "type": "mousedown",
+          "id": "ok",
+          "buttons": 1
+        },
+        {
+          "type": "pointerup",
+          "id": "ok",
+          "buttons": 0
+        },
+        {
+          "type": "mouseup",
+          "id": "ok",
+          "buttons": 0
+        },
+        {
+          "type": "click",
+          "id": "ok",
+          "buttons": 0
+        }
+      ]
+    }
+  ],
+  "modifierMask": 0
+}

@@ -288,7 +288,7 @@ val find_static_credential_by_token :
 
 (** Structured description of which credential fields differ between two
     credentials that share the same token hash. *)
-type credential_field_diff =
+type credential_field_diff = Auth_credential_token.credential_field_diff =
   | Agent_name of { left : string; right : string }
   | Role of { left : agent_role; right : agent_role }
   | Created_at of { left : string; right : string }

@@ -270,7 +270,9 @@ let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id 
   | None -> Lane_addon_tool_request_owner.Manual e.instance_id)
 let notify_exports m e =
   publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id:e.package.id Export_inventory_changed;
-  notify_tool_change e.package
+  notify_tool_change e.package;
+  if e.package.exported_tools <> [] then
+    Lane_addon_exports_broadcast.changed ~base_path:m.base_path
 let override : backend option ref = ref None
 type fleet_backend = {
   snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;

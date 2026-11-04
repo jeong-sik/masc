@@ -15,12 +15,12 @@ module StringMap : Map.S with type key = string
 (** Issue #18901: cause carried inside [Fiber_unresolved]. Splits the
     24h fleet ratio of 26 graceful-shutdown artifacts to 9 real
     missed-resolutions inside the same supervisor crash log. *)
-type fiber_drop_cause =
+type fiber_drop_cause = Keeper_registry_types_failure.fiber_drop_cause =
   | Graceful_shutdown
   | Cancelled_by_parent
   | Unexpected
 
-type failure_reason =
+type failure_reason = Keeper_registry_types_failure.failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
   | Provider_runtime_error of

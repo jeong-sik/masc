@@ -174,6 +174,11 @@ val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
 
 val broadcast_to_sse_runtime_observers : runtime_authority -> Yojson.Safe.t -> unit
+(** Send to [authority]'s observer sessions only, without external
+    subscribers. It does not suspend: the fan-out holds a [Stdlib.Mutex],
+    checks each session's queue capacity before adding to it, and
+    disconnects a full session instead of waiting. A caller holding a lock
+    may call it. *)
 (** Send a replayable event to this runtime's SSE observers without invoking
     external subscriber callbacks on the publisher's path. *)
 

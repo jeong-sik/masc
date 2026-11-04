@@ -12449,9 +12449,13 @@ let keeper_activity_at ~turn ~waiting (keeper : keeper) =
 
 module Name_table = Hashtbl.Make (String)
 
+(* A starting size for a per-read name index: room for a roster without
+   resizing. The table grows past it like any Hashtbl. *)
+let name_table_initial_size = 64
+
 (* The first row each name has, as a scan from the front would find it. *)
 let first_row_by_name ~name rows =
-  let table = Name_table.create 64 in
+  let table = Name_table.create name_table_initial_size in
   List.iter
     (fun row ->
       let key = name row in
@@ -12461,7 +12465,7 @@ let first_row_by_name ~name rows =
 
 (* Every row each name has, in list order. *)
 let rows_by_name ~name rows =
-  let table = Name_table.create 64 in
+  let table = Name_table.create name_table_initial_size in
   List.iter
     (fun row ->
       let key = name row in
@@ -12471,10 +12475,9 @@ let rows_by_name ~name rows =
   table
 
 (* The roster is read several times a frame -- the list, the title, the
-   Activity pane, the footer -- so each source is indexed by name once here.
-   Searching every source again for every keeper cost keepers x tasks
-   comparisons per read, which a held arrow key paid many times a second. *)
-let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+   Activity pane, the footer -- so each source is indexed by name once per
+   read and every Keeper looks its readings up there. *)
+let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row list =
   let turns =
     first_row_by_name state.keeper_turns
       ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
@@ -12488,15 +12491,15 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ~name:(fun (row : Tui_decode.keeper_tool_approval) -> row.kta_keeper)
   in
   let current_tasks =
-    let wanted = Name_table.create 64 in
+    let wanted = Name_table.create name_table_initial_size in
     List.iter
       (fun (keeper : keeper) ->
         match keeper.k_activity with
         | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
             Name_table.replace wanted task_id ()
         | Some { Tui_decode.k_current_task_id = None; _ } | None -> ())
-      state.keepers;
-    if Name_table.length wanted = 0 then Name_table.create 1
+      keepers;
+    if Name_table.length wanted = 0 then Name_table.create name_table_initial_size
     else
       first_row_by_name
         (List.filter (fun (task : Tui_decode.task) -> Name_table.mem wanted task.id) state.tasks)
@@ -12507,9 +12510,9 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
     | Some (Tui_decode.Async_ready { requests; _ }) ->
         rows_by_name requests
           ~name:(fun (row : Tui_decode.async_request_row) -> row.ar_keeper_name)
-    | Some (Tui_decode.Async_unavailable _) | None -> Name_table.create 1
+    | Some (Tui_decode.Async_unavailable _) | None -> Name_table.create name_table_initial_size
   in
-  let question_counts = Name_table.create 16 in
+  let question_counts = Name_table.create name_table_initial_size in
   (match state.asks_snapshot with
    | None -> ()
    | Some snapshot ->
@@ -12564,9 +12567,14 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ; async_requests
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
-    state.keepers
+    keepers
   |> Masc_tui_keeper_list_model.order_rows ~layout:state.keeper_list_layout
        ~sort:state.keeper_list_sort
+
+let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+  match state.keepers with
+  | [] -> []
+  | keepers -> rows_of_keepers state keepers
 
 let ordered_keepers state =
   List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)

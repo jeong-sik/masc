@@ -290,8 +290,8 @@ let activity_rank = function
   | Verifying -> 12 | External_waiting -> 13 | Idle -> 14 | Paused -> 15
   | Offline -> 16 | Unknown -> 17
 
-(* A row's activity reads all of its waiting items and async requests, so it
-   is worked out once per row here rather than twice in every comparison. *)
+(* A row's activity reads all of its waiting items and async requests, so
+   each row is ranked once before sorting and comparisons read the ranks. *)
 type ranked = { row : row; activity : activity; group : attention }
 
 let rank row =

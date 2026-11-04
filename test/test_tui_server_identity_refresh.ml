@@ -6548,11 +6548,17 @@ let test_roster_rows_join_each_reading_by_keeper_name () =
   let request keeper id = Tui_decode.{ ar_request_id = id; ar_submitted_by = "test";
     ar_keeper_name = keeper; ar_phase = Async_running; ar_submitted_at = 1.;
     ar_ownership = Async_runtime_owned } in
-  let ask asker id = Masc.Tui_decode_asks.{ ar_asker = asker; ar_id = id; ar_asked_at = 1.;
-    ar_source_turn_ref = None; ar_context = None; ar_questions = []; ar_resolution = Ask_open } in
-  let task id status : Tui_decode.task = { id; title = id; status; priority = 3; goal_ids = [] } in
+  let ask ?(resolution = Masc.Tui_decode_asks.Ask_open) asker id =
+    Masc.Tui_decode_asks.{ ar_asker = asker; ar_id = id; ar_asked_at = 1.;
+      ar_source_turn_ref = None; ar_context = None; ar_questions = []; ar_resolution = resolution } in
+  let task ?(title = "") id status : Tui_decode.task =
+    { id; title = (if title = "" then id else title); status; priority = 3; goal_ids = [] } in
+  let waiting name kwr_waiting_count = Tui_decode.{ kwr_keeper_name = name;
+    kwr_state = Keeper_waiting_idle; kwr_waiting_count; kwr_since = None; kwr_due_at = None;
+    kwr_waiting_on = [] } in
   state.keepers <- [alpha; beta];
   state.keeper_turns <- [turn "alpha" running; turn "beta" Keeper_turn_idle; turn "alpha" Keeper_turn_idle];
+  state.keeper_waiting <- [waiting "alpha" 1; waiting "alpha" 2];
   state.keeper_tool_approvals <- [approval "beta" "first"; approval "beta" "second"];
   state.tools_async_observation <- Some (Tui_decode.Async_ready {
     summary = Tui_decode.{ ars_active = 3; ars_runtime_owned = 3; ars_ownership_unknown = 0;
@@ -6561,23 +6567,29 @@ let test_roster_rows_join_each_reading_by_keeper_name () =
     recovery = None });
   state.asks_snapshot <- Some Masc.Tui_decode_asks.{ asn_keeper = None; asn_open_count = 3;
     asn_rows = [ask (Ask_keeper "beta") "q1"; ask (Ask_installation
-      { ai_declaration_id = "beta"; ai_title = "beta" }) "q2"; ask (Ask_keeper "beta") "q3"] };
+      { ai_declaration_id = "beta"; ai_title = "beta" }) "q2";
+      ask ~resolution:(Ask_withdrawn { aw_reason = "done"; aw_withdrawn_at = 2. })
+        (Ask_keeper "beta") "q3"] };
   state.tasks <- [ task "task-other" Masc_domain.Todo
-                 ; task "task-alpha" (Masc_domain.InProgress { assignee = "alpha"; started_at = "1" })
+                 ; task ~title:"first" "task-alpha" (Masc_domain.InProgress { assignee = "alpha"; started_at = "1" })
+                 ; task ~title:"second" "task-alpha" Masc_domain.Todo
                  ; task "task-beta" (Masc_domain.AwaitingVerification { assignee = "beta";
                      started_at = "1"; submitted_at = "2"; verification_id = "v" }) ];
   let rows = keeper_list_rows state in
   let find name = List.find (fun row -> row.Masc_tui_keeper_list_model.keeper.k_name = name) rows in
   let alpha_row = find "alpha" and beta_row = find "beta" in
   Alcotest.(check bool) "a name's first turn row is its turn" true (alpha_row.turn = Some running);
+  Alcotest.(check bool) "a name's first waiting row is its waiting" true
+    (alpha_row.waiting = Masc_tui_keeper_list_model.Waiting_observed (waiting "alpha" 1));
   Alcotest.(check (option string)) "a name's first held call is its held call" (Some "first")
     (Option.map (fun (row : Tui_decode.keeper_tool_approval) -> row.kta_approval_id) beta_row.approval);
   Alcotest.(check (list string)) "async requests keep their read order" ["a1"; "a2"]
     (List.map (fun (row : Tui_decode.async_request_row) -> row.ar_request_id) alpha_row.async_requests);
-  Alcotest.(check int) "only the Keeper's own questions count" 2 beta_row.open_questions;
+  Alcotest.(check int) "every question the Keeper asked counts, whatever its resolution" 2
+    beta_row.open_questions;
   Alcotest.(check int) "a Keeper that asked nothing has none" 0 alpha_row.open_questions;
-  Alcotest.(check (option string)) "the current task is found by id" (Some "task-alpha")
-    (Option.map (fun (task : Tui_decode.task) -> task.id) alpha_row.task);
+  Alcotest.(check (option string)) "the current task is the first with its id" (Some "first")
+    (Option.map (fun (task : Tui_decode.task) -> task.title) alpha_row.task);
   Alcotest.(check bool) "a task awaiting its verdict is held by its assignee" true
     (beta_row.awaiting_verification && not alpha_row.awaiting_verification)
 ;;

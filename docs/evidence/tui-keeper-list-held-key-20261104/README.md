@@ -30,8 +30,10 @@ old one is the installed binary above. Host load average 150 to 250 for all of
 it, so every wall-clock number here moves with the host.
 
 - `component-bench.txt`: `bench_keeper_list_rows.ml.txt` (not part of the
-  product build) runs main's `keeper_list_rows`, copied verbatim, and the new
-  one on the same state: 43 Keepers, 375 active tasks with the live status mix
+  product build) runs main's `keeper_list_rows` body, copied verbatim, with its
+  sort reduced to the Grouped + Recent case the operator uses (it calls
+  `group_of_row`, whose result this change keeps), against the new one on the
+  same state: 43 Keepers, 375 active tasks with the live status mix
   (todo 337, in_progress 31, awaiting_verification 6, claimed 1). Both return
   the same rows in the same order. Allocation is deterministic: 96,872 →
   58,752 minor bytes per call. The median time per call fell 1,103 → 270 us in
@@ -50,3 +52,15 @@ it, so every wall-clock number here moves with the host.
   none of those frames near the top. The next largest Keepers cost is
   `sanitize_terminal_text` under `keeper_runtime_cells`, which measures every
   row's runtime text each frame.
+
+### Small roster, many tasks
+
+The [rejected index bundle](../extreme-performance-20261030/keeper-projection-rejected/README.md)
+of 2026-10-30 turned down eager indexing because it slowed small query sets.
+The same bench with `K=2` (two Keepers, 375 tasks) shows that cost here too.
+In the stored run (last block of `component-bench.txt`, after the review
+fixes) the median went 35 → 74 us and allocation 2,344 → 7,256 bytes per
+call; an unstored run just before it gave 34 → 57 us. With the live 43
+Keepers the stored run gives 680 → 250 us and 96,872 → 59,136 bytes. The live
+roster is the case the operator reported; 40 us is a quarter of a percent of a
+16 ms frame.

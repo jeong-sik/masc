@@ -158,7 +158,7 @@
 
 - `Keeper_model_input_demotion`(RFC-0363)이 이미 끝난 호출의 인자를 `{"_blob": {"sha256", "bytes", "mime", "preview"}}` 로 바꿔서 보내요(`with_reference`, `keeper_model_input_demotion.ml:167`). 모델이 보는 지난 호출이 도구 스키마에 없는 모양이 돼요.
 - 저장된 요청 5,244개 중 4,400개(83.9%)에 그렇게 바뀐 인자가 있어요. `masc-productor-owner`(deepseek-v4.1-flash)는 요청의 95.4%에 중앙값 334개가 들어 있고, 줄인 바이트의 중앙값이 366 KB(본문의 29.9%)예요. 이 Keeper 의 요청 하나를 열어서 assistant 메시지의 `masc_board_comment` 호출 `input` 이 `{"_blob": {"sha256": "4f394ce0…", "bytes": 4698, …}}` 인 것을 확인했어요.
-- GLM 으로 도는 Keeper 도 같은 비율로 받아요. `ocaml-agent-ic`(glm-5.3-flash)가 95.2%, `wkbl-data`·`wkbl-web-leader`·`e-masc-the-leader`·`code-reviewer-father`(glm-5.3)가 85~99%예요. 그런데 `_blob` 하나뿐인 호출은 `ocaml-agent-ic` 2건, `wkbl-data` 61건, `wkbl-web-leader` 23건, `e-masc-the-leader` 0건, `code-reviewer-father` 0건이에요. 같은 기록을 받아도 따라 하는 모델이 따로 있어요.
+- 저장된 요청이 모두 GLM 인 Keeper 넷도 강등된 인자를 받아요. `ocaml-agent-ic`(요청 373개)는 95.2%, `wkbl-web-leader`(351개)는 84.3%, `e-masc-the-leader`(275개)는 96.0%, `goo-yang-bong`(212개)은 76.9%예요. 그런데 `_blob` 하나뿐인 호출은 이 넷이 2건, 23건, 0건, 14건이에요. 저장된 요청에 deepseek 가 많은 `masc-productor-owner`(542개 중 409개)는 요청의 94.6%에서 받고 520건, `wkbl-front`(582개 중 337개)는 92.1%에 457건, `code-reviewer`(442개 중 437개)는 76.2%에 372건이에요. 같은 기록을 받아도 따라 하는 정도가 달라 보여요. 호출을 모델로 나눌 수 없어서 Keeper 단위 비교이고, 저장된 요청이 5개뿐인 `code-reviewer-sister` 는 호출이 217건이라 어느 모델이 만든 호출인지 알 수 없어요.
 
 **베낀 것이 아니라 지어낸 값.** 봉투 1,344건 가운데 `sha256` 의 blob 이 저장소에 있는 것은 7건이고 1,337건(99.5%)은 없어요. 요청 기록에서 본 강등된 인자의 해시는 12,855개 중 12,313개(95.8%)가 blob 이 같은 크기로 있어요. 기록에서 복사한 해시라면 대부분 있어야 해서, 모델이 봉투 모양을 따라 해시와 크기를 지어낸 거예요(`config/prompts/keeper.md` 문단이 "해시를 지어내지 않는다" 고 적은 일이에요). 예: 11-04 00:16Z `masc-productor-owner` 가 `masc_board_comment` 를 `{"_blob": {"bytes": 2905, "sha256": "a5bc9d78…", …}}` 로 불러 거절됐고, 그 해시의 blob 은 저장소에 없어요. 6.8초 뒤 같은 글을 제대로 된 인자로 다시 보내서 실행됐어요.
 
@@ -403,6 +403,6 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - 첫 길은 `Keeper_model_input_demotion`(RFC-0363)이에요. 이미 끝난 호출의 인자를 `{"_blob": {...}}` 로 바꿔서 모델에 보내요. 저장된 요청 5,244개 중 4,400개(83.9%)에 있고, `masc-productor-owner` 는 95.4%에 중앙값 334개예요. assistant 메시지의 `tool_use.input` 을 직접 열어 확인했어요.
 - 모델이 베낀 값이 아니라 지어낸 값이에요. 봉투 모양으로 보낸 1,344건 중 1,337건은 `sha256` 의 blob 이 저장소에 없어요. 강등이 만든 해시는 95.8%가 있어요.
 - 784건은 진짜 인자를 `_blob` 아래에 넣었어요(`{"_blob": {"post_id": ..., "content": ...}}`).
-- GLM 으로 도는 Keeper 다섯도 요청의 85~99%에 같은 강등된 인자를 받는데 `_blob` 호출은 `ocaml-agent-ic` 2건, `wkbl-data` 61건, `wkbl-web-leader` 23건, `e-masc-the-leader` 0건, `code-reviewer-father` 0건이에요. 따라 하는 모델이 따로 있어요.
+- 저장된 요청이 모두 GLM 인 Keeper 넷(`ocaml-agent-ic`, `wkbl-web-leader`, `e-masc-the-leader`, `goo-yang-bong`)도 요청의 76.9~96.0%에 강등된 인자를 받는데 `_blob` 호출은 2건, 23건, 0건, 14건이에요. deepseek 가 많은 `masc-productor-owner` 520건, `wkbl-front` 457건, `code-reviewer` 372건과 달라요(Keeper 단위 비교예요).
 - 그래서 Recent Actions 의 인자 재표시를 막아도 첫 길이 남아요(추정). 제안한 수정만으로는 이 숫자가 거의 안 바뀔 거예요.
-- 센 방법과 스크립트는 `docs/evidence/blob-input-2026-11` 에 있어요(시험 89개). 고친 뒤에는 `blob_calls.outcome_alone.refused_before_run` 이 0 에 가까워져야 해요.
+- 센 방법과 스크립트는 `docs/evidence/blob-input-2026-11` 에 있어요(시험 91개). 고친 뒤에는 `blob_calls.outcome_alone.refused_before_run` 이 0 에 가까워져야 해요.

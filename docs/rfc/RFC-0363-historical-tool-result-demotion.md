@@ -197,7 +197,7 @@ reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정
 
 본문의 몫은 요청마다 `줄인 바이트 ÷ wire.body_bytes` 를 구한 중앙값이다.
 
-봉투를 보낸 호출 1,344건 중 1,337건은 `sha256` 의 blob 이 없다. 기록에서 복사한 해시는 저장소에 있어야 하므로, 대부분은 복사가 아니라 모델이 만든 값이다. GLM 으로 요청을 보낸 Keeper 다섯(`ocaml-agent-ic`, `wkbl-data`, `wkbl-web-leader`, `e-masc-the-leader`, `code-reviewer-father`)도 요청의 84.8~98.9%에서 같은 강등된 인자를 받는다. 그런데 `_blob` 하나뿐인 호출은 각각 2, 61, 23, 0, 0건이다. 같은 기록을 받아도 따라 하는 쪽이 따로 있다. 원장에 모델이 없어서 호출은 Keeper 단위로만 나눴다.
+봉투를 보낸 호출 1,344건 중 1,337건은 `sha256` 의 blob 이 없다. 기록에서 복사한 해시는 저장소에 있어야 하므로, 대부분은 복사가 아니라 모델이 만든 값이다. 저장된 요청이 모두 GLM 인 Keeper 넷(`ocaml-agent-ic` 373개, `wkbl-web-leader` 351개, `e-masc-the-leader` 275개, `goo-yang-bong` 212개)도 요청의 76.9~96.0%에서 강등된 인자를 받는다. 그런데 `_blob` 하나뿐인 호출은 각각 2, 23, 0, 14건이다. 저장된 요청에 deepseek 가 많은 `masc-productor-owner`(542개 중 409개), `wkbl-front`(582개 중 337개), `code-reviewer`(442개 중 437개)는 요청의 94.6%, 92.1%, 76.2%에서 받고 520, 457, 372건이다. 같은 기록을 받아도 따라 하는 정도가 다르다. 원장에 모델이 없어서 호출은 Keeper 단위로만 나눴고, 저장된 요청이 5개뿐인 `code-reviewer-sister`(217건)처럼 호출을 만든 모델을 알 수 없는 Keeper 도 있다.
 
 이 측정으로 정해지지 않는 것이 셋이다.
 

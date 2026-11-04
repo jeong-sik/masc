@@ -694,6 +694,31 @@ class SummarizeHistoryTest(unittest.TestCase):
             rows = self.summary()["by_keeper_and_model"]
         self.assertEqual(len(rows), 1)  # type: ignore[arg-type]
 
+    def test_every_keeper_and_model_is_counted_even_without_a_demoted_argument_or_beyond_the_row_cap(self) -> None:
+        with mock.patch.object(blobs, "TOP_HISTORY_ROWS", 1):
+            result = self.summary()
+        self.assertEqual(
+            result["requests_by_keeper_and_model"],
+            {
+                "k1": {
+                    "m1": {"requests": 3, "with_demoted_arguments": 2},
+                    "m2": {"requests": 1, "with_demoted_arguments": 1},
+                },
+                "k2": {"m2": {"requests": 1, "with_demoted_arguments": 0}},
+            },
+        )
+
+    def test_a_group_counts_requests_with_demoted_arguments_apart_from_those_with_demoted_results(self) -> None:
+        requests = [
+            blobs.HistoryRequest("k", "m", 100, 1, 10, 0, 0, 0),
+            blobs.HistoryRequest("k", "m", 100, 0, 0, 1, 10, 0),
+            blobs.HistoryRequest("k", "m", 100, 0, 0, 2, 20, 0),
+        ]
+        result = blobs.summarize_history(requests, {}, self.base)
+        self.assertEqual(
+            result["requests_by_keeper_and_model"], {"k": {"m": {"requests": 3, "with_demoted_arguments": 1}}}
+        )
+
     def test_a_request_without_body_bytes_is_left_out_of_the_share(self) -> None:
         requests = [blobs.HistoryRequest("k", "m", 0, 1, 50, 0, 0, 0), blobs.HistoryRequest("k", "m", 1000, 1, 50, 0, 0, 0)]
         row = blobs.summarize_history(requests, {}, self.base)["by_keeper_and_model"][0]  # type: ignore[index]
@@ -714,6 +739,7 @@ class SummarizeHistoryTest(unittest.TestCase):
             (0, 0, None),
         )
         self.assertEqual((result["distinct_demoted_arguments"], result["stored_and_same_size"], result["by_keeper_and_model"]), (0, 0, []))
+        self.assertEqual(result["requests_by_keeper_and_model"], {})
 
     def test_a_demoted_argument_is_stored_when_its_blob_has_the_recorded_size(self) -> None:
         put_blob(self.base, SHA_A, "12345")

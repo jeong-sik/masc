@@ -322,6 +322,284 @@
     ],
     "distinct_demoted_arguments": 12855,
     "requests": 5244,
+    "requests_by_keeper_and_model": {
+      "build-maniac": {
+        "glm-5.3-flash": {
+          "requests": 15,
+          "with_demoted_arguments": 10
+        }
+      },
+      "code-reviewer": {
+        "deepseek-v4.1-flash": {
+          "requests": 95,
+          "with_demoted_arguments": 0
+        },
+        "deepseek/deepseek-v4.1-flash-1017": {
+          "requests": 342,
+          "with_demoted_arguments": 336
+        },
+        "glm-5.3-flash": {
+          "requests": 5,
+          "with_demoted_arguments": 1
+        }
+      },
+      "code-reviewer-brother": {
+        "deepseek-v4.1-flash": {
+          "requests": 2,
+          "with_demoted_arguments": 0
+        },
+        "glm-5.3-flash": {
+          "requests": 10,
+          "with_demoted_arguments": 1
+        },
+        "kimi-k3.1-pro": {
+          "requests": 115,
+          "with_demoted_arguments": 114
+        },
+        "mimo-v2.6-flash": {
+          "requests": 3,
+          "with_demoted_arguments": 0
+        }
+      },
+      "code-reviewer-father": {
+        "glm-5.3": {
+          "requests": 245,
+          "with_demoted_arguments": 230
+        },
+        "glm-5.3-flash": {
+          "requests": 26,
+          "with_demoted_arguments": 15
+        },
+        "kimi-k3.1-pro": {
+          "requests": 28,
+          "with_demoted_arguments": 24
+        },
+        "mimo-v2.6-flash": {
+          "requests": 10,
+          "with_demoted_arguments": 0
+        }
+      },
+      "code-reviewer-mother": {
+        "deepseek-v4.1-flash": {
+          "requests": 2,
+          "with_demoted_arguments": 0
+        },
+        "deepseek/deepseek-v4.1-flash-1017": {
+          "requests": 214,
+          "with_demoted_arguments": 200
+        },
+        "glm-5.3-flash": {
+          "requests": 11,
+          "with_demoted_arguments": 0
+        }
+      },
+      "code-reviewer-sister": {
+        "glm-5.3-flash": {
+          "requests": 5,
+          "with_demoted_arguments": 0
+        }
+      },
+      "code-reviewer-uncle": {
+        "deepseek-v4.1-flash": {
+          "requests": 44,
+          "with_demoted_arguments": 36
+        },
+        "glm-5.3-flash": {
+          "requests": 7,
+          "with_demoted_arguments": 2
+        }
+      },
+      "context-reviewer": {
+        "deepseek-v4.1-flash": {
+          "requests": 60,
+          "with_demoted_arguments": 0
+        },
+        "glm-5.3-flash": {
+          "requests": 67,
+          "with_demoted_arguments": 61
+        }
+      },
+      "e-masc-the-leader": {
+        "glm-5.3": {
+          "requests": 265,
+          "with_demoted_arguments": 262
+        },
+        "glm-5.3-flash": {
+          "requests": 10,
+          "with_demoted_arguments": 2
+        }
+      },
+      "ego-acceptance-20261101-0213": {
+        "glm-5.3-flash": {
+          "requests": 6,
+          "with_demoted_arguments": 0
+        }
+      },
+      "github-pr-checker": {
+        "deepseek-v4.1-flash": {
+          "requests": 22,
+          "with_demoted_arguments": 0
+        }
+      },
+      "goo-yang-bong": {
+        "glm-5.3-flash": {
+          "requests": 212,
+          "with_demoted_arguments": 163
+        }
+      },
+      "kidsnote-incoming-dd-manager": {
+        "deepseek-v4.1-flash": {
+          "requests": 113,
+          "with_demoted_arguments": 83
+        },
+        "glm-5.3-flash": {
+          "requests": 21,
+          "with_demoted_arguments": 0
+        },
+        "minimax-m3.1-flash": {
+          "requests": 1,
+          "with_demoted_arguments": 0
+        }
+      },
+      "kidsnote-qa-hub-manager": {
+        "glm-5.3-flash": {
+          "requests": 71,
+          "with_demoted_arguments": 63
+        }
+      },
+      "kidsnote-slack-reader": {
+        "deepseek-v4.1-flash": {
+          "requests": 19,
+          "with_demoted_arguments": 0
+        },
+        "glm-5.3-flash": {
+          "requests": 126,
+          "with_demoted_arguments": 114
+        },
+        "nvidia/nemotron-3.5-super-vl:free": {
+          "requests": 3,
+          "with_demoted_arguments": 2
+        }
+      },
+      "masc-productor-owner": {
+        "deepseek-v4.1-flash": {
+          "requests": 409,
+          "with_demoted_arguments": 390
+        },
+        "glm-5.3-flash": {
+          "requests": 133,
+          "with_demoted_arguments": 123
+        }
+      },
+      "msx-retro-mania": {
+        "deepseek-v4.1-flash": {
+          "requests": 237,
+          "with_demoted_arguments": 219
+        },
+        "glm-5.3-flash": {
+          "requests": 16,
+          "with_demoted_arguments": 6
+        },
+        "qwen3.8-flash": {
+          "requests": 2,
+          "with_demoted_arguments": 0
+        }
+      },
+      "music-sensei": {
+        "glm-5.3-flash": {
+          "requests": 224,
+          "with_demoted_arguments": 186
+        }
+      },
+      "native-image-goal-20261101-0340": {
+        "glm-5.3-flash": {
+          "requests": 3,
+          "with_demoted_arguments": 0
+        }
+      },
+      "native-image-verify-20261101-111334": {
+        "glm-5.3-flash": {
+          "requests": 1,
+          "with_demoted_arguments": 0
+        }
+      },
+      "ocaml-agent-ic": {
+        "glm-5.3-flash": {
+          "requests": 373,
+          "with_demoted_arguments": 355
+        }
+      },
+      "pr-updater": {
+        "glm-5.3-flash": {
+          "requests": 14,
+          "with_demoted_arguments": 1
+        }
+      },
+      "sangsu": {
+        "deepseek-v4.1-flash": {
+          "requests": 43,
+          "with_demoted_arguments": 0
+        },
+        "glm-5.3-flash": {
+          "requests": 71,
+          "with_demoted_arguments": 69
+        }
+      },
+      "temporal-continuity-20261030-1727": {
+        "glm-5.3-flash": {
+          "requests": 12,
+          "with_demoted_arguments": 0
+        }
+      },
+      "wkbl-data": {
+        "deepseek-v4.1-flash": {
+          "requests": 50,
+          "with_demoted_arguments": 50
+        },
+        "glm-5.3": {
+          "requests": 344,
+          "with_demoted_arguments": 302
+        }
+      },
+      "wkbl-front": {
+        "deepseek-v4.1-flash": {
+          "requests": 337,
+          "with_demoted_arguments": 315
+        },
+        "glm-5.3-flash": {
+          "requests": 220,
+          "with_demoted_arguments": 209
+        },
+        "nvidia/nemotron-3.5-super-vl:free": {
+          "requests": 25,
+          "with_demoted_arguments": 12
+        }
+      },
+      "wkbl-growth": {
+        "deepseek-v4.1-flash": {
+          "requests": 51,
+          "with_demoted_arguments": 0
+        },
+        "deepseek/deepseek-v4.1-flash-1017": {
+          "requests": 134,
+          "with_demoted_arguments": 132
+        },
+        "glm-5.3-flash": {
+          "requests": 19,
+          "with_demoted_arguments": 16
+        }
+      },
+      "wkbl-web-leader": {
+        "glm-5.3": {
+          "requests": 348,
+          "with_demoted_arguments": 295
+        },
+        "glm-5.3-flash": {
+          "requests": 3,
+          "with_demoted_arguments": 1
+        }
+      }
+    },
     "stored_and_same_size": 12313,
     "unreadable_messages": 0,
     "with_demoted_arguments": 4400,

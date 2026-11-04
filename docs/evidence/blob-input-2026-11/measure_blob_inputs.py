@@ -380,6 +380,12 @@ def summarize_history(
                 "result_saved_bytes_median": median_int([item.result_saved for item in with_results]),
             }
         )
+    requests_by_keeper: dict[str, dict[str, dict[str, int]]] = defaultdict(dict)
+    for (keeper, model), items in grouped.items():
+        requests_by_keeper[keeper][model] = {
+            "requests": len(items),
+            "with_demoted_arguments": sum(1 for item in items if item.arguments > 0),
+        }
     carrying_total = sum(1 for request in requests if request.arguments > 0)
     same_size = 0
     for sha, original in envelopes.items():
@@ -396,6 +402,7 @@ def summarize_history(
         "distinct_demoted_arguments": len(envelopes),
         "stored_and_same_size": same_size,
         "by_keeper_and_model": rows[:TOP_HISTORY_ROWS],
+        "requests_by_keeper_and_model": dict(sorted(requests_by_keeper.items())),
     }
 
 

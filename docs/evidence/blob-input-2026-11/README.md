@@ -68,7 +68,9 @@ docs/evidence/blob-input-2026-11/measure_blob_inputs.py --base-path ~/me \
 | 11-04 | 5 | 0 |
 
 `alone` 호출이 많은 Keeper 는 `masc-productor-owner` 520, `wkbl-front` 457, `code-reviewer` 372, `context-reviewer` 270, `code-reviewer-sister` 217, `msx-retro-mania` 204, `tui-developer` 89, `code-reviewer-mother` 64건이에요. 모두 실행 전에 거절됐어요.
-JSON 의 `blob_calls.alone_by_keeper` 에는 Keeper 23명 모두의 `alone` 호출 수가 있고, 없는 Keeper 는 0건이에요. 아래 표에서 GLM 으로 요청을 보낸 다섯은 `ocaml-agent-ic` 2, `wkbl-data` 61, `wkbl-web-leader` 23, `e-masc-the-leader` 0, `code-reviewer-father` 0건이에요.
+JSON 의 `blob_calls.alone_by_keeper` 에는 Keeper 23명 모두의 `alone` 호출 수가 있고, 없는 Keeper 는 0건이에요. `history_arguments.requests_by_keeper_and_model` 에는 Keeper 와 모델마다 저장된 요청 수와 그중 강등된 인자가 있는 요청 수가 모두 있어요.
+저장된 요청이 모두 GLM 인 Keeper 넷의 `alone` 호출은 `ocaml-agent-ic`(요청 373개) 2건, `wkbl-web-leader`(351개) 23건, `e-masc-the-leader`(275개) 0건, `goo-yang-bong`(212개) 14건이에요. 강등된 인자는 이 요청들의 76.9~96.0%에 있어요.
+저장된 요청에 deepseek 가 많은 `masc-productor-owner`(542개 중 409개)는 520건, `wkbl-front`(582개 중 337개)는 457건, `code-reviewer`(442개 중 437개)는 372건이에요. 요청의 94.6%, 92.1%, 76.2%에 강등된 인자가 있어요.
 도구는 `masc_board_comment` 1,221, `Write` 478, `Execute` 305, `keeper_memory_write` 154, `masc_board_post` 102, `Edit` 47, `masc_schedule_create` 31, `masc_ask` 16건이에요.
 
 저장된 요청 5,244개 가운데 4,400개(83.9%)에 강등된 인자가 있어요. 읽지 못한 메시지는 0이에요.
@@ -93,6 +95,6 @@ JSON 의 `history_arguments.by_keeper_and_model` 은 강등된 인자가 있는 
 
 - 저장된 요청은 턴마다 하나라서 모델 요청의 일부예요. 어느 요청을 저장하는지는 확인하지 못했어요.
 - 해시가 저장소에 없는 봉투는 모델이 지어낸 값일 수 있고, 지워진 blob 일 수도 있어요. 강등이 만든 해시의 95.8%가 같은 창에서 저장소에 있어서, 지워진 몫은 많아야 4.2%예요(저장된 요청에서 본 해시만 센 값이에요).
-- 원장 행으로는 호출을 모델별로 나눌 수 없어요. 표의 모델은 저장된 요청의 `wire.model` 이에요. 같은 Keeper 가 날짜에 따라 모델을 바꿀 수 있어서 `wkbl-front` 는 두 줄이에요.
+- 원장 행으로는 호출을 모델별로 나눌 수 없어요. 표의 모델은 저장된 요청의 `wire.model` 이에요. 같은 Keeper 가 날짜에 따라 모델을 바꿀 수 있어서 `wkbl-front` 는 두 줄이에요. 저장된 요청이 적은 Keeper 는 호출을 만든 모델을 알 수 없어요(`code-reviewer-sister` 는 저장된 요청 5개가 모두 GLM 인데 `alone` 호출이 217건이에요).
 - 강등된 인자가 요청의 84%에 있는 이유는 이 측정이 가르지 않아요. 크기 거절 뒤의 재전송과 Official client host 의 턴 경계 인자 강등이 둘 다 같은 값을 만들어요(`docs/rfc/RFC-0363-historical-tool-result-demotion.md` §3.4.1).
-- 시험 89개가 통과하고, 계산을 틀리게 바꾼 변형 102개를 모두 잡았어요.
+- 시험 91개가 통과하고, 계산을 틀리게 바꾼 변형 109개를 모두 잡았어요.

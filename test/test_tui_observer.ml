@@ -432,11 +432,6 @@ let test_a_frame_its_type_decides_is_not_read_past_the_type () =
        (decode_all
           [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
 
-(* A delta has a slice too, and reading the table for "does this have one"
-   rather than "does it replace a projection" would swallow this one: the
-   screen would drop a keeper change into the quiet class. It has its own arm
-   above, and the table marks it as not a whole projection, so both halves
-   have to break before it can go wrong. *)
 (* The metrics file's own announcement, not the heartbeat: the in-turn pulse
    sends [keeper_heartbeat] without writing a row. *)
 let test_a_metrics_append_names_its_keeper () =
@@ -459,6 +454,11 @@ let test_a_metrics_append_names_its_keeper () =
      | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
      | _ -> None)
 
+(* A delta has a slice too, and reading the table for "does this have one"
+   rather than "does it replace a projection" would swallow this one: the
+   screen would drop a keeper change into the quiet class. It has its own arm
+   above, and the table marks it as not a whole projection, so both halves
+   have to break before it can go wrong. *)
 let test_a_delta_with_a_slice_is_not_a_snapshot () =
   check (list string) "a composite change stays a keeper event"
     [ "composite(lane-smith)" ]

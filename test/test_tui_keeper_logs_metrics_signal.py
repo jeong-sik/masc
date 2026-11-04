@@ -2,9 +2,10 @@
 """The logs view reads its Keeper's metrics again when the server announces a
 row appended to that Keeper's metrics file (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every metrics
-read after the view opens comes from an announcement. The metrics file is
-read from the local workspace, so the reads are counted in the TUI's own log.
+The first test pushes the refresh cadence out of its lifetime, so every
+metrics read after the view opens comes from an announcement. The second runs
+the cadence every second and sees it read nothing. The metrics file is read
+from the local workspace, so the reads are counted in the TUI's own log.
 """
 
 import glob
@@ -92,6 +93,30 @@ class KeeperLogsMetricsSignalTest(unittest.TestCase):
             self.assertEqual(started_reads(base, "analyst"), opened + 1)
 
         owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
+
+    def test_the_cadence_does_not_read_the_metrics(self) -> None:
+        owed.ChatOwedHistoryTest.binary = self.binary
+
+        def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
+            base = server.base
+            step("keys", "l")
+            step(
+                "wait",
+                lambda: started_reads(base, "analyst") >= 1,
+                "the logs view did not read its Keeper's metrics",
+            )
+            step("drain", 1.0)
+            opened = started_reads(base, "analyst")
+            server.set_phase("cadence")
+            step("drain", 3.5)
+            self.assertGreaterEqual(
+                server.count("cadence", "/health"), 2, "the cadence did not run"
+            )
+            self.assertEqual(started_reads(base, "analyst"), opened)
+
+        owed.ChatOwedHistoryTest.run_chat(
+            cast(owed.ChatOwedHistoryTest, self), scenario, refresh_seconds=1.0
+        )
 
 
 if __name__ == "__main__":

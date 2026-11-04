@@ -1094,9 +1094,7 @@ let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta)
 
 let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
   Dashboard_cache.invalidate (keeper_config_cache_key config name);
-  Dashboard_cache.invalidate (keeper_composite_cache_key config name);
-  Dashboard_cache.invalidate_prefix
-    (Printf.sprintf "dashboard:fleet-composite:%s" config.base_path);
+  invalidate_keeper_composite_caches ~base_path:config.base_path ~name;
   match runtime_event with
   | Some event ->
       (* See #37175: only the lifecycle listener acts on a partial refresh. *)
@@ -1341,12 +1339,6 @@ let secret_projection_response_json config name =
     ]
 ;;
 
-let invalidate_keeper_secret_projection_caches config name =
-  Dashboard_cache.invalidate (keeper_composite_cache_key config name);
-  Dashboard_cache.invalidate_prefix
-    (Printf.sprintf "dashboard:fleet-composite:%s" config.Workspace.base_path)
-;;
-
 let required_secret_string_field json name =
   match Json_util.assoc_member_opt name json with
   | Some (`String value) -> Ok value
@@ -1452,7 +1444,7 @@ let handle_keeper_secrets_post state req reqd body_str =
            (match result with
             | Error msg -> respond_error reqd msg
             | Ok () ->
-              invalidate_keeper_secret_projection_caches config name;
+              invalidate_keeper_composite_caches ~base_path:config.Workspace.base_path ~name;
               Http.Response.json_value ~compress:true ~request:req
                 (secret_projection_response_json config name)
                 reqd)

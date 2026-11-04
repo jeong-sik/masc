@@ -1,15 +1,25 @@
-(** SSE broadcast helpers for keeper lifecycle events.
+(** SSE broadcast helpers for keeper lifecycle events: scoped SSE broadcasts
+    with an Otel_metric_store counter and a log line on failure. No registry
+    state touched. *)
 
-    Extracted from keeper_registry.ml (lines 610-652) as part of the
-    godfile decomp campaign. Two pure side-effect wrappers around
-    scoped SSE broadcasts with Otel_metric_store counter
-    + log on failure. No registry state touched. *)
+let before_composite_changed : (base_path:string -> name:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~name:_ -> ())
+;;
+
+let install_before_composite_changed f = Atomic.set before_composite_changed f
 
 let composite_changed ~base_path ~name ~ts_unix =
   (* Signal-only freshness tick: name + timestamp. The authoritative read
      model is the per-keeper composite HTTP endpoint; consumers must
      re-fetch [/api/v1/keepers/:name/composite]. See
      docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md §Read Model Rules. *)
+  (try (Atomic.get before_composite_changed) ~base_path ~name with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Keeper.warn
+       "registry: composite read model invalidation name=%s failed: %s"
+       name
+       (Printexc.to_string exn));
   try
     let json =
       `Assoc
@@ -24,15 +34,8 @@ let composite_changed ~base_path ~name ~ts_unix =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    (* P2 silent-failure fix: previously this discarded the exception
-         silently, hiding the case where the SSE broadcast pipe is dead
-         (subscriber cleanup race, transport tear-down).  Operators
-         investigating "dashboard stopped updating" had no signal that
-         the broadcast itself was failing.  PR-C (#11075) added a
-         counter on the SSE side, but only for per-client failures
-         inside broadcast_impl — exceptions thrown out of
-         Sse.broadcast itself bypass that counter.  Logging here
-         makes the exception visible at the call site. *)
+    (* Sse counts a failure to deliver to one client; an exception out of the
+       broadcast itself is counted and logged here. *)
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LifecycleDispatchRejections)
       ~labels:[ "keeper", name; "event", "broadcast_composite_failed" ]

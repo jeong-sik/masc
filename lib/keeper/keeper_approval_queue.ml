@@ -758,9 +758,55 @@ let load_snapshot_unlocked ~base_path : (loaded_snapshot, storage_error) result 
     Error { path; reason }
 ;;
 
-let attach_replay_results ~delivery_map replay_results =
+let attach_replay_results ~delivery_map (replay_results, settlements) =
+  let with_outcomes =
+    SMap.fold
+      (fun approval_id outcome result ->
+         match result with
+         | Error _ as error -> error
+         | Ok deliveries ->
+           (match SMap.find_opt approval_id deliveries with
+            | None ->
+              Error
+                (Printf.sprintf
+                   "gate_replay_results outcome %s has no matching delivery"
+                   approval_id)
+           | Some
+               ( { decision = Decision.Approve
+                 ; grant_consumed = true
+                 ; replay_outcome = None
+                 ; _
+                 } as delivery ) ->
+             Ok
+               (SMap.add
+                  approval_id
+                  { delivery with replay_outcome = Some outcome }
+                  deliveries)
+           | Some { decision = Decision.Approve; grant_consumed = false; _ } ->
+             Error
+               (Printf.sprintf
+                  "gate_replay_results outcome %s requires a consumed approve grant"
+                  approval_id)
+           | Some
+               { decision = Decision.Reject _; _ } ->
+             Error
+               (Printf.sprintf
+                  "gate_replay_results outcome %s belongs to a non-approved delivery"
+                  approval_id)
+           | Some { replay_outcome = Some _; _ } ->
+             Error
+               (Printf.sprintf
+                  "gate_replay_results outcome %s is duplicated in memory"
+                  approval_id)))
+      replay_results
+      (Ok delivery_map)
+  in
+  (* The operator settlement attaches under the same admission rules as an
+     outcome — a consumed approve delivery — and never displaces one: an
+     outcome, when present, remains the machine's own durable answer
+     (#26191). *)
   SMap.fold
-    (fun approval_id outcome result ->
+    (fun approval_id settlement result ->
        match result with
        | Error _ as error -> error
        | Ok deliveries ->
@@ -768,37 +814,38 @@ let attach_replay_results ~delivery_map replay_results =
           | None ->
             Error
               (Printf.sprintf
-                 "gate_replay_results outcome %s has no matching delivery"
+                 "gate_replay_results settlement %s has no matching delivery"
                  approval_id)
           | Some
               ( { decision = Decision.Approve
                 ; grant_consumed = true
-                ; replay_outcome = None
                 ; _
-                } as delivery ) ->
+                } as delivery )
+            when Option.is_none delivery.operator_settlement ->
             Ok
               (SMap.add
                  approval_id
-                 { delivery with replay_outcome = Some outcome }
+                 { delivery with operator_settlement = Some settlement }
                  deliveries)
           | Some { decision = Decision.Approve; grant_consumed = false; _ } ->
             Error
               (Printf.sprintf
-                 "gate_replay_results outcome %s requires a consumed approve grant"
+                 "gate_replay_results settlement %s requires a consumed approve grant"
                  approval_id)
-          | Some
-              { decision = Decision.Reject _; _ } ->
+          | Some { decision = Decision.Reject _; _ } ->
             Error
               (Printf.sprintf
-                 "gate_replay_results outcome %s belongs to a non-approved delivery"
+                 "gate_replay_results settlement %s belongs to a non-approved delivery"
                  approval_id)
-          | Some { replay_outcome = Some _; _ } ->
+          | Some { decision = Decision.Approve; grant_consumed = true; _ } ->
+            (* Reached only with a settlement already attached: the
+               first arm's guard took the unattached case. *)
             Error
               (Printf.sprintf
-                 "gate_replay_results outcome %s is duplicated in memory"
+                 "gate_replay_results settlement %s is duplicated in memory"
                  approval_id)))
-    replay_results
-    (Ok delivery_map)
+    settlements
+    with_outcomes
 ;;
 
 let load_replay_results_unlocked ~base_path ~delivery_map =
@@ -952,6 +999,7 @@ let approved_resolution_delivery ~base_path ~id =
             }
         ; state = Resolution_unconsumed
         ; replay_outcome = delivery.replay_outcome
+        ; operator_settlement = delivery.operator_settlement
         }
     | Ok (Approved_delivery_consumed delivery) ->
       Ok
@@ -962,6 +1010,7 @@ let approved_resolution_delivery ~base_path ~id =
             }
         ; state = Resolution_consumed
         ; replay_outcome = delivery.replay_outcome
+        ; operator_settlement = delivery.operator_settlement
         })
 ;;
 
@@ -1035,6 +1084,86 @@ let record_consumed_resolution_replay ~base_path ~id ~outcome =
                  }
                in
                Error (Grant_replay_projection_unavailable error)))))
+;;
+
+(* #26191. Record an authenticated operator's terminal judgement on a grant
+   whose replay outcome stayed absent after a restart. The fence — keeper,
+   resolution sequence — binds the judgement to the exact delivery the
+   operator was looking at; the wake revision and source post id are carried
+   for observability, not re-derived here. Idempotent by judgement+fence
+   identity; a different judgement or fence on the same approval is an
+   explicit conflict. The settlement sits beside the replay outcome and
+   never displaces one. *)
+let record_operator_settlement
+      ~base_path
+      ~keeper_name
+      ~id
+      (settlement : Keeper_approval_queue_result.operator_settlement) =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get replay_projection_errors) with
+    | Some error -> Error (Grant_replay_projection_unavailable error)
+    | None ->
+      (match approved_delivery_unlocked ~base_path ~id with
+       | Error _ as error -> error
+       | Ok (Approved_delivery_unconsumed _) ->
+         Error (Grant_replay_not_consumed id)
+       | Ok (Approved_delivery_consumed delivery) ->
+         if not (String.equal delivery.entry.keeper_name keeper_name) then
+           Error
+             (Grant_settlement_keeper_mismatch
+                { approval_id = id
+                ; requested_keeper = keeper_name
+                ; stored_keeper = delivery.entry.keeper_name
+                })
+         else if delivery.resolution_sequence <> settlement.resolution_sequence
+         then
+           Error
+             (Grant_settlement_fence_mismatch
+                { approval_id = id
+                ; requested_sequence = settlement.resolution_sequence
+                ; stored_sequence = delivery.resolution_sequence
+                })
+         else
+           (match delivery.operator_settlement with
+            | Some existing
+              when Keeper_approval_queue_result.operator_settlement_equal
+                     existing settlement ->
+              Ok Settlement_already_recorded
+            | Some _ -> Error (Grant_settlement_conflict id)
+            | None ->
+              let updated_delivery =
+                { delivery with operator_settlement = Some settlement }
+              in
+              let updated_deliveries =
+                SMap.add id updated_delivery (Atomic.get deliveries)
+              in
+              (match
+                 save_replay_results_file_unlocked
+                   ~base_path
+                   ~delivery_map:updated_deliveries
+               with
+               | Error error ->
+                 Error (Grant_replay_projection_unavailable error)
+               | Ok Fsync_completed ->
+                 Atomic.set deliveries updated_deliveries;
+                 (match durable_state_for ~base_path with
+                  | None -> ()
+                  | Some durable when SMap.mem id durable.durable_deliveries ->
+                    set_durable_state
+                      ~base_path
+                      { durable with
+                        durable_deliveries =
+                          SMap.add id updated_delivery durable.durable_deliveries
+                      }
+                  | Some _ -> ());
+                 Ok Settlement_recorded
+               | Ok (Visible_sync_unconfirmed reason) ->
+                 let error =
+                   { path = replay_results_store_path ~base_path
+                   ; reason
+                   }
+                 in
+                 Error (Grant_replay_projection_unavailable error)))))
 ;;
 
 let consume_approved_resolution
@@ -2230,6 +2359,7 @@ let journal_resolution ~base_path ~id ~decision ~source ~remember_rule ~rule_exp
         ; created_by
         ; grant_consumed = false
         ; replay_outcome = None
+        ; operator_settlement = None
         }
       in
       let updated_pending = SMap.remove id (Atomic.get pending) in

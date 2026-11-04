@@ -4,7 +4,11 @@ open Keeper_approval_queue_result
 module SMap = Set_util.StringMap
 
 let pending_store_version = 13
-let replay_results_store_version = 1
+(* v2 adds [settlements]: the operator's terminal judgement on a grant whose
+   replay outcome stayed absent after a restart (#26191). The pending store
+   itself does not carry it — the sidecar owns it beside [outcomes], and the
+   delivery map re-attaches it on load exactly as it re-attaches outcomes. *)
+let replay_results_store_version = 2
 
 type persisted_delivery =
   { entry : pending_approval
@@ -16,6 +20,7 @@ type persisted_delivery =
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
+  ; operator_settlement : Keeper_approval_queue_result.operator_settlement option
   }
 let exact_request_context_version = 1
 
@@ -139,6 +144,33 @@ let snapshot_to_yojson ~base_path ~next_sequence ~generation ~pending_map ~deliv
     ]
 ;;
 
+(* The settlement row is flat, matching the outcome row shape: a string
+   [kind] discriminator plus the reference fields it names, never a nested
+   object under [kind]. *)
+let operator_settlement_kind_fields = function
+  | Effect_confirmed_applied artifact_ref ->
+    [ "kind", `String "effect_confirmed_applied"
+    ; "artifact_ref", Tool_output.normalized_artifact_ref_to_json artifact_ref
+    ]
+  | Effect_confirmed_failed detail_ref ->
+    [ "kind", `String "effect_confirmed_failed"
+    ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
+    ]
+  | Terminally_abandoned -> [ "kind", `String "terminally_abandoned" ]
+;;
+
+let operator_settlement_to_yojson (settlement : Keeper_approval_queue_result.operator_settlement) =
+  `Assoc
+    (operator_settlement_kind_fields settlement.kind
+     @ [ "resolution_sequence", `Int settlement.resolution_sequence
+       ; "admitted_revision", `String (Int64.to_string settlement.admitted_revision)
+       ; "source_post_id", `String settlement.source_post_id
+       ; "stage", `String settlement.stage
+       ; "settled_at", `Float settlement.settled_at
+       ])
+;;
+
+
 let replay_results_to_yojson ~base_path ~delivery_map =
   let outcomes =
     map_values_for_base
@@ -154,9 +186,24 @@ let replay_results_to_yojson ~base_path ~delivery_map =
              ])
         delivery.replay_outcome)
   in
+  let settlements =
+    map_values_for_base
+      ~base_path
+      delivery_map
+      (fun delivery -> delivery.entry)
+    |> List.filter_map (fun delivery ->
+      Option.map
+        (fun settlement ->
+           `Assoc
+             [ "approval_id", `String delivery.entry.id
+             ; "settlement", operator_settlement_to_yojson settlement
+             ])
+        delivery.operator_settlement)
+  in
   `Assoc
     [ "version", `Int replay_results_store_version
     ; "outcomes", `List outcomes
+    ; "settlements", `List settlements
     ]
 ;;
 type log_row =
@@ -188,6 +235,88 @@ let required_member ~surface field fields =
   match List.assoc_opt field fields with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let operator_settlement_kind_of_fields ~surface fields =
+  let open Result.Syntax in
+  match List.assoc_opt "kind" fields with
+  | Some (`String "effect_confirmed_applied") ->
+    let* artifact_ref_json = required_member ~surface "artifact_ref" fields in
+    let* artifact_ref =
+      match Tool_output.normalized_artifact_ref_of_json artifact_ref_json with
+      | Tool_output.Decoded_normalized_artifact_ref artifact_ref -> Ok artifact_ref
+      | Tool_output.Not_normalized_artifact_ref ->
+        Error
+          (surface ^ ".artifact_ref must be a normalized artifact reference")
+      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+        Error (surface ^ ".artifact_ref: " ^ detail)
+    in
+    Ok (Effect_confirmed_applied artifact_ref)
+  | Some (`String "effect_confirmed_failed") ->
+    let* detail_ref_json = required_member ~surface "detail_ref" fields in
+    let* detail_ref =
+      match Tool_output.normalized_artifact_ref_of_json detail_ref_json with
+      | Tool_output.Decoded_normalized_artifact_ref detail_ref -> Ok detail_ref
+      | Tool_output.Not_normalized_artifact_ref ->
+        Error
+          (surface ^ ".detail_ref must be a normalized artifact reference")
+      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+        Error (surface ^ ".detail_ref: " ^ detail)
+    in
+    Ok (Effect_confirmed_failed detail_ref)
+  | Some (`String "terminally_abandoned") -> Ok Terminally_abandoned
+  | Some (`String other) ->
+    Error (Printf.sprintf "%s.kind %S is unknown" surface other)
+  | Some _ -> Error (surface ^ ".kind must be a string")
+  | None -> Error (surface ^ ".kind is required")
+;;
+
+let operator_settlement_of_yojson ~surface (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:
+          [ "kind"; "artifact_ref"; "detail_ref"; "resolution_sequence"
+          ; "admitted_revision"; "source_post_id"; "stage"; "settled_at" ]
+        fields
+    in
+    let* kind = operator_settlement_kind_of_fields ~surface fields in
+    let* () =
+      match kind with
+      | Effect_confirmed_applied _ | Effect_confirmed_failed _ -> Ok ()
+      | Terminally_abandoned ->
+        (* A judgement with no bounded reference must not name one. *)
+        (match List.assoc_opt "artifact_ref" fields, List.assoc_opt "detail_ref" fields with
+         | None, None -> Ok ()
+         | _ -> Error (surface ^ ".terminally_abandoned carries no reference field"))
+    in
+    let* resolution_sequence =
+      required_positive_int ~surface "resolution_sequence" fields
+    in
+    let* admitted_revision =
+      match List.assoc_opt "admitted_revision" fields with
+      | Some (`String raw) ->
+        (match Int64.of_string_opt raw with
+         | Some value -> Ok value
+         | None -> Error (surface ^ ".admitted_revision must be an int64 string"))
+      | Some _ -> Error (surface ^ ".admitted_revision must be an int64 string")
+      | None -> Error (surface ^ ".admitted_revision is required")
+    in
+    let* source_post_id = required_string ~surface "source_post_id" fields in
+    let* stage = required_string ~surface "stage" fields in
+    let* settled_at = required_float ~surface "settled_at" fields in
+    Ok
+      { kind
+      ; resolution_sequence
+      ; admitted_revision
+      ; source_post_id
+      ; stage
+      ; settled_at
+      }
+  | _ -> Error (surface ^ " must be a JSON object")
 ;;
 
 let optional_string ~surface field fields =
@@ -643,6 +772,7 @@ let persisted_delivery_of_yojson ~base_path json =
       ; created_by
       ; grant_consumed
       ; replay_outcome = None
+      ; operator_settlement = None
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
 ;;
@@ -725,6 +855,28 @@ let replay_result_row_of_yojson json =
   | _ -> Error "gate_replay_results.outcomes[] must be a JSON object"
 ;;
 
+let replay_settlement_row_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let surface = "gate_replay_results.settlements[]" in
+    let* () =
+      reject_unknown_fields
+        ~surface
+        ~allowed:[ "approval_id"; "settlement" ]
+        fields
+    in
+    let* approval_id = required_string ~surface "approval_id" fields in
+    let* settlement_json = required_member ~surface "settlement" fields in
+    let* settlement =
+      operator_settlement_of_yojson
+        ~surface:(surface ^ ".settlement")
+        settlement_json
+    in
+    Ok (approval_id, settlement)
+  | _ -> Error "gate_replay_results.settlements[] must be a JSON object"
+;;
+
 let replay_results_of_yojson json =
   match json with
   | `Assoc fields ->
@@ -733,7 +885,7 @@ let replay_results_of_yojson json =
     let* () =
       reject_unknown_fields
         ~surface
-        ~allowed:[ "version"; "outcomes" ]
+        ~allowed:[ "version"; "outcomes"; "settlements" ]
         fields
     in
     let* () =
@@ -757,11 +909,28 @@ let replay_results_of_yojson json =
         replay_result_row_of_yojson
         outcomes_json
     in
-    map_of_unique_entries
-      ~surface:"gate_replay_results.outcomes"
-      ~id_of:fst
-      outcomes
-    |> Result.map (SMap.map snd)
+    let* outcomes_map =
+      map_of_unique_entries
+        ~surface:"gate_replay_results.outcomes"
+        ~id_of:fst
+        outcomes
+      |> Result.map (SMap.map snd)
+    in
+    let* settlements_json = required_member ~surface "settlements" fields in
+    let* settlements =
+      parse_list
+        ~surface:"gate_replay_results.settlements"
+        replay_settlement_row_of_yojson
+        settlements_json
+    in
+    let+ settlements_map =
+      map_of_unique_entries
+        ~surface:"gate_replay_results.settlements"
+        ~id_of:fst
+        settlements
+      |> Result.map (SMap.map snd)
+    in
+    outcomes_map, settlements_map
   | _ -> Error "gate_replay_results must be a JSON object"
 ;;
 

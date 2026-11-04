@@ -727,15 +727,20 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
         }) -> ()
 ;;
 
-(* The client reaches MASC tools through this handler, so entering it is the
-   observed fact that an effect was attempted. Record it before the call: the
-   handler may commit and then raise or be cancelled, and observing only its
-   return would reopen a duplicate-effect window. *)
+(* The client reaches MASC tools through this handler, so entering it for an
+   input its producer declares [Effect_possible] is the observed fact that an
+   effect was attempted. A [Read_only] input cannot mutate the work, so it
+   leaves the disposition alone, as the Codex and Muse lanes do. Record it
+   before the call: the handler may commit and then raise or be cancelled, and
+   observing only its return would reopen a duplicate-effect window. *)
 let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
   { tool with
     Host.call =
       (fun ~call_id input ->
-        Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted;
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible ->
+           Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted);
         tool.call ~call_id input)
   }
 ;;

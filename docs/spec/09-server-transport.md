@@ -453,7 +453,6 @@ let make_routes ~port ~host:_ ~sw ~clock =
 |------|----------|
 | `/dashboard`, `/dashboard/` | `assets/dashboard/index.html` (SPA entry) |
 | `/dashboard/assets/*` | Vite 빌드 산출물 정적 파일 |
-| `/dashboard/credits` | OCaml 렌더링 HTML (`Credits_dashboard.html`) |
 
 ---
 

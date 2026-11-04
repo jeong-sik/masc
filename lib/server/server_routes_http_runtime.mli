@@ -12,11 +12,10 @@ val is_dashboard_spa_deep_link : string -> bool
     is a dashboard SPA deep link that should be served by the
     SPA shell rather than rejected as 404.
 
-    Three rules pinned at the contract seam:
+    Two rules pinned at the contract seam:
     - starts with [/dashboard/]
     - NOT a [/dashboard/assets/] path (those have their own
       asset handler)
-    - NOT [/dashboard/credits] (which has a dedicated handler)
 
     A future "let's add /dashboard/api/..." route reopens this
     classification — pinning so the SPA fallback does not

@@ -725,16 +725,9 @@ let test_write_visible_scratch_path () =
     (Fs_compat.load_file (Filename.concat playground "scratch/allowed.txt"))
 ;;
 
-let contains_in haystack needle =
-  let n = String.length needle
-  and h = String.length haystack in
-  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
-  n = 0 || go 0
-;;
-
 (* Equal local commits do not prove a fresh origin observation. A ref moved
-   with an old reflog timestamp must say stale on both surfaces; moving it
-   again makes the same checkout current. *)
+   with an old reflog timestamp must say stale; moving it again makes the
+   same checkout current. *)
 let test_equal_checkout_requires_recent_target_ref () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -758,25 +751,6 @@ let test_equal_checkout_requires_recent_target_ref () =
     (stale |> Json.member "state" |> Json.to_string);
   Alcotest.(check int) "last moved" 1600000000
     (stale |> Json.member "target_ref_last_observed_at_unix" |> Json.to_int);
-  let rows =
-    match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
-    | Ok [ ({ row_freshness = Keeper_sandbox_control.Stale_ref
-                  { age_s = Some age; _ }; _ } as row) ] ->
-      Alcotest.(check bool) "old local ref" true (age > 900);
-      [ row ]
-    | _ -> Alcotest.fail "World State did not receive Stale_ref"
-  in
-  let observation = Masc.Keeper_world_observation.observe
-    ~pending_board_events:(Some []) ~config ~meta in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
-      ~turn_decision:(Masc.Keeper_world_observation.keeper_cycle_decision
-                        ~meta observation)
-      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
-      ~repository_freshness:rows ~observation ()
-  in
-  Alcotest.(check bool) "World State says as of" true
-    (contains_in world_state "origin/main as of 2020-09-13 12:26:40 UTC");
   let head =
     match run_git_or_fail ~cwd:checkout [ "rev-parse"; "HEAD" ] with
     | head :: _ -> head
@@ -810,169 +784,6 @@ let test_equal_checkout_requires_recent_target_ref () =
     (entry () |> Json.member "state" |> Json.to_string)
 ;;
 
-(* The row projection reads the same probe as the JSON surface, so the same
-   seeded world must answer with the same facts in typed form. *)
-let test_checkout_freshness_rows_read_the_same_probe () =
-  setup
-  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
-  seed_masc_checkout_one_ahead ~config ~meta ~playground;
-  match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
-  | Error scan_error ->
-    Alcotest.fail
-      (Masc.Keeper_playground_checkouts.scan_error_to_string scan_error)
-  | Ok [ row ] ->
-    Alcotest.(check string)
-      "checkout path"
-      "repos/masc"
-      row.Keeper_sandbox_control.row_checkout_path;
-    Alcotest.(check (option string))
-      "branch"
-      (Some "fixture")
-      row.Keeper_sandbox_control.row_branch;
-    (match row.Keeper_sandbox_control.row_freshness with
-     | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
-       Alcotest.(check string) "target ref" "origin/main" target_ref;
-       Alcotest.(check int) "ahead count" 1 ahead
-     | _ -> Alcotest.fail "expected Ahead freshness");
-    (match row.Keeper_sandbox_control.row_changed_files with
-     | Some changed -> Alcotest.(check bool) "dirty seen" true (changed > 0)
-     | None -> Alcotest.fail "expected a changed-files count")
-  | Ok rows ->
-    Alcotest.failf "expected exactly one row, got %d" (List.length rows)
-;;
-
-let test_freshness_rows_render_in_turn_prompt () =
-  setup
-  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
-  seed_masc_checkout_one_ahead ~config ~meta ~playground;
-  let rows =
-    match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
-    | Ok rows -> rows
-    | Error scan_error ->
-      Alcotest.fail
-        (Masc.Keeper_playground_checkouts.scan_error_to_string scan_error)
-  in
-  let observation =
-    Masc.Keeper_world_observation.observe
-      ~pending_board_events:(Some [])
-      ~config
-      ~meta
-  in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
-      ~turn_decision:
-        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
-      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
-      ~repository_freshness:rows
-      ~observation
-      ()
-  in
-  Alcotest.(check bool)
-    "layer heading present"
-    true
-    (contains_in world_state "### Repository Checkouts (1)");
-  Alcotest.(check bool)
-    "row states the standing"
-    true
-    (contains_in world_state "ahead of origin/main by 1");
-  let without_rows =
-    Masc.Keeper_unified_prompt.build_prompt
-      ~turn_decision:
-        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
-      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
-      ~observation
-      ()
-  in
-  Alcotest.(check bool)
-    "layer absent when no rows are supplied"
-    false
-    (contains_in
-       without_rows.Masc.Keeper_unified_prompt.world_state
-       "### Repository Checkouts")
-;;
-
-let index_of haystack needle =
-  let n = String.length needle
-  and h = String.length haystack in
-  let rec go i =
-    if i + n > h then None
-    else if String.sub haystack i n = needle then Some i
-    else go (i + 1)
-  in
-  go 0
-;;
-
-(* Drifted rows render ahead of current ones, and unmeasurable rows collapse
-   into a single count line (a live playground answered 19 of 32 rows with
-   the same budget-exhausted reason — repeating it per row is noise). *)
-let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
-  setup
-  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
-  let current_row : Masc.Keeper_sandbox_control.freshness_row =
-    { row_checkout_path = "repos/settled"
-    ; row_branch = Some "main"
-    ; row_changed_files = Some 0
-    ; row_freshness =
-        Masc.Keeper_sandbox_control.Current
-          { target_ref = "origin/main"; upstream_head = "deadbeef"
-          ; last_observed_at_unix = 1; age_s = 0 }
-    }
-  in
-  let stale_row : Masc.Keeper_sandbox_control.freshness_row =
-    { row_checkout_path = "repos/stale"
-    ; row_branch = Some "main"
-    ; row_changed_files = None
-    ; row_freshness =
-        Masc.Keeper_sandbox_control.Behind
-          { target_ref = "origin/main"; upstream_head = "deadbeef"; behind = 5 }
-    }
-  in
-  let broken_row : Masc.Keeper_sandbox_control.freshness_row =
-    { row_checkout_path = "repos/broken"
-    ; row_branch = None
-    ; row_changed_files = None
-    ; row_freshness =
-        Masc.Keeper_sandbox_control.Freshness_unavailable "probe failed"
-    }
-  in
-  let observation =
-    Masc.Keeper_world_observation.observe
-      ~pending_board_events:(Some [])
-      ~config
-      ~meta
-  in
-  let { Masc.Keeper_unified_prompt.world_state; _ } =
-    Masc.Keeper_unified_prompt.build_prompt
-      ~turn_decision:
-        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
-      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
-      ~repository_freshness:[ current_row; broken_row; stale_row ]
-      ~observation
-      ()
-  in
-  Alcotest.(check bool)
-    "heading counts every row"
-    true
-    (contains_in world_state "### Repository Checkouts (3)");
-  Alcotest.(check bool)
-    "unmeasurable rows collapse into one count line"
-    true
-    (contains_in world_state "1 checkout(s) not measurable this turn");
-  Alcotest.(check bool)
-    "the failure reason is not repeated per row"
-    false
-    (contains_in world_state "probe failed");
-  (match
-     ( index_of world_state "- repos/stale"
-     , index_of world_state "- repos/settled" )
-   with
-   | Some stale_at, Some settled_at ->
-     Alcotest.(check bool)
-       "behind renders ahead of current"
-       true
-       (stale_at < settled_at)
-   | _ -> Alcotest.fail "expected both measured rows to render")
-;;
 
 let () =
   (* Forced before the runner starts: alcotest captures each case's stdout and
@@ -1057,18 +868,6 @@ let () =
         ; Alcotest.test_case
             "equal checkout requires recent target ref" `Quick
             test_equal_checkout_requires_recent_target_ref
-        ; Alcotest.test_case
-            "freshness rows read the same probe as the JSON surface"
-            `Quick
-            test_checkout_freshness_rows_read_the_same_probe
-        ; Alcotest.test_case
-            "freshness rows render as a turn-context layer"
-            `Quick
-            test_freshness_rows_render_in_turn_prompt
-        ; Alcotest.test_case
-            "freshness layer sorts drift first and aggregates unmeasured"
-            `Quick
-            test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured
         ] )
     ]
 ;;

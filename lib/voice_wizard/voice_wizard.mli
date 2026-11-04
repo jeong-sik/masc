@@ -21,7 +21,6 @@ type provider =
   | Mcp_tool
 
 val provider_label : provider -> string
-val provider_of_label : string -> provider option
 
 val providers_for : Voice_setup.section -> provider list
 (** Which providers can serve this section, in the order they are offered.
@@ -117,9 +116,6 @@ val steps : draft -> step list
 
 val step_prompt : step -> string
 (** One line asking for that step, in the second person. *)
-
-val step_gap : step -> gap option
-(** The gap a step fills, when it fills one. [Review] fills none. *)
 
 val request_json : revision:string -> Voice_setup.change list -> Yojson.Safe.t
 (** The body for [POST /api/v1/voice/setup]: the revision the changes were

@@ -268,12 +268,6 @@ val client_capabilities_meta_key : string
     2026-07-28 marks required on every client request. A request missing a
     required field is malformed and answered with [-32602]. *)
 
-val request_meta_has_key : string -> string -> bool
-(** [request_meta_has_key body_str key] is whether [params._meta] in [body_str]
-    carries [key] with a non-null value. An unparseable body, an absent
-    [_meta], and an explicit [null] all answer [false] — none of them is a
-    declaration. *)
-
 val request_meta_has_object : string -> string -> bool
 (** Whether the named per-request metadata field is a JSON object. *)
 

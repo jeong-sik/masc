@@ -14,12 +14,6 @@ let count_map_incr (map : int Count_map.t) (key : string) : int Count_map.t =
     let cur = Option.value ~default:0 (Count_map.find_opt key map) in
     Count_map.add key (cur + 1) map
 
-let count_table_incr (tbl : (string, int) Hashtbl.t) (key : string) : unit =
-  let key = String.trim key in
-  if key <> "" then
-    let cur = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
-    Hashtbl.replace tbl key (cur + 1)
-
 let truncate_text ~(max_len : int) (s : string) : string =
   let s = String.trim s in
   match String_util.utf8_safe ~max_bytes:max_len ~suffix:"..." s with
@@ -129,20 +123,6 @@ let top_counts_map_json
     (map : int Count_map.t) : Yojson.Safe.t list =
   map
   |> Count_map.bindings
-  |> List.sort (fun (ka, va) (kb, vb) ->
-       let c = Int.compare vb va in
-       if c <> 0 then c else String.compare ka kb)
-  |> Keeper_types_profile.take limit
-  |> List.map (fun (k, v) ->
-       `Assoc [ (name_key, `String k); ("count", `Int v) ])
-
-let top_counts_json
-    ?(limit = 5)
-    ~(name_key : string)
-    (tbl : (string, int) Hashtbl.t) : Yojson.Safe.t list =
-  tbl
-  |> Hashtbl.to_seq
-  |> List.of_seq
   |> List.sort (fun (ka, va) (kb, vb) ->
        let c = Int.compare vb va in
        if c <> 0 then c else String.compare ka kb)

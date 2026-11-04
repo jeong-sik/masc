@@ -10,5 +10,4 @@ type invalid_bool_policy =
 val parse_bool_token : string -> bool option
 
 val env_opt : string -> string option
-val get_int_logged : string -> default:int -> int
 val get_bool_logged : ?invalid:invalid_bool_policy -> string -> default:bool -> bool

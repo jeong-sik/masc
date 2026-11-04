@@ -2183,6 +2183,67 @@ let test_post_effect_transport_enters_recovery () =
        | _ -> fail "post-effect transport failure released the durable claim")
 ;;
 
+(* The same broken transport after a call whose producer declares the input
+   [Read_only]: the handler ran, but it cannot have changed the work, so the
+   fence must not report an attempted effect. What remains is the uncertainty
+   the sent prompt already carries. *)
+let test_read_only_call_does_not_record_an_effect () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor
+           ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+           Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe"
+      ~description:"Read one deterministic fixture value"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit_and_read mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Close_transport
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_ONCE"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check
+                   string
+                   "a read-only call leaves only the sent prompt's uncertainty"
+                   "observation_unavailable"
+                   (Keeper_provider_attempt_effect.to_string effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "the broken transport completed the Keeper turn");
+       check int "read-only handler ran" 1 !call_count)
+;;
+
 let test_operator_interrupt_preserves_previous_native_settlement () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -6812,6 +6873,8 @@ let () =
             "post-effect transport enters recovery"
             `Quick
             test_post_effect_transport_enters_recovery
+        ; test_case "a read-only call does not record an effect" `Quick
+            test_read_only_call_does_not_record_an_effect
         ; test_case "operator interruption preserves previous native settlement" `Quick
             test_operator_interrupt_preserves_previous_native_settlement
         ; test_case

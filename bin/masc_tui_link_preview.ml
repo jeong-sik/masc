@@ -250,12 +250,13 @@ let index_sub ~sub s from =
   if lsub = 0 then Some (max 0 from)
   else begin
     let last = ls - lsub in
+    let rec eq j i =
+      j >= lsub || (s.[i + j] = sub.[j] && eq (j + 1) i)
+    in
     let rec loop i =
       if i > last then None
-      else begin
-        let rec eq j = j >= lsub || (s.[i + j] = sub.[j] && eq (j + 1)) in
-        if eq 0 then Some i else loop (i + 1)
-      end
+      else if eq 0 i then Some i
+      else loop (i + 1)
     in
     loop (max 0 from)
   end

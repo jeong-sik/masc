@@ -2278,7 +2278,7 @@ type chat_timeline_index =
 let chat_row_yields_a_tie (row : msg_entry) =
   row.me_role = Message_memory || String.equal row.me_request_id ""
 
-let chat_timeline_index ~messages ~visible =
+let build_chat_timeline_index ~messages ~visible =
   let by_request = Hashtbl.create 64 in
   List.iteri
     (fun position (message : msg_entry) ->
@@ -2328,6 +2328,17 @@ let chat_timeline_index ~messages ~visible =
         (fun (_, at) -> match at with None -> true | Some at -> Float.is_finite at)
         cti_visible
   }
+
+let last_chat_timeline_index = ref None
+
+let chat_timeline_index ~messages ~visible =
+  match !last_chat_timeline_index with
+  | Some (previous_messages, previous_visible, index)
+    when previous_messages == messages && previous_visible == visible -> index
+  | Some _ | None ->
+      let index = build_chat_timeline_index ~messages ~visible in
+      last_chat_timeline_index := Some (messages, visible, index);
+      index
 
 (* The first visible row at or after [lower_bound] that a live turn at
    [timeline_at] precedes, or the row count when none. Same walk as

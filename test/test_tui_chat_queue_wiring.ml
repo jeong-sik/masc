@@ -4831,6 +4831,31 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
   check bool "the generator exercised many logs" true (!checked >= 2000)
 ;;
 
+let test_chat_timeline_index_reuses_only_identical_inputs () =
+  let rows = [ chat_entry ~request_id:"r" ~role:Tui_types.Message_keeper ~text:"x" ~at:5. () ] in
+  let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in
+  let first = Tui_types.chat_timeline_index ~messages:rows ~visible in
+  let second = Tui_types.chat_timeline_index ~messages:rows ~visible in
+  check bool "unchanged input lists reuse their derived index" true (first == second);
+  let changed_messages = rows @ [ chat_entry ~request_id:"other" ~role:Tui_types.Message_keeper ~text:"y" ~at:7. () ] in
+  let rebuilt_for_messages = Tui_types.chat_timeline_index ~messages:changed_messages ~visible in
+  check bool "a messages-only change rebuilds the derived index" false (first == rebuilt_for_messages);
+  let changed_visible = List.map (fun (message, _) -> message, Some 6.) visible in
+  let changed = Tui_types.chat_timeline_index ~messages:rows ~visible:changed_visible in
+  check bool "a changed visible list rebuilds the derived index" false (first == changed);
+  check (option (float 0.)) "the rebuilt index carries the changed visible timestamp" (Some 6.)
+    (snd changed.cti_visible.(0));
+  let got = Tui_types.chat_log_timeline_context changed
+      ~member_ids:[ "r" ] ~request_id:"r" ~started_at:5. in
+  let expected_timeline = Tui_types.chat_live_timeline_at ~member_ids:[ "r" ]
+      ~request_id:"r" ~started_at:5. ~request_messages:rows changed_visible in
+  let expected_insertion = Tui_types.chat_block_insertion_index ~member_ids:[]
+      ~bounds:(fun _ -> false) ~request_id:"r" ~timeline_at:expected_timeline changed_visible in
+  check (option (float 0.)) "the rebuilt index matches the full-list moment" expected_timeline got.clt_timeline_at;
+  check int "the rebuilt index matches the full-list insertion" expected_insertion got.clt_insertion;
+  check bool "the rebuilt index keeps no false committed error" false got.clt_committed_error
+;;
+
 (* Held turns that have no committed row of their own are placed among the
    committed rows by their clocks: each block goes after the last committed
    row older than it and before the next, and blocks sharing a gap keep
@@ -7199,6 +7224,8 @@ let () =
             test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
         ; test_case "indexed timeline context matches the full-list functions" `Quick
             test_indexed_timeline_context_matches_the_full_list_functions
+        ; test_case "timeline index reuses only identical inputs" `Quick
+            test_chat_timeline_index_reuses_only_identical_inputs
         ; test_case "held turn blocks merge among committed rows by clock" `Quick
             test_held_turn_blocks_merge_among_committed_rows_by_clock
         ; test_case "settled logs are the selected logs held settled" `Quick

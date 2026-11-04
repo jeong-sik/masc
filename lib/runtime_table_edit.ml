@@ -51,6 +51,7 @@ type 'e commit_error =
   | Changed_meanwhile
   | Edit_refused of 'e
   | Not_written of string
+  | Outcome_unknown of string
 
 let revision_of_observation (observation : Runtime.config_observation) =
   Runtime.config_source_revision_to_string observation.source_revision

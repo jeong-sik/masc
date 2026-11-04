@@ -43,6 +43,7 @@ val run
   -> runtime_config_path:string
   -> server_port:(int, string) result
   -> agent:string
+  -> agent_named:bool
   -> modes:mode list
   -> no_addon:bool
   -> binary:string option

@@ -2832,10 +2832,11 @@ let browser_lane_setup_cmd =
               ego tables are planned against the runtime.toml the server holds and saved \
               through it; with no server answering they are written to the file. The \
               server's port is MASC_HTTP_PORT, the workspace's saved port or the default: \
-              --port names the BiDi port."
+              --port names the BiDi port. While the server is still starting, or no \
+              sign-in is stored for --agent (masc login), nothing is set up."
          ])
     Term.(
-      const (fun base_path requested_base_path agent modes no_addon binary token_file manifest_dir
+      const (fun base_path requested_base_path named_agent modes no_addon binary token_file manifest_dir
                   host_name firefox profile port geckodriver browser ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
@@ -2849,12 +2850,17 @@ let browser_lane_setup_cmd =
             (resolve_connection_port requested_base_path None
              |> Result.map Workspace_connection.to_int
              |> Result.map_error Workspace_connection.error_message)
-          ~agent
+          ~agent:(Option.value named_agent ~default:default_login_agent)
+          ~agent_named:(Option.is_some named_agent)
           ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
           ~port ~geckodriver ~browser ~ego_command ~ego_space)
       $ base_path
       $ run_base_path
-      $ login_agent
+      $ Arg.(
+          value
+          & opt (some string) None
+          & info [ "agent" ] ~docv:"AGENT"
+              ~doc:"The sign-in a bidi, automation or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
       $ modes
       $ no_addon
       $ binary

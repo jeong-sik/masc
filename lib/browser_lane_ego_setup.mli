@@ -72,6 +72,9 @@ type error =
       (** [runtime.toml] changed after the plan was made, or, for a plan
           made again, this table changed. The table was not written. *)
   | Not_written of string
+  | Outcome_unknown of string
+      (** The table was sent to the workspace's running server and whether it
+          landed could not be told. *)
 
 val error_message : error -> string
 

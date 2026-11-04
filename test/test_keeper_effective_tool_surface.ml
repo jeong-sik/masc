@@ -558,7 +558,6 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
         , `Assoc [ "count", `Int 0; "tools", `List []; "surface_summary", `Assoc [] ] )
       ; "tool_usage", `Assoc []
       ; "effective_keeper_surface", Keeper_effective_tool_surface.to_yojson (Available surface)
-      ; "skill_activations", `Null
       ]
   in
   match Masc.Tui_decode_tools.decode_tool_snapshot dashboard_tools with

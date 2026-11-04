@@ -342,6 +342,10 @@ let test_home_visit_stays_with_local_workspace () =
         (!sent = [ P.Chat_visited alpha ]);
       Alcotest.(check bool) "the admitted visit is this session's pick, the declined ones are not" true
         (state.session_picks = [ P.Key.Last_chat_keeper ]);
+      State.note_session_key state P.Key.Hints_visible;
+      State.note_session_key state P.Key.Hints_visible;
+      Alcotest.(check int) "a setting changed twice is listed once" 2
+        (List.length state.session_picks);
       let settled = ref 0 in
       Writer.drain_completed state.preference_writer ~can_take:(fun () -> true)
         ~apply:(fun (completion : Writer.completion) ->

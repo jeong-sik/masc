@@ -15007,6 +15007,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           else not state.user_input_priority_next
       in
       state.user_input_priority_next <- new_value;
+      note_session_key state Masc.Tui_preference.Key.User_input_priority_next;
       notice ~kind:Notice_reply
         (Printf.sprintf "User input auto-next priority: %s (new messages will %sbe promoted to run next)"
            (if new_value then "ON" else "OFF")
@@ -21889,17 +21890,7 @@ let contact_of_connection_status :
   | Masc_tui_types.Connecting | Masc_tui_types.Booting ->
       Masc_tui_server_lifecycle.Undecided
 
-(* What a refresh completing owes the operator, decided from the status it
-   concluded rather than from which message carried it.
-
-   Both reactions used to hang off [Http_refresh_failed], which carries an
-   exception a surface load threw. Nothing listening on the port is not that:
-   each surface returns its own connection error, the refresh completes, and
-   [apply_http_surfaces] concludes [Disconnected] from the results. So the
-   one case a first install produces reached neither the server start the
-   installer promises nor a second look at a credential that could not be
-   minted yet. *)
-(* The stored picks in [settings], except the ones this session has picked
+(* The stored picks in [settings], except the ones this session has changed
    itself: a value read later never replaces a choice made meanwhile. The
    opening screen is not among them; it is the start-up read's alone. *)
 let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
@@ -21927,10 +21918,18 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      for a name no scheme carries, and the [when] guard then leaves
      theme_choice unset. *)
   if unpicked Key.Theme then
-    (match settings.theme with
-     | Some name when Masc_tui_theme_choice.apply name ->
-         state.theme_choice <- Some name
-     | Some _ | None -> ());
+    (match settings.theme, state.theme_before_preview with
+     | None, (Some _ | None) -> ()
+     (* A preview is on screen. The stored theme becomes what Esc puts back,
+        and the preview stays where the reader is looking. *)
+     | Some name, Some _ ->
+         if List.exists
+              (fun (entry : Masc_tui_theme_choice.entry) ->
+                String.equal entry.Masc_tui_theme_choice.name name)
+              (Masc_tui_theme_choice.entries ())
+         then state.theme_before_preview <- Some (Some name)
+     | Some name, None ->
+         if Masc_tui_theme_choice.apply name then state.theme_choice <- Some name);
   if unpicked Key.Language then
     (match settings.language with
      | None -> ()
@@ -21973,6 +21972,16 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
+(* What a refresh completing owes the operator, decided from the status it
+   concluded rather than from which message carried it.
+
+   Both reactions used to hang off [Http_refresh_failed], which carries an
+   exception a surface load threw. Nothing listening on the port is not that:
+   each surface returns its own connection error, the refresh completes, and
+   [apply_http_surfaces] concludes [Disconnected] from the results. So the
+   one case a first install produces reached neither the server start the
+   installer promises nor a second look at a credential that could not be
+   minted yet. *)
 let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   let contact = contact_of_connection_status state.connection_status in
@@ -22003,10 +22012,15 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
       ~purpose:Masc_tui_credential_preparation.Workspace_retry ~base_path ~host ~port
   end;
   (* The start-up settings read failed, typically because the server this
-     session starts itself was not up yet. It is read once more now; the
-     read waits for the credential being prepared above. *)
+     session starts itself was not up yet. It is read once more, when the
+     server reached is this workspace's and this terminal's credential is
+     no longer being retried: a read either of those would refuse is not
+     spent. *)
   match state.settings_reread with
-  | Reread_due when contact = Masc_tui_server_lifecycle.Server_reached ->
+  | Reread_due
+    when contact = Masc_tui_server_lifecycle.Server_reached
+         && state.workspace_identity = Workspace_identity_match
+         && not !tui_credential_retry_pending ->
       (match Eio_context.get_switch_opt () with
        | Some sw ->
            state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw state.preference_read)
@@ -27868,7 +27882,20 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
          | Some outcome ->
              state.settings_reread <- Reread_settled;
              (match outcome with
-              | Ok (Ok settings) -> apply_stored_picks state settings
+              | Ok (Ok settings) ->
+                  let board_sort_before = state.board_sort in
+                  apply_stored_picks state settings;
+                  (* The start-up apply runs before the terminal is taken,
+                     and main sends the page then; here it is sent now. *)
+                  sync_theme_page state;
+                  (* The server sorts the Board, so an order read here is
+                     asked for the way a pick asks for it. *)
+                  if state.board_sort <> board_sort_before then
+                    start_http_refresh state ~host:server_peer_host
+                      ~port:state.port ~intent:Revalidate
+                      ~refresh_inflight:http_refresh_inflight
+                      ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                      ~scoped_refresh_followup ~mailbox
               | Ok (Error reason) ->
                   report_action state "error"
                     (ui_text state ~ko:("화면 설정을 다시 읽지 못했어요. 이번 세션은 기본값이에요: " ^ reason)
@@ -33086,7 +33113,8 @@ Use relative paths for resources already held in the package. -->
        | Some k when help_owns_input && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
-           state.hints_visible <- not state.hints_visible
+           state.hints_visible <- not state.hints_visible;
+           note_session_key state Masc.Tui_preference.Key.Hints_visible
        | Some k when help_owns_input ->
            (match k with
             | "?" | "esc" ->

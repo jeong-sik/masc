@@ -9382,8 +9382,9 @@ type state = {
   preference_read : unit -> (Masc.Tui_preference.settings, string) result;
   mutable settings_reread : settings_reread;
   mutable session_picks : Masc.Tui_preference.Key.t list;
-  (* The settings this session has picked itself. A settings read that lands
-     later leaves them as picked. *)
+  (* The settings this session has changed itself, through a pick or a
+     session toggle. A settings read that lands later leaves them as they
+     are. *)
   mutable metrics_scroll: int;
   mutable metrics_content_height: int;
   mutable metrics_scroll_card_rows: int option;
@@ -9454,17 +9455,17 @@ type state = {
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
      is open. *)
-  (* Whether footers spell their key hints ([tui].hints_visible at boot,
+  (* Whether footers spell their key hints ([tui].hints_visible when the settings are read,
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
   (* Whether the opening screen's help-door line has been retired
-     ([tui].help_hint_shown at boot, written by the first input). The line
+     ([tui].help_hint_shown when the settings are read, written by the first input). The line
      teaches the one key a new reader has none of the context for, and any
      input says the reader is driving now. *)
   mutable help_hint_shown: bool;
   (* Whether a line typed while an earlier one still waits joins that line
-     instead of queueing behind it ([tui].coalesce_queued_input at boot). A
+     instead of queueing behind it ([tui].coalesce_queued_input when the settings are read). A
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
@@ -9492,7 +9493,7 @@ type state = {
      when it moves the next accepted request within the priority cohort. *)
   mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
-     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     ([voice.stt].send_on_stop when the settings are read). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
@@ -15414,8 +15415,12 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
-let note_session_pick (state : state) change =
-  state.session_picks <- Masc.Tui_preference.key_of_change change :: state.session_picks
+let note_session_key (state : state) key =
+  if not (List.mem key state.session_picks) then
+    state.session_picks <- key :: state.session_picks
+
+let note_session_pick state change =
+  note_session_key state (Masc.Tui_preference.key_of_change change)
 
 (* A Home visit becomes this workspace's last chat. A Keeper name from a
    remote or unconfirmed workspace must not become the local workspace's last

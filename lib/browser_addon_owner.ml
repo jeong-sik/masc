@@ -318,13 +318,16 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
              ~finally:(fun () -> Eio.Cancel.protect (fun () ->
                Eio.Mutex.use_rw ~protect:true t.gate (fun () -> t.ego_claim_active <- false)))
              (fun () -> waiting t ~disposition:W.Outcome_unknown (fun () ->
+                (* A browser answer is a success only with [ok: true]
+                   (Browser_addon_tool.failure_of_reply), so the recovery
+                   answer carries it like every page answer. *)
+                let taken_over fields = W.Issue_result (Ok (B.Answered
+                  (`Assoc (("ok",`Bool true) :: ("action",`String "take_over") :: fields)))) in
                 match recover published with
                 | Ok (Reclaimed {space_id; space_name}) ->
-                    W.Issue_result (Ok (B.Answered (`Assoc ["action",`String "take_over";
-                      "spaceId",`Int space_id;"spaceName",`String space_name;"reclaimed",`Bool true])))
+                    taken_over ["spaceId",`Int space_id;"spaceName",`String space_name;"reclaimed",`Bool true]
                 | Ok (Reopening {space}) ->
-                    W.Issue_result (Ok (B.Answered (`Assoc ["action",`String "take_over";
-                      "spaceName",`String space;"reopening",`Bool true])))
+                    taken_over ["spaceName",`String space;"reopening",`Bool true]
                 | Error detail -> refusal detail)))
     else
     (match with_admission t incarnation (fun () ->

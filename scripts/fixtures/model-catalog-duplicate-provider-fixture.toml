@@ -1,0 +1,20 @@
+# Intentionally duplicate provider rows: the uniqueness check must refuse this
+# file.  Never loaded by the product — the two provider rows carry the same id
+# once case folding is applied, which is the other half of the
+# Model_catalog.reject_duplicate_rows contract.
+
+[[providers]]
+id = "example_go"
+kind = "openai_compat"
+base_url = "https://example.invalid/go/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[providers]]
+id = "Example_Go"
+kind = "openai_compat"
+base_url = "https://example.invalid/alt/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"

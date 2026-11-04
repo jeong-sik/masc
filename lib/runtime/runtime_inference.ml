@@ -77,7 +77,7 @@ let for_runtime ~name =
      | Runtime_execution.Masc_agent_core ->
        seed_of_thinking_support
          ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
-         (Runtime.thinking_support_of_runtime_id name))
+         (Runtime_schema.thinking_request runtime.Runtime_instance.model))
   | None ->
     seed_of_thinking_support
       ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)

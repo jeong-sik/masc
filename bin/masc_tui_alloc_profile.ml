@@ -1,4 +1,8 @@
-let path = Sys.getenv_opt "MASC_TUI_ALLOC_PROFILE"
+(* A blank value is off, as it is for MASC_TUI_FRAME_TIMING. *)
+let path =
+  match Sys.getenv_opt "MASC_TUI_ALLOC_PROFILE" with
+  | Some file when String.trim file <> "" -> Some file
+  | Some _ | None -> None
 
 (* One sample per this many allocated words, on average. A held key allocated
    about 60 MB per second on the UI domain, so this keeps a few thousand
@@ -11,6 +15,10 @@ let callstack_frames = 24
 
 (* Sites printed per ranking. *)
 let report_rows = 40
+
+(* The UI domain runs systhreads too, and they share its profile, so a sample
+   can arrive on any of them. *)
+let lock = Mutex.create ()
 
 let by_site : (string, float) Hashtbl.t = Hashtbl.create 1024
 let by_stack : (string, float) Hashtbl.t = Hashtbl.create 1024
@@ -33,7 +41,6 @@ let is_masc location =
 
 let record (allocation : Gc.Memprof.allocation) =
   let words = float_of_int allocation.n_samples /. sampling_rate in
-  sampled_words := !sampled_words +. words;
   let locations =
     match Printexc.backtrace_slots allocation.callstack with
     | None -> []
@@ -44,10 +51,11 @@ let record (allocation : Gc.Memprof.allocation) =
     | Some l -> l
     | None -> "(no masc frame)"
   in
-  add by_site site words;
-  add by_stack
-    (String.concat " < " (List.filteri (fun i _ -> i < 8) locations))
-    words;
+  let stack = String.concat " < " (List.filteri (fun i _ -> i < 8) locations) in
+  Mutex.protect lock (fun () ->
+    sampled_words := !sampled_words +. words;
+    add by_site site words;
+    add by_stack stack words);
   None
 
 let tracker =
@@ -77,17 +85,19 @@ let report () =
       (try Gc.Memprof.stop () with Failure _ -> ());
       try
         let oc = open_out_gen [ Open_append; Open_creat ] 0o644 file in
-        let total = !sampled_words in
+        let total, sites, stacks =
+          Mutex.protect lock (fun () -> (!sampled_words, ranked by_site, ranked by_stack))
+        in
         let share words = if total > 0. then 100. *. words /. total else 0. in
         Printf.fprintf oc "alloc estimated_words=%.0f sampling_rate=%g\n" total
           sampling_rate;
         List.iter
           (fun (site, words) ->
             Printf.fprintf oc "  site %5.1f%% %.0f words %s\n" (share words) words site)
-          (ranked by_site);
+          sites;
         List.iter
           (fun (stack, words) ->
             Printf.fprintf oc "  stack %5.1f%% %s\n" (share words) stack)
-          (ranked by_stack);
+          stacks;
         close_out oc
       with Sys_error _ -> ())

@@ -20,7 +20,6 @@ Upstream issue reports are reproduction evidence, not universal contracts:
 MASC history:
 - #32840 measured MiniMax native reasoning_details plus inline tags and intentionally made the channels orthogonal. That evidence does not authorize generic splitting of every reasoning-capable model.
 - #34159 restored the documented GLM-4.6V delta:reasoning_content declaration in provider scope; catalog tests were not live-wire proof.
-- #34698 projected official-client envelopes for TUI; canonical JSON encoding is currently assumed by its prefix recognizer. Equivalent reserialization is a remaining conditional UI gap.
 
 The source audit at #34896 head 8ae765291 found:
 1. Native Ollama sync did not apply the inline framing contract.

@@ -10,26 +10,11 @@ type opening = Masc.Tui_preference.opening =
   | Keeper of Keeper_id.Keeper_name.t
 
 type t = {
-  opening : (opening, string) result;
-  last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
-  theme : string option;
-  language : string option;
-  board_sort : string option;
+  stored : Masc.Tui_preference.settings;
+  settings_unread : string option;
   keeper_list_sort : string option;
   keeper_list_layout : string option;
   keeper_list_error : string option;
-  candle : string option;
-  reduce_motion : bool option;
-  lift_colours : bool option;
-  table_frame : bool option;
-  hints_visible : bool option;
-  help_hint_shown : bool option;
-  coalesce_queued_input : bool option;
-  send_on_stop : bool option;
-  user_input_priority_next : bool option;
-  midi_soundfont : string option;
-  audio_input_device : string option;
-  settings_unread : string option;
 }
 
 let runtime_toml_path ~base_path =
@@ -100,26 +85,11 @@ let of_settings ~base_path reading =
   let keeper_list_errors =
     (match keeper_preferences with Ok _ -> [] | Error reason -> [reason])
     @ Option.to_list container_error @ Option.to_list sort_error @ Option.to_list layout_error in
-  { opening = settings.opening;
-    last_chat_keeper = settings.last_chat_keeper;
-    theme = settings.theme;
-    language = settings.language;
-    board_sort = settings.board_sort;
+  { stored = settings;
+    settings_unread;
     keeper_list_sort;
     keeper_list_layout;
     keeper_list_error = (match keeper_list_errors with [] -> None | errors -> Some (String.concat "; " errors));
-    candle = settings.candle;
-    reduce_motion = settings.reduce_motion;
-    lift_colours = settings.lift_colours;
-    table_frame = settings.table_frame;
-    hints_visible = settings.hints_visible;
-    help_hint_shown = settings.help_hint_shown;
-    coalesce_queued_input = settings.coalesce_queued_input;
-    send_on_stop = settings.send_on_stop;
-    user_input_priority_next = settings.user_input_priority_next;
-    midi_soundfont = settings.midi_soundfont;
-    audio_input_device = settings.audio_input_device;
-    settings_unread;
   }
 
 type startup_snapshot = {

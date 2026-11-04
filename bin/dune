@@ -1927,6 +1927,8 @@
   masc.keeper_execution_scope
   unix
   yojson
+  ;; [Reread_running] carries the fiber promise of an in-flight settings read.
+  eio
   masc.server))
 
 (library

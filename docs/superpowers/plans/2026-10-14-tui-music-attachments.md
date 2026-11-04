@@ -322,7 +322,7 @@ git -c core.hooksPath=/dev/null commit -m "tui(board): attachment action module 
     하단 recede 스타일 한 줄; `open_board_post` 시 None).
   - `Masc_tui_keys.footer_hints_board_read ~has_attachments:bool`(true면
     `o:all comments` 앞에 `1-9:attachment` 힌트 삽입).
-  - `Masc_tui_config.t` 필드 `midi_soundfont : string option`(`runtime.toml` 없으면 None).
+  - `Masc.Tui_preference.settings` 필드 `midi_soundfont : string option`(`runtime.toml` 없으면 None).
 
 - [ ] **Step 1: 실패 테스트 추가**
 

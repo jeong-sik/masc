@@ -815,6 +815,7 @@ let clear_keeper_history_projection state =
    taken it; what the server answered is said when the writer's completion is
    drained, below. *)
 let store_preference state change =
+  note_session_pick state change;
   ignore
     (Masc_tui_preference_writer.submit state.preference_writer
        ~sw:(Eio_context.get_switch_opt ()) change
@@ -15006,6 +15007,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           else not state.user_input_priority_next
       in
       state.user_input_priority_next <- new_value;
+      note_session_key state Masc.Tui_preference.Key.User_input_priority_next;
       notice ~kind:Notice_reply
         (Printf.sprintf "User input auto-next priority: %s (new messages will %sbe promoted to run next)"
            (if new_value then "ON" else "OFF")
@@ -21888,6 +21890,88 @@ let contact_of_connection_status :
   | Masc_tui_types.Connecting | Masc_tui_types.Booting ->
       Masc_tui_server_lifecycle.Undecided
 
+(* The stored picks in [settings], except the ones this session has changed
+   itself: a value read later never replaces a choice made meanwhile. The
+   opening screen is not among them; it is the start-up read's alone. *)
+let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
+  let unpicked key = not (List.mem key state.session_picks) in
+  let module Key = Masc.Tui_preference.Key in
+  if unpicked Key.Midi_soundfont then boot_midi_soundfont := settings.midi_soundfont;
+  if unpicked Key.Audio_input_device then boot_audio_input_device := settings.audio_input_device;
+  if unpicked Key.Last_chat_keeper then
+    (match settings.last_chat_keeper with
+     | Ok None -> state.home_last_chat <- No_chat_receipt
+     | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
+     | Error reason ->
+         state.home_last_chat <- Unreadable_chat_receipt reason;
+         add_event state "error" reason);
+  if unpicked Key.Board_sort then
+    (match settings.board_sort with
+     | None -> ()
+     | Some value ->
+         (match board_sort_of_string value with
+          | Some sort -> state.board_sort <- sort
+          | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
+  (* A theme named in runtime.toml's [tui] section is applied, so the reader's
+     pick survives a restart instead of being re-chosen each session. Absent
+     or unknown, the TUI follows the terminal: Theme_choice.apply returns false
+     for a name no scheme carries, and the [when] guard then leaves
+     theme_choice unset. *)
+  if unpicked Key.Theme then
+    (match settings.theme, state.theme_before_preview with
+     | None, (Some _ | None) -> ()
+     (* A preview is on screen. The stored theme becomes what Esc puts back,
+        and the preview stays where the reader is looking. *)
+     | Some name, Some _ ->
+         if List.exists
+              (fun (entry : Masc_tui_theme_choice.entry) ->
+                String.equal entry.Masc_tui_theme_choice.name name)
+              (Masc_tui_theme_choice.entries ())
+         then state.theme_before_preview <- Some (Some name)
+     | Some name, None ->
+         if Masc_tui_theme_choice.apply name then state.theme_choice <- Some name);
+  if unpicked Key.Language then
+    (match settings.language with
+     | None -> ()
+     | Some value ->
+         (match ui_language_of_string value with
+          | Some lang -> state.ui_language <- lang
+          | None -> add_event state "error" ("Unknown saved UI language: " ^ value)));
+  if unpicked Key.Candle then
+    (match settings.candle with
+     | None -> ()
+     | Some value ->
+         (match Masc_tui_emblem_screen.style_of_string value with
+          | Some style -> Masc_tui_emblem_screen.set_style style
+          | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
+  if unpicked Key.Reduce_motion then
+    state.about_reduce_motion <-
+      (match settings.reduce_motion with Some enabled -> enabled | None -> false);
+  (* Absent reads as on, which is what masc drew before the key existed -- a
+     reader who never set it sees no change. *)
+  if unpicked Key.Lift_colours then
+    Masc_tui_theme.set_lift_enabled (Option.value settings.lift_colours ~default:true);
+  (* The box a table draws is a look, and a look that survives a restart is
+     the point of storing it. *)
+  if unpicked Key.Table_frame then
+    set_table_frame (Option.value settings.table_frame ~default:false);
+  (* Absent reads as on -- the hints predate the key, and a reader who never
+     set it sees no change. *)
+  if unpicked Key.Hints_visible then
+    state.hints_visible <- Option.value settings.hints_visible ~default:true;
+  (* Absent reads as not shown: the door line exists for a first-time
+     reader, and a long-running operator still meets it once. *)
+  if unpicked Key.Help_hint_shown then
+    state.help_hint_shown <- Option.value settings.help_hint_shown ~default:false;
+  if unpicked Key.Coalesce_queued_input then
+    state.coalesce_queued_input <- Option.value settings.coalesce_queued_input ~default:false;
+  if unpicked Key.User_input_priority_next then
+    state.user_input_priority_next <-
+      Option.value settings.user_input_priority_next ~default:false;
+  (* Default false, unlike its neighbours: this one sends without the operator
+     confirming, so absence is not consent. *)
+  state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
+
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -21926,7 +22010,26 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
   then begin
     launch_credential_preparation state
       ~purpose:Masc_tui_credential_preparation.Workspace_retry ~base_path ~host ~port
-  end
+  end;
+  (* The start-up settings read failed, typically because the server this
+     session starts itself was not up yet. It is read once more, when the
+     server reached is this workspace's and this terminal's credential is
+     no longer being retried: a read either of those would refuse is not
+     spent. *)
+  match state.settings_reread with
+  | Reread_due
+    when contact = Masc_tui_server_lifecycle.Server_reached
+         && state.workspace_identity = Workspace_identity_match
+         && not !tui_credential_retry_pending ->
+      (match Eio_context.get_switch_opt () with
+       | Some sw ->
+           state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw state.preference_read)
+       | None ->
+           state.settings_reread <- Reread_settled;
+           report_action state "error"
+             (ui_text state ~ko:"화면 설정을 다시 읽을 수 없어요. 이번 세션은 기본값이에요."
+                ~en:"Screen settings cannot be read again; this session stays on the defaults."))
+  | Reread_due | Reread_settled | Reread_running _ -> ()
 
 (* A server action belongs to the Keeper that submitted it even when its
    completion arrives after navigation. Keep offscreen outcomes in the action
@@ -27777,6 +27880,40 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let keeper_preferences_changed = drain_keeper_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
+  let settings_reread_changed =
+    if over_budget () then false else
+    match state.settings_reread with
+    | Reread_due | Reread_settled -> false
+    | Reread_running promise ->
+        (match Eio.Promise.peek promise with
+         | None -> false
+         | Some outcome ->
+             state.settings_reread <- Reread_settled;
+             (match outcome with
+              | Ok (Ok settings) ->
+                  let board_sort_before = state.board_sort in
+                  apply_stored_picks state settings;
+                  (* The start-up apply runs before the terminal is taken,
+                     and main sends the page then; here it is sent now. *)
+                  sync_theme_page state;
+                  (* The server sorts the Board, so an order read here is
+                     asked for the way a pick asks for it. *)
+                  if state.board_sort <> board_sort_before then
+                    start_http_refresh state ~host:server_peer_host
+                      ~port:state.port ~intent:Revalidate
+                      ~refresh_inflight:http_refresh_inflight
+                      ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                      ~scoped_refresh_followup ~mailbox
+              | Ok (Error reason) ->
+                  report_action state "error"
+                    (ui_text state ~ko:("화면 설정을 다시 읽지 못했어요. 이번 세션은 기본값이에요: " ^ reason)
+                       ~en:("Screen settings could not be read again; this session stays on the defaults: " ^ reason))
+              | Error exn ->
+                  report_action state "error"
+                    (ui_text state ~ko:("화면 설정을 다시 읽다가 멈췄어요: " ^ Printexc.to_string exn)
+                       ~en:("Reading the screen settings again stopped: " ^ Printexc.to_string exn)));
+             true)
+  in
   let credential_changed =
     if over_budget () then false else
     let module Preparation = Masc_tui_credential_preparation in
@@ -27900,7 +28037,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
-  let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || credential_changed) in
+  let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
   (* One already-retired notice is bounded work.  Do not starve it behind a
      busy mailbox, but let an operator gesture cancel its marker first. *)
@@ -28181,29 +28318,19 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   apply_raw_mode new_term
 
 let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
-  (* A theme named in runtime.toml's [tui] section is applied at boot, so the
-     reader's pick survives a restart instead of being re-chosen each session.
-     Absent or unknown, the TUI follows the terminal exactly as before:
-     Theme_choice.apply returns false for a name no scheme carries, and the
-     [when] guard then leaves theme_choice unset. *)
   (* The server could not answer this terminal's settings: it opens on the
-     defaults, says so once, and leaves the stored picks as they are. *)
+     defaults, says so once, and reads them again when a server is first
+     reached. *)
   Option.iter
     (fun reason ->
+       state.settings_reread <- Reread_due;
        report_action state "error"
          (ui_text state
             ~ko:("서버에서 화면 설정을 읽지 못해 기본값으로 열었어요: " ^ reason)
             ~en:("Screen settings could not be read from the server; opened on the defaults: " ^ reason)))
     tui_settings.settings_unread;
-  boot_midi_soundfont := tui_settings.midi_soundfont;
-  boot_audio_input_device := tui_settings.audio_input_device;
-  (match tui_settings.last_chat_keeper with
-   | Ok None -> ()
-   | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
-   | Error reason ->
-       state.home_last_chat <- Unreadable_chat_receipt reason;
-       add_event state "error" reason);
-  (match tui_settings.opening with
+  apply_stored_picks state tui_settings.stored;
+  (match tui_settings.stored.opening with
    | Ok Masc_tui_config.Overview -> ()
    | Ok (Masc_tui_config.Last None as opening) ->
        state.opening_mode <- opening;
@@ -28214,12 +28341,6 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
        state.opening_pending <- true
    | Error reason ->
        state.opening_notice <- Some (reason ^ ". Showing Dashboard."));
-  (match tui_settings.board_sort with
-   | None -> ()
-   | Some value ->
-       (match board_sort_of_string value with
-        | Some sort -> state.board_sort <- sort
-        | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   let note_keeper_preference_error message =
     note_keeper_preference_startup_error state message;
     add_event state "error" message in
@@ -28236,58 +28357,7 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
         | Some layout -> state.keeper_list_layout <- layout
         | None -> note_keeper_preference_error ("Unknown saved Keeper view: " ^ value)));
   Option.iter (fun reason -> note_keeper_preference_error ("Keeper view preferences unavailable: " ^ reason))
-    tui_settings.keeper_list_error;
-  (match tui_settings.theme with
-   | Some name when Masc_tui_theme_choice.apply name ->
-       state.theme_choice <- Some name
-   | Some _ | None -> ());
-  (match tui_settings.language with
-   | None -> ()
-   | Some value ->
-       (match ui_language_of_string value with
-        | Some lang -> state.ui_language <- lang
-        | None -> add_event state "error" ("Unknown saved UI language: " ^ value)));
-  (match tui_settings.candle with
-   | None -> ()
-   | Some value ->
-       (match Masc_tui_emblem_screen.style_of_string value with
-        | Some style -> Masc_tui_emblem_screen.set_style style
-        | None -> add_event state "error" ("Unknown saved candle: " ^ value)));
-  state.about_reduce_motion <-
-    (match tui_settings.reduce_motion with Some enabled -> enabled | None -> false);
-
-  (* Same file, same moment. Absent reads as on, which is what masc drew
-     before the key existed -- a reader who never set it sees no change. *)
-  Masc_tui_theme.set_lift_enabled
-    (Option.value (tui_settings.lift_colours) ~default:true);
-
-  (* Same file, same moment: the box a table draws is a look, and a look that
-     survives a restart is the point of storing it. *)
-  set_table_frame
-    (Option.value (tui_settings.table_frame) ~default:false);
-
-  (* Same file, same moment. Absent reads as on -- the hints predate the
-     key, and a reader who never set it sees no change. *)
-  state.hints_visible <-
-    Option.value (tui_settings.hints_visible) ~default:true;
-  (* Absent reads as not shown: the door line exists for a first-time
-     reader, and a long-running operator still meets it once. *)
-  state.help_hint_shown <-
-    Option.value (tui_settings.help_hint_shown) ~default:false;
-  state.coalesce_queued_input <-
-    Option.value
-      (tui_settings.coalesce_queued_input)
-      ~default:false;
-  state.user_input_priority_next <-
-    Option.value
-      (tui_settings.user_input_priority_next)
-      ~default:false;
-  (* Default false, unlike its neighbours: this one sends without the operator
-     confirming, so absence is not consent. *)
-  state.voice_send_on_stop <-
-    Option.value
-      (tui_settings.send_on_stop)
-      ~default:false
+    tui_settings.keeper_list_error
 
 (** Main loop *)
 let main
@@ -28338,9 +28408,16 @@ let main
         Masc_tui_http.post_tui_preference ~host:server_peer_host ~port
           ~base_path:paths.lw_base_path ~masc_root:paths.lw_masc_root change
   in
+  let read_settings () =
+    match own_paths with
+    | None -> Error "No workspace is open"
+    | Some paths ->
+        Masc_tui_http.fetch_tui_preferences ~host:server_peer_host ~port
+          ~base_path:paths.lw_base_path ~masc_root:paths.lw_masc_root
+  in
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
-      ~local_base_path:base_path ~preference_send ~port
+      ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port
       ~refresh_interval:refresh ()
   in
   state.observation_store <- Result.to_option observation_store;
@@ -28353,13 +28430,6 @@ let main
   Masc_tui_http.install_credential_preparation state.credential_preparation;
   launch_credential_preparation state
     ~purpose:Masc_tui_credential_preparation.Initial ~base_path ~host:server_peer_host ~port;
-  let read_settings () =
-    match own_paths with
-    | None -> Error "No workspace is open"
-    | Some paths ->
-        Masc_tui_http.fetch_tui_preferences ~host:server_peer_host ~port
-          ~base_path:paths.lw_base_path ~masc_root:paths.lw_masc_root
-  in
   let tui_settings_read = Masc_tui_config.prepare_startup_read
       ~sw:(Eio_context.get_switch_opt ()) ~base_path ~read_settings in
 
@@ -33051,7 +33121,8 @@ Use relative paths for resources already held in the package. -->
        | Some k when help_owns_input && k = "h" ->
            (* Session toggle; the persistent form is [tui].hints_visible in
               runtime.toml, named on the help sheet itself. *)
-           state.hints_visible <- not state.hints_visible
+           state.hints_visible <- not state.hints_visible;
+           note_session_key state Masc.Tui_preference.Key.Hints_visible
        | Some k when help_owns_input ->
            (match k with
             | "?" | "esc" ->

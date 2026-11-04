@@ -90,6 +90,11 @@ val change_of_yojson : Yojson.Safe.t -> (change, string) result
 val change_kind : change -> string
 (** The [change] field's value for this change; audit records it. *)
 
+val key_of_change : change -> Key.t
+(** The setting a reader sees this change move. [Chat_visited] also moves
+    [Opening_keeper] while the reader opens on the last chat; the setting it
+    names here is [Last_chat_keeper]. *)
+
 (** What a terminal reader starts with, read from runtime.toml by the rules
     the terminal used when it read the file itself. *)
 type settings =

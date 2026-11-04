@@ -3935,7 +3935,8 @@ let test_a_space_that_did_not_open_is_looked_up_once () =
   listing:=`Unanswered;
   let detail=before_effect "an unanswered lookup" (dispatch peer Live.Tabs_list (obj [])) in
   check bool "an unanswered lookup keeps ego's error" true (String.starts_with ~prefix:"task space not found: 51" detail);
-  check bool "and says presence is unknown" true (contains detail "Space presence is unknown: ego went away");
+  check bool "and says presence is unknown, and why" true
+    (contains detail "; Space presence is unknown: " && contains detail "ego went away");
   check bool "an unanswered lookup leaves the earlier presence" true (presence ()=Masc.Browser_ego_space_observation.Present);
   listing:=`Ids [52];
   let detail=before_effect "a Space ego no longer lists" (dispatch peer Live.Tabs_list (obj [])) in

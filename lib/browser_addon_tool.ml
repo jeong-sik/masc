@@ -84,14 +84,42 @@ let transferable verb upload_id = match verb,upload_id with
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
       |On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"
-let result ~start_time ~failed ~disposition data message : S.tool_result =
-  let result=if failed then Tool_result.make_err ~tool_name:definition.name ~start_time
-    ~class_:Tool_result.Workflow_rejection ~effect_disposition:disposition ~data message
-    else Tool_result.make_ok ~tool_name:definition.name ~start_time ~data () in
+let result ~start_time ~failure data message : S.tool_result =
+  let result=match failure with
+    | Some (class_,effect_disposition) -> Tool_result.make_err ~tool_name:definition.name ~start_time
+        ~class_ ~effect_disposition ~data message
+    | None -> Tool_result.make_ok ~tool_name:definition.name ~start_time ~data () in
   {content=[S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
-   structured_content=Some data;is_error=Some failed;_meta=Lane_addon_tool_result.metadata result}
-let refused ~start_time detail = result ~start_time ~failed:true ~disposition:Tool_result.Proven_pre_effect
+   structured_content=Some data;is_error=Some (Option.is_some failure);_meta=Lane_addon_tool_result.metadata result}
+let refused ~start_time ~class_ detail = result ~start_time ~failure:(Some (class_,Tool_result.Proven_pre_effect))
   (W.reply_to_json (W.Service_refusal {message=detail;disposition=W.Not_started})) detail
+(* The browser the caller named or the lane it asked for is not here; a
+   choice between browsers is the caller's to make. *)
+let selection_failure_class = function
+  | B.Activity_rejected _ | No_live_client | Selected_client_disconnected _ -> Tool_result.Dependency_unavailable
+  | Ambiguous_clients _ | Transport_unsupported _ -> Tool_result.Workflow_rejection
+(* What the reply says happened. A refusal before any effect is the request
+   the current state does not admit. A browser that acted and did not finish,
+   answered no outcome, or did not answer is the dependency that could not
+   fulfil it. A reply this tool cannot read is its own failure. *)
+let failure_of_reply = function
+  | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->
+      (match List.assoc_opt "ok" fields with
+       | Some (`Bool true) -> None
+       | Some (`Bool false) -> Some (match List.assoc_opt "effectPhase" fields with
+           | Some (`String "not_started") -> Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect
+           | Some (`String "partial") -> Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect
+           | Some _|None -> Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown)
+       | Some _|None -> Some (Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown))
+  | Issue_result (Error selection) -> Some (selection_failure_class selection,Tool_result.Proven_pre_effect)
+  | Service_refusal {disposition=W.Not_started;_} | Issue_result (Ok (B.Rejected_before_effect _)) ->
+      Some (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect)
+  | Issue_result (Ok B.Lane_absent) -> Some (Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect)
+  | Service_refusal {disposition=W.Outcome_unknown;_} | Issue_result (Ok (B.Timed_out|Refused _)) ->
+      Some (Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown)
+  | Issue_result (Ok (B.Answered _))
+  | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt ->
+      Some (Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown)
 let invoke ~owner ~principal arguments =
   let start_time=Tool_timing.start () in
   let run () =
@@ -101,7 +129,7 @@ let invoke ~owner ~principal arguments =
     let* route,verb,upload_id=parse arguments in let* ()=transferable verb upload_id in
     Ok (actor,route,verb,upload_id) in
   match prepared with
-  | Error detail -> refused ~start_time detail
+  | Error detail -> refused ~start_time ~class_:Tool_result.Policy_rejection detail
   | Ok (actor,route,verb,upload_id) ->
     let reply=match upload_id with
       | Some id -> Browser_addon_owner.dispatch_upload owner ~id ~actor ~route ~verb
@@ -120,30 +148,17 @@ let invoke ~owner ~principal arguments =
       | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
       | Poll_result _|Receipt -> None in
     match unscoped with
-    | Some detail -> refused ~start_time detail
+    | Some detail -> refused ~start_time ~class_:Tool_result.Dependency_unavailable detail
     | None ->
-    let failed,disposition=match reply with
-      | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->
-          (match List.assoc_opt "ok" fields with
-           | Some (`Bool true) -> false,Tool_result.Proven_post_effect
-           | Some (`Bool false) -> true,(match List.assoc_opt "effectPhase" fields with
-               | Some (`String "not_started") -> Tool_result.Proven_pre_effect
-               | Some (`String "partial") -> Tool_result.Proven_post_effect
-               | Some _|None -> Tool_result.Effect_outcome_unknown)
-           | Some _|None -> true,Tool_result.Effect_outcome_unknown)
-      | Service_refusal {disposition=W.Not_started;_}|Issue_result (Error _)
-      | Issue_result (Ok (B.Lane_absent|Rejected_before_effect _)) -> true,Tool_result.Proven_pre_effect
-      | Service_refusal {disposition=W.Outcome_unknown;_}|Issue_result (Ok (B.Timed_out|Refused _|Answered _))
-      | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt -> true,Tool_result.Effect_outcome_unknown in
     (* A read leaves browser content unchanged, but can still publish a host
        artifact. Keep the original receipt's evidence of partial or unknown
        effects instead of authorizing replay from the verb classification. *)
-    result ~start_time ~failed ~disposition data "browser command failed; inspect its original receipt before further input" in
+    result ~start_time ~failure:(failure_of_reply reply) data "browser command failed; inspect its original receipt before further input" in
   match run () with
   | value -> value
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
   | exception exn ->
     Printf.eprintf "browser Add-on tool failed: %s\n%!" (Printexc.to_string exn);
-    result ~start_time ~failed:true ~disposition:Tool_result.Effect_outcome_unknown
+    result ~start_time ~failure:(Some (Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown))
       (W.reply_to_json (W.Service_refusal {message="browser command failed; outcome unknown";disposition=W.Outcome_unknown}))
       "browser command failed; outcome unknown"

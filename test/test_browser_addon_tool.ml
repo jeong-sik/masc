@@ -77,9 +77,9 @@ let control_identity ~sw ~owner =
           | Ok _ -> fail (label ^ ": control reached selection without an observed client") in
         let result=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") input in
         check (option bool) (label ^ ": authenticated control is refused") (Some true) result.is_error;
-        check bool (label ^ ": refusal is proven before effect") true
+        check bool (label ^ ": refusal is an argument the caller corrects, before effect") true
           (Lane_addon_tool_result.failure result=
-            (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect));
+            (Tool_result.Policy_rejection,Tool_result.Proven_pre_effect));
         check (option string) (label ^ ": invocation preserves the parse-boundary refusal") (Some expected)
           (Option.bind result.structured_content (fun data ->
             match Yojson.Safe.Util.member "message" data with
@@ -136,9 +136,9 @@ let scenario () = Eio_main.run (fun env ->
     let absent=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester")
       (`Assoc ["lane",`String "live";"clientId",`String (B.client_id_to_string other_client);
         "command",B.verb_json B.Tabs_list]) in
-    check bool "a client not connected here is refused before dispatch" true
+    check bool "a client not connected here is an absent browser, refused before dispatch" true
       (absent.is_error=Some true
-       && Lane_addon_tool_result.failure absent=(Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect));
+       && Lane_addon_tool_result.failure absent=(Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect));
     let pending=Eio.Fiber.fork_promise ~sw (fun () ->
       Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments hover)) in
     let issued=match Eio.Promise.await_exn poll with
@@ -178,12 +178,12 @@ let scenario () = Eio_main.run (fun env ->
     check bool "partial payload is retained" true
       (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)
         result.structured_content);
-    check bool "partial metadata forbids pre-effect replay" true
-      (Lane_addon_tool_result.failure result=(Tool_result.Workflow_rejection,Tool_result.Proven_post_effect));
+    check bool "partial metadata forbids pre-effect replay and names the browser that did not finish" true
+      (Lane_addon_tool_result.failure result=(Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect));
     let no_more=send (W.Poll {client;window_sec=0.001}) in
     check bool "anonymous and partial calls have no hidden replay" true
       (match no_more with W.Poll_result {command=None;_} -> true | _ -> false);
-    List.iter (fun (label,phase,expected) ->
+    List.iter (fun (label,phase,expected_class,expected) ->
       let read=B.Page_read {tab_id=Some 7;max_chars=Some 12000} in
       let pending=Eio.Fiber.fork_promise ~sw (fun () ->
         Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments read)) in
@@ -200,11 +200,11 @@ let scenario () = Eio_main.run (fun env ->
       check bool (label ^ ": original read payload retained") true
         (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)
           result.structured_content);
-      check bool (label ^ ": read retains receipt effect disposition") true
-        (Lane_addon_tool_result.failure result=(Tool_result.Workflow_rejection,expected)))
-      ["partial read",Some "partial",Tool_result.Proven_post_effect;
-       "uncertain read",None,Tool_result.Effect_outcome_unknown;
-       "unstarted read",Some "not_started",Tool_result.Proven_pre_effect];
+      check bool (label ^ ": read retains receipt class and effect disposition") true
+        (Lane_addon_tool_result.failure result=(expected_class,expected)))
+      ["partial read",Some "partial",Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect;
+       "uncertain read",None,Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown;
+       "unstarted read",Some "not_started",Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect];
     check bool "failed reads are not silently replayed" true
       (match send (W.Poll {client;window_sec=0.001}) with
        | W.Poll_result {command=None;_} -> true | _ -> false);

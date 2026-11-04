@@ -98,11 +98,11 @@ let answer_result ~lane ~tool_name ~start_time = function
        let message = match List.assoc_opt "error" fields with
          | Some (`String message) -> message
          | _ -> "browser backend failed without an error message" in
-       let effect_disposition = match List.assoc_opt "effectPhase" fields with
-         | Some (`String "not_started") -> Tool_result.Proven_pre_effect
-         | Some (`String "partial") -> Tool_result.Proven_post_effect
-         | Some _ | None -> Tool_result.Effect_outcome_unknown in
-       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+       let class_, effect_disposition = match List.assoc_opt "effectPhase" fields with
+         | Some (`String "not_started") -> Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect
+         | Some (`String "partial") -> Tool_result.Dependency_unavailable, Tool_result.Proven_post_effect
+         | Some _ | None -> Tool_result.Dependency_unavailable, Tool_result.Effect_outcome_unknown in
+       Tool_result.make_err ~tool_name ~start_time ~class_
          ?data:(List.assoc_opt "data" fields) ~effect_disposition message
      | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
          "invalid browser backend response")
@@ -120,7 +120,8 @@ let answer_result ~lane ~tool_name ~start_time = function
     Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect reason
   | B.Refused reason ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection reason
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Effect_outcome_unknown reason
 (* A worker states no browser identity; the host adds the one it chose. *)
 let response ~route verb answer =
   let data=W.reply_to_json (W.Issue_result (Ok answer)) in

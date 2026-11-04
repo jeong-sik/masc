@@ -46,12 +46,63 @@ def exact_lane(name: str) -> dict:
     }
 
 
+def exact_row(name: str) -> dict:
+    lane = exact_lane(name)
+    return {
+        "id": f"exact/{name}",
+        "label": name,
+        "purpose": name,
+        "selection": {"kind": "exact", "lane_id": name},
+        "state": {
+            "kind": "exact",
+            "configuration": {
+                "kind": "configured",
+                "admitted_slots": lane["admitted_slots"],
+                "cli_slots": lane["cli_slots"],
+                "declared_slots": lane["declared_slots"],
+                "declared_cli_slots": lane["declared_cli_slots"],
+                "dropped_slots": lane["dropped_slots"],
+                "admission_error": lane["admission_error"],
+            },
+        },
+    }
+
+
+def browser_row(name: str) -> dict:
+    live = name == "live"
+    return {
+        "id": f"browser/{name}",
+        "label": name,
+        "purpose": name,
+        "selection": {"kind": "browser", "lane": name},
+        "state": {
+            "kind": "browser_clients" if live else "browser_executor",
+            "addon": {
+                "kind": "observed",
+                **({"connected_clients": 0} if live else {"registered": False}),
+            },
+        },
+    }
+
+
+def machine_row(machine: str) -> dict:
+    return {
+        "id": f"machine/{machine}",
+        "label": machine.upper(),
+        "purpose": "shared machine",
+        "selection": {"kind": "machine", "machine": machine},
+        "state": {"kind": "machine", "activity": "on", "publication": "stable"},
+    }
+
+
 def lane_payload() -> dict:
     lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "browser_stagehand", "candle_appraiser"]
     return {
         "schema": "masc.lane-inventory/v1",
         "observed_at": 1.0,
-        "rows": [],
+        "rows": [exact_row(name) for name in lanes]
+        + [browser_row(name) for name in ["live", "automation", "stagehand"]]
+        + [machine_row("msx"), machine_row("dos")],
         "exact_snapshot": {
             "schema": "masc.standalone_llm_lanes.v2",
             "generated_at": "2026-10-04T00:00:00Z",

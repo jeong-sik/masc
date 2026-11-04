@@ -197,13 +197,18 @@ class ChatOwedHistoryTest(unittest.TestCase):
                 close_fds=True,
             )
             os.close(slave)
+            transcript_path = os.environ.get("MASC_TUI_TEST_TRANSCRIPT")
+            transcript = open(transcript_path, "wb") if transcript_path else None
 
             def drain_for(seconds: float) -> None:
                 deadline = time.monotonic() + seconds
                 while time.monotonic() < deadline:
                     if select.select([master], [], [], 0.05)[0]:
                         try:
-                            os.read(master, 65536)
+                            chunk = os.read(master, 65536)
+                            if transcript:
+                                transcript.write(chunk)
+                                transcript.flush()
                         except OSError:
                             return
 
@@ -259,6 +264,8 @@ class ChatOwedHistoryTest(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+                if transcript:
+                    transcript.close()
                 os.close(master)
                 server.shutdown()
                 server.server_close()

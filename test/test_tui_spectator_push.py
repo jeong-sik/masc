@@ -14,16 +14,6 @@ import test_tui_lane_inventory_push as lane_fixture
 LIVE_PATH = "/api/v1/lane-addons/live"
 
 
-def machine_row(machine: str) -> dict:
-    return {
-        "id": f"machine/{machine}",
-        "label": machine.upper(),
-        "purpose": "shared machine",
-        "selection": {"kind": "machine", "machine": machine},
-        "state": {"kind": "machine", "activity": "on", "publication": "stable"},
-    }
-
-
 def machine_payload() -> dict:
     return {
         "source_kind": "msx_capture",
@@ -77,14 +67,6 @@ class SpectatorPushTest(unittest.TestCase):
     binary = ""
 
     def test_visible_machine_reads_and_controlled_ticker(self) -> None:
-        base_lane_payload = lane_fixture.lane_payload
-
-        def spectator_lane_payload() -> dict:
-            payload = base_lane_payload()
-            payload["rows"] = [machine_row("msx"), machine_row("dos")]
-            return payload
-
-        lane_fixture.lane_payload = spectator_lane_payload
         owed.ChatServer = SpectatorServer
         owed.ChatOwedHistoryTest.binary = self.binary
 

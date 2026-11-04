@@ -4,7 +4,7 @@
    screen directly, because the retained frame underneath would otherwise
    repaint rows over it. The render loop skips its own Render step while
    [msx_open] is set (the same way it does for [image_open]) and re-fetches the
-   frame on a timer instead.
+   frame only after the server announces a changed machine observation.
 
    The keyboard belongs to this screen while it is open: a key never reaches
    the surface underneath. [esc] closes it and [+] / [-] resize the drawing.

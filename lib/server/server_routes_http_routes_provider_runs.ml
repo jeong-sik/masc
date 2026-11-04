@@ -6,7 +6,6 @@ module Http = Http_server_eio
 module Cache = Server_dashboard_json_cache
 
 let dashboard_model_metrics_cache = Cache.create ()
-let dashboard_runtime_metrics_cache = Cache.create ()
 let dashboard_cost_latency_cache = Cache.create ()
 let dashboard_keeper_decisions_cache = Cache.create ()
 let dashboard_keeper_decisions_log_cache = Cache.create ()
@@ -31,23 +30,6 @@ let runtime_specification_json (runtime : Runtime_instance.t) =
     "model_context", Json_util.int_opt_to_json runtime.model.max_context;
     "provider_context", Json_util.int_opt_to_json runtime.provider.max_context;
     "binding_context", Json_util.int_opt_to_json runtime.binding.max_context ]
-
-let redact_provider_history_cache_error = function
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (function
-             | "cache", `Assoc metadata ->
-                 "cache", `Assoc
-                   (List.map
-                      (function
-                        | "last_error", _ ->
-                            "last_error", `String "history refresh failed"
-                        | field -> field)
-                      metadata)
-             | field -> field)
-           fields)
-  | json -> json
 
 let empty_model_metrics_json ~window ~bucket_min =
   `Assoc
@@ -111,17 +93,24 @@ let add_routes ~sw router =
        )
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/metrics" (fun state _agent req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let window_minutes = 1440 in
-         let history = Cache.read ~sw ~sync_first:false
-           ~cache:dashboard_runtime_metrics_cache ~key:base_path
-           ~placeholder:(`Assoc [ "state", `String "loading" ])
-           ~compute:(fun () -> Model_inference_metrics.compute_runtime_metrics_json
-             ~base_path ~window_minutes)
-           |> redact_provider_history_cache_error in
-         let _, _, runtimes = Runtime.get_default_route_and_runtimes () in
-         let json = `Assoc [ "history", history;
-           "specifications", `List (List.map runtime_specification_json runtimes) ] in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
+         (* The history keeps each file's rows between reads, so a read after
+            a runtime_metrics push reads only the rows written since; the first
+            read of a file reads it whole, on a worker. *)
+         match
+           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+             (* NDT-OK: request-time clock for a trailing window read. *)
+             Server_runtime_metrics.read ~base_path ~now:(Unix.gettimeofday ()))
+         with
+         | history ->
+           let _, _, runtimes = Runtime.get_default_route_and_runtimes () in
+           let json = `Assoc [ "history", history;
+             "specifications", `List (List.map runtime_specification_json runtimes) ] in
+           Http.Response.json_value ~compress:true ~request:req json reqd
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           Log.Server.warn "runtime history read failed: %s" (Printexc.to_string exn);
+           Http.Response.json_value ~status:`Service_unavailable ~request:req
+             (`Assoc [ "error", `String "runtime history unavailable" ]) reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-costs" (fun state req reqd ->
          match
            Dashboard_http_keeper_feeds.keeper_costs_window_of_query

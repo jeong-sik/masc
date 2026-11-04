@@ -271,3 +271,10 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   Fs_compat.append_file path line
+
+(* The runtime history reads every Keeper's decision log, so a row written
+   moves it. *)
+let append_decision_record config name json =
+  append_jsonl_line (keeper_decision_log_path config name) json;
+  Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+    Workspace_dataset_event.Runtime_metrics

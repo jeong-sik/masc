@@ -141,9 +141,9 @@ class LaneInventoryPushTest(unittest.TestCase):
         def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
             lane = cast(LaneServer, server)
             lane.set_phase("open")
-            step("keys", "9pp")
+            step("keys", "\t\t\t\t9pp")
             step("wait", lambda: lane.response_count("open", LANES) >= 1, "Lanes did not open")
-            step("keys", ":addons\n")
+            step("keys", "/addons\n")
             step("wait", lambda: lane.response_count("open", ADDONS) >= 1, "Add-ons did not open")
             step("keys", "\r")
 

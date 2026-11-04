@@ -18,7 +18,24 @@ let test_ticker_stops_with_the_observer_stream () = with_env (fun env sw ->
       Eio.Time.sleep (Eio.Stdenv.clock env) 0.45;
       check int "a closed stream advances nothing more" stopped !calls))
 
+let test_observer_machine_query () =
+  List.iter
+    (fun (target, expected) ->
+      match Machine_spectator.machine_of_request_target target with
+      | Ok machine ->
+          check string "the selected machine survives the query" expected
+            (Option.value ~default:"" (Option.map Masc.Machine_lane.to_wire machine))
+      | Error detail -> fail detail)
+    [ "/mcp?sse_kind=observer", ""
+    ; "/mcp?sse_kind=observer&machine=msx", "msx"
+    ; "/mcp?sse_kind=observer&machine=dos", "dos" ];
+  match Machine_spectator.machine_of_request_target "/mcp?sse_kind=observer&machine=other" with
+  | Error _ -> ()
+  | Ok _ -> fail "an unknown machine was admitted"
+
 let () =
   run "machine spectator"
     [ "lifecycle", [ test_case "ticker stops with its observer stream" `Quick
-        test_ticker_stops_with_the_observer_stream ] ]
+        test_ticker_stops_with_the_observer_stream ]
+    ; "query", [ test_case "only a named machine is admitted" `Quick
+        test_observer_machine_query ] ]

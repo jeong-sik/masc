@@ -1217,6 +1217,24 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         Transport.stop_sse_session successor_id)))
 ;;
 
+let test_observer_names_controlled_machine env =
+  let target = ref "" in
+  let handler reqd =
+    target := (Httpun.Reqd.request reqd).Httpun.Request.target;
+    stream_response ~receipts:[ receipt ] [ "data: {}\n\n" ] reqd
+  in
+  with_server env ~handler (fun ~port ->
+    let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+        ~machine:Masc.Machine_lane.Msx
+        ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path
+        ~expected_masc_root:identity.sid_masc_root ~host:"127.0.0.1" ~port
+        ~session_id:"observer-machine" ~cursor:None ~on_open:(fun _ -> ())
+        ~on_chunk:(fun _ -> ()) in
+    Alcotest.(check bool) "the controlled observer opens" true (Result.is_ok result);
+    Alcotest.(check (option string)) "the query names only the controlled machine"
+      (Some "msx") (Uri.get_query_param (Uri.of_string !target) "machine"))
+;;
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_env test) in
   Alcotest.run
@@ -1251,6 +1269,7 @@ let () =
       , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "unusable replay retries without the requested cursor" test_observer_retries_without_cursor
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
+        ; case "a controlled observer names its machine" test_observer_names_controlled_machine
         ; case "observer requires the workspace receipt" test_observer_requires_workspace_receipt
         ; case "identity requires scoped admission" test_observer_identity_requires_scoped_admission
         ; case "workspace refusal differs from session conflict" test_observer_workspace_refusal_is_not_a_session_conflict

@@ -15,7 +15,9 @@
     is. A new one goes to [\[browser.automation\]]. *)
 
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
+        (** Where runtime.toml is read and the table committed: the file, or
+            the workspace's running server (RFC-0482 §3.2). *)
   ; geckodriver : string option
         (** An absolute path. Without one, the [geckodriver] [PATH] names
             first, when it answers [--version]; one that does not is an error,

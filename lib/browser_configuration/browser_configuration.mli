@@ -64,6 +64,10 @@ val parse : Otoml.t -> (t, string) result
     cannot be read or its tables do not parse. *)
 val of_file : string -> (t, string) result
 
+val of_text : string -> (t, string) result
+(** {!of_file} of a runtime.toml text, for one read from the workspace's
+    running server. *)
+
 (** A source that starts from a runtime.toml table, with what that table
     parses to. External hosts need none. *)
 type _ source =

@@ -41,6 +41,8 @@ val mode_name : mode -> string
 val run
   :  base_path:string
   -> runtime_config_path:string
+  -> server_port:(int, string) result
+  -> agent:string
   -> modes:mode list
   -> no_addon:bool
   -> binary:string option

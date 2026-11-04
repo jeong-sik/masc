@@ -2810,19 +2810,34 @@ let browser_lane_setup_cmd =
               name. When ego lite does not list its spaces, nothing is written. It \
               installs no host. An existing table keeps its values unless they are named. \
               The server reads the table when it starts."
+         ; `P
+             "While this workspace's server answers on its port, the bidi, automation and \
+              ego tables are planned against the runtime.toml the server holds and saved \
+              through it; with no server answering they are written to the file. The \
+              server's port is MASC_HTTP_PORT, the workspace's saved port or the default: \
+              --port names the BiDi port."
          ])
     Term.(
-      const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
-                  profile port geckodriver browser ego_command ego_space ->
+      const (fun base_path requested_base_path agent modes no_addon binary token_file manifest_dir
+                  host_name firefox profile port geckodriver browser ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
           (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+          (* --port here is the BiDi port, so the server's is resolved without
+             a flag: MASC_HTTP_PORT, the workspace's saved port, the default. *)
+          ~server_port:
+            (resolve_connection_port requested_base_path None
+             |> Result.map Workspace_connection.to_int
+             |> Result.map_error Workspace_connection.error_message)
+          ~agent
           ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
           ~port ~geckodriver ~browser ~ego_command ~ego_space)
       $ base_path
+      $ run_base_path
+      $ login_agent
       $ modes
       $ no_addon
       $ binary

@@ -3893,6 +3893,7 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
     (match begin_tools_async_task_body state ~force with
      | None -> ()
      | Some request ->
+       state.tools_async_task_owed <- Masc_tui_owed_read.started state.tools_async_task_owed;
        Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.atr_job) previous;
        let source=Masc_tui_fetched.request_key request.atr_ticket in
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
@@ -17877,6 +17878,30 @@ let owe_tools_async_detail_read state keeper =
        String.equal target.keeper_name keeper) state.tools_async_selection
   then state.tools_async_detail_owed <- Masc_tui_owed_read.changed state.tools_async_detail_owed
 
+(* The open source Task's body reads again when the backlog changes, on a
+   revalidation, and after a failed read (RFC-0480 §3.4). Its history reads
+   its first page on opening and more on request; [r] reads it again. *)
+let owe_tools_async_task_read state =
+  state.tools_async_task_owed <- Masc_tui_owed_read.changed state.tools_async_task_owed
+
+(* Runs on every loop iteration. Only an open source Task owes a read. *)
+let launch_owed_tools_async_task state ~mailbox =
+  let open_task =
+    state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open
+    && Option.is_some state.tools_async_task_source
+  in
+  if not open_task then state.tools_async_task_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Option.is_some state.tools_async_task_body_request in
+    let read =
+      if reading then state.tools_async_task_owed
+      else Masc_tui_owed_read.abandoned state.tools_async_task_owed
+    in
+    state.tools_async_task_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_tools_async_task state ~mailbox
+  end
+
 (* Runs on every loop iteration. Only an open request detail owes a read:
    opening it, or moving the selection, reads it. *)
 let launch_owed_tools_async_detail state ~mailbox =
@@ -18742,6 +18767,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_tools_read state;
+       owe_tools_async_task_read state;
        owe_clients_read state;
        Option.iter (fun (target : Masc.Tui_decode_async_request.target) ->
            owe_tools_async_detail_read state target.keeper_name)
@@ -23162,7 +23188,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_verification_read state;
          owe_goal_projection_reads state;
          (* The call scope reads the selected Keeper's current Task. *)
-         owe_tools_surface_read state
+         owe_tools_surface_read state;
+         owe_tools_async_task_read state
        end);
       (* The Goal tree carries the approvals waiting on each Goal. *)
       (if !gate_changed && not !observer_source_loss_seen then
@@ -26838,7 +26865,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let _,terminal_cols=get_terminal_size () in
       complete_task_document state ~cols:(task_document_columns state ~terminal_cols) request result
   | Tools_async_task_body_loaded (request,result) ->
-      complete_tools_async_task_body state request result
+      let current =
+        tools_async_task_request_current state request state.tools_async_task_body_request
+          state.tools_async_task_body
+      in
+      complete_tools_async_task_body state request result;
+      if current then
+        state.tools_async_task_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.tools_async_task_owed
+           | Error _ -> failed_read state.tools_async_task_owed)
   | Tools_async_task_history_loaded (request,result) ->
       complete_tools_async_task_history state request result
   | Tools_async_observation_loaded (generation, result) ->
@@ -32581,6 +32617,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_tools state ~mailbox:async_messages;
       launch_owed_tools_async_detail state ~mailbox:async_messages;
+      launch_owed_tools_async_task state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
@@ -41249,14 +41286,13 @@ Use relative paths for resources already held in the package. -->
                 a slow authenticated read from stacking across ticks. *)
              launch_runtime_surface_load state ~mailbox:async_messages
                ~force:false
-         | Tools ->
-             (* The catalog and the selected Keeper's surface re-read on the
-                Skill, row and backlog pushes ([launch_owed_tools]); an open
-                async request on its Keeper's request and journal pushes
-                ([launch_owed_tools_async_detail]). Both retry a failed read.
-                An open source Task still reads on this tick. *)
-             if Option.is_some state.tools_async_task_source then
-               launch_tools_async_task state ~mailbox:async_messages
+         (* The catalog and the selected Keeper's surface re-read on the
+            Skill, row and backlog pushes ([launch_owed_tools]); an open async
+            request on its Keeper's request and journal pushes
+            ([launch_owed_tools_async_detail]); an open source Task on the
+            backlog's execution snapshot ([launch_owed_tools_async_task]).
+            Each retries a failed read. *)
+         | Tools -> ()
          (* runtime.toml re-reads when the server commits it and retries a
             failed read ([launch_owed_runtime_config]). *)
          | Config -> ()

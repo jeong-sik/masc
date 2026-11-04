@@ -380,7 +380,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
-  | Planning_detail.Heading -> Ansi.bold
+  | Planning_detail.Heading -> Theme.info () ^ Ansi.bold
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's

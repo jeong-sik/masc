@@ -18,7 +18,8 @@ type tone =
   | Quiet
   | Plain
   | Heading
-      (** A section's own title. It is drawn bold so a long detail has
+      (** A section's own title. It is drawn in the heading style the other
+          detail screens use (info colour, bold), so a long detail has
           landmarks to scroll between; the rows under it keep their tones. *)
 
 type line =

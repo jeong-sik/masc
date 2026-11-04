@@ -7142,6 +7142,7 @@ let launch_lanes_load state ~mailbox =
   if state.standalone_lanes_inflight then ()
   else begin
     state.standalone_lanes_inflight <- true;
+    state.lanes_owed <- Masc_tui_owed_read.started state.lanes_owed;
     let host = server_peer_host in
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
@@ -8126,6 +8127,9 @@ let owe_harness_read state =
 let owe_overview_read state =
   state.overview_owed <- Masc_tui_owed_read.changed state.overview_owed
 
+let owe_lanes_read state =
+  state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
+
 (* The Runtime surface reads again when the server announces a probe landed,
    a runtime history row, a usage report, a standing change or a runtime.toml
    commit, which move its probe, history and resolved document, and after a
@@ -8198,6 +8202,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Workspace_health -> owe_overview_read state
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
+  | Masc.Workspace_dataset_event.Lanes -> owe_lanes_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -9169,6 +9174,21 @@ let launch_owed_overview state ~mailbox =
   state.overview_owed <- read;
   if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.overview_inflight then
     launch_overview_load state ~mailbox
+
+(* Runs on every loop iteration. Only the Lanes surface reads the inventory;
+   off screen nothing is owed, since arriving reads it. A read already in
+   flight is let finish first. *)
+let launch_owed_lanes state ~mailbox =
+  if state.view <> Lanes then state.lanes_owed <- Masc_tui_owed_read.settled
+  else begin
+    let read =
+      if state.standalone_lanes_inflight then state.lanes_owed
+      else Masc_tui_owed_read.abandoned state.lanes_owed
+    in
+    state.lanes_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.standalone_lanes_inflight
+    then launch_lanes_load state ~mailbox
+  end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -16877,6 +16897,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.standalone_lanes_error <- None;
   state.standalone_lanes_inflight <- false;
   state.standalone_lanes_reread_pending <- false;
+  state.lanes_owed <- Masc_tui_owed_read.settled;
   state.runtime_surface_generation <- state.runtime_surface_generation + 1;
   state.runtime_surface_inflight <- None;
   state.runtime_surface_force_pending <- false;
@@ -19233,6 +19254,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight
        Masc_tui_types.revalidate_ask_followup_read state
        owe_overview_read state;
    | Cadence -> ());
+       owe_lanes_read state;
        if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state);
   scoped_refresh_followup :=
     note_full_refresh_intent
@@ -19584,6 +19606,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_asks_read state;
     owe_overview_read state;
     owe_harness_read state;
+    owe_lanes_read state;
     owe_async_requests_read state;
     owe_selected_tools_async_detail_read state;
     owe_tools_async_task_read state;
@@ -27919,6 +27942,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
       if generation = state.standalone_lanes_generation then (
+        state.lanes_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.lanes_owed
+           | Error _ -> failed_read state.lanes_owed);
         match result with
         | Ok snapshot ->
             replace_lane_inventory state snapshot;
@@ -33198,6 +33225,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
+      launch_owed_lanes state ~mailbox:async_messages;
       reconcile_contact_retry state ~mailbox:async_messages
         ~refresh_inflight:!http_refresh_inflight;
       launch_owed_runtime_config state ~mailbox:async_messages;
@@ -41817,7 +41845,9 @@ Use relative paths for resources already held in the package. -->
             registry change and the backlog's execution snapshot, and retries
             a failed read ([launch_owed_verification]). *)
          | Verification -> ()
-             | Lanes -> launch_lanes_load state ~mailbox:async_messages
+         (* The inventory re-reads when the server says what it draws moved
+            and retries a failed read ([launch_owed_lanes]). *)
+         | Lanes -> ()
          (* The roster re-reads when a workspace client row or a Keeper
             registry row changes and retries a failed read
             ([launch_owed_clients]). *)

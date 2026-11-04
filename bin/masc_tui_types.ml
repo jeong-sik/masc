@@ -10560,6 +10560,10 @@ type state = {
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
+  (* The Lanes inventory reads when the server announces that what it draws
+     moved, on a revalidation and a workspace authority change, and again
+     after a failed read (RFC-0480 §3.4). *)
+  mutable lanes_owed: Masc_tui_owed_read.t;
   (* A re-read asked for while a load was out. That load may have left before
      the change it has to show, so one more follows it. *)
   mutable standalone_lanes_reread_pending: bool;
@@ -14854,6 +14858,7 @@ let suspend_workspace_readings state =
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;
   state.standalone_lanes_reread_pending <- false;
+  state.lanes_owed <- Masc_tui_owed_read.settled;
   state.runtime_surface_inflight <- None;
   state.runtime_surface_force_pending <- false;
   state.runtime_surface_owed <- Masc_tui_owed_read.settled;
@@ -20132,6 +20137,7 @@ let create_state
   standalone_lanes = None;
   standalone_lanes_error = None;
   standalone_lanes_inflight = false;
+  lanes_owed = Masc_tui_owed_read.settled;
   standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
   slot_editor = None;

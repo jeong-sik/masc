@@ -17,6 +17,7 @@ type tone =
      quieter than the warn instruction, so a confirmation block keeps three
      readable volumes instead of one flat shout. *)
   | Plain
+  | Heading
 
 type line =
   { tone : tone
@@ -572,7 +573,7 @@ let timeline_unavailability_detail = function
 let timeline ~width ~goal_id
     (loaded : (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t) =
   let header =
-    { tone = Note; text = "RELATED ACTIVITY · latest state per linked item" }
+    { tone = Heading; text = "RELATED ACTIVITY · latest state per linked item" }
   in
   let observed = function
         | [] ->

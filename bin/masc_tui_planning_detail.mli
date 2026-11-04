@@ -17,6 +17,9 @@ type tone =
   | Note
   | Quiet
   | Plain
+  | Heading
+      (** A section's own title. It is drawn bold so a long detail has
+          landmarks to scroll between; the rows under it keep their tones. *)
 
 type line =
   { tone : tone

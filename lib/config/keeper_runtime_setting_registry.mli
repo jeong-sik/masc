@@ -47,7 +47,6 @@ type effective =
 
 (** The operator-facing group a row is listed under. *)
 type category =
-  | Spawn
   | Turn
   | Bootstrap
   | Lifecycle

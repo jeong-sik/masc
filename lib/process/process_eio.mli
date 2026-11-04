@@ -187,13 +187,6 @@ val run_argv_with_stdin_held_open_and_status_split :
     merely end-of-request. It requires an initialized Eio process runtime and
     fails closed with status 127 when called through the Unix fallback path. *)
 
-val cwd_path : string option -> (Eio.Fs.dir_ty Eio.Path.t, string) result
-(** Resolve an optional [cwd] string against the initialized default.
-
-    Absolute replaces the default, relative appends to it -- the same rule the
-    [?cwd:string] entry points above apply, and the same dependence on the
-    capability [init] was given. [Error] when [init] has not run. *)
-
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
     @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.

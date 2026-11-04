@@ -16690,7 +16690,6 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                       | None, (Ok _ | Error _)
                       | Some _, Error _ -> ());
                      observation))
-             approval_ticket)
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->

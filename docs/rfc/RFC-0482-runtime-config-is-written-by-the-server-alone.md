@@ -83,6 +83,8 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 
 이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
+재시작이 필요한 설정은 서버로 저장해도 바로 쓰이지 않는다. 서버는 부팅 때 적용한 값과 저장된 값을 비교하고, 다르면 그 키를 `pending_restart` 로 보여 준다(`lib/keeper_runtime/keeper_runtime_config.ml` `application_status`). 그래서 CLI 의 "실행 중인 서버는 재시작할 때 읽는다" 안내는 서버로 쓸 때도 맞다.
+
 ### 3.3 고르지 않은 길
 
 | 길 | 고르지 않은 이유 |
@@ -104,6 +106,5 @@ L4 는 L1~L3 과 #48036 뒤에만 들어간다.
 
 ## 5. 열린 질문
 
-1. CLI 가 그 워크스페이스의 서버를 찾는 방법. TUI 는 `--port` 와 `.masc/auth/masc-tui.token` 으로 붙는다. CLI 가 같은 값을 읽을지, 다른 운영자 토큰을 쓸지 정해야 한다.
-2. `masc config set` 은 "재시작 때 읽는다"고 안내하는 설정이 있다(`Runtime_setting_set.requires_restart`). 서버로 저장하면 원문 저장처럼 바로 `set_loaded` 된다. 재시작이 필요한 설정이 그 사이에 어떤 상태인지 확인해야 한다.
-3. Keeper 선호 writer(`submit_keeper_preference`)는 요청 번호와 단계(phase)를 가진 비동기 writer 다. 서버 route 로 옮길 때 그 순서 보장을 어디에 둘지 정해야 한다.
+1. CLI 가 그 워크스페이스의 서버를 찾는 방법. TUI 는 `--port` 로 서버를 정하고, `Masc_tui_http.install_operator_token` 이 `.masc/auth/masc-tui.token` 을 읽거나 잠금을 잡고 새로 받는다. CLI 가 이 모듈을 같이 쓸지, 다른 운영자 토큰을 쓸지 정해야 한다. 이 모듈은 지금 `bin/` 의 TUI 쪽에 있다.
+2. Keeper 선호 writer(`submit_keeper_preference`)는 요청 번호와 단계(phase)를 가진 비동기 writer 다. 서버 route 로 옮길 때 그 순서 보장을 어디에 둘지 정해야 한다.

@@ -7,11 +7,7 @@
 
 module TP = Mcp_server_eio_tool_profile
 
-type tool_profile = Mcp_server_eio_types.tool_profile =
-  | Full
-  | Managed_agent
-  | Operator_remote
-  | Seat
+type tool_profile = Mcp_server_eio_types.tool_profile
 
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error

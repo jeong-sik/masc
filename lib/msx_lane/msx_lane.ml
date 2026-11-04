@@ -151,10 +151,7 @@ type change_mark = { count : int; incarnation : string }
    Running always waits for the final frame. Both transitions are published
    under [lock], including when a step raises after partial progress. *)
 let change_count = ref 0
-type 'mark publication = 'mark Machine_live_publication.t =
-  | No_screen
-  | Stable of 'mark
-  | Running of 'mark
+type 'mark publication = 'mark Machine_live_publication.t
 type published_state = change_mark publication
 let published : published_state Atomic.t = Atomic.make No_screen
 

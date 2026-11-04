@@ -280,10 +280,7 @@ type change_mark = {
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
-type 'mark publication = 'mark Machine_live_publication.t =
-  | No_screen
-  | Stable of 'mark
-  | Running of 'mark
+type 'mark publication = 'mark Machine_live_publication.t
 type published_state = change_mark publication
 
 val current_publication : unit -> published_state

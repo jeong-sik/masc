@@ -38,7 +38,7 @@ type trigger_policy_toml_load =
     [runtime.toml]. Missing file/key are deliberate no-config outcomes; a
     present value has already passed the canonical policy parser. *)
 
-type trigger_policy_load_error =
+type trigger_policy_load_error = Connector_trigger_policy.load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }

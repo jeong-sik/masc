@@ -6,11 +6,7 @@
     removed (2026-06-08 fleet-wide cleanup); the tool itself is
     responsible for any hang protection. *)
 
-type tool_profile = Mcp_server_eio_types.tool_profile =
-  | Full
-  | Managed_agent
-  | Operator_remote
-  | Seat
+type tool_profile = Mcp_server_eio_types.tool_profile
 
 (* Delegate to the single canonical definition rather than re-declaring the
    exception→severity match (it previously drifted as a verbatim copy in two

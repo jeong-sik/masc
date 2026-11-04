@@ -30,11 +30,7 @@
 (** Tool surface profile.  Re-exported from {!Mcp_server_eio_types}
     so callers can match on variants without importing the types
     module directly. *)
-type tool_profile = Mcp_server_eio_types.tool_profile =
-  | Full
-  | Managed_agent
-  | Operator_remote
-  | Seat
+type tool_profile = Mcp_server_eio_types.tool_profile
 
 val is_seat_tool : string -> bool
 (** Whether host-owned permission metadata grants the machine-player surface.

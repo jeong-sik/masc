@@ -5,11 +5,7 @@
     and tool JSON serialization for the MCP protocol.
 *)
 
-type tool_profile = Mcp_server_eio_types.tool_profile =
-  | Full
-  | Managed_agent
-  | Operator_remote
-  | Seat
+type tool_profile = Mcp_server_eio_types.tool_profile
 
 let instruction key =
   let value = Prompt_registry.get_prompt key in

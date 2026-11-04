@@ -240,12 +240,7 @@ val exact_output_target_source :
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
 
-type missing_catalog_model =
-  { runtime_id : string
-  ; provider_id : string
-  ; provider_label : string
-  ; model_id : string
-  }
+type missing_catalog_model = Runtime_config_projection.missing_catalog_model
 (** Runtime binding whose concrete provider/model pair is absent from the AGENT_CORE
     capability catalog. [provider_label] is the exact AGENT_CORE capability namespace
     used for lookup. *)
@@ -258,10 +253,7 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
-type unavailable_runtime_assignment =
-  { keeper_name : string
-  ; runtime_id : string
-  }
+type unavailable_runtime_assignment = Runtime_config_projection.unavailable_runtime_assignment
 
 type startup_degradation =
   { report : missing_catalog_report

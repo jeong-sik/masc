@@ -150,9 +150,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Harness_verdicts -> "")
          | Masc.Workspace_dataset_event.Harness_verdicts
          | Masc.Workspace_dataset_event.Runtime_config
-         | Masc.Workspace_dataset_event.Clients -> "")
-         | Masc.Workspace_dataset_event.Provider_usage
-      ^ ")"
+         | Masc.Workspace_dataset_event.Clients
+         | Masc.Workspace_dataset_event.Provider_usage -> "")
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
   | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
@@ -1053,6 +1052,13 @@ let test_a_repository_push_reads_the_list () =
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]))
+  check (list string) "Clients and provider usage pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
+          ]))
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

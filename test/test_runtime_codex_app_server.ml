@@ -8138,7 +8138,7 @@ let fixture_rpc_refusal id =
     id
 ;;
 
-let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail () =
+let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~error_type ~detail () =
   let module Store = Keeper_official_client_session_store in
   with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
     let capture = Filename.concat base_path "setup-refusal.jsonl" in
@@ -8150,7 +8150,7 @@ let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail 
       | Error error ->
         let expected = Agent_core.Error.Provider
           (Llm_provider.Error.ProviderReportedError
-            { provider = "codex_app_server"; error_type = Some "rpc_error"; detail }) in
+            { provider = "codex_app_server"; error_type = Some error_type; detail }) in
         check string "original RPC error remains visible"
           (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
       | Ok _ -> fail "setup RPC refusal completed a Keeper turn");
@@ -10487,6 +10487,7 @@ let () =
             (test_keeper_setup_rpc_refusal_preserves_session
               ~responses:[fixture_rpc_refusal 1; account_chatgpt; thread_result]
               ~methods:["initialize"]
+              ~error_type:"rpc_error"
               ~detail:"initialize (code -32603): opaque fixture refusal")
         ; test_case
             "Keeper account RPC refusal preserves the native session"
@@ -10494,7 +10495,8 @@ let () =
             (test_keeper_setup_rpc_refusal_preserves_session
               ~responses:[init_result; fixture_rpc_refusal 2; thread_result]
               ~methods:["initialize"; "initialized"; "account/read"]
-              ~detail:"account/read (code -32603): opaque fixture refusal")
+              ~error_type:"account_read_failed"
+              ~detail:"Codex app-server RPC account/read failed (code -32603): opaque fixture refusal")
         ; test_case
             "Keeper resume RPC refusal keeps fresh recovery"
             `Quick

@@ -1640,12 +1640,18 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           , Some detail ) -> Error (internal_error detail)
         | ( Host.Terminal_tool_boundary _
           , None ) -> settle_host_stop stop)
-     | Error (Runtime_codex_app_server.Rpc_error _ as error)
+     | Error
+           ( ( Runtime_codex_app_server.Rpc_error _
+             | Runtime_codex_app_server.Account_read_failed _ )
+             as error )
        when not !thread_request_transmitted ->
        (* Setup-stage refusal (initialize, account/read): no thread request
           reached the vendor, so the settled session, ordinal and frontier
           stay exactly as claimed-over. [release_transient] cannot restore
-          the claim frontier, hence the byte-exact revert instead. *)
+          the claim frontier, hence the byte-exact revert instead.
+          [Account_read_failed] joined [Rpc_error] here after #47921 split
+          it into its own variant: the account/read handshake refusal is
+          still a setup-stage refusal (#47715). *)
        observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then

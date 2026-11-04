@@ -143,6 +143,7 @@ let summary = function
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
   | Observer.Event Observer.Repositories_changed -> "repositories"
+  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -909,6 +910,30 @@ let test_a_repository_push_reads_the_list () =
   check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
   check int "a verification or run push does not" 0 (count verification_frames)
 
+let connector_frame =
+  {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}
+
+|}
+
+let test_a_connector_push_names_its_connector () =
+  check (list string) "it decodes with the connector it names" [ "connector(slack)" ]
+    (List.map summary (decode_all [ connector_frame ]));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.gate_connector_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it owes the connectors a read" 1 (count [ connector_frame ]);
+  check int "a repository push does not" 0 (count [ repositories_frame ]);
+  match decode_all [ "data: {\"type\":\"gate_connector_changed\"}\n\n" ] with
+  | [ Observer.Undecodable _ ] -> ()
+  | decoded ->
+      fail
+        ("a connector push without a connector was read: "
+         ^ String.concat ", " (List.map summary decoded))
+
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"
     [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
@@ -1378,6 +1403,8 @@ let () =
             test_a_repository_push_reads_the_list
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
+        ; test_case "a connector push names its connector" `Quick
+            test_a_connector_push_names_its_connector
         ; test_case "only a confirmation change reads the confirmations" `Quick
             test_only_a_confirmation_change_reads_the_confirmations
         ; test_case "only a schedule change reads the schedules" `Quick

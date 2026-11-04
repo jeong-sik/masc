@@ -286,6 +286,9 @@ type event =
   | Repositories_changed
       (** The workspace's repository catalog was written. A server push with
           no payload, named by {!Masc.Repository_catalog_broadcast}. *)
+  | Gate_connector_changed of { connector : string }
+      (** [connector]'s bindings, recorded names or drawn connection state
+          changed. A server push named by {!Masc.Gate_connector_changed_event}. *)
   | Keeper_event_queue_changed of { keeper : string }
       (** [keeper]'s event queue, or the reaction record beside it, was
           written. A server push named by
@@ -368,6 +371,10 @@ val async_requests_changed : event -> bool
 
 val repositories_changed : event -> bool
 (** The repository catalog changed. *)
+
+val gate_connector_changed : event -> bool
+(** [true] for {!Gate_connector_changed}. The Connectors list and a Keeper's
+    channels tab read the connectors again on it. *)
 
 val verification_requests_changed : event -> bool
 (** The verification request store, or the verification run registry a

@@ -5653,11 +5653,14 @@ let launch_connectors_load state ~mailbox =
   match begin_connectors_read state with
   | None -> ()
   | Some request ->
+    state.connectors_owed <- Masc_tui_owed_read.started state.connectors_owed;
     let enqueue_status = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read ~key:(Connector_read.job_key request) state ~mailbox
-      ~on_not_run:(fun () -> connector_read_not_started state request)
+      ~on_not_run:(fun () ->
+        state.connectors_owed <- Masc_tui_owed_read.abandoned state.connectors_owed;
+        connector_read_not_started state request)
       ~deliver:(fun result ->
         Connectors_loaded (request,
           Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result))
@@ -7942,6 +7945,11 @@ let owe_verification_read state =
 let owe_repositories_read state =
   state.repositories_owed <- Masc_tui_owed_read.changed state.repositories_owed
 
+(* The connectors read again when [gate_connector_changed] arrives while they
+   are on screen, and after a failed read (RFC-0480 §3.1). *)
+let owe_connectors_read state =
+  state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
+
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
 let owe_async_requests_read state =
@@ -7991,7 +7999,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | None -> ())
   | Connectors -> (
       match browser_lane_on_screen state with
-      | None -> launch_connectors_load state ~mailbox
+      | None ->
+          owe_connectors_read state;
+          launch_connectors_load state ~mailbox
       | Some _ -> refresh_browser_lane state ~mailbox)
   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
   | Tools ->
@@ -8748,6 +8758,36 @@ let repositories_on_screen state =
   | Schedules | Verification | Harness | Fusion | Code | Changes | Connectors | Runtime
   | Config | Resources | Tools | System_logs | Keepers _ ->
       false
+
+(* The Connectors list, outside the Browser Lane, and a Keeper's channels tab
+   draw the connectors. *)
+let connectors_on_screen state =
+  match state.view with
+  | Connectors -> Option.is_none (browser_lane_on_screen state)
+  | Keepers Keeper_detail -> state.detail_tab = Detail_channels
+  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Fusion | Code | Changes | Repositories | Runtime
+  | Config | Resources | Tools | System_logs ->
+      false
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
+   surface reads it. A read already in flight is let finish first. *)
+let launch_owed_connectors state ~mailbox =
+  if not (connectors_on_screen state) then
+    state.connectors_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading =
+      Connector_read.reading_for ~authority:state.detail_read_authority state.connectors_read
+    in
+    let read =
+      if reading then state.connectors_owed
+      else Masc_tui_owed_read.abandoned state.connectors_owed
+    in
+    state.connectors_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_connectors_load state ~mailbox
+  end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -17452,7 +17492,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.identity_attempt_error <- None;
       state.identity_filter <- None;
       Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_channels ->
+      owe_connectors_read state;
+      launch_connectors_load state ~mailbox
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
          not the fleet list. *)
@@ -18349,6 +18391,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_keeper_turns_read state;
        owe_verification_read state;
        owe_repositories_read state;
+       owe_connectors_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -22437,6 +22480,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let turns_changed = ref false in
       let verification_changed = ref false in
       let repositories_changed = ref false in
+      let connectors_changed = ref false in
       let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -22506,6 +22550,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.verification_requests_changed event then
                 verification_changed := true;
               if Masc_tui_observer.repositories_changed event then repositories_changed := true;
+              if Masc_tui_observer.gate_connector_changed event then connectors_changed := true;
               (match Masc_tui_observer.turn_change event with
                | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
@@ -22538,7 +22583,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
@@ -22591,7 +22636,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22699,6 +22744,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if (!verification_changed || !execution_snapshot_seen) && not !observer_source_loss_seen then
          owe_verification_read state);
       (if !repositories_changed && not !observer_source_loss_seen then owe_repositories_read state);
+      (if !connectors_changed && not !observer_source_loss_seen then owe_connectors_read state);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
@@ -26524,6 +26570,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match complete_connectors_read state request result with
        | None -> ()
        | Some completion -> begin
+        state.connectors_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.connectors_owed
+           | Error _ -> failed_read state.connectors_owed);
         (match completion.Connector_read.follow_up with
          | Connector_read.No_follow_up -> ()
          | Read_after_write -> launch_connectors_load state ~mailbox);
@@ -32043,6 +32093,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
+      launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40686,7 +40737,9 @@ Use relative paths for resources already held in the package. -->
          | Repositories -> ()
          | Connectors ->
              (match browser_lane_on_screen state with
-              | None -> launch_connectors_load state ~mailbox:async_messages
+              (* The connectors re-read on [gate_connector_changed] and retry
+                 a failed read ([launch_owed_connectors]). *)
+              | None -> ()
               | Some view when not state.image_open ->
                   Option.iter (launch_browser_lane state ~mailbox:async_messages)
                     (Browser_lane_view.cadence_operation view)

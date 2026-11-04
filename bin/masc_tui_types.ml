@@ -165,6 +165,9 @@ module Connector_read : sig
   val view : t -> view
   val stage : t -> stage option
   (** [None] means no active read; held demand and failed starts are separate. *)
+  val reading_for : authority:unit ref -> t -> bool
+  (** Whether a read for [authority] is active. A read left from an older
+      authority does not count: {!begin_read} starts a new one beside it. *)
   val begin_read : authority:unit ref -> owner:unit ref -> t -> (t * request) option
   (** [None] shares the active request for this authority. A supplied owner is
       fresh for this attempt; an older authority cannot lend its active slot. *)
@@ -222,6 +225,10 @@ end = struct
     | Pending_status _ -> Some Status_pending
     | Pending_names _ -> Some Names_pending
     | Empty | Held | Not_started _ -> None
+
+  let reading_for ~authority = function
+    | Pending_status (request, _) | Pending_names request -> request.authority == authority
+    | Empty | Held | Not_started _ -> false
 
   let owes_read request follow_up =
     match request.cause, follow_up with
@@ -10647,6 +10654,7 @@ type state = {
   (* The read the repository list owes after a catalog change, a
      revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
   mutable repositories_owed: Masc_tui_owed_read.t;
+  mutable connectors_owed: Masc_tui_owed_read.t;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -19820,6 +19828,7 @@ let create_state
   repositories_error = None;
   repositories_inflight = false;
   repositories_owed = Masc_tui_owed_read.settled;
+  connectors_owed = Masc_tui_owed_read.settled;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;

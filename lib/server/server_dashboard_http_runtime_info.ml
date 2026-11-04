@@ -2238,8 +2238,8 @@ let dashboard_tools_cache_ttl_sec = 30.0
 
 (* The cache holds only what is the same for every viewer: the inventory,
    the usage summary, the resolutions. What is about one Keeper -- its
-   effective surface, its skill activations -- is answered live per request
-   below, so the key names the workspace alone. *)
+   effective surface -- is answered live per request below, so the key names
+   the workspace alone. *)
 let dashboard_tools_cache_key ~base_path = Printf.sprintf "tools:%s" base_path
 
 let dashboard_tools_warming_json () =

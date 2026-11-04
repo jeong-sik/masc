@@ -367,6 +367,20 @@ let test_absent_keeper_is_not_found_not_warming () =
     (surface |> member "keeper_name" |> to_string)
 ;;
 
+(* A Keeper's activation projection is its own route (RFC-0483); the tools
+   answer carries none. *)
+let test_tools_answer_carries_no_activation_projection () =
+  with_workspace @@ fun config ->
+  match
+    Server_dashboard_http_runtime_info.dashboard_tools_http_json
+      ~keeper:"never-registered"
+      config
+  with
+  | `Assoc fields ->
+    check bool "no skill_activations key" false (List.mem_assoc "skill_activations" fields)
+  | _ -> fail "the tools answer is not an object"
+;;
+
 let composition_fixture config meta =
   record_one config meta;
   let ledger = match Ledger.load ~config ~trace_id:meta.Keeper_meta_contract.runtime.trace_id with
@@ -524,6 +538,8 @@ let () =
             test_missing_keeper_is_no_session
         ; test_case "the per-Keeper activations answer reads the live ledger" `Quick
             test_keeper_activations_answer_reads_the_live_ledger
+        ; test_case "the tools answer carries no activation projection" `Quick
+            test_tools_answer_carries_no_activation_projection
  ; test_case "absent keeper is not found, not warming" `Quick
      test_absent_keeper_is_not_found_not_warming
         ; test_case "corrupt ledger is unavailable" `Quick

@@ -4837,12 +4837,15 @@ let test_chat_timeline_index_reuses_only_identical_inputs () =
   let first = Tui_types.chat_timeline_index ~messages:rows ~visible in
   let second = Tui_types.chat_timeline_index ~messages:rows ~visible in
   check bool "unchanged input lists reuse their derived index" true (first == second);
-  let changed_visible = List.rev visible in
+  let changed_messages = rows @ [ chat_entry ~request_id:"other" ~role:Tui_types.Message_keeper ~text:"y" ~at:7. () ] in
+  let rebuilt_for_messages = Tui_types.chat_timeline_index ~messages:changed_messages ~visible in
+  check bool "a messages-only change rebuilds the derived index" false (first == rebuilt_for_messages);
+  let changed_visible = List.map (fun (message, _) -> message, Some 6.) visible in
   let changed = Tui_types.chat_timeline_index ~messages:rows ~visible:changed_visible in
   check bool "a changed visible list rebuilds the derived index" false (first == changed);
   let got = Tui_types.chat_log_timeline_context changed
       ~member_ids:[ "r" ] ~request_id:"r" ~started_at:5. in
-  check (option (float 0.)) "the rebuilt index keeps the request moment" (Some 5.) got.clt_timeline_at;
+  check (option (float 0.)) "the rebuilt index keeps the changed visible moment" (Some 6.) got.clt_timeline_at;
   check bool "the rebuilt index keeps no false committed error" false got.clt_committed_error
 ;;
 

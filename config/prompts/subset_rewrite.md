@@ -5,6 +5,3 @@ operator_surface: fragment
 ---
 ### move_to_field (vars: field, because)
 use the {{field}} field: {{because}}
-
-### call_this_instead (vars: call, because)
-call {{call}} instead: {{because}}

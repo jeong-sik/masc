@@ -603,8 +603,8 @@ Keeper의 `sandbox_image`로 지정합니다.
 기본 설치는 **자동 시작하지 않는 Keeper `imp` 1명**과 내장 스킬
 `browser-lanes`, `browser-live-follow-read`, `browser-navigate-read`,
 `diagram-in-chat`, `evidence-review`, `frontend-change`, `lane-addon-author`,
-`observe-act-verify`, `prior-art`, `root-cause-first`, `run-and-read`,
-`skill-authoring`, `verify-before-claiming-done`, `work-intake`를 준비합니다.
+`observe-act-verify`, `prior-art`, `root-cause-first`, `skill-authoring`,
+`verify-before-claiming-done`, `work-intake`를 준비합니다.
 모델과 샌드박스를 설정한 뒤 Keeper를 시작하세요.
 
 Task와 Goal 검증 에이전트도 `keeper_skill`을 통해 작업 공간에 공개된 지침 Skill을

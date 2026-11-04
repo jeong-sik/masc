@@ -68,22 +68,12 @@ let mentions ~needle haystack =
 ;;
 
 
-(* The one that keeps a move, named here so adding a second is a decision
-   rather than a drift. *)
-let has_a_move : Masc_exec.Parsed.reason_too_complex list = [ `Background ]
-
-let test_only_one_construct_has_a_move () =
+let test_no_construct_has_a_move () =
   List.iter
     (fun construct ->
-       let expected_move = List.mem construct has_a_move in
-       match rewrite_of construct, expected_move with
-       | Rewrite.Unrepresentable _, false -> ()
-       | Rewrite.Unrepresentable _, true ->
-         Alcotest.failf
-           "%s lost the move it still has"
-           (Rewrite.tag (rewrite_of construct))
-       | other, true -> ignore other
-       | other, false ->
+       match rewrite_of construct with
+       | Rewrite.Unrepresentable _ -> ()
+       | other ->
          Alcotest.failf
            "a shell runs this construct, so advising %s sends the caller to \
             rewrite working code"
@@ -121,13 +111,11 @@ let tag_is construct expected =
 ;;
 
 let test_each_rewrite_names_the_right_move () =
-  (* The shell running the line exits when the line does, so a backgrounded
-     child is left with no handle. Spawn returns one. *)
-  tag_is `Background "call_this_instead:spawn";
   (* A shell runs each of these, so there is no other call to name. *)
   List.iter
     (fun construct -> tag_is construct "unrepresentable")
-    [ `Heredoc
+    [ `Background
+    ; `Heredoc
     ; `Here_string
     ; `Cmd_subst
     ; `Shell_builtin "eval"
@@ -182,38 +170,14 @@ let test_a_nested_pipeline_is_flattened_not_refused () =
       (Rewrite.tag other)
 ;;
 
-(* The advice for a backgrounded command names a tool, not a pattern, and a
-   name nobody has is worse than no advice. [Subset_rewrite] lives below the
-   tool schemas and cannot read them; this is the layer that sees both. *)
-let test_the_background_advice_names_a_registered_tool () =
-  let sentence = Rewrite.to_string (Rewrite.of_reason (Gate.Unsupported_construct `Background)) in
-  let spawn =
-    match
-      List.find_opt
-        (fun (d : Tool_schemas_spawn.definition) ->
-           d.action = Tool_schemas_spawn.Start)
-        Tool_schemas_spawn.definitions
-    with
-    | Some d -> d.schema.Masc_domain.name
-    | None -> Alcotest.fail "the spawn surface has no Start tool"
-  in
-  Alcotest.(check string)
-    "the sentence names the spawn tool as it is registered"
-    (Printf.sprintf
-       "call %s instead: the shell running this line exits when the line does, so [&] \
-        leaves a child with no handle to wait on, read from, or stop"
-       spawn)
-    sentence
-;;
-
 let () =
   Alcotest.run
     "subset_rewrite"
     [ ( "taxonomy"
       , [ Alcotest.test_case
-            "only one construct has a move"
+            "no construct has a move"
             `Quick
-            test_only_one_construct_has_a_move
+            test_no_construct_has_a_move
         ; Alcotest.test_case
             "no advice claims there is no shell"
             `Quick
@@ -234,10 +198,6 @@ let () =
             "a nested pipeline is flattened, not refused"
             `Quick
             test_a_nested_pipeline_is_flattened_not_refused
-        ; Alcotest.test_case
-            "the background advice names a registered tool"
-            `Quick
-            test_the_background_advice_names_a_registered_tool
         ] )
     ]
 ;;

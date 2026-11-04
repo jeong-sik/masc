@@ -108,6 +108,124 @@ let test_every_reader_silences_stderr () =
     Masc_tui_clipboard.readers
 ;;
 
+(* Over SSH a tool on this host fills this host's clipboard, so the copy goes
+   to the terminal whatever is installed. *)
+let test_a_remote_session_copies_through_the_terminal () =
+  let env pairs name = List.assoc_opt name pairs in
+  let session = Masc_tui_clipboard.copy_session in
+  Alcotest.(check bool) "no SSH variables is local" true
+    (session (env []) = Masc_tui_clipboard.Local);
+  Alcotest.(check bool) "SSH_CONNECTION is remote" true
+    (session (env [ "SSH_CONNECTION", "10.0.0.1 51000 10.0.0.2 22" ])
+     = Masc_tui_clipboard.Remote);
+  Alcotest.(check bool) "SSH_TTY is remote" true
+    (session (env [ "SSH_TTY", "/dev/ttys004" ]) = Masc_tui_clipboard.Remote);
+  Alcotest.(check bool) "a remote session never runs a tool" true
+    (Masc_tui_clipboard.copy_route Masc_tui_clipboard.Remote ~installed:(fun _ -> true)
+     = Masc_tui_clipboard.Terminal_only)
+
+(* Locally the installed tools are tried in their order, and with none
+   installed the terminal is the only way out. *)
+let test_a_local_session_tries_the_installed_tools_first () =
+  let names = function
+    | Masc_tui_clipboard.Through_tools tools ->
+        List.map Masc_tui_clipboard.writer_name tools
+    | Masc_tui_clipboard.Terminal_only -> []
+  in
+  let route installed =
+    Masc_tui_clipboard.copy_route Masc_tui_clipboard.Local
+      ~installed:(fun name -> List.mem name installed)
+  in
+  Alcotest.(check (list string)) "every installed tool, in order"
+    [ "pbcopy"; "wl-copy"; "xclip" ]
+    (names (route [ "xclip"; "wl-copy"; "pbcopy" ]));
+  Alcotest.(check (list string)) "only the installed ones" [ "xclip" ]
+    (names (route [ "xclip" ]));
+  Alcotest.(check bool) "nothing installed goes to the terminal" true
+    (route [] = Masc_tui_clipboard.Terminal_only)
+
+(* When no tool runs, the text still leaves through the terminal, and the
+   outcome says so. *)
+let test_a_copy_without_a_tool_is_sent_to_the_terminal () =
+  let sent = ref None in
+  let outcome =
+    Masc_tui_clipboard.copy_text Masc_tui_clipboard.Remote
+      ~write_osc52:(fun text -> sent := Some text) "copied text"
+  in
+  Alcotest.(check (option string)) "the text went to the terminal" (Some "copied text") !sent;
+  Alcotest.(check bool) "and the outcome says so" true
+    (outcome = Masc_tui_clipboard.Sent_to_terminal { failed = [] })
+
+(* Fake tools on a private PATH stand in for the desktop ones, so the real
+   clipboard is never touched. Each fake writes what it reads to its own file
+   and exits with the given status. *)
+let with_fake_tools tools f =
+  let dir = Filename.temp_dir "masc-tui-copy-tools" "" in
+  let received name = Filename.concat dir (name ^ ".received") in
+  List.iter
+    (fun (name, status) ->
+      let script = Filename.concat dir name in
+      Out_channel.with_open_bin script (fun channel ->
+        Printf.fprintf channel "#!/bin/sh\n/bin/cat > %s\nexit %d\n"
+          (Filename.quote (received name)) status);
+      Unix.chmod script 0o755)
+    tools;
+  let saved_path = Sys.getenv_opt "PATH" in
+  Unix.putenv "PATH" dir;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "PATH" (Option.value saved_path ~default:"");
+      Array.iter (fun entry -> Sys.remove (Filename.concat dir entry)) (Sys.readdir dir);
+      Sys.rmdir dir)
+    (fun () ->
+      f (fun name ->
+        match In_channel.with_open_bin (received name) In_channel.input_all with
+        | text -> Some text
+        | exception Sys_error _ -> None))
+
+let multiline_text = "first line\n'quoted' \"twice\" $HOME `tick`\n한글 줄\n"
+
+let not_sent_to_terminal _ = Alcotest.fail "the terminal got a copy a tool already took"
+
+(* The first tool that exits 0 holds the text byte for byte, and the terminal
+   is left alone. *)
+let test_a_local_copy_reaches_the_first_tool_intact () =
+  with_fake_tools [ "pbcopy", 0; "wl-copy", 0 ] (fun received ->
+    let outcome =
+      Masc_tui_clipboard.copy_text Masc_tui_clipboard.Local
+        ~write_osc52:not_sent_to_terminal multiline_text
+    in
+    Alcotest.(check bool) "pbcopy took it" true
+      (outcome = Masc_tui_clipboard.Copied_by "pbcopy");
+    Alcotest.(check (option string)) "byte for byte" (Some multiline_text)
+      (received "pbcopy");
+    Alcotest.(check (option string)) "the next tool never ran" None (received "wl-copy"))
+
+(* A tool that exits non-zero is passed over for the next one. *)
+let test_a_failed_tool_hands_the_copy_to_the_next () =
+  with_fake_tools [ "pbcopy", 1; "wl-copy", 0 ] (fun received ->
+    let outcome =
+      Masc_tui_clipboard.copy_text Masc_tui_clipboard.Local
+        ~write_osc52:not_sent_to_terminal multiline_text
+    in
+    Alcotest.(check bool) "wl-copy took it" true
+      (outcome = Masc_tui_clipboard.Copied_by "wl-copy");
+    Alcotest.(check (option string)) "wl-copy holds the text" (Some multiline_text)
+      (received "wl-copy"))
+
+(* When every installed tool fails, the terminal gets the text and the
+   outcome names the tools that failed, in the order they were tried. *)
+let test_every_failed_tool_is_named_before_the_terminal_copy () =
+  with_fake_tools [ "pbcopy", 1; "xclip", 2 ] (fun _received ->
+    let sent = ref None in
+    let outcome =
+      Masc_tui_clipboard.copy_text Masc_tui_clipboard.Local
+        ~write_osc52:(fun text -> sent := Some text) multiline_text
+    in
+    Alcotest.(check (option string)) "the terminal got the text" (Some multiline_text) !sent;
+    Alcotest.(check bool) "both failures named in order" true
+      (outcome = Masc_tui_clipboard.Sent_to_terminal { failed = [ "pbcopy"; "xclip" ] }))
+
 let () =
   Alcotest.run "tui clipboard"
     [ ( "readers"
@@ -122,5 +240,19 @@ let () =
             test_every_reader_silences_stderr
         ] )
     ; ("errors", [])
+    ; ( "copy"
+      , [ Alcotest.test_case "remote session goes through the terminal" `Quick
+            test_a_remote_session_copies_through_the_terminal
+        ; Alcotest.test_case "local session tries installed tools first" `Quick
+            test_a_local_session_tries_the_installed_tools_first
+        ; Alcotest.test_case "no tool sends to the terminal" `Quick
+            test_a_copy_without_a_tool_is_sent_to_the_terminal
+        ; Alcotest.test_case "first tool gets the text intact" `Quick
+            test_a_local_copy_reaches_the_first_tool_intact
+        ; Alcotest.test_case "failed tool hands over to the next" `Quick
+            test_a_failed_tool_hands_the_copy_to_the_next
+        ; Alcotest.test_case "failed tools are named before the terminal copy" `Quick
+            test_every_failed_tool_is_named_before_the_terminal_copy
+        ] )
     ]
 ;;

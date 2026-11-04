@@ -47,3 +47,44 @@ val reader_command : reader -> dest:string -> string
 
 val error_to_string : error -> string
 (** One line an operator can act on. *)
+
+(** {1 Copying text out}
+
+    Text the operator copies goes to a desktop clipboard tool when this
+    process runs on the operator's own machine, and to the terminal as OSC 52
+    otherwise or when no tool takes it. A tool's exit status says whether the
+    text arrived; OSC 52 says nothing back, so its outcome stays unconfirmed. *)
+
+type writer
+
+val writers : writer list
+(** The tools {!copy_text} tries, in order: pbcopy, wl-copy, xclip. *)
+
+val writer_name : writer -> string
+
+type copy_session =
+  | Local  (** this process runs where the operator pastes *)
+  | Remote  (** over SSH: a tool here would fill this host's clipboard *)
+
+val copy_session : (string -> string option) -> copy_session
+(** [Remote] when the environment names an SSH connection or SSH terminal. *)
+
+type copy_route =
+  | Through_tools of writer list  (** installed tools, tried in order *)
+  | Terminal_only
+
+val copy_route : copy_session -> installed:(string -> bool) -> copy_route
+(** Where a copy goes before anything runs. *)
+
+type copy_outcome =
+  | Copied_by of string  (** this tool exited 0 with the text *)
+  | Sent_to_terminal of { failed : string list }
+      (** written as OSC 52 after these tools, if any, failed *)
+
+val copy_text :
+  copy_session -> write_osc52:(string -> unit) -> string -> copy_outcome
+(** Copy [text] along {!copy_route}, falling back to [write_osc52] when every
+    tool fails. Runs the tool synchronously; the call returns once it has. *)
+
+val copy_outcome_text : copy_outcome -> string
+(** What happened, for the operator's notice. *)

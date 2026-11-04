@@ -4201,7 +4201,7 @@
 (test
  (name test_tui_clipboard)
  (modules test_tui_clipboard)
- (libraries alcotest masc_tui_clipboard))
+ (libraries alcotest masc_tui_clipboard unix))
 
 (test
  (name test_tui_sse_lines)

@@ -197,3 +197,91 @@ let error_to_string = function
   | Unreadable { reader; detail } ->
     Printf.sprintf "%s could not read the clipboard image: %s" reader detail
 ;;
+
+(* Text goes the other way through a desktop tool that reads its stdin. The
+   text is handed over as a file rather than a pipe: a tool that exits before
+   reading all of it would leave this process writing into a closed pipe, and
+   SIGPIPE would end the TUI. *)
+type writer =
+  { writer_name : string
+  ; command : source:string -> string
+  }
+
+let writer_name writer = writer.writer_name
+
+let writer_reading_stdin name args =
+  { writer_name = name
+  ; command =
+      (fun ~source ->
+        String.concat " "
+          ((name :: args) @ [ "<"; Filename.quote source; ">/dev/null"; quiet_stderr ]))
+  }
+
+(* macOS first for the reason the readers put it first. *)
+let writers =
+  [ writer_reading_stdin "pbcopy" []
+  ; writer_reading_stdin "wl-copy" []
+  ; writer_reading_stdin "xclip" [ "-selection"; "clipboard"; "-in" ]
+  ]
+
+type copy_session = Local | Remote
+
+(* Over SSH the desktop tools on this host fill this host's clipboard, not the
+   one the operator pastes from; only the terminal can reach that one. *)
+let copy_session getenv =
+  match getenv "SSH_CONNECTION", getenv "SSH_TTY" with
+  | None, None -> Local
+  | Some _, _ | _, Some _ -> Remote
+
+type copy_route =
+  | Through_tools of writer list
+  | Terminal_only
+
+let copy_route session ~installed =
+  match session with
+  | Remote -> Terminal_only
+  | Local -> (
+      match List.filter (fun writer -> installed writer.writer_name) writers with
+      | [] -> Terminal_only
+      | tools -> Through_tools tools)
+
+type copy_outcome =
+  | Copied_by of string
+  | Sent_to_terminal of { failed : string list }
+
+let write_through writer text =
+  let source = Filename.temp_file "masc-tui-copy" ".txt" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove source with Sys_error _ -> ())
+    (fun () ->
+      match
+        Out_channel.with_open_bin source (fun channel -> Out_channel.output_string channel text)
+      with
+      | exception Sys_error _ -> false
+      | () -> (
+          match Unix.system (writer.command ~source) with
+          | Unix.WEXITED 0 -> true
+          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false))
+
+let copy_text session ~write_osc52 text =
+  let send_to_terminal failed =
+    write_osc52 text;
+    Sent_to_terminal { failed = List.rev failed }
+  in
+  match copy_route session ~installed:executable_exists with
+  | Terminal_only -> send_to_terminal []
+  | Through_tools tools ->
+      let rec attempt failed = function
+        | [] -> send_to_terminal failed
+        | writer :: rest ->
+            if write_through writer text then Copied_by writer.writer_name
+            else attempt (writer.writer_name :: failed) rest
+      in
+      attempt [] tools
+
+let copy_outcome_text = function
+  | Copied_by tool -> Printf.sprintf "copied with %s" tool
+  | Sent_to_terminal { failed = [] } -> "sent to the terminal as OSC 52 (unconfirmed)"
+  | Sent_to_terminal { failed } ->
+      Printf.sprintf "sent to the terminal as OSC 52 (unconfirmed) after %s failed"
+        (String.concat ", " failed)

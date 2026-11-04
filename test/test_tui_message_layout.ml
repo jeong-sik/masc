@@ -441,16 +441,13 @@ let test_truncate_middle () =
     (String.starts_with ~prefix:"featu" cut && String.ends_with ~suffix:"grouping-02" cut);
   check bool "overflowing label never exceeds column width" true
     (Layout.display_width cut <= 18);
-  (* A plain ASCII label keeps a third of the usable cells from its front and
-     the rest from its back, at every width that has to cut it. *)
+  (* A plain ASCII label is cut without segmenting it. A zero-width style in
+     front sends the same label down the segmenting path; with the style taken
+     back out, the two cuts must be the same at every width. *)
   let name = "native-image-goal-verify-20261101-111334" in
-  let length = String.length name in
-  for col = Layout.cut_mark_cells + 1 to length - 1 do
-    let usable = col - Layout.cut_mark_cells in
-    let head = usable / 3 in
-    check string (Printf.sprintf "ASCII cut at col=%d" col)
-      (String.sub name 0 head ^ Layout.cut_mark
-       ^ String.sub name (length - (usable - head)) (usable - head))
+  for col = Layout.cut_mark_cells to String.length name do
+    check string (Printf.sprintf "plain and styled ASCII cut alike at col=%d" col)
+      (Masc_tui_theme.strip_sgr (Layout.truncate_middle col ("\x1b[0m" ^ name)))
       (Layout.truncate_middle col name)
   done;
   let korean = "가나다라마바사아자차카타파하" in

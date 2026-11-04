@@ -489,6 +489,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Workspace_store_changed Observer.Pending_confirms -> "pending confirmation"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests -> "verification"
   | Observer.Workspace_store_changed Observer.Goal_projection -> "goals"
+  | Observer.Workspace_store_changed Observer.Runtime_config -> "runtime.toml"
   | Observer.Workspace_store_changed Observer.Skill_catalog -> "skill catalog"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Gate_connector_changed _ -> "connector"
@@ -646,6 +647,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a verification request changed" }
   | Observer.Workspace_store_changed Observer.Goal_projection ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a Goal changed" }
+  | Observer.Workspace_store_changed Observer.Runtime_config ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml changed" }
   | Observer.Workspace_store_changed Observer.Skill_catalog ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the skill catalog was published" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->

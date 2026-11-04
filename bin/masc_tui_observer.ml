@@ -148,6 +148,8 @@ type workspace_store =
   (* The Goal store, the verification ledger, the measurement store or the
      verifier's observations. *)
   | Goal_projection
+  (* runtime.toml: the server committed a text of it. *)
+  | Runtime_config
   (* A workspace skill catalog snapshot was published. *)
   | Skill_catalog
 
@@ -375,7 +377,7 @@ let skill_activations_keeper = function
 
 let skill_catalog_published = function
   | Workspace_store_changed Skill_catalog -> true
-  | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection)
+  | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Runtime_config)
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
@@ -427,7 +429,7 @@ let goal_projection_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Skill_catalog) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Skill_catalog | Runtime_config) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _
   | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
@@ -493,7 +495,7 @@ let schedules_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Pending_confirms | Goal_projection | Skill_catalog) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Pending_confirms | Goal_projection | Skill_catalog | Runtime_config) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -521,7 +523,23 @@ let pending_confirms_changed = function
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Goal_projection | Skill_catalog) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Goal_projection | Skill_catalog | Runtime_config) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
+  | Snapshot _ | Execution_snapshot | Other _ ->
+      false
+
+let runtime_config_changed = function
+  | Workspace_store_changed Runtime_config -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _ | Keeper_metrics_appended _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Skill_catalog) | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Lane_resource _
   | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
@@ -970,6 +988,8 @@ let reading_of_type type_name =
       Named (Workspace_store_changed Pending_confirms)
   | type_name when String.equal type_name Masc.Goal_projection_broadcast.changed_event ->
       Named (Workspace_store_changed Goal_projection)
+  | type_name when String.equal type_name Masc.Runtime_config_changed_event.event_type ->
+      Named (Workspace_store_changed Runtime_config)
   | type_name when String.equal type_name Masc.Skill_catalog_published_event.event_type ->
       Named (Workspace_store_changed Skill_catalog)
   | type_name when String.equal type_name Masc.Workspace_dataset_event.event_type ->

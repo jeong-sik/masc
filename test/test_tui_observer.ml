@@ -822,7 +822,10 @@ let test_a_verification_or_run_push_reads_the_requests () =
   let count frames =
     decode_all frames
     |> List.filter (function
-         | Observer.Event event -> Observer.verification_requests_changed event
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Verification_requests -> true
+              | Some Masc.Workspace_dataset_event.Repositories | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
@@ -879,13 +882,20 @@ let test_a_repository_push_reads_the_list () =
     decode_all frames
     |> List.filter (function
          | Observer.Event event ->
-             (match Observer.dataset_changed event with
+             (match Observer.dataset_owed event with
               | Some Masc.Workspace_dataset_event.Repositories -> true
               | Some Masc.Workspace_dataset_event.Verification_requests | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
   check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
+  check bool "it owes the verification requests nothing" true
+    (match decode_all [ repositories_frame ] with
+     | [ Observer.Event event ] ->
+         (match Observer.dataset_owed event with
+          | Some Masc.Workspace_dataset_event.Verification_requests -> false
+          | Some Masc.Workspace_dataset_event.Repositories | None -> true)
+     | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
   List.iter
     (fun frame ->

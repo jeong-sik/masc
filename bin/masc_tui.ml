@@ -22385,8 +22385,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let execution_snapshot_seen = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
-      let verification_changed = ref false in
-      let datasets_changed = ref [] in
+      let datasets_owed = ref [] in
       let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -22449,10 +22448,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
-              if Masc_tui_observer.verification_requests_changed event then
-                verification_changed := true;
-              (match Masc_tui_observer.dataset_changed event with
-               | Some dataset -> datasets_changed := dataset :: !datasets_changed
+              (match Masc_tui_observer.dataset_owed event with
+               | Some dataset -> datasets_owed := dataset :: !datasets_owed
                | None -> ());
               (match Masc_tui_observer.turn_change event with
                | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
@@ -22644,9 +22641,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
-      (if (!verification_changed || !execution_snapshot_seen) && not !observer_source_loss_seen then
+      (if !execution_snapshot_seen && not !observer_source_loss_seen then
          owe_verification_read state);
-      (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_changed);
+      (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_owed);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a

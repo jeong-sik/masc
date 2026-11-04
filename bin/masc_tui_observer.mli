@@ -356,14 +356,11 @@ val tool_modes_changed : event -> bool
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
 
-val dataset_changed : event -> Masc.Workspace_dataset_event.dataset option
-(** The workspace dataset a push names as written. *)
-
-val verification_requests_changed : event -> bool
-(** The verification request store, or the verification run registry a
-    request row reads its review from, changed. The goal-verification and
-    exact-lane registries do not count. A backlog commit arrives as the
-    execution {!Snapshot}. *)
+val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
+(** The workspace dataset a push owes a read: the dataset it names as
+    written, or the verification requests when the verification run registry
+    their rows read changed. The goal-verification and exact-lane registries
+    owe nothing. A backlog commit arrives as {!Execution_snapshot}. *)
 
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)

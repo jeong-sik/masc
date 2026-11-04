@@ -309,22 +309,11 @@ let async_requests_changed = function
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
-let dataset_changed = function
+let dataset_owed = function
   | Dataset_changed dataset -> Some dataset
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
-  | Keeper_turn_complete _
-  | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
-  | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed _ | Schedule_store_invalidated | Pending_confirm_invalidated | Keeper_event_queue_changed _
-  | Board_changed _ | Approval_change _
-  | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
-      None
-
-let verification_requests_changed = function
-  | Dataset_changed Masc.Workspace_dataset_event.Verification_requests
-  | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification -> true
+  (* The Verification queue's rows read their review from this registry. *)
+  | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification ->
+      Some Masc.Workspace_dataset_event.Verification_requests
   | Internal_agent_runs_changed
       (Masc.Internal_agent_runs_event.Goal_verification | Masc.Internal_agent_runs_event.Exact_lane)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
@@ -333,9 +322,10 @@ let verification_requests_changed = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _
-  | Fusion_run_status _ | Dataset_changed Masc.Workspace_dataset_event.Repositories | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
-  | Schedule_store_invalidated | Pending_confirm_invalidated | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
-      false
+  | Fusion_run_status _ | Schedule_store_invalidated | Pending_confirm_invalidated | Keeper_event_queue_changed _
+  | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
+      None
 
 let roster_change = function
   | Keeper_roster_change change -> Some change

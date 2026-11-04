@@ -377,7 +377,7 @@ val run_argv_pipeline_with_status_split :
     from the final stdout pipe and per-stage stderr pipes while the pipeline is
     still running. *)
 
-type detached_handle = {
+type detached_handle = Process_eio_detached.detached_handle = {
   pid : int;
       (** Child process PID (also the process-group leader). *)
   pgid : int;
@@ -390,7 +390,7 @@ type detached_handle = {
       (** [Unix.gettimeofday ()] at spawn time. *)
 }
 
-type detached_devnull_handle = {
+type detached_devnull_handle = Process_eio_detached.detached_devnull_handle = {
   devnull_pid : int;
       (** Child process PID (also the process-group leader). *)
   devnull_pgid : int;

@@ -140,7 +140,7 @@ val is_registered : string -> bool
     Known tool names map to module tags through a compile-time match or the
     tag registry. Handler registration does not authorize tool names. *)
 
-type module_tag =
+type module_tag = Tool_tag_types.module_tag =
   | Mod_plan | Mod_operator
   | Mod_local_runtime
   | Mod_run

@@ -433,6 +433,71 @@ let test_error_projection () =
   | error -> failf "final turn failure: %s" (Agent_core.Error.to_string error)
 ;;
 
+(* A non-retryable modelError without quota names its cause only in prose.
+   The account's own model/list says whether the configured model is in the
+   catalog; when it is not, the reported error names that, and the variant
+   (and so retry and effect handling) stays the modelError one. *)
+let test_model_error_names_a_missing_catalog_model () =
+  let entry model_id : Msp.model_catalog_entry =
+    { model_id; display_label = model_id; provider_id = "meta"; profile_id = None;
+      context_limit = Some 1_000_000; output_limit = None; is_default = false;
+      variants = Msp.Unknown_efforts } in
+  let catalog source models : Msp.model_catalog =
+    { source; provider_id = "meta"; profile_id = None; models } in
+  let model = "muse-spark-1.3" in
+  check bool "a catalog that lists the model says so" true
+    (Adapter.catalog_reading ~model (catalog Msp.Provider_catalog [entry model])
+     = Keeper_muse_runtime.Catalog_lists_model);
+  let empty = Adapter.catalog_reading ~model (catalog Msp.Bundled_catalog []) in
+  check bool "an empty bundled catalog omits it" true
+    (empty = Keeper_muse_runtime.Catalog_omits_model
+               { model; source = Msp.Bundled_catalog; listed = 0 });
+  check bool "another model does not stand in for it" true
+    (Adapter.catalog_reading ~model (catalog Msp.Provider_catalog [entry "muse-spark-1.4"])
+     = Keeper_muse_runtime.Catalog_omits_model
+         { model; source = Msp.Provider_catalog; listed = 1 });
+  let failed ?quota ~retryable kind =
+    Serve.Turn_failed { Msp.kind; message = "not logged in"; retryable; quota } in
+  let final = failed ~retryable:false Msp.Model_error in
+  check (option string) "only a final modelError without quota reads the catalog"
+    (Some model) (Adapter.catalog_checked_model ~configured_model:(Some model) final);
+  check (option string) "no configured model, nothing to look up"
+    None (Adapter.catalog_checked_model ~configured_model:None final);
+  check (option string) "a retryable modelError does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~retryable:true Msp.Model_error));
+  check (option string) "a typed quota does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~quota:{Msp.limit_kind = "tierLimit"; resets_at_ms = 1}
+               ~retryable:false Msp.Model_error));
+  check (option string) "another error kind does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~retryable:false Msp.Step_limit));
+  let reported ?catalog error =
+    match Adapter.runtime_error_to_core_error ?catalog error with
+    | Agent_core.Error.Provider
+        (Llm_provider.Error.ProviderReportedError { provider = "muse_serve"; error_type; detail }) ->
+      error_type, detail
+    | other -> failf "expected a reported provider error: %s" (Agent_core.Error.to_string other) in
+  let error_type, detail = reported ~catalog:empty final in
+  check (option string) "the missing model is named as the cause"
+    (Some "model_not_in_account_catalog") error_type;
+  check bool "the detail keeps the host's words and names the catalog" true
+    (String.ends_with ~suffix:
+       "; the account's model catalog (bundledCatalog, 0 models) does not list muse-spark-1.3"
+       detail
+     && String.starts_with ~prefix:(Serve.error_to_string final) detail);
+  check (option string) "a listed model keeps the host's kind"
+    (Some "modelError") (fst (reported ~catalog:Keeper_muse_runtime.Catalog_lists_model final));
+  check (option string) "no reading keeps the host's kind"
+    (Some "modelError") (fst (reported final));
+  check (option string) "a reading never relabels another kind"
+    (Some "stepLimit") (fst (reported ~catalog:empty (failed ~retryable:false Msp.Step_limit)));
+  match Adapter.runtime_error_to_core_error ~catalog:empty (failed ~retryable:true Msp.Model_error) with
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+  | other -> failf "a retryable modelError stays availability: %s" (Agent_core.Error.to_string other)
+;;
+
 (* Exit 2 and exit 5 refuse the configuration the host was started with, and
    the same configuration exits the same way again: configuration, not a
    dropped connection. Exit 3 is a refused login or settings file. *)
@@ -3893,6 +3958,8 @@ let () =
         ; test_case "session refusals start fresh next" `Quick
             test_refusals_of_the_session_start_fresh_next
         ; test_case "error projection" `Quick test_error_projection
+        ; test_case "a modelError names a model missing from the account catalog" `Quick
+            test_model_error_names_a_missing_catalog_model
         ; test_case "documented refusal exits are not dropped connections" `Quick
             test_documented_refusal_exits_are_not_dropped_connections
         ] )

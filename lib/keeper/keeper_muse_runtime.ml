@@ -57,11 +57,53 @@ let resolve_native_posture ~base_path ~keeper_name ~required_native_posture =
     ~default:Runtime_native_tools.Native_read ~none_supported:false
 ;;
 
+(* What the account's own [model/list] says about the configured model, read
+   after a non-retryable [modelError] that carries no quota detail. *)
+type catalog_reading =
+  | Catalog_lists_model
+  | Catalog_omits_model of
+      { model : string
+      ; source : Msp.model_catalog_source
+      ; listed : int
+      }
+
+let catalog_reading ~model (catalog : Msp.model_catalog) =
+  if List.exists (fun (entry : Msp.model_catalog_entry) -> String.equal entry.model_id model)
+       catalog.models
+  then Catalog_lists_model
+  else Catalog_omits_model { model; source = catalog.source; listed = List.length catalog.models }
+;;
+
+let model_not_in_account_catalog = "model_not_in_account_catalog"
+
+(* Only a non-retryable [modelError] without quota leaves its cause to prose,
+   so only that failure reads the catalog, and only for a configured model. *)
+let catalog_checked_model ~configured_model (error : Serve.error) =
+  match error with
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = false; quota = None; _ } ->
+    configured_model
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = true; _ }
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = Some _; _ }
+  | Serve.Turn_failed
+      { Msp.kind =
+          ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+          | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Launch_error
+          | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
+      ; _
+      }
+  | Serve.Invalid_config _ | Serve.Spawn_failed _ | Serve.Turn_input_write_failed _
+  | Serve.Protocol_error _ | Serve.Rpc_error _ | Serve.Capability_not_granted _
+  | Serve.Session_not_durable | Serve.Session_model_mismatch _
+  | Serve.Session_workspace_mismatch _ | Serve.Session_approval_mode_mismatch _
+  | Serve.Auth_required _ | Serve.Turn_cancelled | Serve.Unsupported_server_request _
+  | Serve.Runtime_shutting_down | Serve.Process_exited _ | Serve.Timeout _ -> None
+;;
+
 (* Mirrors the Codex app-server projection where the two clients share a
    shape: an exited process and the host's own interrupt are typed MASC
    values, and an idle stream after [turn/start] was written stays off the
    rotation chain because the host may still be running the turn. *)
-let runtime_error_to_core_error ?(now = Time_compat.now ()) (error : Serve.error) =
+let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Serve.error) =
   match error with
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
@@ -147,12 +189,26 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) (error : Serve.error
         (Llm_provider.Error.ProviderUnavailable
            { provider = provider_name; detail = Serve.error_to_string error })
     else
+      (* The account's catalog names the cause the error prose does not; the
+         error stays a reported [modelError] for retry and effect handling. *)
+      let error_type, detail =
+        match kind, catalog with
+        | Msp.Model_error, Some (Catalog_omits_model { model; source; listed }) ->
+          ( model_not_in_account_catalog
+          , Printf.sprintf "%s; the account's model catalog (%s, %d models) does not list %s"
+              (Serve.error_to_string error) (Msp.model_catalog_source_to_string source) listed model )
+        | Msp.Model_error, (None | Some Catalog_lists_model)
+        (* [Auth_required] is matched above as an auth error; the alias keeps
+           its constructor in the type. *)
+        | ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+          | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Launch_error
+          | Msp.Auth_required | Msp.Unrecognized_error_kind _ ),
+          (None | Some (Catalog_lists_model | Catalog_omits_model _)) ->
+          Msp.turn_error_kind_to_string kind, Serve.error_to_string error
+      in
       Agent_core.Error.Provider
         (Llm_provider.Error.ProviderReportedError
-           { provider = provider_name
-           ; error_type = Some (Msp.turn_error_kind_to_string kind)
-           ; detail = Serve.error_to_string error
-           })
+           { provider = provider_name; error_type = Some error_type; detail })
   | Serve.Turn_cancelled ->
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Host_stopped_turn
@@ -1602,7 +1658,27 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
                 ~current:!recovery_failure ~admission:!admission error;
-            runtime_error_to_core_error error)
+            (* The handshake bound also bounds this metadata exchange. *)
+            let catalog =
+              match catalog_checked_model ~configured_model:client_config.model error with
+              | None -> None
+              | Some model ->
+                (match
+                   Eio.Time.with_timeout_exn clock client_config.admission_timeout_s (fun () ->
+                     Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd client_config)
+                 with
+                 | Ok listed -> Some (catalog_reading ~model listed)
+                 | Error read_error ->
+                   Log.Keeper.warn ~keeper_name "Muse model catalog not read after model error: %s"
+                     (Serve.error_to_string read_error);
+                   None
+                 | exception Eio.Time.Timeout ->
+                   Log.Keeper.warn ~keeper_name
+                     "Muse model catalog not read after model error: no answer within %.0fs"
+                     client_config.admission_timeout_s;
+                   None)
+            in
+            runtime_error_to_core_error ?catalog error)
         | `Abort stop -> Ok (`Stopped stop))
     in
     let settle_cancellation exn =
@@ -1960,6 +2036,8 @@ module For_testing = struct
     List.rev !emitted
   ;;
 
+  let catalog_reading = catalog_reading
+  let catalog_checked_model = catalog_checked_model
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 

@@ -144,6 +144,8 @@ let targets_wire names =
   `Assoc [ "kind", `String "targets"; "targets", `List (List.map (fun n -> `String n) names) ]
 ;;
 
+let comment_id (comment : Board.comment) = Board.Comment_id.to_string comment.id
+
 let board_event_failures () =
   Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string ObservationQueryFailures)
@@ -246,7 +248,9 @@ let test_scan_follows_the_recorded_audience () =
    through a signal that is newer than its cursor. A new comment or vote moves
    the post's [updated_at] and lists it again, but the post's own signal needs
    a content time past the cursor, so the missing audience is never read and
-   nothing is counted as a failure. *)
+   nothing is counted as a failure. The comment's row records the lane, as a
+   declared target would; the store here declares no recipients, so the name in
+   its text is not one. *)
 let test_an_old_post_without_an_audience_costs_nothing () =
   with_workspace
   @@ fun config ->
@@ -270,13 +274,17 @@ let test_an_old_post_without_an_audience_costs_nothing () =
   check int "the first scan only starts the cursor" 0 listed;
   Unix.sleepf 0.01;
   let failures_before = board_event_failures () in
-  ignore
-    (get
-       (Board_dispatch.add_comment
-          ~post_id:(post_id old_post)
-          ~author:"external-author"
-          ~content:"@scanreader please look"
-          ()));
+  let comment =
+    get
+      (Board_dispatch.add_comment
+         ~post_id:(post_id old_post)
+         ~author:"external-author"
+         ~content:"@scanreader please look"
+         ())
+  in
+  record_audiences
+    ~path:(Board.comments_path (Board.global ()))
+    [ comment_id comment, Some (targets_wire [ "scanreader" ]) ];
   let _events, listed, mentions = scan () in
   check int "a new comment lists the old post again" 1 listed;
   check int "the comment is delivered from its own audience" 1 mentions;
@@ -301,7 +309,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
 
 (* When the missing audience is read, it is the post's own signal that is
    refused. The comments on the same post are separate signals and still go
-   through. *)
+   through: this one's row records the lane. *)
 let test_a_post_without_an_audience_does_not_stop_its_comments () =
   with_workspace
   @@ fun config ->
@@ -317,14 +325,18 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
          ~post_kind:Board.Human_post
          ())
   in
-  ignore
-    (get
-       (Board_dispatch.add_comment
-          ~post_id:(post_id post)
-          ~author:"external-author"
-          ~content:"@scanreader please look"
-          ()));
+  let comment =
+    get
+      (Board_dispatch.add_comment
+         ~post_id:(post_id post)
+         ~author:"external-author"
+         ~content:"@scanreader please look"
+         ())
+  in
   record_audiences ~path:(Board.persist_path (Board.global ())) [ post_id post, None ];
+  record_audiences
+    ~path:(Board.comments_path (Board.global ()))
+    [ comment_id comment, Some (targets_wire [ "scanreader" ]) ];
   Keeper_registry.set_board_cursor
     ~base_path:config.Workspace.base_path
     meta.Keeper_meta_contract.name
@@ -344,8 +356,6 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
     1.0
     (board_event_failures () -. failures_before)
 ;;
-
-let comment_id (comment : Board.comment) = Board.Comment_id.to_string comment.id
 
 let test_scan_follows_the_recorded_comment_audience () =
   with_workspace

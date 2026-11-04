@@ -9384,7 +9384,6 @@ type state = {
   mutable usage_section: usage_section;
   mutable usage_scope_id: string option;
   mutable usage_show_limit_exhausted: bool;
-  mutable agents: agent list;
   mutable tasks: task list;
   (* Full Task values and their original immutable producer snapshot are one
      observation. Terminal Tasks remain available independently of active rows. *)
@@ -19490,7 +19489,6 @@ let create_state
   usage_section = Usage_plan;
   usage_scope_id = None;
   usage_show_limit_exhausted = false;
-  agents = [];
   tasks = [];
   task_payloads = Task_payloads.empty;
   goal_task_links = Goal_links_not_read;

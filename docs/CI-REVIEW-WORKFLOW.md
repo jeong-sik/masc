@@ -223,6 +223,14 @@ and quote the input size beside any count — `lines=41703 grep=0` means the
 symbol is absent, `lines=0 grep=0` means the read failed. A count on an empty
 input is not evidence of absence.
 
+Counting a long `Counter(...)` or argument list by eye is the same mistake in a
+different shape. A failure message listed 17 keys over 98 requests; reading it
+by eye missed `('setup', '/api/v1/dashboard/scheduled-automation'): 5`, and two
+wrong hypotheses were built on "the path is absent". Extracting the keys and
+summing them showed the schedule path present and — scoped to its phase — zero
+after the test cleared its list, which was the actual finding. Parse the
+structure and count it; do not scan it.
+
 Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
 is not the line that follows its own invocation. Taking the next result line
 attributes another suite's summary to the one being read: a `test_mcp_server_eio`

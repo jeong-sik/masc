@@ -381,7 +381,7 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
               (* A refused delivery loses this one result. The server stopped
                  waiting for it, and its caller was told the outcome is
                  unknown; a connection that is gone fails the next poll. *)
-              (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload result) with
+              (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload (Peer.with_input_state peer result)) with
                | Ok () -> ()
                | Error detail ->
                  Log.Server.warn "browser Add-on ego result of command %s was not delivered: %s" command.id detail);

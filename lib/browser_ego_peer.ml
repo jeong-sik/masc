@@ -2043,3 +2043,29 @@ let dispatch ?command_id ?actor t ~verb args =
   | Ok (Error (Live.Observed_failure observed)) ->
     Error (Live.Observed_failure {observed with receipt=annotate observed.receipt})
   | Ok (Error (Live.Before_effect _|Outcome_unknown _) as failure) -> failure
+
+(* What leaves the peer. A failure that is only a message becomes the observed
+   failure with the same effect phase, so its receipt can say where input stands;
+   while input is held the receipt also names the lock. Ownership is not claimed
+   here: only an answer that observed it (space_status, release_input) carries a
+   lock whose release path may be Keeper-callable, and that one is kept. *)
+let with_input_state t result =
+  let lock = match Input.status t.input with
+    | Input.Uncertain _ -> Some (Input.lock_report t.input ~owner:None)
+    | Input.Ready _ -> None in
+  let stamp = function
+    | `Assoc fields ->
+      let fields = List.remove_assoc "inputReadiness" fields in
+      let fields = match lock with
+        | Some report when not (List.mem_assoc "inputLock" fields) -> ("inputLock",report) :: fields
+        | Some _ | None -> fields in
+      `Assoc (("inputReadiness",str (Input.provenance t.input)) :: fields)
+    | value -> value in
+  match result with
+  | Ok value -> Ok (stamp value)
+  | Error (Live.Before_effect message) ->
+    Error (Live.Observed_failure {disposition=Live.Not_started;message;receipt=stamp (obj [])})
+  | Error (Live.Outcome_unknown message) ->
+    Error (Live.Observed_failure {disposition=Live.Uncertain;message;receipt=stamp (obj [])})
+  | Error (Live.Partial_failure partial) -> Error (Live.Partial_failure {partial with receipt=stamp partial.receipt})
+  | Error (Live.Observed_failure observed) -> Error (Live.Observed_failure {observed with receipt=stamp observed.receipt})

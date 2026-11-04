@@ -275,6 +275,19 @@ val dispatch
   -> Yojson.Safe.t
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 
+val with_input_state
+  :  t
+  -> (Yojson.Safe.t, Browser_live_peer.failure) result
+  -> (Yojson.Safe.t, Browser_live_peer.failure) result
+(** What leaves the peer. Every object result and every failure receipt
+    carries [inputReadiness]; while input is held it also carries [inputLock]
+    ({!Browser_ego_input.lock_report} with no claimed owner, so its release
+    path asks for [space_status]). An answer that already carries [inputLock]
+    from an ownership observation ([space_status], [release_input]) keeps it.
+    A [Before_effect] or [Outcome_unknown] failure becomes the
+    [Observed_failure] with the same effect phase so its receipt can carry
+    them. [dispatch] keeps its own failure classification. *)
+
 (** Explicit completion with [keep: []], sharing dispatch's exactly-once state.
     Ego protects unknown-origin Pages and unmanaged tabs. Only a validated
     native [closedSpace=true] receipt permits file cleanup. An uncertain finish

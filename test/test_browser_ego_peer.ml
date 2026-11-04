@@ -1223,6 +1223,58 @@ let test_a_gesture_refused_before_its_press_keeps_input () =
        ["urlBefore",str observed_url;"receipt",obj [];"error",str "native click failed";
         "thrown",obj ["name",str "ElementResolutionError";"kind",str "permanent"]]]
 
+(* What leaves the peer says where input stands, failures included. *)
+let test_every_answer_carries_the_input_state () =
+  let module Input=Masc.Browser_ego_input in
+  let dialog=ego_dialog "alert" "mousedown interrupted" in
+  let input_reply receipt = answered (obj ["urlBefore",str observed_url;
+    "tab",obj ["url",str observed_url;"title",str "Slack"];"receipt",receipt;"error",`Null]) in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> input_reply (obj ["dialog",dialog])
+    | "space.release_input" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | other -> failf "unexpected input-state step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let gesture=interact_args (Lane.Click "#source") in
+  ignore (dispatch peer Live.Page_interact gesture);
+  let pending=match Peer.input_status peer with
+    | Input.Uncertain pending -> pending
+    | Input.Ready _ -> fail "the interrupted gesture left no pending input" in
+  let receipt_of label = function
+    | Error (Live.Observed_failure {receipt;_} | Live.Partial_failure {receipt;_}) -> receipt
+    | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail (label ^ ": no failure receipt") in
+  let held label receipt =
+    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt));
+    check string (label ^ ": lock state") "release_uncertain" (text (field "state" (field "inputLock" receipt)));
+    check string (label ^ ": lock generation") pending.generation
+      (text (field "generation" (field "pending" (field "inputLock" receipt))));
+    check bool (label ^ ": ownership is not claimed without an observation") false
+      (Yojson.Safe.Util.to_bool (field "keeperCallable" (field "releasePath" (field "inputLock" receipt)))) in
+  let refusal=Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) in
+  check string "the refusal of the next input stays before any effect" "before effect" (failure_kind refusal);
+  held "the refusal" (receipt_of "the refusal" refusal);
+  let unknown=Peer.with_input_state peer (Error (Live.Outcome_unknown "lost answer")) in
+  check string "an unknown outcome stays unknown" "unknown" (failure_kind unknown);
+  held "an unknown outcome" (receipt_of "an unknown outcome" unknown);
+  (match Peer.with_input_state peer (dispatch peer Live.Browser_info (obj [])) with
+   | Ok value -> held "a read while held" value
+   | Error _ -> fail "a read while input is held was not served");
+  let partial=receipt_of "a partial failure"
+    (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
+  held "a partial failure" partial;
+  check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
+  (match Peer.with_input_state peer (Ok (obj ["inputLock",str "observed by the producer"])) with
+   | Ok value -> check string "a lock the answer already carries is kept" "observed by the producer"
+       (text (field "inputLock" value))
+   | Error _ -> fail "an answer carrying its own lock failed");
+  (match dispatch peer Live.Page_act (obj ["action",str "release_input";
+      "generation",str pending.generation;"confirmation",str "checked_and_released"]) with
+   | Ok _ -> ()
+   | Error _ -> fail "the owning agent could not release its lock");
+  let after=receipt_of "a failure after release" (Peer.with_input_state peer (Error (Live.Before_effect "refused"))) in
+  check string "after release the readiness is the Keeper's" "keeper_asserted" (text (field "inputReadiness" after));
+  check bool "after release no lock is named" true (field "inputLock" after=`Null)
+
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "owned-upload.txt" in
@@ -3988,6 +4040,7 @@ let () =
       test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;
       test_case "keeper release unblocks an owned Space" `Quick test_keeper_release_input_unblocks_owned_space;
       test_case "a gesture refused before its press keeps input" `Quick test_a_gesture_refused_before_its_press_keeps_input;
+      test_case "every answer carries the input state" `Quick test_every_answer_carries_the_input_state;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

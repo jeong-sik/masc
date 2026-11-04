@@ -490,8 +490,12 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
   if result.is_error=Some true then
     let class_,effect_disposition=Lane_addon_tool_result.failure result in
+    let lead=match effect_disposition with
+      | Tool_result.Proven_pre_effect -> "Browser command was refused before any effect. "
+      | Tool_result.Proven_post_effect -> "Browser command failed after part of its effect; inspect its receipt before further input. "
+      | Tool_result.Effect_outcome_unknown -> "Browser command failed and its effect is unknown; inspect its receipt before further input. " in
     fail ?metadata:result._meta ~data:raw ~class_ ~effect_disposition
-      ("Browser command failed; inspect its original receipt before further input. " ^ Agent_core.Mcp.text_of_tool_result result)
+      (lead ^ Agent_core.Mcp.text_of_tool_result result)
   else
   let decode ()=
     let* value=Option.to_result ~none:"browser command lacks structured content" result.structured_content in

@@ -10,11 +10,11 @@ type specification = {
   id : string; catalog : int option; output : int option;
   model : int option; provider : int option; binding : int option;
 }
-type history = Loading | Unavailable
+type history =
   | Decision_directory_unavailable | Decision_files_unreadable of int
   | Decision_rows_invalid of { malformed : int; schema_invalid : int }
   | Observed of {
-  window : int; generated_at : timestamp; stale : bool; refresh_failed : bool; unattributed : int;
+  window : int; generated_at : timestamp; unattributed : int;
   store_note : string; runtimes : stats list;
 }
 type t = { history : history; specifications : specification list }
@@ -87,13 +87,7 @@ let specification json =
   Ok {id; catalog; output; model; provider; binding}
 let history json =
   let* state = member text "state" json in
-  let* cache = required "cache" json in
-  let* refresh_failed = match field "last_error" cache with
-    | None | Some `Null -> Ok false
-    | Some (`String _) -> Ok true
-    | Some _ -> Error "runtime evidence has an invalid refresh error" in
   match state with
-  | "loading" -> Ok (if refresh_failed then Unavailable else Loading)
   | "unavailable" ->
     let* diagnostic = required "decision_read" json in
     let* cause = member text "cause" diagnostic in
@@ -113,11 +107,7 @@ let history json =
     let* window = member nat "window_minutes" json in
     let* unattributed = member nat "unattributed_entries" json in
     let* runtimes = member (list stats) "runtimes" json in
-    let* cache_state = member text "state" cache in
     let* generated_at = member time "observed_at" json in
-    let* stale = match cache_state with
-      | "fresh" -> Ok false | "stale_refreshing" -> Ok true
-      | _ -> Error "runtime evidence has an unconfirmed cache state" in
     let* store = required "cost_read" json in
     let* store_state = member text "state" store in
     let* store_note = match store_state with
@@ -130,7 +120,7 @@ let history json =
           malformed violations conflicts)
       | _ -> Error "runtime evidence has an unrecognized cost read state" in
     if unique (List.map (fun (row : stats) -> row.id) runtimes) then
-      Ok (Observed {window; generated_at; stale; refresh_failed; unattributed; store_note; runtimes})
+      Ok (Observed {window; generated_at; unattributed; store_note; runtimes})
     else Error "runtime evidence repeats a runtime identity"
   | _ -> Error "runtime history state is unavailable"
 let decode json =
@@ -155,8 +145,6 @@ let lines t ~runtime_id =
         "Declared context", Printf.sprintf "model %s / provider %s / binding %s tokens"
           (count row.model) (count row.provider) (count row.binding)] in
   let history = match t.history with
-    | Loading -> ["Runtime history", "loading; refresh to read the completed snapshot"]
-    | Unavailable -> ["Runtime history", "snapshot refresh failed; no history available"]
     | Decision_directory_unavailable ->
         ["Runtime history", "unavailable; decision log directory could not be read"]
     | Decision_files_unreadable count ->
@@ -167,10 +155,8 @@ let lines t ~runtime_id =
           "incomplete; %d malformed and %d schema-invalid decision rows; runtime totals unavailable"
           malformed schema_invalid]
     | Observed observed ->
-      ["History window", Printf.sprintf "last %d min, snapshot %s%s"
-        observed.window (timestamp observed.generated_at)
-        (if observed.refresh_failed then " (stale, refresh failed)"
-         else if observed.stale then " (stale, refreshing)" else "");
+      ["History window", Printf.sprintf "last %d min, read %s"
+        observed.window (timestamp observed.generated_at);
        "Attribution", Printf.sprintf "executed runtime ID; %d records without an answerer excluded" observed.unattributed;
        "Store coverage", observed.store_note]
       @ (match List.find_opt (fun (row : stats) -> row.id = runtime_id) observed.runtimes with

@@ -14,6 +14,49 @@
 open Model_inference_metrics_entry
 open Model_inference_metrics_parser
 
+(* ── One row of a trailing-window reading ─────────────────── *)
+
+(* What one physical row gives a reading over the window that starts at
+   [since_unix]. A schema violation counts while its row is in the window;
+   one with no readable time counts wherever its file is read. *)
+type row_reading =
+  | Row_entry of raw_entry
+  | Row_schema_violation of { ts_unix : float option; error : parse_error }
+  | Row_ignored  (** Older than the window, or a row the reading does not count. *)
+
+let readable_ts ts = if renderable_timestamp ts then Some ts else None
+
+let decision_row_reading ~since_unix json =
+  match parse_telemetry_entry json ~since_unix with
+  | Ok entry -> Row_entry entry
+  | Error error when parse_error_is_schema_violation error ->
+    Row_schema_violation
+      { ts_unix = Option.bind (Safe_ops.json_float_opt "ts_unix" json) readable_ts; error }
+  | Error _ -> Row_ignored
+
+(* A raw provider observation is the cost ledger's own record, not a sample. *)
+let cost_row_reading ~since_unix json =
+  match Cost_ledger.of_json json with
+  | Ok { usage_projection = Cost_ledger.Raw_observation _; _ } -> Row_ignored
+  | Ok { usage_projection = Cost_ledger.(Resolved_delta | Resolved_attempt_delta _); _ }
+  | Error _ ->
+    (match parse_cost_entry json ~since_unix with
+     | Ok entry -> Row_entry entry
+     | Error Out_of_window -> Row_ignored
+     | Error error ->
+       let ts_unix =
+         match Cost_ledger.of_json json with
+         | Ok row -> readable_ts row.ts_unix
+         | Error _ -> None
+       in
+       Row_schema_violation { ts_unix; error })
+
+let row_in_window ~since_unix = function
+  | Row_entry (entry : raw_entry) -> entry.ts_unix >= since_unix
+  | Row_schema_violation { ts_unix = Some ts; _ } -> ts >= since_unix
+  | Row_schema_violation { ts_unix = None; _ } -> true
+  | Row_ignored -> false
+
 (* ── Read decisions.jsonl files ─────────────────────────── *)
 
 type decision_read = (unit, decision_read_error) result
@@ -65,45 +108,49 @@ let fold_decision_file ~init ~on_malformed ~f path =
           | exception End_of_file -> acc in
         read init)
 
-let read_all_decisions ~base_path ~since_unix =
+(* Every Keeper's decision log, sorted by path; [Error ()] when the Keeper
+   runtime directory cannot be listed (logged). *)
+let decision_log_paths ~base_path =
   let keeper_dir =
     Common.keepers_runtime_dir_of_base ~base_path
   in
   match decision_files keeper_dir with
+  | Error () -> Error ()
+  | Ok files ->
+    Ok
+      (files
+       |> List.filter (fun f ->
+         Keeper_runtime_root_entry.classify_basename f
+         |> List.exists (function
+           | Keeper_runtime_root_entry.Keeper { artifact = Decision_log; _ } -> true
+           | Keeper_runtime_root_entry.Keeper { artifact = Metadata | Feedback_log | Tla_trace_log; _ } -> false))
+       |> List.sort String.compare
+       |> List.map (Filename.concat keeper_dir))
+
+let read_all_decisions ~base_path ~since_unix =
+  match decision_log_paths ~base_path with
   | Error () -> [], Error Decision_directory_unavailable
   | Ok files ->
     let unreadable = ref 0 in
     let malformed_rows = ref 0 in
     let schema_violation_rows = ref 0 in
-    let files =
-      files
-      |> List.filter (fun f ->
-        Keeper_runtime_root_entry.classify_basename f
-        |> List.exists (function
-          | Keeper_runtime_root_entry.Keeper { artifact = Decision_log; _ } -> true
-          | Keeper_runtime_root_entry.Keeper { artifact = Metadata | Feedback_log | Tla_trace_log; _ } -> false))
-      |> List.sort String.compare
-    in
     let entries = List.concat_map
-      (fun fname ->
-         let path = Filename.concat keeper_dir fname in
+      (fun path ->
          try
            fold_decision_file
              ~init:[]
              ~on_malformed:(fun () -> incr malformed_rows)
              ~f:(fun acc ~line_no json ->
-               match parse_telemetry_entry json ~since_unix with
-               | Ok e -> e :: acc
-               | Error err ->
-                 if parse_error_is_schema_violation err
-                 then begin
-                   incr schema_violation_rows;
-                   Log.Model_inference_metrics.warn "decisions.jsonl parse drop: %s:%d reason=%s"
-                     path
-                     line_no
-                     (parse_error_label err)
-                 end;
-                 acc)
+               match decision_row_reading ~since_unix json with
+               | Row_entry e -> e :: acc
+               | Row_schema_violation { error; _ } ->
+                 incr schema_violation_rows;
+                 Log.Model_inference_metrics.warn "decisions.jsonl parse drop: %s:%d reason=%s"
+                   path
+                   line_no
+                   (parse_error_label error);
+                 acc
+               | Row_ignored -> acc)
              path
          with
          | Eio.Cancel.Cancelled _ as exn ->
@@ -141,32 +188,15 @@ let read_cost_entries_dated ~base_path ~since_unix
       ~until:(Log.format_utc_date_of now)
       (function
         | Dated_jsonl.Parsed json ->
-          (match Cost_ledger.of_json json with
-           | Ok { usage_projection = Cost_ledger.Raw_observation _; _ } -> ()
-           | Ok { usage_projection = Cost_ledger.(Resolved_delta | Resolved_attempt_delta _); _ }
-           | Error _ ->
-             (match parse_cost_entry json ~since_unix with
-              | Ok entry -> entries := entry :: !entries
-              | Error Out_of_window -> ()
-              | Error
-                  (( Not_assoc
-                   | Invalid_ts_unix
-                   | Missing_ts_unix
-                   | No_telemetry_object
-                   | Missing_outcome
-                   | Invalid_outcome
-                   | Missing_usage_reported
-                   | Missing_telemetry_reported
-                   | Missing_success_model
-                   | Missing_success_inference_identity
-                   | Missing_error_model_attribution
-                   | Invalid_executed_runtime_id
-                   | Invalid_current_cost_row _ ) as err) ->
-                incr schema_violation_rows;
-                Log.Model_inference_metrics.warn
-                  "cost ledger schema drop: reason=%s detail=%s"
-                  (parse_error_label err)
-                  (parse_error_detail err)))
+          (match cost_row_reading ~since_unix json with
+           | Row_entry entry -> entries := entry :: !entries
+           | Row_ignored -> ()
+           | Row_schema_violation { error; _ } ->
+             incr schema_violation_rows;
+             Log.Model_inference_metrics.warn
+               "cost ledger schema drop: reason=%s detail=%s"
+               (parse_error_label error)
+               (parse_error_detail error))
         | Dated_jsonl.Malformed_json { path; line_number; detail } ->
           incr malformed_rows;
           let location =

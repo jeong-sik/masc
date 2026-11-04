@@ -13,7 +13,6 @@ let payload rows = `Assoc [
     "provider_context", `Null; "binding_context", `Int 500000]];
   "history", `Assoc ["state", `String "ready"; "window_minutes", `Int 1440; "observed_at", `Float 1234.;
     "unattributed_entries", `Int 7; "runtimes", `List rows;
-    "cache", `Assoc ["state", `String "stale_refreshing"; "generated_at", `Float 1234.];
     "cost_read", `Assoc ["state", `String "unavailable"]]]
 let read json = match Evidence.decode json with Ok value -> value | Error detail -> fail detail
 let value label lines = List.assoc label lines

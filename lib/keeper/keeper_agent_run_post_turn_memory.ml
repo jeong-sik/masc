@@ -122,11 +122,7 @@ let run
                ]
              | None -> []))
      in
-     Keeper_types_support.append_jsonl_line
-       (Keeper_types_support.keeper_decision_log_path
-          config
-          meta.name)
-       eval_json
+     Keeper_types_support.append_decision_record config meta.name eval_json
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -66,6 +66,11 @@ val requires_restart : change -> bool
 (** Whether a running server picks the change up only when it restarts, as the
     registry says for the row. *)
 
+val edit_text : change list -> string -> (string, error) result
+(** The runtime.toml text with every change applied, by the same rules as
+    {!apply}, without reading or writing a file: a command that saves through
+    the running server edits the text the server answered. *)
+
 val apply : runtime_config_path:string -> change list -> (bool, error) result
 (** Apply every change in order, in one commit under the config write lock. At
     most one change per key. All of them or none. [Ok true] when the file's

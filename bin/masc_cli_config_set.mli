@@ -5,10 +5,19 @@
     reads the arguments, seeds a workspace that has no runtime.toml yet and
     reports. *)
 
-val run : base_path:string -> assignments:string list -> int
-(** Writes every assignment in one commit, or none. The file is the one the
-    server reads for [base_path], [MASC_CONFIG_DIR] included. A workspace with
-    no runtime.toml is seeded the way server start seeds it, so a script can set
-    a key before the first start; a workspace that has one is left as it is.
+val run : base_path:string -> port:int -> agent:string -> assignments:string list -> int
+(** Writes every assignment in one commit, or none.
+
+    When [base_path]'s server answers on [port] and is ready, the commit goes
+    through it (RFC-0482 §3.2): the server is the one writer of runtime.toml
+    while it runs and tells its readers. That needs the sign-in [masc login]
+    keeps for [agent]. A port answering for another workspace, a server still
+    starting or a missing sign-in writes nothing.
+
+    With no server answering, the file is the one the server reads for
+    [base_path], [MASC_CONFIG_DIR] included. A workspace with no runtime.toml
+    is seeded the way server start seeds it, so a script can set a key before
+    the first start; a workspace that has one is left as it is.
+
     The result is the process exit code: [0] when the file holds the requested
     values, [1] when nothing was written and the reason is on stderr. *)

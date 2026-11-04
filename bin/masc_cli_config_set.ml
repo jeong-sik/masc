@@ -40,21 +40,64 @@ let runtime_config_path ~base_path =
             skip or empty."
            path))
 
-let run ~base_path ~assignments =
+let report_local ~path ~changed changes =
+  let keys = String.concat ", " (List.map Runtime_setting_set.toml_key changes) in
+  if changed
+  then Printf.printf "set %s in %s\n" keys path
+  else Printf.printf "%s already as requested in %s\n" keys path
+
+(* With no server answering on the port, the command writes the file itself:
+   then nothing else writes it and no reader is waiting to be told. *)
+let write_locally ~refuse ~base_path changes =
+  match runtime_config_path ~base_path with
+  | Error message -> refuse message
+  | Ok path ->
+    (match Runtime_setting_set.apply ~runtime_config_path:path changes with
+     | Error error -> refuse (Runtime_setting_set.error_message error)
+     | Ok changed ->
+       report_local ~path ~changed changes;
+       if changed && List.exists Runtime_setting_set.requires_restart changes
+       then print_endline "A running server reads these when it restarts.";
+       0)
+
+let report_server ~outcome changes =
+  let keys = String.concat ", " (List.map Runtime_setting_set.toml_key changes) in
+  match outcome with
+  | Masc_cli_runtime_config_remote.Unchanged ->
+    Printf.printf "%s already as requested in the running server's runtime.toml\n" keys
+  | Masc_cli_runtime_config_remote.Saved { path } ->
+    Printf.printf "set %s in %s through the running server\n" keys path;
+    if List.exists Runtime_setting_set.requires_restart changes
+    then print_endline "The running server applies these when it restarts."
+
+let run ~base_path ~port ~agent ~assignments =
   let refuse message = prerr_endline message; 1 in
   match changes_of assignments with
   | Error message -> refuse message
   | Ok changes ->
-    (match runtime_config_path ~base_path with
-     | Error message -> refuse message
-     | Ok path ->
-       (match Runtime_setting_set.apply ~runtime_config_path:path changes with
-        | Error error -> refuse (Runtime_setting_set.error_message error)
-        | Ok changed ->
-          let keys = String.concat ", " (List.map Runtime_setting_set.toml_key changes) in
-          if changed
-          then Printf.printf "set %s in %s\n" keys path
-          else Printf.printf "%s already as requested in %s\n" keys path;
-          if changed && List.exists Runtime_setting_set.requires_restart changes
-          then print_endline "A running server reads these when it restarts.";
+    (match Unix.realpath base_path with
+     | exception Unix.Unix_error _ ->
+       (* A workspace that does not exist yet has no server; seeding it is
+          this command's to do. *)
+       write_locally ~refuse ~base_path changes
+     | real_base_path ->
+       let route =
+         Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+           match Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent with
+           | Error message -> `Refused message
+           | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+           | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+             (* RFC-0482 §3.2: the running server is the writer. *)
+             let edit text =
+               Result.map_error Runtime_setting_set.error_message
+                 (Runtime_setting_set.edit_text changes text)
+             in
+             `Through_server (Masc_cli_runtime_config_remote.save ~clock server ~edit))
+       in
+       (match route with
+        | `Refused message -> refuse message
+        | `Local -> write_locally ~refuse ~base_path changes
+        | `Through_server (Error message) -> refuse message
+        | `Through_server (Ok outcome) ->
+          report_server ~outcome changes;
           0))

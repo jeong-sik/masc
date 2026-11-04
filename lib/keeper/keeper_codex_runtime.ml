@@ -1651,7 +1651,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           the claim frontier, hence the byte-exact revert instead.
           [Account_read_failed] joined [Rpc_error] here after #47921 split
           it into its own variant: the account/read handshake refusal is
-          still a setup-stage refusal (#47715). *)
+          still a setup-stage refusal (#47715). The arm's reach is the
+          [thread_request_transmitted] flag: an RPC stage added between
+          account/read and the first thread request will be reverted here
+          too, so a PR adding one must read this arm alongside it. *)
        observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then

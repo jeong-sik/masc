@@ -328,6 +328,25 @@ let test_unrequested_board_context_does_not_gain_new_navigation_input () =
      && observe_delivery current (Surface_read_context.current navigation_context)
        {bpr_query=requested;bpr_result=Ok [post "late"]}=None)
 
+(* Suspension clears the list, and resuming the same workspace does not
+   revalidate the Board, so the list is owed whether or not a read was in
+   flight. A read in flight is dropped with the old authority; it stays
+   recorded with the change it can no longer deliver. *)
+let test_withdrawal_owes_the_list () =
+  let idle=state () in
+  suspend_workspace_readings idle;
+  Alcotest.(check bool) "a cleared list with no read in flight is owed" true
+    (match idle.board_list_owed with
+     | Masc_tui_owed_read.Owed _ -> true
+     | Settled | Reading _ | Waiting _ -> false);
+  let reading=state () in
+  reading.board_list_owed <- Masc_tui_owed_read.(started (changed settled));
+  suspend_workspace_readings reading;
+  Alcotest.(check bool) "a read in flight keeps the change it missed" true
+    (match reading.board_list_owed with
+     | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true
+     | Reading { changed_since = false; _ } | Settled | Owed _ | Waiting _ -> false)
+
 let () = Alcotest.run "tui_board_list_reading"
   ["availability and continuity",
    [Alcotest.test_case "initial loading empty and failure" `Quick test_initial_loading_empty_and_failure_are_distinct;
@@ -344,4 +363,6 @@ let () = Alcotest.run "tui_board_list_reading"
     Alcotest.test_case "context rebind original query and successor admission" `Quick
       test_surface_context_rebind_keeps_origin_query_and_current_admission;
     Alcotest.test_case "unrequested context navigation and retirement" `Quick
-      test_unrequested_board_context_does_not_gain_new_navigation_input]]
+      test_unrequested_board_context_does_not_gain_new_navigation_input;
+    Alcotest.test_case "withdrawal owes the list" `Quick
+      test_withdrawal_owes_the_list]]

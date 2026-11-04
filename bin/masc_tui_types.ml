@@ -14489,6 +14489,9 @@ let suspend_workspace_readings state =
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_listing <- Masc_tui_fetched.Absent;
   state.board_list_reported_error <- None;
+  (* The list is cleared, and resuming the same workspace does not revalidate
+     the Board, so the list is owed. A read in flight keeps its failures. *)
+  state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed;
   retire_keeper_message_search state;
   stop_waiting_for_memory_recall_standing state
     "서버 신원 확인이 끊겨서 읽지 못했어요";
@@ -14573,7 +14576,6 @@ let suspend_workspace_readings state =
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
-  state.board_list_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;

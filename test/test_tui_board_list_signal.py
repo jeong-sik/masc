@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """The Board list and hearth census read again when the server announces a
 Board write while the Board is on screen, and again after a failed read
-(RFC-0480 L4).
+(RFC-0480 L4). A read on entering the Board that a newer refresh supersedes
+before it answers is read again too (#48053).
 
-The refresh cadence is pushed out of the test's lifetime, so every list read
-after the Board opens comes from an announcement or a failed read.
+The refresh cadence is pushed out of the test's lifetime, or reads no Board,
+so every list read after the Board opens comes from an announcement, a failed
+read or a superseded one.
 """
 
 import os
 import sys
+import threading
 import time
 import unittest
 import urllib.parse
@@ -33,6 +36,11 @@ class ListHandler(owed.ChatHandler):
                 fail = server.list_failures_left > 0
                 if fail:
                     server.list_failures_left -= 1
+                hold = server.hold_next_list
+                server.hold_next_list = False
+            if hold:
+                server.list_held.set()
+                server.release_list.wait(owed.WAIT_SECONDS)
             if fail:
                 sent = self.respond(503, {"error": "board unavailable"}, workspace_receipt=True)
             else:
@@ -53,6 +61,9 @@ class ListServer(owed.ChatServer):
         self.RequestHandlerClass = ListHandler
         self.list_times: list[float] = []
         self.list_failures_left = 0
+        self.hold_next_list = False
+        self.list_held = threading.Event()
+        self.release_list = threading.Event()
 
 
 class BoardListSignalTest(unittest.TestCase):
@@ -120,6 +131,48 @@ class BoardListSignalTest(unittest.TestCase):
             self.assertGreater(second_wait, first_wait + 1.0)
 
         self.run_list(scenario)
+
+    def test_an_entry_read_superseded_by_the_cadence_is_read_again(self) -> None:
+        # The cadence reads no Board. A full refresh it starts while the
+        # entry read is held takes a newer ticket, so the held answer is
+        # dropped and only the list debt can read the Board again.
+        owed.ChatServer = ListServer
+        owed.ChatOwedHistoryTest.binary = self.binary
+
+        def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
+            listing = cast(ListServer, server)
+            try:
+                with listing.condition:
+                    listing.hold_next_list = True
+                listing.set_phase("open")
+                # Keepers -> Usage -> Board.
+                step("keys", "\t\t")
+                step("wait", listing.list_held.is_set, "the Board did not read its list")
+                listing.set_phase("superseded")
+                step(
+                    "wait",
+                    lambda: listing.response_count("superseded", "/health") >= 2,
+                    "the cadence did not run while the entry read was held",
+                )
+                listing.set_phase("released")
+                listing.release_list.set()
+                step(
+                    "wait",
+                    lambda: listing.response_count("released", LIST_PATH) >= 1,
+                    "the superseded entry read was not read again",
+                )
+                step("drain", 2.0)
+                # The second read can itself be superseded by a cadence pass
+                # and read once more; it does not repeat without end.
+                reads = listing.count("released", LIST_PATH)
+                self.assertGreaterEqual(reads, 1)
+                self.assertLessEqual(reads, 3)
+            finally:
+                listing.release_list.set()
+
+        owed.ChatOwedHistoryTest.run_chat(
+            cast(owed.ChatOwedHistoryTest, self), opened, refresh_seconds=1.0
+        )
 
 
 if __name__ == "__main__":

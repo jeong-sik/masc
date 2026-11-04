@@ -2,7 +2,7 @@
 
     The authorization endpoint calls this for an https [client_id]
     (MCP 2026-07-28 client registration). The fetch is a plain GET: the host
-    must resolve only to public addresses ({!Server_outbound_address}), no
+    must resolve only to public addresses ({!Outbound_address}), no
     redirect is followed, the body may be at most
     {!Auth_oauth_client_metadata.max_document_bytes}, and only HTTP 200 is a
     document. Every fetch uses its admitted addresses in a fresh HTTP client;

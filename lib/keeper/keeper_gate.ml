@@ -1897,8 +1897,8 @@ let decide_from_selected_mode ~intent ?observe request = function
        read-only argv dispatched into a disposable guest (the typed
        [sandbox_profile] on the request decides that), server-side
        [web_search] reads, and
-       [web_fetch] GETs whose literal destination the fetch checks itself
-       (it does not resolve DNS names);
+       [web_fetch] GETs whose destination the fetch checks itself
+       (the literal host, and the addresses a DNS name resolves to);
        paying the judge (or the human queue) for them is how a bare `ls`
        became an approval prompt and a keeper stopped searching. Manual
        mode is untouched: an operator who asked to see everything still

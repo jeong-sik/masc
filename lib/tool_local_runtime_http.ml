@@ -102,9 +102,32 @@ let max_response_args = function
   | Some bytes when bytes <= 0 -> []
   | Some bytes -> [ "--max-filesize"; Int.to_string bytes ]
 
+type pinned_resolution =
+  { host : string
+  ; port : int
+  ; first_address : Ipaddr.t
+  ; other_addresses : Ipaddr.t list
+  }
+
+(* curl matches a [--resolve] entry against the URL's host as written,
+   trailing dot included, and ignores case (measured with curl 8.7.1). An
+   entry that does not match leaves curl to its own lookup, so [host] must be
+   the URL's host. IPv6 addresses are bracketed. *)
+let resolve_args = function
+  | None -> []
+  | Some { host; port; first_address; other_addresses } ->
+    let address = function
+      | Ipaddr.V4 v4 -> Ipaddr.V4.to_string v4
+      | Ipaddr.V6 v6 -> "[" ^ Ipaddr.V6.to_string v6 ^ "]"
+    in
+    [ "--resolve"
+    ; Printf.sprintf "%s:%d:%s" host port
+        (String.concat "," (List.map address (first_address :: other_addresses)))
+    ]
+
 let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     ?(follow_redirects = false) ?(max_redirects = 3) ?(compressed = false)
-    ?max_response_bytes url =
+    ?max_response_bytes ?pinned_resolution url =
   let timeout_sec = max 1 timeout_sec in
   let redirect_args =
     if follow_redirects then [ "--location"; "--max-redirs"; Int.to_string max_redirects ]
@@ -126,6 +149,7 @@ let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
   @ redirect_args
   @ header_args headers
   @ max_response_args max_response_bytes
+  @ resolve_args pinned_resolution
   @ [ "-w"; curl_write_out; url ]
 
 let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
@@ -224,11 +248,11 @@ let transport_failure_cause = function
 
 let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
     ?(headers = []) ?(follow_redirects = false) ?(max_redirects = 3)
-    ?(compressed = false) ?max_response_bytes url =
+    ?(compressed = false) ?max_response_bytes ?pinned_resolution url =
   let timeout_sec = max 1 timeout_sec in
   let argv =
     curl_get_argv ~timeout_sec ~headers ~follow_redirects ~max_redirects
-      ~compressed ?max_response_bytes url
+      ~compressed ?max_response_bytes ?pinned_resolution url
   in
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->

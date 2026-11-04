@@ -11,7 +11,10 @@ let request_headers = [ "Accept", "application/json" ]
 
 let fetch ~clock ~net url =
   let url = (url : Auth_oauth_client_metadata.document_url :> string) in
-  let* resolved_addresses = Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) in
+  let* resolved_addresses =
+    Outbound_address.resolve_allowed_host ~net (Uri.of_string url)
+    |> Result.map_error Outbound_address.host_refusal_to_string
+  in
   match
     Masc_http_client.get_response_sync
       ~resolved_addresses

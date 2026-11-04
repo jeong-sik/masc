@@ -105,6 +105,10 @@ type fetch_failure =
   | Invalid_redirect of string
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
+  | Destination_refused of Outbound_address.host_refusal
+      (** A DNS name whose resolved addresses, or whose lookup, the outbound
+          policy did not admit. *)
+  | Resolution_unavailable  (** No network context to resolve the host. *)
 
 val with_http_fetch_for_test :
   (timeout_sec:int ->

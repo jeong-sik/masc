@@ -88,36 +88,15 @@ let valid_url url =
 
 (* Boundary: web content decides what gets fetched next, so a request
    must not reach the loopback surface (MASC's own API included), the
-   private network, or link-local metadata addresses. The check is
-   literal — IP ranges via Ipaddr plus the RFC 6761 localhost names.
-   It does not resolve DNS, so a public hostname that resolves to a
-   private address is outside this boundary; that limitation is part
-   of the contract, not hidden. Applied to the initial URL and to
-   every redirect hop. *)
-let rec blocked_ip_reason : Ipaddr.t -> string option = function
-  | Ipaddr.V4 v4 ->
-      if Ipaddr.V4.Prefix.(mem v4 loopback) then Some "loopback address"
-      else if Ipaddr.V4.Prefix.(mem v4 link) then Some "link-local address"
-      else if
-        List.exists
-          (fun block -> Ipaddr.V4.Prefix.mem v4 block)
-          Ipaddr.V4.Prefix.private_blocks
-      then Some "private-network address"
-      else if Ipaddr.V4.compare v4 Ipaddr.V4.any = 0 then
-        Some "unspecified address"
-      else None
-  | Ipaddr.V6 v6 -> (
-      match Ipaddr.v4_of_v6 v6 with
-      | Some v4 -> blocked_ip_reason (Ipaddr.V4 v4)
-      | None ->
-          if Ipaddr.V6.compare v6 Ipaddr.V6.localhost = 0 then
-            Some "loopback address"
-          else if Ipaddr.V6.Prefix.(mem v6 link) then Some "link-local address"
-          else if Ipaddr.V6.Prefix.(mem v6 unique_local) then
-            Some "private-network address"
-          else if Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0 then
-            Some "unspecified address"
-          else None)
+   private network, link-local metadata addresses, or any other range
+   {!Outbound_address} refuses. The literal check here refuses IP
+   literals and the RFC 6761 localhost names before any network round
+   trip. A DNS name is admitted by the addresses it resolves to when it
+   is fetched, and curl is pinned to exactly those addresses
+   ({!pinned_resolution}). Both apply to the initial URL and to every
+   redirect hop. *)
+let blocked_ip_reason ip =
+  Option.map Outbound_address.refusal_to_string (Outbound_address.ip_refusal ip)
 
 (* A host is fetchable as a canonical IP literal or as a DNS name, and
    nothing in between. curl also accepts what inet_aton does — a decimal,
@@ -193,7 +172,7 @@ let blocked_destination_reason url =
             | Error _ ->
                 if non_canonical_numeric_host lowered then
                   Some "numeric host is not a canonical IP literal"
-                else None (* DNS name; resolution is out of scope here *)))
+                else None (* DNS name; admitted by its resolved addresses *)))
 
 let ends_with ~suffix value =
   let value_length = String.length value in
@@ -622,6 +601,9 @@ type fetch_failure =
   | Invalid_redirect of string  (* redirect target is not a typed HTTP(S) URL *)
   | Redirect_limit_exceeded
   | Unsupported_content_type of string
+  | Destination_refused of Outbound_address.host_refusal
+      (* the host's resolved addresses, or its lookup, did not admit it *)
+  | Resolution_unavailable      (* no network context to resolve the host *)
 
 (* HTTP semantics are supplied by the response status, never inferred from
    its body. A 404 also covers a server declining to disclose a resource;
@@ -657,6 +639,9 @@ let fetch_failure_to_string = function
       Printf.sprintf "redirect limit exceeded (max %d)" max_redirects
   | Unsupported_content_type content_type ->
       Printf.sprintf "unsupported content type: %s" content_type
+  | Destination_refused refusal ->
+      "destination refused: " ^ Outbound_address.host_refusal_to_string refusal
+  | Resolution_unavailable -> "fetch failed: no network context to resolve the host"
 
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
@@ -666,6 +651,17 @@ let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   | Invalid_redirect _ -> Tool_result.Workflow_rejection
   | Redirect_limit_exceeded -> Tool_result.Runtime_failure
   | Unsupported_content_type _ -> Tool_result.Runtime_failure
+  (* A name that resolves where the boundary forbids is the same caller-input
+     violation as that address written as a literal. A name that does not
+     resolve is what curl's own lookup reported as exit 6. *)
+  | Destination_refused
+      ( Outbound_address.Missing_host | Outbound_address.Local_host_name
+      | Outbound_address.Refused_address _ | Outbound_address.Non_ip_address ) ->
+      Tool_result.Workflow_rejection
+  | Destination_refused
+      (Outbound_address.No_address | Outbound_address.Resolver_failed _) ->
+      Tool_result.Dependency_unavailable
+  | Resolution_unavailable -> Tool_result.Runtime_failure
 
 type fetch_response =
   { http_status : int option
@@ -703,8 +699,44 @@ let validate_redirect_target target =
     | Some reason -> Error ("redirect target rejected: " ^ reason)
     | None -> Ok ())
 
+(* HIGH-RISK-UNREVIEWED: a DNS name is fetchable only at the addresses the
+   outbound policy admitted for it, and curl is pinned to exactly those, so a
+   second lookup inside curl cannot answer with a different address. *)
+let pinned_resolution url =
+  let uri = Uri.of_string (String.trim url) in
+  match Uri.host uri with
+  | None -> Error (Destination_refused Outbound_address.Missing_host)
+  | Some host -> (
+      match Ipaddr.of_string host with
+      | Ok _ ->
+          (* An IP literal names its own address and the literal check
+             admitted it; curl makes no lookup for it. *)
+          Ok None
+      | Error _ -> (
+          match Eio_context.get_net_opt () with
+          | None -> Error Resolution_unavailable
+          | Some net -> (
+              match
+                Eio_context.run_on_owner_domain (fun () ->
+                    Outbound_address.resolve_allowed_host ~net uri)
+              with
+              | Error refusal -> Error (Destination_refused refusal)
+              | Ok [] -> Error (Destination_refused Outbound_address.No_address)
+              | Ok (first :: rest) ->
+                  Ok
+                    (Some
+                       { Tool_local_runtime_http.host
+                       ; port = Outbound_address.port_of_uri uri
+                       ; first_address = Outbound_address.ipaddr_of_eio first
+                       ; other_addresses =
+                           List.map Outbound_address.ipaddr_of_eio rest
+                       }))))
+
 let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
   let rec loop ~redirect_count request_url =
+    match pinned_resolution request_url with
+    | Error failure -> Error failure
+    | Ok pinned_resolution ->
     match
       Tool_local_runtime_http.http_get_text_response_with_headers
         ~timeout_sec
@@ -712,6 +744,7 @@ let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
         ~follow_redirects:false
         ~compressed:true
         ~max_response_bytes
+        ?pinned_resolution
         request_url
     with
     | Error failure ->
@@ -929,7 +962,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
              | Http_status status ->
                  Some (`Assoc [ "upstream_http_status", `Int status ])
              | Transport_error _ | No_http_status | Invalid_redirect _
-             | Redirect_limit_exceeded | Unsupported_content_type _ -> None
+             | Redirect_limit_exceeded | Unsupported_content_type _
+             | Destination_refused _ | Resolution_unavailable -> None
            in
            Tool_result.make_err
              ~tool_name

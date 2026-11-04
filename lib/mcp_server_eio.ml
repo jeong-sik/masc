@@ -148,7 +148,7 @@ let handle_request
     ~handle_read_resource_eio:Mcp_server_eio_resource.handle_read_resource_eio
     ~clock
     ~sw
-    ~profile:(profile : tool_profile :> Mcp_server_eio_types.tool_profile)
+    ~profile
     ?mcp_session_id
     ?otel_mcp_protocol_version
     ?otel_transport_context

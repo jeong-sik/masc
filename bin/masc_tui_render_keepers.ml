@@ -885,7 +885,6 @@ let render_keeper_list (state : state) =
                        state.keeper_yolo_names)
               ~selected row
           in
-          let secondary = keeper_secondary_row_content ~inner row in
           let press text =
             pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
               (fit_width text inner)
@@ -896,8 +895,9 @@ let render_keeper_list (state : state) =
             else box_line buf cols (press text)
           in
           emit primary;
+          (* Only the detailed layout draws the second row, so only it builds one. *)
           (match state.keeper_list_layout with
-           | Keeper_list_model.Detailed -> emit secondary
+           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~inner row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
     entries_window;
 

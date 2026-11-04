@@ -665,12 +665,12 @@ let composer_lines ~max_rows input =
 
 let input_viewport ~max_cells input =
   let max_cells = Int.max 0 max_cells in
-  let pieces = display_pieces input in
-  if pieces_width pieces <= max_cells then input
+  if display_width input <= max_cells then input
   else if max_cells = 0 then ""
   else
     cut_mark
-    ^ cell_suffix_of_pieces input pieces (Int.max 0 (max_cells - cut_mark_cells))
+    ^ cell_suffix_of_pieces input (display_pieces input)
+        (Int.max 0 (max_cells - cut_mark_cells))
 
 let input_window ~max_cells ~cursor input =
   let max_cells = max 0 max_cells in
@@ -829,15 +829,20 @@ let chat_role_label_width ~pane_cells =
    a tail-only cut, which is the right thing to lose last. *)
 let truncate_middle column label =
   if column <= 0 then ""
+  else if display_width label <= column then label
+  else if column <= cut_mark_cells then cut_mark
   else
-    let pieces = display_pieces label in
-    let cells = pieces_width pieces in
-    if cells <= column then label
-    else if column <= cut_mark_cells then cut_mark
-    else
-      let usable = column - cut_mark_cells in
-      let head_cells = usable / 3 in
-      let tail_cells = usable - head_cells in
+    let usable = column - cut_mark_cells in
+    let head_cells = usable / 3 in
+    let tail_cells = usable - head_cells in
+    match ascii_display_width label with
+    | Some cells when cells = String.length label ->
+        (* Printable ASCII with no CSI: a byte is a cell, so the two ends are
+           substrings and no piece is built per byte. *)
+        String.sub label 0 head_cells ^ cut_mark
+        ^ String.sub label (cells - tail_cells) tail_cells
+    | Some _ | None ->
+      let pieces = display_pieces label in
       let head, _, saw_ansi =
         cell_prefix_of_pieces label pieces head_cells
       in

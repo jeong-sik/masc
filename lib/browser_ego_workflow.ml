@@ -322,7 +322,7 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
         try { dialog = (await page.info()).dialog; }
         catch (error) { return failure(index, step.method, error); }
         return failure(index, step.method,
-          'Ego returned no native action receipt; input release remains unconfirmed. Inspect this Space and use its private operator input-reset confirmation before another input. Never replay this step.',
+          'Ego returned no native action receipt; input release remains unconfirmed. Observe this Space before the next input. Never replay this step.',
           dialog ? {dialog} : {});
       }
       inputReleased = cleanReceipt(receipt);

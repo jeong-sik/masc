@@ -555,38 +555,15 @@ let scenario mode =
             (field "ok" first=`Bool false && field "effectPhase" first=`String "partial");
           ignore(answered (issue (B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];
             interaction=B.Action.Accept_dialog None}))));
-          let blocked=answered (issue (workflow "#continue")) in
-          check bool "answering the dialog does not invent input release proof" true
-            (field "ok" blocked=`Bool false && field "effectPhase" blocked=`String "not_started");
-          let private_call action arguments=ok (Owner.operator owner
-            (`Assoc ["action",`String action;"arguments",arguments])) in
-          let view=private_call "view" (`Assoc []) in
-          let action=match field "actions" view with
-            | `List [action] -> action | _ -> fail "original worker has no pending-input operator form" in
-          let arguments=field "arguments" action in
-          check bool "attached worker form binds its original live client and Space" true
-            (field "clientId" arguments=`String (B.client_id_to_string client.client_id)
-              && field "spaceId" arguments=`String "51");
-          let before=lines (Filename.concat root "steps") in
-          let replace key value=match arguments with
-            | `Assoc fields -> `Assoc ((key,`String value)::List.remove_assoc key fields)
-            | _ -> fail "operator form arguments must be an object" in
-          List.iter (fun arguments -> check bool "worker form rejects stale or foreign confirmation" true
-            (field "outcome" (private_call "assert_input_reset" arguments)=`String "not_applied"))
-            [replace "clientId" "another-client";replace "spaceId" "52";
-             replace "generation" "stale";replace "confirmation" "go"];
-          check bool "actual attached worker applies the exact operator assertion" true
-            (field "outcome" (private_call "assert_input_reset" arguments)=`String "operator_asserted");
-          check (list string) "private form and reset send no SDK commands" before
-            (lines (Filename.concat root "steps"));
+          check string "the interrupted input is reported unconfirmed" "release_uncertain"
+            (Yojson.Safe.Util.to_string (field "inputReadiness" (field "data" first)));
           let continued=answered (issue (workflow "#continue")) in
           let data=field "data" continued in
-          check bool "same worker completes a distinct normal click after reset" true
+          check bool "the next real input runs without any confirmation" true
             (field "ok" continued=`Bool true && field "tabId" data=`Int 1
               && field "inputReleased" data=`Bool true && field "completedEffect" data=`Bool true);
-          let settled=private_call "view" (`Assoc []) in
-          check bool "new input settles the attached Peer without another confirmation" true
-            (field "actions" settled=`List []);
+          check string "and settles the input readiness" "command_settled"
+            (Yojson.Safe.Util.to_string (field "inputReadiness" data));
           check (list string) "original input was never replayed" ["#dialog";"#continue"]
             (lines (Filename.concat root "recovery-inputs"));
           ignore(answered (issue (B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels []))))));
@@ -671,8 +648,7 @@ let scenario mode =
           check bool "explicit completion ran" true (finished ());
           check bool "retirement cleans a confirmed closed Space" true (dispatch W.Retire = W.Receipt));
         check bool "no client is left" true (B.connected_clients () = []))) in
-      let input_store=Masc.Lane_addon_store.create ~root:(Filename.concat root "retained-lane-addons") in
-      let failure = try Ego.run ~env ~owner ~input_store ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
+      let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
        | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned" | "missing"), None -> ()
@@ -755,7 +731,7 @@ let () =
       test_case "a start on a cancelled connection starts nothing" `Quick test_a_start_on_a_cancelled_connection_starts_nothing;
       test_case "explicit completion permits worker file cleanup" `Quick (child "normal");
       test_case "retirement preserves Space and browser-backed files" `Quick (child "retained");
-      test_case "attached worker operator reset resumes real input without replay" `Quick (child "recovery");
+      test_case "an unconfirmed input does not stop the next real input, which is not a replay" `Quick (child "recovery");
       test_case "a result delivered after the caller stopped waiting does not end the connection" `Quick (child "late");
       test_case "retirement stops a running command and preserves the Space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");

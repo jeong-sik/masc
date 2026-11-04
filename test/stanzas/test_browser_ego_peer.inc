@@ -5,19 +5,9 @@
  (deps test_browser_ego_raw_type.cjs))
 
 (test
- (name test_browser_ego_input_durability)
- (modules test_browser_ego_input_durability)
- (libraries masc alcotest yojson))
-
-(test
  (name test_browser_ego_input_release)
  (modules test_browser_ego_input_release)
  (libraries masc masc.browser_lane alcotest yojson))
-
-(test
- (name test_browser_ego_input_store)
- (modules test_browser_ego_input_store)
- (libraries masc alcotest yojson unix))
 
 (rule
  (alias runtest-test_browser_ego_target)

@@ -90,8 +90,6 @@ let space t = t.space
 let space_observation t = t.space_observation
 let space_presence t = t.space_presence
 let input_status t = Input.status t.input
-let input_busy t = Input.busy t.input
-let assert_input_reset t ~generation = Input.assert_reset t.input ~generation ~now:(t.now ())
 
 let remember t page = match List.assoc_opt page t.pages with
   | Some id -> id
@@ -342,7 +340,7 @@ let run_native_step t ~step ~args body =
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
+let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
   let* () = Browser_configuration.validate_ego_space space in
   let reference=match space with Browser_configuration.Named_space name -> str name | Existing_space id -> `Int id in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:reference ~holder:Either_holds ~args:`Null
@@ -367,7 +365,7 @@ let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
      | Some (Agent_owner | Handed_to_operator) ->
-       let* input=input ~space_id:bound_space.id in
+       let input=Input.create ~space_id:bound_space.id in
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
          input; finish_state=Active; space_observation=Some observation;
@@ -1130,7 +1128,6 @@ let upload t id ~selector ~paths =
    and one process serves this connection, so the run closes a chooser it
    does not fill with setFiles([]), which hands the page nothing. *)
 let choose_files ?actor t id ~opener ~paths =
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
@@ -1439,7 +1436,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let holds_button = match operation with
     | Target_click | Target_double_click | Target_drag _ -> true
     | Target_fill _ | Target_hover | Target_select _ -> false in
-  let* pending=if holds_button then Input.begin_holding t.input ~now:(t.now ()) ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
+  let* pending=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
@@ -1582,7 +1579,7 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
   let before result=Result.map_error (fun message->Live.Before_effect message) result in
   let* source=before (managed_source t ~tab_id:id ~label) in
   let current=window_page source in
-  let* pending=before (Input.begin_holding t.input ~now:(t.now ()) ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_type_text") in
+  let* pending=before (Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label) in
   let* context=match Raw_type.prepare ~command_id:pending.command_id ~generation:pending.generation ~source:current ~indices:[0] with
     | Ok context->Ok context
     | Error _ -> let* ()=before (Input.not_started t.input ~generation:pending.generation) in
@@ -1660,7 +1657,6 @@ let interact ?actor t args =
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
@@ -1846,7 +1842,6 @@ let page_management_script = {js|async (task, args) => {
 type page_management = Adopt of string option | Release
 let manage_tab t ~tab_id operation =
   let pre message=Error (Live.Before_effect message) in
-  let* ()=Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* previous=match List.find_opt (fun (_,id) -> id=tab_id) t.pages with
     | Some (page,_) -> Ok page
     | None -> pre "browser tab is no longer present; list this connection's tabs" in
@@ -1917,7 +1912,6 @@ let workflow ?actor t args =
     |> Result.map_error (fun reason -> Live.Before_effect (Browser_lane.Native_workflow.unavailable_input_message reason)) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.holds_input step.action) request.steps in
   let raw_indices=List.filter_map (fun (index,(step:Browser_lane.Native_workflow.step)) ->
@@ -1938,7 +1932,7 @@ let workflow ?actor t args =
     | Input.Page_scope,[] -> Ok None
     | Input.Space_scope,_ | Input.Page_scope,(_::_) ->
       pre (managed_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
-  let* pending=if holds_input then Input.begin_holding t.input ~now:(t.now ()) ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+  let* pending=if holds_input then Input.begin_holding t.input ~scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let* windows=match raw_indices,source,pending with
     | [],_,_ -> Ok None
@@ -2059,7 +2053,7 @@ let dispatch ?command_id ?actor t ~verb args =
   let command_id=match command_id with Some id -> id
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let annotate = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match Input.within_command t.input ~command_id (fun () -> let* ()=admit_after_finish t ~verb args in dispatch_raw ?actor t ~verb args) with
   | Error detail -> Error (Live.Before_effect detail)
@@ -2073,7 +2067,7 @@ let dispatch ?command_id ?actor t ~verb args =
    failure with the same effect phase, so its receipt can say where input stands. *)
 let with_input_state t result =
   let stamp = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match result with
   | Ok value -> Ok (stamp value)

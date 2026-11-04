@@ -6,13 +6,6 @@ val create : root:string -> t
     resulting absolute ownership boundary is retained by the store. *)
 val root : t -> string
 
-(** One retained input state per numeric native Ego Space, across worker
-    incarnations and declarations in this workspace. Cross-process, no-follow
-    private-inode locking and complete-record CAS fence stale writers. No
-    deletion/expiry or generic action acknowledgement clears this state. *)
-val load_ego_input : t -> space_id:int -> (Yojson.Safe.t option, string) result
-val compare_and_set_ego_input : t -> space_id:int -> expected:Yojson.Safe.t option ->
-  replacement:Yojson.Safe.t -> (unit, string) result
 val digest : string -> string
 (** SHA-256 of every original byte, unchanged by internal feed boundaries.
     Bounded C feeds allow the runtime to service another systhread between

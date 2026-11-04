@@ -315,7 +315,7 @@ type space_missing = { space : B.ego_space; observed_at : float }
 type connection_end = Connected | User_owned_name of user_owned_name
   | Space_missing of space_missing * unit Eio.Promise.t
 
-let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (configuration : Browser_configuration.live_ego) work =
+let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
   let downloads = {Peer.root = Filename.concat downloads downloads_folder;
     publish = (fun path -> Eio_unix.run_in_systhread (fun () -> Browser_addon_owner.publish_download owner path))} in
@@ -401,15 +401,7 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
     | Some (space, Peer.User_owned_matches ids) ->
       Ok (User_owned_name {space; ids; observed_at=Eio.Time.now (Eio.Stdenv.clock env)})
     | Some (_, (Peer.No_user_owned_match | Peer.Space_names_unavailable _)) | None ->
-    let input ~space_id =
-      let active ()=not (Browser_addon_owner.is_retired owner) in
-      let writer=Browser_addon_owner.incarnation owner ^ ":" ^ Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-      let persistence={Browser_ego_input.read=(fun () -> Systhread_host.run (fun () -> Lane_addon_store.load_ego_input input_store ~space_id));
-        compare_and_set=(fun ~expected ~replacement -> Systhread_host.run (fun () ->
-          if active () then Lane_addon_store.compare_and_set_ego_input input_store ~space_id ~expected ~replacement
-          else Error "retired Ego input writer"));active} in
-      Browser_ego_input.create_persistent ~persistence ~writer ~space_id in
-    let* peer = Peer.open_space ~input ~space:configuration.space ~version ~capture_directory:directory ~downloads
+    let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory ~downloads
         ~now:(fun () -> Eio.Time.now (Eio.Stdenv.clock env))
         ~run:(runner session) ~run_native:(native_runner session) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
@@ -424,9 +416,7 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
     let attached =
       let* first = poll 0. in
       let* () = if Option.is_none first then Ok () else Error "the ego connection received input before attachment" in
-      Browser_addon_owner.attach_live ~ego_input:{Browser_ego_operator.status=(fun () -> Peer.input_status peer);
-        busy=(fun () -> Peer.input_busy peer);assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
-        space_observation=(fun () -> Peer.space_observation peer);
+      Browser_addon_owner.attach_live ~ego_space:{Browser_addon_owner.space_observation=(fun () -> Peer.space_observation peer);
         space_presence=(fun () -> Peer.space_presence peer)}
         owner ~client_id ~cleanup:(fun () ->
         ignore (Eio.Promise.try_resolve stop_cycle ());

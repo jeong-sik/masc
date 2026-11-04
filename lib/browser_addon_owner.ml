@@ -4,6 +4,10 @@ module W = Browser_addon_wire
 type phase = Serving | Retired
 type ego_recovered = Reclaimed of {space_id:int; space_name:string} | Reopening of {space:string}
 type cleanup = (unit, string) result Eio.Lazy.t
+type ego_space = {
+  space_observation : unit -> Browser_ego_space_observation.t option;
+  space_presence : unit -> Browser_ego_space_observation.presence;
+}
 type t = {
   incarnation : string;
   gate : Eio.Mutex.t;
@@ -15,7 +19,7 @@ type t = {
     (Yojson.Safe.t, Browser_extension_protocol.error) result) option;
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
-  mutable ego_input : (B.client_id * Browser_ego_operator.recovery) option;
+  mutable ego_space : (B.client_id * ego_space) option;
   mutable unavailable : Browser_addon_observation.unavailable list;
   (* Recovers the ego Space the worker published as unavailable: receives
      that record, answers with the Space it reclaimed or the name it is
@@ -40,7 +44,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -57,9 +61,9 @@ let with_admission t incarnation run =
 let snapshot t = `Assoc ([
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map (fun (client : B.client_info) ->
-    let space_observation,space_presence=match t.ego_input with
-      | Some (client_id,recovery) when client_id=client.client_id ->
-        recovery.space_observation (),Some (recovery.space_presence ())
+    let space_observation,space_presence=match t.ego_space with
+      | Some (client_id,ego_space) when client_id=client.client_id ->
+        ego_space.space_observation (),Some (ego_space.space_presence ())
       | None|Some _ -> None,None in
     Browser_addon_observation.publish_client client ~space_observation ~space_presence) (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
@@ -166,7 +170,7 @@ let attach_extensions t execute =
     | Serving,None,_ -> Error "owned Chrome backend is unavailable"
     | Serving,Some _,Some _ -> Error "private extension executor is already attached"
     | Serving,Some _,None -> t.extensions<-Some execute;Ok ())
-let attach_live ?ego_input t ~client_id ~cleanup =
+let attach_live ?ego_space t ~client_id ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
     | Retired -> Error "browser owner is retired"
     | Serving ->
@@ -183,32 +187,17 @@ let attach_live ?ego_input t ~client_id ~cleanup =
           else
             (* This worker disconnects its own connection when it ends; the
                lane's no-poll window is for native hosts only. *)
-            (match transport,ego_input with
-             | (B.Webdriver_bidi|Web_extension),Some _ -> Error "input recovery requires an Ego connection"
+            (match transport,ego_space with
+             | (B.Webdriver_bidi|Web_extension),Some _ -> Error "Space observations require an Ego connection"
              | (Webdriver_bidi|Web_extension|Ego_task_space),None | Ego_task_space,Some _ ->
                Result.map (fun () ->
                  t.live <- (transport, owned_cleanup name cleanup) :: t.live;
-                 t.ego_input <- (match ego_input with None -> t.ego_input | Some recovery -> Some (client_id,recovery));
+                 t.ego_space <- (match ego_space with None -> t.ego_space | Some ego_space -> Some (client_id,ego_space));
                  (* A live connection serving again ends every refusal this
                     owner published about the lane. *)
                  t.unavailable <- [])
                (B.hold_client ~client_id))
         | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
-let operator_schema = Browser_ego_operator.schema
-let operator t arguments =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
-    match t.phase with
-    | Retired -> Error "browser owner is retired"
-    | Serving ->
-      let connection=match t.ego_input with
-        | None -> None
-        | Some (client_id,recovery) ->
-          match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.connected_clients ()) with
-          | Some {transport=B.Ego_task_space;space=Some space;_} ->
-              Some {Browser_ego_operator.client_id=B.client_id_to_string client_id;space;recovery}
-          | None | Some {transport=Ego_task_space;space=None;_}
-          | Some {transport=(Web_extension|Webdriver_bidi);_} -> None in
-      Ok (Browser_ego_operator.invoke connection arguments))
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
@@ -216,7 +205,7 @@ let revoke t =
     | Serving ->
       t.phase <- Retired;
       t.extensions <- None;
-      t.ego_input <- None;
+      t.ego_space <- None;
       t.ego_recovery <- None;
       t.ego_claim_active <- false;
       Option.iter Browser_addon_models.retire t.models;

@@ -1,5 +1,5 @@
 (** Pure validation of an authenticated native event interval around one raw
-    keyboard call. This module does not run the SDK, admit input, settle Input,
+    keyboard call. This module does not run the SDK, settle Input,
     or make raw typing available. Its callers must supply actual CDP responses
     and the two unchanged native [Page.events] arrays from one serialized
     invocation. Application evaluation results are not such a capture.

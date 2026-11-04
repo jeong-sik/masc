@@ -1317,7 +1317,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
-  let receipt = null, failure = null;
+  let receipt = null, failure = null, thrown = null;
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
@@ -1331,9 +1331,14 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     failure = reason(error);
     // The SDK owns this gesture and its release attempts. mouse.up() can
     // swallow a dialog interruption as void; another release could also
-    // duplicate the SDK's original mouseup. Keep uncertainty on failure.
+    // duplicate the SDK's original mouseup. Never release here. Hand the
+    // error's declared name and kind to the host, which alone judges them.
+    thrown = {
+      name: typeof error?.name === "string" ? error.name : null,
+      kind: typeof error?.kind === "string" ? error.kind : null
+    };
   }
-  return {urlBefore, receipt, error: failure};
+  return {urlBefore, receipt, error: failure, thrown};
 }|js}
 (* An input the SDK showed released is settled. One that was never held keeps the readiness it had. *)
 let settle_input t pending settled = match pending with
@@ -1341,6 +1346,11 @@ let settle_input t pending settled = match pending with
   | Some (pending:Input.pending) -> match settled with
     | Browser_ego_release.No_hold -> Input.not_started t.input ~generation:pending.generation
     | Browser_ego_release.Released proof -> Input.command_settled t.input ~generation:pending.generation proof
+let refusable_gesture = function
+  | Target_click -> Some Browser_ego_release.Click
+  | Target_double_click -> Some Browser_ego_release.Double_click
+  | Target_drag _ -> Some Browser_ego_release.Drag_and_drop
+  | Target_fill _ | Target_hover | Target_select _ -> None
 let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
@@ -1383,7 +1393,28 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   | Ok value ->
     let outcome detail = Error (Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
     match field "error" value, field "urlBefore" value, field "receipt" value, field "tab" value with
-    | Some (`String error), _, _, _ -> outcome (head error)
+    | Some (`String error), _, _, _ ->
+      (* A gesture the SDK refused before its press holds nothing: the input
+         keeps the readiness it had. Only a frame with no receipt can be such
+         a refusal. The effect stays uncertain, because the SDK may have
+         scrolled the target or, for a double click, finished a first click
+         and its release before it gave up. *)
+      (match pending, refusable_gesture operation, field "receipt" value with
+       | Some _, Some gesture, Some `Null ->
+         (match Browser_ego_release.answer_of_refusal gesture
+                  (Option.value (field "thrown" value) ~default:`Null) with
+          | Browser_ego_release.Refused_before_press resolution as answer ->
+            (match Browser_ego_release.judge [0,answer] with
+             | Browser_ego_release.Settled settled ->
+               let* () = settle_input t pending settled
+                 |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+               Error (Live.Observed_failure {disposition=Live.Uncertain;message=head error ^ "; " ^ unknown;
+                 receipt=obj (["tabId",`Int id;"action",str verb] @ reference
+                   @ ["refusedBeforePress",obj ["kind",str (Browser_ego_release.resolution_to_wire resolution)]])})
+             | Browser_ego_release.Unconfirmed _ -> outcome (head error))
+          | Browser_ego_release.Receipt_without_dialog | Browser_ego_release.Native_window_tail _
+          | Browser_ego_release.Unreleased _ -> outcome (head error))
+       | (None | Some _), (None | Some _), (None | Some _) -> outcome (head error))
     | Some `Null, Some (`String url_before), Some (`Assoc receipt), Some ((`Null | `Assoc _) as tab) ->
       (* Click, double-click and dragAndDrop settle only from the SDK's receipt read whole. A receipt
          with a member the SDK does not declare is not an answer, so it is read as neither released nor served. *)
@@ -1391,7 +1422,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
       let declared = match operation with
         | Target_click | Target_double_click | Target_drag _ ->
           (match answer with
-           | Browser_ego_release.Native_window_tail _
+           | Browser_ego_release.Native_window_tail _ | Browser_ego_release.Refused_before_press _
            | Browser_ego_release.Unreleased (Browser_ego_release.Undeclared_answer
                | Native_window_unconfirmed _ | Conflicting_evidence) ->
              Error "ego answered the input with a receipt the SDK does not declare"

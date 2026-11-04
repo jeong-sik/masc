@@ -1,7 +1,11 @@
 module Window = Browser_ego_native_window
 type unreleased = Receipt_with_dialog | Void_answer | Undeclared_answer | Never_returned
   | Native_window_unconfirmed of Window.unconfirmed | Conflicting_evidence
-type answer = Receipt_without_dialog | Native_window_tail of Window.completion | Unreleased of unreleased
+type resolution = Transient | Permanent
+let resolution_to_wire = function Transient -> "transient" | Permanent -> "permanent"
+type refusable_gesture = Click | Double_click | Drag_and_drop
+type answer = Receipt_without_dialog | Native_window_tail of Window.completion
+  | Refused_before_press of resolution | Unreleased of unreleased
 type evidence = Receipt_step of int | Window_step of {index:int;completion:Window.completion}
 type proof = Released_by_receipts of int list | Completed_by_evidence of evidence list
 type settled = No_hold | Released of proof
@@ -45,6 +49,24 @@ let answer_of_json = function
   | `Null -> Unreleased Void_answer
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Unreleased Undeclared_answer
 let of_unreleased answer = Unreleased answer
+let resolution_error_name = "ElementResolutionError"
+let resolution_of_wire = function
+  | "transient" -> Some Transient
+  | "permanent" -> Some Permanent
+  | _ -> None
+(* The gesture is matched so that only the three refusable gestures can ask. *)
+let answer_of_refusal gesture value =
+  match gesture with
+  | Click | Double_click | Drag_and_drop ->
+    match value with
+    | `Assoc fields when distinct_members fields && List.length fields = 2 ->
+      (match List.assoc_opt "name" fields, List.assoc_opt "kind" fields with
+       | Some (`String name), Some (`String kind) when name = resolution_error_name ->
+         (match resolution_of_wire kind with
+          | Some resolution -> Refused_before_press resolution
+          | None -> Unreleased Never_returned)
+       | (None | Some _), (None | Some _) -> Unreleased Never_returned)
+    | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Unreleased Never_returned
 let answer_of_window ~expected completion =
   if Window.matches completion expected then Ok (Native_window_tail completion)
   else Error "native input completion belongs to another invocation"
@@ -57,12 +79,16 @@ let one_answer_per_step answers =
     | Unreleased _ -> kept
     | Receipt_without_dialog -> (match later with
         | Receipt_without_dialog | Unreleased _ -> later
-        | Native_window_tail _ -> Unreleased Conflicting_evidence)
+        | Native_window_tail _ | Refused_before_press _ -> Unreleased Conflicting_evidence)
     | Native_window_tail original -> (match later with
         | Unreleased _ -> later
-        | Receipt_without_dialog -> Unreleased Conflicting_evidence
+        | Receipt_without_dialog | Refused_before_press _ -> Unreleased Conflicting_evidence
         | Native_window_tail next -> if Window.same_completion original next then kept
-          else Unreleased Conflicting_evidence) in
+          else Unreleased Conflicting_evidence)
+    | Refused_before_press _ -> (match later with
+        | Unreleased _ -> later
+        | Refused_before_press _ -> kept
+        | Receipt_without_dialog | Native_window_tail _ -> Unreleased Conflicting_evidence) in
   List.fold_left (fun folded (index, answer) ->
     if List.mem_assoc index folded
     then List.map (fun (step, kept) -> if step = index then (step, keep_the_stricter kept answer) else (step, kept)) folded
@@ -70,13 +96,16 @@ let one_answer_per_step answers =
 let judge answers =
   let rec go first_window proven = function
     | [] ->
-      let evidence = List.rev proven in
-      let proof = match first_window with
-        | None -> Released_by_receipts (List.filter_map (function
-            | Receipt_step index -> Some index | Window_step _ -> None) evidence)
-        | Some _ -> Completed_by_evidence evidence in
-      Settled (Released proof)
+      (match List.rev proven with
+       | [] -> Settled No_hold
+       | _ :: _ as evidence ->
+         let proof = match first_window with
+           | None -> Released_by_receipts (List.filter_map (function
+               | Receipt_step index -> Some index | Window_step _ -> None) evidence)
+           | Some _ -> Completed_by_evidence evidence in
+         Settled (Released proof))
     | (index, Receipt_without_dialog) :: rest -> go first_window (Receipt_step index :: proven) rest
+    | (_, Refused_before_press _) :: rest -> go first_window proven rest
     | (index, Native_window_tail completion) :: rest ->
       let binding = Window.binding completion in
       let compatible = match first_window with

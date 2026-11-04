@@ -42,6 +42,27 @@ test('a drag already cleaned up by the SDK receives no duplicate release', async
   assert.equal(f.calls.filter(call=>call[0]==='SDK-owned release').length,1);
   assert.equal(f.calls.filter(call=>call[0]==='up').length,0);
 });
+test('a thrown error hands its declared name and kind to the host and nothing else', async()=>{
+  class ElementResolutionError extends Error {
+    constructor(message, kind) { super(message); this.name = 'ElementResolutionError'; this.kind = kind; }
+  }
+  const refused=fixture(()=>{throw new ElementResolutionError('Locator loc=css:#target matched 0 elements','permanent');});
+  const result=await run(refused.page,args);
+  assert.equal(result.error,'Locator loc=css:#target matched 0 elements');
+  assert.equal(result.thrown.name,'ElementResolutionError');
+  assert.equal(result.thrown.kind,'permanent');
+  assert.equal(refused.calls.filter(call=>call[0]==='up').length,0);
+  const plain=fixture(()=>{throw Error('native drag interrupted');});
+  const other=await run(plain.page,args);
+  assert.equal(other.thrown.name,'Error');
+  assert.equal(other.thrown.kind,null);
+  const odd=fixture(()=>{throw 'not an error object';});
+  const none=await run(odd.page,args);
+  assert.equal(none.thrown.name,null);
+  assert.equal(none.thrown.kind,null);
+  const served=await run(fixture(()=>({popups:[]})).page,args);
+  assert.equal(served.thrown,null);
+});
 test('a dialog receipt keeps native drag release unconfirmed', async()=>{
   const receipt={dialog:{type:'alert',message:'hold'}};
   const f=fixture(()=>receipt);

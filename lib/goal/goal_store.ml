@@ -740,7 +740,7 @@ let append_audit_event config json =
       | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
     match append expected with
     | Fs_compat.Private_file_succeeded _ ->
-        notify_projection_change config;
+        projection_source_changed config;
         Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
         (* The durable effect committed; the cleanup failure is descriptor
@@ -748,7 +748,7 @@ let append_audit_event config json =
            retry that writes the event twice. *)
         Log.Misc.warn "goal event transaction cleanup failed: %s"
           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-        notify_projection_change config;
+        projection_source_changed config;
         Ok ()
     | Private_file_failed error ->
         Error (Fs_compat.private_jsonl_append_error_to_string error)
@@ -822,7 +822,7 @@ let flush_pending_events_locked config =
                 Error (Fs_compat.durable_append_error_to_string error ^ "; "
                        ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure) in
           let* changed = appended in
-          if changed then notify_projection_change config;
+          if changed then projection_source_changed config;
           (match write_state_with_effect ~projection_effect:Projection_unchanged config
                    { state with pending_events = []; version = state.version + 1;
                      updated_at = Masc_domain.now_iso () } with

@@ -80,13 +80,18 @@ let test_a_new_connector_name_reaches_observers () =
   let_the_announcer_run ();
   check (list string) "a changed name announces again" [ "fixture" ]
     (connector_changes stream);
-  (* A directory sync records names one after another under the writer's
-     lock; the connector is announced once for the burst. *)
-  remember ~id:"C2" "design";
-  remember ~id:"C3" "ops";
-  remember ~id:"C4" "random";
+  (* A directory sync hands a whole page over; the page is one change. *)
+  let remember_page entries =
+    Keeper_connector_names.remember_many ~base_dir:config.base_path ~connector:"fixture"
+      ~scope:Keeper_connector_names.Channel entries
+  in
+  remember_page [ "C2", "design"; "C3", "ops"; "C4", "random" ];
   let_the_announcer_run ();
-  check (list string) "a burst of names announces once" [ "fixture" ]
+  check (list string) "a page of names announces once" [ "fixture" ]
+    (connector_changes stream);
+  remember_page [ "C2", "design"; "C3", "ops" ];
+  let_the_announcer_run ();
+  check (list string) "a page of known names announces nothing" []
     (connector_changes stream)
 
 (* The Telegram poll loop writes its state after every poll. Only a change

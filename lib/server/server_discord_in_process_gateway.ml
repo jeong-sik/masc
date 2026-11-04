@@ -259,11 +259,7 @@ let discord_member_directory_page = function
   | _ -> Error "Discord guild members response is not a list"
 
 let remember_directory_entries ~base_dir ~scope entries =
-  List.iter
-    (fun (id, name) ->
-       Keeper_connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
-         ~name ())
-    entries
+  Keeper_connector_names.remember_many ~base_dir ~connector:State.channel ~scope entries
 
 let discord_recent_message_limit = 100
 let discord_member_page_limit = 1000

@@ -127,39 +127,62 @@ let directory_for_path file_path =
     directory
 ;;
 
-let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
-  let id = String.trim id in
-  let name = String.trim name in
-  if String.equal id "" || String.equal name ""
-  then ()
-  else
+(* Records every new or changed name of one connector scope with a single
+   append, and announces the connector once when any row was written. A
+   directory sync hands a whole page here, so the page is one change. *)
+let remember_many ~base_dir ~connector ~scope entries =
+  let entries =
+    List.filter_map
+      (fun (id, name) ->
+         let id = String.trim id in
+         let name = String.trim name in
+         if String.equal id "" || String.equal name "" then None else Some (id, name))
+      entries
+  in
+  let written =
     Cross_context_mutex.with_durable_lock directories_lock (fun () ->
       let file_path = names_path ~base_dir ~connector ~scope in
       let directory = directory_for_path file_path in
-      match Hashtbl.find_opt directory id with
-      | Some known when String.equal known name -> ()
-      | Some _ | None ->
+      let fresh =
+        List.filter
+          (fun (id, name) ->
+             match Hashtbl.find_opt directory id with
+             | Some known -> not (String.equal known name)
+             | None -> true)
+          entries
+      in
+      match fresh with
+      | [] -> false
+      | _ :: _ ->
         (match
            ignore (Keeper_fs.ensure_dir (names_dir base_dir));
-           let line =
+           let row (id, name) =
              Yojson.Safe.to_string
                (`Assoc
                  [ "id", `String id
                  ; "name", `String name
                  ; "ts", `Float (Time_compat.now ())
                  ])
+             ^ "\n"
            in
-           Fs_compat.append_file file_path (line ^ "\n");
-           Hashtbl.replace directory id name;
+           Fs_compat.append_file file_path (String.concat "" (List.map row fresh));
+           List.iter (fun (id, name) -> Hashtbl.replace directory id name) fresh;
            Hashtbl.remove sorted_directories file_path
          with
-         | () -> Gate_connector_announce.changed ~connector_id:connector
+         | () -> true
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
            Log.Keeper.warn "connector_names: append failed for %s/%s: %s"
              (sanitize_name connector)
              (scope_segment scope)
-             (Printexc.to_string exn)))
+             (Printexc.to_string exn);
+           false))
+  in
+  if written then Gate_connector_announce.changed ~connector_id:connector
+;;
+
+let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
+  remember_many ~base_dir ~connector ~scope [ id, name ]
 ;;
 
 let recall ~base_dir ~connector ~scope ~(id : string) =

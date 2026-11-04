@@ -9601,6 +9601,8 @@ type state = {
   mutable dos_live: Masc_tui_machine_live.view;
   mutable msx_live_in_flight: machine_live_request option;
   mutable dos_live_in_flight: machine_live_request option;
+  mutable msx_live_owed: Masc_tui_owed_read.t;
+  mutable dos_live_owed: Masc_tui_owed_read.t;
   (* Recent Keeper activity on the DOS machine, newest first, from the same
      live route [dos_live] reads. MSX has no such feed yet (its Lane takes no
      [~who] on several calls), so there is no [msx_activity] here -- adding
@@ -10608,6 +10610,7 @@ type state = {
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
   mutable browser_lane_read_resume: (int * Browser_lane_view.t * Browser_lane_view.operation) option;
+  mutable browser_observation_owed: Masc_tui_owed_read.t;
   mutable connectors: Masc.Tui_decode_connectors.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_read: Connector_read.t;
@@ -10952,6 +10955,8 @@ type state = {
           revalidating the same requested workspace does not end the outage.
           This log key never admits readings or grants request authority. *)
   mutable observer_retry_owner: unit ref option;
+  mutable observer_stream_owner: unit ref option;
+  mutable observer_machine: Masc.Machine_lane.t option;
   (* While the server cannot be reached, booting or unconfirmed, a timer
      tries a revalidation again, waiting longer after each failure. *)
   mutable contact_retry_owner: unit ref option;
@@ -11164,7 +11169,6 @@ type state = {
   mutable detail_scroll: int;
   workspace: string;
   port: int;
-  refresh_interval: float;
 }
 
 let clear_goal_action_error state ~goal_id =
@@ -14439,6 +14443,8 @@ let suspend_workspace_readings state =
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
   state.observer_retry_owner <- None;
+  state.observer_stream_owner <- None;
+  state.observer_machine <- None;
   (* The withdrawal cancelled the contact timer with every other job. *)
   state.contact_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
@@ -19202,9 +19208,10 @@ let create_state
     ~workspace
     ?(local_base_path = "")
     ~port
-    ~refresh_interval
+    ?(refresh_interval = 0.0)
     ()
   =
+  ignore refresh_interval;
   {
   observation_instance = Masc_tui_observation_origin.create_instance
     ~id:(Random_id.uuid_v7 ()) ~client_version:Build_version.current;
@@ -19359,6 +19366,8 @@ let create_state
   dos_live = Masc_tui_machine_live.Unread;
   msx_live_in_flight = None;
   dos_live_in_flight = None;
+  msx_live_owed = Masc_tui_owed_read.settled;
+  dos_live_owed = Masc_tui_owed_read.settled;
   dos_activity = [];
   collab = None;
   play_room = None;
@@ -19909,6 +19918,7 @@ let create_state
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
   browser_lane_read_resume = None;
+  browser_observation_owed = Masc_tui_owed_read.settled;
   connectors = None;
   connectors_error = None;
   connectors_read = Connector_read.empty;
@@ -20081,6 +20091,8 @@ let create_state
   observer = Observer_off;
   observer_last_close = None;
   observer_retry_owner = None;
+  observer_stream_owner = None;
+  observer_machine = None;
   contact_retry_owner = None;
   contact_failures = 0;
   observer_recovery_owner = None;
@@ -20181,8 +20193,13 @@ let create_state
   detail_scroll = 0;
   workspace;
   port;
-  refresh_interval;
 }
+
+let observer_machine_of_state state =
+  if state.msx_open && not state.msx_menu_open
+     && state.machine_interaction = Control_machine
+  then Some state.machine_source
+  else None
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =

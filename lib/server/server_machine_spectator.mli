@@ -1,3 +1,7 @@
+val machine_of_request_target : string -> (Machine_lane.t option, string) result
+(** Read the optional ["machine"] query. An unknown value is an error; absence
+    leaves the observer stream without a machine ticker. *)
+
 val start :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> stop_promise:unit Eio.Promise.t ->
   machine:Machine_lane.t -> config:Workspace.config -> unit

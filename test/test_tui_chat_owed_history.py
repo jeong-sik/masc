@@ -182,8 +182,6 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     base,
                     "--port",
                     str(server.server_port),
-                    "--refresh",
-                    str(refresh_seconds),
                 ],
                 stdin=slave,
                 stdout=slave,

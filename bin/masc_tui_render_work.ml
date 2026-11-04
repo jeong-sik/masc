@@ -242,7 +242,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
+       ~status:[]
        ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh");
 
   let offset =

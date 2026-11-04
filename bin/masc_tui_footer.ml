@@ -9,7 +9,6 @@ type task_creation_phase = Task_not_started | Task_reserved | Task_preparing | T
 
 type status_item =
   | Task_creation of { keeper : string; phase : task_creation_phase }
-  | Refresh_interval of float
   | Server_build of
       { version : string
       ; commit : string
@@ -72,7 +71,7 @@ type status_item =
 let needs_operator = function
   | Workspace_mismatch _ | Workspace_unconfirmed | Server_worktree_binary | Tui_build_mismatch _
   | Keeper_action_armed _ | Keeper_action_running _ | Task_creation _ -> true
-  | Refresh_interval _ | Server_build _ | Server_base_path _
+  | Server_build _ | Server_base_path _
   | Keeper_answering _ | Keeper_answered _ | Port _ -> false
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -121,12 +120,6 @@ let status_item_projection = function
       | Task_not_started -> "not started" | Task_reserved -> "waiting to prepare" | Task_preparing -> "preparing"
       | Task_awaiting_reply -> "awaiting reply" | Task_awaiting_application -> "result awaiting UI" in
     Some {text=Printf.sprintf "Task for %s: %s" keeper stage;retention=Live_activity}
-  | Refresh_interval seconds when Float.is_finite seconds && seconds > 0. ->
-    Some
-      { text = Printf.sprintf "Refresh: %.0fs" seconds
-      ; retention = Refresh_context
-      }
-  | Refresh_interval _ -> None
   | Server_build { version; commit } ->
     let version = String.trim version in
     let commit = String.trim commit in

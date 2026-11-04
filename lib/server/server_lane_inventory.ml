@@ -321,7 +321,7 @@ let merge_inventory ~(live : Addon.inventory) ~(retained : Addon.inventory) =
   let live_ids = List.map (fun (item : Addon.inventory_instance) -> item.instance_id) live.instances in
   let retained = List.filter (fun (item : Addon.inventory_instance) ->
     item.presence = Addon.Retained && not (List.mem item.instance_id live_ids)) retained.instances in
-  { owner_present = live.owner_present
+  { Addon.owner_present = live.owner_present
   ; instances = List.sort (fun (left : Addon.inventory_instance) right ->
       String.compare left.instance_id right.instance_id) (live.instances @ retained)
   ; issues = live.issues @ retained.issues

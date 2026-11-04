@@ -1,3 +1,10 @@
+let machine_of_request_target target =
+  match Uri.get_query_param (Uri.of_string target) "machine" with
+  | None -> Ok None
+  | Some "msx" -> Ok (Some Machine_lane.Msx)
+  | Some "dos" -> Ok (Some Machine_lane.Dos)
+  | Some value -> Error ("unknown observer machine: " ^ value)
+
 let step = ref (fun ~config ~machine ->
   match machine with
   | Machine_lane.Msx ->
@@ -6,6 +13,12 @@ let step = ref (fun ~config ~machine ->
         ~name:"masc_msx_step"
         ~arguments:(`Assoc ["frames", `Int 18; "include_frame", `Bool true])
       |> Result.map ignore
+      |> Result.map_error (function
+        | Lane_addon_runtime.Unavailable detail | Lane_addon_runtime.Outcome_unknown detail -> detail
+        | Lane_addon_runtime.Host_refusal
+            (Lane_addon_call_context.Rejected detail | Lane_addon_call_context.Unavailable detail
+            | Lane_addon_call_context.Activity_disabled detail
+            | Lane_addon_call_context.Activity_unobserved detail) -> detail)
   | Machine_lane.Dos -> Ok ())
 
 let start ~sw ~clock ~stop_promise ~machine ~config =

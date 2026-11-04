@@ -746,6 +746,20 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
+  let machine =
+    match Machine_spectator.machine_of_request_target request.target with
+    | Error _ as error -> error
+    | Ok machine ->
+        (match machine, sse_kind with
+         | Some _, (Sse.Agent_stream | Sse.Presence) ->
+             Error "the machine query requires an observer stream"
+         | (Some _ | None), _ -> Ok machine)
+  in
+  match machine with
+  | Error detail ->
+      respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+        ~request_authority request reqd ~session_id ~protocol_version detail
+  | Ok machine ->
   let observer_scope =
     match sse_kind with
     | Sse.Observer ->
@@ -1020,6 +1034,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
+              Option.iter (fun machine ->
+                Option.iter (fun (_, scope) ->
+                  Machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
+                    ~machine ~config:scope.config) observer_scope) machine;
               Option.iter (fun (_, scope) ->
                 Eio.Fiber.fork_daemon ~sw (fun () ->
                   (match Eio.Fiber.first

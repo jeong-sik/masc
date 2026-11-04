@@ -406,4 +406,23 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
 
 let build ~generated_at_iso ~config =
   build_at ~now:(Time_compat.now ()) ~generated_at_iso ~config
+
+(* The document as of [now] without the time of the read, so two readings
+   compare equal unless something they show changed. *)
+let standing ~now ~config = build_at ~now ~generated_at_iso:"" ~config
+
+let next_standing_change_at ~now =
+  let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
+  Option.to_list snapshot.rs_default_runtime @ snapshot.rs_runtimes
+  |> List.concat_map (fun (rt : Runtime_instance.t) ->
+       let quota =
+         Runtime_quota_window.active_until ~scope:(Runtime_instance.quota_scope_of_runtime rt) ~now
+       in
+       let observed =
+         Runtime_candidate_backpressure.candidate_backpressure ~now
+           ~candidate:rt.candidate_backpressure
+       in
+       let _, rate_limit = runtime_rate_limit ~now observed in
+       Option.to_list quota @ Option.to_list rate_limit)
+  |> List.fold_left (fun earliest at -> Some (Option.fold earliest ~none:at ~some:(Float.min at))) None
 ;;

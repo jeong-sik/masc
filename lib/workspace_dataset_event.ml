@@ -6,6 +6,7 @@ type dataset =
   | Harness_verdicts
   | Keeper_oauth_attempts of { keeper : string }
   | Clients
+  | Provider_usage
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
@@ -18,6 +19,7 @@ let harness_verdicts_name = "harness_verdicts"
 let runtime_config_name = "runtime_config"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 let clients_name = "clients"
+let provider_usage_name = "provider_usage"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -26,6 +28,7 @@ let dataset_name = function
   | Runtime_config -> runtime_config_name
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
   | Clients -> clients_name
+  | Provider_usage -> provider_usage_name
 ;;
 
 let keeper_field = function
@@ -55,6 +58,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name harness_verdicts_name -> Ok Harness_verdicts
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
   | Some (`String name) when String.equal name clients_name -> Ok Clients
+  | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)

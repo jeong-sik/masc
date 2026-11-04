@@ -74,6 +74,25 @@ let test_a_read_that_never_ran_is_owed_again () =
   check bool "the failures in a row survive" true
     (match O.abandoned after_failure with O.Owed { failures = 1 } -> true | _ -> false)
 
+(* The server sets stale_at = last verdict + 12h, so a snapshot whose
+   evaluator is already Stale carries a stale_at in the past. The read that
+   returned it covered that turn; keeping the past moment would store a
+   schedule that is due at once, and the loop would owe a new read on every
+   answer, since each answer carries the same past moment. *)
+let test_a_stale_at_already_past_stores_no_schedule () =
+  check bool "a past stale_at is not stored" false
+    (Option.is_some (O.stale_at_to_schedule ~now:100.0 (Some 99.0)));
+  check bool "a stale_at at the reading moment is not stored either" false
+    (Option.is_some (O.stale_at_to_schedule ~now:100.0 (Some 100.0)));
+  check bool "a future stale_at is stored" true
+    (Option.is_some (O.stale_at_to_schedule ~now:100.0 (Some 100.5)));
+  check bool "no stale_at stays none" false
+    (Option.is_some (O.stale_at_to_schedule ~now:100.0 None));
+  (match O.stale_at_to_schedule ~now:100.0 (Some 100.5) with
+   | Some at ->
+       check bool "the stored moment is the server's own" true (Float.equal at 100.5)
+   | None -> check bool "a future stale_at is stored" true false)
+
 let () =
   run "tui_owed_read"
     [ ( "owed_read"
@@ -92,5 +111,7 @@ let () =
             test_a_read_that_never_ran_is_owed_again
         ; test_case "a replacing read covers the changes before it" `Quick
             test_a_replacing_read_covers_the_changes_before_it
+        ; test_case "a stale_at already past stores no schedule" `Quick
+            test_a_stale_at_already_past_stores_no_schedule
         ] )
     ]

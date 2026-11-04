@@ -59,6 +59,15 @@ type early_approval_observation = {
 
 (* Each value settles one independently owned dataset. Board's two datasets
    share a logical source, while neither delivery consumes its sibling. *)
+(** A provider history answer and the TUI clock when its request started. The
+    next UTC day is counted from the start, so a request sent before midnight
+    whose answer lands after it reads again at once. *)
+type provider_history_reading = {
+  phr_days : int;
+  phr_requested_at : float;
+  phr_result : (Masc.Tui_decode_usage.provider_usage_history, string) result;
+}
+
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
   | Dataset_board_posts of board_posts_receipt
@@ -69,8 +78,7 @@ type http_dataset =
       (Masc.Tui_decode.runtime_option list, string) result
       * (Masc.Tui_decode_usage.provider_usage_windows, string) result
   | Dataset_keeper_usage of (Masc.Tui_decode_usage.keeper_usage_window, string) result
-  | Dataset_provider_history of
-      int * (Masc.Tui_decode_usage.provider_usage_history, string) result
+  | Dataset_provider_history of provider_history_reading
   | Dataset_overview_goals of (Masc.Tui_decode.overview_goal list, string) result
   | Dataset_account_emails of ((string * string) list * int, string) result
 
@@ -116,8 +124,7 @@ type 'identity http_scoped_surface_readings = {
     * (Masc.Tui_decode_usage.provider_usage_windows, string) result)
     option;
   http_keeper_usage: (Masc.Tui_decode_usage.keeper_usage_window, string) result option;
-  http_provider_history:
-    (int * (Masc.Tui_decode_usage.provider_usage_history, string) result) option;
+  http_provider_history: provider_history_reading option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Masc.Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)

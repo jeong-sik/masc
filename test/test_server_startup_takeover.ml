@@ -371,9 +371,6 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
       close_quietly won_write;
       close_quietly go_read;
       let queued_read, queued_write = Unix.pipe () in
-      let marathon_log =
-        Filename.concat run_dir "contender-marathon.log"
-      in
       let buffer = Bytes.create 1 in
       Fun.protect
         ~finally:(fun () ->
@@ -395,19 +392,6 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
            let contender_pid =
              match Unix.fork () with
              | 0 ->
-               let stderr_log =
-                 Filename.concat run_dir "contender-stderr.log"
-               in
-               (try
-                  let err_fd =
-                    Unix.openfile stderr_log
-                      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
-                      0o644
-                  in
-                  Unix.dup2 err_fd Unix.stderr;
-                  Unix.close err_fd
-                with Unix.Unix_error _ -> ());
-               ignore (Unix.write_substring queued_write "S" 0 1 : int);
                (* Close only what is open here: the parent already closed
                   waiting_write, won_write and go_read, so their numbers were
                   recycled by the queued pipe itself; naming them would close
@@ -417,18 +401,7 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                close_quietly go_write;
                close_quietly queued_read;
                close_quietly release_owner;
-               let marathon_fd =
-                 Unix.openfile marathon_log
-                   [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
-                   0o644
-               in
-               let milestone tag =
-                 try ignore (Unix.write_substring marathon_fd tag 0 1 : int)
-                 with Unix.Unix_error _ -> ()
-               in
-               milestone "C";
                let on_wait _ =
-                 milestone "W";
                  ignore (Unix.write_substring queued_write "Q" 0 1 : int)
                in
                (* The contender must block on the winner's lease until the
@@ -439,17 +412,14 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                     ~run_dir ~on_wait base_path
                 with
                 | Ok _ ->
-                  milestone "O";
                   ignore (Unix.write_substring queued_write "O" 0 1 : int);
                   Unix._exit 7
                 | Error _ ->
-                  milestone "R";
                   ignore (Unix.write_substring queued_write "E" 0 1 : int);
                   Unix._exit 7
                 | exception _ ->
                   (try ignore (Unix.write_substring queued_write "X" 0 1 : int)
                    with Unix.Unix_error _ -> ());
-                  milestone "X";
                   Unix._exit 9)
              | contender_pid ->
                close_quietly queued_write;
@@ -459,52 +429,13 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
              ~finally:(fun () ->
                if process_alive contender_pid then stop_process contender_pid)
              (fun () ->
-                let read_byte what =
-                  let got = Unix.read queued_read buffer 0 1 in
-                  if got <> 1
-                  then (
-                    let marathon =
-                      try
-                        let ic = open_in marathon_log in
-                        Fun.protect
-                          ~finally:(fun () -> close_in_noerr ic)
-                          (fun () -> really_input_string ic (in_channel_length ic))
-                      with Sys_error _ -> "<no marathon log>"
-                    in
-                    let status =
-                      match waitpid_nointr contender_pid with
-                      | None -> "reaped-elsewhere"
-                      | Some (_, Unix.WEXITED code) ->
-                        Printf.sprintf "exited(%d)" code
-                      | Some (_, Unix.WSIGNALED signal) ->
-                        Printf.sprintf "signaled(%d)" signal
-                      | Some (_, Unix.WSTOPPED signal) ->
-                        Printf.sprintf "stopped(%d)" signal
-                    in
-                    let stderr_tail =
-                      try
-                        let ic =
-                          open_in (Filename.concat run_dir "contender-stderr.log")
-                        in
-                        Fun.protect
-                          ~finally:(fun () -> close_in_noerr ic)
-                          (fun () ->
-                            let len = in_channel_length ic in
-                            let take = min len 2000 in
-                            seek_in ic (len - take);
-                            really_input_string ic take)
-                      with Sys_error _ -> "<no stderr log>"
-                    in
-                    Alcotest.failf
-                      "contender pipe gave %d bytes at %s; marathon=%S status=%s stderr=%S"
-                      got what marathon status stderr_tail)
-                  else Bytes.get buffer 0
-                in
-                Alcotest.(check char)
-                  "the contender child started (S)" 'S' (read_byte "start");
                 Alcotest.(check char)
                   "the contender is waiting (Q), not returned (O), refused (E), or crashed (X)"
-                  'Q' (read_byte "queue");
+                  'Q'
+                  (let got = Unix.read queued_read buffer 0 1 in
+                   if got <> 1
+                   then Alcotest.failf "contender exited early (%d bytes)" got
+                   else Bytes.get buffer 0);
                 ignore (Unix.write_substring go_write "1" 0 1 : int);
                 (match waitpid_nointr waiter_pid with
                  | Some (_, Unix.WEXITED 0) -> ()

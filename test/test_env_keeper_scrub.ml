@@ -146,6 +146,27 @@ let filter_environment_scrubs_schemeless_proxy_credentials () =
        String_util.contains_substring e "secret"))
 ;;
 
+(* The authority ends at the first "/", "?" or "#" and its last "@" separates
+   userinfo from host. A password with a raw "@" and a bare authority followed
+   by a "://" in the query both left credential bytes in the child env. *)
+let filter_environment_scrubs_the_whole_proxy_userinfo () =
+  let input =
+    [| "HTTP_PROXY=http://operator:pa@ss@proxy.example.com:8080"
+     ; "HTTPS_PROXY=operator:secret@proxy.internal/path?next=http://other"
+    |]
+  in
+  let out = Env_keeper_scrub.filter_environment input in
+  Alcotest.(check bool) "raw @ in the password is redacted whole" true
+    (mem "HTTP_PROXY=http://[REDACTED]@proxy.example.com:8080" out);
+  Alcotest.(check bool) "bare authority with :// in the query is redacted" true
+    (mem "HTTPS_PROXY=[REDACTED]@proxy.internal/path?next=http://other" out);
+  Alcotest.(check bool) "no password byte is left" false
+    (Array.to_list out |> List.exists (fun e ->
+       String_util.contains_substring e "pa@ss"
+       || String_util.contains_substring e "ss@"
+       || String_util.contains_substring e "secret"))
+;;
+
 (* The measured hang: the host EDITOR is on the allowlist, so a keeper
    subprocess inherited the operator's editor and git launched it with no tty.
    Both facts are pinned — the editor still arrives for anything that wants to
@@ -195,6 +216,8 @@ let () =
             filter_environment_scrubs_proxy_credentials
         ; Alcotest.test_case "scrubs scheme-less proxy credentials" `Quick
             filter_environment_scrubs_schemeless_proxy_credentials
+        ; Alcotest.test_case "scrubs the whole proxy userinfo" `Quick
+            filter_environment_scrubs_the_whole_proxy_userinfo
         ] )
     ; ( "non-interactive"
       , [ Alcotest.test_case "a subprocess cannot wait for a person" `Quick

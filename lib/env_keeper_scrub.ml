@@ -53,51 +53,6 @@ let key_of_entry entry =
 
 let is_url_var key = String.equal key "HTTP_PROXY" || String.equal key "HTTPS_PROXY"
 
-let index_substring_from s sub start =
-  let slen = String.length sub in
-  let len = String.length s in
-  let rec scan i =
-    if i + slen > len then None else if String.sub s i slen = sub then Some i else scan (i + 1)
-  in
-  scan start
-;;
-
-let index_char_from s start c =
-  let len = String.length s in
-  let rec scan i = if i >= len then None else if Char.equal s.[i] c then Some i else scan (i + 1) in
-  scan start
-;;
-
-let scrub_authority value auth_start =
-  let auth_end =
-    match index_char_from value auth_start '/' with
-    | None -> String.length value
-    | Some idx -> idx
-  in
-  if auth_end <= auth_start
-  then value
-  else (
-    match String.index_opt (String.sub value auth_start (auth_end - auth_start)) '@' with
-    | None -> value
-    | Some at_idx ->
-      let host_offset = auth_start + at_idx in
-      String.concat
-        ""
-        [ String.sub value 0 auth_start
-        ; "[REDACTED]"
-        ; String.sub value host_offset (String.length value - host_offset)
-        ])
-
-let scrub_url_value value =
-  match index_substring_from value "://" 0 with
-  | Some scheme_end -> scrub_authority value (scheme_end + 3)
-  | None ->
-    (* A proxy value without a scheme ([user:pass@host:port]) is still a
-       proxy: curl defaults it to http. Scrub its userinfo the same way;
-       a bare [host:port] has no [@] and passes through unchanged. *)
-    scrub_authority value 0
-;;
-
 let scrub_entry entry =
   let key = key_of_entry entry in
   if is_url_var key
@@ -106,7 +61,7 @@ let scrub_entry entry =
     | None -> entry
     | Some idx ->
       let value = String.sub entry (idx + 1) (String.length entry - idx - 1) in
-      let scrubbed = scrub_url_value value in
+      let scrubbed = Url_userinfo.redact value in
       if String.equal value scrubbed then entry else key ^ "=" ^ scrubbed)
   else entry
 ;;

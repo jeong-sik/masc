@@ -520,6 +520,66 @@ let test_utf8_complete_prefix_every_cut_is_valid () =
         (String.length head - String.length kept)
   done
 
+(* ---- Url_userinfo.redact ---- *)
+
+let check_redact label expected input =
+  Alcotest.(check string) label expected (Url_userinfo.redact input)
+
+let test_redact_leaves_values_without_userinfo () =
+  check_redact "empty" "" "";
+  check_redact "bare host" "search.example:8888" "search.example:8888";
+  check_redact "url without userinfo"
+    "https://search.example:8443/path?q=a@b"
+    "https://search.example:8443/path?q=a@b";
+  check_redact "scheme only" "http://" "http://";
+  check_redact "ipv6 literal host" "http://[::1]:8080/x" "http://[::1]:8080/x"
+
+let test_redact_replaces_userinfo_of_each_shape () =
+  check_redact "user and password"
+    "https://[REDACTED]@search.example"
+    "https://user:SECRETPASS6@search.example";
+  check_redact "user only"
+    "http://[REDACTED]@search.example:8888/search"
+    "http://user@search.example:8888/search";
+  check_redact "bare authority"
+    "[REDACTED]@search.example:8888"
+    "user:SECRETPASS6@search.example:8888";
+  check_redact "protocol-relative"
+    "//[REDACTED]@search.example:8888/search"
+    "//user:SECRETPASS6@search.example:8888/search";
+  check_redact "ipv6 literal host"
+    "http://[REDACTED]@[::1]:8080"
+    "http://u:p@[::1]:8080"
+
+let test_redact_takes_the_last_at_of_the_authority () =
+  check_redact "raw @ in the password is redacted whole"
+    "http://[REDACTED]@proxy.example:8080"
+    "http://user:p@ss@proxy.example:8080";
+  check_redact "second @ before the path"
+    "http://[REDACTED]@host/x"
+    "http://a@b@host/x"
+
+let test_redact_stops_the_authority_at_slash_question_and_hash () =
+  check_redact "@ in the query is not userinfo"
+    "http://host?next=a@b" "http://host?next=a@b";
+  check_redact "@ in the fragment is not userinfo"
+    "http://host#a@b" "http://host#a@b";
+  check_redact "userinfo before a query that holds @"
+    "http://[REDACTED]@host?next=a@b" "http://user@host?next=a@b";
+  check_redact "userinfo before a fragment that holds @"
+    "http://[REDACTED]@host#a@b" "http://user@host#a@b"
+
+let test_redact_ignores_scheme_separator_after_the_authority () =
+  check_redact "bare authority with :// in the query"
+    "[REDACTED]@search.example/?next=http://other"
+    "user:SECRETPASS6@search.example/?next=http://other";
+  check_redact "bare host with :// and @ in the query is unchanged"
+    "search.example/?next=http://a@b"
+    "search.example/?next=http://a@b";
+  check_redact "bare authority with :// in the path"
+    "[REDACTED]@host/redirect/http://x@y"
+    "user:pw@host/redirect/http://x@y"
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -609,4 +669,15 @@ let () =
           test_case "utf8_complete_prefix keeps bytes that are not UTF-8"
             `Quick test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8;
           test_case "utf8_complete_prefix leaves every cut valid" `Quick
-            test_utf8_complete_prefix_every_cut_is_valid ] ) ]
+            test_utf8_complete_prefix_every_cut_is_valid ] );
+      ( "url_userinfo",
+        [ test_case "values without userinfo are unchanged" `Quick
+            test_redact_leaves_values_without_userinfo;
+          test_case "userinfo of every URL shape is replaced" `Quick
+            test_redact_replaces_userinfo_of_each_shape;
+          test_case "the last @ of the authority separates userinfo" `Quick
+            test_redact_takes_the_last_at_of_the_authority;
+          test_case "the authority ends at / ? and #" `Quick
+            test_redact_stops_the_authority_at_slash_question_and_hash;
+          test_case "a :// after the authority is not the scheme separator"
+            `Quick test_redact_ignores_scheme_separator_after_the_authority ] ) ]

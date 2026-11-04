@@ -303,36 +303,7 @@ let with_env name value f =
     ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
     f
 
-let test_display_searxng_url_redacts_userinfo () =
-  Alcotest.(check string)
-    "url without userinfo is unchanged"
-    "https://search.example:8443/path?q=a@b"
-    (Web_search_setup.display_searxng_url "https://search.example:8443/path?q=a@b");
-  Alcotest.(check string)
-    "user:password userinfo is redacted"
-    "https://[REDACTED]@search.example"
-    (Web_search_setup.display_searxng_url "https://user:SECRETPASS6@search.example");
-  Alcotest.(check string)
-    "user-only userinfo is redacted"
-    "http://[REDACTED]@search.example:8888/search"
-    (Web_search_setup.display_searxng_url "http://user@search.example:8888/search");
-  Alcotest.(check string)
-    "scheme-less authority userinfo is redacted"
-    "[REDACTED]@search.example:8888"
-    (Web_search_setup.display_searxng_url "user:SECRETPASS6@search.example:8888");
-  Alcotest.(check string)
-    "protocol-relative authority userinfo is redacted"
-    "//[REDACTED]@search.example:8888/search"
-    (Web_search_setup.display_searxng_url "//user:SECRETPASS6@search.example:8888/search");
-  Alcotest.(check string)
-    "scheme-less authority userinfo with :// in query is redacted"
-    "[REDACTED]@search.example/?next=http://other"
-    (Web_search_setup.display_searxng_url
-       "user:SECRETPASS6@search.example/?next=http://other");
-  Alcotest.(check string)
-    "scheme-less url without userinfo keeps @ inside :// query parameter"
-    "search.example/?next=http://a@b"
-    (Web_search_setup.display_searxng_url "search.example/?next=http://a@b");
+let test_searxng_base_url_refusal_redacts_userinfo () =
   with_env "MASC_SEARXNG_URL" "user:SECRETPASS6@search.example:8888" (fun () ->
     match Env_config_runtime.Tools.searxng_base_url () with
     | Error msg ->
@@ -562,8 +533,8 @@ let () =
         ; Alcotest.test_case "the refusal names the key" `Quick test_the_refusal_names_the_key
         ; Alcotest.test_case "a searxng url the reader would refuse" `Quick
             test_a_searxng_url_the_reader_would_refuse_is_not_written
-        ; Alcotest.test_case "display_searxng_url redacts userinfo" `Quick
-            test_display_searxng_url_redacts_userinfo
+        ; Alcotest.test_case "searxng_base_url refusal redacts userinfo" `Quick
+            test_searxng_base_url_refusal_redacts_userinfo
         ; Alcotest.test_case "two changes to one key" `Quick
             test_two_changes_to_one_key_are_refused
         ; Alcotest.test_case "a stale revision" `Quick test_a_stale_revision_writes_nothing

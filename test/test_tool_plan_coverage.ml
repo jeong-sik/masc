@@ -75,7 +75,10 @@ let in_workspace label f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = unique_ctx label in
   Fun.protect
-    ~finally:(fun () -> rm_rf ctx.config.Masc.Workspace.base_path)
+    ~finally:(fun () ->
+      (* Cleanup must not hide the failure of the test body. *)
+      try rm_rf ctx.config.Masc.Workspace.base_path
+      with Sys_error _ | Unix.Unix_error _ -> ())
     (fun () -> f ctx)
 
 let dispatch (ctx : Tool_plan.context) name args =
@@ -138,27 +141,16 @@ let test_set_without_task_id_is_refused () =
     Tool_result.Workflow_rejection;
   check (option string) "nothing was written" None (marker ctx)
 
-(* [.masc/current_task] is a directory that cannot be moved aside. The file
-   store fails; the caller's arguments were fine. *)
+(* The directory that should hold [.masc/current_task] is a regular file. The
+   file store fails; the caller's arguments were fine. *)
 let test_set_store_failure_is_runtime_failure () =
-  if Unix.geteuid () = 0 then skip ();
   in_workspace "store-failure" @@ fun ctx ->
-  let masc_dir = Workspace_utils.masc_dir ctx.config in
-  let marker_path = Filename.concat masc_dir "current_task" in
-  let trash = Filename.concat masc_dir "_trash" in
-  Fs_compat.mkdir_p marker_path;
-  Fs_compat.save_file (Filename.concat marker_path "forensics.txt") "kept";
-  Fs_compat.mkdir_p trash;
-  Unix.chmod trash 0o555;
-  Fun.protect
-    ~finally:(fun () -> Unix.chmod trash 0o755)
-    (fun () ->
-      check_failed "set"
-        (dispatch ctx "masc_plan_set_task" (set_args "task-001"))
-        Tool_result.Runtime_failure;
-      check bool "the directory stays in place" true
-        (Sys.is_directory marker_path);
-      check (option string) "nothing was written over it" None (marker ctx))
+  Fs_compat.mkdir_p ctx.config.Masc.Workspace.base_path;
+  Fs_compat.save_file (Workspace_utils.masc_dir ctx.config) "not a directory";
+  check_failed "set"
+    (dispatch ctx "masc_plan_set_task" (set_args "task-001"))
+    Tool_result.Runtime_failure;
+  check (option string) "nothing was written" None (marker ctx)
 
 let test_dispatch_unknown_tool () =
   match

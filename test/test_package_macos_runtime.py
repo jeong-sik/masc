@@ -29,9 +29,21 @@ class PythonHttpsProbe(unittest.TestCase):
     def run_probe(self):
         shipped = os.path.join(sys.base_prefix, 'ssl', 'cacert.pem')
         with patch.dict(os.environ, {'SSL_CERT_FILE': shipped}):
-            exec(package.PYTHON_HTTPS_PROBE, {})
+            exec(package.PYTHON_SHIPPED_BUNDLE_HTTPS_PROBE, {})
 
-    def test_probe_requires_the_shipped_bundle(self):
+    def test_shared_probe_keeps_the_system_trust_store(self):
+        # The GNU/Linux runtime ships no CA bundle and runs this probe as is.
+        environ = {name: value for name, value in os.environ.items()
+                   if name not in ('SSL_CERT_FILE', 'SSL_CERT_DIR')}
+        body = io.BytesIO(b'ok')
+        response = urllib.error.HTTPError('https://example.com', 200, 'OK', Message(), body)
+        with patch.dict(os.environ, environ, clear=True), \
+                patch.object(urllib.request, 'urlopen', return_value=response) as request:
+            exec(package.PYTHON_HTTPS_PROBE, {})
+        request.assert_called_once_with('https://example.com', timeout=30)
+        self.assertTrue(body.closed)
+
+    def test_macos_probe_requires_the_shipped_bundle(self):
         for cafile in (None, '/private/etc/ssl/cert.pem'):
             environ = {name: value for name, value in os.environ.items() if name != 'SSL_CERT_FILE'}
             if cafile is not None:
@@ -39,7 +51,7 @@ class PythonHttpsProbe(unittest.TestCase):
             with self.subTest(cafile=cafile), patch.dict(os.environ, environ, clear=True), \
                     patch.object(urllib.request, 'urlopen') as request:
                 with self.assertRaisesRegex(ValueError, 'shipped CA bundle'):
-                    exec(package.PYTHON_HTTPS_PROBE, {})
+                    exec(package.PYTHON_SHIPPED_BUNDLE_HTTPS_PROBE, {})
                 request.assert_not_called()
 
     def test_https_rejection_is_a_validated_response(self):

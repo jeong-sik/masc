@@ -2081,6 +2081,12 @@ type client_table_column =
   | Client_status_column | Client_name_column | Client_type_column
   | Client_acting_for_column | Client_task_column | Client_last_seen_column
 
+(* A Keeper registry row has no observation time to measure from. *)
+let client_last_seen_text ~now (row : Masc.Tui_decode.client_row) =
+  match row.cr_last_seen with
+  | Some last_seen -> Masc_tui_wire_age.text ~now last_seen
+  | None -> Masc_tui_theme.Glyph.no_value
+
 let render_client_detail state (client : Masc.Tui_decode.client_row) =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -2111,8 +2117,8 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
     @ field "Acting for" (optional client.cr_keeper_name)
     @ field "Task" (optional client.cr_current_task)
     @ field "Observation age"
-        (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
-    @ field ~style:Ansi.dim "Last seen (as read)" client.cr_last_seen
+        (optional (Option.map (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ())) client.cr_last_seen))
+    @ field ~style:Ansi.dim "Last seen (as read)" (optional client.cr_last_seen)
     @ detail_section_lines "2. 클라이언트 식별 정보 (Identity)"
     @ field "Name" client.cr_name
     @ field "Type" client.cr_agent_type
@@ -2167,7 +2173,7 @@ let render_clients (state : state) =
   let table_width = max 0 (framed_inner_width cols - 2) in
   let last_seen_width =
     List.fold_left (fun widest (row : Masc.Tui_decode.client_row) ->
-      max widest (Message_layout.display_width (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)))
+      max widest (Message_layout.display_width (client_last_seen_text ~now:now_s row)))
       (Message_layout.display_width "LAST SEEN") clients
     (* The table keeps its status and identity floor. Exact observations that
        exceed this share are read in the selected client's scrollable detail. *)
@@ -2284,7 +2290,7 @@ let render_clients (state : state) =
                  header reading 09:31:39 on 2026-09-23, and the distance a
                  reader could take from that pointed two hours ahead. A span
                  carries its own day. *)
-              ~last_seen:(Masc_tui_wire_age.text ~now:now_s row.cr_last_seen))
+              ~last_seen:(client_last_seen_text ~now:now_s row))
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)

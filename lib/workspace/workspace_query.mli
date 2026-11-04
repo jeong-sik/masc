@@ -96,6 +96,19 @@ val get_agents_raw : config -> Masc_domain.agent list
     initialized — safe for dashboard and display contexts. *)
 val get_active_agents : config -> Masc_domain.agent list
 
+(** Which of the three merged sources a roster row came from. *)
+type agent_source =
+  | Agent_record  (** A record under [.masc/agents/]. *)
+  | Workspace_state  (** A name in the workspace state's [active_agents]. *)
+  | Keeper_registry
+      (** A Keeper of the live registry. Its [session_bound_at] and
+          [last_seen] are the time of the read, not facts about the Keeper. *)
+
+val get_active_agent_sources_observed :
+  config -> (Masc_domain.agent * agent_source) list * string list
+(** {!get_active_agents_observed} with each row's source; the first source to
+    name an agent keeps the row. *)
+
 val get_active_agents_observed : config -> Masc_domain.agent list * string list
 (** The roster together with the reads that failed while building it. The
     roster is merged from three sources, so one can fail while the others

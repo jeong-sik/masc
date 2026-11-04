@@ -27,7 +27,7 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
-let dashboard_agent_json (agent : Masc_domain.agent) =
+let agent_json ~session_bound_at ~last_seen (agent : Masc_domain.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
   `Assoc
@@ -38,12 +38,25 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
     ; "current_task", Json_util.string_opt_to_json agent.current_task
-    ; "session_bound_at", `String agent.session_bound_at
-    ; "last_seen", `String agent.last_seen
+    ; "session_bound_at", session_bound_at
+    ; "last_seen", last_seen
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
     ]
+;;
+
+let dashboard_agent_json (agent : Masc_domain.agent) =
+  agent_json ~session_bound_at:(`String agent.session_bound_at)
+    ~last_seen:(`String agent.last_seen) agent
+;;
+
+(* A Keeper registry row carries the time of the read in both fields; the
+   Clients roster shows no time for it rather than that one. *)
+let dashboard_client_json ((agent : Masc_domain.agent), (source : Workspace.agent_source)) =
+  match source with
+  | Workspace.Agent_record | Workspace.Workspace_state -> dashboard_agent_json agent
+  | Workspace.Keeper_registry -> agent_json ~session_bound_at:`Null ~last_seen:`Null agent
 ;;
 
 let dashboard_message_json (message : Masc_domain.message) =

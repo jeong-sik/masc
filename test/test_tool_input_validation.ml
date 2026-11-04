@@ -2045,7 +2045,7 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
       [
         ("_agent_name", `String "codex-local-admin");
         ("task_id", `String "task-216");
-        ("action", `String "done");
+        ("action", `String "start");
       ]
   in
   let blocked, forwarded =

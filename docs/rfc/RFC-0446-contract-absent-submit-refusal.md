@@ -78,7 +78,7 @@ val parse : Masc_domain.task_contract option -> contract_parse
 
 `Present` 의 조건은 "trim 한 뒤 비어 있지 않은 `completion_contract` 항목이 하나 이상" 하나다.
 `required_evidence` 는 비어 있어도 `Present` 다. 증거를 얼마나 요구할지는 계약 작성자의 결정이고, 그 충분함은 판정자가 본다.
-`strict`, `inspect_gate_evidence`, `verify_gate_evidence` 는 parse 에 영향을 주지 않는다.
+`inspect_gate_evidence`, `verify_gate_evidence` 는 parse 에 영향을 주지 않는다.
 `Invalid` 는 `Absent` 로 접지 않는다. 둘은 다른 원인이고 다른 조치가 따른다(§2.5).
 
 생성 경계도 같은 parse 를 쓴다. `masc_add_task` 가 `contract` 객체를 주는데 parse 가 `Invalid` 면 생성을 거절한다. `contract` 를 생략하면 `Absent` 로 생성된다. 그래서 정상 운영에서 `Invalid` 는 사람이 `tasks.json` 을 손으로 고쳤을 때만 나온다.

@@ -86,7 +86,6 @@ interface TaskExecutionLinks {
 }
 
 interface TaskContract {
-  strict?: boolean
   completion_contract?: string[]
   required_evidence?: string[]
   inspect_gate_evidence?: string[]

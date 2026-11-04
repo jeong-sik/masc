@@ -50,7 +50,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
       ignore (Workspace.init config ~agent_name:(Some "fusion-keeper"));
       Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
       let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose a design" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
-      let contract : Masc_domain.task_contract = {strict=true; completion_contract=["Decision must preserve measured behavior"];
+      let contract : Masc_domain.task_contract = {completion_contract=["Decision must preserve measured behavior"];
         required_evidence=["artifact:expected-proof.json"]; inspect_gate_evidence=[]; verify_gate_evidence=["Run acceptance scenario"]} in
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
         ~title:"Evaluate alternatives" ~priority:2 ~description:"Choose and explain" |> require "task" in

@@ -6,7 +6,7 @@ let task description =
     "description", `String description; "priority", `Int 2;
     "status", `String "todo"; "files", `List [];
     "created_at", `String "2026-09-09T00:00:00Z";
-    "contract", `Assoc ["strict", `Bool true;
+    "contract", `Assoc [
       "completion_contract", `List [`String "verify actual output"];
       "required_evidence", `List [`String "artifact://proof"];
       "inspect_gate_evidence", `List []; "verify_gate_evidence", `List []];

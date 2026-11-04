@@ -246,11 +246,6 @@ let add_task_with_result
                           ; "created_by", created_by_json
                           ; ( "predecessor_task_id"
                             , Json_util.string_opt_to_json predecessor_task_id )
-                          ; ( "strict_contract"
-                            , `Bool
-                                (match contract with
-                                 | Some contract -> contract.strict
-                                 | None -> false) )
                           ]);
                   let _ =
                     broadcast ~audience:System_record
@@ -375,11 +370,6 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                              ; "goal_id", Json_util.string_opt_to_json goal_id
                              ; "priority", `Int task.priority
                              ; "created_by", created_by_json
-                             ; ( "strict_contract"
-                               , `Bool
-                                   (match task.contract with
-                                    | Some contract -> contract.strict
-                                    | None -> false) )
                              ]))
                   added_tasks_with_goal_ids;
                 let summary =

@@ -8147,16 +8147,17 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
-(* runtime.toml reads when the server says it committed the file, on a
-   revalidation, and again after a failed read (RFC-0480 §3.4). A CLI or a
-   hand edit shows on arrival or [r]. *)
-(* The Usage view's provider windows, runtime quota standing and provider
-   history read again when the server announces provider usage, on a
-   revalidation, after a failed read, and once the UTC day a history reading
-   was taken on has ended (RFC-0480 §3.4). *)
+(* The Usage view's provider windows and runtime quota standing read again
+   when the server announces a usage report or a standing change; the
+   provider history reads again on a usage report and once the UTC day a
+   history request started on has ended. Both read on a revalidation and
+   after a failed read (RFC-0480 §3.4). *)
 let owe_provider_usage_reads state =
   owe_pushed_read state Surface_read_source.Runtime_quota;
   owe_pushed_read state Surface_read_source.Provider_history
+
+let owe_provider_standing_read state =
+  owe_pushed_read state Surface_read_source.Runtime_quota
 
 let owe_provider_history_day state ~now =
   match state.provider_history_reread_at with
@@ -8165,6 +8166,9 @@ let owe_provider_history_day state ~now =
       owe_pushed_read state Surface_read_source.Provider_history
   | Some _ | None -> ()
 
+(* runtime.toml reads when the server says it committed the file, on a
+   revalidation, and again after a failed read (RFC-0480 §3.4). A CLI or a
+   hand edit shows on arrival or [r]. *)
 let owe_runtime_config_read state =
   state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed;
   (* The account emails are read from the credentials a server-run login
@@ -8217,6 +8221,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       Masc_tui_types.owe_identity_login_read state keeper
   | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
   | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
+  | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -15902,9 +15907,9 @@ let seconds_per_day = 86_400.0
 (* The first instant of the UTC day after [now]. *)
 let next_utc_day ~now = (Float.floor (now /. seconds_per_day) +. 1.0) *. seconds_per_day
 
-let apply_provider_history_load state (days, result) =
+let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_result = result } =
   if days = state.provider_history_days then begin
-    state.provider_history_reread_at <- Some (next_utc_day ~now:(Unix.gettimeofday ()));
+    state.provider_history_reread_at <- Some (next_utc_day ~now:phr_requested_at);
     match result with
     | Ok (history : Masc.Tui_decode_usage.provider_usage_history)
       when history.puh_days = days ->
@@ -16373,15 +16378,18 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   in
   let read_provider_history () =
     when_needed ~source:Surface_read_order.Provider_history
-      ~dataset:(fun (days, result) -> Dataset_provider_history (days, result))
-      ~outcome:(fun (_, result) -> Http_refresh_progress.of_result result)
+      ~dataset:(fun reading -> Dataset_provider_history reading)
+      ~outcome:(fun reading -> Http_refresh_progress.of_result reading.phr_result)
       needs.needs_provider_history (fun () ->
-      match Masc_tui_loader.load_provider_usage_history ~host ~port
-              ~days:provider_history_days with
-      | result -> provider_history_days, result
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-          provider_history_days, Error (Printexc.to_string exn))
+      let phr_requested_at = Unix.gettimeofday () in
+      let phr_result =
+        match Masc_tui_loader.load_provider_usage_history ~host ~port
+                ~days:provider_history_days with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn)
+      in
+      { phr_days = provider_history_days; phr_requested_at; phr_result })
   in
   let read_overview_goals () =
     when_needed ~source:Surface_read_order.Overview_goals ~outcome:Http_refresh_progress.of_result
@@ -16587,7 +16595,7 @@ let apply_http_scoped_data state ~datasets results =
   apply Surface_read_order.Runtime_quota_data
     ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota) (apply_runtime_quota_load state) results.http_runtime_quota;
   apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
-  apply Surface_read_order.Provider_history_data ~received:(fun (_, result) -> Result.is_ok result) (apply_provider_history_load state) results.http_provider_history;
+  apply Surface_read_order.Provider_history_data ~received:(fun reading -> Result.is_ok reading.phr_result) (apply_provider_history_load state) results.http_provider_history;
   apply Surface_read_order.Account_emails_data ~received:Result.is_ok (apply_account_emails_load state) results.http_account_emails;
   let request = results.http_surface_request in
   Log.Transport.info "tui_surface_read_applied request=%d started_ns=%Ld applied_ns=%Ld sources=%s"
@@ -16606,7 +16614,7 @@ let apply_http_dataset state = function
   | Dataset_system_logs result -> apply_system_logs_load state result; None
   | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
   | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
-  | Dataset_provider_history (days, result) -> apply_provider_history_load state (days, result); None
+  | Dataset_provider_history reading -> apply_provider_history_load state reading; None
   | Dataset_overview_goals result -> apply_overview_goals_load state result; None
   | Dataset_account_emails result -> apply_account_emails_load state result; None
 

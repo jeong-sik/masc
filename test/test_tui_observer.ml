@@ -156,6 +156,9 @@ let summary = function
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
   | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
+         | Masc.Workspace_dataset_event.Provider_usage
+         | Masc.Workspace_dataset_event.Provider_standing -> "")
+      ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -946,6 +949,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
+                  | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1013,6 +1017,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
+                  | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1031,6 +1036,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
               | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Provider_usage
+              | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
           | None -> true)
@@ -1054,6 +1060,14 @@ let test_a_repository_push_reads_the_list () =
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]))
   check (list string) "Clients and provider usage pushes decode by name"
     [ "dataset(clients)"; "dataset(provider_usage)" ]
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]));
+  check (list string) "a Keeper's metrics push names its Keeper"
+    [ "dataset(keeper_metrics:alpha)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]));
+  check (list string) "Clients and provider usage and standing pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)"; "dataset(provider_standing)" ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
@@ -1083,6 +1097,7 @@ let test_a_connector_push_names_its_connector () =
       fail
         ("a connector push without a connector was read: "
          ^ String.concat ", " (List.map summary decoded))
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

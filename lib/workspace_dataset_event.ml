@@ -7,6 +7,7 @@ type dataset =
   | Keeper_oauth_attempts of { keeper : string }
   | Clients
   | Provider_usage
+  | Provider_standing
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
@@ -20,6 +21,7 @@ let runtime_config_name = "runtime_config"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 let clients_name = "clients"
 let provider_usage_name = "provider_usage"
+let provider_standing_name = "provider_standing"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -29,6 +31,7 @@ let dataset_name = function
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
   | Clients -> clients_name
   | Provider_usage -> provider_usage_name
+  | Provider_standing -> provider_standing_name
 ;;
 
 let keeper_field = function
@@ -59,6 +62,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
   | Some (`String name) when String.equal name clients_name -> Ok Clients
   | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
+  | Some (`String name) when String.equal name provider_standing_name -> Ok Provider_standing
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)

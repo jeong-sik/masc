@@ -54,6 +54,43 @@ class CallSummaryTest(unittest.TestCase):
         assert isinstance(per_turn, dict)
         self.assertEqual((per_turn["n"], per_turn["max"], per_turn["mean"]), (2, 3, 2.0))
 
+    def test_gaps_are_summed_per_pair_of_consecutive_tools(self) -> None:
+        calls = [
+            call(0, 1, tool="Execute"),
+            call(11, 12, tool="Write"),  # Execute -> Write, gap 10
+            call(13, 14, tool="Write"),  # Write -> Write, gap 1
+            call(24, 25, tool="Execute"),  # Write -> Execute, gap 10
+            call(30, 31, tool="Write"),  # Execute -> Write, gap 5
+        ]
+        transitions = lane.summarize_calls(calls, {"k": 100.0})["tool_transitions"]
+        assert isinstance(transitions, dict)
+        same, cross = transitions["same_tool"], transitions["cross_tool"]
+        self.assertEqual((same["pairs"], same["gap_s"]), (1, 1.0))
+        self.assertEqual(same["top_by_gap"], [{"from": "Write", "to": "Write", "pairs": 1, "gap_s": 1.0, "mean_gap_s": 1.0}])
+        self.assertEqual((cross["pairs"], cross["gap_s"]), (3, 25.0))
+        self.assertEqual(
+            cross["top_by_gap"][0], {"from": "Execute", "to": "Write", "pairs": 2, "gap_s": 15.0, "mean_gap_s": 7.5}
+        )
+        self.assertEqual((cross["top_by_gap"][1]["from"], cross["top_by_gap"][1]["to"]), ("Write", "Execute"))
+
+    def test_only_the_largest_pairs_are_listed(self) -> None:
+        extra = 2
+        count = lane.TOP_TOOL_TRANSITIONS + extra
+        calls = [call(0, 1, tool="T0")]
+        for index in range(1, count + 1):
+            # The pair (T{index-1}, T{index}) gets a gap of `index` seconds.
+            start = calls[-1].end + index
+            calls.append(call(start, start + 1, tool=f"T{index}"))
+        cross = lane.summarize_calls(calls, {"k": 1000.0})["tool_transitions"]["cross_tool"]
+        self.assertEqual(cross["pairs"], count)
+        gaps = [item["gap_s"] for item in cross["top_by_gap"]]
+        self.assertEqual(gaps, [float(count - offset) for offset in range(lane.TOP_TOOL_TRANSITIONS)])
+
+    def test_overlapping_calls_add_no_gap_to_a_pair(self) -> None:
+        calls = [call(0, 10, tool="Read"), call(5, 6, tool="Read")]
+        same = lane.summarize_calls(calls, {"k": 100.0})["tool_transitions"]["same_tool"]
+        self.assertEqual((same["pairs"], same["gap_s"]), (1, 0.0))
+
     def test_calls_are_counted_by_batch_size_and_execution_mode(self) -> None:
         calls = [
             lane.Call("k", "k/t#1", "Read", 0.0, 1.0, False, False, 1, "concurrent"),

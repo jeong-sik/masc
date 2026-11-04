@@ -258,6 +258,160 @@
       "turn_time_s": 74735.4
     },
     "tool_time_s": 364853.7,
+    "tool_transitions": {
+      "cross_tool": {
+        "gap_s": 902086.0,
+        "pairs": 45763,
+        "top_by_gap": [
+          {
+            "from": "Execute",
+            "gap_s": 50662.0,
+            "mean_gap_s": 26.9,
+            "pairs": 1883,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 41506.0,
+            "mean_gap_s": 24.1,
+            "pairs": 1725,
+            "to": "Write"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 41452.7,
+            "mean_gap_s": 21.2,
+            "pairs": 1958,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_dos_screen",
+            "gap_s": 35336.4,
+            "mean_gap_s": 29.6,
+            "pairs": 1192,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 34376.2,
+            "mean_gap_s": 27.1,
+            "pairs": 1267,
+            "to": "masc_dos_screen"
+          },
+          {
+            "from": "Read",
+            "gap_s": 31916.9,
+            "mean_gap_s": 24.1,
+            "pairs": 1322,
+            "to": "Execute"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 28986.9,
+            "mean_gap_s": 19.5,
+            "pairs": 1484,
+            "to": "Read"
+          },
+          {
+            "from": "Write",
+            "gap_s": 28238.2,
+            "mean_gap_s": 17.1,
+            "pairs": 1653,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 26189.5,
+            "mean_gap_s": 50.9,
+            "pairs": 515,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 25359.8,
+            "mean_gap_s": 34.2,
+            "pairs": 742,
+            "to": "masc_board_post_get"
+          }
+        ]
+      },
+      "same_tool": {
+        "gap_s": 934103.6,
+        "pairs": 88548,
+        "top_by_gap": [
+          {
+            "from": "Execute",
+            "gap_s": 747575.3,
+            "mean_gap_s": 14.5,
+            "pairs": 51631,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 38832.1,
+            "mean_gap_s": 37.1,
+            "pairs": 1048,
+            "to": "masc_board_post_get"
+          },
+          {
+            "from": "Read",
+            "gap_s": 33230.9,
+            "mean_gap_s": 28.2,
+            "pairs": 1180,
+            "to": "Read"
+          },
+          {
+            "from": "keeper_artifact_read",
+            "gap_s": 16831.1,
+            "mean_gap_s": 1.4,
+            "pairs": 11649,
+            "to": "keeper_artifact_read"
+          },
+          {
+            "from": "keeper_memory_search",
+            "gap_s": 16440.3,
+            "mean_gap_s": 93.4,
+            "pairs": 176,
+            "to": "keeper_memory_search"
+          },
+          {
+            "from": "masc_board_comment",
+            "gap_s": 9400.9,
+            "mean_gap_s": 13.1,
+            "pairs": 717,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "BrowserRead",
+            "gap_s": 9303.4,
+            "mean_gap_s": 33.5,
+            "pairs": 278,
+            "to": "BrowserRead"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 8256.2,
+            "mean_gap_s": 29.8,
+            "pairs": 277,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "Grep",
+            "gap_s": 5707.8,
+            "mean_gap_s": 8.4,
+            "pairs": 681,
+            "to": "Grep"
+          },
+          {
+            "from": "BrowserInteract",
+            "gap_s": 5341.1,
+            "mean_gap_s": 31.2,
+            "pairs": 171,
+            "to": "BrowserInteract"
+          }
+        ]
+      }
+    },
     "turn_time_s": 2555344.8,
     "turns": 9872
   },

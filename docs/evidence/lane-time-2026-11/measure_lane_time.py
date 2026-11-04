@@ -33,6 +33,9 @@ Definitions:
 - admission wait: `waited_ms` of a `provider_admission:waited` event. A request
   granted a permit at once is not reported, so the events are the requests that
   queued.
+- tool transitions: for each pair of consecutive calls in a turn, the gap goes
+  to the pair (previous tool, next tool). Pairs of the same tool are kept apart
+  from pairs of different tools.
 - batch size: the ledger's `batch_size`, the number of tool calls the model
   asked for in one response. Execution mode: its `execution_mode`
   (`serial` or `concurrent`), set by the tool's descriptor in agent_core.
@@ -77,6 +80,7 @@ SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
 ADMISSION_WAIT_HOURS_HIGH = 5.0
+TOP_TOOL_TRANSITIONS = 10
 CANCELLED_TURN = "Turn_cancelled"
 CANCEL_MATCH_SLACK_SEC = 3.0
 POLL_COMMAND = re.compile(r"\bsleep\b|\bfor\s+\w+\s+in\b|\bwhile\b|\buntil\b")
@@ -353,6 +357,28 @@ def count_quantiles(values: list[int]) -> dict[str, float | int]:
     }
 
 
+def ranked_transitions(
+    pair_count: Counter[tuple[str, str]], pair_gap_s: dict[tuple[str, str], float], *, same_tool: bool
+) -> dict[str, object]:
+    """Total and top pairs by gap, for pairs of one tool (`same_tool`) or of two different tools."""
+    chosen = [(pair, seconds) for pair, seconds in pair_gap_s.items() if (pair[0] == pair[1]) == same_tool]
+    chosen.sort(key=lambda item: (-item[1], item[0]))
+    return {
+        "pairs": sum(pair_count[pair] for pair, _ in chosen),
+        "gap_s": round(sum(seconds for _, seconds in chosen), 1),
+        "top_by_gap": [
+            {
+                "from": pair[0],
+                "to": pair[1],
+                "pairs": pair_count[pair],
+                "gap_s": round(seconds, 1),
+                "mean_gap_s": round(seconds / pair_count[pair], 1),
+            }
+            for pair, seconds in chosen[:TOP_TOOL_TRANSITIONS]
+        ],
+    }
+
+
 def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict[str, object]:
     by_turn: dict[str, list[Call]] = defaultdict(list)
     for call in calls:
@@ -360,6 +386,8 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
     gaps: list[float] = []
     reread_gaps: list[float] = []
     overlapping = 0
+    pair_count: Counter[tuple[str, str]] = Counter()
+    pair_gap_s: dict[tuple[str, str], float] = defaultdict(float)
     for turn_calls in by_turn.values():
         turn_calls.sort(key=lambda call: (call.start, call.end))
         for previous, current in zip(turn_calls, turn_calls[1:]):
@@ -368,6 +396,8 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
                 overlapping += 1
                 gap = 0.0
             gaps.append(gap)
+            pair_count[(previous.tool, current.tool)] += 1
+            pair_gap_s[(previous.tool, current.tool)] += gap
             if current.reread:
                 reread_gaps.append(gap + (current.end - current.start))
     tool_s = sum(call.end - call.start for call in calls)
@@ -394,6 +424,10 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
         "tool_time_s": round(tool_s, 1),
         "execute_time_s": round(execute_s, 1),
         "between_calls": {**quantiles(gaps), "overlapping_pairs": overlapping},
+        "tool_transitions": {
+            "same_tool": ranked_transitions(pair_count, pair_gap_s, same_tool=True),
+            "cross_tool": ranked_transitions(pair_count, pair_gap_s, same_tool=False),
+        },
         "other_turn_time_s": round(busy_s - tool_s - sum(gaps), 1),
         "rereads_after_first_call": {"calls": len(reread_gaps), "turn_time_s": round(sum(reread_gaps), 1)},
         "long_execute": {

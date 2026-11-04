@@ -28,6 +28,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 긴 Execute: 60초 이상 걸린 Execute 예요. 명령에 `sleep`, `for ... in`, `while`, `until` 이 있으면 폴링으로 세요. 명령 문장은 이 판정에만 써요.
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
 - 승인 대기: `provider_admission:waited` 이벤트의 `waited_ms` 예요. 허용을 바로 받은 요청은 기록되지 않아서, 이 이벤트는 줄을 선 요청만 세요.
+- 도구 쌍: 한 턴에서 연이은 두 호출의 사이 시간(위 호출 사이 시간과 같은 값)을 (앞 호출의 도구, 다음 호출의 도구) 쌍에 더해요. 도구가 같은 쌍과 다른 쌍을 따로 합치고, 각각 사이 시간이 큰 쌍 10개를 `turn_time.tool_transitions` 에 적어요.
 - 한 응답의 호출 수: 원장의 `batch_size` 예요. 모델이 한 응답에 담아 요청한 도구 호출 수고, 호출마다 그 값을 세요.
 - 실행 방식: 원장의 `execution_mode`(`serial` 또는 `concurrent`)예요. 도구 descriptor 가 정해요(`packages/agent_core/lib/base/tool.mli`).
 - 턴이 취소된 때 돌던 Execute: `failure_kind` 가 `Turn_cancelled` 인 작업의 `completed_at` 이 같은 Keeper 의 Execute 호출 구간(시작 3초 전부터 끝 3초 뒤까지) 안에 있으면 세요. 원장은 호출이 끝날 때 행을 쓰기 때문이에요. 잃은 Execute 시간은 `completed_at` 까지 돈 부분이에요.
@@ -46,6 +47,16 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 한 응답에 호출 하나만 담은 경우가 141,419호출(98.1%)이고, 둘 이상 담은 호출은 2,764호출(1.9%)이에요. 크기별로 2가 1,500, 3이 453, 4가 152, 5가 70, 6이 24, 7이 539, 8이 16, 10이 10호출이에요.
 - 실행 방식은 serial 85,098호출(99.2시간)과 concurrent 59,085호출(2.2시간)이에요. 호출이 대부분 응답당 하나라서 concurrent 로 분류돼도 겹쳐 도는 호출은 드물어요(호출 사이 시간이 겹친 쌍 3,174개).
 - 60초 이상 Execute 562호출이 42.0시간(5.9%)이고, 그중 폴링 331호출이 29.3시간(4.1%)이에요.
+
+호출 사이 시간 510.1시간을 도구 쌍으로 나누면(`turn_time.tool_transitions`):
+
+| 쌍 | 쌍 수 | 사이 시간 | 몫 |
+|---|---:|---:|---:|
+| 같은 도구가 이어진 쌍 | 88,548 | 259.5시간 | 50.9% |
+| 그중 `Execute` → `Execute` | 51,631 | 207.7시간(평균 14.5초) | 40.7% |
+| 다른 도구로 넘어간 쌍 | 45,763 | 250.6시간 | 49.1% |
+| 그중 `Execute` → `masc_board_comment` | 1,883 | 14.1시간(평균 26.9초) | 2.8% |
+| 그중 `masc_dos_screen` ↔ `masc_dos_press` | 2,459 | 19.4시간 | 3.8% |
 
 폴링을 많이 한 Keeper:
 

@@ -127,6 +127,19 @@ type workspace_file_catalog = {
 (** Checkout root and exact file paths, both relative to the selected workspace.
     Paths obey the same confidentiality and symlink policy as file reads. *)
 
+(** The checkout that owns a directory and its local branches. [branches_root]
+    is relative to the selected workspace. *)
+type workspace_branches = {
+  branches_root : string;
+  branches_list : Repo_git.branch_list;
+}
+
+type workspace_branches_error =
+  | Branches_invalid_path
+  | Branches_directory_unavailable
+  | Branches_repository_unavailable
+  | Branches_failed of string
+
 type workspace_file_catalog_error =
   | Catalog_invalid_path
   | Catalog_directory_unavailable
@@ -189,6 +202,16 @@ module For_testing : sig
       [base] is the far edge because it is where the caller's authority ends:
       the query named a keeper or a repository, and an answer from outside
       that is not an answer to the question asked. *)
+
+  val workspace_branches :
+    base:string ->
+    path:string ->
+    (workspace_branches, workspace_branches_error) result
+  (** Local branches of the checkout containing directory [path], stopping at
+      [base], newest tip first and at most 200. *)
+
+  val workspace_branches_json : workspace_branches -> Yojson.Safe.t
+  (** The [GET /api/v1/git/branches] body: [{root; branches; truncated}]. *)
 
   val workspace_file_catalog :
     base:string ->

@@ -186,7 +186,7 @@ let numbers_end_error_name : Numbers.end_error -> string = function
   | Numbers.End_stopped _ -> "End_stopped"
   | Numbers.End_locked _ -> "End_locked"
   | Numbers.End_moved _ -> "End_moved"
-  | Numbers.End_unknown _ -> "End_unknown"
+  | Numbers.End_unread _ -> "End_unread"
 ;;
 
 let confirm_end_name file =
@@ -450,11 +450,15 @@ let a_moved_end_stops_the_file () =
       , fun path ->
           let other, _, _ = open_ok ~path in
           ignore (append_ok other [ 3 ] : int) )
-    ; "the file was cut", fun path -> Unix.truncate path 2
+    ; ("the file was cut", fun path -> Unix.truncate path 2)
+    ; ( "a line without its end was added"
+      , fun path ->
+          let channel = open_out_gen [ Open_append; Open_wronly ] 0o600 path in
+          Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel "3") )
     ]
 ;;
 
-let an_unreadable_end_stops_the_file () =
+let an_end_that_was_not_read_leaves_the_file_open () =
   (* The superuser reads a file of mode 0000. *)
   if Unix.geteuid () = 0 then Alcotest.skip ();
   with_path (fun path ->
@@ -466,8 +470,10 @@ let an_unreadable_end_stops_the_file () =
         ~finally:(fun () -> Unix.chmod path 0o600)
         (fun () -> confirm_end_name file)
     in
-    Alcotest.(check string) "a file that cannot be read" "End_unknown" name;
-    Alcotest.(check bool) "the file is stopped" true (Option.is_some (Numbers.stopped file)))
+    Alcotest.(check string) "a file that cannot be read" "End_unread" name;
+    Alcotest.(check bool) "the file is not stopped" true (Option.is_none (Numbers.stopped file));
+    Alcotest.(check string) "the end is confirmed once it reads" "Ok" (confirm_end_name file);
+    Alcotest.(check int) "the next append follows the end" 2 (append_ok file [ 2 ]))
 ;;
 
 let a_writer_outside_its_zone_reads_nothing () =
@@ -520,8 +526,8 @@ let texts_name_the_file_the_line_and_the_format () =
       , [ "counter file"; path; "why" ] )
     ; "End_locked", Numbers.end_error_to_string (Numbers.End_locked { path }), [ "counter file"; path ]
     ; "End_moved", Numbers.end_error_to_string (Numbers.End_moved { path }), [ "counter file"; path ]
-    ; ( "End_unknown"
-      , Numbers.end_error_to_string (Numbers.End_unknown { path; detail = "boom" })
+    ; ( "End_unread"
+      , Numbers.end_error_to_string (Numbers.End_unread { path; detail = "boom" })
       , [ "counter file"; path; "boom" ] )
     ]
 ;;
@@ -562,9 +568,9 @@ let () =
             an_end_that_did_not_move_is_confirmed
         ; Alcotest.test_case "a moved end stops the file" `Quick a_moved_end_stops_the_file
         ; Alcotest.test_case
-            "an unreadable end stops the file"
+            "an end that was not read leaves the file open"
             `Quick
-            an_unreadable_end_stops_the_file
+            an_end_that_was_not_read_leaves_the_file_open
         ; Alcotest.test_case
             "a writer outside its zone reads nothing"
             `Quick

@@ -189,14 +189,14 @@ let check_probe label expected probe =
       (label ^ ": on entry to a zone")
       expected.value
       (value_name (H.Mismatch (first, rest)))
-  | Ok (agreement, settlement) ->
-    Alcotest.(check string)
-      (label ^ ": on entry to a zone")
-      expected.value
-      (value_name
-         (match agreement with
-          | H.Nothing_answered -> H.Absent
-          | H.Answered -> H.Matches));
+  | Ok agreement ->
+    let value, settlement =
+      match agreement with
+      | H.Nothing_answered { to_abort = None } -> H.Absent, H.Nothing_to_settle
+      | H.Nothing_answered { to_abort = Some intent } -> H.Absent, H.Abort intent
+      | H.Answered settlement -> H.Matches, settlement
+    in
+    Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name value);
     Alcotest.(check string)
       (label ^ ": what closes the intent on entry")
       expected.settle

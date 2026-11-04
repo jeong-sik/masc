@@ -382,7 +382,7 @@ module Make (F : Line_format) = struct
     | End_stopped of stop
     | End_locked of { path : string }
     | End_moved of { path : string }
-    | End_unknown of
+    | End_unread of
         { path : string
         ; detail : string
         }
@@ -395,8 +395,40 @@ module Make (F : Line_format) = struct
       Printf.sprintf "%s %s is locked by another process" F.description path
     | End_moved { path } ->
       Printf.sprintf "%s %s does not end where this process left it" F.description path
-    | End_unknown { path; detail } ->
-      Printf.sprintf "where %s %s ends cannot be read: %s" F.description path detail
+    | End_unread { path; detail } ->
+      Printf.sprintf "where %s %s ends was not read: %s" F.description path detail
+  ;;
+
+  (* How a failed read after the end bears on the file. Every failure is named,
+     as in [failure_kind]. The cursor of this process always ends after a
+     complete line, so a cut tail, a suffix that does not read, or a path that
+     no longer names the same file means that the file is not the one this
+     process left. A failure of the read itself says nothing about the file,
+     and the read wrote nothing. *)
+  type read_failure =
+    | Read_locked
+    | Read_moved
+    | Read_not_done
+
+  let rec read_failure : Fs_compat.private_jsonl_transaction_error -> read_failure = function
+    | Fs_compat.Stable_lock_contended _ -> Read_locked
+    | Fs_compat.Cursor_mismatch _
+    | Fs_compat.Unexpected_transaction_file_kind _
+    | Fs_compat.Ambiguous_transaction_file_identity _
+    | Fs_compat.Transaction_path_binding_changed _
+    | Fs_compat.Transaction_content_changed _
+    | Fs_compat.Incomplete_transaction_tail _
+    | Fs_compat.Invalid_transaction_suffix -> Read_moved
+    | Fs_compat.Transaction_settlement_failed { primary = Fs_compat.Transaction_failed error; cleanup_failures = _ }
+      -> read_failure error
+    | Fs_compat.Transaction_settlement_failed
+        { primary = Fs_compat.Transaction_succeeded _; cleanup_failures = _ }
+    | Fs_compat.Unexpected_stable_lock_permissions _
+    | Fs_compat.Invalid_stable_lock_state _
+    | Fs_compat.Private_jsonl_operation_failed _
+    | Fs_compat.Rewrite_stage_failed _
+    | Fs_compat.Rewrite_published_durability_unknown _
+    | Fs_compat.Transaction_append_failed _ -> Read_not_done
   ;;
 
   (* The thread gets the path and the cursor as values, as in [write_on_thread]. *)
@@ -419,19 +451,17 @@ module Make (F : Line_format) = struct
       match log.stopped with
       | Some reason -> Error (End_stopped { path = log.path; reason })
       | None ->
-        (match read_after_end log with
-         | Ok { Fs_compat.bytes; cursor } ->
+        (match Fs_compat.private_jsonl_snapshot_success_receipt (read_after_end log) with
+         | Ok { Fs_compat.value = { Fs_compat.bytes; cursor }; settlement_error } ->
+           Option.iter (observe_settlement ~description:F.description ~path:log.path) settlement_error;
            if String.equal bytes "" && Fs_compat.Private_jsonl_cursor.equal cursor log.cursor
            then Ok ()
            else moved ()
          | Error error ->
-           (match failure_kind error with
-            | Lock_held_by_another_process -> Error (End_locked { path = log.path })
-            | End_moved -> moved ()
-            | Outcome_unknown ->
-              let detail = store_error error in
-              log.stopped <- Some detail;
-              Error (End_unknown { path = log.path; detail }))))
+           (match read_failure error with
+            | Read_locked -> Error (End_locked { path = log.path })
+            | Read_moved -> moved ()
+            | Read_not_done -> Error (End_unread { path = log.path; detail = store_error error }))))
   ;;
 
   (* [Eio.Mutex.use_rw] disables the mutex for good when its function raises.

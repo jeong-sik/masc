@@ -282,7 +282,7 @@ let end_error_name : L.end_error -> string = function
   | L.End_stopped _ -> "End_stopped"
   | L.End_locked _ -> "End_locked"
   | L.End_moved _ -> "End_moved"
-  | L.End_unknown _ -> "End_unknown"
+  | L.End_unread _ -> "End_unread"
 ;;
 
 let store_append_error_name : S.append_error -> string = function
@@ -437,44 +437,46 @@ let commits_follow_one_another () =
     check_store "a restart" opened ~pending:None ~last_committed:second.Z.record_hash ~aborted:[])
 ;;
 
-(* Commits from fibers that run at once take turns in the zone. In whatever
-   order they run, each mode event either goes in or is refused by the state
-   it meets, every one that goes in appends one record, and a restart reads the
-   state that was published last. *)
+(* Commits from fibers that run at once take turns in the zone. A fiber holds
+   the zone while a write runs on a system thread, so the others start and
+   wait, and [Eio.Mutex] lets them in in the order they came, which is the
+   order of the events. So every event goes in, each one appends one record,
+   and a restart reads the state that was published last. *)
 let commits_from_fibers_take_turns () =
   with_dirs (fun dirs ->
     ignore (bootstrap dirs : B.completed);
     let zone = open_zone dirs in
     let lines_before = count_lines (read_file (log_file dirs)) in
     let events = [ M.Off; M.Reactivate; M.Off; M.Reactivate; M.Off; M.Reactivate ] in
+    let in_flight = ref 0 in
+    let most_in_flight = ref 0 in
     let results =
       Eio.Fiber.List.map
         ~max_fibers:(List.length events)
-        (fun (index, event) -> Z.commit zone (mode_draft ~at_ms:(at_ms + 1 + index) event))
+        (fun (index, event) ->
+          incr in_flight;
+          most_in_flight := max !most_in_flight !in_flight;
+          let result = Z.commit zone (mode_draft ~at_ms:(at_ms + 1 + index) event) in
+          decr in_flight;
+          result)
         (List.mapi (fun index event -> index, event) events)
     in
+    Alcotest.(check bool) "the commits waited for each other" true (!most_in_flight > 1);
     let committed =
-      List.filter_map
+      List.map
         (function
-          | Ok committed -> Some committed
-          | Error error ->
-            Alcotest.(check string) "a commit that did not go in" "Refused Mode" (error_name error);
-            None)
+          | Ok committed -> committed
+          | Error error -> Alcotest.failf "a commit was refused: %s" (Z.error_to_string error))
         results
     in
-    Alcotest.(check bool) "a commit went in" true (committed <> []);
+    Alcotest.(check int) "every commit went in" (List.length events) (List.length committed);
     Alcotest.(check int)
-      "one record for each commit that went in"
-      (lines_before + List.length committed)
+      "one record for each commit"
+      (lines_before + List.length events)
       (count_lines (read_file (log_file dirs)));
-    let published = Z.snapshot zone in
-    ignore
-      (check_restart
-         "a restart"
-         dirs
-         ~mode:published.Z.state.Authz_state.mode
-         ~head:(R.head_hash published.Z.head)
-       : opened))
+    let last = List.nth committed (List.length committed - 1) in
+    check_snapshot "the last commit" ~mode:on ~head:last.Z.record_hash (Z.snapshot zone);
+    ignore (check_restart "a restart" dirs ~mode:on ~head:last.Z.record_hash : opened))
 ;;
 
 (* ---- refusals ---- *)
@@ -526,6 +528,20 @@ let the_zone_opens_only_a_bootstrapped_log () =
     check_refused "an empty log";
     Alcotest.(check bool) "an empty log: no store file" false (Sys.file_exists dirs.store_file);
     Alcotest.(check string) "an empty log: the log" "" (read_file (log_file dirs)))
+;;
+
+(* A log path that cannot be looked at is not taken for a log that is not
+   there. *)
+let a_log_that_cannot_be_checked_is_not_opened () =
+  with_dirs (fun dirs ->
+    (match Z.open_at_start ~log_path:(log_file dirs ^ "\000") ~store_path:dirs.store_file with
+     | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened"
+     | Error error ->
+       Alcotest.(check string) "the refusal" "Log_not_checked" (open_error_name error));
+    Alcotest.(check bool)
+      "no store directory"
+      false
+      (Sys.file_exists (Filename.dirname dirs.store_file)))
 ;;
 
 (* A bootstrapped log reads [Matches] with its store. A store that holds no
@@ -885,6 +901,10 @@ let () =
             "the zone opens only a bootstrapped log"
             `Quick
             the_zone_opens_only_a_bootstrapped_log
+        ; Alcotest.test_case
+            "a log that cannot be checked is not opened"
+            `Quick
+            a_log_that_cannot_be_checked_is_not_opened
         ; Alcotest.test_case
             "a store with no answer refuses every commit"
             `Quick

@@ -196,8 +196,8 @@ let in_zone t draft store_writer log_writer head =
   let published = Atomic.get t.current in
   match H.settle_on_entry t.probe with
   | Error (first, rest) -> Error (Uncertain { first; rest })
-  | Ok (H.Nothing_answered, (_ : H.settlement)) -> Error Store_holds_no_answer
-  | Ok (H.Answered, settled) ->
+  | Ok (H.Nothing_answered { to_abort = (_ : S.intent option) }) -> Error Store_holds_no_answer
+  | Ok (H.Answered settled) ->
     let* record =
       Result.map_error
         (fun error -> Record_not_built error)

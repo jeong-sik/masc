@@ -48,11 +48,17 @@
     file fails with [Diverged] and stops it. A write that leaves the file on the
     same inode at the same size is not noticed ({!Authz_jsonl_file.Make}).
 
-    An abort is the one write that the zone makes to the store from what the
-    log says, and not after a write of its own to the log. The append that the
-    intent was for did not happen, and another process may have held the log
-    then, so the zone asks the file before it writes one. A record that another
-    process appends after that is found by the next append, as [Diverged].
+    An abort is the one settlement that no later judgment checks again. A
+    [Committed] names a record that each later judgment looks for in the log
+    ({!Authz_high_water.Commit_not_in_log}). An [Aborted_intent] says that the
+    record of the intent is not in the log, and nothing reads that again. The
+    append that the intent was for did not happen, and another process may
+    have held the log then, so before an abort the zone asks the file with
+    {!Authz_log.confirm_end}. The answer holds only while that read holds the
+    lock. A record that another process appends after it is found by the next
+    append of the zone, as [Diverged]. When no append follows, because the
+    process ends or the intent is not written, the next start finds the files
+    in agreement, and that record has no intent in the store.
 
     {b One record.} A commit appends one record. A list of records can land in
     part ({!Authz_log.append}), and which record the intent of a list names is
@@ -64,7 +70,9 @@
     {!Store_stopped} or {!Log_stopped}. A write that raises stops its file as
     well, and the exception reaches the caller of {!commit}
     ({!Authz_log.append}). The next start reads what a stopped file holds. If
-    the [Committed] raised, the snapshot already holds the record.
+    the [Committed] raised, the snapshot already holds the record. The read of
+    {!Authz_log.confirm_end} can raise too. It wrote nothing, so the log is not
+    stopped, and the exception reaches the caller of {!commit}.
 
     Every call runs in an Eio fiber. *)
 
@@ -158,9 +166,10 @@ type error =
           record is in the log and in the snapshot as well. *)
   | Abort_not_confirmed of Authz_log.end_error
       (** An earlier commit left an intent to abort, and the end of the log was
-          not confirmed. Nothing was written. [End_moved] and [End_unknown]
-          stop the log, and the next start judges the intent from the file.
-          After [End_locked] the next commit asks again. *)
+          not confirmed. Nothing was written. [End_moved] stops the log, and
+          the next start judges the intent from the file. After [End_locked]
+          or [End_unread] the log is not stopped and the next commit asks
+          again. *)
   | Settlement_not_written of Authz_external_store.append_error
       (** The commit stopped at the settlement, and nothing of the record was
           written. *)

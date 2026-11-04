@@ -141,7 +141,7 @@ type end_error = File.end_error =
   | End_stopped of stop
   | End_locked of { path : string }
   | End_moved of { path : string }
-  | End_unknown of
+  | End_unread of
       { path : string
       ; detail : string
       }

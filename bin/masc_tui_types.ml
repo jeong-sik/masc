@@ -12413,16 +12413,17 @@ let move_keeper_terminal state ~by =
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
-let keeper_reading (state : state) (keeper : keeper) :
-    Masc_tui_keeper_control.reading =
+let keeper_reading_in roster (keeper : keeper) : Masc_tui_keeper_control.reading =
   { name = keeper.k_name
   ; paused = keeper.k_paused
   ; liveness =
       (match keeper.k_origin with
        | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
        | Persisted_keeper | Remote_keeper ->
-         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
+         Masc_tui_keeper_control.liveness_of_roster roster keeper.k_name)
   }
+
+let keeper_reading (state : state) keeper = keeper_reading_in state.keeper_roster keeper
 
 let keeper_last_turn_at (keeper : keeper) =
   Option.bind keeper.k_activity (fun activity -> activity.Tui_decode.k_last_turn_at)
@@ -12476,17 +12477,34 @@ let rows_by_name ~name rows =
 (* The roster is read several times a frame -- the list, the title, the
    Activity pane, the footer -- so each source is indexed by name once per
    read and every Keeper looks its readings up there. *)
-let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row list =
+(* Everything the roster rows are made from. The rows read nothing else, so
+   the same inputs give the same rows. *)
+type roster_inputs = {
+  ri_keepers : keeper list;
+  ri_turns : Tui_decode.keeper_turn_row list;
+  ri_waiting : Tui_decode.keeper_waiting_row list;
+  ri_waiting_unverified : string list;
+  ri_waiting_failure : Tui_decode.keeper_waiting_failure option;
+  ri_approvals : Tui_decode.keeper_tool_approval list;
+  ri_tasks : task list;
+  ri_async : Tui_decode.async_request_observation option;
+  ri_asks : Masc.Tui_decode_asks.asks_snapshot option;
+  ri_roster : Masc_tui_keeper_control.roster;
+  ri_layout : Masc_tui_keeper_list_model.layout;
+  ri_sort : Masc_tui_keeper_list_model.sort;
+}
+
+let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
   let turns =
-    first_row_by_name state.keeper_turns
+    first_row_by_name inputs.ri_turns
       ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
   in
   let waiting_rows =
-    first_row_by_name state.keeper_waiting
+    first_row_by_name inputs.ri_waiting
       ~name:(fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name)
   in
   let approvals =
-    first_row_by_name state.keeper_tool_approvals
+    first_row_by_name inputs.ri_approvals
       ~name:(fun (row : Tui_decode.keeper_tool_approval) -> row.kta_keeper)
   in
   let current_tasks =
@@ -12501,18 +12519,18 @@ let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row lis
     if Name_table.length wanted = 0 then Name_table.create name_table_initial_size
     else
       first_row_by_name
-        (List.filter (fun (task : Tui_decode.task) -> Name_table.mem wanted task.id) state.tasks)
+        (List.filter (fun (task : Tui_decode.task) -> Name_table.mem wanted task.id) inputs.ri_tasks)
         ~name:(fun (task : Tui_decode.task) -> task.id)
   in
   let async_rows =
-    match state.tools_async_observation with
+    match inputs.ri_async with
     | Some (Tui_decode.Async_ready { requests; _ }) ->
         rows_by_name requests
           ~name:(fun (row : Tui_decode.async_request_row) -> row.ar_keeper_name)
     | Some (Tui_decode.Async_unavailable _) | None -> Name_table.create name_table_initial_size
   in
   let question_counts = Name_table.create name_table_initial_size in
-  (match state.asks_snapshot with
+  (match inputs.ri_asks with
    | None -> ()
    | Some snapshot ->
        List.iter
@@ -12524,7 +12542,7 @@ let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row lis
            | Masc.Tui_decode_asks.Ask_installation _ -> ())
          snapshot.Masc.Tui_decode_asks.asn_rows);
   let verification_holders =
-    Masc_tui_keeper_list_model.verification_holders state.tasks
+    Masc_tui_keeper_list_model.verification_holders inputs.ri_tasks
   in
   List.map
     (fun (keeper : keeper) ->
@@ -12536,8 +12554,8 @@ let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row lis
       in
       let observed_waiting = Name_table.find_opt waiting_rows name in
       let waiting, activity_waiting =
-        match List.mem name state.keeper_waiting_unverified,
-              state.keeper_waiting_failure, observed_waiting with
+        match List.mem name inputs.ri_waiting_unverified,
+              inputs.ri_waiting_failure, observed_waiting with
         | true, _, _ | false, Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
         | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
         | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
@@ -12553,7 +12571,7 @@ let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row lis
         Option.value ~default:[] (Name_table.find_opt async_rows name)
       in
       { Masc_tui_keeper_list_model.keeper
-      ; reading = keeper_reading state keeper
+      ; reading = keeper_reading_in inputs.ri_roster keeper
       ; turn
       ; waiting
       ; approval
@@ -12567,13 +12585,48 @@ let rows_of_keepers (state : state) keepers : Masc_tui_keeper_list_model.row lis
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
     keepers
-  |> Masc_tui_keeper_list_model.order_rows ~layout:state.keeper_list_layout
-       ~sort:state.keeper_list_sort
+  |> Masc_tui_keeper_list_model.order_rows ~layout:inputs.ri_layout
+       ~sort:inputs.ri_sort
+
+(* The full pattern makes a new input field a build error here until it is
+   both named (warning 9) and compared (warning 27). The project leaves both
+   warnings off, so they are turned on for this function alone. *)
+let[@warning "+9+27"] same_roster_inputs
+    { ri_keepers; ri_turns; ri_waiting; ri_waiting_unverified; ri_waiting_failure;
+      ri_approvals; ri_tasks; ri_async; ri_asks; ri_roster; ri_layout; ri_sort } b =
+  ri_keepers == b.ri_keepers && ri_turns == b.ri_turns
+  && ri_waiting == b.ri_waiting && ri_waiting_unverified == b.ri_waiting_unverified
+  && ri_waiting_failure == b.ri_waiting_failure && ri_approvals == b.ri_approvals
+  && ri_tasks == b.ri_tasks && ri_async == b.ri_async && ri_asks == b.ri_asks
+  && ri_roster == b.ri_roster && ri_layout = b.ri_layout && ri_sort = b.ri_sort
+
+(* The list, the terminal title, the Activity pane and the footer each ask for
+   the rows in one frame. Every input is an immutable value the state swaps
+   whole, so while each one is still the same value the last answer is the
+   answer. *)
+let last_roster_rows : (roster_inputs * Masc_tui_keeper_list_model.row list) option ref =
+  ref None
 
 let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
-  match state.keepers with
-  | [] -> []
-  | keepers -> rows_of_keepers state keepers
+  let inputs =
+    { ri_keepers = state.keepers; ri_turns = state.keeper_turns
+    ; ri_waiting = state.keeper_waiting; ri_waiting_unverified = state.keeper_waiting_unverified
+    ; ri_waiting_failure = state.keeper_waiting_failure
+    ; ri_approvals = state.keeper_tool_approvals; ri_tasks = state.tasks
+    ; ri_async = state.tools_async_observation; ri_asks = state.asks_snapshot
+    ; ri_roster = state.keeper_roster; ri_layout = state.keeper_list_layout
+    ; ri_sort = state.keeper_list_sort }
+  in
+  match !last_roster_rows with
+  | Some (seen, rows) when same_roster_inputs seen inputs -> rows
+  | Some _ | None ->
+      let rows =
+        match inputs.ri_keepers with
+        | [] -> []
+        | keepers -> rows_of_keepers inputs keepers
+      in
+      last_roster_rows := Some (inputs, rows);
+      rows
 
 let ordered_keepers state =
   List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)
@@ -21664,9 +21717,24 @@ let tools_task_forget_frame state = state.tools_task_presented <- None
    the Schedules surface, which is where a schedule without a time is still
    worth seeing; a strip that draws one wake has to draw the one it can say a
    time for. *)
-let agenda (state : state) : Masc_tui_agenda.t =
+(* Everything the agenda strip is made from. The strip reads nothing else, so
+   the same inputs give the same strip. *)
+type agenda_inputs = {
+  ai_schedules : schedule_snapshot option;
+  ai_schedules_error : string option;
+  ai_schedule_freshness : Masc_tui_agenda.schedule_freshness;
+  ai_approvals_observed : bool;
+  ai_approvals_error : string option;
+  ai_approvals : Tui_decode.keeper_tool_approval list;
+  ai_asks : Masc.Tui_decode_asks.asks_snapshot option;
+  ai_asks_error : string option;
+  ai_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
+  ai_stalled : Masc_tui_agenda.stalled Masc_tui_agenda.reading;
+}
+
+let agenda_of_inputs (inputs : agenda_inputs) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules_agenda, state.schedules_agenda_error with
+    match inputs.ai_schedules, inputs.ai_schedules_error with
     (* A store the server could not read answers with a status other than
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
@@ -21694,7 +21762,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
            snapshot.scs_rows)
   in
   let awaiting =
-    match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
+    match inputs.ai_approvals_observed, inputs.ai_approvals_error with
     | false, Some error ->
       Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
@@ -21708,14 +21776,14 @@ let agenda (state : state) : Masc_tui_agenda.t =
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
               })
-           state.keeper_tool_approvals)
+           inputs.ai_approvals)
   in
   (* The same open asks Approvals walks, read again on their announcement
      whatever the view. Kept rows stay on the list through a failed re-read,
      the way the held calls above do: the asks were open when last seen, and
      dropping them would say nothing is waiting. *)
   let asking =
-    match state.asks_snapshot, state.asks_error with
+    match inputs.ai_asks, inputs.ai_asks_error with
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
         (List.map
@@ -21733,8 +21801,44 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
   in
   Masc_tui_agenda.project ~scheduled
-    ~scheduled_freshness:state.schedules_agenda_freshness ~awaiting ~asking
-    ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
+    ~scheduled_freshness:inputs.ai_schedule_freshness ~awaiting ~asking
+    ~confirming:inputs.ai_goals_to_confirm ~stalled:inputs.ai_stalled
+;;
+
+(* As [same_roster_inputs]: a new field fails the build until compared. *)
+let[@warning "+9+27"] same_agenda_inputs
+    { ai_schedules; ai_schedules_error; ai_schedule_freshness; ai_approvals_observed;
+      ai_approvals_error; ai_approvals; ai_asks; ai_asks_error; ai_goals_to_confirm;
+      ai_stalled } b =
+  ai_schedules == b.ai_schedules && ai_schedules_error == b.ai_schedules_error
+  && ai_schedule_freshness = b.ai_schedule_freshness
+  && Bool.equal ai_approvals_observed b.ai_approvals_observed
+  && ai_approvals_error == b.ai_approvals_error && ai_approvals == b.ai_approvals
+  && ai_asks == b.ai_asks && ai_asks_error == b.ai_asks_error
+  && ai_goals_to_confirm == b.ai_goals_to_confirm && ai_stalled == b.ai_stalled
+
+(* Every surface asks how many rows the strip takes, and the strip itself is
+   drawn once more, all in one frame. Its inputs are immutable values the state
+   swaps whole, so while each one is still the same value the last strip is the
+   strip. *)
+let last_agenda : (agenda_inputs * Masc_tui_agenda.t) option ref = ref None
+
+let agenda (state : state) : Masc_tui_agenda.t =
+  let inputs =
+    { ai_schedules = state.schedules_agenda; ai_schedules_error = state.schedules_agenda_error
+    ; ai_schedule_freshness = state.schedules_agenda_freshness
+    ; ai_approvals_observed = state.keeper_tool_approvals_observed
+    ; ai_approvals_error = state.keeper_tool_approvals_error
+    ; ai_approvals = state.keeper_tool_approvals
+    ; ai_asks = state.asks_snapshot; ai_asks_error = state.asks_error
+    ; ai_goals_to_confirm = state.goals_to_confirm; ai_stalled = state.operator_stalled }
+  in
+  match !last_agenda with
+  | Some (seen, strip) when same_agenda_inputs seen inputs -> strip
+  | Some _ | None ->
+      let strip = agenda_of_inputs inputs in
+      last_agenda := Some (inputs, strip);
+      strip
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather

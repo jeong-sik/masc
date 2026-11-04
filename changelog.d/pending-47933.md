@@ -1,3 +1,0 @@
-### Fixed
-
-- A Librarian claim with no cited items fails absorption instead of being absorbed (#47933).

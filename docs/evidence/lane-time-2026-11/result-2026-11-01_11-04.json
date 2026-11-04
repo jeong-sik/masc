@@ -128,6 +128,60 @@
       "sum_s": 1726630.6
     }
   },
+  "schedule_wakes": {
+    "cancelled_in_queue": 1566,
+    "created_during_long_execute": {
+      "mean_s": 1571.6,
+      "n": 50,
+      "p50_s": 935.9,
+      "p90_s": 3857.9,
+      "sum_s": 78581.2
+    },
+    "latency": {
+      "mean_s": 509.4,
+      "n": 3241,
+      "p50_s": 3.6,
+      "p90_s": 494.3,
+      "sum_s": 1651075.8
+    },
+    "no_turn_started": 16,
+    "stimuli": 4823,
+    "total_wait_s": 1651075.8,
+    "turn_started": 3241,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 896295.1,
+    "wait_overlapping_long_execute_s": 63322.1,
+    "waited_at_least_30_min": {
+      "n": 173,
+      "sum_s": 1398649.2,
+      "top_keepers": [
+        {
+          "keeper": "e-masc-the-leader",
+          "n": 26,
+          "sum_s": 438574.9
+        },
+        {
+          "keeper": "sangsu",
+          "n": 22,
+          "sum_s": 329317.0
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "n": 33,
+          "sum_s": 151435.3
+        },
+        {
+          "keeper": "wkbl-front",
+          "n": 24,
+          "sum_s": 134263.6
+        },
+        {
+          "keeper": "wkbl-data",
+          "n": 14,
+          "sum_s": 78606.5
+        }
+      ]
+    }
+  },
   "turn_time": {
     "between_calls": {
       "mean_s": 13.7,

@@ -258,5 +258,157 @@ class AdmissionTest(unittest.TestCase):
             self.assertEqual(lane.read_admission_waits(pathlib.Path(raw), since=DAY_START, until=DAY_START + 10), [])
 
 
+TURN_STARTED_KIND = "turn_started"
+QUEUE_CANCELLED_KIND = "event_queue_cancelled"
+
+
+def stimulus_row(keeper: str, stimulus_id: str, arrived: float) -> str:
+    return json.dumps(
+        {
+            "record_kind": "stimulus",
+            "keeper_name": keeper,
+            "stimulus_id": stimulus_id,
+            "recorded_at_unix": arrived + 1.0,
+            "stimulus": {"kind": "schedule_due", "arrived_at_unix": arrived},
+        }
+    )
+
+
+def reaction_row(keeper: str, stimulus_id: str, kind: str, recorded: float) -> str:
+    return json.dumps(
+        {
+            "record_kind": "reaction",
+            "keeper_name": keeper,
+            "stimulus_id": stimulus_id,
+            "recorded_at_unix": recorded,
+            "reaction": {"kind": kind},
+        }
+    )
+
+
+def write_reaction_day(base: pathlib.Path, keeper: str, day: str, lines: list[str]) -> None:
+    month, number = day[:7], day[8:]
+    directory = base / ".masc" / "keepers" / keeper / "reaction-ledger" / "v7" / month
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{number}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def wake(arrived: float, started: float | None, *, cancelled: bool = False, keeper: str = "k") -> lane.Wake:
+    return lane.Wake(keeper, arrived, started, cancelled)
+
+
+class WakeReadTest(unittest.TestCase):
+    def test_a_start_recorded_the_next_day_joins_and_a_cancel_does_not_start(self) -> None:
+        first = DAY_START + 100.0
+        day_two = DAY_START + 86_400.0
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_reaction_day(
+                base,
+                "k",
+                "2026-11-01",
+                [
+                    stimulus_row("k", "a", first),
+                    stimulus_row("k", "late-start", DAY_START + 86_000.0),
+                    stimulus_row("k", "cancelled", first + 5.0),
+                    stimulus_row("k", "outside", DAY_START + 90_000.0),  # after `until`
+                    reaction_row("k", "a", TURN_STARTED_KIND, first + 30.0),
+                    reaction_row("k", "a", TURN_STARTED_KIND, first + 99.0),  # a later start is ignored
+                    reaction_row("k", "cancelled", QUEUE_CANCELLED_KIND, first + 6.0),
+                    "{not json",
+                ],
+            )
+            write_reaction_day(base, "k", "2026-11-02", [reaction_row("k", "late-start", TURN_STARTED_KIND, day_two + 50.0)])
+            wakes = lane.read_wakes(base, date(2026, 11, 1), date(2026, 11, 1), DAY_START, DAY_START + 88_000.0)
+        by_id = {(w.arrived): w for w in wakes}
+        self.assertEqual(len(wakes), 3)
+        self.assertEqual(by_id[first].started, first + 30.0)
+        self.assertEqual(by_id[DAY_START + 86_000.0].started, day_two + 50.0)
+        self.assertEqual((by_id[first + 5.0].started, by_id[first + 5.0].cancelled), (None, True))
+
+    def test_the_same_stimulus_id_of_two_keepers_keeps_each_keepers_state(self) -> None:
+        arrived = DAY_START + 10.0
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_reaction_day(
+                base,
+                "k",
+                "2026-11-01",
+                [stimulus_row("k", "same", arrived), reaction_row("k", "same", TURN_STARTED_KIND, arrived + 5.0)],
+            )
+            write_reaction_day(
+                base,
+                "j",
+                "2026-11-01",
+                [stimulus_row("j", "same", arrived), reaction_row("j", "same", QUEUE_CANCELLED_KIND, arrived + 7.0)],
+            )
+            wakes = lane.read_wakes(base, date(2026, 11, 1), date(2026, 11, 1), DAY_START, DAY_START + 1_000.0)
+        state = {w.keeper: (w.started, w.cancelled) for w in wakes}
+        self.assertEqual(state, {"k": (arrived + 5.0, False), "j": (None, True)})
+
+    def test_a_start_recorded_two_days_after_the_window_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_reaction_day(base, "k", "2026-11-01", [stimulus_row("k", "a", DAY_START + 10.0)])
+            write_reaction_day(base, "k", "2026-11-03", [reaction_row("k", "a", TURN_STARTED_KIND, DAY_START + 2 * 86_400.0 + 5.0)])
+            wakes = lane.read_wakes(base, date(2026, 11, 1), date(2026, 11, 1), DAY_START, DAY_START + 1_000.0)
+        self.assertEqual([w.started for w in wakes], [None])
+
+
+
+class WakeSummaryTest(unittest.TestCase):
+    def test_counts_split_started_cancelled_and_unstarted(self) -> None:
+        summary = lane.summarize_wakes(
+            [wake(0, 10), wake(0, None, cancelled=True), wake(0, None), wake(0, 20)], {}, {}
+        )
+        self.assertEqual(
+            (summary["stimuli"], summary["turn_started"], summary["cancelled_in_queue"], summary["no_turn_started"]),
+            (4, 2, 1, 1),
+        )
+        self.assertEqual(summary["latency"]["sum_s"], 30.0)  # type: ignore[index]
+
+    def test_a_wake_cancelled_after_it_started_counts_as_started(self) -> None:
+        summary = lane.summarize_wakes([wake(0, 10, cancelled=True)], {}, {})
+        self.assertEqual((summary["turn_started"], summary["cancelled_in_queue"]), (1, 0))
+
+    def test_a_wake_that_started_before_it_arrived_counts_zero_latency(self) -> None:
+        summary = lane.summarize_wakes([wake(100, 90)], {}, {})
+        self.assertEqual(summary["latency"]["sum_s"], 0.0)  # type: ignore[index]
+
+    def test_wait_is_split_by_what_the_same_keeper_was_doing(self) -> None:
+        long_execute = {"k": [(0.0, 400.0)], "other": [(600.0, 900.0)]}
+        runs = {"k": [(0.0, 400.0), (1000.0, 1100.0)]}
+        wakes = [
+            wake(100, 1_500),  # arrives inside the Execute; waits 1400 s; 300 s of it inside the Execute
+            wake(500, 1_500, keeper="other"),  # waits through its own Execute (300 s), not through k's
+        ]
+        summary = lane.summarize_wakes(wakes, long_execute, runs)
+        self.assertEqual(summary["total_wait_s"], 2_400.0)
+        self.assertEqual(summary["wait_overlapping_long_execute_s"], 600.0)  # 300 of k's own + 300 of other's own
+        self.assertEqual(summary["wait_overlapping_a_run_of_the_same_keeper_s"], 400.0)  # 300 + 100 of k's runs
+        self.assertEqual(summary["created_during_long_execute"]["n"], 1)  # type: ignore[index]
+
+    def test_waits_of_half_an_hour_or_more_are_totalled_apart(self) -> None:
+        summary = lane.summarize_wakes([wake(0, 1_799), wake(0, 1_800), wake(0, 5_000)], {}, {})
+        tail = summary["waited_at_least_30_min"]
+        assert isinstance(tail, dict)
+        self.assertEqual((tail["n"], tail["sum_s"]), (2, 6_800.0))
+
+    def test_a_keeper_whose_waits_were_all_short_is_not_listed(self) -> None:
+        tail = lane.summarize_wakes([wake(0, 1_000, keeper="quick"), wake(0, 2_000, keeper="slow")], {}, {})["waited_at_least_30_min"]
+        assert isinstance(tail, dict)
+        self.assertEqual(tail["top_keepers"], [{"keeper": "slow", "n": 1, "sum_s": 2_000.0}])
+
+    def test_the_longest_waiting_keepers_are_listed_largest_first_and_capped(self) -> None:
+        wakes = [wake(0, 2_000, keeper="small"), wake(0, 9_000, keeper="big"), wake(0, 3_000, keeper="big")]
+        wakes += [wake(0, 2_000 + 100 * index, keeper=f"k{index}") for index in range(lane.TOP_WAKE_KEEPERS + 1)]
+        tail = lane.summarize_wakes(wakes, {}, {})["waited_at_least_30_min"]
+        assert isinstance(tail, dict)
+        top = tail["top_keepers"]
+        self.assertEqual(len(top), lane.TOP_WAKE_KEEPERS)
+        self.assertEqual(top[0], {"keeper": "big", "n": 2, "sum_s": 12_000.0})
+        self.assertEqual([item["sum_s"] for item in top], sorted((item["sum_s"] for item in top), reverse=True))
+
+
 if __name__ == "__main__":
     unittest.main()

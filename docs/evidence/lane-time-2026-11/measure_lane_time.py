@@ -39,6 +39,13 @@ Definitions:
 - batch size: the ledger's `batch_size`, the number of tool calls the model
   asked for in one response. Execution mode: its `execution_mode`
   (`serial` or `concurrent`), set by the tool's descriptor in agent_core.
+- schedule wake: a `stimulus` row of a Keeper's reaction ledger
+  (`keepers/<keeper>/reaction-ledger/v7/YYYY-MM/DD.jsonl`) is an event that
+  entered the Keeper's event queue at `stimulus.arrived_at_unix`. Its first
+  `turn_started` reaction ends the wait. A stimulus whose only reaction is
+  `event_queue_cancelled` never started a turn. The reaction files of the day
+  after `--to-date` are read too, so a wake that started just after the window
+  is not counted as unstarted.
 - cancelled during Execute: an operation that failed with `Turn_cancelled` and
   whose `completed_at` falls inside an Execute call of the same Keeper
   (`start - 3 s` .. `end + 3 s`; the ledger writes a call's row when it
@@ -81,6 +88,11 @@ SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
 ADMISSION_WAIT_HOURS_HIGH = 5.0
 TOP_TOOL_TRANSITIONS = 10
+WAKE_TAIL_SEC = 1800.0
+TOP_WAKE_KEEPERS = 5
+REACTION_LEDGER_DIR = pathlib.PurePosixPath("reaction-ledger") / "v7"
+TURN_STARTED = "turn_started"
+QUEUE_CANCELLED = "event_queue_cancelled"
 CANCELLED_TURN = "Turn_cancelled"
 CANCEL_MATCH_SLACK_SEC = 3.0
 POLL_COMMAND = re.compile(r"\bsleep\b|\bfor\s+\w+\s+in\b|\bwhile\b|\buntil\b")
@@ -110,6 +122,14 @@ class Operation:
     started_at: float | None
     completed_at: float | None
     failure_kind: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Wake:
+    keeper: str
+    arrived: float
+    started: float | None
+    cancelled: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +307,47 @@ def read_operations(base: pathlib.Path, since: float, until: float) -> list[Oper
     return operations
 
 
+def read_wakes(base: pathlib.Path, first: date, last: date, since: float, until: float) -> list[Wake]:
+    """Stimuli that arrived in [since, until], with their first `turn_started` (read through the day after `last`)."""
+    arrived: dict[tuple[str, str], float] = {}
+    started: dict[tuple[str, str], float] = {}
+    cancelled: set[tuple[str, str]] = set()
+    for keeper_dir in sorted((base / ".masc" / "keepers").glob("*")):
+        ledger = keeper_dir / REACTION_LEDGER_DIR
+        day = first
+        while day <= last + timedelta(days=1):
+            path = ledger / f"{day.year:04d}-{day.month:02d}" / f"{day.day:02d}.jsonl"
+            day += timedelta(days=1)
+            if not path.is_file():
+                continue
+            with path.open("rb") as handle:
+                for line in handle:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    keeper, stimulus_id = text_of(row.get("keeper_name")), text_of(row.get("stimulus_id"))
+                    if keeper is None or stimulus_id is None:
+                        continue
+                    key = (keeper, stimulus_id)
+                    if row.get("record_kind") == "stimulus":
+                        stimulus = row.get("stimulus")
+                        at = number_of(stimulus.get("arrived_at_unix")) if isinstance(stimulus, dict) else None
+                        if at is not None and since <= at <= until:
+                            arrived[key] = at
+                    elif row.get("record_kind") == "reaction":
+                        reaction = row.get("reaction")
+                        kind = text_of(reaction.get("kind")) if isinstance(reaction, dict) else None
+                        recorded = number_of(row.get("recorded_at_unix"))
+                        if kind == TURN_STARTED and recorded is not None:
+                            started[key] = min(recorded, started.get(key, recorded))
+                        elif kind == QUEUE_CANCELLED:
+                            cancelled.add(key)
+    return [Wake(key[0], at, started.get(key), key in cancelled) for key, at in sorted(arrived.items())]
+
+
 def read_admission_waits(base: pathlib.Path, since: float, until: float) -> list[AdmissionWait]:
     waits: list[AdmissionWait] = []
     day = datetime.fromtimestamp(since, timezone.utc).date()
@@ -446,24 +507,77 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
     }
 
 
+def decompose_waits(
+    waits: list[tuple[str, float, float]],
+    long_execute: dict[str, list[Interval]],
+    runs: dict[str, list[Interval]],
+) -> dict[str, object]:
+    """Splits waits, given as (keeper, begin, end), by what the same Keeper was doing during them."""
+    total_wait = overlap_long = overlap_run = 0.0
+    blocked_waits: list[float] = []
+    for keeper, begin, end in waits:
+        wait = end - begin
+        if wait <= 0:
+            continue
+        total_wait += wait
+        overlap_long += overlap_seconds(begin, end, long_execute.get(keeper, []))
+        overlap_run += overlap_seconds(begin, end, runs.get(keeper, []))
+        if any(a <= begin < b for a, b in long_execute.get(keeper, [])):
+            blocked_waits.append(wait)
+    return {
+        "total_wait_s": round(total_wait, 1),
+        "wait_overlapping_long_execute_s": round(overlap_long, 1),
+        "wait_overlapping_a_run_of_the_same_keeper_s": round(overlap_run, 1),
+        "created_during_long_execute": quantiles(blocked_waits),
+    }
+
+
+def summarize_wakes(
+    wakes: list[Wake],
+    long_execute: dict[str, list[Interval]],
+    runs: dict[str, list[Interval]],
+) -> dict[str, object]:
+    started = [wake for wake in wakes if wake.started is not None]
+    latency = [max(wake.started - wake.arrived, 0.0) for wake in started if wake.started is not None]
+    tail = [seconds for seconds in latency if seconds >= WAKE_TAIL_SEC]
+    tail_by_keeper: dict[str, list[float]] = defaultdict(list)
+    for wake in started:
+        assert wake.started is not None
+        if wake.started - wake.arrived >= WAKE_TAIL_SEC:
+            tail_by_keeper[wake.keeper].append(wake.started - wake.arrived)
+    top_tail = sorted(tail_by_keeper.items(), key=lambda item: (-sum(item[1]), item[0]))[:TOP_WAKE_KEEPERS]
+    return {
+        "stimuli": len(wakes),
+        "turn_started": len(started),
+        "cancelled_in_queue": sum(1 for wake in wakes if wake.started is None and wake.cancelled),
+        "no_turn_started": sum(1 for wake in wakes if wake.started is None and not wake.cancelled),
+        "latency": quantiles(latency),
+        "waited_at_least_30_min": {
+            "n": len(tail),
+            "sum_s": round(sum(tail), 1),
+            "top_keepers": [
+                {"keeper": keeper, "n": len(waits), "sum_s": round(sum(waits), 1)} for keeper, waits in top_tail
+            ],
+        },
+        **decompose_waits(
+            [(wake.keeper, wake.arrived, wake.started) for wake in started if wake.started is not None],
+            long_execute,
+            runs,
+        ),
+    }
+
+
 def summarize_operations(
     operations: list[Operation],
     long_execute: dict[str, list[Interval]],
     runs: dict[str, list[Interval]],
 ) -> dict[str, object]:
     started = [op for op in operations if op.started_at is not None]
-    total_wait = overlap_long = overlap_run = 0.0
-    blocked_waits: list[float] = []
-    for op in started:
-        assert op.started_at is not None
-        wait = op.started_at - op.created_at
-        if wait <= 0:
-            continue
-        total_wait += wait
-        overlap_long += overlap_seconds(op.created_at, op.started_at, long_execute.get(op.keeper, []))
-        overlap_run += overlap_seconds(op.created_at, op.started_at, runs.get(op.keeper, []))
-        if any(a <= op.created_at < b for a, b in long_execute.get(op.keeper, [])):
-            blocked_waits.append(wait)
+    decomposition = decompose_waits(
+        [(op.keeper, op.created_at, op.started_at) for op in started if op.started_at is not None],
+        long_execute,
+        runs,
+    )
     by_origin: dict[str, dict[str, object]] = {}
     for origin in sorted({op.origin for op in operations}):
         group = [op for op in operations if op.origin == origin]
@@ -483,10 +597,7 @@ def summarize_operations(
     return {
         "operations": len(operations),
         "started": len(started),
-        "total_wait_s": round(total_wait, 1),
-        "wait_overlapping_long_execute_s": round(overlap_long, 1),
-        "wait_overlapping_a_run_of_the_same_keeper_s": round(overlap_run, 1),
-        "created_during_long_execute": quantiles(blocked_waits),
+        **decomposition,
         "by_origin": by_origin,
     }
 
@@ -582,6 +693,9 @@ def main() -> int:
         "turn_time": summarize_calls(calls, busy_by_keeper),
         "chat_operations": summarize_operations(operations, long_execute, runs),
         "cancelled_turns": summarize_cancelled_turns(operations, execute_calls),
+        "schedule_wakes": summarize_wakes(
+            read_wakes(base, args.from_date, args.to_date, since, args.until), long_execute, runs
+        ),
         "provider_admission": summarize_admission(read_admission_waits(base, since, args.until)),
     }
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)

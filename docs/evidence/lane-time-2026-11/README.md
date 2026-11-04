@@ -29,6 +29,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
 - 승인 대기: `provider_admission:waited` 이벤트의 `waited_ms` 예요. 허용을 바로 받은 요청은 기록되지 않아서, 이 이벤트는 줄을 선 요청만 세요.
 - 도구 쌍: 한 턴에서 연이은 두 호출의 사이 시간(위 호출 사이 시간과 같은 값)을 (앞 호출의 도구, 다음 호출의 도구) 쌍에 더해요. 도구가 같은 쌍과 다른 쌍을 따로 합치고, 각각 사이 시간이 큰 쌍 10개를 `turn_time.tool_transitions` 에 적어요.
+- 일정 깨움: Keeper 의 reaction 원장(`keepers/<이름>/reaction-ledger/v7/YYYY-MM/DD.jsonl`)에서 `stimulus` 행은 이벤트가 Keeper 의 큐에 들어온 일이고, 들어온 시각은 `stimulus.arrived_at_unix` 예요. 같은 `stimulus_id` 의 첫 `turn_started` 반응이 기다림의 끝이에요. 반응이 `event_queue_cancelled` 뿐이면 턴이 시작되지 않은 거예요. `--to-date` 다음 날 파일까지 읽어서, 창 바로 뒤에 시작한 이벤트가 시작 안 한 것으로 잡히지 않게 해요. 기다림이 같은 Keeper 의 60초 이상 Execute 나 턴과 겹친 시간은 위임·채팅 작업과 같은 식으로 세요.
 - 한 응답의 호출 수: 원장의 `batch_size` 예요. 모델이 한 응답에 담아 요청한 도구 호출 수고, 호출마다 그 값을 세요.
 - 실행 방식: 원장의 `execution_mode`(`serial` 또는 `concurrent`)예요. 도구 descriptor 가 정해요(`packages/agent_core/lib/base/tool.mli`).
 - 턴이 취소된 때 돌던 Execute: `failure_kind` 가 `Turn_cancelled` 인 작업의 `completed_at` 이 같은 Keeper 의 Execute 호출 구간(시작 3초 전부터 끝 3초 뒤까지) 안에 있으면 세요. 원장은 호출이 끝날 때 행을 쓰기 때문이에요. 잃은 Execute 시간은 `completed_at` 까지 돈 부분이에요.
@@ -87,6 +88,20 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | 그중 같은 Keeper 의 턴과 겹친 시간 | 1,401.8분(22.4%) |
 | Execute 가 도는 중에 만들어진 작업 | 17건, 대기 중앙값 223.2초, 합계 85.8분 |
 
+일정 깨움(`schedule_wakes`, 이벤트 4,823건, 이 기간 reaction 원장의 `stimulus` 는 모두 `schedule_due` 예요):
+
+| | 값 |
+|---|---:|
+| 턴이 시작된 것 | 3,241건 |
+| 큐에서 취소된 것 | 1,566건 |
+| 턴이 시작되지 않은 것 | 16건 |
+| 큐에 들어와서 턴이 시작되기까지 | 중앙값 3.6초, p90 494.3초, 합계 458.6시간 |
+| 그 기다림 중 같은 Keeper 가 60초 이상 Execute 를 돌던 시간과 겹친 것 | 17.6시간(3.8%) |
+| 그 기다림 중 같은 Keeper 의 턴이 돌던 시간과 겹친 것 | 249.0시간(54.3%) |
+| 30분 이상 기다린 이벤트 | 173건, 388.5시간(84.7%) |
+
+30분 이상 기다린 시간이 큰 Keeper 는 `e-masc-the-leader` 121.8시간(26건), `sangsu` 91.5시간(22건), `masc-productor-owner` 42.1시간(33건), `wkbl-front` 37.3시간(24건), `wkbl-data` 21.8시간(14건)이에요.
+
 턴이 취소돼 끝난 작업(`Turn_cancelled`)은 106건이에요. 그중 같은 Keeper 의 Execute 가 도는 중에 취소된 것은 3건이고, 잃은 Execute 시간은 합계 37.1초예요. 60초 이상 Execute 가 도는 중에 취소된 작업은 없어요.
 
 위임(375건, 시작한 373건)은 305건이 성공하고 68건이 실패, 2건이 취소돼요. 실패 68건은 `Turn_cancelled` 36건, `Turn_exception` 32건이에요. 시작 전 대기는 중앙값 0.1초, p90 586.4초이고, 돌아간 시간은 중앙값 109.7초, p90 807.7초예요.
@@ -97,5 +112,6 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 턴 길이는 trace 파일의 첫 줄과 마지막 줄 시각으로 어림한 값이에요. 마지막 줄이 턴이 끝난 뒤에 늦게 써졌다면 턴이 길게 잡혀요. 이 경우가 있는지는 확인하지 못했어요.
 - "호출 사이 시간"에는 모델 추론과 제공자 쪽 대기가 함께 들어 있어서 둘을 가르지 못했어요. 승인 대기 합계(479.6시간)가 호출 사이 시간(510.1시간)과 비슷한 크기라서 대부분이 승인 줄일 것으로 보지만, 같은 요청끼리 짝지어 확인하지는 않았어요.
 - 작업 DB 만 있고 턴 trace 가 없는 Keeper 의 작업은 "같은 Keeper 의 턴과 겹친 시간"이 0으로 잡혀요.
-- 위임·채팅 작업만 봤어요. Board 멘션이나 일정으로 깨운 턴이 Execute 때문에 늦어졌는지는 못 쟀어요.
+- reaction 원장의 `stimulus` 가 이 기간 모두 `schedule_due` 라서 Board 멘션으로 깨운 턴의 대기는 못 쟀어요.
+- 일정 깨움이 30분 넘게 기다린 이유는 가리지 못했어요. 같은 Keeper 가 그 사이 다른 턴을 돌았거나, 그 이벤트를 나중에 골랐을 수 있어요.
 - 작업 DB 의 보존 기간은 확인하지 못했어요. 날짜가 지난 뒤에 다시 돌리면 같은 값이 안 나올 수 있어요.

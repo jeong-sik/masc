@@ -38,3 +38,7 @@ let due ~now = function
   | Owed _ -> true
   | Waiting { retry_at; _ } -> now >= retry_at
   | Settled | Reading _ -> false
+
+let stale_at_to_schedule ~now = function
+  | Some at when at > now -> Some at
+  | Some _ | None -> None

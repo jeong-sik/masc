@@ -27044,8 +27044,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Ok snapshot ->
           state.harness_owed <- Masc_tui_owed_read.succeeded state.harness_owed;
           state.harness_stale_at <-
-            Option.bind snapshot.Masc.Tui_decode.hs_overview (fun overview ->
-              overview.Masc.Tui_decode.hov_stale_at);
+            Masc_tui_owed_read.stale_at_to_schedule ~now:(Unix.gettimeofday ())
+              (Option.bind snapshot.Masc.Tui_decode.hs_overview (fun overview ->
+                 overview.Masc.Tui_decode.hov_stale_at));
           state.harness <- Some snapshot;
           state.harness_error <- None;
           (match state.harness_detail with

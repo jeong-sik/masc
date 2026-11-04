@@ -1919,106 +1919,6 @@ let test_keeper_purge_cancels_future_schedule_intent () =  with_workspace
   | None -> fail "cancelled future schedule missing"
 ;;
 
-let test_owner_absent_pending_demand_is_drained_not_retained () =
-  (* Owner-absent termination (task-370 contract item 1): durable pending
-     work under a name the Keeper store does not know used to be retained and
-     re-visited every maintenance cycle -- 881 retained visits for
-     one keeper on 2026-08-25, surviving restarts. No cycle can
-     make that wait productive: the work can never execute until the name is
-     registered. The recovery loop must drain it through the exact
-     accepted-cancellation transition instead of retaining it. *)
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  (* A queue directory for a name that was never registered in the Keeper
-     store -- the exact orphan shape the recovery loop discovers. *)
-  let orphan_name = "keeper-never-registered" in
-  let wake : Keeper_event_queue.scheduled_wake =
-    { occurrence_id = "orphan-occurrence"
-    ; schedule_instance_id = "orphan-instance"
-    ; schedule_id = "orphan-schedule"
-    ; due_at = 200.0
-    ; payload_digest = "orphan-digest"
-    ; title = None
-    ; message = "orphaned wake"
-    ; result_delivery = None
-    }
-  in
-  let stimulus : Keeper_event_queue.stimulus =
-    { post_id = "orphan-post"
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = 200.0
-    ; payload = Keeper_event_queue.Schedule_due wake
-    }
-  in
-  (* Two entries, not one: the drain cancels them in one call, and each
-     cancellation must clear the single-slot outbox before the next one or
-     the second is refused (the schedule supersede hit exactly this on
-     2026-09-14). *)
-  let enqueue stimulus =
-    match
-      Keeper_registry_event_queue.enqueue_stimulus_durable_result
-        ~base_path
-        orphan_name
-        stimulus
-    with
-    | Keeper_registry_event_queue.Stimulus_enqueued -> ()
-    | Keeper_registry_event_queue.Stimulus_already_present ->
-      fail "orphan stimulus already present in a fresh workspace"
-    | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-      fail ("orphan enqueue failed: " ^ detail)
-  in
-  enqueue stimulus;
-  enqueue
-    { stimulus with
-      post_id = "orphan-post-2"
-    ; arrived_at = 200.5
-    ; payload =
-        Keeper_event_queue.Schedule_due
-          { wake with occurrence_id = "orphan-occurrence-2"; due_at = 200.5 }
-    };
-  let pending_before =
-    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
-    |> function
-    | Ok state -> Keeper_event_queue.length (Keeper_event_queue_state.pending state)
-    | Error detail -> fail detail
-  in
-  check int "orphan queue holds two pending stimuli before drain" 2 pending_before;
-  (match
-     Keeper_registry_event_queue.drain_owner_absent_pending_result
-       ~base_path
-       orphan_name
-       ~applied_at:201.0
-       ~reason:"owner absent from keeper store; pending demand cannot execute"
-   with
-   | Ok 2 -> ()
-   | Ok n -> failf "expected both stimuli drained in one call, got %d" n
-   | Error detail -> fail ("owner-absent drain failed: " ^ detail));
-  let drained_state =
-    match
-      Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:orphan_name
-    with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
-  check int "orphan queue is empty after drain" 0
-    (Keeper_event_queue.length (Keeper_event_queue_state.pending drained_state));
-  (match Keeper_event_queue_state.transition_outbox drained_state with
-   | [] -> ()
-   | _ :: _ -> fail "the drain left a cancellation receipt in the outbox");
-  (* The drain must be idempotent: a second visit finds nothing to retain. *)
-  (match
-     Keeper_registry_event_queue.drain_owner_absent_pending_result
-       ~base_path
-       orphan_name
-       ~applied_at:202.0
-       ~reason:"owner absent from keeper store; pending demand cannot execute"
-   with
-   | Ok 0 -> ()
-   | Ok n -> failf "second drain should find nothing, got %d" n
-   | Error detail -> fail ("second owner-absent drain failed: " ^ detail))
-;;
-
 let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
   with_workspace
   @@ fun config ->
@@ -4840,8 +4740,6 @@ let () =
             test_dispatch_drops_a_wake_withdrawn_after_intake
         ; test_case "withdrawal skips an entry a turn settled first" `Quick
             test_withdrawal_skips_an_entry_a_turn_settled_first
-        ; test_case "owner absent pending demand is drained not retained" `Quick
-            test_owner_absent_pending_demand_is_drained_not_retained
         ; test_case "shutdown fence rejects schedule intake before enqueue" `Quick
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "fenced purge settles on the first tick after its blocker is repaired"

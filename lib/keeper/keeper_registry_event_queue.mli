@@ -131,18 +131,6 @@ val cancel_scheduled_wakes_result :
     was given is cancelled too, and that turn's terminal answers
     [Turn_selection_withdrawn]. *)
 
-val drain_owner_absent_pending_result :
-  base_path:string ->
-  string ->
-  applied_at:float ->
-  reason:string ->
-  (int, string) result
-(** Cancel every pending stimulus owned by a name the Keeper store does not
-    know. No maintenance cycle can make that wait productive; retaining it
-    produced 881 retained visits for one stale queue and a 913-error day.
-    Projects each receipt after its commit like [cancel_scheduled_wakes_result].
-    Returns the number of pending entries removed. *)
-
 val transfer_pending_accepted_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->

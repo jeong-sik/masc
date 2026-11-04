@@ -784,6 +784,16 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
     check (list (option string)) "the Add-on notification names its instance"
       [ Some instance ] (List.filter_map (fun (name, instance) ->
         if String.equal name "lane_addons" then Some instance else None) !heard);
+    heard := [];
+    let before = number "observation_seq" (inspect fixture instance) in
+    ignore (dispatch fixture Runtime.Observe ["instance_id", str instance] |> unwrap);
+    await clock (fun () -> number "observation_seq" (inspect fixture instance) > before);
+    ignore (dispatch fixture Runtime.Observe ["instance_id", str instance] |> unwrap);
+    await clock (fun () -> number "observation_seq" (inspect fixture instance) > before + 1);
+    check int "an unchanged inventory does not announce another Lanes read" 0
+      (List.filter (fun (name, _) -> String.equal name "lanes") !heard |> List.length);
+    check int "every committed observation still announces Inspect" 2
+      (List.filter (fun (name, _) -> String.equal name "lane_addons") !heard |> List.length);
     detach clock fixture instance))
 
 let () = run "Lane action workflow" ["canonical request identity",[

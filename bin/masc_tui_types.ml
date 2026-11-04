@@ -10606,6 +10606,8 @@ type state = {
   mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
   mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable tools_async_task_body_request: tools_async_task_request option;
+  (* What the open source Task body owes after a backlog write. *)
+  mutable tools_async_task_owed: Masc_tui_owed_read.t;
   mutable tools_async_task_history_request: tools_async_task_source task_history_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
@@ -19890,6 +19892,7 @@ let create_state
   tools_async_task_body = Masc_tui_fetched.initial;
   tools_async_task_history = Masc_tui_fetched.initial;
   tools_async_task_body_request = None;
+  tools_async_task_owed = Masc_tui_owed_read.settled;
   tools_async_task_history_request = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;

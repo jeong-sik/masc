@@ -536,7 +536,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~invalidate_full_health_snapshot:
       Server_routes_http_runtime.invalidate_full_health_snapshot
     ();
-  Server_dashboard_http.install_planning_cache_invalidation ();
+  Server_dashboard_http.install_goal_projection_observer ();
   Keeper_registry.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
   Keeper_registry_broadcast.install_before_composite_changed

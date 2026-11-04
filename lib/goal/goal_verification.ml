@@ -504,6 +504,7 @@ let write_state_result config state =
   clear_verifications_cache_for recovery;
   let json = state_to_yojson state in
   let* () = Workspace_utils.write_json_result config primary json in
+  Goal_store.projection_source_changed config;
   (match Workspace_utils.write_json_result config recovery json
    with
    | Ok () -> ()

@@ -2817,7 +2817,7 @@ let test_cached_planning_reads_a_new_goal () =
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let goals () =
         let open Yojson.Safe.Util in
@@ -2857,13 +2857,66 @@ let test_cached_planning_reads_a_new_goal () =
       check bool "notification delivery keeps the planning cache" true
         (Option.is_some (Dashboard_cache.peek key)))
 
+(* RFC-0480 §3.4: every Goal projection source announces after it drops the
+   planning cache -- the Goal file, the verification ledger and the
+   measurement store. The ledger write below leaves the Goal itself
+   unchanged, so only the ledger's own announcement can reach a reader. *)
+let test_goal_projection_sources_announce_after_dropping_planning () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
+    (fun () ->
+      Server_dashboard_http.install_goal_projection_observer ();
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+      let key = Server_dashboard_http.planning_cache_key ~base_path:config.base_path in
+      let heard = ref 0 in
+      let heard_with_cache = ref 0 in
+      let id = "goal-projection-announce" in
+      Lib.Sse.subscribe_external
+        ~runtime_authority:(Lib.Sse.runtime_authority_exn ~base_path:config.base_path) ~id
+        ~callback:(fun (event : Lib.Sse.external_event) ->
+          match Lib.Json_util.assoc_string_opt "type" event.ext_payload with
+          | Some kind when String.equal kind Lib.Goal_projection_broadcast.changed_event ->
+            incr heard;
+            if Option.is_some (Dashboard_cache.peek key) then incr heard_with_cache
+          | Some _ | None -> ())
+        ();
+      Fun.protect ~finally:(fun () -> Lib.Sse.unsubscribe_external id) (fun () ->
+        let prime () = ignore (Server_dashboard_http.cached_planning_payload ~config) in
+        prime ();
+        let goal, _, _ =
+          match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
+                  ~title:"Announced Goal" ~metric:"goals" ~target_value:"1" () with
+          | Ok result -> result
+          | Error error -> fail (Goal_store.write_error_to_string error)
+        in
+        let after_goal = !heard in
+        check bool "a Goal write announces" true (after_goal > 0);
+        prime ();
+        (match Lib.Goal_verification.mark_proof_pending config ~goal_id:goal.id
+                 ~criterion:(Goal_store.criterion_of_goal goal) with
+         | Ok _ -> ()
+         | Error detail -> fail detail);
+        let after_ledger = !heard in
+        check bool "a ledger write announces" true (after_ledger > after_goal);
+        prime ();
+        (match Lib.Goal_measurement.record config ~goal_id:goal.id
+                 ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+                 ~evidence:"note:announced" ~actor:"dashboard" with
+         | Ok _ -> ()
+         | Error _ -> fail "measurement was refused");
+        check bool "a measurement write announces" true (!heard > after_ledger);
+        check int "every announcement follows the dropped planning cache" 0
+          !heard_with_cache))
+
 let test_cached_planning_reads_new_goal_history () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let history_ids () =
         let open Yojson.Safe.Util in
@@ -8834,6 +8887,8 @@ let () =
             test_cached_planning_reads_a_new_goal;
           test_case "cached planning reads new Goal history" `Quick
             test_cached_planning_reads_new_goal_history;
+          test_case "Goal projection sources announce after dropping planning" `Quick
+            test_goal_projection_sources_announce_after_dropping_planning;
           test_case "planning counts a task awaiting verification on its own"
             `Quick
             test_planning_counts_a_task_awaiting_verification_on_its_own;

@@ -727,9 +727,10 @@ let cached_planning_payload ~(config : Workspace.config) =
        dashboard_planning_http_json ~config))
 ;;
 
-let install_planning_cache_invalidation () =
+let install_goal_projection_observer () =
   Atomic.set Workspace_hooks.on_goal_projection_mutation_fn (fun ~base_path ->
-    Dashboard_cache.invalidate (planning_cache_key ~base_path))
+    Dashboard_cache.invalidate (planning_cache_key ~base_path);
+    Goal_projection_broadcast.changed ~base_path)
 ;;
 
 let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =

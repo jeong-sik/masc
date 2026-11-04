@@ -365,6 +365,10 @@ let notify_projection_change config =
       Log.Misc.error "goal_store: projection observer failed for %s: %s"
         config.base_path (Printexc.to_string exn)
 
+let projection_source_changed config =
+  Goal_projection_generation.advance ();
+  notify_projection_change config
+
 let write_state_with_effect ~projection_effect config state =
   ensure_dirs config;
   let path = goals_path config in

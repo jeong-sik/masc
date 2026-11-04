@@ -4121,21 +4121,11 @@ let launch_tools_parts state ~mailbox parts =
    effective surface, and its activations. A new generation drops the
    answers still in flight. The skills catalog and the Usage answers read on
    their pushes ([launch_owed_tools]). *)
-let launch_tools_load ?(force = true) state ~mailbox =
+let launch_tools_load state ~mailbox =
   if server_authority_ready state then begin
-  let keeper =
-    Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
-  in
-  let already_reading =
-    match state.tools_read_inflight with
-    | Some request -> Option.equal String.equal request.tri_keeper keeper
-    | None -> false
-  in
-  if force || not already_reading then begin
     state.tools_request_generation <- state.tools_request_generation + 1;
     state.tools_read_inflight <- None;
     launch_tools_parts state ~mailbox [ Tools_inventory_read; Tools_activations_read ]
-  end
   end
 
 let settle_tools_skill_read state ~generation part =
@@ -39279,10 +39269,11 @@ Use relative paths for resources already held in the package. -->
                 if Option.is_some state.tools_async_task_source then begin
                   close_tools_async_task state;
                   launch_tools_async_detail state ~mailbox:async_messages
-                end else if state.tools_async_detail_open then begin
-                  close_tools_async_detail state;
-                  launch_tools_load ~force:false state ~mailbox:async_messages
-                end else goto_surface state ~mailbox:async_messages Config
+                end else if state.tools_async_detail_open then
+                  (* Back on the request list, which reads on its own pushes
+                     ([launch_owed_async_requests]). *)
+                  close_tools_async_detail state
+                else goto_surface state ~mailbox:async_messages Config
             | Config ->
                 state.runtime_model_jump <- None;
                 state.runtime_config_jump_section <- None;

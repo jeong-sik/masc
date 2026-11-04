@@ -257,6 +257,13 @@ val write_state : Workspace_utils.config -> state -> unit
     deterministic initial state. Takes no lock and does not read first;
     production writers go through the locked read-modify-write operations below. *)
 
+val projection_source_changed : Workspace_utils.config -> unit
+(** A Goal projection source kept outside the Goal file (the audit event
+    ledger, the verification ledger, the measurement store) was published. Advance the projection
+    generation and run the Goal projection mutation hook. Callers run it under
+    their store lock after the primary write; the hook must not yield or
+    reenter the Goal store. *)
+
 val write_state_result :
   Workspace_utils.config -> state -> (unit, string) result
 (** Result-returning variant of {!write_state}. Publish through the shared local

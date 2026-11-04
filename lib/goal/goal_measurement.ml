@@ -171,6 +171,7 @@ let write config items =
       ]
   in
   let* committed = Workspace_utils.write_json_commit_result config (path config) json in
+  Goal_store.projection_source_changed config;
   (match committed.mirror_error with
    | None -> ()
    | Some detail ->
@@ -238,7 +239,6 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
                 Ok (goal, Result.map_error (fun detail -> Store_error detail) recorded)))
     with
     | Ok (goal_at_recording, Ok measurement) ->
-        Goal_projection_generation.advance ();
         Ok { measurement; goal_at_recording }
     | Ok (_, Error error) -> Error error
     | Error (Goal_store.Goal_not_found _) ->

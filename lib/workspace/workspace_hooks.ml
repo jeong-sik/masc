@@ -145,8 +145,10 @@ let on_task_mutation_fn
   : (unit -> unit) Atomic.t
   = Atomic.make (fun () -> ())
 
-(* Goal rows and audit events affect planning. Notification delivery alone
-   does not. The installed observer must not yield or read the Goal store. *)
+(* Goal rows, audit events, the verification ledger and the measurement store
+   affect the Goal projection. Notification delivery alone does not. The
+   installed observer runs under the writer's lock, so it must not yield or
+   read the Goal store. *)
 let on_goal_projection_mutation_fn
   : (base_path:string -> unit) Atomic.t
   = Atomic.make (fun ~base_path:_ -> ())

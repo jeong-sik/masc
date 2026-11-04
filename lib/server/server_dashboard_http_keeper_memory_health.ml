@@ -222,67 +222,10 @@ let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
 (* What a newest-first walk over journal lines found before it ran out of
    lines: the newest Librarian commit, if it reached one, and the newest
    Librarian failure it passed on the way there. *)
-type librarian_journal_walk =
-  | Reached_librarian_commit of
-      { committed_at : float
-      ; failure_after : Keeper_memory_os_current.librarian_failure_kind option
-      }
-  | No_librarian_commit of
-      { newest_failure : Keeper_memory_os_current.librarian_failure_kind option }
-
-let rec walk_newest_first ~newest_failure = function
-  | [] -> No_librarian_commit { newest_failure }
-  | Ok
-      (Keeper_memory_os_current.Journal_committed
-         { recorded_at; source = { kind = Keeper_memory_os_current.Librarian; _ }; _ })
-    :: _ -> Reached_librarian_commit { committed_at = recorded_at; failure_after = newest_failure }
-  | Ok (Keeper_memory_os_current.Journal_failed { kind; _ }) :: older ->
-    let newest_failure =
-      match newest_failure with
-      | Some _ -> newest_failure
-      | None -> Some kind
-    in
-    walk_newest_first ~newest_failure older
-  | Ok
-      (Keeper_memory_os_current.Journal_committed
-         { source =
-             { kind = Keeper_memory_os_current.(Explicit_write | Explicit_retract); _ }; _ })
-    :: older
-  | Ok (Keeper_memory_os_current.Journal_quarantined _) :: older
-  | Error _ :: older -> walk_newest_first ~newest_failure older
-;;
-
-(* Every [keeper_memory_write] and retraction journals a committed line of
-   its own, so the last line says nothing about the Librarian: one write after
-   a failed pass hid the failure, and one write after a good pass hid the
-   success. The answer is the newest Librarian commit and whatever Librarian
-   failure came after it, wherever in the journal that commit sits.
-
-   The tail reader takes a line count, so the read starts at the last line
-   and doubles the window until the walk reaches a Librarian commit or the
-   reader returns fewer lines than asked -- the start of the file. There is
-   no cap: a request reads back as far as its answer. A keeper the Librarian
-   never committed for is therefore read to the start on every request; the
-   journal only grows, so that cost grows with it. *)
-let librarian_journal_outcome ~keepers_dir ~keeper_id =
-  let rec read ~window =
-    let lines =
-      Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:window
-    in
-    match walk_newest_first ~newest_failure:None (List.rev lines) with
-    | Reached_librarian_commit { committed_at; failure_after } ->
-      Some committed_at, failure_after
-    | No_librarian_commit { newest_failure } when List.length lines < window ->
-      None, newest_failure
-    | No_librarian_commit _ -> read ~window:(window * 2)
-  in
-  read ~window:1
-;;
-
 let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
-  let last_success_at, last_failure =
-    librarian_journal_outcome ~keepers_dir ~keeper_id
+  let { Keeper_memory_journal_outcome.last_success_at; last_failure } =
+    Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id
   in
   let last_failure_kind =
     Option.map Keeper_memory_os_current.librarian_failure_kind_to_string last_failure

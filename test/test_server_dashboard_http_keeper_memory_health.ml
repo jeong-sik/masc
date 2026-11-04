@@ -390,6 +390,45 @@ let test_reports_the_librarian_position_without_a_loop () =
     (string_field "last_failure_kind" (member "librarian" (keeper_obj keeper_id after_failure)))
 ;;
 
+(* The outcome is folded from the lines appended since the last read; a
+   journal that shrank is folded again from its start, and a removed one says
+   nothing. *)
+let test_journal_outcome_reads_appended_lines () =
+  let base = fresh_dir "masc-memory-health-journal-outcome" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "outcome-" ^ Filename.basename base in
+  let read () = Masc.Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
+  let failure_kind (outcome : Masc.Keeper_memory_journal_outcome.t) =
+    Option.map Current.librarian_failure_kind_to_string outcome.last_failure in
+  let empty = read () in
+  Alcotest.(check bool) "no journal is no commit and no failure" true
+    (Option.is_none empty.last_success_at && Option.is_none empty.last_failure);
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
+  Alcotest.(check (option (float 0.))) "the Librarian commit is read" (Some test_now)
+    (read ()).last_success_at;
+  Current.append_librarian_failure ~keepers_dir ~keeper_id ~now:(test_now +. 60.)
+    ~trace_id:"outcome-test" ~kind:Current.Exact_execution_failure ~detail:"refused"
+    ~snapshot_present:true;
+  let after_failure = read () in
+  Alcotest.(check (option string)) "an appended failure is read" (Some "exact_execution_failure")
+    (failure_kind after_failure);
+  Alcotest.(check (option (float 0.))) "the earlier commit is kept" (Some test_now)
+    after_failure.last_success_at;
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let lines = In_channel.with_open_bin path In_channel.input_all |> String.split_on_char '\n'
+    |> List.filter (fun line -> line <> "") in
+  Out_channel.with_open_bin path (fun channel ->
+    Out_channel.output_string channel (List.nth lines (List.length lines - 1) ^ "\n"));
+  let shrunk = read () in
+  Alcotest.(check bool) "a shrunk journal is read from its start" true
+    (Option.is_none shrunk.last_success_at
+     && failure_kind shrunk = Some "exact_execution_failure");
+  Sys.remove path;
+  let removed = read () in
+  Alcotest.(check bool) "a removed journal says nothing" true
+    (Option.is_none removed.last_success_at && Option.is_none removed.last_failure)
+;;
+
 (* A keeper's own [keeper_memory_write] journals a committed line too. It is
    not a Librarian pass, so it must neither hide the Librarian failure before
    it nor wipe the Librarian success before that. *)
@@ -1225,6 +1264,8 @@ let () =
             test_reports_derived_facts_and_support_invalidations
         ; Alcotest.test_case "librarian position without a loop" `Quick
             test_reports_the_librarian_position_without_a_loop
+        ; Alcotest.test_case "journal outcome reads appended lines" `Quick
+            test_journal_outcome_reads_appended_lines
         ; Alcotest.test_case "librarian failure then explicit write" `Quick
             test_librarian_failure_then_explicit_write_keeps_both
         ; Alcotest.test_case "corrupt snapshot visible" `Quick

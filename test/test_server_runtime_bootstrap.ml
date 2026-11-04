@@ -3140,7 +3140,7 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
           let raw_error = Agent_core.Error.to_string error in
           let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
           let failure = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-              ~core_error:error terminal ~raw_error in
+              ~core_error:error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate in
           Keeper_registry.set_failure_reason ~base_path:dir meta.Keeper_meta_contract.name failure;
           mark_keeper_failing config meta)
         native;

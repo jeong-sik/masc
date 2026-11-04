@@ -14,6 +14,7 @@ let record_failure_observation
       ~terminal_reason
       ~err
       ~error_text
+      ~terminal_error_origin
   =
   let base_path = config.base_path in
   let count =
@@ -25,7 +26,7 @@ let record_failure_observation
   let reason =
     match
       Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-        ~core_error:err terminal_reason ~raw_error:error_text
+        ~core_error:err terminal_reason ~raw_error:error_text ~terminal_error_origin
     with
     | Some typed_cause -> typed_cause
     | None -> Keeper_registry.Turn_consecutive_failures count

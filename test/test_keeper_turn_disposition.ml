@@ -107,7 +107,7 @@ let test_lossy_terminal_wire_never_manufactures_typed_cause () =
 
 let check_runtime_failure_reason raw_error expected_code =
   let terminal = Legacy.of_code raw_error in
-  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
+  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error ~terminal_error_origin:Unified_types.Terminal_error_not_from_a_candidate with
   | Some (Registry.Provider_runtime_error { code; detail }) ->
     Alcotest.(check string) "provider runtime code" expected_code code;
     Alcotest.(check bool)
@@ -153,7 +153,7 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
     Unified_types.registry_failure_reason_of_terminal_reason
       ~core_error
       terminal
-      ~raw_error
+      ~raw_error ~terminal_error_origin:Unified_types.Terminal_error_not_from_a_candidate
   in
   let missing_env =
     Agent_core.Error.Config

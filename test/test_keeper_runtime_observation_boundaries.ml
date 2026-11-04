@@ -86,7 +86,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
   let raw_error = "synthetic observation" in
   let reason =
     Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-      ?core_error terminal ~raw_error
+      ?core_error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
   in
   Fun.protect ~finally:R.For_testing.clear (fun () ->
     ignore (R.For_testing.register ~base_path meta.name meta);

@@ -115,7 +115,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
        (Route.response_observed route)
    | _ -> Alcotest.fail "local refusal must not rotate, retry or claim a remote effect");
   let reason = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-      ~core_error:error terminal ~raw_error in
+      ~core_error:error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate in
   Alcotest.(check bool) "registry receives same typed payload" true
     (reason = Some (R.Official_client_recovery_required expected));
   let meta =

@@ -167,7 +167,14 @@ let runtime_blocker_surface_of_failure_reason
       ; summary = lazy (empty_turn_sentence runtime_id)
       ; signature = Some (code ^ ": " ^ detail)
       }
-  | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
+  | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; runtime_id; _ } ->
+    (* The runtime is the candidate whose error ended the turn, recorded at
+       write time; a record written without one names none. *)
+    let from_runtime =
+      match runtime_id with
+      | Some runtime_id -> " from " ^ runtime_id
+      | None -> ""
+    in
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
          ?agent_core_timeout
@@ -191,9 +198,10 @@ let runtime_blocker_surface_of_failure_reason
          { blocker_class = Blocked_by_provider_runtime_error
          ; summary = lazy (
              Printf.sprintf
-               "%s timeout%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
+               "%s timeout%s%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
                source_label
                phase_suffix
+               from_runtime
                code
                detail)
          ; signature = None
@@ -208,7 +216,9 @@ let runtime_blocker_surface_of_failure_reason
        Some
          { blocker_class = Blocked_by_provider_runtime_error
          ; summary =
-             lazy (Printf.sprintf "Provider runtime error (%s): %s" code detail)
+             lazy
+               (Printf.sprintf "Provider runtime error%s (%s): %s" from_runtime code
+                  detail)
          ; signature = None
          })
   | Keeper_registry.Official_client_recovery_required recovery ->

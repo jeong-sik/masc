@@ -257,8 +257,14 @@ let registry_failure_reason_of_terminal_reason
       ?core_error
       (terminal_reason : Keeper_turn_terminal.t)
       ~(raw_error : string)
+      ~(terminal_error_origin : keeper_cycle_failed_terminal_origin)
   : Keeper_registry.failure_reason option
   =
+  let failed_runtime_id =
+    match terminal_error_origin with
+    | Terminal_error_from { runtime_id; attempt = _ } -> Some runtime_id
+    | Terminal_error_not_from_a_candidate -> None
+  in
   let detail =
     match core_error with
     | Some (Agent_core.Error.Config _) -> "provider configuration failed"
@@ -360,7 +366,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = None
+         ; runtime_id = failed_runtime_id
            (* The typed observation rides along with the verbatim wire
               (RFC-0371 §6.1(3)); consumers stop re-parsing the code. *)
          ; agent_core_timeout =
@@ -382,7 +388,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; runtime_id = None
+         ; runtime_id = failed_runtime_id
          ; agent_core_timeout = None
          ; reason = None
          ; fenced_empty_turn_runtime = None

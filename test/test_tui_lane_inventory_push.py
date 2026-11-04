@@ -3,6 +3,7 @@
 
 import os
 import sys
+import threading
 import unittest
 import urllib.parse
 from typing import Callable, cast
@@ -118,9 +119,9 @@ class LaneServer(owed.ChatServer):
     def __init__(self, base: str) -> None:
         super().__init__(base)
         self.RequestHandlerClass = LaneHandler
-        self.hold_lanes = __import__("threading").Event()
-        self.lanes_held = __import__("threading").Event()
-        self.release_lanes = __import__("threading").Event()
+        self.hold_lanes = threading.Event()
+        self.lanes_held = threading.Event()
+        self.release_lanes = threading.Event()
 
 
 def dataset(name: str, instance_id: str | None = None) -> dict[str, object]:

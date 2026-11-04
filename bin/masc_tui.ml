@@ -4025,12 +4025,11 @@ let launch_tools_load ?(force = true) state ~mailbox =
       };
     let host = server_peer_host in
     let port = state.port in
-    (match usage_keepers with
-     | [] -> ()
-     | _ :: _ ->
+    (match state.tools_pane with
+     | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ()
+     | Tools_usage ->
          (* A Keeper that left the roster leaves the readings with it. *)
-         state.tools_keeper_usage <-
-           List.filter (fun (name, _) -> List.mem name usage_keepers) state.tools_keeper_usage;
+         keep_roster_skill_usage state ~roster:usage_keepers;
          List.iter
            (fun keeper ->
               launch_workspace_json_read state ~mailbox
@@ -26692,10 +26691,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
       settle_tools_read state ~generation (Tools_usage_read keeper);
       if generation = state.tools_request_generation then
-        state.tools_keeper_usage <-
-          List.sort
-            (fun (left, _) (right, _) -> String.compare left right)
-            ((keeper, result) :: List.remove_assoc keeper state.tools_keeper_usage)
+        record_keeper_skill_usage state ~keeper result
   | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (

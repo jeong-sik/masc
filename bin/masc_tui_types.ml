@@ -5756,6 +5756,19 @@ type tools_activations =
   | Activations_no_keeper
   | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
 
+(* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
+   beside the failure. *)
+type keeper_skill_usage_reading =
+  | Skill_usage_read of Masc.Tui_decode_tools.keeper_skill_usage
+  | Skill_usage_read_failed of
+      { last : Masc.Tui_decode_tools.keeper_skill_usage option
+      ; detail : string
+      }
+
+let skill_usage_answer = function
+  | Skill_usage_read usage -> Some usage
+  | Skill_usage_read_failed { last; detail = _ } -> last
+
 type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
   ; tad_reading : unit ref; tad_job : unit ref }
@@ -10601,8 +10614,7 @@ type state = {
   mutable tools_activations_error: string option;
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
      Keeper that left the roster leaves this list at the next read. *)
-  mutable tools_keeper_usage:
-    (string * (Masc.Tui_decode_tools.keeper_skill_usage, string) result) list;
+  mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -14383,6 +14395,29 @@ let move_tools_async_selection state delta =
       state.tools_async_last_logical <- None;
     state.tools_async_selection <- Some target
   end
+
+(* Records one Keeper's Usage read in Keeper name order. A failed read keeps
+   the Keeper's last answer beside the failure. *)
+let record_keeper_skill_usage state ~keeper result =
+  let reading =
+    match result with
+    | Ok usage -> Skill_usage_read usage
+    | Error detail ->
+        Skill_usage_read_failed
+          { last = Option.bind (List.assoc_opt keeper state.tools_keeper_usage) skill_usage_answer
+          ; detail
+          }
+  in
+  state.tools_keeper_usage <-
+    List.sort
+      (fun (left, _) (right, _) -> String.compare left right)
+      ((keeper, reading) :: List.remove_assoc keeper state.tools_keeper_usage)
+
+(* The Usage readings of the Keepers on [roster]; an empty roster keeps
+   none. *)
+let keep_roster_skill_usage state ~roster =
+  state.tools_keeper_usage <-
+    List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage
 
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with

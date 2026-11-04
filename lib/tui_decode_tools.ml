@@ -467,7 +467,6 @@ let decode_skill_activation_projection json =
 
 type skills_catalog_surface =
   { scs_reference : Skill_reference.t
-  ; scs_name : string
   ; scs_kind : string
   ; scs_flow : skill_flow option
   }
@@ -768,7 +767,6 @@ let decode_skills_catalog_surface json =
     Skill_reference.of_yojson reference
     |> Result.map_error (fun _ -> "skills surface reference is invalid")
   in
-  let scs_name = Skill_reference.(scs_reference.identity.name) in
   let* scs_kind = required_string_field json "kind" in
   let* scs_flow =
     match scs_kind, member "profile" json with
@@ -786,7 +784,7 @@ let decode_skills_catalog_surface json =
     | unknown, _ ->
       Error (Printf.sprintf "skills surface kind has unknown value %S" unknown)
   in
-  Ok { scs_reference; scs_name; scs_kind; scs_flow }
+  Ok { scs_reference; scs_kind; scs_flow }
 
 let decode_skill_catalog_rejection json =
   let* () =
@@ -1153,6 +1151,10 @@ let skill_activation_keeper = function
 let keeper_skill_activations_schema = "masc.keeper-skill-activations/v1"
 
 let decode_keeper_skill_activations ~keeper json =
+  let* () =
+    validate_closed_object ~label:"skill activations"
+      ~allowed:[ "schema"; "keeper"; "skill_activations" ] json
+  in
   let* schema = required_string_field json "schema" in
   let* answered = required_string_field json "keeper" in
   if not (String.equal schema keeper_skill_activations_schema) then
@@ -1167,6 +1169,10 @@ let decode_keeper_skill_activations ~keeper json =
 let keeper_skill_usage_schema = "masc.keeper-skill-usage/v1"
 
 let decode_keeper_skill_usage_row json =
+  let* () =
+    validate_closed_object ~label:"skill usage row"
+      ~allowed:[ "reference"; "invocations"; "deliveries"; "actions"; "last_used_at" ] json
+  in
   let* reference = required_object_field json "reference" in
   let* ksu_reference =
     Skill_reference.of_yojson reference
@@ -1179,6 +1185,9 @@ let decode_keeper_skill_usage_row json =
   Ok { ksu_reference; ksu_invocations; ksu_deliveries; ksu_actions; ksu_last_used_at }
 
 let decode_keeper_skill_usage ~keeper json =
+  let* () =
+    validate_closed_object ~label:"skill usage" ~allowed:[ "schema"; "keeper"; "usage" ] json
+  in
   let* schema = required_string_field json "schema" in
   let* answered = required_string_field json "keeper" in
   if not (String.equal schema keeper_skill_usage_schema) then
@@ -1188,17 +1197,26 @@ let decode_keeper_skill_usage ~keeper json =
   else
     let* usage = required_object_field json "usage" in
     let* state = required_string_field usage "state" in
+    let closed allowed =
+      validate_closed_object ~label:"skill usage.usage" ~allowed:("state" :: allowed) usage
+    in
     match state with
     | "ready" ->
+        let* () = closed [ "rows" ] in
         let* rows = required_list_field usage "rows" in
         let* rows = decode_list "usage.rows" decode_keeper_skill_usage_row rows in
         Ok (Keeper_usage_ready rows)
-    | "no_session" -> Ok Keeper_usage_no_session
+    | "no_session" ->
+        let* () = closed [] in
+        Ok Keeper_usage_no_session
     | "unavailable" ->
+        let* () = closed [ "reason"; "detail" ] in
         let* kua_reason = required_string_field usage "reason" in
         let* kua_detail = required_string_field usage "detail" in
         Ok (Keeper_usage_unavailable { kua_reason; kua_detail })
-    | "no_catalog" -> Ok Keeper_usage_no_catalog
+    | "no_catalog" ->
+        let* () = closed [] in
+        Ok Keeper_usage_no_catalog
     | unknown -> Error (Printf.sprintf "skill usage state has unknown value %S" unknown)
 
 let skill_flow_mermaid flow =

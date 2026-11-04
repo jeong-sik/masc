@@ -8,11 +8,10 @@
     fiber is installed and before the listener starts, so no reader misses
     them. The TUI saves through this server's routes and has no writer of its
     own. [masc config set], [masc web-search-setup], [masc voice-local-setup],
-    [masc runtime-default-set] and [masc browser-lane-setup] save through them
-    while this server runs, and write the file in their own process only when
-    no server of this workspace answers. [masc runtime-setup-batch] writes it
-    in its own process either way (RFC-0482 L3d); this process does not see
-    those writes.
+    [masc runtime-default-set], [masc browser-lane-setup] and
+    [masc runtime-setup-batch] save through them while this server runs, and
+    write the file in their own process only when no server of this workspace
+    answers (RFC-0482).
     [install ~sw ~base_path] forks a fiber on [sw] that waits for each move
     without polling and sends {!Runtime_config_changed_event} to [base_path]'s
     observers. Commits that land together send one signal. An edit

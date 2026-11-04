@@ -16,7 +16,9 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
           ended and what it wrote to stderr. *)
   | Commit_refused of string
       (** The commit that publishes the saved text refused it: the final
-          in-process validation disagreed with what the staged child accepted.
+          validation (in this process, or in the running server's save)
+          disagreed with what the staged child accepted, or the running server
+          refused the save.
           The string is the commit's refusal, several lines at most, carried
           whole by {!error_detail} rather than the one-line summary. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
@@ -31,6 +33,11 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
       (** Storage failed before rename. The prior configuration remains visible;
           the diagnostic is for the operator's terminal, never an HTTP error. *)
   | Lock_unavailable
+  | Commit_unobserved of string
+      (** {!configure_text} published the validated text to the workspace's
+          running server, and whether the server saved it is unknown: no
+          answer arrived, the server answered with an error after receiving
+          it, or its receipt could not be read. The string says which. *)
 type usage_limited = { runtime_id : string; code : string }
 (** A runtime whose provider declined the verification for the account's
     usage: a spent quota or a rate limit. It is published without a
@@ -50,14 +57,23 @@ type readiness =
     and says nothing about whether they ever passed a check. [limited] lists
     what was called and published unmeasured, and may be empty. A caller
     must not report the save as verified. *)
+type commit_record = { source_revision : string; order : string;
+                       durability : Runtime.config_durability;
+                       lock_warnings : Runtime.config_lock_warning list }
+(** What the publishing commit reported: the revision it wrote, its order, its
+    durability and the lock warnings, from this process's commit or from the
+    running server's answer. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
-                 readiness:readiness; commit:Runtime.config_commit_receipt }
+                 readiness:readiness; commit:commit_record }
 val error_message : error -> string
 (** One line: how the step ended and why, never a child's log. *)
 val error_detail : error -> string option
 (** Child stderr, final validation detail, or the filesystem failure diagnostic.
     For the operator's own terminal, not for HTTP responses. *)
 val revision_to_string : revision -> string
+val revision_of_text : string -> revision
+(** The setup revision of a runtime.toml text, as {!observe} computes it from
+    the file. *)
 val revision_of_string : string -> (revision,error) result
 val observe : base_path:string -> (revision,error) result
 val observe_inventory : base_path:string -> (revision * Runtime.config_observation,error) result
@@ -89,6 +105,19 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     published registry and is carried by [commit] in the receipt. A save is not
     owner activation or sandbox readiness. Pending credentials are retained
     after visible publication in the same cancellation-protected phase. *)
+val configure_text : ?default_lane_id:string -> binary:string -> original_text:string ->
+  expected_revision:revision -> specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
+  default_runtime_id:string -> verify:bool -> commit:(string -> (commit_record,error) result) ->
+  unit -> (receipt,error) result
+(** {!configure} for a workspace whose running server is the writer of
+    runtime.toml (RFC-0482 §3.2). The save is decided against [original_text],
+    the text the server holds, compared with [expected_revision] the way
+    {!observe} computes it; it is staged and verified here like {!configure};
+    and [commit] publishes the validated text and answers what it stored. No
+    local lock is held, so [commit] must refuse a text that moved since
+    [original_text] with [Changed_configuration]. Takes no pending
+    credentials: only the server's own setup route passes those. *)
+
 val receipt_json : receipt -> Yojson.Safe.t
 (** [commit.warnings] carries public warning codes only, never private lock paths
     or exception diagnostics. An empty list means the owning lock reported none. *)

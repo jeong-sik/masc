@@ -217,6 +217,9 @@ type workspace_store =
       (** A Goal projection source changed: the Goal store, the verification
           ledger, the measurement store or the verifier's observations
           ({!Masc.Goal_projection_broadcast}). *)
+  | Runtime_config
+      (** The server committed a runtime.toml text
+          ({!Masc.Runtime_config_changed_event}). *)
 
 (** A whole-projection push. The TUI re-reads what [Transport_health]
     measures ([/api/v1/dashboard/transport-health]); the others are named for
@@ -422,6 +425,9 @@ val schedules_changed : event -> bool
 
 val event_queue_changed : event -> string option
 (** The Keeper whose event queue or reaction record a push names. *)
+
+val runtime_config_changed : event -> bool
+(** runtime.toml changed on the server: a {!Runtime_config} change. *)
 
 val pending_confirms_changed : event -> bool
 (** The confirmations waiting for an operator changed or one passed its

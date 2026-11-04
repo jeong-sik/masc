@@ -4865,6 +4865,7 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
       (* Cadence ticks share a single read. Only an explicit new intent or a
          write queues another read, whose source must be newer than this one. *)
       state.runtime_config_read <- `Loading false;
+      state.runtime_config_owed <- Masc_tui_owed_read.started state.runtime_config_owed;
       state.runtime_config_generation <- state.runtime_config_generation + 1;
       let generation = state.runtime_config_generation in
       let requested_model = state.runtime_model_jump in
@@ -8008,6 +8009,19 @@ let owe_verification_read state =
 let owe_repositories_read state =
   state.repositories_owed <- Masc_tui_owed_read.changed state.repositories_owed
 
+(* runtime.toml reads when the server says it committed a text of it, on
+   arrival and on a revalidation, and again after a failed read (RFC-0482
+   L4). *)
+let owe_runtime_config_read state =
+  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed
+
+(* The panes that draw runtime.toml. *)
+let runtime_config_on_screen state =
+  state.view = Config
+  && (match state.config_pane with
+      | Config_runtime | Config_models | Config_themes -> true
+      | Config_prompts | Config_presets | Config_params | Config_voice -> false)
+
 (* The connectors read again when [gate_connector_changed] arrives while they
    are on screen, and after a failed read (RFC-0480 §3.1). *)
 let owe_connectors_read state =
@@ -8086,6 +8100,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | Config_params -> launch_runtime_params_load state ~mailbox
       | Config_voice -> launch_voice_config_load state ~mailbox
       | Config_runtime | Config_models | Config_themes ->
+          owe_runtime_config_read state;
           launch_runtime_config_load state ~mailbox)
   | Resources -> launch_resources_load state ~mailbox
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
@@ -8941,6 +8956,27 @@ let launch_owed_connectors state ~mailbox =
     state.connectors_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_connectors_load state ~mailbox
+  end
+
+(* Runs on every loop iteration. Off the panes that draw runtime.toml nothing
+   is owed: arriving on one reads it. A read already in flight is let finish
+   first. *)
+let launch_owed_runtime_config state ~mailbox =
+  if not (runtime_config_on_screen state) then
+    state.runtime_config_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading =
+      match state.runtime_config_read with
+      | `Loading _ -> true
+      | `Idle -> false
+    in
+    let read =
+      if reading then state.runtime_config_owed
+      else Masc_tui_owed_read.abandoned state.runtime_config_owed
+    in
+    state.runtime_config_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_runtime_config_load state ~mailbox
   end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
@@ -22717,6 +22753,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let async_requests_changed = ref false in
       let pending_confirms_changed = ref false in
       let schedules_changed = ref false in
+      let runtime_config_changed = ref false in
       let event_queue_keepers = ref [] in
       let runtime_journals = ref [] in
       let tool_modes_changed = ref false in
@@ -22830,6 +22867,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | None -> ());
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
               if Masc_tui_observer.schedules_changed event then schedules_changed := true;
+              if Masc_tui_observer.runtime_config_changed event then runtime_config_changed := true;
               Option.iter (fun keeper -> event_queue_keepers := keeper :: !event_queue_keepers)
                 (Masc_tui_observer.event_queue_changed event);
               Option.iter (fun appended -> runtime_journals := appended :: !runtime_journals)
@@ -23019,6 +23057,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !connectors_changed && not !observer_source_loss_seen then owe_connectors_read state);
       (if !transport_measured && not !observer_source_loss_seen then
          owe_pushed_read state Surface_read_source.Transport);
+      (if !runtime_config_changed && not !observer_source_loss_seen then owe_runtime_config_read state);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
@@ -24502,6 +24541,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if pending then launch_runtime_config_load state ~mailbox else
       match result with
       | Ok (snapshot : Masc_tui_runtime_config_snapshot.t) ->
+          state.runtime_config_owed <- Masc_tui_owed_read.succeeded state.runtime_config_owed;
           let reading = snapshot.reading in
           let path = reading.path in
           let metadata = reading.metadata in
@@ -24566,6 +24606,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              report_action state "error"
                (Printf.sprintf "runtime.toml has no [%s] section" section))
       | Error detail ->
+          state.runtime_config_owed <- failed_read state.runtime_config_owed;
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
@@ -32389,6 +32430,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
+      launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
@@ -41067,9 +41109,12 @@ Use relative paths for resources already held in the package. -->
              else if state.tools_pane=Tools_async && state.tools_async_detail_open then
                launch_tools_async_detail state ~mailbox:async_messages
              else launch_tools_load ~force:false state ~mailbox:async_messages
-         | Config ->
-             (* The file moves under hot-reload edits from other agents. *)
-             launch_runtime_config_load state ~mailbox:async_messages
+         (* runtime.toml re-reads on [runtime_config_changed], which the
+            server sends for every text it commits, and retries a failed read
+            ([launch_owed_runtime_config]). Every writer saves through the
+            server while it runs (RFC-0482); an edit made to the file by hand
+            has no writer to announce it. *)
+         | Config -> ()
          | Resources ->
              (* Loaded on arrival and on r. A tick-cadence relist would open
                 an MCP session every two seconds for an inventory that moves

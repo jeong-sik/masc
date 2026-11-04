@@ -144,6 +144,7 @@ let summary = function
   | Observer.Event (Observer.Dataset_changed dataset) ->
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -453,6 +454,19 @@ let test_a_goal_projection_change_is_named () =
   check bool "and only it is a Goal projection change" true
     (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Goal_projection)
      && not (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Schedule_store)))
+
+(* The server's runtime.toml commit announcement: the Config screen reads the
+   file on it (RFC-0482 L4). *)
+let test_a_runtime_config_change_is_named () =
+  check (list string) "the push reads as a runtime.toml change"
+    [ "runtime_config" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+              Masc.Runtime_config_changed_event.event_type ]));
+  check bool "and only it is a runtime.toml change" true
+    (Observer.runtime_config_changed (Observer.Workspace_store_changed Observer.Runtime_config)
+     && not (Observer.runtime_config_changed (Observer.Workspace_store_changed Observer.Goal_projection)))
 
 (* The metrics file's own announcement, not the heartbeat: the in-turn pulse
    sends [keeper_heartbeat] without writing a row. *)
@@ -1426,6 +1440,8 @@ let () =
             test_a_metrics_append_names_its_keeper
         ; test_case "a Goal projection change is named" `Quick
             test_a_goal_projection_change_is_named
+        ; test_case "a runtime.toml change is named" `Quick
+            test_a_runtime_config_change_is_named
         ; test_case "only a chat-appended event names a reload keeper" `Quick
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "only a memory journal event names a journal keeper" `Quick

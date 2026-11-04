@@ -14,6 +14,16 @@ val consume_item : t -> Yojson.Safe.t -> (t, string) result
 val note_unreadable : t -> t
 (** Count one unreadable item or physical row after the caller has logged it. *)
 
+val unbounded : unit -> t
+(** A projection with no observation-time bound, for the rows of one day
+    file kept between reads; {!absorb} applies the window when it answers. *)
+
+val absorb : t -> t -> t
+(** [absorb t kept] adds [kept]'s readings and unreadable count to [t] under
+    [t]'s window and the latest-reading rules of {!consume_item}. Absorbing
+    the day files' projections oldest first answers what consuming their
+    rows in that order would have. *)
+
 val response_json : days:int -> t -> Yojson.Safe.t
 (** Apply source/day replacement before selecting daily display points.
     [days] is the caller's validated window length. Empty reports remain

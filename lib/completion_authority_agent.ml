@@ -1232,11 +1232,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             | Ok (attempt,original,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
-               answered for the intended one. The judge kept running after the
-               July evaluation flow was removed, but this call went with it,
-               and the ledger starved for a month while verdicts flowed
-               (last record 2026-07-27; the surface read as a museum). A
-               non-verdict is a no-op inside. *)
+               answered for the intended one. A non-verdict is a no-op
+               inside. *)
             let reviewed_request = Verifier_review_original.review_request original in
             (* The v3 original freezes the generator runtime, not the submitting
                response identity. The current wake cannot bind that identity to

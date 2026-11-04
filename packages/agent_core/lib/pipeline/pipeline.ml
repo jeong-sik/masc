@@ -48,20 +48,11 @@ let stage_parse = Pipeline_stage_prepare.stage_parse
 
 (* ── Stage 3: Route ──────────────────────────────────────── *)
 
-(** Convert [Llm_provider.Http_client.http_error] into the [core_error]
-    shape the pre-[Complete] dispatch path used to surface (that path,
-    formerly [Api.create_message], was removed 2026-07-21). Keeps
-    downstream Pipeline/Retry/ContextOverflow handling source-compatible
-    now that Sync dispatch routes through {!Llm_provider.Complete.complete}.
-
-    HTTP status codes are re-classified via
-    {!Llm_provider.Retry.classify_error} so
-    ContextOverflow/RateLimited/etc. still map to the same variants. *)
 (** Sync dispatch via {!Llm_provider.Complete.complete}.  Routes all
     provider kinds through the consolidated path so [on_request_end]
     metrics fire and [Llm_transport.t] (set via [agent.options.transport])
-    handles CLI providers.  Streaming dispatch is likewise consolidated on
-    {!Llm_provider.Complete.complete_stream}; no legacy fallback remains. *)
+    handles CLI providers.  Streaming dispatch likewise goes through
+    {!Llm_provider.Complete.complete_stream}. *)
 let dispatch_sync = Pipeline_stage_route.dispatch_sync
 
 let dispatch_stream = Pipeline_stage_route.dispatch_stream

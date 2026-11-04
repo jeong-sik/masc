@@ -737,8 +737,7 @@ let lifecycle_to_string = function
 
 let metadata_to_fields name =
   let meta = metadata name in
-  (* The per-actor "surfaces" field was dropped in the surface-cut refactor.
-     External MCP discovery is represented by [is_public_mcp]; Keeper model
+  (* External MCP discovery is represented by [is_public_mcp]; Keeper model
      visibility is descriptor-owned and deliberately independent. *)
   let base =
     [

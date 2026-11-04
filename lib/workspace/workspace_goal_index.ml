@@ -722,9 +722,7 @@ let link_tasks_to_goals_result config links =
     associations. Each entry is [(goal_id, [task_id; ...])]. Task IDs
     are resolved against the supplied [tasks] list.
 
-    When [goal_task_links] is omitted, the index is empty. The old
-    fallback of deriving links from [task.goal_id] was removed as part
-    of the task↔goal boundary refactor. *)
+    When [goal_task_links] is omitted, the index is empty. *)
 let build_goal_task_index
       ?(goal_task_links : (string * string list) list = [])
       (tasks : task list)

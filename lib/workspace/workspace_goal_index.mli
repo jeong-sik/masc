@@ -21,9 +21,7 @@ val normalize_link_id : string -> string
     associations. Each entry is [(goal_id, [task_id; ...])]. Task IDs
     are resolved against the supplied [tasks] list.
 
-    When [goal_task_links] is omitted, the index is empty. The old
-    fallback of deriving links from [task.goal_id] was removed as part
-    of the task↔goal boundary refactor. *)
+    When [goal_task_links] is omitted, the index is empty. *)
 val build_goal_task_index
   :  ?goal_task_links:(string * string list) list
   -> Masc_domain.task list

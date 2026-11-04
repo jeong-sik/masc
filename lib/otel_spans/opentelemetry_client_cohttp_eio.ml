@@ -14,10 +14,10 @@ open Opentelemetry
 
 let ( let@ ) = ( @@ )
 let spf = Printf.sprintf
-(* Library [Opentelemetry.GC_metrics] sampling was removed here: it emitted
-   process.runtime.ocaml.gc.* series that duplicated the richer masc_gc_*
-   gauges exported through Otel_metric_store (and consumed by the Grafana
-   OCaml Heap / GC panels).  One signal, one name. *)
+(* GC series are the masc_gc_* gauges exported through Otel_metric_store
+   (and consumed by the Grafana OCaml Heap / GC panels), not library
+   [Opentelemetry.GC_metrics] sampling, whose process.runtime.ocaml.gc.*
+   series would duplicate them.  One signal, one name. *)
 
 type error =
   [ `Status of int * Opentelemetry.Proto.Status.status
@@ -349,9 +349,8 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
   let last_sent_metrics = Atomic.make (Mtime_clock.now ())
   let timeout_sent_metrics = Mtime.Span.(5 * s)
 
-  (* Required by Opentelemetry.Collector.BACKEND.  No-op: library GC
-     sampling was removed (process.runtime.ocaml.gc.* duplicated the
-     masc_gc_* gauges already exported via Otel_metric_store). *)
+  (* Required by Opentelemetry.Collector.BACKEND.  No-op: the masc_gc_*
+     gauges exported via Otel_metric_store are the GC series. *)
   let signal_emit_gc_metrics () = ()
 
   let additional_metrics () : Metrics.resource_metrics list =

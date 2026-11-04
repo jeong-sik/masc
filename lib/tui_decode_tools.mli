@@ -276,6 +276,9 @@ type tool_snapshot = {
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 (** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
 
+val skill_activation_keeper : skill_activation_projection -> string
+(** The Keeper a projection is for. *)
+
 val decode_keeper_skill_activations :
   keeper:string -> Yojson.Safe.t -> (skill_activation_projection, string) result
 (** Reads the [GET /api/v1/keepers/skill-activations?keeper=] answer for

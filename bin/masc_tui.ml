@@ -4031,6 +4031,15 @@ let launch_tools_load ?(force = true) state ~mailbox =
         state.tools_activations <- Some Activations_no_keeper;
         state.tools_activations_error <- None
     | Some keeper ->
+        (* A reading held for no Keeper or for another one is not this
+           Keeper's, so it is not kept on screen while this read runs. *)
+        (match state.tools_activations with
+         | Some (Activations_read projection)
+           when String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper -> ()
+         | Some (Activations_read _ | Activations_no_keeper) ->
+             state.tools_activations <- None;
+             state.tools_activations_error <- None
+         | None -> ());
         launch_workspace_json_read state ~mailbox
           ~deliver:(fun result ->
             Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }))

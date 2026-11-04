@@ -1333,10 +1333,13 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         @ tool_lines
     end
   in
-  let activation_lines =
+  let activation_reading_lines =
     lazy begin
     match state.tools_activations with
-    | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
+    | None ->
+        (match state.tools_activations_error with
+         | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
+         | Some _ -> [ Theme.warn (), " Skill Activations — unavailable (no reading)" ])
     | Some Masc_tui_types.Activations_no_keeper ->
         [ Theme.warn (), " Skill Activations — no Keeper selected" ]
     | Some
@@ -1654,6 +1657,17 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         @ timeline_lines
         @ scoped_lines
         @ receipt_lines
+    end
+  in
+  (* The Activations pane has its own read, so its failure is drawn here;
+     [error_lines] below speaks for the tool inventory. *)
+  let activation_lines =
+    lazy begin
+      (match state.tools_activations_error with
+       | None -> []
+       | Some error ->
+           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line error ])
+      @ Lazy.force activation_reading_lines
     end
   in
   let catalog_lines =

@@ -1171,6 +1171,12 @@ let decode_tool_snapshot json =
     ; ts_effective
     }
 
+let skill_activation_keeper = function
+  | Skill_activations_available { sap_keeper_name; sap_ledger = _ }
+  | Skill_activations_no_session { sap_keeper_name }
+  | Skill_activations_unavailable { sap_keeper_name; sap_reason = _; sap_detail = _ } ->
+      sap_keeper_name
+
 let keeper_skill_activations_schema = "masc.keeper-skill-activations/v1"
 
 let decode_keeper_skill_activations ~keeper json =

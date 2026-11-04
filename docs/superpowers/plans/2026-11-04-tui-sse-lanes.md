@@ -16,6 +16,7 @@
 - No polling fallback, new environment variable, screen-wording assertion, or local Dune build.
 - Preserve detached history, private instance visibility, pending actions, open drafts, and workspace withdrawal.
 - Do not emit a dataset for every worker commit without checking the actual Lanes/Inspect read can change.
+- Lanes freshness compares the served `/api/v1/lanes` projection, including merged browser identities and retained/declaration rows. A per-entry observation signature is not authoritative. Ordinary observation commits update cheap live state only; cold caches and rare declaration/retained writes may perform their scoped reads.
 
 ## Review Focus
 

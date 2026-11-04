@@ -138,10 +138,7 @@ type selection =
         from the fields kept. Evidence only; nothing is refused for it. *)
   ; dropped : Keeper_memory_os_types.dropped_statement list
     (** One statement per retired memory. The librarian names only what
-        changes; a current memory it does not name here stays, which is what
-        the apply step has always done. The whole-set roll call this answer
-        used to carry was checked and then discarded, and one slip in it threw
-        away the pass (RFC-0456). *)
+        changes; a current memory it does not name here stays. *)
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
     (** One statement per current memory a new claim names in [absorbs]
         (RFC-0456 §4.2). Each is current, in no [dropped] statement, and

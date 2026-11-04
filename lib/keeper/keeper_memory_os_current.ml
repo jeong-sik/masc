@@ -3255,16 +3255,8 @@ let committed_unread_messages ~keepers_dir ~keeper_id =
 (* Apply a librarian's disposition to whatever the snapshot holds when the
    lock is taken.
 
-   The librarian says three things about the facts it was shown: keep this one,
-   retire that one for this reason, add these new claims. Those statements are
-   what it decided; the whole-set list it also carries is a projection of them
-   against the snapshot it read, and projecting early is what forced the write
-   to demand that nothing had changed since. A keeper recording one fact of its
-   own during the pass moved the revision and the pass was thrown away -- 758
-   times on the fleet, 590 of them in one week (masc #32859).
-
-   A fact the disposition never mentions is one the librarian never saw, so it
-   is left alone. That is the whole difference.
+   The librarian says what changes: retire that one for this reason, add these
+   new claims. A fact the disposition never mentions is left alone.
 
    A fact the librarian retires is retired even if the keeper re-observed it
    during the pass: the judgment was about the claim, and a re-observation does

@@ -145,7 +145,6 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
   http_approvals: approval_observation option;
   http_scoped: http_scoped_surface_results;
   (* Mandatory on every refresh: the same endpoint may name a different
@@ -301,7 +300,6 @@ type async_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
-  | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
@@ -424,6 +422,7 @@ type async_msg =
       string * int * (Measurement.t, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
+  | Overview_loaded of (overview_snapshot, string) result
   | Fusion_runs_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
   | Fusion_detail_loaded of
@@ -982,7 +981,7 @@ let rec workspace_message_is_read = function
   | Lane_run_detail_loaded _
   | Measurement_artifact_loaded _
   | Verification_loaded _
-  | Harness_loaded _
+  | Harness_loaded _ | Overview_loaded _
   | Fusion_runs_loaded _
   | Fusion_detail_loaded _
   | Fusion_historical_detail_loaded _
@@ -1079,7 +1078,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -1174,7 +1173,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Voice_wizard_saved _ | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
   | Voice_wizard_probed _ | Voice_wizard_reread _ | Voice_config_loaded _ | Voice_calibrated _
   | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _
+  | Http_asks_loaded _ | Http_approvals_loaded _
   | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _
   | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _
   | Http_initial_identity_read _ | Http_refresh_done _ | Http_refresh_failed _
@@ -1189,7 +1188,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Context_inspector_part_loaded _ | Keeper_chat_older_loaded _ | Live_context_loaded _
   | Local_keepers_read _ | Local_workspace_read _ | Keeper_composite_loaded _ | Lane_inventory_loaded _
   | Clients_loaded _ | Lane_runs_loaded _ | Lane_run_detail_loaded _
-  | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _
+  | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _ | Overview_loaded _
   | Fusion_runs_loaded _ | Fusion_detail_loaded _ | Fusion_historical_detail_loaded _
   | Fusion_launch_options_loaded _ | Fusion_launched _ | Memory_recall_standing_loaded _
   | Repositories_loaded _
@@ -1315,7 +1314,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1336,7 +1335,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_composite_loaded (_, _, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
     | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
-    | Harness_loaded _ | Fusion_runs_loaded (_, _)
+    | Harness_loaded _ | Overview_loaded _ | Fusion_runs_loaded (_, _)
     | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
     | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
     | Memory_recall_standing_loaded (_, _)
@@ -1457,7 +1456,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
@@ -1475,7 +1474,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
   | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
   | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
-  | Harness_loaded _ | Fusion_runs_loaded (_, _)
+  | Harness_loaded _ | Overview_loaded _ | Fusion_runs_loaded (_, _)
   | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
   | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
   | Memory_recall_standing_loaded (_, _)

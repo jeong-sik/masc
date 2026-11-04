@@ -1573,6 +1573,7 @@ describe('fetchDashboardTools', () => {
     expect(parseDashboardKeeperWaitingSource('chat_operation_queued')).toBe('chat_operation_queued')
     expect(parseDashboardKeeperWaitingSource('chat_operation_running')).toBe('chat_operation_running')
     expect(parseDashboardKeeperWaitingSource('observation_unavailable')).toBe('observation_unavailable')
+    expect(parseDashboardKeeperWaitingSource('runtime_quota_spent')).toBe('runtime_quota_spent')
     expect(parseDashboardKeeperWaitingSource(' owner_shutdown ')).toBeNull()
     expect(parseDashboardKeeperWaitingSource('owner_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()

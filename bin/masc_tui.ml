@@ -8636,6 +8636,36 @@ let failed_read owed =
 
 let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
 
+(* The Planning screen's Goals and their tree read again when
+   [goal_projection_changed] or [execution_snapshot] arrives while Planning is
+   on screen, and after a failed read (RFC-0480 §3.1). The read on entering
+   Planning and a revalidation ride the surface refresh. *)
+let owe_planning_reads state =
+  state.planning_owed <- Masc_tui_owed_read.changed state.planning_owed;
+  state.overview_goals_owed <- Masc_tui_owed_read.changed state.overview_goals_owed
+
+(* Every read that asks for a Planning dataset starts its debt, whatever
+   started it: a read on entering Planning or a revalidation that is
+   superseded before it answers leaves the dataset owed, and
+   [launch_owed_planning] reads it again. *)
+let note_planning_reads_started state (needs : Masc_tui_types.surface_needs) =
+  if needs.needs_planning then
+    state.planning_owed <- Masc_tui_owed_read.started state.planning_owed;
+  if needs.needs_overview_goals then
+    state.overview_goals_owed <- Masc_tui_owed_read.started state.overview_goals_owed
+
+let settle_planning_read state result =
+  state.planning_owed <-
+    (match result with
+     | Ok _ -> Masc_tui_owed_read.succeeded state.planning_owed
+     | Error _ -> failed_read state.planning_owed)
+
+let settle_overview_goals_read state result =
+  state.overview_goals_owed <-
+    (match result with
+     | Ok _ -> Masc_tui_owed_read.succeeded state.overview_goals_owed
+     | Error _ -> failed_read state.overview_goals_owed)
+
 (* The questions a Keeper or an installation puts to the operator read again
    when their log changes, on a resumed authority, and after a failed read
    (RFC-0480 §3.1). Every full refresh but the cadence reads them too. *)
@@ -15376,7 +15406,9 @@ let apply_provider_history_load state (days, result) =
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
    observed this refresh. *)
-let apply_overview_goals_load state = function
+let apply_overview_goals_load state result =
+  settle_overview_goals_read state result;
+  match result with
   | Ok goals -> state.overview_goals <- Goals_read goals
   | Error err -> state.overview_goals <- Goals_failed err
 
@@ -15490,7 +15522,9 @@ let apply_keeper_roster_observation state observation =
       apply_keeper_roster_load state result;
       Result.is_ok result
 
-let apply_planning_load state = function
+let apply_planning_load state result =
+  settle_planning_read state result;
+  match result with
   | Ok planning ->
       let goal_ids planning =
         planning_visible_goals ~filter:state.planning_filter
@@ -18458,15 +18492,21 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          Board read in flight keeps its datasets. It leaves the Keeper
          roster out too: the roster reads the rows the server names and the
          whole roster when every row changed ([launch_owed_keeper_roster],
-         RFC-0481 §3.3). *)
+         RFC-0481 §3.3). Planning and its Goals tree read on
+         [goal_projection_changed] and [execution_snapshot]
+         ([launch_owed_planning]). *)
       let current = current_surface_needs state in
       match intent with
       | Revalidate -> current
-      | Cadence -> { current with needs_board = false; needs_keeper_roster = false }
+      | Cadence ->
+          { current with
+            needs_board = false; needs_keeper_roster = false
+          ; needs_planning = false; needs_overview_goals = false }
     in
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
       else None in
+    note_planning_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19036,6 +19076,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let refresh_ticket = Http_refresh_order.for_navigation
       ~collection_inflight state.http_refresh_order in
     state.http_refresh_order <- refresh_ticket;
+    note_planning_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19155,6 +19196,41 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with needs_board = true }
     end
+  end
+
+(* Runs on every loop iteration. A dataset already in flight is let finish
+   first; one that ended without an answer leaves its read owed again. Only
+   the datasets whose debt is due are read; the scoped refresh records their
+   start ([note_planning_reads_started]). *)
+let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  if state.view <> Planning then begin
+    state.planning_owed <- Masc_tui_owed_read.settled;
+    state.overview_goals_owed <- Masc_tui_owed_read.settled
+  end else begin
+    let pending dataset =
+      Surface_read_order.pending_dataset state.http_surface_reads dataset
+    in
+    let planning_reading = pending Surface_read_order.Planning_data in
+    let goals_reading = pending Surface_read_order.Overview_goals_data in
+    let planning =
+      if planning_reading then state.planning_owed
+      else Masc_tui_owed_read.abandoned state.planning_owed
+    in
+    let goals =
+      if goals_reading then state.overview_goals_owed
+      else Masc_tui_owed_read.abandoned state.overview_goals_owed
+    in
+    state.planning_owed <- planning;
+    state.overview_goals_owed <- goals;
+    let now = monotonic_now_s () in
+    let planning_due = Masc_tui_owed_read.due ~now planning && not planning_reading in
+    let goals_due = Masc_tui_owed_read.due ~now goals && not goals_reading in
+    if (planning_due || goals_due) && server_authority_ready state then
+      start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+        ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
+        ~needs:{ Masc_tui_types.nothing with
+                 needs_planning = planning_due; needs_overview_goals = goals_due }
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
@@ -22456,6 +22532,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let selected_tool_called = ref false in
       let open_board_post_changed = ref false in
       let board_changed = ref false in
+      let goals_changed = ref false in
       let gate_changed = ref false in
       let held_calls_changed = ref false in
       let asks_changed = ref false in
@@ -22565,6 +22642,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 verification_changed := true;
               if Masc_tui_observer.repositories_changed event then repositories_changed := true;
               if Masc_tui_observer.gate_connector_changed event then connectors_changed := true;
+              if Masc_tui_observer.goal_projection_changed event then goals_changed := true;
               (match Masc_tui_observer.turn_change event with
                | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
@@ -22597,7 +22675,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Goal_projection_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
@@ -22650,7 +22728,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Goal_projection_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22789,6 +22867,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (board_post_on_screen state));
       (if !board_changed && not !observer_source_loss_seen && state.view = Board then
          owe_board_list_read state);
+      (* The planning payload carries the task backlog, which a task write
+         announces as [execution_snapshot]. *)
+      (if (!goals_changed || !execution_snapshot_seen) && not !observer_source_loss_seen
+          && state.view = Planning then
+         owe_planning_reads state);
       (if !gate_changed && not !observer_source_loss_seen then owe_gate_snapshot_read state);
       (if !held_calls_changed && not !observer_source_loss_seen then owe_held_calls_read state);
       (if !asks_changed && not !observer_source_loss_seen then owe_asks_read state);
@@ -32121,6 +32204,9 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_schedules state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
+        ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
+        ~mailbox:async_messages;
+      launch_owed_planning state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface

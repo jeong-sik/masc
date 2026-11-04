@@ -226,6 +226,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Other "brand_new_push"
     ; Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane
     ; Observer.Schedule_store_invalidated
+    ; Observer.Goal_projection_changed
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -240,7 +241,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all fourteen" 14 (under Acting.Everything);
+  check int "everything keeps all fifteen" 15 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
 

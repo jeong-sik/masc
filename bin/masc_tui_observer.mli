@@ -283,6 +283,11 @@ type event =
   | Verification_requests_changed
       (** The workspace's verification request store was written. A server
           push with no payload, named by {!Masc.Verification_request_broadcast}. *)
+  | Goal_projection_changed
+      (** A Goal projection source changed: the Goal store, the verification
+          ledger, the measurement store or the verifier's observations. A
+          server push with no payload, named by
+          {!Masc.Goal_projection_broadcast}. *)
   | Repositories_changed
       (** The workspace's repository catalog was written. A server push with
           no payload, named by {!Masc.Repository_catalog_broadcast}. *)
@@ -376,6 +381,9 @@ val gate_connector_changed : event -> bool
 (** [true] for {!Gate_connector_changed}. The Connectors list and a Keeper's
     channels tab read the connectors again on it. *)
 
+val goal_projection_changed : event -> bool
+(** Whether [event] is {!Goal_projection_changed}. The Planning screen reads
+    its Goals again on this. *)
 val verification_requests_changed : event -> bool
 (** The verification request store, or the verification run registry a
     request row reads its review from, changed. The goal-verification and

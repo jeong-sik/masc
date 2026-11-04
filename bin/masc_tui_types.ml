@@ -10129,6 +10129,11 @@ type state = {
   (* The read the Board list and hearth census owe while the Board is on
      screen. *)
   mutable board_list_owed: Masc_tui_owed_read.t;
+  (* The Planning screen's two datasets read again on [goal_projection_changed]
+     and [execution_snapshot]; each keeps its own debt, since one can fail
+     while the other answers. *)
+  mutable planning_owed: Masc_tui_owed_read.t;
+  mutable overview_goals_owed: Masc_tui_owed_read.t;
   (* The read the questions to the operator owe on every surface. *)
   mutable asks_owed: Masc_tui_owed_read.t;
   (* The read the durable async requests owe while the Keepers list or Tools is on screen. *)
@@ -19644,6 +19649,8 @@ let create_state
   keeper_calls_owed = None;
   board_post_owed = None;
   board_list_owed = Masc_tui_owed_read.settled;
+  planning_owed = Masc_tui_owed_read.settled;
+  overview_goals_owed = Masc_tui_owed_read.settled;
   asks_owed = Masc_tui_owed_read.settled;
   async_requests_owed = Masc_tui_owed_read.settled;
   pending_confirms_owed = Masc_tui_owed_read.settled;

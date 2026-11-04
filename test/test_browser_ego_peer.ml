@@ -1046,7 +1046,7 @@ let test_target_dialog_keeps_release_uncertain_until_a_clean_receipt () =
       | Input.Uncertain pending -> pending
       | Ready _ -> fail "dialog-interrupted gesture lost its original input" in
     check bool "pending input belongs to the original command and Page" true
-      (pending.command_id="original-target-gesture" && pending.tab_id=1 && pending.page_label="p1");
+      (pending.command_id="original-target-gesture" && pending.page_label="p1");
     check string "answering the dialog succeeds" "served" (failure_kind (dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
     check bool "answering the dialog preserves the exact pending generation" true
@@ -3532,7 +3532,7 @@ let test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles (
          let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
            | Ready _ -> fail "nonempty workflow did not acquire input ownership" in
          check bool "the running click holds the original tab's input" true
-           (pending.tab_id=1 && pending.page_label="p1" && pending.operation="native_workflow");
+           (pending.page_label="p1");
          input_commands := (pending.command_id,selector) :: !input_commands;
          (match selector with
           | "#dialog" -> answered (obj [
@@ -3639,7 +3639,7 @@ let test_popup_workflow_identity_and_scope () =
    | other -> failf "expected typed popup partial failure, got %s" (failure_kind other));
   (match Peer.input_status peer with
    | Input.Uncertain pending -> check bool "lost multi-Page input is scoped to the original Space without guessing a Page" true
-       (pending.scope=Input.Space_scope && pending.tab_id=1)
+       (pending.scope=Input.Space_scope && pending.page_label="p1")
    | Ready _ -> fail "popup child input was incorrectly released");
   ignore (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup]));
   check int "a new popup input runs once and the unknown child input is not replayed" 2 !issued

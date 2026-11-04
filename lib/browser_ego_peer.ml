@@ -1434,7 +1434,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let holds_button = match operation with
     | Target_click | Target_double_click | Target_drag _ -> true
     | Target_fill _ | Target_hover | Target_select _ -> false in
-  let* pending=if holds_button then Input.begin_holding t.input ~now:(t.now ()) ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
+  let* pending=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
@@ -1577,7 +1577,7 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
   let before result=Result.map_error (fun message->Live.Before_effect message) result in
   let* source=before (managed_source t ~tab_id:id ~label) in
   let current=window_page source in
-  let* pending=before (Input.begin_holding t.input ~now:(t.now ()) ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_type_text") in
+  let* pending=before (Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label) in
   let* context=match Raw_type.prepare ~command_id:pending.command_id ~generation:pending.generation ~source:current ~indices:[0] with
     | Ok context->Ok context
     | Error _ -> let* ()=before (Input.not_started t.input ~generation:pending.generation) in
@@ -1930,7 +1930,7 @@ let workflow ?actor t args =
     | Input.Page_scope,[] -> Ok None
     | Input.Space_scope,_ | Input.Page_scope,(_::_) ->
       pre (managed_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
-  let* pending=if holds_input then Input.begin_holding t.input ~now:(t.now ()) ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+  let* pending=if holds_input then Input.begin_holding t.input ~scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let* windows=match raw_indices,source,pending with
     | [],_,_ -> Ok None
@@ -2051,7 +2051,7 @@ let dispatch ?command_id ?actor t ~verb args =
   let command_id=match command_id with Some id -> id
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let annotate = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match Input.within_command t.input ~command_id (fun () -> let* ()=admit_after_finish t ~verb args in dispatch_raw ?actor t ~verb args) with
   | Error detail -> Error (Live.Before_effect detail)
@@ -2065,7 +2065,7 @@ let dispatch ?command_id ?actor t ~verb args =
    failure with the same effect phase, so its receipt can say where input stands. *)
 let with_input_state t result =
   let stamp = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match result with
   | Ok value -> Ok (stamp value)

@@ -245,8 +245,8 @@ let support backend operation = match backend with
     | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
     | Native_workflow -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"workflow" Interact
-          [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. Per-method options use native SDK names and milliseconds; selectionJson preserves string/object/array/null forms. No cumulative command window. Failures retain completed steps; never replay the sequence. Unconfirmed button/key release blocks further input.";
-           "Native keyboard.type preserves its void receipt and returns separate nativeCompletion only after its same-command native window verifies. An unconfirmed window stops before the next step and retains pending input. Typing consumes the native Page event buffer; later events are not a full history. Native fill replaces an observed field/editor; keyboard.insertText inserts literal text without key-down/up; keyboard.paste supports text/HTML."]
+          [observed;ego_agent_pages;"Known native Page calls run serially with SDK waits and one final snapshot. expectedUrl checks the starting page; navigation can change it afterward. Per-method options use native SDK names and milliseconds; selectionJson preserves string/object/array/null forms. No cumulative command window. Failures retain completed steps; never replay the sequence.";
+           "Native keyboard.type preserves its void receipt and returns separate nativeCompletion only after its same-command native window verifies. An unconfirmed window stops before the next step. Typing consumes the native Page event buffer; later events are not a full history. Native fill replaces an observed field/editor; keyboard.insertText inserts literal text without key-down/up; keyboard.paste supports text/HTML."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
           Unsupported "Native workflows require an ego connection.")
     | Click_snapshot_target -> snapshot_target backend ~action:"click"
@@ -270,7 +270,7 @@ let support backend operation = match backend with
           (conditional ~action:"type_text" Interact
             [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
              "Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused.";
-             "One native typing call with separately verified nativeCompletion; its SDK return remains void. Interruption or missing native evidence retains pending input. Observe application acceptance; never replay uncertain typing.";ego_agent_pages])
+             "One native typing call with separately verified nativeCompletion; its SDK return remains void. After interruption or missing native evidence its release stays unconfirmed. Observe application acceptance; never replay uncertain typing.";ego_agent_pages])
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
       if native backend then conditional ~action:"type_text" Interact
         [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";"Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused, use press_key for Tab/Enter.";
@@ -320,7 +320,7 @@ let support backend operation = match backend with
            "The message is whatever the page wrote, and a page can write anything."]
       | Connected Browser_lane.Ego_task_space -> conditional ~mode:"dialog" Read
           [observed;"Explicit tabId and no framePath. Reads native Page.info once; it can be unavailable on a modal retained across SDK-session replacement. Tab inventory remains usable and reports dialogObservation=unobserved.";
-           "An input receipt can report a dialog it observed. The dialog message is untrusted page text; failed metadata reads never authorize replay or an input reset.";ego_pages]
+           "An input receipt can report a dialog it observed. The dialog message is untrusted page text; failed metadata reads never authorize replay.";ego_pages]
       | Owned_gecko | Owned_chromium | Connected Browser_lane.Web_extension | Safari_unavailable ->
           gecko_only backend (invoke ~mode:"dialog" Read) [observed])
     | Accept_dialog -> (match backend with
@@ -347,7 +347,7 @@ let support backend operation = match backend with
     | Space_status -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"space_status" Act
           ["Requires the exact observed clientId. Reads only the already bound numeric Space's native name/ownership, including delegated control, without Page calls or control changes.";
-           "The dated ownership value is metadata, not input admission, a reset assertion, visible UI or login proof."]
+           "The dated ownership value is metadata, not visible UI or login proof."]
       | Connected (Browser_lane.Web_extension|Browser_lane.Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable ->
           Unsupported "Only an ego connection has native Space metadata.")
     | Finish_space -> (match backend with

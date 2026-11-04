@@ -1,15 +1,11 @@
-(** Where the last input-holding command on one Ego connection stands. This is
-    an observation for answers, never input admission: an input whose release
-    is unconfirmed does not refuse the next one. *)
+(** Where the last input-holding command on one Ego connection stands. Answers
+    report it as [inputReadiness]; the next input runs either way. *)
 type scope = Page_scope | Space_scope
 type pending = private {
   generation : string;
   command_id : string;
-  tab_id : int;
   page_label : string;
-  operation : string;
   scope : scope;
-  held_at : float;
 }
 (** One input-holding command, from just before its native effect. *)
 type readiness =
@@ -23,12 +19,11 @@ type t
 val create : space_id:int -> t
 (** One connection's state for the numeric native Space it is bound to. *)
 val status : t -> status
-val busy : t -> bool
 val within_command : t -> command_id:string -> (unit -> 'a) -> ('a, string) result
 (** Reject overlapping commands on one connection. Cancellation releases only
     the local running marker. *)
 
-val begin_holding : t -> now:float -> scope:scope -> tab_id:int -> page_label:string -> operation:string -> (pending, string) result
+val begin_holding : t -> scope:scope -> page_label:string -> (pending, string) result
 (** Record the intent inside the original command scope, before the native
     effect. An earlier unconfirmed input is kept as the readiness to restore if
     this one never starts. Space_scope preserves the originating Page identity
@@ -43,5 +38,5 @@ val command_settled : t -> generation:string -> Browser_ego_release.proof -> (un
 val not_started : t -> generation:string -> (unit, string) result
 (** Restore the readiness before this pending generation. *)
 
-val provenance : t -> string
-(** [command_settled] or [release_uncertain]. *)
+val readiness_wire : t -> string
+(** The [inputReadiness] answer value: [command_settled] or [release_uncertain]. *)

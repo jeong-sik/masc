@@ -11,8 +11,7 @@ let source : Window.page = {space_id=7;native={Masc.Browser_surface.label=Some "
 let page_json (page:Window.page) = `Assoc (("spaceId",`Int page.space_id)
   :: Masc.Browser_surface.ego_page_fields page.native)
 let begin_input input command = ok (ok (Input.within_command input ~command_id:command
-  (fun () -> Input.begin_holding input ~now:100. ~scope:Input.Page_scope ~tab_id:3
-    ~page_label:"p1" ~operation:"native_type")))
+  (fun () -> Input.begin_holding input ~scope:Input.Page_scope ~page_label:"p1")))
 let with_native_cases context consume =
   let directory=Filename.temp_dir ~perms:0o700 "masc-raw-type-" "" in
   Fun.protect ~finally:(fun () ->
@@ -111,10 +110,17 @@ let pending_and_space_fences () = with_cases (fun input pending context cases ->
   check bool "stale generation cannot settle actual pending" true
     (Result.is_error (Input.command_settled input ~generation:"stale" proof));
   check bool "stale generation leaves the pending input" true (Input.status input=Input.Uncertain pending);
+  (* The other connection's own command and generation, on a Page of Space 7:
+     only the Space differs. *)
   let elsewhere=Input.create ~space_id:8 in
   let other=begin_input elsewhere "actual-issued-command" in
-  check bool "another Space cannot settle this Space's native-window proof" true
-    (Result.is_error (Input.command_settled elsewhere ~generation:other.Input.generation proof));
+  let other_context=ok (Raw.prepare ~command_id:other.Input.command_id ~generation:other.generation
+    ~source ~indices:[0]) in
+  with_native_cases other_context (fun other_cases ->
+    let other_expected,other_completion=completed other_context other_cases "normal" in
+    let other_proof=released [0,ok (Release.answer_of_window ~expected:other_expected other_completion)] in
+    check bool "another Space cannot settle a native-window proof from this Space's Page" true
+      (Result.is_error (Input.command_settled elsewhere ~generation:other.generation other_proof)));
   ok (Input.command_settled input ~generation:pending.Input.generation proof);
   check bool "the exact pending generation settles from its native completion" true
     (Input.status input=Input.Ready Command_settled))

@@ -218,7 +218,7 @@ val input_status : t -> Browser_ego_input.status
     object receipt without a dialog. Raw [type_text] and workflow
     [keyboard.type] retain the SDK's void return and carry separately verified
     native-window completion. The same command, generation and canonical
-    source/current Page bind that evidence before retained Input settlement;
+    source/current Page bind that evidence before Input settlement;
     it does not attest physical input freshness or application acceptance.
     The fixed producer stops before later workflow actions when its interval
     is unconfirmed, and the Host independently checks it. Native event captures

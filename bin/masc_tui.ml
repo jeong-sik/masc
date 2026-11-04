@@ -8042,6 +8042,18 @@ let owe_overview_read state =
 let owe_lanes_read state =
   state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
 
+let owe_lane_addons_read state =
+  state.lane_addons_owed <- Masc_tui_owed_read.changed state.lane_addons_owed
+
+(* The overview shows every instance; a detail shows its own. *)
+let lane_addons_show_instance state instance_id =
+  match state.lane_addons with
+  | None -> false
+  | Some view ->
+      (match view.Masc_tui_lane_addons.screen with
+       | Masc_tui_lane_addons.Overview -> true
+       | Masc_tui_lane_addons.Detail (id, _) -> String.equal id instance_id)
+
 (* The Runtime surface reads again when the server announces a probe landed,
    a runtime history row, a usage report, a standing change or a runtime.toml
    commit, which move its probe, history and resolved document, and after a
@@ -8151,6 +8163,13 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
   | Masc.Workspace_dataset_event.Lanes -> owe_lanes_read state
+  | Masc.Workspace_dataset_event.Lane_addon_instance { instance_id } ->
+      if lane_addons_show_instance state instance_id then owe_lane_addons_read state
+  | Masc.Workspace_dataset_event.Lane_addon_configuration ->
+      if Option.is_some state.lane_addons then begin
+        owe_lane_addons_read state;
+        state.lane_application_owed <- Masc_tui_owed_read.changed state.lane_application_owed
+      end
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -9056,6 +9075,61 @@ let launch_owed_lanes state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.standalone_lanes_inflight
     then launch_lanes_load state ~mailbox
   end
+
+(* Runs on every loop iteration. A closed pane owes nothing: opening it
+   reads. An open pane reads what it owes once no read is out and no draft,
+   document, action menu, installer, subscription panel or evidence prompt
+   holds it; a pending action reads its status instead, which never submits
+   the action again. While one of those holds it, a moved declaration reading
+   still reads the configuration alone. *)
+let launch_owed_lane_addons state ~mailbox =
+  match state.lane_addons with
+  | None ->
+      state.lane_addons_owed <- Masc_tui_owed_read.settled;
+      state.lane_addons_owed_generation <- None;
+      state.lane_application_owed <- Masc_tui_owed_read.settled
+  | Some view ->
+      let reading =
+        match state.lane_addons_owed_generation with
+        | Some generation -> view.loading && view.generation = generation
+        | None -> false
+      in
+      if not reading then begin
+        state.lane_addons_owed_generation <- None;
+        state.lane_addons_owed <- Masc_tui_owed_read.abandoned state.lane_addons_owed
+      end;
+      let held =
+        Option.is_some view.draft || Option.is_some view.document_key
+        || Option.is_some view.action_menu || Option.is_some view.installer
+        || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
+      in
+      let application_pending = Masc_tui_lane_application.pending view.application_reading in
+      if not application_pending then
+        state.lane_application_owed <- Masc_tui_owed_read.abandoned state.lane_application_owed;
+      let now = monotonic_now_s () in
+      if server_authority_ready state && not view.loading then
+        if held then begin
+          if Masc_tui_owed_read.due ~now state.lane_application_owed && not application_pending
+          then begin
+            state.lane_application_owed <- Masc_tui_owed_read.started state.lane_application_owed;
+            launch_lane_application state ~mailbox
+          end
+        end
+        else if Masc_tui_owed_read.due ~now state.lane_addons_owed then begin
+          let request =
+            match Masc_tui_lane_addons.pending_action view with
+            | Some action -> Masc_tui_lane_addons.Action_status action
+            | None -> Masc_tui_lane_addons.Inspect
+          in
+          let before = state.lane_addons_generation in
+          state.lane_addons_owed <- Masc_tui_owed_read.started state.lane_addons_owed;
+          (* The inspection reads the configuration too; a change after it
+             starts owes both again. *)
+          state.lane_application_owed <- Masc_tui_owed_read.settled;
+          launch_lane_addons state ~mailbox request;
+          if state.lane_addons_generation <> before
+          then state.lane_addons_owed_generation <- Some state.lane_addons_generation
+        end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -19005,6 +19079,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight
        owe_chat_journal_reads state;
        owe_overview_read state;
        owe_lanes_read state;
+       if Option.is_some state.lane_addons then owe_lane_addons_read state;
        if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state);
   scoped_refresh_followup :=
     note_full_refresh_intent
@@ -22402,6 +22477,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       refresh_queue_after_priority state ~mailbox ~keeper_name;
       drain_queued_message state ~base_path ~mailbox
   | Lane_application_loaded (ticket,result) ->
+      state.lane_application_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.lane_application_owed
+         | Error _ -> failed_read state.lane_application_owed);
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
   | Lane_subscriptions_loaded (generation,result) ->
@@ -22413,6 +22492,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, target, result) ->
+      if state.lane_addons_owed_generation = Some generation then begin
+        state.lane_addons_owed_generation <- None;
+        state.lane_addons_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.lane_addons_owed
+           | Error _ -> failed_read state.lane_addons_owed)
+      end;
       let showing = Option.is_some state.lane_addons in
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -32817,6 +32903,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_lanes state ~mailbox:async_messages;
+      launch_owed_lane_addons state ~mailbox:async_messages;
       reconcile_contact_retry state ~mailbox:async_messages
         ~refresh_inflight:!http_refresh_inflight;
       launch_owed_runtime_config state ~mailbox:async_messages;
@@ -41394,19 +41481,8 @@ Use relative paths for resources already held in the package. -->
           | Server -> ()
           | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
         end;
-        (* The visible Add-ons pane follows the existing refresh cadence.
-           Status reads reuse the accepted request; they never submit it again. *)
-        (match state.lane_addons with
-         | Some view when not view.loading && Option.is_none view.draft
-              && Option.is_none view.document_key && Option.is_none view.action_menu
-              && Option.is_none view.installer && Option.is_none view.subscription_panel
-              && Option.is_none view.evidence_prompt ->
-             let request = match Masc_tui_lane_addons.pending_action view with
-               | Some action -> Masc_tui_lane_addons.Action_status action
-               | None -> Masc_tui_lane_addons.Inspect in
-             launch_lane_addons state ~mailbox:async_messages request
-         | Some _ -> launch_lane_application state ~mailbox:async_messages
-         | None -> ());
+        (* The open Add-ons pane re-reads when the server says what it shows
+           moved and retries a failed read ([launch_owed_lane_addons]). *)
         (* Also refresh logs / Board detail if viewing them. *)
         (match state.view with
          | Code -> ()

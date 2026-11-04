@@ -70,14 +70,14 @@ TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에
 
 ## 2. 장부를 쓰는 곳
 
-추가 기록은 모두 `commit_event_locked`(`lib/keeper/keeper_skill_activation_ledger.ml:2407`) 하나를 지난다. 이 함수는 세션 잠금 안에서 한 줄을 붙이고 프로세스 안의 장부 캐시를 고친다. 이 함수를 부르는 공개 함수는 이렇다.
+추가 기록은 모두 `commit_event_locked`(`lib/keeper/keeper_skill_activation_ledger.ml:2412`) 하나를 지난다. 이 함수는 세션 잠금 안에서 한 줄을 붙이고 프로세스 안의 장부 캐시를 고친다. 이 함수를 부르는 공개 함수는 이렇다.
 
 | 함수 | 기록 | 부르는 곳 |
 |---|---|---|
 | `record` | `Activation_recorded` | `keeper_skill_activation_recorder.ml:279` |
 | `record_original_invocation` | `Activation_recorded` | 같은 파일 :245 |
-| `observe_delivery` | `Deliveries_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2613) | recorder :345 |
-| `observe_action` | `Action_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2756) | recorder :369, :386 |
+| `observe_delivery` | `Deliveries_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2618) | recorder :345 |
+| `observe_action` | `Action_observed`. 전이를 거절하면 `Transition_rejected`(ledger.ml:2761) | recorder :369, :386 |
 | `observe_async_result_delivery` | `Async_result_delivered` | `keeper_composition_result_delivery.ml:375` |
 | `observe_async_action` | `Async_action_observed` | `keeper_skill_async_action_observer.ml:65` |
 

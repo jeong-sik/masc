@@ -52,7 +52,6 @@
   masc.auth
   masc.http_client
   masc_cli_keeper_create
-  masc_cli_board_posts_initialization
    masc.agent_core.digest
   masc_tui_editor
   masc.crypto_rng
@@ -1694,13 +1693,6 @@
  (wrapped false)
  (modules masc_tui_editor)
  (libraries unix))
-
-;; Offline posts commands share the actual Cmdliner leaf with focused tests.
-(library
- (name masc_cli_board_posts_initialization)
- (wrapped false)
- (modules masc_cli_board_posts_initialization)
- (libraries masc.server cmdliner yojson masc.agent_core.digest))
 
 ;; The declaration [masc keeper-create] sends and the answer it reads, both
 ;; pure, so the flag surface is a test rather than a running server.

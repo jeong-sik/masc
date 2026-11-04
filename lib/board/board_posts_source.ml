@@ -1,7 +1,5 @@
 open Board_types
 
-let live_guard_enforced = false
-
 type reserved_settlement = {
   result : (unit, board_error) result;
   exception_ : exn;

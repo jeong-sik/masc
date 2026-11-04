@@ -52,11 +52,8 @@ let test_load_persisted_posts_missing_file () =
     (Masc_board_handlers.Board_votes_json.load_persisted_posts store = Ok 0);
   Alcotest.(check bool) "the empty start grants posts authority" true
     (posts_source_health store = Ok ());
-  Alcotest.(check bool) "live reads never bootstrap a posts payload" false
-    (Sys.file_exists (Board.persist_path store));
-  Alcotest.(check bool) "live reads never publish initialization" false
-    (Sys.file_exists (Masc_board_handlers.Board_paths.posts_initialization_guard_file
-       ~workspace_masc_dir:(Board.workspace_masc_dir store)))
+  Alcotest.(check bool) "live reads never create the posts file" false
+    (Sys.file_exists (Board.persist_path store))
 ;;
 
 let test_load_persisted_comments_missing_file () =

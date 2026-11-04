@@ -8,10 +8,7 @@
   board_content_json
   board_content_diagnostics
   board_posts_rows
-  board_posts_guard_rows
   board_posts_inspection
-  board_initialization_inspect
-  board_initialization_protocol
   board_vote_transition
   board_voting
   board_snapshot_batch
@@ -27,11 +24,7 @@
   board_audience
   board_content_json
   board_content_diagnostics
-  board_initialization
-  board_initialization_inspect
-  board_initialization_protocol
   board_posts_rows
-  board_posts_guard_rows
   board_posts_inspection
   board_core
   board_core_classify

@@ -125,14 +125,14 @@ let test_explicit_load_before_create base_path _workspace =
   present_empty_posts base_path;
   let store = make_store base_path in
   let path = Board.persist_path store in
-  let initialized = read_bytes path in
+  let empty = read_bytes path in
   require_pre_effect (create store "unobserved request");
-  Alcotest.(check string) "refused create preserves initialized payload" initialized
+  Alcotest.(check string) "refused create preserves the empty payload" empty
     (read_bytes path);
   Alcotest.(check int) "refused create published no row" 0
     (List.length (Board.list_posts store ()));
   load_posts store 0;
-  Alcotest.(check string) "explicit load preserves actual initialized empty bytes" initialized
+  Alcotest.(check string) "explicit load preserves the actual empty bytes" empty
     (read_bytes path);
   let post = require_post (create store "admitted request") in
   check_observed_bytes store;
@@ -182,7 +182,7 @@ let test_directory_replacement_stays_refused ~replace_root base_path workspace =
     original_post.body (current store original_post).body;
   ignore (require_post (create store "restored physical identity remains usable"))
 
-let test_sub_board_only_retains_initialized_directory base_path workspace =
+let test_sub_board_only_retains_the_state_directory base_path workspace =
   present_empty_posts base_path;
   let store = make_store base_path in
   let create_topic slug = Board.create_sub_board store ~slug ~name:slug
@@ -866,7 +866,7 @@ let counting_io calls : Fs_compat.private_jsonl_transaction_io_for_testing =
   { before_sync_parent = (fun _ -> incr calls)
   ; close_fd = (fun fd -> incr calls; Unix.close fd) }
 
-let test_fresh_workspace_without_guard base_path workspace =
+let test_fresh_workspace_accepts_every_writer base_path _workspace =
   let store = make_store base_path in
   load_posts store 0;
   load_comments store 0;
@@ -878,23 +878,11 @@ let test_fresh_workspace_without_guard base_path workspace =
   ignore (require_board (Board.create_sub_board store ~slug:"fresh" ~name:"fresh"
     ~description:"first topic in a fresh workspace" ~owner:"source-writer" ()));
   Board.flush_dirty store;
-  Alcotest.(check bool) "no initialization guard was written" false
-    (Sys.file_exists (Paths.posts_initialization_guard_file ~workspace_masc_dir:workspace));
   let fresh = reloaded base_path 1 in
   load_comments fresh 1;
   Alcotest.(check string) "the first post persisted" post.body (current fresh post).body;
   Alcotest.(check (pair int int)) "the first vote and comment persisted" (1, 1)
     ((current fresh post).votes_up, (current fresh post).reply_count)
-
-let test_guard_file_is_not_read base_path workspace =
-  present_empty_posts base_path;
-  write_bytes (Paths.posts_initialization_guard_file ~workspace_masc_dir:workspace)
-    "not an initialization guard\n";
-  let store = reloaded base_path 0 in
-  let post = require_post (create store "a malformed offline guard is never read") in
-  let fresh = reloaded base_path 1 in
-  Alcotest.(check string) "the post persisted beside the unread guard file"
-    post.body (current fresh post).body
 
 let test_auxiliary_writes_never_read_posts base_path _workspace =
   present_empty_posts base_path;
@@ -1331,10 +1319,10 @@ let () =
             (test_directory_replacement_stays_refused ~replace_root:true)
         ; case "replaced state directory cannot rearm a store"
             (test_directory_replacement_stays_refused ~replace_root:false)
-        ; case "sub-board-only stores retain the initialized directory"
-            test_sub_board_only_retains_initialized_directory
+        ; case "sub-board-only stores retain the state directory"
+            test_sub_board_only_retains_the_state_directory
         ; case "BasePath aliases preserve actual source identity" test_base_path_alias
-        ; case "two initialized empty observations cannot auto-adopt" test_two_empty_present_observations
+        ; case "two empty Present observations cannot auto-adopt" test_two_empty_present_observations
         ; case "Present cannot replace a later dangling source" test_present_then_dangling_source
         ; case "initial dangling source is never Missing" test_initial_dangling_source
         ; case "same inode and length still require exact bytes" test_same_cursor_changed_bytes
@@ -1344,9 +1332,8 @@ let () =
         ; case "Present disappearance is retained" test_present_disappearance_is_retained
         ; case "retained typed snapshot cannot overwrite a newer edit" test_retained_snapshot_is_stale
         ; case "all actual writers preserve one posts source" test_cross_writer_projection
-        ; case "a fresh workspace without a guard starts empty and accepts every writer"
-            test_fresh_workspace_without_guard
-        ; case "live loads never read an offline guard file" test_guard_file_is_not_read
+        ; case "a fresh workspace starts empty and accepts every writer"
+            test_fresh_workspace_accepts_every_writer
         ; case "auxiliary writers neither read nor admit posts"
             test_auxiliary_writes_never_read_posts ]
     ; "descriptor settlement",

@@ -174,7 +174,12 @@ let attach_live ?ego_input t ~client_id ~cleanup =
       else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
         | Some {transport=(B.Webdriver_bidi | B.Ego_task_space) as transport;_} ->
           let name = "live " ^ B.live_transport_to_string transport in
-          if List.mem_assoc transport t.live then Error ("an owned " ^ name ^ " connection is already attached")
+          (* One connection per transport at a time. One that ended, as a
+             connection whose ego Space went missing does, keeps its cleanup
+             here so retirement still settles it, and lets the next attach. *)
+          let serving (other:B.client_info) = other.client_id <> client_id
+            && other.transport = transport && List.mem other.client_id t.clients in
+          if List.exists serving (B.active_clients ()) then Error ("an owned " ^ name ^ " connection is already attached")
           else
             (* This worker disconnects its own connection when it ends; the
                lane's no-poll window is for native hosts only. *)

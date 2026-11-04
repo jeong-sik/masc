@@ -444,7 +444,14 @@ let scenario mode =
           ignore (answered (dispatch (W.Issue {route=B.Live_route (Some client.client_id);
             verb=B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels [])));
             actor=None;timeout_sec=B.default_timeout_sec;only_if_idle=false})));
-          check bool "the remaining worker retires normally" true (dispatch W.Retire = W.Receipt))
+          (* The reopened Space was completed; the lost one never was, so
+             retirement keeps the files and says which Space it could not settle. *)
+          check bool "retirement still settles the connection whose Space ego lost" true
+            (match dispatch W.Retire with
+             | W.Service_refusal {disposition=W.Outcome_unknown;message} ->
+                 String_util.contains_substring message "ego task space 51 was gone from ego before its connection ended"
+             | W.Service_refusal {disposition=W.Not_started;_}
+             | W.Receipt|W.Issue_result _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _ -> false))
         else if mode = "user-owned" then (
           check bool "the worker keeps serving" false (Owner.is_retired owner);
           check bool "the exact unavailability is published" true

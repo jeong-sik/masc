@@ -2965,6 +2965,7 @@
 (include stanzas/test_tui_lane_read_decision.inc)
 (include stanzas/test_tui_lane_inventory_notifications.inc)
 (include stanzas/test_tui_lane_inventory_push.inc)
+(include stanzas/test_tui_spectator_push.inc)
 (include stanzas/test_machine_spectator.inc)
 
 ; nofile-status reads the process table: which finds scan the caller's home,

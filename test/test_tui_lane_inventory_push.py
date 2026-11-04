@@ -145,6 +145,9 @@ class LaneInventoryPushTest(unittest.TestCase):
             step("wait", lambda: lane.response_count("open", LANES) >= 1, "Lanes did not open")
             step("keys", "/addons\n")
             step("wait", lambda: lane.response_count("open", ADDONS) >= 1, "Add-ons did not open")
+            step("drain", 2.4)
+            self.assertEqual(lane.response_count("open", LANES), 1, "Lane reads continued while idle")
+            self.assertEqual(lane.response_count("open", ADDONS), 1, "Add-on reads continued while idle")
             step("keys", "\r")
 
             lane.set_phase("inspect")

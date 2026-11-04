@@ -21,9 +21,19 @@ let test_addon_read_is_scoped_to_the_open_instance () =
   check bool "no open instance means no read" true
     (Decision.of_dataset ~view:(Decision.Addons None) dataset = Decision.Ignore)
 
+let test_open_addon_wins_over_the_lanes_surface () =
+  let dataset = Masc.Workspace_dataset_event.Lane_addons { instance_id = "quiz-1" } in
+  check bool "an Add-on open over Lanes still owns its Inspect push" true
+    (Decision.of_views ~lanes:true ~addon:(Some "quiz-1") dataset
+     = Decision.Read_addon "quiz-1");
+  check bool "another instance is still ignored over Lanes" true
+    (Decision.of_views ~lanes:true ~addon:(Some "someone-else") dataset
+     = Decision.Ignore)
+
 let () =
   run "Lane read decision"
     [ "scope",
       [ test_case "Lanes reads only while visible" `Quick test_lanes_read_only_when_visible
       ; test_case "Add-on reads only the open instance" `Quick test_addon_read_is_scoped_to_the_open_instance
+      ; test_case "an open Add-on wins over Lanes" `Quick test_open_addon_wins_over_the_lanes_surface
       ] ]

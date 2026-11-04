@@ -329,7 +329,7 @@ Active navigation uses the theme's selection background. Markdown headings,
 code banners and table headers use palette-relative accents; headings also keep
 their weight and underline. Resources distinguish `[MD vN]`, `[HTML vN]` and
 `[MCP]` badges, with separate colours for explicit revision-check status.
-Selected cards use a neutral background and plain text so their contents stay
+Selected rows use a neutral background and plain text so their contents stay
 readable. Colourless terminals retain selection and textual type/check labels.
 
 A kept pick is written to `runtime.toml` under a `[tui]` table, which the TUI
@@ -441,8 +441,11 @@ fields name the command that does, and after the save the same command is
 in the session log. Turns reach the new account only after a lane lists it
 as a candidate. The
 Resources surface hangs off System under `s` and lists every MCP
-resource and authorized published reports; `Enter` reads one beside the
-list. Reports use the existing admin API and pin the listed revision, with body
+resource and authorized published reports, one row each: its type, its name,
+the check and `today` marker of a report, a description, and the media type or,
+for a report, its author, creation time and size. A narrower terminal drops the
+media type first, then the description, then the marker. `Enter` reads one
+beside the list. Reports use the existing admin API and pin the listed revision, with body
 digest and byte-length verification. A report API refusal leaves MCP resources
 available and records the refusal; per-report storage diagnostics remain visible.
 Report Markdown uses the shared document renderer; HTML has an inert document

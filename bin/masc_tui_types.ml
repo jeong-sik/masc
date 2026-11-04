@@ -4652,7 +4652,7 @@ let pushed_sources : Surface_read_source.t list =
    producer, so a late full bundle cannot overwrite a newer navigation read.
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
-  type kind = Full | Navigation | Independent
+  type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
@@ -4675,7 +4675,7 @@ module Surface_read_order : sig
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
   val pending_scoped : needs:surface_needs -> t -> source list
-  (** Visible sources owned by navigation or independent reads. Full-refresh
+  (** Visible sources owned by navigation reads. Full-refresh
       readers have their own execution progress, distinct from publication. *)
   val source_name : source -> string
   val dataset_source : dataset -> source
@@ -4688,7 +4688,7 @@ module Surface_read_order : sig
   val navigation_active : t -> request -> bool
   val latest_navigation : t -> request -> bool
 end = struct
-  type kind = Full | Navigation | Independent
+  type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
@@ -4732,7 +4732,7 @@ end = struct
       datasets=List.concat_map source_datasets (sources needs); owner=ref ()} in
     let retained = List.filter (fun (dataset, _) -> not (List.mem dataset request.datasets)) current.owners in
     let active_navigation, latest_navigation = match kind with
-      | Full | Independent -> current.active_navigation, current.latest_navigation
+      | Full -> current.active_navigation, current.latest_navigation
       | Navigation -> request :: current.active_navigation, Some request in
     {next=current.next+1; owners=List.map (fun dataset -> dataset,request) request.datasets @ retained;
      active_navigation; latest_navigation}, request
@@ -4764,7 +4764,7 @@ end = struct
       (source_datasets source)) (sources needs)
   let pending_scoped ~needs current =
     List.filter (fun source -> List.exists (fun dataset -> match List.assoc_opt dataset current.owners with
-      | Some {kind = Navigation | Independent; _} -> true
+      | Some {kind = Navigation; _} -> true
       | Some {kind = Full; _} | None -> false) (source_datasets source)) (sources needs)
   let source_name = Surface_read_source.name
   let request_id request = request.id
@@ -4810,7 +4810,7 @@ end = struct
       "id", `Int (Surface_read_order.request_id request);
       "started_ns", `Intlit (Int64.to_string (Surface_read_order.started_ns request));
       "kind", `String (match Surface_read_order.request_kind request with
-        | Full -> "full" | Navigation -> "navigation" | Independent -> "independent")] in
+        | Full -> "full" | Navigation -> "navigation")] in
     `Assoc ["schema_version", `Int 1;
       "origin", request context.origin; "current", request context.current;
       "planned_board_query", (match context.planned_board_query with

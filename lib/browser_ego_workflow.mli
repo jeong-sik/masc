@@ -59,7 +59,11 @@ type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Browser_ego_release.settled; pages : pages option }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
       effect_started : bool; completed_effect : bool; input : Browser_ego_release.t;
-      native_error : native_error option; pages : pages option }
+      native_error : native_error option; pages : pages option;
+      refused_before_press : Browser_ego_release.resolution option }
+      (** [refused_before_press]: the failed step was a click, double click,
+          drag or popup trigger the SDK refused before its press, with the
+          SDK's kind. The receipt's failure then carries [refusedBeforePress]. *)
 
 (** Validates step indices/methods, native observation receipt types,
     saving-Fetch provenance/download ID/filename and native Download cancel

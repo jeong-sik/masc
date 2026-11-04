@@ -83,6 +83,14 @@ let event_queue_intake_error_reason_label = function
   | Addon_result_unavailable _ -> "event_queue_addon_result_unavailable"
 ;;
 
+let event_queue_intake_error_counts_as_cycle_failure = function
+  | Pending_selection_failed _ -> true
+  | Connector_read_failed _ | Connector_item_missing _
+  | Board_unavailable _ | Ask_read_failed _
+  | Completion_rejection_read_failed _
+  | Job_result_unavailable _ | Addon_result_unavailable _ -> false
+;;
+
 let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->

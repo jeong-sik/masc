@@ -410,7 +410,9 @@ let test_unpinned_board_source_is_retained_without_blocking_siblings () =
   check (list string) "a legacy source does not block the readable sibling"
     [ readable ] (admitted_ids first);
   (match first.event_queue_intake_error with
-   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable _) -> ()
+   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable _ as error) ->
+     check bool "unknown audience is not a crashed cycle" false
+       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
    | _ -> fail "the retained legacy source must remain observable");
   let selections = pending () in
   let survivor = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = legacy_id) selections in
@@ -527,7 +529,9 @@ let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
     check string "missing or corrupt evidence never rewrites authority" before
       (In_channel.with_open_text path In_channel.input_all);
     match selected.event_queue_intake_error with
-    | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _) -> ()
+    | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _ as error) ->
+      check bool "uncertain evidence is typed retry, not cycle failure" false
+        (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
     | None | Some _ -> fail "uncertain old rejection lost its retry outcome") [false;true]
 ;;
 
@@ -546,7 +550,9 @@ let test_unread_rejection_authority_retains_source_and_allows_siblings () =
   check int "both exact queue sources remain pending" 2 (List.length (pending ()));
   check string "unread primary bytes are preserved" corrupt (In_channel.with_open_text path In_channel.input_all);
   match selected.event_queue_intake_error with
-  | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _) -> ()
+  | Some (Keeper_heartbeat_stimulus_intake.Completion_rejection_read_failed _ as error) ->
+    check bool "authority read failure is retry, not a crashed cycle" false
+      (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
   | None | Some (Keeper_heartbeat_stimulus_intake.Pending_selection_failed _
       | Keeper_heartbeat_stimulus_intake.Board_unavailable _
       | Keeper_heartbeat_stimulus_intake.Connector_read_failed _

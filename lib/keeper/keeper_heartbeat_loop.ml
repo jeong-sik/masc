@@ -1016,6 +1016,15 @@ let run_keepalive_unified_turn
        with
        | Ok () -> ()
        | Error message -> failwith message);
+      (match event_intake.event_queue_intake_error with
+       | None -> ()
+       | Some error
+         when
+           Stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
+             error ->
+         record_event_queue_failure
+           (Stimulus_intake.event_queue_intake_error_to_string error)
+       | Some _ -> ());
       let pending_board_events = event_intake.pending_board_events in
       let obs =
         Keeper_world_observation.observe

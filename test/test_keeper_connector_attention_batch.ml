@@ -494,8 +494,11 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
           ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
         let assert_read_failure intake =
           match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
-          | Some (Keeper_heartbeat_stimulus_intake.Connector_read_failed _)
-            when failure = `Torn_tail || failure = `Unreadable -> ()
+          | Some (Keeper_heartbeat_stimulus_intake.Connector_read_failed error)
+            when failure = `Torn_tail || failure = `Unreadable ->
+            check bool "connector read failure is a retry, not a crashed cycle" false
+              (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure
+                 (Keeper_heartbeat_stimulus_intake.Connector_read_failed error))
           | Some (Keeper_heartbeat_stimulus_intake.Connector_item_missing _)
             when failure = `Missing_file || failure = `Missing_rows -> ()
           | _ -> fail "unread connector store was treated as missing content" in
@@ -625,10 +628,12 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
       | `Missing_file | `Missing_rows | `Open | `Withdrawn -> true
       | `Unreadable | `Malformed -> false in
     let assert_retry intake =
-      (match intake.Intake.event_queue_intake_error, failure with
-        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_read_failed _)), `Unreadable
-        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_decode_failed _)), `Malformed -> ()
-        | _ -> fail "unavailable Ask was admitted or misclassified");
+      let error = match intake.Intake.event_queue_intake_error, failure with
+        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_read_failed _) as error), `Unreadable
+        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_decode_failed _) as error), `Malformed -> error
+        | _ -> fail "unavailable Ask was admitted or misclassified" in
+      check bool "unavailable Ask is retry, not crashed cycle" false
+        (Intake.event_queue_intake_error_counts_as_cycle_failure error);
       check bool "independent scheduling remains permitted" true
         (Keeper_heartbeat_loop.should_run_turn_after_event_intake ~scheduled:true
            ~event_queue_intake_error:intake.event_queue_intake_error);

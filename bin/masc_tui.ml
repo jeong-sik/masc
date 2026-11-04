@@ -9332,9 +9332,28 @@ let launch_owed_tools state ~mailbox =
    (RFC-0480 §3.1). Entering Schedules and [r] read them directly. Each owes
    its own read: the two can be in flight at once, and one answering says
    nothing of the other. *)
+(* task-3231 diagnostic only: stderr lines that say how the schedules read
+   moves between owed, waiting and launched. No behaviour depends on them. *)
+let diag_task_3231 fmt =
+  Printf.ksprintf (fun line -> prerr_endline ("[diag task-3231] " ^ line)) fmt
+
+let diag_owed_string = function
+  | Masc_tui_owed_read.Settled -> "Settled"
+  | Masc_tui_owed_read.Owed { failures } -> Printf.sprintf "Owed{failures=%d}" failures
+  | Masc_tui_owed_read.Reading { failures; changed_since } ->
+      Printf.sprintf "Reading{failures=%d;changed_since=%b}" failures changed_since
+  | Masc_tui_owed_read.Waiting { failures; retry_at } ->
+      Printf.sprintf "Waiting{failures=%d;retry_at=%.3f}" failures retry_at
+
+let diag_schedules_last_key = ref ""
+
 let owe_schedules_read state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.changed state.schedules_agenda_owed;
-  state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
+  state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed;
+  diag_task_3231 "owe_schedules_read agenda_owed=%s agenda_due_now=%b page_owed=%s"
+    (diag_owed_string state.schedules_agenda_owed)
+    (Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.schedules_agenda_owed)
+    (diag_owed_string state.schedules_page_owed)
 
 (* The agenda strip says its list may be behind until a read that began after
    this point answers: on a schedule change, on a newly opened observer and
@@ -9364,16 +9383,41 @@ let launch_owed_schedules state ~mailbox =
     (if not page_on_screen then Masc_tui_owed_read.settled
      else if page_reading then state.schedules_page_owed
      else Masc_tui_owed_read.abandoned state.schedules_page_owed);
+  (let now = monotonic_now_s () in
+   let key =
+     Printf.sprintf
+       "auth=%b on_screen=%b agenda_owed=%s agenda_inflight=%b agenda_due=%b page_owed=%s page_inflight=%b page_due=%b"
+       (server_authority_ready state) page_on_screen
+       (diag_owed_string state.schedules_agenda_owed)
+       (Snapshot_read.in_flight state.schedules_agenda_read)
+       (Masc_tui_owed_read.due ~now state.schedules_agenda_owed)
+       (diag_owed_string state.schedules_page_owed) page_reading
+       (Masc_tui_owed_read.due ~now state.schedules_page_owed)
+   in
+   if not (String.equal key !diag_schedules_last_key) then begin
+     diag_schedules_last_key := key;
+     if state.schedules_agenda_owed <> Masc_tui_owed_read.Settled
+        || state.schedules_page_owed <> Masc_tui_owed_read.Settled
+     then diag_task_3231 "launch_owed_schedules now=%.3f %s" now key
+   end);
   if server_authority_ready state then begin
     let now = monotonic_now_s () in
     let intent = Snapshot_read.Refresh in
     if page_on_screen && not page_reading
        && not (page_carries_agenda && Snapshot_read.in_flight state.schedules_agenda_read)
        && Masc_tui_owed_read.due ~now state.schedules_page_owed
-    then launch_schedules_load ~intent state ~mailbox;
+    then begin
+      diag_task_3231 "launch_schedules_load now=%.3f page_owed=%s" now
+        (diag_owed_string state.schedules_page_owed);
+      launch_schedules_load ~intent state ~mailbox
+    end;
     if not (Snapshot_read.in_flight state.schedules_agenda_read)
        && Masc_tui_owed_read.due ~now state.schedules_agenda_owed
-    then launch_schedule_agenda_load ~intent state ~mailbox
+    then begin
+      diag_task_3231 "launch_schedule_agenda_load now=%.3f agenda_owed=%s" now
+        (diag_owed_string state.schedules_agenda_owed);
+      launch_schedule_agenda_load ~intent state ~mailbox
+    end
   end
 
 (* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
@@ -23254,7 +23298,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    previews_changed := keeper :: !previews_changed
                | None -> ());
               if Masc_tui_observer.pending_confirms_changed event then pending_confirms_changed := true;
-              if Masc_tui_observer.schedules_changed event then schedules_changed := true;
+              if Masc_tui_observer.schedules_changed event then begin
+                schedules_changed := true;
+                diag_task_3231 "schedule_store_invalidated reached the TUI event loop now=%.3f"
+                  (monotonic_now_s ())
+              end;
               if Masc_tui_observer.runtime_config_changed event then runtime_config_changed := true;
               Option.iter (fun keeper -> event_queue_keepers := keeper :: !event_queue_keepers)
                 (Masc_tui_observer.event_queue_changed event);
@@ -25356,7 +25404,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
       if current then
-        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
+      diag_task_3231 "Schedule_agenda_read answered ok=%b current=%b agenda_owed=%s retry_s=%.3f now=%.3f"
+        (Result.is_ok result) current (diag_owed_string state.schedules_agenda_owed)
+        stream_reconnect_s (monotonic_now_s ())
   | Schedules_loaded (Schedule_page_read request, result) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
@@ -25366,7 +25417,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if current_page then
         state.schedules_page_owed <- settled_schedule_read state.schedules_page_owed result;
       if current_agenda then
-        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
+      diag_task_3231
+        "Schedule_page_read answered ok=%b current_page=%b current_agenda=%b page_owed=%s agenda_owed=%s now=%.3f"
+        (Result.is_ok result) current_page current_agenda
+        (diag_owed_string state.schedules_page_owed)
+        (diag_owed_string state.schedules_agenda_owed) (monotonic_now_s ())
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from

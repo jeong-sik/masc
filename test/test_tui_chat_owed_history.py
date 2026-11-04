@@ -12,6 +12,7 @@ import os
 import pathlib
 import pty
 import queue
+import re
 import select
 import struct
 import subprocess
@@ -200,14 +201,20 @@ class ChatOwedHistoryTest(unittest.TestCase):
             )
             os.close(slave)
 
+            # Diagnostic only (task-3231): keep what the TUI wrote to the pty so a
+            # failed wait can print its "[diag task-3231]" lines into the CI log.
+            captured = bytearray()
+
             def drain_for(seconds: float) -> None:
                 deadline = time.monotonic() + seconds
                 while time.monotonic() < deadline:
                     if select.select([master], [], [], 0.05)[0]:
                         try:
-                            os.read(master, 65536)
+                            captured.extend(os.read(master, 65536))
                         except OSError:
                             return
+                        if len(captured) > 16 * 1024 * 1024:
+                            del captured[: len(captured) - 8 * 1024 * 1024]
 
             def wait_until(predicate: Callable[[], bool], label: str) -> None:
                 deadline = time.monotonic() + WAIT_SECONDS
@@ -217,6 +224,11 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     if process.poll() is not None:
                         break
                     drain_for(0.05)
+                drain_for(0.05)
+                for line in re.findall(
+                    rb"\[diag task-3231\][^\r\n\x1b]*", bytes(captured)
+                )[-300:]:
+                    print(line.decode("utf-8", "replace"), file=sys.stderr, flush=True)
                 self.fail(f"{label}; exit={process.poll()}, requests={server.requests!r}")
 
             def keys(text: str) -> None:

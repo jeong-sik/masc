@@ -23182,7 +23182,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         owe_agenda_revalidation state;
         (* A change can land between the initial read and subscription, or
            during a disconnected interval. Read under the current authority. *)
-        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
         revalidate_visible_fusion state ~mailbox;
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
@@ -23245,6 +23245,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
+      (* The local Keeper list reads each Keeper's meta, which a row change
+         announces; hand edits to a declaration show on arrival or [r]. *)
+      let local_keepers_changed = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
       let datasets_owed = ref [] in
@@ -23382,7 +23385,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
-                   owe_keeper_roster_change state change
+                   owe_keeper_roster_change state change;
+                   local_keepers_changed := true
                | Masc_tui_observer.Execution_snapshot -> execution_snapshot_seen := true
                | Masc_tui_observer.Agent_core
                    { kind = Masc_tui_observer.Relay_subscription_loss
@@ -23451,11 +23455,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Masc_tui_observer.Undecodable _, _, _ -> ());
           end)
         decoded;
-      if !execution_snapshot_seen || !observer_source_loss_seen then
+      (* The local work read also lists the Goals waiting for confirmation. *)
+      if !execution_snapshot_seen || !observer_source_loss_seen
+         || List.mem Masc.Workspace_dataset_event.Goals !datasets_owed then
         (* Both the compact invalidation and the complete snapshot use this
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+      if !local_keepers_changed || !observer_source_loss_seen then
+        launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
@@ -41566,7 +41574,6 @@ Use relative paths for resources already held in the package. -->
           | Server -> ()
           | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
         end;
-        launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Poll base_path;
         let host = server_peer_host in
         let port = state.port in
         (* Closed feeds normally retry on their own timer. The cadence can

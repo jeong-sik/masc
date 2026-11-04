@@ -2359,6 +2359,30 @@ let test_runtime_history_kept_reads_match_one_pass () =
     append_decisions path [row (now -. 10.)];
     ignore (continue_and_compare "a rotated log reads as a whole read does" kept))
 
+(* Malformed rows have no timestamp to leave the window. While their decision
+   file remains listed, a kept read and a cold read reject it alike, even a day
+   later. *)
+let test_runtime_history_malformed_rows_are_file_scoped () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "malformed.history" in
+    write_decisions path [];
+    append_raw_line path "{malformed";
+    let now = now_unix () in
+    let state ~now reading =
+      M.runtime_metrics_json ~observed_at:now ~window_minutes:1440 reading
+      |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.to_string in
+    let kept, initial = Kept.refresh ~base_path:base ~now ~window_minutes:1440 Kept.empty in
+    check string "a malformed decision row rejects the initial history"
+      "unavailable" (state ~now initial);
+    let later = now +. 86400. +. 60. in
+    let _kept, continued = Kept.refresh ~base_path:base ~now:later ~window_minutes:1440 kept in
+    let _, cold = Kept.refresh ~base_path:base ~now:later ~window_minutes:1440 Kept.empty in
+    check string "a day later the kept and cold reads agree" (history_text ~now:later cold)
+      (history_text ~now:later continued);
+    check string "a timestamp-less malformed row does not expire with the window"
+      "unavailable" (state ~now:later continued))
+
 (* A kept row stops counting once it leaves the window, with no write; the
    earliest such instant is the next change. *)
 let test_runtime_history_rows_leave_the_window () =
@@ -2435,6 +2459,7 @@ let () =
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;
       test_case "runtime history includes retained rotated logs" `Quick test_runtime_history_reads_rotated_decisions;
       test_case "runtime history kept reads match a whole read" `Quick test_runtime_history_kept_reads_match_one_pass;
+      test_case "runtime history malformed rows are file scoped" `Quick test_runtime_history_malformed_rows_are_file_scoped;
       test_case "runtime history rows leave the window" `Quick test_runtime_history_rows_leave_the_window;
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;

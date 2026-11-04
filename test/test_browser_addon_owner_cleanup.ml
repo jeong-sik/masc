@@ -137,6 +137,18 @@ let an_ended_live_connection_yields_its_transport () =
        | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check int "each attached connection is settled once" 2 !settled)))
 
-let () = run "browser addon cleanup" ["lifecycle",[
-  test_case "all backends settle despite failure and caller cancellation" `Quick scenario;
-  test_case "an ended live connection yields its transport" `Quick an_ended_live_connection_yields_its_transport]]
+(* A process holds one browser owner, so this case runs in its own process.
+   An earlier case's process manager can interrupt the wait with SIGCHLD. *)
+let rec reaped pid = match Unix.waitpid [] pid with
+  | _, status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> reaped pid
+let isolated case () =
+  let pid = Unix.create_process Sys.executable_name [|Sys.executable_name;"--case";case|] Unix.stdin Unix.stdout Unix.stderr in
+  check bool ("isolated owner case " ^ case) true (reaped pid = Unix.WEXITED 0)
+
+let () =
+  if Array.length Sys.argv = 3 && Sys.argv.(1) = "--case" && Sys.argv.(2) = "reattach" then
+    an_ended_live_connection_yields_its_transport ()
+  else run "browser addon cleanup" ["lifecycle",[
+    test_case "all backends settle despite failure and caller cancellation" `Quick scenario;
+    test_case "an ended live connection yields its transport" `Quick (isolated "reattach")]]

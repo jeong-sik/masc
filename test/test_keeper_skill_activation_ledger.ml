@@ -1561,11 +1561,53 @@ let test_nested_scope_integrity_and_invocation_conflict () =
     ; (("unknown", `Bool true), (function Ledger.Unexpected_field { object_name = "scope"; field = "unknown" } -> true | _ -> false)) ]
 ;;
 
+let test_usage_reads_only_the_committed_session () =
+  with_session @@ fun config trace_one session_one ->
+  let trace_two = trace_id "trace-two" in
+  let session_two = Keeper_fs.keeper_session_dir config "trace-two" in
+  Unix.mkdir session_two 0o700;
+  ignore (ok "alpha seed" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one (activation ())));
+  ignore (ok "beta seed" (Ledger.record ~keeper_name:"beta" ~config ~trace_id:trace_two
+    (activation ~trace:"trace-two" ())));
+  let loads = Hashtbl.create 2 in
+  let count trace = let key = Keeper_id.Trace_id.to_string trace in
+    Hashtbl.replace loads key (1 + Option.value ~default:0 (Hashtbl.find_opt loads key)) in
+  let load_count key = Option.value ~default:0 (Hashtbl.find_opt loads key) in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config ~trace_id -> count trace_id; Ledger.load ~config ~trace_id)
+    (fun () ->
+      let sessions = [ "alpha", trace_one; "beta", trace_two ] in
+      let read () =
+        let ledgers, unavailable = Server_skill_usage_runtime.read_sessions ~config sessions in
+        check (list string) "both ledgers are readable" [] unavailable;
+        List.map (fun (keeper, ledger) -> keeper, (Ledger.summarize ledger).instruction_invocations) ledgers
+      in
+      ignore (read ());
+      ignore (read ());
+      check int "alpha is cold once" 1 (load_count "trace-one");
+      check int "beta is cold once" 1 (load_count "trace-two");
+      ignore (ok "alpha second activation" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
+        (activation ~skill_tool_use_id:"call-two" ())));
+      check (list (pair string int)) "the writer's latest ledger is visible"
+        [ "alpha", 2; "beta", 1 ] (read ());
+      check int "alpha did not reload" 1 (load_count "trace-one");
+      check int "beta did not reload" 1 (load_count "trace-two");
+      ignore (ok "alpha duplicate" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
+        (activation ~skill_tool_use_id:"call-two" ())));
+      check (list (pair string int)) "idempotent observation preserves usage"
+        [ "alpha", 2; "beta", 1 ] (read ());
+      check int "idempotent alpha stays cached" 1 (load_count "trace-one");
+      check int "idempotent beta stays cached" 1 (load_count "trace-two");
+      ignore (session_one))
+;;
+
 let () =
   run
     "keeper skill activation ledger"
     [ ( "session ledger"
-      , [ test_case "a committed row announces its Keeper" `Quick
+      , [ test_case "usage reloads only the committed session" `Quick
+            test_usage_reads_only_the_committed_session
+        ; test_case "a committed row announces its Keeper" `Quick
             test_a_committed_row_announces_its_keeper
         ; test_case "legacy composition identifies its row and refuses later append" `Quick
             test_legacy_composition_reports_exact_row_without_appending

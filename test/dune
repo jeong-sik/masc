@@ -5338,6 +5338,7 @@
   masc.skill_reference
   masc.skill_snapshot
   masc.skill_config
+  masc.server
   unix
   yojson))
 

@@ -92,9 +92,6 @@ type usage = Runtime_antigravity_protocol.usage =
     through [Backend_anthropic.usage_of_wire_counts] rather than copying the
     fields across. *)
 
-(** A CLI-announced mode this tree does not model is carried rather than
-    rejected: nothing branches on [permission_mode], and rejecting it ended
-    the turn and parked the session. *)
 type permission_mode = Runtime_antigravity_protocol.permission_mode =
   | Always_proceed
   | Request_review

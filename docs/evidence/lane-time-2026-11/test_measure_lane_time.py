@@ -47,6 +47,26 @@ class CallSummaryTest(unittest.TestCase):
         self.assertEqual(between["sum_s"], 3.0)
         self.assertEqual(between["overlapping_pairs"], 1)
 
+    def test_calls_per_turn_counts_calls_of_each_turn(self) -> None:
+        calls = [call(0, 1), call(2, 3), call(4, 5), call(0, 1, turn="k/t#2")]
+        summary = lane.summarize_calls(calls, {"k": 10.0})
+        per_turn = summary["calls_per_turn"]
+        assert isinstance(per_turn, dict)
+        self.assertEqual((per_turn["n"], per_turn["max"], per_turn["mean"]), (2, 3, 2.0))
+
+    def test_calls_are_counted_by_batch_size_and_execution_mode(self) -> None:
+        calls = [
+            lane.Call("k", "k/t#1", "Read", 0.0, 1.0, False, False, 1, "concurrent"),
+            lane.Call("k", "k/t#1", "Execute", 2.0, 12.0, False, False, 1, "serial"),
+            lane.Call("k", "k/t#1", "Execute", 13.0, 15.0, False, False, 2, "serial"),
+        ]
+        summary = lane.summarize_calls(calls, {"k": 20.0})
+        self.assertEqual(summary["calls_by_batch_size"], {"1": 2, "2": 1})
+        self.assertEqual(
+            summary["execution_modes"],
+            {"concurrent": {"calls": 1, "time_s": 1.0}, "serial": {"calls": 2, "time_s": 12.0}},
+        )
+
     def test_reread_turn_time_is_gap_plus_tool_time(self) -> None:
         summary = lane.summarize_calls([call(0, 1), call(4, 6, reread=True)], {"k": 10.0})
         self.assertEqual(summary["rereads_after_first_call"], {"calls": 1, "turn_time_s": 5.0})
@@ -81,15 +101,53 @@ class OperationSummaryTest(unittest.TestCase):
         self.assertEqual((summary["operations"], summary["started"], summary["total_wait_s"]), (1, 0, 0.0))
 
 
+class CancelledTurnTest(unittest.TestCase):
+    def cancelled(self, keeper: str, completed_at: float, kind: str = "Turn_cancelled") -> lane.Operation:
+        return lane.Operation(keeper, "delegate", "failed", 0.0, 1.0, completed_at, kind)
+
+    def test_only_a_cancel_inside_an_execute_of_the_same_keeper_counts(self) -> None:
+        operations = [
+            self.cancelled("k", 40.0),  # inside the long Execute of k, 40 s in
+            self.cancelled("k", 500.0),  # no Execute at that time
+            self.cancelled("other", 40.0),  # another Keeper's Execute is not k's
+            self.cancelled("k", 40.0, kind="Turn_exception"),  # not a cancel
+        ]
+        execute_calls = {"k": [(0.0, 100.0)], "other": [(1000.0, 1100.0)]}
+        summary = lane.summarize_cancelled_turns(operations, execute_calls)
+        self.assertEqual(summary["turn_cancelled_operations"], 3)
+        self.assertEqual(summary["cancelled_during_execute"], 1)
+        self.assertEqual(summary["cancelled_during_long_execute"], 1)
+        self.assertEqual((summary["execute_time_lost_s"], summary["long_execute_time_lost_s"]), (40.0, 40.0))
+
+    def test_short_execute_is_counted_but_not_as_long(self) -> None:
+        summary = lane.summarize_cancelled_turns([self.cancelled("k", 5.0)], {"k": [(0.0, 10.0)]})
+        self.assertEqual((summary["cancelled_during_execute"], summary["cancelled_during_long_execute"]), (1, 0))
+        self.assertEqual((summary["execute_time_lost_s"], summary["long_execute_time_lost_s"]), (5.0, 0.0))
+
+    def test_one_cancel_counts_once_when_two_executes_overlap(self) -> None:
+        summary = lane.summarize_cancelled_turns([self.cancelled("k", 30.0)], {"k": [(0.0, 100.0), (10.0, 90.0)]})
+        self.assertEqual(summary["cancelled_during_execute"], 1)
+        self.assertEqual(summary["execute_time_lost_s"], 30.0)
+
+    def test_the_slack_after_the_end_matches_and_beyond_it_does_not(self) -> None:
+        call = {"k": [(0.0, 10.0)]}
+        inside = lane.summarize_cancelled_turns([self.cancelled("k", 10.0 + lane.CANCEL_MATCH_SLACK_SEC)], call)
+        outside = lane.summarize_cancelled_turns([self.cancelled("k", 10.0 + lane.CANCEL_MATCH_SLACK_SEC + 0.1)], call)
+        self.assertEqual((inside["cancelled_during_execute"], outside["cancelled_during_execute"]), (1, 0))
+        self.assertEqual(inside["execute_time_lost_s"], 10.0)
+
+
 class StoreReadingTest(unittest.TestCase):
     def test_ledger_rows_become_calls_with_rereads_and_polling(self) -> None:
         rows = [
             {"record_kind": "tool_call", "ts": 1000.0, "duration_ms": 2000, "keeper": "k", "tool": "keeper_artifact_read",
-             "trace_id": "t", "keeper_turn_id": 1, "input_fingerprint": "i", "output_fingerprint": "o"},
+             "trace_id": "t", "keeper_turn_id": 1, "input_fingerprint": "i", "output_fingerprint": "o",
+             "batch_size": 2, "execution_mode": "concurrent"},
             {"record_kind": "tool_call", "ts": 1010.0, "duration_ms": 1000, "keeper": "k", "tool": "keeper_artifact_read",
              "trace_id": "t", "keeper_turn_id": 1, "input_fingerprint": "i", "output_fingerprint": "o"},
             {"record_kind": "tool_call", "ts": 1100.0, "duration_ms": 90000, "keeper": "k", "tool": "Execute",
-             "trace_id": "t", "keeper_turn_id": 1, "input": {"command": "for i in 1 2; do sleep 5; done"}},
+             "trace_id": "t", "keeper_turn_id": 1, "input": {"command": "for i in 1 2; do sleep 5; done"},
+             "batch_size": 1, "execution_mode": "serial"},
             {"record_kind": "other", "ts": 1.0},
             {"record_kind": "tool_call", "ts": 9999999.0, "duration_ms": 1, "keeper": "k", "tool": "Execute"},
         ]
@@ -102,6 +160,7 @@ class StoreReadingTest(unittest.TestCase):
         self.assertEqual([c.reread for c in calls], [False, True, False])
         self.assertEqual([c.polling for c in calls], [False, False, True])
         self.assertEqual(calls[0].start, 998.0)
+        self.assertEqual([(c.batch_size, c.mode) for c in calls], [(2, "concurrent"), (0, "unknown"), (1, "serial")])
 
     def test_operations_are_classified_by_sender_keeper_and_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

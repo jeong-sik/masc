@@ -33,6 +33,13 @@ Definitions:
 - admission wait: `waited_ms` of a `provider_admission:waited` event. A request
   granted a permit at once is not reported, so the events are the requests that
   queued.
+- batch size: the ledger's `batch_size`, the number of tool calls the model
+  asked for in one response. Execution mode: its `execution_mode`
+  (`serial` or `concurrent`), set by the tool's descriptor in agent_core.
+- cancelled during Execute: an operation that failed with `Turn_cancelled` and
+  whose `completed_at` falls inside an Execute call of the same Keeper
+  (`start - 3 s` .. `end + 3 s`; the ledger writes a call's row when it
+  returns). The Execute time lost is the part that had run by `completed_at`.
 
 Nothing here reads message text. Command text is read only for the polling test.
 
@@ -70,6 +77,8 @@ SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
 ADMISSION_WAIT_HOURS_HIGH = 5.0
+CANCELLED_TURN = "Turn_cancelled"
+CANCEL_MATCH_SLACK_SEC = 3.0
 POLL_COMMAND = re.compile(r"\bsleep\b|\bfor\s+\w+\s+in\b|\bwhile\b|\buntil\b")
 
 Interval = tuple[float, float]
@@ -84,6 +93,8 @@ class Call:
     end: float
     reread: bool
     polling: bool
+    batch_size: int = 0
+    mode: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +177,20 @@ def read_calls(base: pathlib.Path, first: date, last: date, until: float) -> lis
                         reread = previous is not None and previous[1] == output_fp and end - previous[0] <= REREAD_WINDOW_SEC
                         last_seen[key] = (end, output_fp)
                     polling = tool == EXECUTE_TOOL and POLL_COMMAND.search(command_text(row.get("input"))) is not None
-                    calls.append(Call(keeper, turn, tool, end - duration, end, reread, polling))
+                    batch_size = row.get("batch_size")
+                    calls.append(
+                        Call(
+                            keeper,
+                            turn,
+                            tool,
+                            end - duration,
+                            end,
+                            reread,
+                            polling,
+                            batch_size if isinstance(batch_size, int) and batch_size >= 1 else 0,
+                            text_of(row.get("execution_mode")) or "unknown",
+                        )
+                    )
         day += timedelta(days=1)
     return calls
 
@@ -311,6 +335,24 @@ def quantiles(values: list[float]) -> dict[str, float | int]:
     }
 
 
+def count_quantiles(values: list[int]) -> dict[str, float | int]:
+    if not values:
+        return {"n": 0}
+    ordered = sorted(values)
+
+    def at(fraction: float) -> int:
+        return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
+
+    return {
+        "n": len(ordered),
+        "p50": at(0.5),
+        "p90": at(0.9),
+        "p99": at(0.99),
+        "max": ordered[-1],
+        "mean": round(statistics.fmean(ordered), 1),
+    }
+
+
 def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict[str, object]:
     by_turn: dict[str, list[Call]] = defaultdict(list)
     for call in calls:
@@ -339,6 +381,15 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
     return {
         "turns": len(by_turn),
         "calls": len(calls),
+        "calls_per_turn": count_quantiles([len(turn_calls) for turn_calls in by_turn.values()]),
+        "calls_by_batch_size": {str(size): count for size, count in sorted(Counter(call.batch_size for call in calls).items())},
+        "execution_modes": {
+            mode: {
+                "calls": sum(1 for call in calls if call.mode == mode),
+                "time_s": round(sum(call.end - call.start for call in calls if call.mode == mode), 1),
+            }
+            for mode in sorted({call.mode for call in calls})
+        },
         "turn_time_s": round(busy_s, 1),
         "tool_time_s": round(tool_s, 1),
         "execute_time_s": round(execute_s, 1),
@@ -406,6 +457,33 @@ def summarize_operations(
     }
 
 
+def summarize_cancelled_turns(
+    operations: list[Operation],
+    execute_calls: dict[str, list[Interval]],
+) -> dict[str, object]:
+    cancelled = [op for op in operations if op.failure_kind == CANCELLED_TURN and op.completed_at is not None]
+    during = during_long = 0
+    lost_s = lost_long_s = 0.0
+    for op in cancelled:
+        assert op.completed_at is not None
+        for start, end in sorted(execute_calls.get(op.keeper, [])):
+            if start - CANCEL_MATCH_SLACK_SEC <= op.completed_at <= end + CANCEL_MATCH_SLACK_SEC:
+                ran_s = min(end - start, max(op.completed_at - start, 0.0))
+                during += 1
+                lost_s += ran_s
+                if end - start >= LONG_EXECUTE_SEC:
+                    during_long += 1
+                    lost_long_s += ran_s
+                break
+    return {
+        "turn_cancelled_operations": len(cancelled),
+        "cancelled_during_execute": during,
+        "cancelled_during_long_execute": during_long,
+        "execute_time_lost_s": round(lost_s, 1),
+        "long_execute_time_lost_s": round(lost_long_s, 1),
+    }
+
+
 def summarize_admission(waits: list[AdmissionWait]) -> dict[str, object]:
     by_provider: dict[str, float] = defaultdict(float)
     by_class: dict[str, float] = defaultdict(float)
@@ -451,9 +529,14 @@ def main() -> int:
     runs = read_runs(base, since, args.until)
     busy_by_keeper = {keeper: union_seconds(intervals) for keeper, intervals in runs.items()}
     long_execute: dict[str, list[Interval]] = defaultdict(list)
+    execute_calls: dict[str, list[Interval]] = defaultdict(list)
     for call in calls:
-        if call.tool == EXECUTE_TOOL and call.end - call.start >= LONG_EXECUTE_SEC:
+        if call.tool != EXECUTE_TOOL:
+            continue
+        execute_calls[call.keeper].append((call.start, call.end))
+        if call.end - call.start >= LONG_EXECUTE_SEC:
             long_execute[call.keeper].append((call.start, call.end))
+    operations = read_operations(base, since, args.until)
     summary = {
         "window": {
             "from": args.from_date.isoformat(),
@@ -463,7 +546,8 @@ def main() -> int:
             "keepers_with_turn_traces": len(runs),
         },
         "turn_time": summarize_calls(calls, busy_by_keeper),
-        "chat_operations": summarize_operations(read_operations(base, since, args.until), long_execute, runs),
+        "chat_operations": summarize_operations(operations, long_execute, runs),
+        "cancelled_turns": summarize_cancelled_turns(operations, execute_calls),
         "provider_admission": summarize_admission(read_admission_waits(base, since, args.until)),
     }
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)

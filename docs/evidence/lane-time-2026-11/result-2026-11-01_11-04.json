@@ -1,4 +1,11 @@
 {
+  "cancelled_turns": {
+    "cancelled_during_execute": 3,
+    "cancelled_during_long_execute": 0,
+    "execute_time_lost_s": 37.1,
+    "long_execute_time_lost_s": 0.0,
+    "turn_cancelled_operations": 106
+  },
   "chat_operations": {
     "by_origin": {
       "channel:": {
@@ -131,7 +138,36 @@
       "sum_s": 1836189.7
     },
     "calls": 144183,
+    "calls_by_batch_size": {
+      "1": 141419,
+      "10": 10,
+      "2": 1500,
+      "3": 453,
+      "4": 152,
+      "5": 70,
+      "6": 24,
+      "7": 539,
+      "8": 16
+    },
+    "calls_per_turn": {
+      "max": 1388,
+      "mean": 14.6,
+      "n": 9872,
+      "p50": 5,
+      "p90": 31,
+      "p99": 152
+    },
     "execute_time_s": 343286.2,
+    "execution_modes": {
+      "concurrent": {
+        "calls": 59085,
+        "time_s": 7740.6
+      },
+      "serial": {
+        "calls": 85098,
+        "time_s": 357113.2
+      }
+    },
     "long_execute": {
       "calls": 562,
       "polling_by_keeper": {

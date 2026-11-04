@@ -28,6 +28,9 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 긴 Execute: 60초 이상 걸린 Execute 예요. 명령에 `sleep`, `for ... in`, `while`, `until` 이 있으면 폴링으로 세요. 명령 문장은 이 판정에만 써요.
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
 - 승인 대기: `provider_admission:waited` 이벤트의 `waited_ms` 예요. 허용을 바로 받은 요청은 기록되지 않아서, 이 이벤트는 줄을 선 요청만 세요.
+- 한 응답의 호출 수: 원장의 `batch_size` 예요. 모델이 한 응답에 담아 요청한 도구 호출 수고, 호출마다 그 값을 세요.
+- 실행 방식: 원장의 `execution_mode`(`serial` 또는 `concurrent`)예요. 도구 descriptor 가 정해요(`packages/agent_core/lib/base/tool.mli`).
+- 턴이 취소된 때 돌던 Execute: `failure_kind` 가 `Turn_cancelled` 인 작업의 `completed_at` 이 같은 Keeper 의 Execute 호출 구간(시작 3초 전부터 끝 3초 뒤까지) 안에 있으면 세요. 원장은 호출이 끝날 때 행을 쓰기 때문이에요. 잃은 Execute 시간은 `completed_at` 까지 돈 부분이에요.
 
 ## 결과(11-01 ~ 11-04T19:10Z, 91.17시간)
 
@@ -39,6 +42,9 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | 나머지(첫 호출 전, 호출 없는 턴, 턴 끝) | 98.4시간 | 13.9% |
 
 - 같은 결과 재조회 32,545개(첫 호출 뒤의 호출만)가 쓴 턴 시간은 20.8시간(2.9%)이에요. 이 호출들은 앞 호출 바로 뒤에 이어져서 호출 사이 시간이 짧아요.
+- 한 턴(9,872개)의 호출 수는 평균 14.6, 중앙값 5, p90 31, p99 152, 최대 1,388이에요.
+- 한 응답에 호출 하나만 담은 경우가 141,419호출(98.1%)이고, 둘 이상 담은 호출은 2,764호출(1.9%)이에요. 크기별로 2가 1,500, 3이 453, 4가 152, 5가 70, 6이 24, 7이 539, 8이 16, 10이 10호출이에요.
+- 실행 방식은 serial 85,098호출(99.2시간)과 concurrent 59,085호출(2.2시간)이에요. 호출이 대부분 응답당 하나라서 concurrent 로 분류돼도 겹쳐 도는 호출은 드물어요(호출 사이 시간이 겹친 쌍 3,174개).
 - 60초 이상 Execute 562호출이 42.0시간(5.9%)이고, 그중 폴링 331호출이 29.3시간(4.1%)이에요.
 
 폴링을 많이 한 Keeper:
@@ -69,6 +75,8 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | 그중 같은 Keeper 의 60초 이상 Execute 와 겹친 시간 | 119.4분(1.9%) |
 | 그중 같은 Keeper 의 턴과 겹친 시간 | 1,401.8분(22.4%) |
 | Execute 가 도는 중에 만들어진 작업 | 17건, 대기 중앙값 223.2초, 합계 85.8분 |
+
+턴이 취소돼 끝난 작업(`Turn_cancelled`)은 106건이에요. 그중 같은 Keeper 의 Execute 가 도는 중에 취소된 것은 3건이고, 잃은 Execute 시간은 합계 37.1초예요. 60초 이상 Execute 가 도는 중에 취소된 작업은 없어요.
 
 위임(375건, 시작한 373건)은 305건이 성공하고 68건이 실패, 2건이 취소돼요. 실패 68건은 `Turn_cancelled` 36건, `Turn_exception` 32건이에요. 시작 전 대기는 중앙값 0.1초, p90 586.4초이고, 돌아간 시간은 중앙값 109.7초, p90 807.7초예요.
 

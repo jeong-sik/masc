@@ -18302,8 +18302,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     (* The side reads -- the ask follow-up and the identity logins this TUI
        is waiting on -- start after workspace admission, either the cold
        initial-probe acknowledgement or the terminal refresh. The open
-       questions the agenda strip counts are not among them: they ride this
-       bundle ([ask_request] above) whatever the surface. *)
+       questions the agenda strip counts read on their own announcement
+       ([launch_owed_asks]). *)
     if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
 
     (* This worker owns the binding. The UI's initial-probe acknowledgement is

@@ -14436,6 +14436,8 @@ let suspend_workspace_readings state =
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
   state.observer_retry_owner <- None;
+  (* The withdrawal cancelled the contact timer with every other job. *)
+  state.contact_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];

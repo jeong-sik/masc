@@ -43,7 +43,7 @@ let binding_audit_read_path () =
    guild ids, so the constant-empty field is declared at the store level
    instead of resolved per event. *)
 let binding_store =
-  Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
+  Store.create ~connector_id ~binding_store_path ~binding_store_read_path ~binding_audit_path
     ~binding_audit_read_path ~guild_id_field:Store.Include_empty
 
 let read_bindings_result () = Store.read_bindings_result binding_store

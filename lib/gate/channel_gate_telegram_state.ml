@@ -5,7 +5,7 @@ let display_name="Telegram"
 let channel="telegram"
 let binding_store_path = Env_config_telegram.binding_store_path
 let binding_audit_path = Env_config_telegram.binding_audit_path
-let store=Store.create ~binding_store_path ~binding_store_read_path:binding_store_path
+let store=Store.create ~connector_id ~binding_store_path ~binding_store_read_path:binding_store_path
   ~binding_audit_path ~binding_audit_read_path:binding_audit_path ~guild_id_field:Store.Include_empty
 let ( let* )=Result.bind
 

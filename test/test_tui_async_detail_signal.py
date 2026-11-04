@@ -142,6 +142,40 @@ class AsyncDetailSignalTest(unittest.TestCase):
 
         self.run_detail(scenario)
 
+    def test_a_change_while_away_reads_the_detail_on_return(self) -> None:
+        # The palette's Keeper chat leaves Tools with the detail still open.
+        def scenario(server: DetailServer, step: Callable[..., None]) -> None:
+            step("keys", ":")
+            step("drain", 0.3)
+            step("keys", "keeper analyst")
+            step("drain", 0.3)
+            step("keys", "\r")
+            step("drain", 1.0)
+            server.set_phase("away")
+            server.events.put(async_requests_changed("analyst"))
+            step(
+                "wait",
+                lambda: server.count("away", "observer-event-written") == 1,
+                "the change was not sent",
+            )
+            step("drain", 1.5)
+            self.assertEqual(server.count("away", STATUS_PATH), 0)
+            server.set_phase("back")
+            step("keys", ":")
+            step("drain", 0.3)
+            step("keys", "go Tools")
+            step("drain", 0.3)
+            step("keys", "\r")
+            step(
+                "wait",
+                lambda: server.response_count("back", STATUS_PATH) == 1,
+                "returning to Tools did not read the detail the change owed",
+            )
+            step("drain", 1.5)
+            self.assertEqual(server.count("back", STATUS_PATH), 1)
+
+        self.run_detail(scenario)
+
     def test_failed_detail_reads_are_read_again_with_growing_waits(self) -> None:
         def scenario(server: DetailServer, step: Callable[..., None]) -> None:
             with server.condition:

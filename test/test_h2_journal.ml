@@ -141,7 +141,11 @@ let test_journal_writes_announce_async_requests () = with_workspace @@ fun _env 
     ignore (Journal.prepare ~base_path source |> journal_value "create the journal");
     check int "creating the journal announces its Keeper" 1 !heard;
     ignore (Journal.prepare ~base_path source |> journal_value "find the journal");
-    check int "finding it written announces nothing" 1 !heard)
+    check int "finding it written announces nothing" 1 !heard;
+    ignore (Journal.load ~base_path ~keeper_name:source.Journal.keeper_name
+              ~composition_run_id:source.Journal.composition_run_id
+            |> journal_value "load the journal");
+    check int "reading it announces nothing" 1 !heard)
 let context (source : Journal.source) =
   ["composition_tool", `String composition_tool;
    "composition_run_id", `String (Plan.Composition_run_id.to_string source.composition_run_id);

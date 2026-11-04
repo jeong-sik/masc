@@ -7,41 +7,16 @@ type opening = Masc.Tui_preference.opening =
   | Keeper of Keeper_id.Keeper_name.t
 
 type t = private {
-  opening : (opening, string) result;
-  last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result;
-  theme : string option;
-  language : string option;
-  (** [tui].language: the UI display language as stored, ["ko"] or ["en"].
-      [None] where the file, the table or the key is absent — the caller
-      keeps its default. The typed reading lives with the UI state
-      (ui_language_of_string); an unknown stored value is reported,
-      never forced into a default. *)
-  board_sort : string option;
+  stored : Masc.Tui_preference.settings;
+  (** The [tui] settings the server answered, or their defaults when it
+      could not answer. *)
+  settings_unread : string option;
+  (** [Some reason] when the server's settings could not be read; [stored]
+      then holds the defaults, with the last conversation unread rather
+      than none. *)
   keeper_list_sort : string option;
   keeper_list_layout : string option;
   keeper_list_error : string option;
-  candle : string option;
-  reduce_motion : bool option;
-  lift_colours : bool option;
-  table_frame : bool option;
-  hints_visible : bool option;
-  help_hint_shown : bool option;
-  coalesce_queued_input : bool option;
-  send_on_stop : bool option;
-  user_input_priority_next : bool option;
-  midi_soundfont : string option;
-  (** [tui].midi_soundfont: the SoundFont file fluidsynth plays MIDI
-      attachments with. [None] where the file, the table or the key is
-      absent — MIDI playback then hands the file to the local app and says
-      the setting is missing. *)
-  audio_input_device : string option;
-  (** [tui].audio_input_device: the input device voice captures open. [None]
-      where the file, the table or the key is absent — captures then record
-      whatever the operating system calls the default input, exactly as they
-      did before the key existed. *)
-  settings_unread : string option;
-  (** [Some reason] when the server's settings could not be read; every
-      setting above then holds its default. *)
 }
 
 val of_settings :

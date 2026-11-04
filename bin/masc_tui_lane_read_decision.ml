@@ -26,3 +26,8 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
     | Masc.Workspace_dataset_event.Workspace_health
     | Masc.Workspace_dataset_event.Runtime_probe
     | Masc.Workspace_dataset_event.Runtime_metrics) -> Ignore
+
+let of_views ~lanes ~addon dataset =
+  match addon with
+  | Some instance_id -> of_dataset ~view:(Addons (Some instance_id)) dataset
+  | None -> of_dataset ~view:(if lanes then Lanes else Addons None) dataset

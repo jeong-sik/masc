@@ -8158,15 +8158,12 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       owe_runtime_surface_read state
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
       let module Decision = Masc_tui_lane_read_decision in
-      let view =
-        match state.view, state.lane_addons with
-        | Lanes, _ -> Decision.Lanes
-        | _, Some { Masc_tui_lane_addons.screen = Detail (instance_id, _); _ } ->
-            Decision.Addons (Some instance_id)
-        | _, Some _ -> Decision.Addons None
-        | _, None -> Decision.Overview
+      let addon = Option.bind state.lane_addons (fun (view : Masc_tui_lane_addons.t) ->
+        match view.screen with
+        | Masc_tui_lane_addons.Detail (instance_id, _) -> Some instance_id
+        | Masc_tui_lane_addons.Overview -> None)
       in
-      (match Decision.of_dataset ~view dataset with
+      (match Decision.of_views ~lanes:(state.view = Lanes) ~addon dataset with
        | Decision.Read_lanes -> state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
        | Decision.Read_addon instance_id ->
            (match state.lane_addons with
@@ -9164,27 +9161,38 @@ let launch_owed_lanes state ~mailbox =
   end
 
 let launch_owed_lane_addons state ~mailbox =
-  match state.lane_addons, state.lane_addons_owed with
-  | Some ({ Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ } as view),
-    Some ((owner, epoch), owed)
-    when String.equal owner open_id && String.equal epoch incarnation ->
-      let busy =
-        Option.is_some view.draft || Option.is_some view.document_key
-        || Option.is_some view.action_menu || Option.is_some view.installer
-        || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
-        || Option.is_some (Masc_tui_lane_addons.pending_action view)
-      in
-      if view.loading || busy then ()
-      else begin
-        let owed = Masc_tui_owed_read.abandoned owed in
-        state.lane_addons_owed <- Some ((owner, epoch), owed);
-        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
-          launch_lane_addons state ~mailbox
-            ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
-            Masc_tui_lane_addons.Inspect
-      end
-  | Some _, Some _ | None, Some _ -> state.lane_addons_owed <- None
-  | Some _, None | None, None -> ()
+  match state.lane_addons_owed with
+  | None -> ()
+  | Some ((owner, epoch), owed) ->
+      (match state.lane_addons with
+       | None -> state.lane_addons_owed <- None
+       | Some view ->
+           (match view.Masc_tui_lane_addons.screen with
+            | Masc_tui_lane_addons.Overview | Masc_tui_lane_addons.Detail _ ->
+                let matches =
+                  match view.Masc_tui_lane_addons.screen with
+                  | Masc_tui_lane_addons.Detail (open_id, incarnation) ->
+                      String.equal owner open_id && String.equal epoch incarnation
+                  | Masc_tui_lane_addons.Overview -> false
+                in
+                if not matches then state.lane_addons_owed <- None
+                else begin
+                  let busy =
+                    Option.is_some view.draft || Option.is_some view.document_key
+                    || Option.is_some view.action_menu || Option.is_some view.installer
+                    || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
+                    || Option.is_some (Masc_tui_lane_addons.pending_action view)
+                  in
+                  if view.loading || busy then ()
+                  else begin
+                    let owed = Masc_tui_owed_read.abandoned owed in
+                    state.lane_addons_owed <- Some ((owner, epoch), owed);
+                    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
+                      launch_lane_addons state ~mailbox
+                        ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
+                        Masc_tui_lane_addons.Inspect
+                  end
+                end))
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)

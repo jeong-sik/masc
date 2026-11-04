@@ -395,6 +395,18 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
            let contender_pid =
              match Unix.fork () with
              | 0 ->
+               let stderr_log =
+                 Filename.concat run_dir "contender-stderr.log"
+               in
+               (try
+                  let err_fd =
+                    Unix.openfile stderr_log
+                      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ]
+                      0o644
+                  in
+                  Unix.dup2 err_fd Unix.stderr;
+                  Unix.close err_fd
+                with Unix.Unix_error _ -> ());
                ignore (Unix.write_substring queued_write "S" 0 1 : int);
                close_quietly waiting_read;
                close_quietly waiting_write;
@@ -468,9 +480,23 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                       | Some (_, Unix.WSTOPPED signal) ->
                         Printf.sprintf "stopped(%d)" signal
                     in
+                    let stderr_tail =
+                      try
+                        let ic =
+                          open_in (Filename.concat run_dir "contender-stderr.log")
+                        in
+                        Fun.protect
+                          ~finally:(fun () -> close_in_noerr ic)
+                          (fun () ->
+                            let len = in_channel_length ic in
+                            let take = min len 2000 in
+                            seek_in ic (len - take);
+                            really_input_string ic take)
+                      with Sys_error _ -> "<no stderr log>"
+                    in
                     Alcotest.failf
-                      "contender pipe gave %d bytes at %s; marathon=%S status=%s"
-                      got what marathon status)
+                      "contender pipe gave %d bytes at %s; marathon=%S status=%s stderr=%S"
+                      got what marathon status stderr_tail)
                   else Bytes.get buffer 0
                 in
                 Alcotest.(check char)

@@ -1,0 +1,55 @@
+== ab-dom-default-1
+load_before [173.03125, 156.595703125, 187.99267578125] binary masc-tui-default
+  build[keeper-list] frames=138 mean=8.64ms p50=2.32 p95=47.74 p99=95.34 max=140.50
+pid=87043 lost_events=0 spans=10601
+domain=0 top-level empty_minor n=68 total_ms=334.0 p50_ms=0.076 p99_ms=148.903 max_ms=148.903
+domain=0 top-level stw_handler n=20 total_ms=246.2 p50_ms=1.364 p99_ms=105.064 max_ms=105.064
+domain=0 top-level domain_condition_wait n=24 total_ms=213.0 p50_ms=2.043 p99_ms=51.470 max_ms=51.470
+domain=0 top-level interrupt_remote n=20 total_ms=179.6 p50_ms=0.029 p99_ms=74.097 max_ms=74.097
+domain=0 top-level major n=100 total_ms=50.9 p50_ms=0.040 p99_ms=15.121 max_ms=15.121
+domain=0 top-level explicit_gc_set n=1 total_ms=0.6 p50_ms=0.585 p99_ms=0.585 max_ms=0.585
+domain=0 top-level stw_leader n=4 total_ms=0.0 p50_ms=0.000 p99_ms=0.000 max_ms=0.000
+== ab-dom-pool2-1
+load_before [190.7861328125, 161.3193359375, 189.12841796875] binary masc-tui-pool2
+  build[keeper-list] frames=137 mean=9.54ms p50=2.34 p95=26.38 p99=246.40 max=284.86
+pid=90288 lost_events=0 spans=3147
+domain=0 top-level empty_minor n=70 total_ms=941.6 p50_ms=0.068 p99_ms=243.194 max_ms=243.194
+domain=0 top-level stw_handler n=11 total_ms=183.2 p50_ms=6.430 p99_ms=61.074 max_ms=61.074
+domain=0 top-level domain_condition_wait n=24 total_ms=117.9 p50_ms=0.293 p99_ms=32.706 max_ms=32.706
+domain=0 top-level major n=92 total_ms=42.0 p50_ms=0.044 p99_ms=5.326 max_ms=5.326
+domain=0 top-level interrupt_remote n=5 total_ms=3.6 p50_ms=0.106 p99_ms=3.325 max_ms=3.325
+domain=0 top-level explicit_gc_set n=1 total_ms=0.1 p50_ms=0.124 p99_ms=0.124 max_ms=0.124
+domain=0 top-level stw_leader n=4 total_ms=0.0 p50_ms=0.000 p99_ms=0.000 max_ms=0.000
+== ab-dom-default-2
+load_before [195.76513671875, 163.85302734375, 189.54541015625] binary masc-tui-default
+  build[keeper-list] frames=153 mean=7.68ms p50=2.05 p95=42.12 p99=83.52 max=157.84
+pid=92172 lost_events=0 spans=10487
+domain=0 top-level empty_minor n=72 total_ms=489.3 p50_ms=0.056 p99_ms=154.530 max_ms=154.530
+domain=0 top-level interrupt_remote n=13 total_ms=212.9 p50_ms=0.140 p99_ms=167.800 max_ms=167.800
+domain=0 top-level domain_condition_wait n=23 total_ms=182.9 p50_ms=0.653 p99_ms=43.646 max_ms=43.646
+domain=0 top-level major n=104 total_ms=120.6 p50_ms=0.018 p99_ms=26.211 max_ms=31.019
+domain=0 top-level stw_handler n=19 total_ms=107.8 p50_ms=1.551 p99_ms=48.187 max_ms=48.187
+domain=0 top-level explicit_gc_set n=1 total_ms=2.3 p50_ms=2.328 p99_ms=2.328 max_ms=2.328
+domain=0 top-level stw_leader n=4 total_ms=0.0 p50_ms=0.000 p99_ms=0.000 max_ms=0.000
+== ab-dom-pool2-2
+load_before [203.0107421875, 166.470703125, 190.1748046875] binary masc-tui-pool2
+  build[keeper-list] frames=133 mean=10.58ms p50=1.93 p95=58.17 p99=122.79 max=138.69
+pid=93913 lost_events=0 spans=3077
+domain=0 top-level empty_minor n=71 total_ms=614.3 p50_ms=0.054 p99_ms=131.428 max_ms=131.428
+domain=0 top-level domain_condition_wait n=24 total_ms=219.6 p50_ms=1.867 p99_ms=42.813 max_ms=42.813
+domain=0 top-level major n=90 total_ms=193.1 p50_ms=0.051 p99_ms=73.374 max_ms=73.374
+domain=0 top-level stw_handler n=9 total_ms=76.7 p50_ms=4.506 p99_ms=34.779 max_ms=34.779
+domain=0 top-level interrupt_remote n=4 total_ms=19.8 p50_ms=5.161 p99_ms=14.650 max_ms=14.650
+domain=0 top-level explicit_gc_set n=1 total_ms=0.1 p50_ms=0.085 p99_ms=0.085 max_ms=0.085
+domain=0 top-level stw_leader n=4 total_ms=0.0 p50_ms=0.000 p99_ms=0.000 max_ms=0.000
+== ab-dom-default-3
+load_before [209.2783203125, 169.56884765625, 190.86083984375] binary masc-tui-default
+  build[keeper-list] frames=189 mean=4.81ms p50=2.26 p95=15.30 p99=44.63 max=104.95
+pid=95544 lost_events=0 spans=14746
+domain=0 top-level empty_minor n=80 total_ms=365.5 p50_ms=0.073 p99_ms=81.933 max_ms=81.933
+domain=0 top-level interrupt_remote n=22 total_ms=168.0 p50_ms=0.133 p99_ms=128.279 max_ms=128.279
+domain=0 top-level domain_condition_wait n=24 total_ms=159.9 p50_ms=1.086 p99_ms=27.076 max_ms=27.076
+domain=0 top-level stw_handler n=21 total_ms=103.1 p50_ms=0.737 p99_ms=51.856 max_ms=51.856
+domain=0 top-level major n=113 total_ms=92.6 p50_ms=0.018 p99_ms=24.160 max_ms=28.850
+domain=0 top-level explicit_gc_set n=1 total_ms=0.1 p50_ms=0.089 p99_ms=0.089 max_ms=0.089
+domain=0 top-level stw_leader n=4 total_ms=0.0 p50_ms=0.000 p99_ms=0.000 max_ms=0.000

@@ -1,0 +1,56 @@
+(* Attach to the first <pid>.events ring that appears in DIR, poll it while the
+   process lives, and report runtime phase spans (per domain). *)
+let dir = Sys.argv.(1)
+let out = Sys.argv.(2)
+let rec wait_file seen =
+  let files = Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".events" && not (List.mem f seen)) in
+  match files with
+  | f :: _ -> int_of_string (Filename.chop_suffix f ".events")
+  | [] -> Unix.sleepf 0.02; wait_file seen
+let () =
+  let existing = Sys.readdir dir |> Array.to_list in
+  let pid = wait_file existing in
+  let cursor = Runtime_events.create_cursor (Some (dir, pid)) in
+  let stacks = Hashtbl.create 8 in
+  let spans = ref [] and lost = ref 0 in
+  let t0 = ref None in
+  let ns ts = Int64.to_int (Runtime_events.Timestamp.to_int64 ts) in
+  let runtime_begin d ts ph =
+    if !t0 = None then t0 := Some (ns ts);
+    let st = try Hashtbl.find stacks d with Not_found -> [] in
+    Hashtbl.replace stacks d ((ph, ns ts) :: st) in
+  let runtime_end d ts ph =
+    match Hashtbl.find_opt stacks d with
+    | Some ((p, start) :: rest) when p = ph ->
+        Hashtbl.replace stacks d rest;
+        spans := (d, Runtime_events.runtime_phase_name ph, start, ns ts - start, List.length rest) :: !spans
+    | Some st -> Hashtbl.replace stacks d (List.filter (fun (p, _) -> p <> ph) st)
+    | None -> () in
+  let lost_events _ n = lost := !lost + n in
+  let cb = Runtime_events.Callbacks.create ~runtime_begin ~runtime_end ~lost_events () in
+  let alive () = try Unix.kill pid 0; true with Unix.Unix_error _ -> false in
+  while alive () do ignore (Runtime_events.read_poll cursor cb None); Unix.sleepf 0.02 done;
+  (try ignore (Runtime_events.read_poll cursor cb None) with _ -> ());
+  let oc = open_out out in
+  let origin = Option.value ~default:0 !t0 in
+  Printf.fprintf oc "pid=%d lost_events=%d spans=%d\n" pid !lost (List.length !spans);
+  let by = Hashtbl.create 16 in
+  List.iter (fun (d, name, _, dur, depth) -> if depth = 0 then begin
+      let k = (d, name) in Hashtbl.replace by k (dur :: (try Hashtbl.find by k with Not_found -> [])) end) !spans;
+  let rows = Hashtbl.fold (fun k v acc -> (k, List.sort compare v) :: acc) by [] in
+  let rows = List.sort (fun (_, a) (_, b) -> compare (List.fold_left (+) 0 b) (List.fold_left (+) 0 a)) rows in
+  List.iter (fun ((d, name), v) ->
+      let n = List.length v in let pct p = List.nth v (min (n - 1) (n * p / 100)) in
+      Printf.fprintf oc "domain=%d top-level %s n=%d total_ms=%.1f p50_ms=%.3f p99_ms=%.3f max_ms=%.3f\n"
+        d name n (float (List.fold_left (+) 0 v) /. 1e6) (float (pct 50) /. 1e6) (float (pct 99) /. 1e6)
+        (float (List.nth v (n - 1)) /. 1e6)) rows;
+  Printf.fprintf oc "spans >= 10ms (any depth):\n";
+  List.iter (fun (d, name, start, dur, depth) -> if dur >= 10_000_000 then
+      Printf.fprintf oc "  domain=%d depth=%d %s at_ms=%.1f dur_ms=%.2f\n" d depth name
+        (float (start - origin) /. 1e6) (float dur /. 1e6)) (List.rev !spans);
+  close_out oc;
+  let tsv = open_out (out ^ ".spans.tsv") in
+  List.iter (fun (d, name, start, dur, depth) ->
+      Printf.fprintf tsv "%d\t%d\t%s\t%d\t%d\n" d depth name (start - origin) dur) (List.rev !spans);
+  close_out tsv

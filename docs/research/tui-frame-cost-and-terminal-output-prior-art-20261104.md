@@ -101,10 +101,13 @@ published timings.
    roster fix, measure the other surfaces the same way; the stage timers only
    cover framing, so add a stage around each surface's model work before
    judging it.
-2. **Build spikes.** Keeper-list Builds of 76 to 178 ms sat outside every stage.
-   They could be GC pauses or the host's load. OCaml runtime events record GC
-   phases with timestamps; read them against the frame records before changing
-   allocation.
+2. **Build spikes.** Runtime events show that the largest keeper-list Build
+   spikes are UI-domain minor collections: 109.4 ms of Build over a 107.1 ms
+   `empty_minor`, mostly spent waiting at the stop-the-world barriers while
+   the host ran at load 170 to 210. Cutting the TUI from 16 domains to 4 did
+   not shorten them ([gc/](../evidence/tui-keeper-list-held-key-20261104/gc/README.md)).
+   What is left to try is getting the TUI's threads scheduled first under
+   load, and finding which loaded value the long promotions copy.
 3. **Presenter cell diff.** Parse each changed row into cells and write only the
    changed runs, with SGR deltas and `EL 0` for a blank tail. Side-by-side
    panes then stop rewriting each other's cells, and emulators like wterm keep

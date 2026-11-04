@@ -1037,10 +1037,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
-          (Keeper_heartbeat_loop_cycle.Checkpointed
-             { meta
-             ; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-             }))
+          (Keeper_heartbeat_loop_cycle.Checkpointed { meta }))
    with
    | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
    | _ ->

@@ -37,10 +37,7 @@ module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
   | Completed of { meta : keeper_meta }
-  | Checkpointed of
-      { meta : keeper_meta
-      ; checkpoint_reason : Keeper_unified_turn.checkpoint_reason
-      }
+  | Checkpointed of { meta : keeper_meta }
   | Input_required of keeper_meta
   | Cancelled of keeper_meta
   | Skipped of keeper_meta
@@ -170,8 +167,7 @@ let run_keeper_cycle_admitted
     in
     Failed { meta; failure }
   | Ok (Keeper_unified_turn.Turn_completed { meta }) -> Completed { meta }
-  | Ok (Keeper_unified_turn.Turn_checkpointed { meta; checkpoint_reason }) ->
-    Checkpointed { meta; checkpoint_reason }
+  | Ok (Keeper_unified_turn.Turn_checkpointed { meta }) -> Checkpointed { meta }
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta

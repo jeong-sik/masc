@@ -668,17 +668,12 @@ let batch_disposition_of_cycle_outcome
        records. Whether the keeper answered is not the queue's question. The
        message itself stays in the external-attention store. *)
     Batch_ack_completed
-  | Some
-      (Cycle.Checkpointed
-         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-         ; _
-         }) ->
+  | Some (Cycle.Checkpointed _) ->
     (* The admitted batch is an attention layer, not the continuation store.
-       Every checkpoint reason is produced after at least one model round
-       ran with the admitted attention projected: a newer durable source
-       arrived or a tool call was deferred to the Gate. On the agent-core
-       lane the checkpoint preserves canonical turn state, while
-       provider-specific dynamic context can remain request-only (in
+       A checkpoint is produced after at least one model round ran with the
+       admitted attention projected and a newer durable source arrived. On
+       the agent-core lane the checkpoint preserves canonical turn state,
+       while provider-specific dynamic context can remain request-only (in
        particular on OpenAI-compatible requests). On an official-client lane
        a session replacement can lose prior context. This delivery ACK is not
        a guarantee that observation text survives in resumed model input.

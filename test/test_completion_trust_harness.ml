@@ -78,8 +78,18 @@ let make_ctx () =
 
 let with_ws name fn =
   let dir = temp_dir name in
+  (* The process-wide Board binds to the BasePath it first resolves and keeps
+     it. Each case owns a different workspace, so it starts with no Board bound
+     and leaves none behind; a later case would otherwise write its Task Board
+     posts into an earlier case's removed directory. *)
+  let unbind_board () =
+    Masc.Board.reset_global_for_test ();
+    Masc.Board_dispatch.reset_for_test ()
+  in
+  unbind_board ();
   Fun.protect
     ~finally:(fun () ->
+      unbind_board ();
       Masc.Eval_calibration.For_testing.reset_store ();
       Time_compat.clear_clock ();
       cleanup_dir dir)

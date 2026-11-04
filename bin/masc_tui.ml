@@ -8644,11 +8644,13 @@ let owe_planning_reads state =
   state.planning_owed <- Masc_tui_owed_read.changed state.planning_owed;
   state.overview_goals_owed <- Masc_tui_owed_read.changed state.overview_goals_owed
 
-(* Every read that asks for a Planning dataset starts its debt, whatever
-   started it: a read on entering Planning or a revalidation that is
-   superseded before it answers leaves the dataset owed, and
-   [launch_owed_planning] reads it again. *)
-let note_planning_reads_started state (needs : Masc_tui_types.surface_needs) =
+(* Every read that asks for the Board list or a Planning dataset starts its
+   debt, whatever started it: a read on entering the surface or a
+   revalidation that is superseded before it answers leaves the dataset owed,
+   and [launch_owed_board_list] or [launch_owed_planning] reads it again. *)
+let note_owed_surface_reads_started state (needs : Masc_tui_types.surface_needs) =
+  if needs.needs_board then
+    state.board_list_owed <- Masc_tui_owed_read.started state.board_list_owed;
   if needs.needs_planning then
     state.planning_owed <- Masc_tui_owed_read.started state.planning_owed;
   if needs.needs_overview_goals then
@@ -18493,7 +18495,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
          replace every dataset currently drawn rather than omit that read.
          The cadence leaves the Board out: it re-reads on
          [notifications/board] ([launch_owed_board_list]), and a scoped
-         Board read in flight keeps its datasets. It leaves the Keeper
+         Board read this bundle supersedes leaves the list owed
+         ([note_owed_surface_reads_started]). It leaves the Keeper
          roster out too: the roster reads the rows the server names and the
          whole roster when every row changed ([launch_owed_keeper_roster],
          RFC-0481 §3.3). Planning and its Goals tree read on
@@ -18510,7 +18513,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
       else None in
-    note_planning_reads_started state needs;
+    note_owed_surface_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19082,7 +19085,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let refresh_ticket = Http_refresh_order.for_navigation
       ~collection_inflight state.http_refresh_order in
     state.http_refresh_order <- refresh_ticket;
-    note_planning_reads_started state needs;
+    note_owed_surface_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19180,7 +19183,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
   end
 
 (* Runs on every loop iteration. A Board read already in flight is let finish
-   first; one that will not deliver leaves the list owed again. *)
+   first; one that will not deliver leaves the list owed again. The scoped
+   and full refreshes record the start of every Board read
+   ([note_owed_surface_reads_started]). *)
 let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if state.view <> Board then state.board_list_owed <- Masc_tui_owed_read.settled
@@ -19196,18 +19201,16 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
        && server_authority_ready state
        && not reading
-    then begin
-      state.board_list_owed <- Masc_tui_owed_read.started read;
+    then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with needs_board = true }
-    end
   end
 
 (* Runs on every loop iteration. A dataset already in flight is let finish
    first; one that ended without an answer leaves its read owed again. Only
    the datasets whose debt is due are read; the scoped refresh records their
-   start ([note_planning_reads_started]). *)
+   start ([note_owed_surface_reads_started]). *)
 let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if state.view <> Planning then begin

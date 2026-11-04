@@ -328,6 +328,21 @@ let test_unrequested_board_context_does_not_gain_new_navigation_input () =
      && observe_delivery current (Surface_read_context.current navigation_context)
        {bpr_query=requested;bpr_result=Ok [post "late"]}=None)
 
+(* A list read in flight when one /health probe fails is dropped with the
+   old authority. Resuming the same workspace does not owe the list again, so
+   the debt itself survives the suspension and the launcher reads it again. *)
+let test_withdrawal_keeps_the_list_debt () =
+  let current=state () in
+  current.board_list_owed <- Masc_tui_owed_read.(started (changed settled));
+  suspend_workspace_readings current;
+  Alcotest.(check bool) "the read in flight is still owed after withdrawal" true
+    (match current.board_list_owed with
+     | Masc_tui_owed_read.Reading _ -> true
+     | Settled | Owed _ | Waiting _ -> false);
+  Alcotest.(check bool) "once it ends unanswered the list is due again" true
+    (Masc_tui_owed_read.due ~now:0.
+       (Masc_tui_owed_read.abandoned current.board_list_owed))
+
 let () = Alcotest.run "tui_board_list_reading"
   ["availability and continuity",
    [Alcotest.test_case "initial loading empty and failure" `Quick test_initial_loading_empty_and_failure_are_distinct;
@@ -344,4 +359,6 @@ let () = Alcotest.run "tui_board_list_reading"
     Alcotest.test_case "context rebind original query and successor admission" `Quick
       test_surface_context_rebind_keeps_origin_query_and_current_admission;
     Alcotest.test_case "unrequested context navigation and retirement" `Quick
-      test_unrequested_board_context_does_not_gain_new_navigation_input]]
+      test_unrequested_board_context_does_not_gain_new_navigation_input;
+    Alcotest.test_case "withdrawal keeps the list debt" `Quick
+      test_withdrawal_keeps_the_list_debt]]

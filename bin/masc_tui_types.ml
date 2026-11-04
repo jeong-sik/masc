@@ -14573,7 +14573,6 @@ let suspend_workspace_readings state =
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
-  state.board_list_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;

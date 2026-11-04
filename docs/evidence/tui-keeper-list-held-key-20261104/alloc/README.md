@@ -13,3 +13,25 @@ each Keeper's last-turn time from an RFC 3339 string on every roster build.
 The decoder had turned the runtime's number into that string a moment
 before. The next sites are character width (`masc_tui_grapheme_segmentation`),
 the roster ranking, and the agenda strip.
+
+`profile-after-parse.txt`: the same run after the last-turn time is kept as a
+number. The parser no longer appears. The largest sites are now the agenda
+strip's projection (`masc_tui_agenda.ml:93`, 6.8%), character width, and the
+roster ranking; the roster and the agenda strip are each rebuilt several
+times a frame.
+
+`ab-layer1-vs-layer5.txt`: the layer-1 binary (roster join fix only) against
+this stack's top (last-turn number, roster and agenda reused while their
+inputs are the same values), alternated three times each, with runtime
+events on. Host load average 29 to 32.
+
+| | Build p50 | Build max | UI allocated words | UI minor GCs |
+|---|---|---|---|---|
+| layer 1 | 1.24 to 1.56 ms | 3.2 to 14.4 ms | 76.6 to 83.6 M | 73 to 74 |
+| layer 5 | 1.02 to 1.30 ms | 7.6 to 9.8 ms | 51.9 to 57.3 M | 67 to 69 |
+
+UI allocation fell about a third in every pair. Minor collections fell less
+than a tenth: the UI domain starts most of them well before its 4 M-word
+minor heap is full (about 0.6 M words allocated per collection), for a reason
+not yet traced. At load 30 no Build in either arm reached 15 ms; the 30 to
+180 ms stalls of the earlier runs came with load 170 to 340.

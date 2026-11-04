@@ -56,14 +56,17 @@ let cursor_of_string encoded =
                then Error Invalid_cursor else Ok (acc @ [{file;size}])
              | _ -> Error Invalid_cursor) (Ok []) rows
          | _ -> Error Invalid_cursor in
-       (match text "schema",text "task_id",text "workspace",ceilings,text "inventory",
-              text "file",integer "device",integer "inode",integer "before",text "anchor" with
-        | Some "masc.task-history.cursor/v2",Some task,Some workspace,Ok ceilings,Some inventory,
-          Some file,Some device,Some inode,Some before,Some anchor
-          when ceilings<>[] && Option.is_some (dated_parts file) ->
-          let cursor={task;workspace;ceilings;inventory;position={file;device;inode;before;anchor}} in
-          if cursor_to_string cursor=encoded then Ok cursor else Error Invalid_cursor
-        | _ -> Error Invalid_cursor)
+       (match ceilings with
+        | Error _ -> Error Invalid_cursor
+        | Ok ceilings ->
+          (match text "schema",text "task_id",text "workspace",text "inventory",
+                 text "file",integer "device",integer "inode",integer "before",text "anchor" with
+           | Some "masc.task-history.cursor/v2",Some task,Some workspace,Some inventory,
+             Some file,Some device,Some inode,Some before,Some anchor
+             when ceilings<>[] && Option.is_some (dated_parts file) ->
+             let cursor={task;workspace;ceilings;inventory;position={file;device;inode;before;anchor}} in
+             if cursor_to_string cursor=encoded then Ok cursor else Error Invalid_cursor
+           | _ -> Error Invalid_cursor))
      | _ -> Error Invalid_cursor
      | exception Yojson.Json_error _ -> Error Invalid_cursor)
 

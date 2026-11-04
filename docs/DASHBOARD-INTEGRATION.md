@@ -210,9 +210,6 @@ status: reference
 - Unreadable credential store / auth bootstrap failure
   - `503 Service Unavailable`
   - `{"error":"auth_cred_store_unreadable", ...}` or `{"error":"auth_Bootstrap_failed", ...}`
-- Removed legacy batch endpoint
-  - `410 Gone`
-  - `{"error":"dashboard batch contract removed", ...}`
 
 Settings Runtime configuration ownership (`Runtime > Accounts`, `Runtime > Cascade`, `Runtime > Check`) and navigation behavior are described in
 [Settings Runtime workspace changes](guides/settings-runtime-workspace.md).

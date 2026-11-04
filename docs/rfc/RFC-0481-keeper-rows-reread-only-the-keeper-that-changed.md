@@ -168,7 +168,7 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 - TUI 는 `keeper_turn_changed` 를 받으면 turns 전체를 읽을 빚을 남긴다(약 2 KB). 키퍼 하나씩 읽게 바꾸는 일은 이 RFC 밖이다. 다시 읽기와 권한 회복 때도 빚을 남긴다. 답변 중 배지는 모든 화면이 그리므로 화면에 들어올 때 따로 읽지 않는다. 어느 turns 읽기든 실패하면 늘어나는 간격으로 다시 읽는다.
 - 2초 turns 읽기는 없다. 답변 중 배지와 채팅 화면의 준비 단계 읽기(`launch_selected_preparation_operation_read`)는 미리보기 알림(§3.5)으로 turns 를 읽어 미리보기를 따라간다.
 - 대기 목록 읽기가 실패하면 늘어나는 간격으로 다시 읽는다.
-- 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정(`schedules_changed`), 확인 대기(`pending_confirms_changed`), fusion(`fusion_run_status`) 알림도 대기 목록을 읽을 빚을 남긴다. 셋 다 이미 나가는 알림이라 서버는 바꾸지 않는다. 대기 목록 읽기는 대기 상태만 바꾸고, turns 행·토큰·끝난 턴 표시는 turns 읽기가 바꾼다.
+- 대기 목록은 `keeper_waiting_inventory_changed` 로 읽는다. 일정(`schedule_store_invalidated`), 확인 대기(`operator_pending_confirm_invalidated`), fusion(`fusion_run_status`) 알림도 대기 목록을 읽을 빚을 남긴다. 셋 다 이미 나가는 알림이라 서버는 바꾸지 않는다. 일정과 확인 대기 알림은 키퍼 이름이 없다. 그래서 알림만으로는 화면의 행을 비우지 않는다. 다만 알림 전에 시작한 대기 목록 읽기는 현재 값으로 받지 않는다. 그 읽기가 답하면 그 키퍼 행은 뒤따르는 읽기가 답할 때까지 '확인 안 됨'으로 보인다. 대기 목록 읽기는 대기 상태만 바꾸고, turns 행·토큰·끝난 턴 표시는 turns 읽기가 바꾼다.
 - turns 읽기 결과를 다루는 곳(§1.8: 대기 영수증, control generation, 끝난 턴 표시, `launch_waiting_keeper_input`, 기록·준비 단계 읽기, Metrics)은 읽기가 신호로 일어나도 그대로 돈다. 끝난 턴 표시는 두 읽기 사이의 running→idle 로 정해진다. 시작 신호의 읽기가 끝나기 전에 턴이 끝나면 표시되지 않는 것은 2초 읽기와 같다.
 - 웹 대시보드는 turns 응답 모양이 그대로라 바뀌지 않는다.
 

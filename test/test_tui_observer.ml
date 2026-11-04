@@ -141,7 +141,6 @@ let summary = function
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
   | Observer.Event Observer.Repositories_changed -> "repositories"
-  | Observer.Event Observer.Schedules_changed -> "schedules"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -155,8 +154,7 @@ let summary = function
          | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper
          | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
          | Observer.Installation_asks_changed { declaration_id } ->
-             "installation_asks:" ^ declaration_id
-         | Observer.Pending_confirms_changed -> "pending_confirms")
+             "installation_asks:" ^ declaration_id)
   | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
       "async_requests:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
@@ -653,13 +651,13 @@ let async_requests_frame =
 |}
 
 let pending_confirms_frame =
-  {|data: {"type":"pending_confirms_changed"}
+  {|data: {"type":"operator_pending_confirm_invalidated"}
 
 |}
 
 let test_only_a_confirmation_change_reads_the_confirmations () =
   check (list string) "a confirmation change decodes as one"
-    [ "approval(pending_confirms)" ]
+    [ "pending_confirm_invalidated" ]
     (List.map summary (decode_all [ pending_confirms_frame ]));
   let count reads frames =
     decode_all frames
@@ -680,12 +678,12 @@ let test_only_a_confirmation_change_reads_the_confirmations () =
        [ pending_confirms_frame ])
 
 let schedules_frame =
-  {|data: {"type":"schedules_changed"}
+  {|data: {"type":"schedule_store_invalidated"}
 
 |}
 
 let test_only_a_schedule_change_reads_the_schedules () =
-  check (list string) "a schedule change decodes as one" [ "schedules" ]
+  check (list string) "a schedule change decodes as one" [ "schedule_store_invalidated" ]
     (List.map summary (decode_all [ schedules_frame ]));
   let count reads frames =
     decode_all frames

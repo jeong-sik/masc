@@ -184,7 +184,6 @@ type approval_change =
   | Keeper_asks_changed of { keeper : string }  (** [keeper_asks_changed] *)
   | Installation_asks_changed of { declaration_id : string }
       (** [lane_addon_asks_changed] *)
-  | Pending_confirms_changed  (** [pending_confirms_changed] *)
 
 (** What a Keeper roster push says changed (RFC-0481 §3.2). *)
 type roster_change =
@@ -273,7 +272,9 @@ type event =
           verification or exact lanes -- changed. A server push named by
           {!Masc.Internal_agent_runs_event}. *)
   | Schedule_store_invalidated
-      (** A schedule ledger write was attempted in the subscribed workspace. *)
+      (** The subscribed workspace's schedule list may have changed: a
+          schedule ledger write was attempted, or a runner tick changed the
+          list or its status passed the staleness deadline. *)
   | Pending_confirm_invalidated
       (** Pending confirmations may have changed in the subscribed workspace. *)
   | Verification_requests_changed
@@ -282,10 +283,6 @@ type event =
   | Repositories_changed
       (** The workspace's repository catalog was written. A server push with
           no payload, named by {!Masc.Repository_catalog_broadcast}. *)
-  | Schedules_changed
-      (** The workspace's schedules changed. A server push with no payload,
-          named by {!Masc.Schedules_changed_event}: the reader re-fetches
-          [/api/v1/dashboard/scheduled-automation]. *)
   | Keeper_event_queue_changed of { keeper : string }
       (** [keeper]'s event queue, or the reaction record beside it, was
           written. A server push named by
@@ -380,14 +377,14 @@ val runtime_journal_appended : event -> (string * runtime_journal) option
 (** The Keeper and journal a runtime journal push names. *)
 
 val schedules_changed : event -> bool
-(** The workspace's schedules changed. *)
+(** The workspace's schedules changed: a {!Schedule_store_invalidated}. *)
 
 val event_queue_changed : event -> string option
 (** The Keeper whose event queue or reaction record a push names. *)
 
 val pending_confirms_changed : event -> bool
 (** The confirmations waiting for an operator changed or one passed its
-    deadline. *)
+    deadline: a {!Pending_confirm_invalidated}. *)
 
 val asks_changed : event -> bool
 (** The questions a Keeper or a Lane Add-on installation puts to the operator

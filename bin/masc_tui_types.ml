@@ -12722,8 +12722,11 @@ type keeper_waiting_snapshot = {
 }
 
 (* [Waiting_unattributed] is a change the event names no Keeper for (a
-   schedule or a confirmation). It owes the waiting list a read but marks no
-   Keeper unverified: the rows on screen stay until the read answers. *)
+   schedule or a confirmation). The change itself marks no Keeper unverified,
+   so with no read in flight the rows on screen stay until the next read
+   answers. A read already in flight may predate it, so its rows are not
+   taken as current: when it answers, its Keepers read as unverified until
+   the read that follows. *)
 type keeper_waiting_change =
   | Waiting_all
   | Waiting_keepers of string list
@@ -12742,7 +12745,9 @@ let note_keeper_waiting_change state change =
           state.keeper_waiting_versions <- (name, version + 1) ::
             List.remove_assoc name state.keeper_waiting_versions) names;
         names
-    | Waiting_unattributed -> [] in
+    | Waiting_unattributed ->
+        state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+        [] in
   state.keeper_waiting_unverified <-
     List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
   state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
@@ -17020,12 +17025,22 @@ let apply_schedule_agenda_read state ticket result =
       (* A change observed during this read means its result may precede the
          change. Retire it without publishing; the caller starts a successor. *)
       if not state.schedules_agenda_event_pending then
+        (* A change announced while the read ran, or one no read has answered
+           yet, is still owed: the list may predate it. *)
+        let change_unread =
+          match state.schedules_owed with
+          | Masc_tui_owed_read.Settled
+          | Masc_tui_owed_read.Reading { changed_since = false; _ } -> false
+          | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _
+          | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true
+        in
         (match result with
          | Ok snapshot ->
              state.schedules_agenda <- Some snapshot;
              state.schedules_agenda_error <- None;
              state.schedules_agenda_freshness <-
-               (if schedule_observer_is_scoped state then Masc_tui_agenda.Last_read
+               (if schedule_observer_is_scoped state && not change_unread
+                then Masc_tui_agenda.Last_read
                 else Masc_tui_agenda.Refresh_needed)
          | Error error ->
              state.schedules_agenda_error <- Some error;

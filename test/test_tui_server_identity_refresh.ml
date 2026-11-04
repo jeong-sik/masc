@@ -6431,6 +6431,30 @@ let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
     (keeper_waiting_row_current state during_control (turn "alpha"))
 ;;
 
+(* A schedule or a confirmation change names no Keeper (RFC-0481 §3.4). A
+   waiting read begun before it may predate it, so that read is not current;
+   the change itself marks no Keeper unverified, so the drawn rows stay. *)
+let test_an_unattributed_change_retires_reads_without_blanking_rows () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  state.keepers <- [alpha; beta];
+  state.keeper_waiting_unverified <- [];
+  let before = capture_keeper_waiting_snapshot state in
+  note_keeper_waiting_change state Waiting_unattributed;
+  Alcotest.(check (list string)) "no Keeper is marked unverified" []
+    state.keeper_waiting_unverified;
+  Alcotest.(check bool) "a read begun before the change is not current" false
+    (keeper_waiting_row_current state before (turn "alpha"));
+  Alcotest.(check bool) "the waiting list owes a read" true
+    (Keeper_waiting_read.change_pending state.keeper_waiting_read);
+  let after = capture_keeper_waiting_snapshot state in
+  Alcotest.(check bool) "a read begun after the change is current" true
+    (keeper_waiting_row_current state after (turn "beta"))
+;;
+
 let test_interactive_generation_revalidates_waiting () =
   let open Masc_tui_types in
   let state, _, _ = local_keeper_source_fixture () in
@@ -6556,6 +6580,8 @@ let () =
             test_reconciliation_does_not_compete_with_periodic_reads
         ; Alcotest.test_case "waiting isolates per-keeper and control epochs" `Quick
             test_waiting_row_epochs_isolate_other_keepers_and_controls
+        ; Alcotest.test_case "an unattributed change retires reads without blanking rows" `Quick
+            test_an_unattributed_change_retires_reads_without_blanking_rows
         ; Alcotest.test_case "interactive generation revalidates waiting" `Quick
             test_interactive_generation_revalidates_waiting
         ; Alcotest.test_case "partial waiting isolates missing keepers" `Quick

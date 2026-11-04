@@ -312,6 +312,7 @@ class WakeReadTest(unittest.TestCase):
                     stimulus_row("k", "late-start", DAY_START + 86_000.0),
                     stimulus_row("k", "cancelled", first + 5.0),
                     stimulus_row("k", "outside", DAY_START + 90_000.0),  # after `until`
+                    stimulus_row("k", "before", DAY_START - 50.0),  # before `since`, recorded late into the first day's file
                     reaction_row("k", "a", TURN_STARTED_KIND, first + 30.0),
                     reaction_row("k", "a", TURN_STARTED_KIND, first + 99.0),  # a later start is ignored
                     reaction_row("k", "cancelled", QUEUE_CANCELLED_KIND, first + 6.0),

@@ -794,24 +794,6 @@ let fenced_cause_empty_no_progress = function
       | Gate_replay_repair_required _) -> None
 ;;
 
-let fenced_cause_of_masc_internal_error = function
-  | Provider_attempt_effect_fenced { cause; _ }
-  | Tool_correction_lost { cause; _ } -> Some cause
-  | Official_client_recovery_required _
-  | Runtime_exhausted _
-  | Resumable_cli_session _
-  | Accept_rejected _
-  | Internal_unhandled_exception _
-  | Internal_bridge_exception _
-  | Internal_contract_rejected _
-  | Incomplete_tool_transcript _
-  | Terminal_effect_failed _
-  | Host_stopped_turn _
-  | Runtime_connection_closed _
-  | Receipt_persistence_failed _
-  | Gate_replay_repair_required _ -> None
-;;
-
 let fenced_attempt_summary = function
   | Provider_attempt_effect_fenced { effect_disposition; cause; _ }
   | Tool_correction_lost { effect_disposition; cause; _ } ->

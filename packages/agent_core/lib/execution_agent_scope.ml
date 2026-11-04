@@ -894,17 +894,6 @@ let record_provider_request_provenance provider provenance =
   |> Result.map ignore
 ;;
 
-let provider_request_provenance provider =
-  match Writer.find_node provider.turn.scope.writer provider.node with
-  | Error error -> Error (Scope_unavailable error)
-  | Ok None -> Error (Resume_topology_mismatch "provider attempt node disappeared")
-  | Ok (Some { Journal.materialized = Journal.Provider_attempt_state {request_provenance; _}; _ }) ->
-    Ok request_provenance
-  | Ok (Some { Journal.materialized = (Journal.Agent_run_state | Journal.Agent_turn_state
-      | Journal.Output_block_state _ | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state); _ }) ->
-    Error (Resume_topology_mismatch "request provenance is not on a provider attempt")
-;;
-
 let record_provider_response provider response =
   transact
     provider.turn.scope.writer

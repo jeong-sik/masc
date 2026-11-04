@@ -120,15 +120,6 @@ let target_bool_field ~target_label ~field toml =
     Error (Printf.sprintf "target %s has non-boolean %s" target_label field)
 ;;
 
-let target_positive_int_field ~target_label ~field toml =
-  match Otoml.find_opt toml Otoml.get_integer [ field ] with
-  | None -> Ok None
-  | Some value when value >= 1 -> Ok (Some value)
-  | Some _ -> Error (Printf.sprintf "target %s has invalid %s" target_label field)
-  | exception Otoml.Type_error _ ->
-    Error (Printf.sprintf "target %s has non-integer %s" target_label field)
-;;
-
 let validate_timeout ~target_label ~field = function
   | None -> Ok ()
   | Some value when Float.is_finite value && value > 0. -> Ok ()

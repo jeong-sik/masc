@@ -285,10 +285,6 @@ val fenced_cause_empty_no_progress : fenced_cause -> bool option
     host or subagent may have run a tool outside MASC's observation, so this
     is a display fact, never a retry admission. *)
 
-val fenced_cause_of_masc_internal_error : masc_internal_error -> fenced_cause option
-(** The cause of a fenced error ([Provider_attempt_effect_fenced],
-    [Tool_correction_lost]); [None] for every other error. *)
-
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :

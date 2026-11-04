@@ -24,9 +24,6 @@ class ConfirmsHandler(owed.ChatHandler):
     def do_GET(self) -> None:
         server = cast(ConfirmsServer, self.server)
         request = urllib.parse.urlsplit(self.path)
-        if request.path == "/health":
-            with server.condition:
-                server.health_reads += 1
         if request.path == OPERATOR_PATH:
             phase = server.record(request.path)
             with server.condition:
@@ -71,7 +68,6 @@ class ConfirmsServer(owed.ChatServer):
         self.RequestHandlerClass = ConfirmsHandler
         self.read_times: list[float] = []
         self.failures_left = 0
-        self.health_reads = 0
 
 
 def pending_confirm_invalidated() -> dict[str, object]:

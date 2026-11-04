@@ -24562,8 +24562,8 @@ let keeper_message_pending_status_rows items =
    returns successfully -- the effect is what is outstanding, not the call. The
    pane had no way to say so.
 
-   Read from [gate_pending], which rides every tick from every surface for the
-   strip's badge, so this is as current in the chat pane as it is on Approvals.
+   Read from [gate_pending], which every surface keeps for the strip's badge,
+   so this is as current in the chat pane as it is on Approvals.
    A projection of rows already loaded: no new field, no new request. *)
 let keeper_effects_at_the_gate (state : state) ~keeper_name =
   List.filter

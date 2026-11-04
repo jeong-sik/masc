@@ -18043,7 +18043,7 @@ let current_surface_needs state =
   Masc_tui_types.surface_needs ~about_open:state.about_open
     ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view
 
-(* The reads a full refresh tick sends beside its surface bundle. They go out
+(* The reads a full refresh sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
    authority withdraws them; [resume_reads_after_authority_change] sends
    them again from this same list. *)
@@ -41272,7 +41272,7 @@ Use relative paths for resources already held in the package. -->
                  (match
                     List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
                   with
-                  (* The roster arrives with the refresh tick. Empty is a
+                  (* The roster arrives with the workspace reads. Empty is a
                      workspace with no keeper yet, or a read that failed; either
                      way there is nobody to assign a voice to, and a screen with
                      one empty axis cannot say which. *)
@@ -41420,7 +41420,6 @@ Use relative paths for resources already held in the package. -->
       (* Pending HTTP readers keep the last observed contact. Their own
          progress carries elapsed time; a slow reader is not a reconnect. *)
       let now_ns = Mtime_clock.elapsed_ns () in
-      (* Periodic refresh *)
       let _, terminal_cols = get_terminal_size () in
       let current_marquee_target =
         keeper_roster_marquee_target state ~cols:terminal_cols
@@ -41444,8 +41443,8 @@ Use relative paths for resources already held in the package. -->
         Render_schedule.request render_schedule Render_schedule.Background
       end;
       (* The running-turn mark, advanced on its own clock rather than the
-         poll's. The poll is two seconds; a mark that changed on it would
-         read as a stall rather than as work. Nothing is fetched here -- the
+         local clock. That clock is two seconds; a mark that changed on it
+         would read as a stall rather than as work. Nothing is fetched here -- the
          frame is derived and the presenter writes only the cells that
          differ, so a repaint that changes one glyph costs one glyph.
 
@@ -41517,104 +41516,28 @@ Use relative paths for resources already held in the package. -->
            still in flight. The server's deadline owns this local wait. *)
         if expire_identity_logins state ~now:(Unix.gettimeofday ()) then
           Render_schedule.request render_schedule Render_schedule.Background;
-        (* The armed approval survives the tick: the snapshot apply already
-           disarms it when its token leaves the list, so clearing here only
-           made the second press race a two-second clock. *)
         if state.view = System_logs then begin
           refresh_client_system_logs state;
           match System_logs_view.source state.system_logs with
           | Server -> ()
           | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
         end;
-        (* The open Add-ons pane re-reads when the server says what it shows
-           moved and retries a failed read ([launch_owed_lane_addons]). *)
-        (* Also refresh logs / Board detail if viewing them. *)
-        (match state.view with
-         | Code -> ()
-         | Keepers Keeper_runtime_pick -> ()
-         (* The list's async badges read again on
-            [keeper_async_requests_changed] and retry a failed read
-            ([launch_owed_async_requests]). *)
-         | Keepers Keeper_list -> ()
-         (* Info's execution facts and Secrets re-read on
-            [keeper_composite_changed] ([launch_owed_keeper_composite]); the
-            metrics tail re-reads when the Keeper's ledger takes a row
-            ([launch_owed_keeper_logs]). Both retry a failed read. *)
-         | Keepers (Keeper_logs | Keeper_detail) -> ()
-         (* Calls re-read on [keeper_tool_call] and retry a failed read
-            ([launch_owed_keeper_calls]). *)
-         | Keepers Keeper_calls -> ()
-         (* The open post re-reads on [notifications/board] and retries a
-            failed read ([launch_owed_board_post]). *)
-         | Board -> ()
-         (* Verification re-reads on its dataset push, a run
-            registry change and the backlog's execution snapshot, and retries
-            a failed read ([launch_owed_verification]). *)
-         | Verification -> ()
-         (* The inventory re-reads when the server says what it draws moved
-            and retries a failed read ([launch_owed_lanes]). *)
-         | Lanes -> ()
-         (* The roster re-reads when a workspace client row or a Keeper
-            registry row changes and retries a failed read
-            ([launch_owed_clients]). *)
-         | Clients -> ()
-         (* Harness re-reads when a verdict or a label is recorded and
-            retries a failed read ([launch_owed_harness]). *)
-         | Harness -> ()
-         (* Fusion re-reads on [fusion_run_status] and retries a failed read
-            ([launch_owed_fusion]). *)
-         | Fusion -> ()
-         (* The memory health re-reads when the server says a Keeper's row
-            or the execution availability moved, and retries a failed read
-            ([launch_owed_memory_health]). *)
-         | Memory -> ()
-         (* The repository list re-reads on its dataset push and
-            retries a failed read ([launch_owed_repositories]). *)
-         | Repositories -> ()
-         | Connectors ->
-             (match browser_lane_on_screen state with
-              (* The list re-reads when the server says a connector changed
-                 and retries a failed read ([launch_owed_connectors]). *)
-              | None -> ()
-              | Some view when not state.image_open ->
-                  Option.iter (launch_browser_lane state ~mailbox:async_messages)
-                    (Browser_lane_view.cadence_operation view)
-              | Some view ->
-                  (match state.browser_viewport with
-                   | Some (shot, _) when Option.is_none !browser_pointer_press ->
-                       Option.iter (launch_browser_lane state ~mailbox:async_messages)
-                         (Browser_lane_view.cadence_operation ~viewport:shot view)
-                   | _ -> ()))
-         (* The Runtime surface re-reads on its probe, provider usage,
-            standing, runtime.toml and history pushes, and retries a failed
-            read ([launch_owed_runtime_surface]). *)
-         | Runtime -> ()
-         (* The catalog and the selected Keeper's surface re-read on the
-            Skill, row and backlog pushes ([launch_owed_tools]); an open async
-            request on its Keeper's request and journal pushes
-            ([launch_owed_tools_async_detail]); an open source Task on the
-            backlog's execution snapshot ([launch_owed_tools_async_task]).
-            Each retries a failed read. *)
-         | Tools -> ()
-         (* runtime.toml re-reads when the server commits it and retries a
-            failed read ([launch_owed_runtime_config]). *)
-         | Config -> ()
-         | Resources ->
-             (* Loaded on arrival and on r. A tick-cadence relist would open
-                an MCP session every two seconds for an inventory that moves
-                at human speed. *)
-             ()
-         (* The schedule list re-reads on [schedule_store_invalidated] (a row's own
-            change, a runner tick or its staleness), on
-            [keeper_event_queue_changed] for a Keeper a drawn row reads, and
-            retries a failed read ([launch_owed_schedules]). *)
-         | Schedules -> ()
-         (* Changes is not on the timer. The read parses every row in the
-            window's date files -- seconds, not milliseconds -- and the answer
-            only moves when the keeper takes a turn. [r] asks for it. *)
-         | Changes
-         | Overview | Acting | Metrics | Keepers Keeper_message
-         | Approvals | Planning | System_logs -> ());
+        (* The browser lane mirror is the one read left on this clock: while
+           it is on screen it pulls a frame every [local_clock_s], until the
+           server sends frames (RFC-0482). Every other surface reads when the
+           server announces its change. *)
+        if state.view = Connectors then
+          (match browser_lane_on_screen state with
+           | None -> ()
+           | Some view when not state.image_open ->
+               Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                 (Browser_lane_view.cadence_operation view)
+           | Some view ->
+               (match state.browser_viewport with
+                | Some (shot, _) when Option.is_none !browser_pointer_press ->
+                    Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                      (Browser_lane_view.cadence_operation ~viewport:shot view)
+                | _ -> ()));
         last_check_ns := now_ns;
         Render_schedule.request render_schedule Render_schedule.Background
       end;

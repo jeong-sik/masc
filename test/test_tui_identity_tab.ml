@@ -398,6 +398,21 @@ let test_only_a_waited_keeper_owes_attempt_reads () =
   check (Alcotest.list Alcotest.string) "a Keeper whose wait ended holds none" []
     (List.map fst state.identity_login_reads)
 
+(* A callback that finished while the reading authority was gone reached
+   nobody, so recovering owes every waited Keeper a read even before the
+   authority is confirmed again. *)
+let test_recovery_owes_every_waited_keeper () =
+  let state = identity_state () in
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a" ~masc_root:"/r";
+  hold_expectation state ~keeper:"B" ~provider:"slack" ~base_path:"/w/a" ~masc_root:"/r";
+  state.server_identity <- None;
+  Masc_tui_types.owe_every_identity_login_read state;
+  check (Alcotest.list Alcotest.string) "both waited Keepers owe a read" [ "A"; "B" ]
+    (state.identity_login_reads
+     |> List.filter_map (fun (keeper, read) ->
+       if Masc_tui_owed_read.due ~now:0. read then Some keeper else None)
+     |> List.sort String.compare)
+
 (* A reading settles the read that owed it: a consent the server still calls
    waiting past its deadline, or a status it could not read, is a failure to
    retry; a callback in progress or an outcome settles it. *)
@@ -1567,6 +1582,8 @@ let () =
             test_only_a_waited_keeper_owes_attempt_reads;
           Alcotest.test_case "a reading reports how it settles" `Quick
             test_a_reading_reports_how_it_settles;
+          Alcotest.test_case "recovery owes every waited Keeper" `Quick
+            test_recovery_owes_every_waited_keeper;
           Alcotest.test_case "every waiting Keeper is read from any surface"
             `Quick test_every_waiting_keeper_is_read_from_any_surface;
           Alcotest.test_case "a removed provider ends the wait" `Quick

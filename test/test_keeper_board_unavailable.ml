@@ -94,7 +94,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
         ; content = "references a post_id that was never created"
         ; hearth = None
         ; updated_at = Some (Time_compat.now ())
-        ; audience = Some Keeper_event_queue.Audience_discoverable
+        ; audience = Keeper_event_queue.Audience_discoverable
         }
   }
 ;;
@@ -311,12 +311,7 @@ let with_intake_sources ~max_events f =
     | Ok selections -> selections
     | Error message -> failf "failed to reload durable selections: %s" message
   in
-  let ack selection =
-    match Keeper_registry_event_queue.ack_pending_result ~base_path meta.name ~selection with
-    | Ok () -> ()
-    | Error message -> failf "failed to acknowledge selected source: %s" message
-  in
-  f ~seed ~seed_board ~intake ~pending ~ack
+  f ~seed ~seed_board ~intake ~pending
 ;;
 
 let admitted_ids intake =
@@ -325,7 +320,7 @@ let admitted_ids intake =
 ;;
 
 let test_empty_observation_source_still_spends_an_admission_slot () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ->
   let bootstrap =
     { (poison_board_signal_stimulus ()) with
       post_id = "bootstrap-limit"; payload = Keeper_event_queue.Bootstrap }
@@ -339,7 +334,7 @@ let test_empty_observation_source_still_spends_an_admission_slot () =
 ;;
 
 let test_permanent_absence_does_not_spend_an_admission_slot () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   seed (poison_board_signal_stimulus ());
   let readable = seed_board "readable source after permanently absent post" in
   let selected = intake () in
@@ -349,7 +344,7 @@ let test_permanent_absence_does_not_spend_an_admission_slot () =
 ;;
 
 let test_unavailable_posts_source_retains_the_exact_durable_selection () =
-  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ->
   let post_id = seed_board "retain this queued source" in
   let original = match pending () with
     | [selection] -> selection | _ -> fail "expected one queued Board source" in
@@ -367,7 +362,9 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
   check (list string) "an unavailable source is not admitted" [] (admitted_ids selected);
   (match selected.event_queue_intake_error with
    | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable
-       { error = Board.Read_source_unavailable _; _ }) -> ()
+       { error = Board.Read_source_unavailable _; _ } as error) ->
+     check bool "an unavailable source is not a crashed cycle" false
+       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
    | _ -> fail "unavailable posts source lost its typed retention reason");
   (match pending () with
    | [selection] ->
@@ -385,54 +382,6 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
      check bool "recovery keeps the same queued selection" true
        (Keeper_event_queue_state.same_entry original selection)
    | _ -> fail "source selection changed during recovery")
-;;
-
-(* A pre-pinning signal has no trustworthy recipient. Its exact durable
-   selection must survive even if the post later disappears, without blocking
-   a readable sibling or inventing a recipient from the current post. *)
-let test_unpinned_board_source_is_retained_without_blocking_siblings () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack ->
-  let legacy_id = seed_board "legacy audience was not recorded" in
-  let pinned = match pending () with
-    | [ selection ] -> selection
-    | _ -> fail "expected the initial Board source" in
-  ack pinned;
-  let legacy = match pinned.source.payload with
-    | Keeper_event_queue.Board_signal board ->
-      { pinned.source with payload = Board_signal { board with audience = None } }
-    | _ -> fail "expected a Board signal" in
-  seed legacy;
-  let original = match pending () with
-    | [ selection ] -> selection
-    | _ -> fail "expected the unpinned legacy source" in
-  let readable = seed_board "a later source with a pinned audience" in
-  let first = intake () in
-  check (list string) "a legacy source does not block the readable sibling"
-    [ readable ] (admitted_ids first);
-  (match first.event_queue_intake_error with
-   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable _ as error) ->
-     check bool "unknown audience is not a crashed cycle" false
-       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
-   | _ -> fail "the retained legacy source must remain observable");
-  let selections = pending () in
-  let survivor = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = legacy_id) selections in
-  check bool "the legacy source keeps its exact incarnation" true
-    (Keeper_event_queue_state.same_entry original survivor);
-  check bool "the legacy source is not replaced or readdressed" true (survivor.source = legacy);
-  let sibling = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = readable) selections in
-  ack sibling;
-  (match Board_dispatch.delete_post ~post_id:legacy_id with
-   | Ok Board.Durable_deletion -> ()
-   | Ok (Board.Deletion_persistence_pending detail) -> fail detail
-   | Error error -> fail (Board.show_board_error error));
-  let again = intake () in
-  check (list string) "a removed post cannot turn unknown audience into delivery" [] (admitted_ids again);
-  check int "no legacy observation was fabricated" 0 (List.length again.pending_board_events);
-  (match pending () with
-   | [ selection ] ->
-     check bool "post deletion does not acknowledge the original" true
-       (Keeper_event_queue_state.same_entry original selection && selection.source = legacy)
-   | _ -> fail "the same legacy source must remain pending")
 ;;
 
 let rejection_ok = function Ok value -> value | Error detail -> fail detail
@@ -472,7 +421,7 @@ let prepare_intake_rejection () =
 ;;
 
 let test_delivered_rejection_remains_current_at_intake () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ->
   let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -485,7 +434,7 @@ let test_delivered_rejection_remains_current_at_intake () =
 ;;
 
 let test_superseded_rejection_is_retired_before_projection () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   let config,task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   ignore (rejection_workspace_ok (Workspace.transition_task_r config
@@ -510,7 +459,7 @@ let test_superseded_rejection_is_retired_before_projection () =
 
 let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
   List.iter (fun malformed ->
-    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
     let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
     seed stimulus;
     rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -536,7 +485,7 @@ let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
 ;;
 
 let test_unread_rejection_authority_retains_source_and_allows_siblings () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   let config,_task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   let readable = seed_board "independent work after unread rejection authority" in
@@ -602,7 +551,7 @@ let comment_event ~meta ~post_id ~comment_id ~author content =
           ; content
           ; hearth = None
           ; updated_at = Some (Time_compat.now ())
-          ; audience = Some Keeper_event_queue.Audience_thread_participants
+          ; audience = Keeper_event_queue.Audience_thread_participants
           }
     }
   in
@@ -875,7 +824,7 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
     ; content = "a reply"
     ; hearth = None
     ; updated_at = None
-    ; audience = None
+    ; audience = Keeper_event_queue.Audience_discoverable
     }
   in
   let refused what stimulus =
@@ -902,7 +851,7 @@ let test_malformed_queued_audience_is_a_failed_read () =
     ; content = "queued post"
     ; hearth = None
     ; updated_at = None
-    ; audience = Some (Keeper_event_queue.Audience_targets targets)
+    ; audience = Keeper_event_queue.Audience_targets targets
     }
   in
   List.iter
@@ -922,7 +871,6 @@ let test_malformed_queued_audience_is_a_failed_read () =
           | Board.Read_invalid_id _ -> ()
           | (Board.Read_post_not_found _
             | Board.Read_comment_not_found _
-            | Board.Read_audience_not_pinned _
             | Board.Read_source_unavailable _) as error ->
             failf "malformed targets must be a permanent read failure: %s"
               (Board.show_board_read_error error)))
@@ -953,8 +901,6 @@ let () =
             test_permanent_absence_does_not_spend_an_admission_slot
         ; test_case "unavailable posts retain the exact durable selection" `Quick
             test_unavailable_posts_source_retains_the_exact_durable_selection
-        ; test_case "unpinned Board source survives post removal without blocking siblings" `Quick
-            test_unpinned_board_source_is_retained_without_blocking_siblings
         ; test_case "delivered rejection remains current at intake" `Quick
             test_delivered_rejection_remains_current_at_intake
         ; test_case "superseded rejection retires before projection" `Quick

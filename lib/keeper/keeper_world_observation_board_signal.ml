@@ -26,7 +26,7 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
-  ; audience : Board.audience option
+  ; audience : Board.audience
   }
 
 type board_read_operation =
@@ -195,7 +195,7 @@ let board_audience_of_queue
 
 let board_stimulus_of_signal_with_audience
       ~(signal : Board_dispatch.board_signal)
-      ~(audience : Board.audience option)
+      ~(audience : Board.audience)
   =
   { Keeper_event_queue.kind =
       (match signal.kind with
@@ -217,7 +217,7 @@ let board_stimulus_of_signal_with_audience
   ; content = signal.content
   ; hearth = signal.hearth
   ; updated_at = signal.updated_at
-  ; audience = Option.map queue_audience_of_board audience
+  ; audience = queue_audience_of_board audience
   }
 ;;
 
@@ -226,7 +226,7 @@ let board_stimulus_of_board_signal
   =
   board_stimulus_of_signal_with_audience
     ~signal:addressed.signal
-    ~audience:(Some addressed.audience)
+    ~audience:addressed.audience
 ;;
 
 (* The queue keeps the comment identity as its wire string (the queue is a
@@ -262,13 +262,7 @@ let board_observation_of_board_stimulus
     | Keeper_event_queue.Vote_cast vote ->
       Ok (Observed_vote_cast (board_vote_change_of_queue vote))
   in
-  let* audience =
-    match bs.audience with
-    | None -> Ok None
-    | Some queued ->
-      let* parsed = board_audience_of_queue ~post_id queued in
-      Ok (Some parsed)
-  in
+  let* audience = board_audience_of_queue ~post_id bs.audience in
   Ok
     { kind
     ; post_id
@@ -383,7 +377,7 @@ let match_signal
 
 let match_observation
       ~(post_kind : Board.post_kind)
-      ~(audience : Board.audience option)
+      ~(audience : Board.audience)
       ~(meta : keeper_meta)
       ~(observation : board_observation)
   =
@@ -392,17 +386,17 @@ let match_observation
     { explicit_mention = false; matched_targets = [] }
   | ( (Observed_post_created | Observed_post_updated _)
     , (Board.Human_post | Board.Automation_post)
-    , Some (Board.Targets targets) )
+    , Board.Targets targets )
   | ( Observed_comment_added _
     , (Board.System_post | Board.Human_post | Board.Automation_post)
-    , Some (Board.Targets targets) ) ->
+    , Board.Targets targets ) ->
     match_recorded_targets ~meta ~author:observation.author targets
   | ( (Observed_post_created | Observed_post_updated _)
     , (Board.Human_post | Board.Automation_post)
-    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+    , (Board.Broadcast | Board.Thread_participants | Board.Discoverable) )
   | ( Observed_comment_added _
     , (Board.System_post | Board.Human_post | Board.Automation_post)
-    , (None | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable)) )
+    , (Board.Broadcast | Board.Thread_participants | Board.Discoverable) )
   | ( (Observed_reaction_changed _ | Observed_vote_cast _)
     , (Board.System_post | Board.Human_post | Board.Automation_post)
     , _ ) ->

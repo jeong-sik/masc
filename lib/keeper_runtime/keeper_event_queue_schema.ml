@@ -16,9 +16,9 @@
    commit message. The decoder rejects foreign generations at the wire
    boundary; tests exercise that rejection without copying these markers. *)
 
-let state = "keeper.event_queue.state.v20"
+let state = "keeper.event_queue.state.v21"
 
-let transition_wal = "masc.keeper_event_queue.transition.v9"
+let transition_wal = "masc.keeper_event_queue.transition.v10"
 
 (* Read-only projections: raw queue counts and the externally served health
    verdict have different wire shapes. Neither marker versions a store. *)
@@ -33,11 +33,11 @@ let fleet_health_summary = "masc.keeper_event_queue.fleet_summary.v7"
    to make loud. *)
 let snapshot_filename = "event-queue-v19.json"
 
-(* The WAL file generation rides on the row marker (transition.v9): bump
+(* The WAL file generation rides on the row marker (transition.v10): bump
    both together or a bumped marker writes a file the older binary's
    rotation/lookup never opens — the silent-miss channel that
    "writer 3곳은 전부 참조" diff-only reading missed. *)
-let transition_wal_filename = "event-queue-transitions-v9.jsonl"
+let transition_wal_filename = "event-queue-transitions-v10.jsonl"
 
 type mismatch =
   { store : string (* which store: "snapshot" | "transition_wal" | ... *)

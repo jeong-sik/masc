@@ -616,7 +616,6 @@ let pending_board_event_kind_of_observation
 let pending_board_event_of_board_observation
       ~(meta : keeper_meta)
       ~(arrived_at : float)
-      ~allow_legacy_unknown
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
@@ -628,70 +627,42 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
-    let legacy_missing kind_label =
-      if allow_legacy_unknown then Ok None
-      else
-        Error
-          { Board_signal.operation = Board_signal.Parse_queued_audience
-          ; post_id = observation.post_id
-          ; error =
-              Board.Read_audience_not_pinned
-                (Printf.sprintf
-                   "post %s %s predates audience pinning"
-                   observation.post_id
-                   kind_label)
-          }
+    let matched =
+      Board_signal.match_observation
+        ~post_kind:(post_snapshot : Board.post).post_kind
+        ~audience:observation.audience
+        ~meta
+        ~observation
     in
-    let recorded_audience =
+    let title, preview, hearth, post_kind, updated_at =
+      let post : Board.post = post_snapshot in
       match observation.kind with
       | Board_signal.Observed_post_created ->
-        (match observation.audience with
-         | Some _ as pinned -> Ok pinned
-         | None -> legacy_missing "post_created")
-      | Board_signal.Observed_post_updated _ ->
-        (match observation.audience with
-         | Some _ as pinned -> Ok pinned
-         | None -> legacy_missing "post_updated")
-      | Board_signal.Observed_comment_added _ ->
-        (match observation.audience with
-         | Some _ as pinned -> Ok pinned
-         | None -> legacy_missing "comment_added")
-      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> Ok None
+        ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
+        , observation.hearth, post.post_kind, post.created_at )
+      | Board_signal.Observed_post_updated { content_updated_at } ->
+        ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
+        , observation.hearth, post.post_kind, content_updated_at )
+      | Board_signal.Observed_comment_added _
+      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
+        (* The event audience belongs to the comment or action, not to the
+           parent post. Its current content has no recipient binding here. *)
+        ( None, None, None, post.post_kind
+        , Option.value observation.updated_at ~default:arrived_at )
     in
-    Result.map (fun audience ->
-      let matched =
-        Board_signal.match_observation
-          ~post_kind:(post_snapshot : Board.post).post_kind ~audience ~meta ~observation
-      in
-      let title, preview, hearth, post_kind, updated_at =
-        let post : Board.post = post_snapshot in
-        match observation.kind with
-        | Board_signal.Observed_post_created ->
-          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
-          , observation.hearth, post.post_kind, post.created_at )
-        | Board_signal.Observed_post_updated { content_updated_at } ->
-          ( Some observation.title, Some (short_preview ~max_len:80 observation.content)
-          , observation.hearth, post.post_kind, content_updated_at )
-        | Board_signal.Observed_comment_added _
-        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
-          (* The event audience belongs to the comment or action, not to the
-             parent post. Its current content has no recipient binding here. *)
-          ( None, None, None, post.post_kind
-          , Option.value observation.updated_at ~default:arrived_at )
-      in
-      let event_kind = pending_board_event_kind_of_observation observation in
-      let latest_external_author, latest_external_preview =
-        match observation.kind with
-        | Board_signal.Observed_comment_added _ ->
-          Some observation.author, Some (short_preview ~max_len:60 observation.content)
-        | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
-        | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> None, None
-      in
+    let event_kind = pending_board_event_kind_of_observation observation in
+    let latest_external_author, latest_external_preview =
+      match observation.kind with
+      | Board_signal.Observed_comment_added _ ->
+        Some observation.author, Some (short_preview ~max_len:60 observation.content)
+      | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
+      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> None, None
+    in
+    Ok
       { event_kind; post_id = observation.post_id; author = observation.author
       ; title; preview; hearth; post_kind; updated_at
       ; explicit_mention = matched.explicit_mention; matched_targets = matched.matched_targets
-      ; replies_after_own_comment = None; latest_external_author; latest_external_preview })
-      recorded_audience
+      ; replies_after_own_comment = None; latest_external_author; latest_external_preview }
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -1247,26 +1218,12 @@ let pending_board_event_of_stimulus
   =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal bs ->
-    let audience_check =
-      match bs.kind, bs.audience with
-      | (Post_created | Post_updated _ | Comment_added _), None ->
-        Error
-          { Board_signal.operation = Board_signal.Parse_queued_audience
-          ; post_id = stimulus.post_id
-          ; error = Board.Read_audience_not_pinned
-              ("queued Board signal predates audience pinning")
-          }
-      | (Post_created | Post_updated _ | Comment_added _), Some _
-      | (Reaction_changed _ | Vote_cast _), (None | Some _) -> Ok ()
-    in
-    Result.bind audience_check (fun () ->
-      Result.bind
-        (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
-        (pending_board_event_of_board_observation
-           ~meta
-           ~arrived_at:stimulus.arrived_at
-           ~allow_legacy_unknown:false)
-      |> Result.map Option.some)
+    Result.bind
+      (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
+      (pending_board_event_of_board_observation
+         ~meta
+         ~arrived_at:stimulus.arrived_at)
+    |> Result.map Option.some
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
       (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id attention.signal)
@@ -1283,7 +1240,6 @@ let pending_board_event_of_stimulus
                 pending_board_event_of_board_observation
                   ~meta
                   ~arrived_at:stimulus.arrived_at
-                  ~allow_legacy_unknown:true
                   observation
                 |> Result.map Option.some)
          | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
@@ -1291,7 +1247,6 @@ let pending_board_event_of_stimulus
            pending_board_event_of_board_observation
              ~meta
              ~arrived_at:stimulus.arrived_at
-             ~allow_legacy_unknown:true
              observation
            |> Result.map Option.some)
   | Keeper_event_queue.Fusion_completed fc ->
@@ -1518,11 +1473,10 @@ let collect_board_events_with_cursor_policy
                     ~post_id:signal.post_id
                     (Board_signal.board_stimulus_of_signal_with_audience
                        ~signal
-                       ~audience:(Some pinned)))
+                       ~audience:pinned))
                  (pending_board_event_of_board_observation
                     ~meta
-                    ~arrived_at:(Time_compat.now ())
-                    ~allow_legacy_unknown:false)
+                    ~arrived_at:(Time_compat.now ()))
                |> Result.map Option.some
                |> Result.map_error (fun error -> Source_unavailable error)
            in
@@ -1573,8 +1527,7 @@ let collect_board_events_with_cursor_policy
                     ({ error =
                          (Board.Read_invalid_id _
                          | Board.Read_post_not_found _
-                         | Board.Read_comment_not_found _
-                         | Board.Read_audience_not_pinned _)
+                         | Board.Read_comment_not_found _)
                      ; _
                      } as unavailable)) ->
                log_and_count_unavailable ~context:"signal replay" unavailable;
@@ -1607,8 +1560,7 @@ let collect_board_events_with_cursor_policy
                ({ error =
                     (Board.Read_invalid_id _
                     | Board.Read_post_not_found _
-                    | Board.Read_comment_not_found _
-                    | Board.Read_audience_not_pinned _)
+                    | Board.Read_comment_not_found _)
                 ; _
                 } as unavailable)) ->
           log_and_count_unavailable ~context:"signal replay" unavailable;

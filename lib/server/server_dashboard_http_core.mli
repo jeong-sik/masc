@@ -114,6 +114,16 @@ val dashboard_briefing_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
+val dashboard_health_line_http_json :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Yojson.Safe.t
+(** The Home Health line ({!Server_workspace_health_line.of_briefing}) of the
+    default mission, with the Keeper observations of the moment laid over it,
+    as the briefing route answers it. A reader reads it again when the server
+    announces [workspace_health]. *)
+
 val dashboard_briefing_sections_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->

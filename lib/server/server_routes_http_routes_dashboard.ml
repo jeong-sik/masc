@@ -3320,6 +3320,15 @@ let add_routes ~sw ~clock router =
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
            (Pool_work.cpu ~name:__FUNCTION__ (fun () -> dashboard_briefing_http_json ~state ~sw ~clock req))
        )
+  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/health-line" (fun state req reqd ->
+         (* Not cached here: a reader reads after a workspace_health push, and
+            the mission it is taken from is the server's own cache. *)
+         let json =
+           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+               dashboard_health_line_http_json ~state ~sw ~clock)
+         in
+         Http.Response.json_value ~request:req json reqd
+       )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/tools" (fun state req reqd ->
            let request = req in let timing = Server_timing.create () in
            (* RFC-0138 Phase 3 Step 2: wait-free read via

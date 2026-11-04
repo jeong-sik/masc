@@ -444,7 +444,7 @@ let keeper_of_event ~traces (event : Observer.event) =
       ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Verification_requests
       | Masc.Workspace_dataset_event.Provider_usage | Masc.Workspace_dataset_event.Provider_standing )
       | Masc.Workspace_dataset_event.Provider_usage | Masc.Workspace_dataset_event.Provider_standing
-      | Masc.Workspace_dataset_event.Keeper_costs )
+      | Masc.Workspace_dataset_event.Keeper_costs | Masc.Workspace_dataset_event.Workspace_health )
   | Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -506,6 +506,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> "provider usage"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> "provider standing"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> "keeper costs"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -680,6 +681,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime's quota or rate-limit standing changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the Keeper cost window took or dropped a row" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Home Health line moved" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

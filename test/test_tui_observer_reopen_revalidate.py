@@ -32,7 +32,7 @@ from typing import Callable, cast
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 # The full refresh bundle reads this on every pass, whatever the surface.
-BUNDLE_PATH = "/api/v1/dashboard/briefing"
+BUNDLE_PATH = "/api/v1/dashboard/health-line"
 WAIT_SECONDS = 25.0
 QUIET_SECONDS = 3.0
 

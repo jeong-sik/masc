@@ -128,14 +128,23 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       ; warm_delay_s = 90.0
       }
     ~compute
-    ~on_result:(mark_cached_surface_success mission_cache)
+    ~on_result:(fun json ->
+      mark_cached_surface_success mission_cache json;
+      (* The Home Health line is announced when a recomputation moves it. A
+         line that could not be taken leaves the mission refresh as it went. *)
+      match
+        Server_workspace_health_line.observe ~base_path:workspace_config.base_path
+          (Dashboard_projection_cache.with_current_keeper_observations
+             ~config:workspace_config json)
+      with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        Log.Dashboard.warn "Home Health line not observed: %s" (Printexc.to_string exn))
 ;;
 
-let dashboard_briefing_http_json ~state ~sw ~clock request =
+let briefing_compute ~state ~sw ~clock ?actor () =
   let net, mono_clock = state_dashboard_runtime_caps state in
-  let actor =
-    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
-  in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
@@ -157,20 +166,29 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
     |> Server_dashboard_http_core_cache.with_projection_diagnostics
          ~surface:"mission" ~started_at ~extra:[]
   in
+  compute ?actor ()
+
+(* Mirror execution surface behavior: serve cached mission instantly after the
+   first success, but let the very first default read bootstrap that success
+   instead of staying "initializing" forever when proactive warm-up misses its
+   first build window. *)
+let default_mission_json ~state ~sw ~clock =
+  cached_surface_or_first_success_json
+    mission_cache
+    ~cache_key:"briefing:default"
+    ~ttl:deep_surface_cache_ttl_s
+    ~clock
+    ~timeout_sec:dashboard_briefing_timeout_s
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () -> briefing_compute ~state ~sw ~clock ()))
+
+let dashboard_briefing_http_json ~state ~sw ~clock request =
+  let actor =
+    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
+  in
+  let compute ?actor () = briefing_compute ~state ~sw ~clock ?actor () in
   let full_json =
     match actor with
-    | None ->
-      (* Mirror execution surface behavior: serve cached mission instantly
-           after the first success, but let the very first default read
-           bootstrap that success instead of staying "initializing" forever
-           when proactive warm-up misses its first build window. *)
-      cached_surface_or_first_success_json
-        mission_cache
-        ~cache_key:"briefing:default"
-        ~ttl:deep_surface_cache_ttl_s
-        ~clock
-        ~timeout_sec:dashboard_briefing_timeout_s
-        (Pool_work.cpu ~name:__FUNCTION__ (fun () -> compute ()))
+    | None -> default_mission_json ~state ~sw ~clock
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
@@ -188,6 +206,13 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
   in
   Dashboard_projection_cache.with_current_keeper_observations
     ~config:(Mcp_server.workspace_config state) full_json
+;;
+
+let dashboard_health_line_http_json ~state ~sw ~clock =
+  let config = Mcp_server.workspace_config state in
+  default_mission_json ~state ~sw ~clock
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config
+  |> Server_workspace_health_line.of_briefing
 ;;
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =

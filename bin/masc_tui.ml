@@ -8161,6 +8161,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
   | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
   | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
+  (* Every refresh pass reads the Health line with the workspace identity. *)
+  | Masc.Workspace_dataset_event.Workspace_health -> ()
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)

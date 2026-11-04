@@ -3264,7 +3264,7 @@ let board_dataset_fixture kind =
   let ticket=Http_refresh_order.dispatch state.http_refresh_order in
   (match kind with
    | Surface_read_order.Full -> begin_http_refresh_state state ~ticket ~started_ns:0L
-   | Surface_read_order.Navigation | Surface_read_order.Independent -> state.http_refresh_order <- ticket);
+   | Surface_read_order.Navigation -> state.http_refresh_order <- ticket);
   let needs={nothing with needs_board=true;needs_planning=true} in
   let reads,request=Surface_read_order.dispatch ~kind ~needs ~started_ns:0L state.http_surface_reads in
   state.http_surface_reads <- reads;
@@ -3291,7 +3291,7 @@ let test_board_delivery_retains_sibling_and_terminal_remainder () =
     (match kind with
      | Surface_read_order.Navigation -> Alcotest.(check bool) "data application does not finish navigation collector" true
          (Surface_read_order.navigation_active reads request)
-     | Surface_read_order.Full | Surface_read_order.Independent -> ());
+     | Surface_read_order.Full -> ());
     state.http_surface_reads <- Surface_read_order.finish reads request;
     Alcotest.(check bool) "matching terminal cleanup retires only its collector" false
       (Surface_read_order.navigation_active state.http_surface_reads request))

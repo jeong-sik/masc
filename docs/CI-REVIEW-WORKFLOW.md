@@ -241,21 +241,21 @@ structure and count it; do not scan it.
 
 A failure count is per framework, and one anchor does not catch both. Alcotest
 prints `2 failures! in 0.027s.` and `[FAIL] name index …`; Python unittest prints
-`^FAILED (failures=N)` and `^FAIL: name`. Counting `^FAIL:` reported 5 or 6 where
-the log held 47 alcotest suites plus 5 unittest suites — 52 failing suites in a
-run described as four. Count the per-suite summary line of each framework
-(`^[0-9]+ failures?! in` and `^FAILED \(`), and say whether the number is
-suites, cases or lines. `[FAIL]` lines also repeat when the row is wrapped, so
-deduplicate on `(suite, index)` before quoting cases.
+`^FAILED (failures=N)` and `^FAIL: name`. Counting `^FAIL:` reported 5 or 6 in a
+run whose log held 49 failing test executions. Count the per-framework summary
+line and say whether the number is executions, cases or lines — a suite, an
+execution and a printed line are three different counts of the same log.
+`[FAIL]` rows also repeat when wrapped, so deduplicate before quoting cases.
+Anchor the execution on the `Full test results in .../_tests/NAME'.` line, whose
+closing quote is `'` and not a backtick; pairing backticks reports zero.
 
 A single run's failure count does not say whether the failures belong to that
-head. Compare the failing suite names across two heads before calling any of them
-a regression: two whole-regression runs held 50 and 49 failing suites with 48 in
-common, so 48 were independent of the head and only three differed — two that
-passed on the later head and one that failed only there. The 48 common failures
-are an environment layer, not a code regression, and the head-dependent set was
-small enough to name. Without that comparison, "N suites fail" reads as a
-statement about the branch when it is mostly a statement about the runner.
+head. Compare the failing execution names across two heads before calling any of
+them a regression: two whole-regression runs held 51 and 49 failing executions
+with 48 in common, so 48 were independent of the head and only four differed.
+The 48 common failures are an environment layer, not a code regression. Without
+that comparison, "N fail" reads as a statement about the branch when it is mostly
+a statement about the runner.
 
 Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
 is not the line that follows its own invocation. Taking the next result line

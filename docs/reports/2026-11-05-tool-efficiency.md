@@ -10,8 +10,9 @@
 - 결과 바이트의 33.2%(310 MB)는 같은 Keeper 가 1시간 안에 같은 입력으로 다시 받은 같은 결과예요. 그중 88%가 도구 둘, `masc_schedule_notes_list`(153 MB)와 `keeper_artifact_read`(121 MB)예요.
 - 결과 바이트의 39.1%(366 MB)는 레인의 결과 상한을 넘어 blob 으로 저장됐어요. 그중 `masc_schedule_notes_list` 가 159 MB, `masc_dos_screen` 이 150 MB 예요.
 - Execute 호출 시간 95.4시간 가운데 29.7시간(31.2%)은 `sleep N; gh run view ...` 처럼 기다리는 명령이에요. 기다리는 동안 그 턴은 아무것도 못 해요.
-- 고친 것: 노트 목록(#48291), 저장된 결과 읽기(#48282), 도구 실행 통계 엔드포인트와 화면(#48223, #48240, #48248).
-- 못 고친 것: 비동기 실행. 설계는 이미 `RFC-keeper-async-fleet-continuity` 에 있어서 새 설계를 만들지 않았고, 가장 작은 조각을 아래 "비동기 실행" 에 적었어요.
+- 고친 것: 노트 목록(#48291), 저장된 결과 읽기(#48282), 위임 상태 조회(#48343), 도구 실행 통계 엔드포인트와 화면(#48223, #48240, #48248).
+- Execute 호출의 0.8%인 60초 이상 562호출이 Execute 시간의 44.0%(42.0시간)예요. 그중 29.3시간은 `sleep` 이나 반복문이 든 호출이고, 92%를 Keeper 5명이 썼어요. 5명은 모두 microVM 이나 remote_ssh 샌드박스예요.
+- 못 고친 것: 비동기 실행. 설계는 이미 `RFC-keeper-async-fleet-continuity` 에 있어서 새 설계를 만들지 않았어요. 지금 낼 수 있는 가장 작은 조각(Docker 한정)은 Keeper 설정 43개 중 1개에만 닿아서 위 5명에게는 효과가 없어요. 근거는 §6 에 있어요.
 
 ## 1. 측정
 
@@ -114,7 +115,7 @@
 
 ## 5. 이번에 만든 것
 
-모두 Draft PR 이에요. 스택(#48223 → #48240 → #48248)은 `gh stack` 으로 올렸고 나머지 둘은 `main` 에서 따로 땄어요.
+모두 Draft PR 이에요. 스택(#48223 → #48240 → #48248)은 `gh stack` 으로 올렸고 나머지 셋은 `main` 에서 따로 땄어요.
 
 | PR | 내용 | 증거 |
 |---|---|---|
@@ -123,6 +124,7 @@
 | #48248 | Tools 화면의 "도구 실행 통계" 카드 | 사진 넷, vitest 43개 |
 | #48282 | `keeper_artifact_read` 에 `contains` 줄 검색 | 시험 15개, CI 통과 |
 | #48291 | `masc_schedule_notes_list` 에 `contains`, `matched_count`, 한 쪽을 레인 상한에 맞춤 | 시험 둘이 늘었고 CI 통과, 실제 기록 재생 |
+| #48343 | `masc_keeper_delegate_status` 결과에서 보낸 요청(`input`, `source`, 해시 둘)을 뺌 | 모든 상태 × 묶음 유무를 보는 시험 1개를 로컬에서 실제로 돌려 통과, 164호출 재생 430,806 → 161,930 바이트(62.4%) |
 
 ### 노트 목록(#48291) 재생 값
 
@@ -158,35 +160,75 @@
 
 ## 6. 비동기 실행
 
-**결론: 새 설계는 필요 없어요.** 턴을 끝내고 완료 때 깨우는 길은 격리 job(`keeper_job_*`)에 이미 있어요(`lib/keeper/keeper_owned_job_completion_wake.ml`: 결과가 저장된 뒤에 같은 `post_id` 로 한 번만 큐에 넣고 wake 힌트를 보내요). 빠진 것은 Keeper 체크아웃에서 도는 Workspace process 이고, `docs/rfc/RFC-keeper-async-fleet-continuity.md`(Draft, #36941·#42799)가 이미 정의해요. 이 단락은 그 RFC 에 측정 수요를 대는 것이고, 코드는 없어요.
+**결론: 새 설계는 필요 없어요. 다만 지금 낼 수 있는 가장 작은 조각은 수요가 있는 곳에 닿지 않아요.** 턴을 끝내고 완료 때 깨우는 길은 격리 job(`keeper_job_*`)에 이미 있어요(`lib/keeper/keeper_owned_job_completion_wake.ml`: 결과가 저장된 뒤에 같은 `post_id` 로 한 번만 큐에 넣고 wake 힌트를 보내요). 빠진 것은 Keeper 체크아웃에서 도는 Workspace process 이고, `docs/rfc/RFC-keeper-async-fleet-continuity.md`(Draft, #36941·#42799)가 이미 정의해요. 이 단락은 그 RFC 에 측정 수요를 대는 것이고, 코드는 없어요.
 
-수요(11-01~11-04):
+### 수요(11-01~11-04)
 
-- Execute 호출 시간의 31.2%(647호출, 29.7시간)가 기다리는 명령이에요. 647호출 중 583호출(90%, 28.9시간)에 `gh run`, `gh pr`, `gh api`, `gh workflow` 가 같이 들어 있어서, 대부분 GitHub Actions 실행을 기다리는 호출로 보여요(추정). 명령 안의 `sleep` 은 중앙값 40초, 최대 870초예요. 가장 많이 기다린 Keeper 는 `masc-productor-owner` 143호출, `wkbl-data` 91호출, `wkbl-front` 80호출, `github-pr-checker` 78호출, `pr-updater` 60호출이에요.
-- 한 턴에서 같은 도구를 부르는 폭주는 `keeper_artifact_read` 862번 77초, `masc_schedule_notes_list` 570번 35초 등이에요.
-- `keeper_spawn*`, `keeper_job_*` 는 31일 동안 0호출이에요. 이유는 가리지 못했어요. 두 계열의 도구 8개가 모두 `defer_loading = true` 라서 도구 검색을 거쳐야 보이는 것이 의심스러워요.
+센 기준: Execute 호출의 `duration_ms`, 11-04T19:10Z 까지. §1 의 "기다림"(명령 문장만 봄)과 달리 길이와 반복문까지 봐서 정의가 달라요.
 
-기존 설계와 왜 안 맞는지:
+- Execute 67,598호출 중 60초 이상 걸린 호출이 562호출(0.8%)이에요. 합계 42.0시간이고 Execute 시간 95.4시간의 44.0%예요. 길이별로 60~120초 163호출, 120~300초 245호출, 300~600초 121호출, 600~900초 20호출, 900~1,800초 13호출이에요.
+- 그중 명령에 `sleep` 이나 `for`·`while`·`until` 반복이 든 호출이 331호출, 29.3시간이에요. 나머지 231호출(12.7시간)은 명령이 여러 가지라 한 가지로 묶지 못했어요.
+- 331호출 중 27.0시간(92%)이 Keeper 5명이에요. `wkbl-data` 8.5시간, `masc-productor-owner` 7.3시간, `wkbl-front` 5.0시간, `goo-yang-bong` 3.2시간, `github-pr-checker` 3.0시간.
+- 가장 오래 걸린 12호출 중 11호출은 `wkbl-data` 가 `gh run view <실행 번호>` 를 반복한 호출이고 16~30분씩 걸렸어요. GitHub Actions 실행이 끝나기를 기다린 것으로 보여요(추정).
+- 이 5명의 `sandbox_profile` 은 microvm(`masc-productor-owner`, `github-pr-checker`)이거나 remote_ssh(`wkbl-data`, `wkbl-front`, `goo-yang-bong`)예요. Keeper 설정 43개 중 microvm 29, remote_ssh 13, docker 1이에요.
+- 5명 중 3명은 `masc_schedule_create` 로 나중에 깨우는 일정을 만들었어요(`wkbl-data` 30호출, `masc-productor-owner` 74호출, `wkbl-front` 73호출). 그래도 기다리는 호출이 남아 있어요. 이 도구가 깨우는 때를 정하는 방법은 시각뿐이라(`due_in_sec`, `due_at_unix`, `due_at_iso`, 반복 규칙) 실행이 끝나는 때에는 못 깨워요. 이것이 이유인지는 확인하지 못했어요(추정).
 
-- `keeper_spawn` 은 수단이 안 돼요. 턴 스위치에 묶여 스위치가 닫히면 SIGTERM 이고(`lib/keeper/keeper_tool_in_process_runtime.ml:1985`, `lib/process/spawn_registry.ml:199-206`), argv 를 그대로 받고 Gate 가 승인하지 않아요. RFC 는 비동기 Workspace process 도 Execute 와 같은 Gate 승인을 거쳐야 한다고 해요.
-- `RFC-0290` 은 코드 0건이고 동시 실행 상한이 Workaround Rejection Bar 와 부딪혀요. `RFC-spawn-a-process-that-outlives-the-call` 은 Execute 에 background 플래그를 다는 안을 거절하고 스폰이 턴을 넘겨야 하는지를 열어 둬요.
+### 이미 있는 길이 닿는 곳
 
-가장 작은 조각(하위 조사가 낸 제안이고 구현은 안 했어요):
+| 길 | 닿는 Keeper | 근거 |
+|---|---|---|
+| 격리 job(`keeper_job_*`) | docker 1명 | RFC §2: `keeper_job_start` 는 지금 Docker 만 구현해요 |
+| `keeper_spawn` | docker | 턴 스위치에 묶여 턴이 끝나면 SIGTERM 이에요(`lib/process/spawn_registry.ml:199-206`) |
+| 위임(`masc_keeper_delegate`) | 모두 | 이미 비동기예요. 하지만 받는 Keeper 가 턴 하나를 통째로 써요 |
+| 일정(`masc_schedule_create`) | 모두 | 시각으로만 깨워요 |
 
-1. Docker 프로필 한정 Workspace process 시작 도구 하나. 시작은 Execute 와 같은 Gate 입구를 지나고, microVM 과 SSH 는 시작 전에 거절해요.
-2. 결과를 먼저 저장하고, 새 typed payload 를 한 번만 큐에 넣고, 깨우는 힌트를 보내요. 서버 재시작 뒤 복구 경로도 같이 둬요. 저장 없이 깨우기만 하는 조각은 RFC 의 알림 규칙(§5)과 A11 에 어긋나요.
-3. 증명은 A05 예요. 턴 A 가 핸들을 받고 끝나고, 완료 전에 내부 턴 B 가 돌고, 완료 자극으로 깨어나 정확한 결과를 써요.
+`keeper_spawn*`, `keeper_job_*` 는 31일 동안 0호출이에요. 도구 8개가 모두 `defer_loading = true` 라서 도구 검색을 거쳐야 보이는 것이 의심스럽지만, 이유는 가리지 못했어요.
 
-기존 `keeper_owned_job_completion_wake` 를 복사해 두 번째 wake 를 만들면 N-of-M 패치예요. 공통부를 뽑거나 payload 를 일반화해야 해요.
+### 막힌 곳
 
-이 조각을 시작하지 않은 이유: RFC 는 이미 진행 중인 계획(`goal-keeper-async-fleet-20261026`)이라, 새 설계를 겹쳐 쓰지 않고 측정 근거만 더했어요. 이 변경은 Gate, 프로세스 수명, 재시작 복구를 함께 건드려요. 이 저장소 규칙으로는 로컬 dune 빌드 없이 CI 로만 확인하는데, type-check 한 번이 8분 30초 걸려요(run 41895911884).
+- 조사가 낸 가장 작은 조각은 "Docker 프로필 한정 Workspace process 시작 도구"예요. 설정 43개 중 1개에만 닿고, 위 5명에게는 닿지 않아요. 이 조각만 내면 수요에 대한 효과를 못 재요.
+- microvm·remote_ssh 에 닿으려면 RFC §8 의 3·4층(엔드포인트가 프로세스 수명을 가지는 프로토콜과 microVM·SSH 어댑터)이 필요해요. 시작 도구만으로는 안 돼요. 호스트에서 프로세스를 띄우거나 전송을 백그라운드로 돌리는 것은 엔드포인트 수명을 구현한 것이 아니라고 RFC §2 가 말해요.
+- 시작은 Execute 와 같은 Gate 입구를 지나야 해요(RFC §2). 그런데 Execute 본문(`handle_tool_execute_typed`, `lib/keeper/keeper_tool_execute_runtime.ml:353-1296`)이 약 940줄짜리 한 함수예요. 안에 `redact` 가 17곳, `Remote_ssh` 가 10곳, `Gate` 가 5곳 있어요(`rg` 로 센 값). 시작과 결과 읽기를 따로 떼려면 이 함수를 먼저 나눠야 해요.
+- 기존 `keeper_owned_job_completion_wake` 를 복사해 두 번째 wake 를 만들면 N-of-M 패치예요. 공통부를 뽑거나 payload 를 일반화해야 해요.
+- `RFC-0290` 은 코드 0건이고 동시 실행 상한이 Workaround Rejection Bar 와 부딪혀요. `RFC-spawn-a-process-that-outlives-the-call` 은 Execute 에 background 플래그를 다는 안을 거절하고, 스폰이 턴을 넘겨야 하는지를 열어 둬요.
+
+### 시작하지 않은 이유
+
+RFC 는 이미 진행 중인 계획(`goal-keeper-async-fleet-20261026`)이에요. 이 변경은 Gate, 프로세스 수명, 재시작 복구를 함께 건드려요. 이 저장소 규칙은 로컬 dune 빌드 없이 CI 로만 확인하라고 하는데, type-check 한 번이 8분 30초 걸려요(run 41895911884). 여러 층에 걸친 변경을 그 속도로 맞추면서 RFC 의 시험 A02·A03·A05(§9)를 증명할 수는 없었어요.
+
+이 보고서가 RFC 에 더하는 것은 순서예요. 수요가 microvm·remote_ssh 에 있으니, 효과를 재려면 3·4층에서 microVM 한 종류와 remote_ssh 를 먼저 지원해야 해요. 닿은 뒤의 확인은 `blocked_waits.wait_time_pct_of_execute`(§9)와 위 5명의 60초 이상 Execute 시간으로 해요.
 
 ## 7. Delegate
 
 - `masc_keeper_delegate` 394호출 중 375호출(95.2%)이 성공했어요. 10-05~10-31 에는 1,362호출 중 187건(13.7%)이 실패했어요.
 - 11-01~11-04 실패 19건은 이름 오류 11건, 입력 모양 오류 7건, 서버가 막 재시작한 직후 1건이에요. 이름 오류는 `keeper not found: <이름>` 이고, 이름이 에이전트 식별자(`masc-pro-builder`, `claude-8241c5b1`)이거나 `root`, `admin` 이에요. 입력 모양 오류는 `prompt` 대신 `message` 를 쓴 호출 4건, `target` 안에 `keeper_name` 을 쓴 호출 1건, 빈 입력 1건, `_blob` 모양 입력 1건이에요. 모두 실행 전에 거절돼서 비용은 호출 한 번이에요.
-- 상태 조회(`masc_keeper_delegate_status`)는 164호출(위임 호출의 42%)이에요. 완료 wake 는 이미 있어서(`keeper_delegate_completion_wake`) 폴링은 필요하지 않은 호출로 보이지만, 호출당 비용이 작고 모델이 답을 기다리며 부르는지 의도적으로 확인하는지는 가리지 못했어요.
-- 개선 후보는 "없는 이름이면 가능한 이름을 알려 준다"와 "`message` 로 보내면 `prompt` 를 쓰라고 알려 준다"예요. 하지만 4.8%의 실패에서 호출 하나씩을 아끼는 정도라서 이번에는 하지 않았어요. 이 도구의 병폐는 호출이 아니라 기다림(비동기 실행)에 있어요.
+- 개선 후보는 "없는 이름이면 가능한 이름을 알려 준다"와 "`message` 로 보내면 `prompt` 를 쓰라고 알려 준다"예요. 하지만 4.8%의 실패에서 호출 하나씩을 아끼는 정도라서 이번에는 하지 않았어요.
+- 이 도구는 이미 비동기예요. 제출은 곧바로 돌아오고, 요청을 받은 Keeper 가 그 턴을 마치면 제출한 Keeper 를 완료 알림으로 깨워요(`keeper_delegate_completion_wake`). 남은 비용은 아래 상태 조회였어요.
+
+### 상태 조회(#48343)
+
+- `masc_keeper_delegate_status` 는 164호출이에요. 위임 호출 394건의 42%예요. 결과는 저장된 위임 기록 전체였어요. 호출한 Keeper 가 직접 보낸 요청 본문(`input`), 보낸 사람 정보(`source`), 해시 둘이 대부분이에요.
+- #48343 은 상태, 그 시각, 실패 사실, 성공했을 때의 `completed_reply` 만 돌려줘요. 같은 164호출을 다시 돌려 보면 결과가 430,806바이트에서 161,930바이트로 줄어요(62.4%).
+
+| 조회한 위임의 상태 | 호출 | 이전 바이트 | 이후 바이트 | 줄어든 몫 |
+|---|---:|---:|---:|---:|
+| Queued 또는 Running | 115 | 257,596 | 22,190 | 91.4% |
+| Succeeded | 27 | 153,148 | 133,308 | 13.0% |
+| Failed | 19 | 19,635 | 6,005 | 69.4% |
+| 상태가 없는 오류 | 3 | 427 | 427 | 0% |
+
+- 바이트는 원장의 `result_bytes`(Keeper 가 실제로 받은 크기)에서 빠지는 필드의 JSON 바이트를 뺀 값이에요. 원장의 `output` 은 긴 답을 잘라 저장해서, 그 길이로 재면 성공한 위임이 모자라게 잡혀요. 처음에 그렇게 재서 87.7% 가 나왔고 고쳤어요.
+- 성공한 위임은 답(`completed_reply`)이 크기의 대부분이라 13.0% 만 줄어요.
+- 재생 코드와 한 줄 명령은 #48343 의 `docs/evidence/delegate-status-projection-2026-11/README.md` 에 있어요.
+
+조회하는 모습(같은 기간, 같은 기준으로 센 값):
+
+- 위임 375건 중 91건(24%)이 한 번 이상 조회됐어요. 한 번만 조회한 위임이 55건, 두 번이 20건, 세 번 이상이 16건이에요.
+- 제출한 뒤 첫 조회까지 중앙값 232초, p90 1,320초가 걸렸어요. 조회 23번은 제출한 같은 턴 안이에요.
+- 조회 164호출 중 155호출(94.5%)은 `code-reviewer`(119)와 `code-reviewer-uncle`(36)이 불렀어요.
+- 164호출 중 45호출(27%, 98,323바이트)은 같은 Keeper 가 1시간 안에 같은 입력으로 같은 결과를 다시 받은 호출이에요. 상태가 그대로인데 되풀이된 조회예요.
+- 도구 설명은 이미 제출한 Keeper 가 완료 알림으로 깨어난다고 적고 있어요. 그래도 조회하는 이유는 가리지 못했어요. 알림을 못 믿어서인지 중간 진행을 보려는지 몰라요.
+- #48343 은 조회 횟수를 바꾸지 않아요. 배포 뒤 같은 방식으로 세서 달라지는지 봐요.
 
 ## 8. 아직 모르는 것
 
@@ -209,6 +251,7 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - `masc_schedule_notes_list` 의 호출 수, `spilled_calls`, `reread_bytes`
 - `keeper_artifact_read` 의 호출 수와 `reread_bytes`
 - 결과 바이트 중 `identical_rereads.bytes_pct`, `spilled_results.bytes_pct`
+- `masc_keeper_delegate_status` 의 호출당 결과 바이트(`tools` 항목의 `result_bytes` ÷ `calls`). 기준선은 2,627바이트고, #48343 재생 값은 987바이트예요.
 - `blocked_waits.wait_time_pct_of_execute`(비동기 실행이 생기기 전에는 안 바뀌어요)
 
 ## 부록: #47642 에 달 코멘트 초안

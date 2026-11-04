@@ -656,7 +656,9 @@ let test_codex_runtime_has_no_agent_core_thinking_seed () =
 ;;
 
 (* Two rows on one OpenAI-compatible provider, both saying the model thinks.
-   Only the second also says it sends no thinking control. *)
+   Only the second also says it sends no thinking control. The first names the
+   control it turns thinking on with, because loading refuses a row whose
+   thinking request the wire cannot carry. *)
 let uncontrolled_thinking_runtime_config =
   {|
 [runtime]
@@ -673,6 +675,9 @@ api-name = "gpt"
 max-context = 64000
 tools-support = true
 thinking-support = true
+
+[models.asks.capabilities]
+thinking-control-format = "reasoning-enabled"
 
 [models.free]
 api-name = "small"
@@ -718,6 +723,64 @@ let test_uncontrolled_row_sends_no_thinking_request () =
          Alcotest.(check (option bool))
            "the uncontrolled row still says the model thinks" (Some true)
            (model "openai.free").Runtime_schema.thinking_support)
+;;
+
+(* A row that turns thinking on over a reasoning_effort wire with no effort to
+   send asks for a request admission refuses, so every turn on it would fail at
+   its first request (#28447). Loading refuses it and names it; the row next to
+   it, which decides nothing, loads. *)
+let unencodable_thinking_runtime_config =
+  {|
+[runtime]
+default = "openai.plain"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
+
+[models.plain]
+api-name = "small"
+max-context = 32000
+tools-support = true
+
+[models.effortless]
+api-name = "effortless-thinker"
+max-context = 32000
+tools-support = true
+thinking-support = true
+
+[models.effortless.capabilities]
+thinking-control-format = "reasoning-effort"
+
+[openai.plain]
+is-default = true
+max-concurrent = 1
+
+[openai.effortless]
+max-concurrent = 1
+|}
+;;
+
+let test_row_whose_thinking_request_admission_refuses_is_refused_at_load () =
+  with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+  with_temp_dir "runtime-unencodable-thinking" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path unencodable_thinking_runtime_config;
+  match Runtime.load_list ~config_path:path with
+  | Error (Runtime_config_error.Thinking_requests_inadmissible refusals) ->
+    Alcotest.(check (list string))
+      "the refused runtimes"
+      [ "openai.effortless" ]
+      (List.map
+         (fun (refusal : Runtime_config_error.thinking_request_refusal) -> refusal.runtime_id)
+         refusals)
+  | Error failure ->
+    Alcotest.failf
+      "refused for another reason: %s"
+      (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+  | Ok _ -> Alcotest.fail "a row whose thinking request admission refuses loaded"
 ;;
 
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
@@ -4377,6 +4440,10 @@ let () =
             "a reasoning-uncontrolled row sends no thinking request"
             `Quick
             test_uncontrolled_row_sends_no_thinking_request
+        ; Alcotest.test_case
+            "a row whose thinking request admission refuses is refused at load"
+            `Quick
+            test_row_whose_thinking_request_admission_refuses_is_refused_at_load
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case

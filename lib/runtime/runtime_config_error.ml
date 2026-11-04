@@ -46,6 +46,13 @@ type exact_slot_degradation =
   ; emptied_lane_ids : string list
   }
 
+type thinking_request_refusal =
+  { runtime_id : string
+  ; execution_model : string
+  ; declared_model : string
+  ; reason : string
+  }
+
 (* One declared [cli_slots] entry that resolves to a configured runtime the
    CLI tail cannot call: a provider-dispatched (HTTP / [Agent_core]) one, or
    an official client with no output-schema channel.
@@ -92,6 +99,7 @@ type load_failure =
       }
   | Admission_allowances_disagree of
       Llm_provider.Provider_admission.allowance_disagreement list
+  | Thinking_requests_inadmissible of thinking_request_refusal list
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Exact_lane_cli_slot_unservable of exact_lane_cli_slot_unservable
 (* A dangling reference is an operator typo, and unlike every other drop reason
@@ -221,6 +229,22 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       execution_model
       declared_model
+  | Thinking_requests_inadmissible refusals ->
+    let refusal_line (refusal : thinking_request_refusal) =
+      Printf.sprintf
+        "- runtime %S (model=%s, [models.%s]): %s"
+        refusal.runtime_id
+        refusal.execution_model
+        refusal.declared_model
+        refusal.reason
+    in
+    Printf.sprintf
+      "%s: these runtimes ask for a thinking setting in their model row that \
+       request admission refuses, so every turn on them would fail before it \
+       is sent. Change the row's thinking-support, reasoning-effort or \
+       capabilities table so the request it builds can be carried:\n%s"
+      config_path
+      (String.concat "\n" (List.map refusal_line refusals))
   | Admission_allowances_disagree disagreements ->
     let allowance_text (allowance : Llm_provider.Provider_admission_state.allowance) =
       match allowance.priority_run_limit with
@@ -310,6 +334,7 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Lane_candidate_unresolved _
   | Max_context_absent _
   | Admission_allowances_disagree _
+  | Thinking_requests_inadmissible _
   | Exact_slot_body_deadlines_absent _
   | Exact_lane_cli_slot_unservable _ -> to_diagnostic_text ~config_path failure
 ;;

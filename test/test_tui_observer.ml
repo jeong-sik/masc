@@ -170,7 +170,8 @@ let summary = function
     ->
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
         (Option.value ~default:"-" lr_detail)
-  | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
+  | Observer.Event (Observer.Snapshot projection) ->
+      "snapshot:" ^ Observer.projection_name projection
   | Observer.Event Observer.Execution_snapshot ->
       "snapshot:" ^ Masc.Dashboard_event_slices.execution_snapshot_type
   | Observer.Event (Observer.Other name) -> "other:" ^ name
@@ -383,6 +384,13 @@ let test_every_whole_projection_push_decodes_as_a_snapshot () =
   check (list string) "the two that were untaught read as snapshots"
     [ "snapshot:operator_digest"; "snapshot:transport_health_snapshot" ]
     (List.map summary
+       (decode_all [ operator_digest_frame; transport_health_frame ]));
+  check (list bool) "only the transport measurement owes the transport a read"
+    [ false; true ]
+    (List.map
+       (function
+         | Observer.Event event -> Observer.transport_health_measured event
+         | Observer.Undecodable _ -> false)
        (decode_all [ operator_digest_frame; transport_health_frame ]));
   (* Not one at a time: every type the table calls a whole projection. A new
      one added to the table is covered here without this test being touched. *)

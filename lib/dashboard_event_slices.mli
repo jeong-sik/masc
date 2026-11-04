@@ -13,6 +13,11 @@ type entry = {
 val execution_snapshot_type : string
 (** Wire type shared by full execution snapshots and their invalidations. *)
 
+val transport_health_snapshot_type : string
+(** Wire type of the transport health measurement the server's refresh loop
+    pushes after it updates the cell [/api/v1/dashboard/transport-health]
+    serves. *)
+
 val entries : entry list
 (** Every event type the bus routes, in delivery order of no significance.
     Exposed so a reader can quantify over the vocabulary instead of keeping

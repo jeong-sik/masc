@@ -660,8 +660,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
             "the questions of " ^ declaration_id ^ " changed"
       in
       { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
-  | Observer.Snapshot name ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = name }
+  | Observer.Snapshot projection ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = Observer.projection_name projection }
   | Observer.Execution_snapshot ->
       { at; keeper = "server"; glyph = Quiet; label
       ; detail = Masc.Dashboard_event_slices.execution_snapshot_type }

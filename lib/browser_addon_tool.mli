@@ -9,10 +9,11 @@ val command : Yojson.Safe.t -> (Browser_lane.route * Browser_lane.verb, string) 
 val failure_of_reply : Browser_addon_wire.reply ->
   (Tool_result.tool_failure_class * Tool_result.failure_effect_disposition) option
 (** The failure class and effect disposition a worker reply carries, or [None]
-    for a success. A failure the browser or its executor answered is
-    [Workflow_rejection]: its cause is only in its message. An absent browser,
-    a lane that is off and a browser that did not answer are
-    [Dependency_unavailable]; a reply that cannot be read is
+    for a success. The class comes only from the reply's variant. A failure
+    whose cause is only in its message (an answer from the browser or its
+    executor, a worker refusal) is [Workflow_rejection]. A selection that
+    finds no browser or a lane that is off, an absent lane and a reply that
+    did not come are [Dependency_unavailable]; a reply that cannot be read is
     [Runtime_failure]. *)
 val invoke : owner:Browser_addon_owner.t -> principal:Lane_addon_call_context.principal ->
   Yojson.Safe.t -> Mcp_protocol.Mcp_types.tool_result

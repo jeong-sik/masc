@@ -85,7 +85,7 @@ let control_identity ~sw ~owner =
               match Yojson.Safe.Util.member "message" data with
               | `String message -> Some message | _ -> None))
         (* An unnamed live take_over is the task Space reclaim. It parses, and
-           a worker with no refused Space to reclaim refuses it before any
+           this worker, which has no reclaim attached, refuses it before any
            dispatch. *)
         | Ok (B.Live_route None,_) when B.Action.is_take_over (B.Action.Control control) ->
           check bool (label ^ ": a reclaim with nothing to reclaim is refused by the worker, before effect") true

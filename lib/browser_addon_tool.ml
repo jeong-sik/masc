@@ -98,12 +98,13 @@ let refused ~start_time ~class_ detail = result ~start_time ~failure:(Some (clas
 let selection_failure_class = function
   | B.Activity_rejected _ | No_live_client | Selected_client_disconnected _ -> Tool_result.Dependency_unavailable
   | Ambiguous_clients _ | Transport_unsupported _ -> Tool_result.Workflow_rejection
-(* What the reply says happened. A failure the browser or its executor
-   answered names its cause only in words, which the model reads, so it stays
-   the request the page did not admit, with the effect its phase states. A
-   refusal before any effect is the same. A browser that is not here, or
-   that did not answer, is the dependency that could not fulfil it. A reply
-   this tool cannot read is its own failure. *)
+(* What the reply says happened. The class comes only from the reply's
+   variant. A failure whose cause is only in words, which the model reads,
+   stays Workflow_rejection with the effect its phase states: an answer from
+   the browser or its executor, and the worker's own refusal before dispatch,
+   even one whose words say a backend is not attached or the worker retired.
+   The variants that say a browser is not here, or that no answer came, are
+   Dependency_unavailable. A reply this tool cannot read is its own failure. *)
 let failure_of_reply = function
   | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->
       (match List.assoc_opt "ok" fields with

@@ -2,6 +2,19 @@ type read_error =
   | Chat_store_unreadable of Keeper_chat_store.strict_decode_error
   | External_attention_unreadable of Keeper_external_attention.read_error
   | External_cursor_failed of string
+  | Counterpart_backlog_over_capacity of
+      { path : string
+      ; rows_past_cursor : int
+      ; bytes_past_cursor : int
+      ; row_cap : int
+      ; byte_cap : int
+      }
+  | Counterpart_selection_over_capacity of
+      { rows : int
+      ; bytes : int option
+      ; row_cap : int
+      ; byte_cap : int
+      }
 
 let read_error_to_string = function
   | External_cursor_failed detail -> "external admission cursor: " ^ detail
@@ -11,6 +24,21 @@ let read_error_to_string = function
   | External_attention_unreadable error ->
     "external attention store is unreadable: "
     ^ Keeper_external_attention.read_error_to_string error
+  | Counterpart_backlog_over_capacity
+      { path; rows_past_cursor; bytes_past_cursor; row_cap; byte_cap } ->
+    Printf.sprintf
+      "counterpart backlog over capacity: %s has %d selectable rows past cursor (%d rendered bytes), caps are %d rows / %d bytes"
+      path rows_past_cursor bytes_past_cursor row_cap byte_cap
+  | Counterpart_selection_over_capacity { rows; bytes; row_cap; byte_cap } ->
+    (match bytes with
+     | None ->
+       Printf.sprintf
+         "counterpart selection over capacity: %d rows exceed the %d-row cap (bytes unmeasured)"
+         rows row_cap
+     | Some bytes ->
+       Printf.sprintf
+         "counterpart selection over capacity: %d rows render to %d bytes, caps are %d rows / %d bytes"
+         rows bytes row_cap byte_cap)
 ;;
 
 open Result.Syntax
@@ -193,9 +221,128 @@ let counterpart_selection_may_overlap ~original ~candidate =
 let counterpart_observations_digest (snapshot : counterpart_snapshot) =
   Keeper_counterpart_observation.digest (counterpart_observations snapshot)
 
-let capture_counterparts_read ?external_after ~base_dir ~keeper_name ~after ~before () =
+let counterpart_row_cap = 4096
+let counterpart_byte_cap = 1_048_576
+let counterpart_prescan_fast_path_bytes = 262_144
+
+(* Streaming pre-read gate over the external attention log. Mirrors the
+   selection in [selected_external_with_offsets] without building it: skips
+   the first [cursor] decoded rows (blank lines skipped exactly like the
+   strict loader, so cursor offsets align), then counts only rows this pass
+   would select — [received_at <= before] with an early stop at the first row
+   past [before] when a cursor is set ([List.take_while] in the selection), or
+   [in_interval] over every row without a cursor. Bytes are the rendered
+   prompt projection ([Keeper_counterpart_observation.to_yojson] per counted
+   row plus list framing), the same basis the post-selection backstop below
+   measures, so a refusal proves the selectable prefix alone exceeds a cap.
+   Small files skip the scan: the strict load right below stays cheap. Any
+   decode or I/O doubt fails open to the strict load, which reports the
+   authoritative error (malformed line, torn tail, scope mismatch); only a
+   proven over-capacity selectable prefix refuses, and the remainder of the
+   file is not read past the refusal or the [before] boundary. A refusal stops
+   the same wake like other capacity refusals ([publication_unfinished]);
+   rows past [before] never cause it, so a lagging Keeper keeps draining its
+   backlog turn by turn while the selectable prefix stays within caps. *)
+let prescan_external_backlog ~path ~external_after ~after ~before =
+  let cursor = match external_after with None -> 0 | Some cursor -> cursor in
+  if cursor < 0
+  then Ok ()
+  else (
+    try
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          let small =
+            try In_channel.length ic <= Int64.of_int counterpart_prescan_fast_path_bytes with
+            | Sys_error _ -> false
+          in
+          if small
+          then Ok ()
+          else (
+            let decode_line line =
+              match Yojson.Safe.from_string line with
+              | json -> (
+                match Attention.event_of_json json with
+                | Ok (Attention.Recorded (item : Attention.item)) ->
+                  let observation = Keeper_counterpart_observation.of_external_attention item in
+                  let rendered =
+                    String.length
+                      (Yojson.Safe.to_string
+                         (Keeper_counterpart_observation.to_yojson observation))
+                  in
+                  Some (item.received_at, rendered)
+                | Error _ -> None)
+              | exception Yojson.Json_error _ -> None
+            in
+            let rows_seen = ref 0 in
+            let rows_counted = ref 0 in
+            let bytes_sum = ref 0 in
+            let over = ref None in
+            let stopped = ref false in
+            (try
+               while Option.is_none !over && not !stopped do
+                 let line = String.trim (input_line ic) in
+                 if String.equal line ""
+                 then ()
+                 else (
+                   match decode_line line with
+                   | None -> stopped := true
+                   | Some (received_at, rendered) ->
+                     rows_seen := !rows_seen + 1;
+                     if !rows_seen > cursor
+                     then (
+                       let selected =
+                         match external_after with
+                         | None -> in_interval ~after ~before received_at
+                         | Some _ -> received_at <= before
+                       in
+                       if selected
+                       then (
+                         rows_counted := !rows_counted + 1;
+                         bytes_sum := !bytes_sum + rendered;
+                         let bytes_past = !bytes_sum + !rows_counted + 1 in
+                         if !rows_counted > counterpart_row_cap
+                         || bytes_past > counterpart_byte_cap
+                         then over := Some (!rows_counted, bytes_past))
+                       else if Option.is_some external_after
+                       then stopped := true))
+               done
+             with
+             | End_of_file | Sys_error _ -> ());
+            match !over with
+            | None -> Ok ()
+            | Some (rows_past, bytes_past) ->
+              Error
+                (Counterpart_backlog_over_capacity
+                   { path
+                   ; rows_past_cursor = rows_past
+                   ; bytes_past_cursor = bytes_past
+                   ; row_cap = counterpart_row_cap
+                   ; byte_cap = counterpart_byte_cap
+                   })))
+    with
+    | Sys_error _ -> Ok ())
+
+let capture_counterparts_read
+  ?(enforce_capacity = true)
+  ?external_after
+  ~base_dir
+  ~keeper_name
+  ~after
+  ~before
+  ()
+  =
   let* () = if Float.is_finite before && Option.fold ~none:true ~some:Float.is_finite after
     then Ok () else Error (External_cursor_failed "counterpart interval must be finite") in
+  let* () =
+    if not enforce_capacity
+    then Ok ()
+    else (
+      prescan_external_backlog
+        ~path:(Attention.attention_path ~base_path:base_dir ~keeper_name)
+        ~external_after ~after ~before)
+  in
   let* chat_rows = match after with
     | Some lower when Float.compare lower before >= 0 -> Ok []
     | Some _ | None -> Chat.load_captured_result ~select:(selected_chat ~after ~before) ~base_dir ~keeper_name
@@ -209,7 +356,35 @@ let capture_counterparts_read ?external_after ~base_dir ~keeper_name ~after ~bef
   match external_after with
   | Some cursor when cursor < 0 || cursor > List.length external_log ->
     Error (External_cursor_failed "external log shrank behind its admission cursor")
-  | Some _ | None -> Ok {keeper_name;after;before;external_after;chat_rows;external_log}
+  | Some _ | None ->
+    let snapshot =
+      { keeper_name; after; before; external_after; chat_rows; external_log }
+    in
+    if not enforce_capacity
+    then Ok snapshot
+    else (
+      let selection = select_counterparts snapshot in
+      let rows = List.length selection.selected in
+      if rows > counterpart_row_cap
+      then
+        Error
+          (Counterpart_selection_over_capacity
+             { rows; bytes = None; row_cap = counterpart_row_cap; byte_cap = counterpart_byte_cap })
+      else (
+        let bytes =
+          String.length
+            (Keeper_counterpart_observation.render_for_prompt (counterpart_observations snapshot))
+        in
+        if bytes > counterpart_byte_cap
+        then
+          Error
+            (Counterpart_selection_over_capacity
+               { rows
+               ; bytes = Some bytes
+               ; row_cap = counterpart_row_cap
+               ; byte_cap = counterpart_byte_cap
+               })
+        else Ok snapshot))
 
 let counterpart_snapshot_to_json (snapshot : counterpart_snapshot) =
   `Assoc ["keeper_name", `String snapshot.keeper_name;
@@ -280,7 +455,7 @@ let snapshot_extends ~(original : counterpart_snapshot) ~(current : counterpart_
 let validate_original_selection (original : counterpart_snapshot) ~base_dir ~keeper_name =
   if original.keeper_name <> keeper_name then Error (External_cursor_failed "Original counterpart Keeper differs")
   else
-    let* current = capture_counterparts_read ?external_after:original.external_after
+    let* current = capture_counterparts_read ~enforce_capacity:false ?external_after:original.external_after
       ~base_dir ~keeper_name ~after:original.after ~before:original.before () in
     snapshot_extends ~original ~current |> Result.map_error (fun detail -> External_cursor_failed detail)
 
@@ -300,6 +475,7 @@ let counterparts_covered_at_frontier
   else
     let* current =
       capture_counterparts_read
+        ~enforce_capacity:false
         ?external_after:original.external_after
         ~base_dir
         ~keeper_name

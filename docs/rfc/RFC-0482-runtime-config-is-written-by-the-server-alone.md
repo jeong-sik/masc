@@ -40,7 +40,7 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 
 ### 1.3 CLI 프로세스
 
-앞의 다섯 명령은 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2). 마지막 명령은 서버가 있어도 직접 쓴다.
+여섯 명령 모두 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2).
 
 | 명령 | 서버가 있을 때 | 서버가 없을 때 |
 |---|---|---|
@@ -49,9 +49,9 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 | `masc voice-local-setup` | voice setup route (`Masc_cli_runtime_config_remote.apply_voice_setup`) | `Voice_setup.apply` |
 | `masc runtime-default-set` | 원문 route (`Runtime.runtime_default_text`, `--setup-lanes` 면 `Runtime.first_run_runtime_text`) | `Runtime.set_runtime_default`, `Runtime.set_first_run_runtime` |
 | `masc browser-lane-setup` | 원문 route. bidi·automation·ego 표를 서버 원문에 계획하고 저장한다(`Masc_cli_runtime_config_remote.table_store`) | 같은 계획을 파일에 쓴다(`Runtime_table_edit.file_store`) |
-| `masc runtime-setup-batch` | 직접 쓴다 (L3d) | `Runtime_setup_batch.configure`. 임시 사본에 `runtime-default-set` 을 돌려 검증한 뒤 원래 파일에 쓴다 |
+| `masc runtime-setup-batch` | 서버 원문으로 정하고 임시 사본에서 검증한 뒤, 저장만 원문 route 로(`Runtime_setup_batch.configure_text`, `Masc_cli_runtime_config_remote.publish_setup_text`) | `Runtime_setup_batch.configure`. 임시 사본에 `runtime-default-set` 을 돌려 검증한 뒤 원래 파일에 쓴다 |
 
-`runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 부른다. 처음 설치할 때는 서버가 없지만, 서버가 떠 있는 워크스페이스에서 다시 돌리면 서버 몰래 쓴다. batch 가 임시 사본에 부르는 `runtime-default-set` 은 그 사본의 서버를 찾지 못해서 사본에 직접 쓴다.
+`runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 `runtime-setup-inventory` 다음에 부른다. inventory 도 서버가 답하면 서버 원문을 읽어서, batch 가 비교하는 revision 과 같은 원문에서 나온다. batch 가 임시 사본에 부르는 `runtime-default-set` 은 그 사본의 서버를 찾지 못해서 사본에 직접 쓴다.
 
 ## 2. 문제
 
@@ -90,7 +90,7 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 
 이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
-`runtime-default-set --setup-lanes` 의 편집은 CLI 가 읽은 모델 카탈로그로 정한다(어느 runtime 이 만들어지는지, 판정 lane 에 넣을 수 있는지). CLI 는 서버 시작과 같은 카탈로그 원본을 읽지만, 셸에서 `AGENT_CORE_MODEL_CATALOG` 를 서버와 다르게 내보내면 서버의 저장 검사가 거절하거나(400), 서버였다면 고르지 않았을 판정 slot 이 저장될 수 있다. 이 차이를 없애려면 서버 route 로 선택만 보내야 하고, 지금은 그 route 가 없다.
+`runtime-default-set --setup-lanes` 의 편집은 CLI 가 읽은 모델 카탈로그로 정한다(어느 runtime 이 만들어지는지, 판정 lane 에 넣을 수 있는지). CLI 는 서버 시작과 같은 카탈로그 원본을 읽지만, 셸에서 `AGENT_CORE_MODEL_CATALOG` 를 서버와 다르게 내보내면 서버의 저장 검사가 거절하거나(400), 서버였다면 고르지 않았을 판정 slot 이 저장될 수 있다. `runtime-setup-batch` 의 임시 사본 검증과 probe 도 CLI 의 카탈로그로 하고, 저장할 때 서버가 다시 검사한다. 이 차이를 없애려면 서버 route 로 선택만 보내야 하고, 지금은 CLI 의 선택(임시 credential 참조 포함)을 받는 route 가 없다.
 
 재시작이 필요한 설정은 서버로 저장해도 바로 쓰이지 않는다. 서버는 부팅 때 적용한 값과 저장된 값을 비교하고, 다르면 그 키를 `pending_restart` 로 보여 준다(`lib/keeper_runtime/keeper_runtime_config.ml` `application_status`). 그래서 CLI 의 "실행 중인 서버는 재시작할 때 읽는다" 안내는 서버로 쓸 때도 맞다.
 

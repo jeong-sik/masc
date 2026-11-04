@@ -7,14 +7,18 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
   | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed of string | Lock_unavailable
+  | Commit_unobserved of string
 type usage_limited = { runtime_id : string; code : string }
 type readiness =
   | Not_probed
   | Verified
   | Usage_limited of usage_limited * usage_limited list
   | Partly_checked of { limited : usage_limited list; not_rechecked : string list }
+type commit_record = { source_revision : string; order : string;
+                       durability : Runtime.config_durability;
+                       lock_warnings : Runtime.config_lock_warning list }
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
-                 readiness:readiness; commit:Runtime.config_commit_receipt }
+                 readiness:readiness; commit:commit_record }
 open Result.Syntax
 let exit_text status = match Process_eio.exit_reason_of_status status with
   | Process_eio.Completed code -> Printf.sprintf "exit %d" code
@@ -50,9 +54,11 @@ let error_message = function
     Printf.sprintf "Runtime %S verification returned no readable report (%s; %s)" runtime_id (exit_text exit) reason
   | Write_failed _ -> "Configuration could not be saved; the previous configuration is unchanged."
   | Lock_unavailable -> "Another configuration operation is active; retry after it finishes."
+  | Commit_unobserved _ ->
+    "The configuration was sent to the workspace's running server, and its answer could not be read; inspect the workspace before retrying."
 let error_detail = function
   | Validation_failed { stderr; _ } | Verification_unreadable { stderr; _ } -> child_detail stderr
-  | Commit_refused reason | Write_failed reason -> child_detail reason
+  | Commit_refused reason | Write_failed reason | Commit_unobserved reason -> child_detail reason
   | Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
   | Child_not_started _ | Verification_failed _ | Lock_unavailable -> None
 let revision_to_string (Revision value) = value
@@ -73,9 +79,13 @@ let snapshot base =
   let* first = read root runtime in
   match first with None -> Error Configuration_unavailable | Some _ -> Ok first
 let content = function None -> "" | Some (file:Fs_compat.owned_regular_file_contents) -> file.content
+let revision_of_item item =
+  Revision (Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item])))))
 let revision first =
-  let item = function None -> `Null | Some (file:Fs_compat.owned_regular_file_contents) -> `String file.content in
-  Revision (Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string (`List [item first])))))
+  revision_of_item
+    (match first with None -> `Null | Some (file:Fs_compat.owned_regular_file_contents) -> `String file.content)
+(* The setup revision of a runtime.toml text, as {!observe} computes it from the file. *)
+let revision_of_text text = revision_of_item (`String text)
 let same_file a b = match a,b with
   | None,None -> true
   | Some (a:Fs_compat.owned_regular_file_contents),Some (b:Fs_compat.owned_regular_file_contents) -> a.content=b.content
@@ -164,11 +174,13 @@ let needs_probe ~existing ~previous_primary ~primary selected =
     not (List.mem id existing)
     || (String.equal id primary && previous_primary <> Some id)) selected
 
-let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify =
-  let* original = snapshot base in
-  if revision original <> expected_revision then Error Changed_configuration else
-  let first = original in
-  let* parsed = match Runtime_toml.parse_string (content first) with
+(* What a save writes, decided from the text it starts from: the revision is
+   compared, the selection resolved against the text's providers and rendered. *)
+type prepared = { runtime_text : string; specs : Runtime_setup_spec.t list;
+                  existing : string list; previous_primary : string option }
+let prepare ~default_lane_id ~original_text ~expected_revision ~specs ~selected =
+  if revision_of_text original_text <> expected_revision then Error Changed_configuration else
+  let* parsed = match Runtime_toml.parse_string original_text with
     | Ok value -> Ok value | Error _ -> Error Invalid_configuration in
   let* () = match default_lane_id with
     | None -> Ok ()
@@ -233,14 +245,20 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
         Toml_line_editor.edit_nested_bool text ~path:[binding.provider_id; binding.model_id]
           ~key:"wizard-default" ~value:true
         |> Result.map_error (fun _ -> Invalid_configuration)
-    | Ok _ | Error _ -> Ok text) (Ok (content first)) parsed.providers in
+    | Ok _ | Error _ -> Ok text) (Ok original_text) parsed.providers in
   let runtime_text = preserved ^ (if added="" then "" else "\n" ^ added) in
   let runtime_text = match default_lane_id with
     | None -> runtime_text
     | Some lane_id -> Toml_line_editor.edit_table_multiline_array runtime_text
         ~path:(Runtime_toml_namespace.(path Runtime) ("lanes." ^ Toml_line_editor.render_key lane_id))
         ~key:"candidates" ~values:selected in
-  let* (validated, readiness) = with_stage (fun stage ->
+  Ok { runtime_text; specs; existing; previous_primary }
+
+(* The prepared text validated by a MASC child in a scratch workspace, and the
+   selected runtimes probed there when [verify]: what is published, and how
+   ready it was found. *)
+let stage_validated ~binary ~default_lane_id ~verify ~selected { runtime_text; specs = _; existing; previous_primary } =
+  with_stage (fun stage ->
     let _,runtime = paths stage in
     let stage_write path text = match write path 0o600 text with
       | Ok () -> Ok () | Error _ -> Error Configuration_unavailable in
@@ -267,7 +285,27 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
           | [], [] -> Verified
           | first :: rest, [] -> Usage_limited (first, rest)
           | _, _ :: _ -> Partly_checked { limited; not_rechecked }) in
-      let* files = snapshot stage in Ok (content files, readiness)) in
+      let* files = snapshot stage in Ok (content files, readiness))
+
+let receipt_of ~default_lane_id ~specs ~selected ~readiness commit =
+  match selected with
+  | [] -> Error Invalid_selection
+  | primary::_ ->
+    let runtime_id = match default_lane_id with Some lane_id -> lane_id | None -> primary in
+    Ok {runtime_id;runtime_ids=selected;
+      models=List.map Runtime_setup_spec.model_id specs; readiness; commit}
+
+let commit_record_of_receipt (receipt : Runtime.config_commit_receipt) =
+  { source_revision = Runtime.config_source_revision_to_string receipt.observation.source_revision;
+    order = Runtime.config_commit_order_to_string receipt.order;
+    durability = receipt.durability;
+    lock_warnings = receipt.lock_warnings }
+
+let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify =
+  let* original = snapshot base in
+  let first = original in
+  let* prepared = prepare ~default_lane_id ~original_text:(content first) ~expected_revision ~specs ~selected in
+  let* (validated, readiness) = stage_validated ~binary ~default_lane_id ~verify ~selected prepared in
   let* current = snapshot base in
   if not (same original current) then Error Changed_configuration else
   let _,runtime = paths base in
@@ -288,12 +326,8 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
             Write_failed (Fs_compat.atomic_replace_failure_to_string failure)) in
     List.iter Runtime_setup_credentials.retain pending_credentials;
     Ok receipt) in
-  match selected with
-  | [] -> Error Invalid_selection
-  | primary::_ ->
-    let runtime_id = match default_lane_id with Some lane_id -> lane_id | None -> primary in
-    Ok {runtime_id;runtime_ids=selected;
-      models=List.map Runtime_setup_spec.model_id specs; readiness; commit}
+  receipt_of ~default_lane_id ~specs:prepared.specs ~selected ~readiness (commit_record_of_receipt commit)
+
 let configure_with_replace_file ~with_lock ~replace_file ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
   if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
      || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
@@ -305,13 +339,28 @@ let configure_with_replace_file ~with_lock ~replace_file ?(pending_credentials=[
     match with_lock ~runtime_config_path:runtime (fun () ->
       configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify) with
     | Ok {Runtime.value=Ok receipt; warnings} ->
-        Ok {receipt with commit=Runtime.attach_lock_warnings warnings receipt.commit}
+        Ok {receipt with commit={receipt.commit with lock_warnings=receipt.commit.lock_warnings @ warnings}}
     | Ok {Runtime.value=Error error; _} -> Error error
     | Error _ -> Error Lock_unavailable)
 let configure ?pending_credentials ?default_lane_id ~binary ~base_path ~expected_revision
     ~specs ~runtime_ids ~default_runtime_id ~verify () =
   configure_with_replace_file ~with_lock:Runtime.with_config_lock_observed ~replace_file:write ?pending_credentials ?default_lane_id
     ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify ()
+(* {!configure} for a workspace whose running server is the writer (RFC-0482
+   §3.2): decided against the text the server holds, staged and validated
+   here, and published by [commit]. No local lock is held; [commit] refuses a
+   text that moved since [original_text]. *)
+let configure_text ?default_lane_id ~binary ~original_text ~expected_revision ~specs ~runtime_ids
+    ~default_runtime_id ~verify ~commit () =
+  if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
+     || not (List.mem default_runtime_id runtime_ids) then Error Invalid_selection else
+  io (fun () ->
+    let binary = Unix.realpath binary in
+    let selected = default_runtime_id :: List.filter ((<>) default_runtime_id) (unique runtime_ids) in
+    let* prepared = prepare ~default_lane_id ~original_text ~expected_revision ~specs ~selected in
+    let* (validated, readiness) = stage_validated ~binary ~default_lane_id ~verify ~selected prepared in
+    let* committed = Eio.Cancel.protect (fun () -> commit validated) in
+    receipt_of ~default_lane_id ~specs:prepared.specs ~selected ~readiness committed)
 let usage_limited_json (row : usage_limited) = `Assoc [
   "runtime_id",`String row.runtime_id;"code",`String row.code]
 let receipt_json receipt = `Assoc ([
@@ -320,8 +369,8 @@ let receipt_json receipt = `Assoc ([
   "models",`List (List.map (fun s -> `String s) receipt.models);
   "configured",`Bool true;"validation",`String "passed";
   "commit",`Assoc [
-    "source_revision",`String (Runtime.config_source_revision_to_string receipt.commit.observation.source_revision);
-    "order",`String (Runtime.config_commit_order_to_string receipt.commit.order);
+    "source_revision",`String receipt.commit.source_revision;
+    "order",`String receipt.commit.order;
     "durability",`String (match receipt.commit.durability with Runtime.Durable -> "durable" | Durability_unconfirmed _ -> "unconfirmed");
     "warnings",`List (List.map (function Runtime.Config_lock_release_unconfirmed _ ->
       `Assoc ["code",`String "runtime_config_lock_release_unconfirmed"]) receipt.commit.lock_warnings)]]

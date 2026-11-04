@@ -866,6 +866,20 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).toHaveBeenCalledTimes(1)
   })
 
+  it('routes board post changes through the board refresh budget', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_changed',
+      post_id: 'post-1',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
   it('refetches the fusion board-sink track when a post is created', async () => {
     const { sseStore } = await loadSseStore()
     const refreshFusion = vi.fn()

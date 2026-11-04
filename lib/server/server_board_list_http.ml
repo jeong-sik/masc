@@ -16,11 +16,10 @@ let filter_param request name =
    entity tag, so a read of an unchanged page sends the kept bytes rather than
    serializing and hashing every post again. The key holds the query and the
    reaction actor, each value prefixed with its length, so two different pages
-   never share a key. A board write drops every [board:list:] entry
-   ([Server_dashboard_http_core_cache.invalidate_board_projections]): one that
-   raises a board event (a post, a comment, a vote, a reaction) through the SSE
-   hook, and an edit, pin, close, reopen, delete or thread change through
-   [Board_dispatch.set_board_write_hook]. *)
+   never share a key. Every board write raises a board event, and the SSE hook
+   drops every [board:list:] entry
+   ([Server_dashboard_http_core_cache.invalidate_board_projections]) before it
+   broadcasts that event. *)
 let payload ?config ~reaction_actor request
   : Dashboard_cache.cached_payload
   =

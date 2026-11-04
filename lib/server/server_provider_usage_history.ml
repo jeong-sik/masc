@@ -18,8 +18,9 @@ let install config =
        a reader looks either way. *)
     Fun.protect
       ~finally:(fun () ->
-        Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
-          Workspace_dataset_event.Provider_usage)
+        Eio.Cancel.protect (fun () ->
+          Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+            Workspace_dataset_event.Provider_usage))
       (fun () ->
         Dated_jsonl.append journal
           (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report))))

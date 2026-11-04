@@ -119,8 +119,6 @@ let verdict_item_of_json json =
       }
 ;;
 
-let ( let* ) result f = Result.bind result f
-
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ~base_path ()
   : harness_verdict_item list
   =

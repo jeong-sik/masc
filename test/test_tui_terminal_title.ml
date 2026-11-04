@@ -11,8 +11,20 @@ let sink () = { writes = []; flushes = 0 }
 let write sink value = sink.writes <- sink.writes @ [ value ]
 let flush sink () = sink.flushes <- sink.flushes + 1
 
-let snapshot ?(activity = Title.Working) ?keeper_name ?runtime_id workspace =
-  Title.make ~activity ~keeper_name ~runtime_id ~workspace
+let snapshot ?(activity = Title.Working) ?(attention = 0) ?keeper_name ?runtime_id workspace =
+  Title.make ~activity ~attention ~keeper_name ~runtime_id ~workspace
+;;
+
+let test_leads_with_the_attention_count () =
+  check string "a count above zero leads, where a tab strip cuts last"
+    "(3) working \xc2\xb7 alpha \xc2\xb7 me"
+    (Title.text (snapshot ~attention:3 ~keeper_name:"alpha" "me"));
+  check string "nothing waiting on the operator adds nothing"
+    "working \xc2\xb7 alpha \xc2\xb7 me"
+    (Title.text (snapshot ~attention:0 ~keeper_name:"alpha" "me"));
+  check string "a count below zero is not drawn"
+    "working \xc2\xb7 me"
+    (Title.text (snapshot ~attention:(-1) "me"))
 ;;
 
 let test_removes_terminal_and_bidi_controls () =
@@ -42,6 +54,14 @@ let test_caps_the_complete_title_without_splitting_utf8 () =
   let rendered = Title.text (snapshot long_workspace) in
   check int "maximum Unicode scalars" 240 (scalar_count rendered);
   check bool "result remains valid UTF-8" true (String.is_valid_utf_8 rendered)
+;;
+
+let test_attention_count_stays_inside_the_scalar_cap () =
+  let long_workspace = String.concat "" (List.init 300 (fun _ -> "\240\159\167\170")) in
+  let rendered = Title.text (snapshot ~attention:12 long_workspace) in
+  check int "the count is part of the same 240 scalars" 240 (scalar_count rendered);
+  check bool "the cut falls on the workspace, not on the count" true
+    (String.starts_with ~prefix:"(12) working" rendered)
 ;;
 
 let test_bounds_sanitizer_work_before_a_printable_suffix () =
@@ -163,6 +183,8 @@ let () =
         ; test_case "bounded UTF-8" `Quick test_caps_the_complete_title_without_splitting_utf8
         ; test_case "bounded scan" `Quick test_bounds_sanitizer_work_before_a_printable_suffix
         ; test_case "Keeper priority" `Quick test_selects_the_keeper_with_explicit_priority
+        ; test_case "attention count leads" `Quick test_leads_with_the_attention_count
+        ; test_case "attention count and cap" `Quick test_attention_count_stays_inside_the_scalar_cap
         ] )
     ; ( "writes"
       , [ test_case "change-driven and cleanup" `Quick test_writes_only_on_change_and_clears_once

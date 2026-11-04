@@ -28602,6 +28602,18 @@ let terminal_title_runtime state keeper_name =
         | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
 ;;
 
+(* The server's own list of what needs the operator, which the footer's
+   ACTION NEEDED row counts. An older server, or one before its first
+   snapshot, cannot say and counts as none. *)
+let terminal_title_attention state =
+  match state.server_identity with
+  | None -> 0
+  | Some identity ->
+      (match identity.Tui_decode.sid_operator_action with
+       | Some alerts -> List.length alerts
+       | None -> 0)
+;;
+
 let terminal_title_snapshot state =
   let live = Option.map turn_log_keeper_name state.msg_live in
   let inflight =
@@ -28622,6 +28634,7 @@ let terminal_title_snapshot state =
   in
   Terminal_title.make
     ~activity
+    ~attention:(terminal_title_attention state)
     ~keeper_name
     ~runtime_id:(terminal_title_runtime state keeper_name)
     ~workspace:state.workspace

@@ -72,18 +72,26 @@ let control_identity ~sw ~owner =
       let verb=B.Page_act (B.Action.Control control) in
       List.iter (fun (label,selection) ->
         let input=`Assoc (selection @ ["command",B.verb_json verb]) in
-        let expected=match Tool.command input with
-          | Error message -> message
-          | Ok _ -> fail (label ^ ": control reached selection without an observed client") in
+        let parsed=Tool.command input in
         let result=Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") input in
         check (option bool) (label ^ ": authenticated control is refused") (Some true) result.is_error;
-        check bool (label ^ ": refusal is an argument the caller corrects, before effect") true
-          (Lane_addon_tool_result.failure result=
-            (Tool_result.Policy_rejection,Tool_result.Proven_pre_effect));
-        check (option string) (label ^ ": invocation preserves the parse-boundary refusal") (Some expected)
-          (Option.bind result.structured_content (fun data ->
-            match Yojson.Safe.Util.member "message" data with
-            | `String message -> Some message | _ -> None)))
+        match parsed with
+        | Error expected ->
+          check bool (label ^ ": refusal is an argument the caller corrects, before effect") true
+            (Lane_addon_tool_result.failure result=
+              (Tool_result.Policy_rejection,Tool_result.Proven_pre_effect));
+          check (option string) (label ^ ": invocation preserves the parse-boundary refusal") (Some expected)
+            (Option.bind result.structured_content (fun data ->
+              match Yojson.Safe.Util.member "message" data with
+              | `String message -> Some message | _ -> None))
+        (* An unnamed live take_over is the task Space reclaim. It parses, and
+           a worker with no refused Space to reclaim refuses it before any
+           dispatch. *)
+        | Ok (B.Live_route None,_) when B.Action.is_take_over (B.Action.Control control) ->
+          check bool (label ^ ": a reclaim with nothing to reclaim is refused by the worker, before effect") true
+            (Lane_addon_tool_result.failure result=
+              (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect))
+        | Ok _ -> fail (label ^ ": control reached selection without an observed client"))
         ["automatic",[];"unnamed live",["lane",`String "live"];
          "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]];
       check bool "the named host-selected client admits control" true

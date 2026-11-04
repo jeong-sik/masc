@@ -7465,6 +7465,42 @@ let decode_workspace_file_catalog json =
   in
   Ok { wfc_root; wfc_files }
 
+type git_branch = {
+  gb_name : string;
+  gb_current : bool;
+  gb_upstream : repository_upstream;
+  gb_commit_epoch : int;
+  gb_subject : string;
+}
+
+type git_branches = {
+  gbs_root : string;
+  gbs_branches : git_branch list;
+  gbs_truncated : bool;
+}
+
+let decode_git_branch json =
+  let* gb_name = required_string_field json "name" in
+  let* gb_current = required_bool_field json "current" in
+  let* gb_upstream =
+    match json with
+    | `Assoc fields -> decode_repository_upstream (json_field fields "upstream")
+    | _ -> Error "git branch must be an object"
+  in
+  let* gb_commit_epoch = required_int_field json "commit_epoch" in
+  let* gb_subject = required_string_field json "subject" in
+  if String.equal gb_name "" then Error "git branch name must be nonempty"
+  else if gb_commit_epoch < 0 then
+    Error (Printf.sprintf "git branch commit_epoch must be at least 0 (received %d)" gb_commit_epoch)
+  else Ok { gb_name; gb_current; gb_upstream; gb_commit_epoch; gb_subject }
+
+let decode_git_branches json =
+  let* gbs_root = required_string_field json "root" in
+  let* branches = required_list_field json "branches" in
+  let* gbs_branches = decode_list "branches" decode_git_branch branches in
+  let* gbs_truncated = required_bool_field json "truncated" in
+  Ok { gbs_root; gbs_branches; gbs_truncated }
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 
 let decode_workspace_file json =

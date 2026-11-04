@@ -2420,6 +2420,25 @@ val decode_workspace_file_catalog :
 (** Strict catalog response from [/api/v1/workspace/files]. Exact path strings
     are retained for selection; terminal escaping belongs to rendering. *)
 
+type git_branch = {
+  gb_name : string;
+  gb_current : bool;  (** The checked-out branch. *)
+  gb_upstream : repository_upstream;
+  gb_commit_epoch : int;  (** Tip commit time, Unix seconds. *)
+  gb_subject : string;
+}
+
+type git_branches = {
+  gbs_root : string;  (** Checkout root relative to the workspace. *)
+  gbs_branches : git_branch list;  (** Server order: newest tip first. *)
+  gbs_truncated : bool;  (** The server says more branches exist. *)
+}
+
+val decode_git_branches : Yojson.Safe.t -> (git_branches, string) result
+(** Strict response of [/api/v1/git/branches]. The [upstream] member is read as
+    in the Git changes answer: null for none, [ahead]/[behind] both null for a
+    gone upstream. An empty name or a negative time is an [Error _]. *)
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 (** Exact source bytes and their server revision are admitted together. *)
 val decode_workspace_file : Yojson.Safe.t -> (workspace_file_source, string) result

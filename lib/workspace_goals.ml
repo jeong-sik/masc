@@ -1071,16 +1071,6 @@ let finish_goal_request_complete ?evidence_refs ?expected_verification
       ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
 ;;
 
-module For_testing = struct
-  let answer_verifying_repeat ?evidence_refs ctx ~goal_id =
-    answer_verifying_repeat ?evidence_refs ~tool_name:"masc_goal_transition"
-      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
-
-  let finish_goal_request_complete ?evidence_refs ctx ~goal_id =
-    finish_goal_request_complete ?evidence_refs ~tool_name:"masc_goal_transition"
-      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
-end
-
 (* A transition targets the ID the caller supplied. The shared string
    validator trims input, which could otherwise redirect a stored legacy ID
    to a different Goal before the transaction checks its identity. *)

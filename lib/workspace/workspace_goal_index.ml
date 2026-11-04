@@ -121,13 +121,11 @@ let links_of_yojson = function
   | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
-(* Ownership-sensitive work needs keys before [links_of_yojson] folds them.
-   A changed key makes that Task's ownership uncertain. Duplicate structural
-   members can hide links, so they make the observation unreadable without
-   changing the regular link reader's existing behavior. *)
+(* Mutations need keys before [links_of_yojson] folds them. Duplicate
+   structural members can hide links, so they make the observation unreadable
+   without changing the regular link reader's existing behavior. *)
 type prepared_link_ambiguity =
   { has_padded_key : bool
-  ; affected_tasks : Task_id_set.t
   }
 
 let link_ambiguity_of_yojson json =
@@ -146,15 +144,12 @@ let link_ambiguity_of_yojson json =
         (match goal, tasks with
          | `String goal_id, `List values ->
              let goal_changed = not (String.equal goal_id (normalize_link_id goal_id)) in
-             let ambiguous = { ambiguous with has_padded_key = ambiguous.has_padded_key || goal_changed } in
+             let ambiguous = { has_padded_key = ambiguous.has_padded_key || goal_changed } in
              let rec add_tasks ambiguous = function
                | [] -> rows ambiguous rest
                | `String task_id :: remaining ->
-                   let link_id = normalize_link_id task_id in
-                   let task_changed = not (String.equal task_id link_id) in
-                   let affected_tasks = if goal_changed || task_changed
-                     then Task_id_set.add link_id ambiguous.affected_tasks else ambiguous.affected_tasks in
-                   let ambiguous = { has_padded_key = ambiguous.has_padded_key || task_changed; affected_tasks } in
+                   let task_changed = not (String.equal task_id (normalize_link_id task_id)) in
+                   let ambiguous = { has_padded_key = ambiguous.has_padded_key || task_changed } in
                    add_tasks ambiguous remaining
                | _ -> Error "goal_task_links: invalid task ID in link observation"
              in
@@ -166,7 +161,7 @@ let link_ambiguity_of_yojson json =
   | `Assoc fields ->
       let* links = one_member "links" fields in
       (match links with
-       | `List values -> rows { has_padded_key = false; affected_tasks = Task_id_set.empty } values
+       | `List values -> rows { has_padded_key = false } values
        | _ -> Error "goal_task_links: invalid links in link observation")
   | _ -> Error "goal_task_links: invalid link observation"
 ;;
@@ -314,18 +309,16 @@ let read_goal_task_links_authoritative_r config =
 
 type goal_task_link_observation =
   { normalized_links : (string * string list) list
-  ; ambiguous_task_ids : string list
   ; padded_key_present : bool
   }
 
 let read_goal_task_links_observed_r config =
   match read_authoritative_link_registry config with
   | Error _ as error -> error
-  | Ok None -> Ok { normalized_links = []; ambiguous_task_ids = []; padded_key_present = false }
+  | Ok None -> Ok { normalized_links = []; padded_key_present = false }
   | Ok (Some prepared) ->
       Result.map (fun ambiguity ->
         { normalized_links = prepared.links
-        ; ambiguous_task_ids = Task_id_set.elements ambiguity.affected_tasks
         ; padded_key_present = ambiguity.has_padded_key })
         prepared.link_ambiguity
 ;;

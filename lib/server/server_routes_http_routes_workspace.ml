@@ -899,7 +899,8 @@ let vetted_regular_file ?max_bytes ~base ~root repo_relative =
             (match max_bytes with
              | Some limit when st_size > limit -> None
              | Some _ | None -> Some relative)
-        | { Unix.st_kind = _; _ } -> None
+        | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                         | Unix.S_FIFO | Unix.S_SOCK; _ } -> None
         | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
 
 let workspace_file_catalog ~base ~path =

@@ -4661,6 +4661,24 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
+(* [needs] with [source]'s flag set to [wanted]. *)
+let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted =
+  match source with
+  | Surface_read_source.Transport -> { needs with needs_transport = wanted }
+  | Surface_read_source.Board -> { needs with needs_board = wanted }
+  | Surface_read_source.Planning -> { needs with needs_planning = wanted }
+  | Surface_read_source.System_logs -> { needs with needs_system_logs = wanted }
+  | Surface_read_source.Runtime_quota -> { needs with needs_runtime_quota = wanted }
+  | Surface_read_source.Keeper_usage -> { needs with needs_keeper_usage = wanted }
+  | Surface_read_source.Provider_history -> { needs with needs_provider_history = wanted }
+  | Surface_read_source.Overview_goals -> { needs with needs_overview_goals = wanted }
+  | Surface_read_source.Account_emails -> { needs with needs_account_emails = wanted }
+
+(* The bundle sources a server push re-reads instead of the refresh cadence
+   (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
+   cadence then leaves it out and its read is owed. *)
+let pushed_sources : Surface_read_source.t list = [ Surface_read_source.Transport ]
+
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
    Questions, approvals and roster already have independent source owners. *)
@@ -4674,6 +4692,9 @@ module Surface_read_order : sig
   type t
   type request
   val initial : t
+  val sources : surface_needs -> source list
+  (** The sources [needs] wants. *)
+  val source_datasets : source -> dataset list
   val dispatch : kind:kind -> needs:surface_needs -> started_ns:int64 -> t -> t * request
   val take : t -> request -> t * dataset list
   val take_dataset : t -> request -> dataset -> t * bool
@@ -10152,6 +10173,9 @@ type state = {
      while the other answers. *)
   mutable planning_owed: Masc_tui_owed_read.t;
   mutable overview_goals_owed: Masc_tui_owed_read.t;
+  (* The reads the bundle sources in [pushed_sources] owe while their
+     surface is on screen. A source with no entry owes nothing. *)
+  mutable pushed_reads: (Surface_read_source.t * Masc_tui_owed_read.t) list;
   (* The read the questions to the operator owe on every surface. *)
   mutable asks_owed: Masc_tui_owed_read.t;
   (* The read the durable async requests owe while the Keepers list or Tools is on screen. *)
@@ -14587,6 +14611,7 @@ let suspend_workspace_readings state =
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
+  state.pushed_reads <- [];
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;
@@ -19671,6 +19696,7 @@ let create_state
   board_list_owed = Masc_tui_owed_read.settled;
   planning_owed = Masc_tui_owed_read.settled;
   overview_goals_owed = Masc_tui_owed_read.settled;
+  pushed_reads = [];
   asks_owed = Masc_tui_owed_read.settled;
   async_requests_owed = Masc_tui_owed_read.settled;
   pending_confirms_owed = Masc_tui_owed_read.settled;

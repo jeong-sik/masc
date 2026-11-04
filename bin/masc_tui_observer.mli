@@ -218,6 +218,16 @@ type workspace_store =
           ledger, the measurement store or the verifier's observations
           ({!Masc.Goal_projection_broadcast}). *)
 
+(** A whole-projection push. The TUI re-reads what [Transport_health]
+    measures ([/api/v1/dashboard/transport-health]); the others are named for
+    the Acting row only. *)
+type projection =
+  | Transport_health
+  | Unread_projection of string
+
+val projection_name : projection -> string
+(** The wire type the push arrived as. *)
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -320,15 +330,15 @@ type event =
           and is recognised by the names {!Masc.Lane_addon_resource_events}
           mints, as {!Masc.Keeper_event_bridge.public_custom_event_type}
           spells them on the wire. *)
-  | Snapshot of string
+  | Snapshot of projection
+      (** A whole-projection push; the payload is not kept. Which types these
+          are comes from the wire's own routing table
+          ({!Masc.Dashboard_event_slices}) rather than a list here, because
+          the list here had drifted by two. *)
   | Execution_snapshot
       (** [execution_snapshot]: a backlog or goal index write, or the
           server's periodic refresh. The Work surface and the Verification
           queue read again on it. *)
-      (** A whole-projection push; the name is kept, the payload is not. Which
-          types these are comes from the wire's own routing table
-          ({!Masc.Dashboard_event_slices}) rather than a list here, because
-          the list here had drifted by two. *)
   | Other of string  (** A [type] this build was not taught, by name. *)
 
 (** One decoded frame. A frame that is not an event this build can read is
@@ -393,6 +403,11 @@ val gate_connector_changed : event -> bool
 val goal_projection_changed : event -> bool
 (** Whether [event] is a {!Goal_projection} store change. The Planning screen reads
     its Goals again on this. *)
+
+val transport_health_measured : event -> bool
+(** The server's transport refresh loop measured again; the Usage surface's
+    transport health reads again on it. *)
+
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)
 

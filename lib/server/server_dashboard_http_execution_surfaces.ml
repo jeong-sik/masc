@@ -1578,7 +1578,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   let broadcast_snapshot () =
     broadcast_cached_surface
       ~encoding:Encode_inline
-      ~event_type:"transport_health_snapshot"
+      ~event_type:Dashboard_event_slices.transport_health_snapshot_type
       (Server_dashboard_http_cache.cached_surface_json transport_health_cache
        |> with_transport_health_metadata)
   in

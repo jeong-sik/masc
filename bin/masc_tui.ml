@@ -8682,6 +8682,51 @@ let settle_overview_goals_read state result =
      | Ok _ -> Masc_tui_owed_read.succeeded state.overview_goals_owed
      | Error _ -> failed_read state.overview_goals_owed)
 
+let pushed_read state source =
+  Option.value ~default:Masc_tui_owed_read.settled (List.assoc_opt source state.pushed_reads)
+
+let set_pushed_read state source read =
+  state.pushed_reads <- (source, read) :: List.remove_assoc source state.pushed_reads
+
+(* A bundle source in [pushed_sources] reads again when the server announces
+   its change while its surface is on screen, and after a failed read
+   (RFC-0480 §3.4). Entering the surface and a revalidation read it in the
+   surface bundle. *)
+let owe_pushed_read state source =
+  set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
+
+(* Any surface bundle that reads a pushed source, full or scoped, is the read
+   its owed change waits on. *)
+let note_pushed_reads_started state (needs : Masc_tui_types.surface_needs) =
+  let wanted = Surface_read_order.sources needs in
+  List.iter
+    (fun source ->
+      if List.mem source wanted then
+        set_pushed_read state source (Masc_tui_owed_read.started (pushed_read state source)))
+    Masc_tui_types.pushed_sources
+
+(* The cadence leaves a pushed source out only while it owes nothing. A full
+   bundle supersedes the answers of a scoped read already out, so a source
+   with a read in flight or due rides the cadence's bundle instead of being
+   dropped by it; that bundle then holds the read. *)
+let pushed_read_rides_cadence state source =
+  let read = pushed_read state source in
+  match read with
+  | Masc_tui_owed_read.Reading _ -> true
+  | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ | Masc_tui_owed_read.Settled ->
+      Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+
+(* An answer for a pushed source, whichever bundle asked, moves its owed
+   read: a failure waits and reads again, and a success settles a read that
+   was in flight. A success that lands while a change is still owed leaves it
+   owed, so one more read follows. *)
+let settle_pushed_dataset state dataset ~received =
+  let source = Surface_read_order.dataset_source dataset in
+  if List.mem source Masc_tui_types.pushed_sources then
+    set_pushed_read state source
+      (if received then Masc_tui_owed_read.succeeded (pushed_read state source)
+       else failed_read (pushed_read state source))
+
 (* The questions a Keeper or an installation puts to the operator read again
    when their log changes, on a resumed authority, and after a failed read
    (RFC-0480 §3.1). Every full refresh but the cadence reads them too. *)
@@ -15799,9 +15844,9 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
       observe_http_reader ~on_progress
         (Http_refresh_progress.Surface_data source) ~outcome load))
     else None in
-  (* Metrics draws the transport and the Overview reads its queue pressure,
-     so a refresh on another surface does not spend a request on it. [None]
-     leaves whatever the last read observed. *)
+  (* Only Usage draws the transport, so a refresh on another surface does
+     not spend a request on it. [None] leaves whatever the last read
+     observed. *)
   let read_transport () =
     when_needed ~source:Surface_read_order.Transport ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_transport result)
@@ -16061,7 +16106,9 @@ let apply_http_scoped_data state ~datasets results =
   let apply dataset ~received load reading =
     if List.mem dataset datasets then Option.iter (fun value ->
       load value;
-      record dataset (if received value then "received" else "failed") []) reading in
+      let received = received value in
+      settle_pushed_dataset state dataset ~received;
+      record dataset (if received then "received" else "failed") []) reading in
   apply Surface_read_order.Transport_data ~received:Result.is_ok (apply_transport_load state) results.http_transport;
   if state.workspace_identity = Workspace_identity_match then begin
   Option.iter (apply_approval_observation state) results.http_approvals;
@@ -16095,7 +16142,10 @@ let apply_http_scoped_data state ~datasets results =
   roster_refreshed
 
 let apply_http_dataset state = function
-  | Dataset_transport result -> apply_transport_load state result; None
+  | Dataset_transport result ->
+      apply_transport_load state result;
+      settle_pushed_dataset state Surface_read_order.Transport_data ~received:(Result.is_ok result);
+      None
   | Dataset_board_posts board -> Some (apply_board_list_load state board)
   | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
   | Dataset_planning result -> apply_planning_load state result; None
@@ -18520,9 +18570,14 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       match intent with
       | Revalidate -> current
       | Cadence ->
-          { current with
-            needs_board = false; needs_keeper_roster = false
-          ; needs_planning = false; needs_overview_goals = false }
+          List.fold_left
+            (fun needs source ->
+              if pushed_read_rides_cadence state source then needs
+              else Masc_tui_types.with_source needs source false)
+            { current with
+              needs_board = false; needs_keeper_roster = false
+            ; needs_planning = false; needs_overview_goals = false }
+            Masc_tui_types.pushed_sources
     in
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
@@ -18531,6 +18586,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
+    note_pushed_reads_started state needs;
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
@@ -19103,6 +19159,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
+    note_pushed_reads_started state needs;
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
@@ -19195,6 +19252,43 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
              | Ok _ | Error _ -> ());
         log_http_surface_read_finished state surface_context
   end
+
+(* Runs on every loop iteration. A pushed source off screen owes nothing:
+   arriving on its surface reads it. A read of it already in flight is let
+   finish first. The due sources go out together in one surface bundle. *)
+let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  let wanted = Surface_read_order.sources (current_surface_needs state) in
+  let now = monotonic_now_s () in
+  let due =
+    List.filter
+      (fun source ->
+        if not (List.mem source wanted) then begin
+          set_pushed_read state source Masc_tui_owed_read.settled;
+          false
+        end
+        else begin
+          let reading =
+            List.exists
+              (Surface_read_order.pending_dataset state.http_surface_reads)
+              (Surface_read_order.source_datasets source)
+          in
+          let read =
+            if reading then pushed_read state source
+            else Masc_tui_owed_read.abandoned (pushed_read state source)
+          in
+          set_pushed_read state source read;
+          Masc_tui_owed_read.due ~now read && not reading
+        end)
+      Masc_tui_types.pushed_sources
+  in
+  if due <> [] && server_authority_ready state then
+    start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
+      ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
+      ~needs:
+        (List.fold_left
+           (fun needs source -> Masc_tui_types.with_source needs source true)
+           Masc_tui_types.nothing due)
 
 (* Runs on every loop iteration. A Board read already in flight is let finish
    first; one that ended unanswered waits and reads again
@@ -22599,6 +22693,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let turns_changed = ref false in
       let datasets_owed = ref [] in
       let connectors_changed = ref false in
+      let transport_measured = ref false in
       let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -22665,6 +22760,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.held_calls_changed event then held_calls_changed := true;
               if Masc_tui_observer.asks_changed event then asks_changed := true;
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
+              if Masc_tui_observer.transport_health_measured event then
+                transport_measured := true;
               (match Masc_tui_observer.dataset_owed event with
                | Some dataset -> datasets_owed := dataset :: !datasets_owed
                | None -> ());
@@ -22864,6 +22961,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_verification_read state);
       (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_owed);
       (if !connectors_changed && not !observer_source_loss_seen then owe_connectors_read state);
+      (if !transport_measured && not !observer_source_loss_seen then
+         owe_pushed_read state Surface_read_source.Transport);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
@@ -32234,6 +32333,9 @@ Use relative paths for resources already held in the package. -->
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
       launch_owed_planning state ~refresh_inflight:http_scoped_refresh_inflight
+        ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
+        ~mailbox:async_messages;
+      launch_owed_pushed_reads state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
       (* The Fusion launch form outlives nothing: whatever moved the surface

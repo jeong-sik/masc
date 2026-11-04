@@ -395,15 +395,6 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
            let contender_pid =
              match Unix.fork () with
              | 0 ->
-               let marathon_fd =
-                 Unix.openfile marathon_log [ Unix.O_WRONLY; Unix.O_CREAT ]
-                   0o644
-               in
-               let milestone tag =
-                 try ignore (Unix.write_substring marathon_fd tag 0 1 : int)
-                 with Unix.Unix_error _ -> ()
-               in
-               milestone "S";
                ignore (Unix.write_substring queued_write "S" 0 1 : int);
                close_quietly waiting_read;
                close_quietly waiting_write;
@@ -413,6 +404,15 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                close_quietly go_write;
                close_quietly queued_read;
                close_quietly release_owner;
+               let marathon_fd =
+                 Unix.openfile marathon_log
+                   [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
+                   0o644
+               in
+               let milestone tag =
+                 try ignore (Unix.write_substring marathon_fd tag 0 1 : int)
+                 with Unix.Unix_error _ -> ()
+               in
                milestone "C";
                let on_wait _ =
                  milestone "W";
@@ -458,8 +458,19 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                           (fun () -> really_input_string ic (in_channel_length ic))
                       with Sys_error _ -> "<no marathon log>"
                     in
-                    Alcotest.failf "contender pipe gave %d bytes at %s; marathon=%S"
-                      got what marathon)
+                    let status =
+                      match waitpid_nointr contender_pid with
+                      | None -> "reaped-elsewhere"
+                      | Some (_, Unix.WEXITED code) ->
+                        Printf.sprintf "exited(%d)" code
+                      | Some (_, Unix.WSIGNALED signal) ->
+                        Printf.sprintf "signaled(%d)" signal
+                      | Some (_, Unix.WSTOPPED signal) ->
+                        Printf.sprintf "stopped(%d)" signal
+                    in
+                    Alcotest.failf
+                      "contender pipe gave %d bytes at %s; marathon=%S status=%s"
+                      got what marathon status)
                   else Bytes.get buffer 0
                 in
                 Alcotest.(check char)

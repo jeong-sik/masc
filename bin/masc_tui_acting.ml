@@ -435,6 +435,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper })
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Approval_change change -> approval_change_keeper change
@@ -448,7 +449,8 @@ let keeper_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Keeper_costs | Masc.Workspace_dataset_event.Workspace_health
       | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics
       | Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addon_instance _
-      | Masc.Workspace_dataset_event.Lane_addon_configuration )
+      | Masc.Workspace_dataset_event.Lane_addon_configuration
+      | Masc.Workspace_dataset_event.Memory_execution )
   | Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -516,6 +518,8 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addon_instance _) -> "lane add-on"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lane_addon_configuration -> "lane add-ons"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Memory_execution -> "memory execution"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -704,6 +708,10 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id ^ " moved in Inspect" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lane_addon_configuration ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the add-on declaration reading moved" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "the memory health row moved" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Memory_execution ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Memory execution availability moved" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

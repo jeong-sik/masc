@@ -2926,12 +2926,15 @@ let add_routes ~sw ~clock router =
                ~base_path) in
            Http.Response.json_value ~compress:true ~request:req json reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-memory-health" (fun state req reqd ->
+         (* The answer the server keeps and announces from, so a reader told
+            that a row moved reads the answer that moved it. *)
          let base_path = (Mcp_server.workspace_config state).base_path in
-         respond_cached_read ~request:req ~reqd
-           ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
-           ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
-               ~base_path))
+         let json =
+           match Server_memory_health_watch.latest ~base_path with
+           | Some json -> json
+           | None -> Server_memory_health_watch.compute ~base_path
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-observables" (fun _state req reqd ->
          let json =

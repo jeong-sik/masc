@@ -146,6 +146,7 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
          | Masc.Workspace_dataset_event.Skill_activations { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Lane_addon_instance { instance_id } -> ":" ^ instance_id
+         | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -161,7 +162,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Runtime_probe
          | Masc.Workspace_dataset_event.Runtime_metrics
          | Masc.Workspace_dataset_event.Lanes
-         | Masc.Workspace_dataset_event.Lane_addon_configuration -> "")
+         | Masc.Workspace_dataset_event.Lane_addon_configuration
+         | Masc.Workspace_dataset_event.Memory_execution -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -882,6 +884,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Lane_addon_instance _
                   | Masc.Workspace_dataset_event.Lane_addon_configuration
+                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Memory_execution
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -964,6 +968,8 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Lane_addon_instance _
                   | Masc.Workspace_dataset_event.Lane_addon_configuration
+                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Memory_execution
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -994,6 +1000,8 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Lanes
               | Masc.Workspace_dataset_event.Lane_addon_instance _
               | Masc.Workspace_dataset_event.Lane_addon_configuration
+              | Masc.Workspace_dataset_event.Memory_health _
+              | Masc.Workspace_dataset_event.Memory_execution
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config

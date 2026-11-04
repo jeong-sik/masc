@@ -1080,6 +1080,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      on the server's clock and announced when what they show moves. *)
   Server_lane_inventory_watch.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
   Server_lane_addons_watch.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
+  (* The Keeper memory health is computed on the server's clock, served from
+     what was computed, and announced per Keeper when a row moves. *)
+  Server_memory_health_watch.start ~sw ~clock
+    ~base_path:(Mcp_server.workspace_config state).base_path;
   let resolved_base = (Mcp_server.workspace_config state).base_path in
   let masc_dir = Workspace.masc_dir (Mcp_server.workspace_config state) in
   resolved_base, masc_dir

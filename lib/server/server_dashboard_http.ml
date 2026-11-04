@@ -1006,20 +1006,6 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Dashboard.warn "config pre-warm failed: %s" (Printexc.to_string exn)
   in
-  let warm_keeper_memory_health () =
-    try
-      let t_start = Time_compat.now () in
-      let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
-      (* fire-and-forget: pre-warm keeper-memory-health cache *)
-      ignore
-        (Dashboard_cache.get_or_compute_payload cache_key
-           ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
-      Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Log.Dashboard.warn "keeper-memory-health pre-warm failed: %s" (Printexc.to_string exn)
-  in
   let warm_task_history () =
     try
       let t_start = Time_compat.now () in
@@ -1060,7 +1046,6 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     ; warm_board
     ; warm_planning
     ; warm_config
-    ; warm_keeper_memory_health
     ; warm_task_history
     ];
   Log.Dashboard.info "primary dashboard surface pre-warm attempts completed in parallel (%.1fms total)"

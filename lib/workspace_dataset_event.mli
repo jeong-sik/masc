@@ -86,6 +86,12 @@ type dataset =
   | Lane_addon_configuration
       (** The declaration reading the operator's Lane Add-ons Inspect shows
           moved. The server compares on its own clock. *)
+  | Memory_health of { keeper : string }
+      (** [keeper]'s row in [GET /api/v1/dashboard/keeper-memory-health]
+          moved, or the Keeper appeared or left. The server computes the
+          health on its own clock and compares it per Keeper. *)
+  | Memory_execution
+      (** The Memory execution availability that answer carries moved. *)
 
 val event_type : string
 

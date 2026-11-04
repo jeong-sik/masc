@@ -14567,8 +14567,6 @@ let suspend_workspace_readings state =
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
   state.board_list_owed <- Masc_tui_owed_read.settled;
-  state.planning_owed <- Masc_tui_owed_read.settled;
-  state.overview_goals_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;

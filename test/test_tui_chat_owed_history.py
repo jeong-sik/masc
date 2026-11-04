@@ -232,6 +232,9 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     drain_for(cast(float, args[0]))
                 elif action == "keys":
                     keys(cast(str, args[0]))
+                elif action == "sequence":
+                    # One write, so an escape sequence reaches the reader whole.
+                    os.write(master, cast(str, args[0]).encode())
                 else:
                     raise AssertionError(action)
 

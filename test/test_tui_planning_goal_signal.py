@@ -86,7 +86,7 @@ class PlanningGoalSignalTest(unittest.TestCase):
 
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             server.set_phase("open")
-            step("keys", TO_PLANNING)
+            step("sequence", TO_PLANNING)
             step(
                 "wait",
                 lambda: server.response_count("open", PLANNING_PATH) >= 1

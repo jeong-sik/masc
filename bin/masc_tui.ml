@@ -8644,6 +8644,16 @@ let owe_planning_reads state =
   state.planning_owed <- Masc_tui_owed_read.changed state.planning_owed;
   state.overview_goals_owed <- Masc_tui_owed_read.changed state.overview_goals_owed
 
+(* Every read that asks for a Planning dataset starts its debt, whatever
+   started it: a read on entering Planning or a revalidation that is
+   superseded before it answers leaves the dataset owed, and
+   [launch_owed_planning] reads it again. *)
+let note_planning_reads_started state (needs : Masc_tui_types.surface_needs) =
+  if needs.needs_planning then
+    state.planning_owed <- Masc_tui_owed_read.started state.planning_owed;
+  if needs.needs_overview_goals then
+    state.overview_goals_owed <- Masc_tui_owed_read.started state.overview_goals_owed
+
 let settle_planning_read state result =
   state.planning_owed <-
     (match result with
@@ -18496,6 +18506,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let roster_request = if needs.needs_keeper_roster
       then Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state
       else None in
+    note_planning_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19065,6 +19076,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let refresh_ticket = Http_refresh_order.for_navigation
       ~collection_inflight state.http_refresh_order in
     state.http_refresh_order <- refresh_ticket;
+    note_planning_reads_started state needs;
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
@@ -19187,8 +19199,9 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
   end
 
 (* Runs on every loop iteration. A dataset already in flight is let finish
-   first; one that will not deliver leaves its read owed again. Either debt
-   being due reads both datasets the screen draws from it. *)
+   first; one that ended without an answer leaves its read owed again. Only
+   the datasets whose debt is due are read; the scoped refresh records their
+   start ([note_planning_reads_started]). *)
 let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if state.view <> Planning then begin
@@ -19213,14 +19226,11 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     let now = monotonic_now_s () in
     let planning_due = Masc_tui_owed_read.due ~now planning && not planning_reading in
     let goals_due = Masc_tui_owed_read.due ~now goals && not goals_reading in
-    if (planning_due || goals_due) && server_authority_ready state then begin
-      if planning_due then state.planning_owed <- Masc_tui_owed_read.started planning;
-      if goals_due then state.overview_goals_owed <- Masc_tui_owed_read.started goals;
+    if (planning_due || goals_due) && server_authority_ready state then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with
                  needs_planning = planning_due; needs_overview_goals = goals_due }
-    end
   end
 
 let start_scoped_refresh_followup state ~host ~port ~refresh_inflight

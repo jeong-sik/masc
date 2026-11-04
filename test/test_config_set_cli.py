@@ -56,6 +56,7 @@ def runtime_toml(base):
 
 
 REVISION = "a" * 64
+VOICE_REVISION = "b" * 64
 SERVER_PATH = "/srv/config/runtime.toml"
 TOKEN = "fixture-bearer"
 
@@ -64,8 +65,9 @@ class StandIn:
     """A server that answers /health for one workspace and serves RUNTIME_TOML
     as its runtime.toml, recording what the command sends."""
 
-    def __init__(self, base_path, ready=True, save_status=200):
+    def __init__(self, base_path, ready=True, save_status=200, speaking=None):
         self.base_path, self.ready, self.save_status = base_path, ready, save_status
+        self.speaking = speaking
         self.saves, self.save_paths, self.authorizations = [], [], []
         stand_in = self
 
@@ -89,6 +91,11 @@ class StandIn:
                     stand_in.authorizations.append(self.headers.get("authorization"))
                     self.answer(200, {"ok": True, "source_text": RUNTIME_TOML,
                                       "source_revision": REVISION, "path": SERVER_PATH})
+                elif self.path == "/api/v1/voice/setup":
+                    stand_in.authorizations.append(self.headers.get("authorization"))
+                    tts = None if stand_in.speaking is None else {"endpoints": stand_in.speaking}
+                    self.answer(200, {"revision": VOICE_REVISION, "source": None,
+                                      "tts": tts, "stt": None})
                 else:
                     self.answer(404, {"ok": False, "error": "not here"})
 
@@ -287,7 +294,7 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertIn("through the running server", result.stdout)
         self.assertEqual(server.save_paths, ["/api/v1/voice/setup"])
         save = server.saves[0]
-        self.assertRegex(save["expected_revision"], r"\S")
+        self.assertEqual(save["expected_revision"], VOICE_REVISION)
         self.assertEqual(save["changes"], [{
             "change": "put_endpoint", "section": "stt",
             "endpoint": {"id": "whisper-local", "kind": "whisper_cli",
@@ -295,6 +302,32 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertTrue(all(value == "Bearer " + TOKEN for value in server.authorizations))
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML,
                          "the command wrote the file under a running server")
+
+    # The changes are decided against what the server holds. The server may
+    # read another file than this workspace's own (MASC_CONFIG_DIR): here the
+    # workspace has none, and the command still sets up through the server.
+    def test_voice_local_setup_decides_against_the_servers_configuration(self):
+        root = self.scratch()
+        base = root / "workspace"
+        base.mkdir()
+        sign_in(base)
+        server = self.stand_in(base)
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--model", str(root / "ggml-base.bin"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(server.save_paths, ["/api/v1/voice/setup"])
+        self.assertFalse(runtime_toml(base).exists())
+
+    def test_voice_local_setup_reads_the_servers_speaking_endpoints(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(base, speaking=[{"id": "macos-say", "kind": "espeak_ng"}])
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--voice", "Yuna")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("already names another provider", result.stderr)
+        self.assertEqual(server.saves, [])
 
     def test_voice_local_setup_refused_by_the_server_writes_nothing(self):
         root = self.scratch()

@@ -40,7 +40,7 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 
 ### 1.3 CLI 프로세스
 
-앞의 세 명령은 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2). 뒤의 두 명령은 서버가 있어도 직접 쓴다.
+앞의 세 명령은 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2). 뒤의 세 명령은 서버가 있어도 직접 쓴다.
 
 | 명령 | 서버가 있을 때 | 서버가 없을 때 |
 |---|---|---|
@@ -48,9 +48,10 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 | `masc web-search-setup` | 원문 route (`Masc_cli_runtime_config_remote.save`) | `Web_search_setup.apply` |
 | `masc voice-local-setup` | voice setup route (`Masc_cli_runtime_config_remote.apply_voice_setup`) | `Voice_setup.apply` |
 | `masc runtime-default-set` | 직접 쓴다 (L3d) | `Runtime.set_runtime_default`, `--setup-lanes` 면 `Runtime.set_first_run_runtime` |
-| `masc runtime-setup-batch` | 직접 쓴다 (L3d) | `Runtime_setup_batch.configure` |
+| `masc runtime-setup-batch` | 직접 쓴다 (L3d) | `Runtime_setup_batch.configure`. 임시 사본에 `runtime-default-set` 을 돌려 검증한 뒤 원래 파일에 쓴다 |
+| `masc browser-lane-setup` | 직접 쓴다 (L3d) | bidi·automation·ego setup 이 `Runtime_table_edit.commit` 으로 쓴다 |
 
-뒤의 두 명령은 설치 스크립트(`scripts/install-runtime-setup.py`)가 부른다. 처음 설치할 때는 서버가 없지만, 서버가 떠 있는 워크스페이스에서 다시 돌리면 서버 몰래 쓴다.
+`runtime-default-set` 은 `scripts/install.sh` 가, `runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 부른다. 처음 설치할 때는 서버가 없지만, 서버가 떠 있는 워크스페이스에서 다시 돌리면 서버 몰래 쓴다.
 
 ## 2. 문제
 
@@ -85,7 +86,7 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 - 그 워크스페이스의 서버가 답하면: `GET /api/v1/runtime/config/raw` 로 서버가 읽는 원문과 revision·경로를 받고, 같은 편집을 그 원문에 한다. `expected_source_revision`·`expected_source_path` 와 함께 `POST /api/v1/runtime/config/raw` 를 보낸다. 서버가 저장하고 발행하고 알린다. 저장 route 가 preview 와 같은 검사를 하고 거절 이유를 돌려주므로 preview 는 따로 부르지 않는다. 그사이 파일이 바뀌었으면(409) 저장하지 않고 다시 실행하라고 알린다.
 - 서버가 아직 준비 중이거나, 답하는데 sign-in 토큰이 없으면: 쓰지 않고 멈춘다. 서버 몰래 파일을 쓰게 되기 때문이다.
 - 서버가 답하지 않거나, 그 port 가 다른 워크스페이스나 masc 가 아닌 것이면: 이 워크스페이스의 서버는 없다. 지금처럼 직접 쓴다. 이때는 알림을 받을 reader 가 없다. TUI 는 서버 없이 돌지 않는다.
-- voice setup 은 runtime.toml 말고 `voice_config.json` 도 본다. 그래서 원문 route 가 아니라 서버의 voice setup route(`POST /api/v1/voice/setup`)로 보낸다. 명령은 자기가 읽은 revision 으로 바꿀 것을 정하고, 그 revision 과 변경 목록을 보낸다(`Voice_wizard.request_json`, TUI voice wizard 와 같은 철자). 서버는 자기 잠금 안에서 revision 이 같을 때만 적용하고, 다르면 409 로 거절한다.
+- voice setup 은 runtime.toml 말고 `voice_config.json` 도 본다. 그래서 원문 route 가 아니라 서버의 voice setup route(`POST /api/v1/voice/setup`)로 보낸다. 명령은 먼저 서버의 voice 관측(`GET /api/v1/voice/setup`)을 읽고, 그 revision 과 speaking endpoint 로 바꿀 것을 정한다. 서버는 이 프로세스와 다른 설정 파일을 볼 수 있다(`MASC_CONFIG_DIR`). 그 revision 과 변경 목록을 보낸다(`Voice_wizard.request_json`, TUI voice wizard 와 같은 철자). 서버는 자기 잠금 안에서 revision 이 같을 때만 적용하고, 다르면 409 로 거절한다.
 
 이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
@@ -109,7 +110,7 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 | L2c | TUI: 1.2 의 쓰기를 순서를 지키는 writer 하나로 L1 route 에 보낸다(`Masc_tui_preference_writer`). Worker TUI 는 저장하지 못했다고 한 번 알린다 | 빠르게 두 번 고른 값이 고른 순서대로 저장되는지 |
 | L2d | TUI: `[tui]` 는 L2a·L1 로만 읽고 쓴다. 언어·candle·opening 은 `Tui_preference` 타입을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
 | L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다. L3a 는 서버 찾기와 원문 저장 client, `masc config set`. L3b 는 `masc web-search-setup`, L3c 는 `masc voice-local-setup` | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
-| L3d | CLI: `masc runtime-default-set`, `masc runtime-setup-batch` 도 서버가 답하면 서버로 쓴다. 기본 runtime 은 TUI 가 쓰는 `POST /api/v1/runtime/config/routing` 이 있다. `--setup-lanes` 와 setup batch 에 맞는 route 는 아직 없어서, 무엇을 둘지 먼저 정한다 | L3 과 같다 |
+| L3d | CLI: `masc runtime-default-set`, `masc runtime-setup-batch`, `masc browser-lane-setup` 도 서버가 답하면 서버로 쓴다. L3a 처럼 각 쓰기를 원문 편집으로 나누고 원문 route 로 저장한다(사용자 결정 2026-11-04) | L3 과 같다 |
 | L4 | TUI Config 화면이 `runtime_config_changed` 에 읽고 실패하면 다시 읽는다. 2초 분기를 지운다 | 알림 하나에 읽기 하나, 주기에는 읽지 않는지(PTY) |
 
 L2b·L2c·L2d 는 PR 하나로 들어간다. 읽기만 서버로 옮기면, 쓰기를 옮길 때까지 TUI 는 서버 파일을 읽고 자기 파일에 쓴다. 두 프로세스가 runtime.toml 을 서로 다른 경로로 찾는 경우 바로 그 기간에 설정을 잃는다. 쓰기만 먼저 옮겨도 같다.

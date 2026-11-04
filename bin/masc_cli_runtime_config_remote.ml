@@ -107,7 +107,7 @@ let store ~clock server source ~edited =
       Masc_http_client.post_sync ~clock ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
     with
     | Error detail ->
-      Error ("The save was sent, and the server's answer did not arrive, so whether it was stored is unknown: " ^ detail)
+      Error ("The server's answer to the save did not arrive, so whether it was stored is unknown: " ^ detail)
     | Ok (200, _) -> Ok (Saved { path = source.path })
     | Ok (409, _) -> Error "runtime.toml changed on the server while this command ran. Nothing was saved; run it again."
     | Ok (status, body) -> Error (error_of_body ~status body)
@@ -117,6 +117,89 @@ let save ~clock server ~edit =
   let* source = fetch ~clock server in
   let* edited = edit source.text in
   store ~clock server source ~edited
+
+(* What voice-local-setup decides its changes against: the revision of the
+   configuration, the path of voice_config.json when that file is the active
+   voice source, and the speaking endpoints by id and kind. A kind this binary
+   does not name is [None]: it is still an endpoint the placement has to count. *)
+type voice_ground =
+  { revision : string
+  ; standalone : string option
+  ; speaking : (string * Voice_config.endpoint_kind option) list
+  }
+
+let voice_answer_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+let voice_answer_unread what = Error ("The server's voice setup answer has no readable " ^ what ^ ".")
+
+let voice_source json =
+  match voice_answer_field "source" json with
+  | None | Some `Null -> Ok None
+  | Some source ->
+    (match voice_answer_field "kind" source with
+     | Some (`String "runtime_toml") -> Ok None
+     | Some (`String "standalone_json") ->
+       (match voice_answer_field "path" source with
+        | Some (`String path) -> Ok (Some path)
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+          voice_answer_unread "voice_config.json path")
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
+       voice_answer_unread "source")
+
+let speaking_endpoint entry =
+  match voice_answer_field "id" entry with
+  | Some (`String id) ->
+    (match voice_answer_field "kind" entry with
+     | Some (`String kind) -> Ok (id, Voice_config.endpoint_kind_of_name kind)
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+       voice_answer_unread "speaking endpoint kind")
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+    voice_answer_unread "speaking endpoint id"
+
+let voice_speaking json =
+  match voice_answer_field "tts" json with
+  | None | Some `Null -> Ok []
+  | Some tts ->
+    (match voice_answer_field "endpoints" tts with
+     | Some (`List entries) ->
+       List.fold_right
+         (fun entry acc ->
+            let open Result.Syntax in
+            let* rest = acc in
+            let* endpoint = speaking_endpoint entry in
+            Ok (endpoint :: rest))
+         entries (Ok [])
+     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+       voice_answer_unread "speaking endpoints")
+
+(* The ground as the running server holds it, read from its voice route: the
+   server may resolve a different configuration file than this process
+   would (MASC_CONFIG_DIR), and the changes are applied to the server's. *)
+let fetch_voice_ground ~clock server =
+  let open Result.Syntax in
+  let* status, body =
+    Result.map_error
+      (fun detail -> "The workspace server did not answer its voice setup: " ^ detail)
+      (Masc_http_client.get_sync ~clock ~url:(server.origin ^ voice_setup_path) ~headers:server.headers ())
+  in
+  let* json =
+    if status = 200 then
+      match Yojson.Safe.from_string body with
+      | json -> Ok json
+      | exception Yojson.Json_error detail -> Error ("The server's voice setup answer is not JSON: " ^ detail)
+    else Error (error_of_body ~status body)
+  in
+  let* revision =
+    match voice_answer_field "revision" json with
+    | Some (`String revision) -> Ok revision
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+      voice_answer_unread "revision"
+  in
+  let* standalone = voice_source json in
+  let* speaking = voice_speaking json in
+  Ok { revision; standalone; speaking }
 
 (* Voice setup goes to the server's voice route, not the text route: voice
    also reads voice_config.json, which the text route does not hold. The server
@@ -128,7 +211,7 @@ let apply_voice_setup ~clock server ~revision changes =
     Masc_http_client.post_sync ~clock ~url:(server.origin ^ voice_setup_path) ~headers:server.headers ~body ()
   with
   | Error detail ->
-    Error ("The setup was sent, and the server's answer did not arrive, so whether it was stored is unknown: " ^ detail)
+    Error ("The server's answer to the setup did not arrive, so whether it was stored is unknown: " ^ detail)
   | Ok (200, _) -> Ok ()
   | Ok (status, body) -> Error (error_of_body ~status body)
 

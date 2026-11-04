@@ -2384,44 +2384,23 @@ let voice_local_voices_exit () =
            [ "voices", `List (List.map Masc.Voice_bridge.catalogue_voice_json voices) ]));
     0
 
-let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let runtime_config_path = runtime_config_path_for_base_path base_path in
-  let refuse message = prerr_endline message; 1 in
-  (* Voice is a section of the configuration [masc init] writes, so a directory
-     that was never initialized has nowhere to put one. Checked here, by the
-     file's existence, rather than read out of the writer's error: that error
-     carries the exception as text, and telling "absent" from "unreadable" in it
-     would mean matching a string. A file that exists and cannot be read still
-     falls through to the writer's own sentence.
-
-     Measured 2026-09-13 on an empty directory before this: exit 1 and
-     [Sys_error("<path>: No such file or directory")], with nothing created. *)
-  if not (Sys.file_exists runtime_config_path) then
-    refuse
-      (Printf.sprintf
-         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
-          first, then this again."
-         base_path runtime_config_path (Filename.quote base_path))
-  else
-  let standalone_path = Voice_config.voice_config_file_in base_path in
-  match Voice_setup.observe ~runtime_config_path ~standalone_path with
-  | Error error -> refuse (Voice_setup.error_message error)
+(* The changes voice-local-setup makes, decided against [ground]: the
+   observation of the writer they go to. [Error] carries the exit code after
+   the reason has been printed. *)
+let voice_local_changes ~refuse (ground : Masc_cli_runtime_config_remote.voice_ground)
+    speak_voice hear_model =
+  match ground.standalone with
   (* The writer refuses this too, under its lock; said here first so nothing
      below is decided against a configuration this command cannot write. *)
-  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
-    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
-  | Ok (revision, ((None | Some (Voice_setup.Runtime_toml, _)) as active)) ->
-    let existing = Option.map snd active in
-    let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
+  | Some path ->
+    Error (refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path)))
+  | None ->
     if Option.is_some speak_voice
-      && Option.exists
-           (fun (config : Voice_config.tts_config) -> List.exists
-             (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
-               && endpoint.Voice_config.kind <> Voice_config.Macos_say)
-             config.Voice_config.endpoints)
-           tts then
-      refuse "The endpoint macos-say already names another provider; nothing was written."
+      && List.exists
+           (fun (id, kind) ->
+             String.equal id "macos-say" && kind <> Some Voice_config.Macos_say)
+           ground.speaking then
+      Error (refuse "The endpoint macos-say already names another provider; nothing was written.")
     else
       (* The name is typed here, and say does not fail on one it does not
          have: it speaks in another voice and exits 0. Measured 2026-09-13,
@@ -2436,7 +2415,7 @@ let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
             (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
             ~voice
       with
-      | Error reason -> refuse (reason ^ ". Nothing was written.")
+      | Error reason -> Error (refuse (reason ^ ". Nothing was written."))
       | Ok () ->
       let speaking =
         match speak_voice with
@@ -2445,14 +2424,7 @@ let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
           (* Where the choice is written decides whether per-keeper voices
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
-          let alongside =
-            match tts with
-            | None -> []
-            | Some (tts : Voice_config.tts_config) ->
-              List.map
-                (fun (endpoint : Voice_config.endpoint) -> Some endpoint.Voice_config.kind)
-                tts.Voice_config.endpoints
-          in
+          let alongside = List.map snd ground.speaking in
           let endpoint_voice, section =
             match Voice_setup.voice_placement ~alongside ~adding:Voice_config.Macos_say with
             | Voice_setup.On_the_endpoint -> Some voice, []
@@ -2483,45 +2455,101 @@ let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
       | [] ->
           prerr_endline
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
-          2
-      | changes ->
-          (* With no server answering on the port, the command writes the
-             file itself: then nothing else writes it and no reader is
-             waiting to be told. *)
-          let apply_locally () =
-            match
-              Voice_setup.apply ~runtime_config_path ~standalone_path
-                ~expected_revision:revision changes
-            with
-            | Error error -> refuse (Voice_setup.error_message error)
-            | Ok _revision ->
-                print_endline "voice is configured";
-                0
-          in
-          (match Unix.realpath base_path with
-           | exception Unix.Unix_error _ -> apply_locally ()
-           | real_base_path ->
-               let route =
-                 Masc_cli_runtime_config_remote.with_client (fun ~clock ->
-                   match
-                     Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path
-                       ~port ~agent
-                   with
-                   | Error message -> `Refused message
-                   | Ok Masc_cli_runtime_config_remote.No_server -> `Local
-                   | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
-                       (* RFC-0482 §3.2: the running server is the writer. *)
-                       `Through_server
-                         (Masc_cli_runtime_config_remote.apply_voice_setup ~clock server
-                            ~revision changes))
-               in
-               (match route with
-                | `Refused message -> refuse message
-                | `Local -> apply_locally ()
-                | `Through_server (Error message) -> refuse message
-                | `Through_server (Ok ()) ->
-                    print_endline "voice is configured through the running server";
-                    0))
+          Error 2
+      | changes -> Ok changes
+
+(* With no server answering on the port, the command is the writer: it reads
+   the file, decides, and writes it itself. Then nothing else writes it and no
+   reader is waiting to be told. *)
+let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  (* Voice is a section of the configuration [masc init] writes, so a directory
+     that was never initialized has nowhere to put one. Checked here, by the
+     file's existence, rather than read out of the writer's error: that error
+     carries the exception as text, and telling "absent" from "unreadable" in it
+     would mean matching a string. A file that exists and cannot be read still
+     falls through to the writer's own sentence.
+
+     Measured 2026-09-13 on an empty directory before this: exit 1 and
+     [Sys_error("<path>: No such file or directory")], with nothing created. *)
+  if not (Sys.file_exists runtime_config_path) then
+    refuse
+      (Printf.sprintf
+         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
+          first, then this again."
+         base_path runtime_config_path (Filename.quote base_path))
+  else
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
+  | Error error -> refuse (Voice_setup.error_message error)
+  | Ok (revision, active) ->
+    let ground =
+      { Masc_cli_runtime_config_remote.revision
+      ; standalone =
+          (match active with
+           | Some (Voice_setup.Standalone_json path, _) -> Some path
+           | None | Some (Voice_setup.Runtime_toml, _) -> None)
+      ; speaking =
+          (match Option.bind active (fun (_, config) -> config.Voice_config.tts) with
+           | None -> []
+           | Some (tts : Voice_config.tts_config) ->
+             List.map
+               (fun (endpoint : Voice_config.endpoint) ->
+                 endpoint.Voice_config.id, Some endpoint.Voice_config.kind)
+               tts.Voice_config.endpoints)
+      }
+    in
+    match voice_local_changes ~refuse ground speak_voice hear_model with
+    | Error code -> code
+    | Ok changes ->
+      (match
+         Voice_setup.apply ~runtime_config_path ~standalone_path
+           ~expected_revision:revision changes
+       with
+       | Error error -> refuse (Voice_setup.error_message error)
+       | Ok _revision ->
+           print_endline "voice is configured";
+           0)
+
+(* RFC-0482 §3.2: while this workspace's server answers on the port, it is the
+   writer. The changes are decided against what the server holds, read from its
+   voice route, because the server may resolve a different configuration file
+   than this process would; they go back to the same route with the revision
+   they were decided on. *)
+let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let refuse message = prerr_endline message; 1 in
+  let writer =
+    match Unix.realpath base_path with
+    | exception Unix.Unix_error _ -> Ok `Local
+    | real_base_path ->
+      Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+        match
+          Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent
+        with
+        | Error message -> Error message
+        | Ok Masc_cli_runtime_config_remote.No_server -> Ok `Local
+        | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+          Result.map
+            (fun ground -> `Through_server (server, ground))
+            (Masc_cli_runtime_config_remote.fetch_voice_ground ~clock server))
+  in
+  match writer with
+  | Error message -> refuse message
+  | Ok `Local -> voice_local_setup_locally ~refuse ~base_path speak_voice hear_model
+  | Ok (`Through_server (server, (ground : Masc_cli_runtime_config_remote.voice_ground))) ->
+    (match voice_local_changes ~refuse ground speak_voice hear_model with
+     | Error code -> code
+     | Ok changes ->
+       (match
+          Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+            Masc_cli_runtime_config_remote.apply_voice_setup ~clock server
+              ~revision:ground.revision changes)
+        with
+        | Error message -> refuse message
+        | Ok () ->
+            print_endline "voice is configured through the running server";
+            0))
 
 let browser_lane_setup_cmd =
   let modes =
@@ -2815,11 +2843,22 @@ let voice_local_setup_cmd =
               would reject."
          ])
     Term.(
-      const (fun base_path port agent voice model list_voices ->
+      const (fun base_path requested_base_path cli_port agent voice model list_voices ->
         if list_voices then voice_local_voices_exit ()
-        else voice_local_setup_exit base_path ~port ~agent voice model)
+        else
+          (* Resolved here rather than by the shared [port] term: listing
+             voices talks to no server, so a port setting it cannot read
+             is no reason to refuse it. *)
+          match resolve_connection_port requested_base_path cli_port with
+          | Error error ->
+              prerr_endline (Workspace_connection.error_message error);
+              1
+          | Ok port ->
+              voice_local_setup_exit base_path ~port:(Workspace_connection.to_int port)
+                ~agent voice model)
       $ base_path
-      $ port
+      $ run_base_path
+      $ port_argument
       $ login_agent
       $ voice
       $ model

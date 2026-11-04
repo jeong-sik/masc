@@ -753,9 +753,41 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   check int "all strict reads and repair retain one external action" 1 !(fixture.calls);
   detach clock fixture id)
 
+let test_observation_commit_announces_lane_inventory () = with_fixture (fun clock fixture ->
+  let heard = ref [] in
+  let subscription = "lane-inventory-announce" in
+  Sse.subscribe_external
+    ~runtime_authority:(Sse.runtime_authority_exn ~base_path:fixture.config.Workspace.base_path)
+    ~id:subscription
+    ~callback:(fun (event : Sse.external_event) ->
+      match event.ext_payload with
+      | `Assoc fields
+        when Option.equal String.equal
+               (Json_util.assoc_string_opt "type" event.ext_payload)
+               (Some Workspace_dataset_event.event_type) ->
+          (match Workspace_dataset_event.of_fields fields with
+           | Ok dataset ->
+               let instance = match Workspace_dataset_event.dataset_name dataset with
+                 | "lane_addons" -> Json_util.assoc_string_opt "instance_id" event.ext_payload
+                 | _ -> None in
+               heard := (Workspace_dataset_event.dataset_name dataset, instance) :: !heard
+           | Error _ -> ())
+      | _ -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscription) (fun () ->
+    let instance = attach clock fixture ~acting:true in
+    let names = List.map fst !heard in
+    check bool "the durable commit announces Lanes" true (List.mem "lanes" names);
+    check bool "the durable commit announces the open Add-on" true (List.mem "lane_addons" names);
+    check (list (option string)) "the Add-on notification names its instance"
+      [ Some instance ] (List.filter_map (fun (name, instance) ->
+        if String.equal name "lane_addons" then Some instance else None) !heard);
+    detach clock fixture instance))
+
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
   "optional world actions",[
+  test_case "observation commit announces Lane inventory and its instance" `Quick test_observation_commit_announces_lane_inventory;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;

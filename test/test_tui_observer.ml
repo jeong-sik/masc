@@ -1456,6 +1456,44 @@ let test_multiline_frame_preserves_payload_and_cursor () =
       check string "multiline canonical SSE data preserved" "alpha" call.kt_keeper
   | _ -> fail "expected one multiline event with cursor 44"
 
+let test_lane_inventory_pushes_decode_with_their_scope () =
+  let lanes = "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lanes\"}\n\n" in
+  let addon = "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"inst-7\"}\n\n" in
+  check (list string) "Lane and Add-on pushes decode by name"
+    [ "dataset(lanes)"; "dataset(lane_addons)" ]
+    (List.map summary (decode_all [ lanes; addon ]));
+  List.iter
+    (fun (frame, expected_name) ->
+      match decode_all [ frame ] with
+      | [ Observer.Event event ] ->
+          (match Observer.dataset_owed event with
+           | Some dataset ->
+               check string "the owed dataset survives" expected_name
+                 (Masc.Workspace_dataset_event.dataset_name dataset)
+           | None -> fail "a Lane push owes no read")
+      | decoded -> failf "a Lane push was not read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ lanes, "lanes"; addon, "lane_addons" ];
+  match Yojson.Safe.from_string
+    "{\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"inst-7\"}" with
+  | `Assoc fields ->
+      (match Masc.Workspace_dataset_event.of_fields fields with
+       | Ok dataset ->
+           check string "the Add-on dataset name" "lane_addons"
+             (Masc.Workspace_dataset_event.dataset_name dataset);
+           check (option string) "the open instance is preserved" (Some "inst-7")
+             (Json_util.assoc_string_opt "instance_id" fields)
+       | Error detail -> fail detail)
+  | _ -> fail "the Add-on fixture is not an object";
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "an Add-on push without a valid instance was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"\"}\n\n" ]
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -1507,6 +1545,8 @@ let () =
             test_a_verification_or_run_push_reads_the_requests
         ; test_case "a repository push reads the list" `Quick
             test_a_repository_push_reads_the_list
+        ; test_case "Lane inventory pushes decode with their scope" `Quick
+            test_lane_inventory_pushes_decode_with_their_scope
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
         ; test_case "only a confirmation change reads the confirmations" `Quick

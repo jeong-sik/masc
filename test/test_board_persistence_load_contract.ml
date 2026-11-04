@@ -14,8 +14,6 @@
 
 open Masc
 
-module Preparation = Masc_test_deps.Board_test_preparation
-
 let () = Mirage_crypto_rng_unix.use_default ()
 
 (* The store-level writers ask a recipient lookup; no name is declared here. *)
@@ -105,7 +103,6 @@ let test_loader_keeps_only_current_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  Preparation.prepare ~base_path:_dir ~action:Preparation.Bootstrap;
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source source_store;
@@ -200,7 +197,6 @@ let test_source_failure_clears_only_after_successful_reload () =
   Fun.protect ~finally:(fun () ->
     Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
     if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
-    Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
     let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
     let loaders = [
@@ -244,7 +240,6 @@ let test_partial_load_never_rewrites_the_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  Preparation.prepare ~base_path:_dir ~action:Preparation.Bootstrap;
   let source_store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source source_store;
@@ -382,7 +377,6 @@ let test_explicit_workspace_is_captured_once () =
       Unix.chdir first;
       let captured_base = Filename.concat (Unix.realpath first) " state with spaces " in
       Fs_compat.mkdir_p captured_base;
-      Preparation.prepare ~base_path:captured_base ~action:Preparation.Bootstrap;
       let store = Board.create_store ~base_path:" state with spaces " () in
       let captured = Common.masc_dir_from_base_path ~base_path:captured_base in
       Unix.chdir second;
@@ -447,7 +441,6 @@ let test_all_persistence_stays_in_captured_workspace () =
       Alcotest.(check bool) "reset creates no selected workspace metadata" false
         (Sys.file_exists root_a);
       Unix.putenv "MASC_BASE_PATH" base_b;
-      Preparation.prepare ~base_path:base_b ~action:Preparation.Bootstrap;
       let forced_b = Board.global () in
       Alcotest.(check string) "first force captures the newly selected root"
         (Unix.realpath root_b) (Board.workspace_masc_dir forced_b);
@@ -474,7 +467,6 @@ let test_all_persistence_stays_in_captured_workspace () =
         Alcotest.(check string) (label ^ ": " ^ Filename.basename path)
           expected (Fs_compat.load_file path)) baseline_b in
       Unix.putenv "MASC_BASE_PATH" base_a;
-      Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
       let store_a = init_a () in
       Unix.putenv "MASC_BASE_PATH" base_b;
       let room = board_ok (Board_dispatch.create_sub_board ~slug:"a-room" ~name:"A room"

@@ -14,8 +14,6 @@
 
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let provider () =
@@ -566,7 +564,6 @@ pointer = "/profile"
       Keeper_tool_call_log.init ~base_path:dir ();
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
-      Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Recipient_lookup.none_declared ());

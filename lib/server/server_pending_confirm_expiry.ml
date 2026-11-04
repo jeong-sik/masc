@@ -180,8 +180,10 @@ let start_with ~sw ~clock ~sleep_until ~sleep_retry
                   publish_observation scope generation Pending_confirm_observation.Observed
               | Some _ -> ());
              if source_failed ||
-                not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then
+                not (Expiry_set.is_empty (Expiry_set.diff plan.expired notified)) then begin
                invalidate ~base_path:scope.config.base_path;
+               Operator_pending_confirm_broadcast.changed ~base_path:scope.config.base_path
+             end;
              match await_usable_next scope plan.next ~generation ~failed:false ~delay:retry_initial_s with
              | `Replaced -> follow_current ()
              | `Changed ->

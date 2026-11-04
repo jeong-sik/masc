@@ -2536,7 +2536,19 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
 let fetch_keeper_runtimes ~(host : string) ~(port : int)
     ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
-  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace="
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+    ^ "&expected_masc_root="
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
+
+(** One Keeper's roster row: [GET /api/v1/gate/keepers?name=<keeper>]
+    (RFC-0481 §3.1). The route never answers it from the list cache. *)
+let fetch_keeper_runtime ~(host : string) ~(port : int)
+    ~(expected_workspace : Masc.Tui_decode.server_identity) ~(keeper_name : string) :
+    (int * string, string) result =
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&name="
+    ^ percent_encode_path_segment keeper_name
+    ^ "&expected_workspace="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
     ^ "&expected_masc_root="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))

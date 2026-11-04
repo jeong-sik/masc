@@ -477,24 +477,15 @@ let output_line_json line =
 
 (* Commands produce bytes. JSON/SSE carries Unicode text, so repair only
    this display projection; raw captures and byte accounting stay intact. *)
-let snapshot_json ?line_limit (s : snapshot) =
-  let lines, lines_omitted = match line_limit with
-    | None -> s.lines, 0
-    | Some limit ->
-      let count = List.length s.lines in
-      let omitted = max 0 (count - max 0 limit) in
-      let rec drop n lines =
-        if n = 0 then lines else match lines with [] -> [] | _ :: rest -> drop (n - 1) rest in
-      drop omitted s.lines, omitted in
+let snapshot_json (s : snapshot) =
   `Assoc
-    ([ "type", `String "snapshot"
+    [ "type", `String "snapshot"
     ; "kind", `String "snapshot"
     ; "keeper", `String s.keeper
     ; "keeper_id", `String s.keeper
     ; "task_id", option_json (fun value -> `String value) s.task_id
     ; "task_count", `Int s.task_count
-    ; "lines", `List (List.map output_line_json lines)
-    ; "lines_omitted", `Int lines_omitted
+    ; "lines", `List (List.map output_line_json s.lines)
     ; ( "active_streams"
       , `List (List.map (fun (stream : active_stream) ->
           `Assoc [ "stream_id", `Int stream.stream_id
@@ -511,10 +502,9 @@ let snapshot_json ?line_limit (s : snapshot) =
     ; "bytes_dropped_stdout", `Int s.bytes_dropped_stdout
     ; "bytes_dropped_stderr", `Int s.bytes_dropped_stderr
     ; "generated_at", `Float s.generated_at
-    ] @ match line_limit with
-    | Some _ -> []
-    | None -> [ "stdout_since", `String (String_util.sanitize_utf8 s.stdout_since)
-              ; "stderr_since", `String (String_util.sanitize_utf8 s.stderr_since) ])
+    ; "stdout_since", `String (String_util.sanitize_utf8 s.stdout_since)
+    ; "stderr_since", `String (String_util.sanitize_utf8 s.stderr_since)
+    ]
 
 let no_task_json keeper_name =
   `Assoc
@@ -531,11 +521,6 @@ let no_task_json keeper_name =
 let event_json ~keeper_name =
   match snapshot ~keeper_name with
   | Some s -> snapshot_json s
-  | None -> no_task_json keeper_name
-
-let event_json_limited ~keeper_name ~line_limit =
-  match snapshot ~keeper_name with
-  | Some s -> snapshot_json ~line_limit s
   | None -> no_task_json keeper_name
 
 let logged_event_json = function

@@ -94,6 +94,18 @@ describe('decodeGateKeepers', () => {
     })
   })
 
+  it('accepts the administrator Candle decay basis beside the Candle summary', () => {
+    const data = Effect.runSync(decodeGateKeepers({
+      candle: { status: 'off' },
+      candle_decay: null,
+      count: 1,
+      keepers: [keeperWire()],
+      ...listingWire(1),
+    }))
+
+    expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
+  })
+
   it('decodes currency-free shared discovery for healthy and directory-error rows', () => {
     const { candle_balance_milli: _healthyBalance, candle_account_revision: _healthyRevision, ...healthy } = keeperWire()
     const { candle_balance_milli: _issueBalance, candle_account_revision: _issueRevision, ...issue } = issueWire()

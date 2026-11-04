@@ -105,6 +105,9 @@ let append_event ~base_path ~keeper_name event =
   in
   (* Landed or not, the log may no longer be the version that was decoded. *)
   forget_log path;
+  (match appended with
+   | Ok () -> Keeper_ask_broadcast.asks_changed ~keeper_name
+   | Error _ -> ());
   appended
 
 let decode_line line =

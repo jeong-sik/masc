@@ -38,6 +38,8 @@
   ;; variants; this library is not re-exported through masc_candle_runtime.
   masc.masc_candle_config
   masc.masc_candle_runtime
+  ;; Server_candle_broadcast installs the ledger's append observer.
+  masc.masc_candle_store
   masc.keeper_operation_identity
   masc.secret_patterns
   masc.machine_checkpoint

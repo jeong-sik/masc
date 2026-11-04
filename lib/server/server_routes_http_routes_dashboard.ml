@@ -141,29 +141,6 @@ let execute_output_keeper ~prefix path =
     if String.equal keeper "" then None else Some keeper
 ;;
 
-let handle_execute_output_snapshot _state req inner_reqd =
-  match execute_output_keeper
-          ~prefix:"/api/v1/dashboard/execute-output-snapshot/"
-          (Http.Request.path req) with
-  | None ->
-    respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
-      "keeper path parameter is required"
-  | Some keeper_name ->
-    let limit = match Server_utils.query_param req "limit" with
-      | None -> Some Dashboard_execute_output.event_log_capacity
-      | Some raw -> int_of_string_opt raw in
-    (match limit with
-     | Some limit when limit > 0 && limit <= Dashboard_execute_output.event_log_capacity ->
-       Http.Response.json_value ~request:req
-         ~extra_headers:([ "cache-control", "private, no-store" ]
-                         @ public_read_cors_headers req)
-         (Dashboard_execute_output.event_json_limited ~keeper_name ~line_limit:limit)
-         inner_reqd
-     | Some _ | None ->
-       respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
-         "limit must be between 1 and the output event capacity")
-;;
-
 let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
        let path = Http.Request.path req in
        let keeper =
@@ -1792,9 +1769,6 @@ let add_routes ~sw ~clock router =
   |> Server_route.prefix_get Server_route.Public_read
        "/api/v1/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
-  |> Server_route.prefix_get Server_route.Public_read
-       "/api/v1/dashboard/execute-output-snapshot/"
-       handle_execute_output_snapshot
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard" (fun _state req reqd ->

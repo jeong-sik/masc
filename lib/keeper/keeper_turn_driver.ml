@@ -448,6 +448,29 @@ let assignment_walk_rest ~now assignment_id =
     Walk_head_serving { runtime_id = assignment_id }
 ;;
 
+(* The earliest moment after [now] at which a dated rest on this assignment's
+   walk ends. A rest that ends only when its provider answers has none. The
+   walk's shown rest can move at that moment without any write. *)
+let assignment_next_dated_release ~now assignment_id =
+  match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
+  | Error (Assignment_missing | Catalog_unavailable _) -> None
+  | Ok { order; _ } ->
+    List.concat_map
+      (fun runtime_id ->
+         match Runtime.get_runtime_by_id runtime_id with
+         | None -> []
+         | Some runtime -> path_rest_parts ~now runtime)
+      order
+    |> List.fold_left
+         (fun earliest part ->
+            match part with
+            | Rest_dated { release_at; walk_promotes_at_release = _ }
+              when Float.compare release_at now > 0 ->
+              Some (Option.fold earliest ~none:release_at ~some:(Float.min release_at))
+            | Rest_dated _ | Rest_until_answered -> earliest)
+         None
+;;
+
 (* The next dispatch after a failed turn, shared by the heartbeat cycle and
    the chat lane's deferred retry so both answer one failure the same way
    (RFC-provider-path-rest §3.1).

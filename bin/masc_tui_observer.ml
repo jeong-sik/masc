@@ -33,6 +33,9 @@ let session_id_of_headers headers =
   | Some _ | None ->
       Error "initialize answered without an Mcp-Session-Id header"
 
+(* The two journals a Keeper's runtime fills beside its chat. *)
+type runtime_journal = Native_tasks_journal | Child_content_journal
+
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -117,6 +120,25 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+type approval_change =
+  | Approval_queue_changed
+  | Approval_rules_changed
+  | Gate_mode_changed
+  | Gate_keeper_settings_changed of { keeper : string }
+  | Tool_approval_waits_changed of { keeper : string }
+  | Tool_approval_mode_changed of { keeper : string }
+  | Keeper_asks_changed of { keeper : string }
+  | Installation_asks_changed of { declaration_id : string }
+  | Pending_confirms_changed
+
+type roster_change =
+  | Keeper_row_changed of { keeper : string }
+  | Every_row_changed
+
+type turn_change =
+  | Turn_state
+  | Turn_preview
+
 type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
@@ -126,6 +148,9 @@ type event =
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_memory_journal_appended of { keeper : string; at : float }
+  (* A Keeper's native task or child content journal took a record. *)
+  | Keeper_runtime_journal_appended of
+      { keeper : string; journal : runtime_journal; at : float }
   | Keeper_chat_stream_frame of
       { keeper : string
       ; operation_id : string
@@ -137,6 +162,11 @@ type event =
       { keeper : string; turn_ref : Ids.Turn_ref.t; seq : int; at : float }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
+  | Keeper_async_requests_changed of { keeper : string }
+  (* Server push: a Keeper's roster row, or every row, may have changed. *)
+  | Keeper_roster_change of roster_change
+  (* Server push: what the turns answer says of a Keeper may have changed. *)
+  | Keeper_turn_changed of { keeper : string; change : turn_change }
   (* Server push, not a keeper act: a fusion deliberation changed stage or
      settled. The Fusion surface treats it as a reload trigger the way the
      dashboard does (sse-store: event = trigger, HTTP = SSOT); the payload
@@ -150,9 +180,18 @@ type event =
   | Internal_agent_runs_changed
   | Schedule_store_invalidated
   | Pending_confirm_invalidated
+  (* Server push with no payload: the workspace's verification request store
+     was written, and a reader that shows the requests re-fetches them. *)
+  | Verification_requests_changed
+  (* Server push with no payload: the workspace's schedules changed, and a
+     reader that shows schedules re-fetches them. *)
+  | Schedules_changed
   (* Server push: a Board write. The Board re-reads on it; [post_id] is the
      post the params name, if any. *)
   | Board_changed of { post_id : string option }
+  (* Server push: the Gate, a held tool call or a tool approval mode
+     changed. *)
+  | Approval_change of approval_change
   (* A Lane Add-on container was acquired, failed to start, was removed, or
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
@@ -182,53 +221,212 @@ let chat_appended_keeper = function
   | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
-  | Keeper_composite_changed _ | Keeper_memory_journal_appended _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Keeper_composite_changed _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let composite_changed_keeper = function
   | Keeper_composite_changed { keeper; _ } -> Some keeper
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let tool_call_keeper = function
   | Keeper_tool_call { kt_keeper; _ } -> Some kt_keeper
-  | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _
+  | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
 let memory_journal_appended_keeper = function
   | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
+  | Keeper_runtime_journal_appended _
   | Keeper_chat_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
-  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Board_changed _ | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
       None
 
-let board_changed_post = function
-  | Board_changed { post_id } -> Some post_id
-  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+let held_calls_changed = function
+  | Approval_change (Tool_approval_waits_changed _) -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
+      | Keeper_asks_changed _ | Installation_asks_changed _ | Pending_confirms_changed )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
+let tool_modes_changed = function
+  | Approval_change (Tool_approval_mode_changed _ | Gate_keeper_settings_changed _) -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _
+      | Pending_confirms_changed )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
+let async_requests_changed = function
+  | Keeper_async_requests_changed _ -> true
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
+      false
+
+let verification_requests_changed = function
+  | Verification_requests_changed | Internal_agent_runs_changed -> true
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Schedules_changed | Board_changed _ | Approval_change _
+  | Schedule_store_invalidated | Pending_confirm_invalidated | Lane_resource _ | Snapshot _ | Other _ ->
+      false
+
+let roster_change = function
+  | Keeper_roster_change change -> Some change
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Lane_resource _
+  | Keeper_turn_changed _ | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _
+  | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
+      None
+
+let turn_change = function
+  | Keeper_turn_changed { keeper; change } -> Some (keeper, change)
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
+  | Keeper_roster_change _ | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _
+  | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
+      None
+
+let runtime_journal_appended = function
+  | Keeper_runtime_journal_appended { keeper; journal; _ } -> Some (keeper, journal)
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _
+  | Approval_change _ | Lane_resource _ | Snapshot _ | Other _ ->
+      None
+
+let schedules_changed = function
+  | Schedules_changed -> true
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Other _ ->
+      false
+
+let pending_confirms_changed = function
+  | Approval_change Pending_confirms_changed -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
+let asks_changed = function
+  | Approval_change (Keeper_asks_changed _ | Installation_asks_changed _) -> true
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
+      | Tool_approval_mode_changed _ | Pending_confirms_changed )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
+
+let board_changed_post = function
+  | Board_changed { post_id } -> Some post_id
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Approval_change _ | Lane_resource _
   | Snapshot _ | Other _ ->
       None
+
+let gate_snapshot_changed = function
+  | Approval_change
+      ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
+      | Gate_keeper_settings_changed _ ) ->
+      true
+  | Approval_change
+      ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
+      | Installation_asks_changed _ | Pending_confirms_changed )
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Keeper_async_requests_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed | Schedule_store_invalidated | Pending_confirm_invalidated | Verification_requests_changed | Schedules_changed | Board_changed _ | Lane_resource _
+  | Snapshot _ | Other _ ->
+      false
 
 (* Field readers over one object's assoc list. Each answers [None] for an
    absent field and for one of the wrong shape; the required readers below
@@ -615,17 +813,95 @@ let reading_of_type type_name =
       Named Schedule_store_invalidated
   | type_name when String.equal type_name Masc.Pending_confirm_invalidation_event.event_type ->
       Named Pending_confirm_invalidated
+  | type_name when String.equal type_name Masc.Verification_request_broadcast.changed_event ->
+      Named Verification_requests_changed
+  | type_name when String.equal type_name Masc.Schedules_changed_event.event_type ->
+      Named Schedules_changed
   | "keeper_chat_appended" as event ->
       From_fields
         (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended
                 { keeper; connector = string_field fields "connector"; at }))
+  | "approval:pending" | "approval:resolved" | "approval:summary_updated" ->
+      Named (Approval_change Approval_queue_changed)
+  | "approval_rules_changed" -> Named (Approval_change Approval_rules_changed)
+  | "gate_mode_changed" | "gate_external_mode_changed" ->
+      Named (Approval_change Gate_mode_changed)
+  | ("gate_keeper_mode_changed" | "keeper_exact_lane_preference_changed") as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "keeper_name" with
+          | Some keeper -> Ok (Approval_change (Gate_keeper_settings_changed { keeper }))
+          | None -> Error (event ^ " carries no keeper_name"))
+  | "keeper_tool_approval_waits_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Tool_approval_waits_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | "keeper_tool_approval_mode_changed" as event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Tool_approval_mode_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Keeper_msg_async_broadcast.requests_changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_async_requests_changed { keeper })
+          | None -> Error (event ^ " carries no name"))
+  | type_name when String.equal type_name Operator_pending_confirm_broadcast.changed_event ->
+      Named (Approval_change Pending_confirms_changed)
+  | event when String.equal event Masc.Keeper_ask_broadcast.asks_changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Approval_change (Keeper_asks_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Lane_addon_ask_broadcast.asks_changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "declaration_id" with
+          | Some declaration_id ->
+              Ok (Approval_change (Installation_asks_changed { declaration_id }))
+          | None -> Error (event ^ " carries no declaration_id"))
+  | event when String.equal event Masc.Keeper_runtime_journal_broadcast.native_tasks_appended_event ->
+      From_fields
+        (fun fields ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
+              Keeper_runtime_journal_appended { keeper; journal = Native_tasks_journal; at }))
+  | event when String.equal event Masc.Keeper_runtime_journal_broadcast.child_content_appended_event ->
+      From_fields
+        (fun fields ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
+              Keeper_runtime_journal_appended { keeper; journal = Child_content_journal; at }))
   | "keeper_memory_journal_appended" as event ->
       From_fields
         (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_memory_journal_appended { keeper; at }))
+  | event when String.equal event Masc.Keeper_row_broadcast.row_changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_roster_change (Keeper_row_changed { keeper }))
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Keeper_row_broadcast.roster_changed_event ->
+      Named (Keeper_roster_change Every_row_changed)
+  | event when String.equal event Masc.Keeper_turn_broadcast.changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_turn_changed { keeper; change = Turn_state })
+          | None -> Error (event ^ " carries no name"))
+  | event when String.equal event Masc.Keeper_turn_preview_signal.changed_event ->
+      From_fields
+        (fun fields ->
+          match string_field fields "name" with
+          | Some keeper -> Ok (Keeper_turn_changed { keeper; change = Turn_preview })
+          | None -> Error (event ^ " carries no name"))
   | other -> (
       (* Which event types are whole-projection pushes is the wire's
          business, not this decoder's. Three were named here and the

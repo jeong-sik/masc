@@ -152,7 +152,11 @@ def appended() -> dict[str, object]:
 class ChatOwedHistoryTest(unittest.TestCase):
     binary = ""
 
-    def run_chat(self, scenario: Callable[[ChatServer, Callable[..., None]], None]) -> None:
+    def run_chat(
+        self,
+        scenario: Callable[[ChatServer, Callable[..., None]], None],
+        refresh_seconds: float = 1000.0,
+    ) -> None:
         with tempfile.TemporaryDirectory(prefix="masc-chat-owed-") as temp_base:
             base = os.path.realpath(temp_base)
             config = pathlib.Path(base, ".masc", "config")
@@ -179,7 +183,7 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     "--port",
                     str(server.server_port),
                     "--refresh",
-                    "1000",
+                    str(refresh_seconds),
                 ],
                 stdin=slave,
                 stdout=slave,

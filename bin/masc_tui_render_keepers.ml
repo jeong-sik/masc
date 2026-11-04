@@ -1223,7 +1223,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let account_line =
       match account, state.item_account_error with
       | Some (Item_account.Ready account), _ ->
-          Printf.sprintf "  Wallet %s Candle · %d owned" (milli account.balance_milli)
+          let balance_milli = selected_item_balance_now state in
+          Printf.sprintf "  Wallet %s Candle%s · %d owned"
+            (milli (Item_account.spendable_milli account ~balance_milli))
+            (match balance_milli with Some _ -> "" | None -> " (as read)")
             (List.length account.owned_items)
       | Some Item_account.Off, _ -> "  Candle off"
       | Some (Item_account.Disabled reason), _ ->
@@ -1255,8 +1258,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Some { price = Item_account.Priced amount; _ } ->
               milli amount ^ " Candle"
               ^ (if owned then ""
-                 else if amount <= account.balance_milli then " · can buy"
-                 else " · need " ^ milli (amount - account.balance_milli) ^ " more")
+                 else
+                   let spendable =
+                     Item_account.spendable_milli account
+                       ~balance_milli:(selected_item_balance_now state)
+                   in
+                   if amount <= spendable then " · can buy"
+                   else " · need " ^ milli (amount - spendable) ^ " more")
           in
           Some ((if owned then "owned · " else "not owned · ") ^ price)
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
@@ -1404,10 +1412,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  else Ansi.dim ^ "no" ^ Ansi.reset)
         @ row_lines ~width "Suggested action:"
             (keeper_suggested_action (keeper_reading state k))
-        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
-            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
-            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
-           match Masc_tui_candle.balance_text state.candle_observation amount with
+        @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
+                   state.candle_observation ~keeper:k.k_name with
            | None -> []
            | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in

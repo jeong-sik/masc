@@ -606,7 +606,7 @@ val operation_error_kind : Keeper_chat_operation_store.error -> operation_error_
 
 module For_testing : sig
   val commit_metadata_transition :
-    keeper_name:string -> store -> Keeper_owner_reducer.transition ->
+    base_path:string -> keeper_name:string -> store -> Keeper_owner_reducer.transition ->
     (Keeper_owner_reducer.state, error) result
   (** Exercise the Owner's persistence exception boundary without a mailbox. *)
 

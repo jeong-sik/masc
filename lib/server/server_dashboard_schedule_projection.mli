@@ -65,3 +65,8 @@ val scheduled_automation_exact_lookup_json :
 (** Renders one exact schedule through the same request-row encoder as the
     aggregate projection. The closed [status] is [found], [not_found],
     [unavailable], or [invalid_id]. *)
+
+val runner_page_view : now:float -> Schedule_runner_status.snapshot -> Yojson.Safe.t
+(** The part of the fleet schedule list the schedule runner's record decides:
+    its status word and each hold it reports, as the list writes them. Two
+    snapshots with equal views give the same list. *)

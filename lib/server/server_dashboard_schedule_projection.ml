@@ -1149,6 +1149,24 @@ let schedule_runner_dashboard_json ~now runner_status =
     ]
 ;;
 
+let runner_page_view ~now (runner_status : Schedule_runner_status.snapshot) =
+  let holds =
+    match runner_status.last_success with
+    | None -> []
+    | Some { held; held_at; _ } ->
+      List.map
+        (fun ({ signal; reason } : Schedule_runner.held) ->
+           `List
+             [ `String signal.schedule_instance_id
+             ; `String signal.schedule_id
+             ; schedule_runner_hold_dashboard_json
+                 (Some { Schedule_runner_status.signal; reason; observed_at = held_at })
+             ])
+        held
+  in
+  `List [ schedule_runner_dashboard_json ~now runner_status; `List holds ]
+;;
+
 let schedule_request_rows_dashboard_json ~config ~now ~runner_status state request_rows =
   let request_rows_with_wakes =
     List.map

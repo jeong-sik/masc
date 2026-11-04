@@ -92,7 +92,9 @@ val set :
     audit log as actor [actor]; if that record fails ([Sys_error] from the
     audit store setup is caught the same way), [Ok (Applied_audit_failed _)]
     is returned so the caller sees that the stance itself already stands
-    durably and in memory — the result is total, it never raises.
+    durably and in memory — the result is total, it never raises. Every
+    [set] then broadcasts {!Keeper_tool_approval_broadcast.mode_changed},
+    because a failed write can change what readers see too.
 *)
 
 val bind : base_path:string -> t -> (unit, string) result

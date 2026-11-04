@@ -31,14 +31,16 @@ let note_exhausted ~scope ~resets_at =
     | Some (Until existing) when Float.compare existing resets_at >= 0 -> ()
     (* A stated reset is more than an observation, so it replaces one. *)
     | Some (Until _) | Some Observed | None ->
-      Hashtbl.replace windows scope (Until resets_at))
+      Hashtbl.replace windows scope (Until resets_at));
+  Runtime_path_rest_signal.recorded ()
 
 let note_observed_exhausted ~scope =
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope with
     (* A stated window already says more; do not weaken it. *)
     | Some (Until _) -> ()
-    | Some Observed | None -> Hashtbl.replace windows scope Observed)
+    | Some Observed | None -> Hashtbl.replace windows scope Observed);
+  Runtime_path_rest_signal.recorded ()
 
 let note_succeeded ~scope =
   Stdlib.Mutex.protect mu (fun () ->
@@ -47,7 +49,8 @@ let note_succeeded ~scope =
        window is the provider's own answer about a time, and one success
        inside it does not make it untrue. *)
     | Some Observed -> Hashtbl.remove windows scope
-    | Some (Until _) | None -> ())
+    | Some (Until _) | None -> ());
+  Runtime_path_rest_signal.recorded ()
 
 let active_until ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->

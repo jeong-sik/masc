@@ -7,6 +7,9 @@
     Enter during a turn answered "Keeper message already in progress" and threw
     the text away. *)
 
+(* No server runs here, so nothing is sent for this workspace. *)
+let preview_base_path = "tui-chat-queue-test"
+
 open Alcotest
 
 module Keeper_chat = Masc_tui_keeper_chat_projection
@@ -6730,7 +6733,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
     let current = Token.fresh () and successor = Token.fresh () in
     let writer = Owner.with_owner ~interrupt_token:current ~observation:(Owner.create_turn_observation ()) (fun () ->
       fst (Eio.Fiber.pair
-        (fun () -> Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
+        (fun () -> Preview.reset ~base_path:preview_base_path ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
@@ -6807,7 +6810,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
       check bool "a fresh clock cannot grant the successor the old owner's preview" true
         (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor = None);
       let next = Owner.with_owner ~interrupt_token:successor ~observation:(Owner.create_turn_observation ()) (fun () ->
-        Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
+        Preview.reset ~base_path:preview_base_path ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
           ~now:4. ~redaction:Masc.Keeper_secret_redaction.empty) in
       Preview.note_attempt ~writer:(Some next) ~now:5. ~runtime_id:"new-provider";
       Ok ()));
@@ -6825,7 +6828,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
     let token = Masc.Keeper_interrupt_token.fresh () in
     let original = Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
     let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
-      Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
+      Preview.reset ~base_path:preview_base_path ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
     let snapshot () =

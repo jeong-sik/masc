@@ -464,11 +464,13 @@ let respond_keeper_tool_json ?config ?(project = Fun.id) ?(kind = Pool_work.Cpu)
    this bound says so instead of returning a short list that looks complete. *)
 let keeper_list_max_limit = 200
 
-(** GET /api/v1/gate/keepers?limit=200&detailed=true&fresh=true
+(** GET /api/v1/gate/keepers?limit=200&detailed=true&fresh=true&name=<keeper>
 
     Authenticated keeper discovery for channel-side connectors. [limit] only
     narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
-    bound. *)
+    bound. [name] narrows the roster to that Keeper's row, or to no row when
+    it is not listed; that read never uses the list cache and is not cut by
+    [limit]. A [name] that is not one Keeper name answers 400. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
   let config = Mcp_server.workspace_config state in
   let expected_fields =
@@ -507,13 +509,31 @@ let handle_gate_keepers ~sw ~clock state request reqd =
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "fresh must be one boolean value")
   | Some fresh ->
+  let named =
+    Uri.query (Uri.of_string request.Httpun.Request.target)
+    |> List.filter (fun (key, _) -> String.equal key "name")
+    |> function
+       | [] -> Ok None
+       | [ (_, [ raw ]) ] ->
+           Result.map Option.some (Keeper_id.Keeper_name.of_string (String.trim raw))
+       | _ -> Error "name must be one keeper name"
+  in
+  match named with
+  | Error detail ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json detail)
+  | Ok named ->
   let limit =
     int_query_param request "limit" ~default:keeper_list_max_limit
     |> fun value -> max 1 (min keeper_list_max_limit value)
   in
   let detailed = bool_query_param request "detailed" ~default:true in
   let args =
-    `Assoc [ ("limit", `Int limit); ("detailed", `Bool detailed); ("fresh", `Bool fresh) ]
+    `Assoc
+      ([ ("limit", `Int limit); ("detailed", `Bool detailed); ("fresh", `Bool fresh) ]
+       @ match named with
+         | None -> []
+         | Some name -> [ ("name", `String (Keeper_id.Keeper_name.to_string name)) ])
   in
   let project =
     match authorize_token_bound_permission_request ~base_path:config.base_path

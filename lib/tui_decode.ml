@@ -140,7 +140,6 @@ type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
   kr_portrait : keeper_portrait;
-  kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
   (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
@@ -3081,7 +3080,7 @@ let decode_keeper_roster_identity ~name json =
     Error "Keeper brief identity fields must not be empty"
   else Ok { k_trace_id; k_created_at; k_updated_at }
 
-let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
+let decode_keeper_runtime ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
@@ -3181,7 +3180,6 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     { kr_name
     ; kr_identity
     ; kr_portrait
-    ; kr_candle_balance_milli = candle_balance_milli
     ; kr_candle_account_revision = account_revision
     ; kr_health
     ; kr_paused
@@ -3200,14 +3198,34 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
 (* [truncated] is carried out rather than dropped: the route clamps its own
    limit, so a workspace with more keepers than one response holds would
    otherwise present a short list as the whole fleet. *)
+type candle_reading =
+  | Candle_off
+  | Candle_disabled of string
+  | Candle_ready of Candle_decay_basis.t
+
+(* The roster's [candle] says whether Candle is on; [candle_decay] carries
+   the fold the TUI computes every amount from (RFC-0481 §3.7). A ready
+   observation needs its basis and the other two have none. *)
+let candle_reading_of_json ~candle decay =
+  match candle, decay with
+  | Candle_observation.Off, `Null -> Ok Candle_off
+  | Candle_observation.Disabled { reason }, `Null -> Ok (Candle_disabled reason)
+  | Candle_observation.Ready _, (`Assoc _ as basis) ->
+      Result.map (fun basis -> Candle_ready basis) (Candle_decay_basis.of_json basis)
+  | Candle_observation.Ready _, `Null -> Error "Candle is ready but the roster carries no decay basis"
+  | Candle_observation.Ready _,
+    (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+      Error "Candle decay basis must be an object"
+  | (Candle_observation.Off | Candle_observation.Disabled _),
+    (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+      Error "Candle decay basis came without a ready Candle observation"
+
 let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
   let candle_rows =
     let* candle = Candle_observation.of_json (member "candle" json) in
-    let decode_balance json =
-      let* balance = match Json_util.assoc_member_opt "candle_balance_milli" json with
-        | Some value -> Candle_observation.balance_of_json value
-        | None -> Error "missing required field candle_balance_milli" in
+    let* reading = candle_reading_of_json ~candle (member "candle_decay" json) in
+    let decode_revision json =
       let* revision = match Json_util.assoc_member_opt "candle_account_revision" json with
         | Some `Null when candle = Candle_observation.Off -> Ok None
         | Some (`String revision) when String.length revision = 64
@@ -3216,20 +3234,15 @@ let decode_keeper_runtime_list json =
              | Candle_observation.Ready _ | Candle_observation.Disabled _ -> Ok (Some revision)
              | Candle_observation.Off -> Error "Candle-off row revision must be null")
         | Some _ | None -> Error "Candle row account revision is missing or malformed" in
-      match candle, balance with
-      | Candle_observation.Ready _, Some _
-      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance, Ok revision)
-      | Candle_observation.Ready _, None
-      | (Candle_observation.Off | Candle_observation.Disabled _), Some _ ->
-        Error "Candle row balance disagrees with the envelope observation" in
-    let* rows = decode_list "keepers" decode_balance items in
-    Ok (candle, rows)
+      Ok (json, Ok revision) in
+    let* rows = decode_list "keepers" decode_revision items in
+    Ok (reading, rows)
   in
   let candle, items = match candle_rows with
-    | Ok (candle, rows) -> Ok candle, rows
-    | Error detail -> Error detail, List.map (fun row -> row, None, Error detail) items
+    | Ok (reading, rows) -> Ok reading, rows
+    | Error detail -> Error detail, List.map (fun row -> row, Error detail) items
   in
-  let decode_row (json, candle_balance_milli, account_revision) =
+  let decode_row (json, account_revision) =
     match member "effective_meta_error" json with
     | `Null when member "status" json = `String "error" ->
         let* name = required_string_field json "name" in
@@ -3243,7 +3256,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli ~account_revision json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~account_revision json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:
@@ -8095,7 +8108,9 @@ type async_request_row =
   ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
-  ; ar_elapsed_sec : float option
+  ; ar_submitted_at : float
+      (** Epoch seconds. A screen works out the age itself: an age the server
+          worked out stops when the reading is not read again. *)
   ; ar_ownership : async_request_ownership
   }
 
@@ -8166,12 +8181,14 @@ let decode_async_request_observation json =
         | "disk_only_ownership_unknown" -> Ok Async_ownership_unknown
         | _ -> Error (Printf.sprintf "unknown worker ownership %S" ownership)
       in
-      let* ar_elapsed_sec = optional_float_field json "elapsed_sec" in
-      let* () = match ar_elapsed_sec with
-        | Some value when not (Float.is_finite value) -> Error "elapsed_sec must be finite"
-        | Some _ | None -> Ok ()
+      let* ar_submitted_at =
+        match optional_float_field json "submitted_at" with
+        | Ok (Some value) when Float.is_finite value -> Ok value
+        | Ok (Some _) -> Error "submitted_at must be finite"
+        | Ok None -> Error "field 'submitted_at' is missing"
+        | Error _ as error -> error
       in
-      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
+      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_submitted_at; ar_ownership }
     in
     let* rows = required_list_field json "requests" in
     let* requests = decode_list "requests" decode_row rows in

@@ -245,6 +245,10 @@ let set t ~base_path ~actor ~keeper_name mode =
                Atomic.set t.state (state_of_rows rows);
                Ok changed_at))
   in
+  (* Readers answer from memory, which a failed write can change too: a
+     revoke to [Auto] still drops the override, and the store error is kept
+     for [last_restore_error]. *)
+  Keeper_tool_approval_broadcast.mode_changed ~keeper_name;
   match result with
   | Error _ as error -> error
   | Ok changed_at ->

@@ -2711,6 +2711,15 @@ auth = "api-key"
 capabilities_base = "openrouter"
 
 [[providers]]
+id = "opencode_go"
+kind = "openai_compat"
+base_url = "https://opencode.ai/zen/go/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat_extended"
+default_model = "deepseek-v4.1-flash"
+
+[[providers]]
 id = "groq"
 kind = "openai_compat"
 base_url = "https://api.groq.com/openai/v1"
@@ -3844,6 +3853,18 @@ supports_parallel_tool_calls = false
 # Gateway input modalities are text only for this id.
 supports_multimodal_inputs = false
 supports_image_input = false
+
+[[models]]
+model_id = "deepseek-v4.1-flash"
+provider_name = "opencode_go"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_reasoning = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+thinking_control_format = "none"
 
 [[models]]
 model_id = "deepseek/deepseek-v4-pro"

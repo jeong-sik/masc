@@ -213,6 +213,7 @@ type entry = {
   mutable current_action : Lane_addon_action.receipt option;
   mutable host_due : bool;
   mutable host_status : host_status;
+  mutable lanes_signal : Yojson.Safe.t option;
 }
 let retire_admission e =
   e.stopping <- true;
@@ -734,8 +735,45 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    is released, with no yield in between. So no reader sees the commit
    without its wake, no later write names an earlier sequence, and a state
    change made while the write was in flight is not overwritten. *)
+let lanes_signal (e : entry) =
+  let browser =
+    match e.package.worker_service with
+    | Lane_addon_types.Mcp_tools -> []
+    | Lane_addon_types.Browser_service _ ->
+        (match Browser_addon_observation.read e.output with
+         | Ok published ->
+             [ "clients", `Int (List.length published.clients)
+             ; "automation", `Bool published.automation.registered
+             ; "stagehand", `Bool published.stagehand.registered ]
+         | Error detail -> [ "unavailable", `String detail ])
+  in
+  let machine_loaded = List.filter_map (fun (row : Lane_addon_types.row) ->
+    List.assoc_opt "machine_loaded" row.fields) e.output.rows in
+  let refreshing = e.state = Lifecycle.Observing || e.pending <> Idle
+    || e.active_tool_calls > 0 || Option.is_some e.current_action in
+  `Assoc
+    [ "instance_id", `String e.instance_id
+    ; "run_id", `String e.run_id
+    ; "package", `String e.package.id
+    ; "revision", `String e.package.revision
+    ; "phase", phase_to_json (phase_of e)
+    ; "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration
+    ; "running", `Bool e.running
+    ; "started", `Bool e.started
+    ; "stopping", `Bool e.stopping
+    ; "cleanup_running", `Bool e.cleanup_running
+    ; "browser", `Assoc browser
+    ; "machine_loaded", `List machine_loaded
+    ; "machine_refreshing", `Bool refreshing ]
+
 let notify_commit m e =
-  Workspace_dataset_event.announce ~base_path:m.base_path Workspace_dataset_event.Lanes;
+  let signal = lanes_signal e in
+  let inventory_changed = match e.lanes_signal with
+    | Some previous -> not (Yojson.Safe.equal previous signal)
+    | None -> true in
+  e.lanes_signal <- Some signal;
+  if inventory_changed then
+    Workspace_dataset_event.announce ~base_path:m.base_path Workspace_dataset_event.Lanes;
   Workspace_dataset_event.announce ~base_path:m.base_path
     (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
 
@@ -3631,6 +3669,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; exact_waiting = []; observed_at = None; issue = None };
+    lanes_signal = None;
     cancel_worker = None; cancel_exact = None; exact_request_id = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this

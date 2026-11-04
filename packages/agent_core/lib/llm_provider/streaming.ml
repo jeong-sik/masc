@@ -192,7 +192,7 @@ let parse_sse_event event_type data_str =
 
 (* Agent Core contract: TTFT classification — distinguishes prelude events
    ([MessageStart], a [ContentBlockStart] that carries no content, [Ping])
-   from the first generated content. Capture point in [Complete] uses this
+   from the first generated content. Capture point in [Complete_stream] uses this
    to fill [Streaming_summary.ttft_ms] and to end the first-event budget. *)
 let sse_event_is_first_token_signal (e : sse_event) : bool =
   let non_empty s = String.length s > 0 in

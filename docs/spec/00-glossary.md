@@ -1540,10 +1540,10 @@ status: reference
 **Rotate-now Evidence Asymmetry (회전 강등 증거 비대칭)**
 : 같은 Rotate_now 회전이라도 후보에 남기는 교차 turn 증거가 갈래마다 다른,
   의도된 비대칭. 이 turn 안에서 후보 순서만 바꾸는 회전은 대부분 증거를
-  남기지 않는다 — 선언된 열일곱 회전 가운데 열다섯(`Auth_failed`·
+  남기지 않는다 — 선언된 열여섯 회전 가운데 열네 가지(`Auth_failed`·
   `Model_unavailable`·`Resumable_cli_session`·`Candidates_filtered`·
   `Runtime_exhausted`·`No_progress_empty`·`No_progress_thinking_only`·
-  `No_progress_truncated`·`Refusal_body_not_received`·`Generation_repeated`·
+  `No_progress_truncated`·`Refusal_body_not_received`·
   `Admission`·`Provider_reported_failure`·`Request_refused`·
   `Provider_wire_defect`·`Context_window_exceeded`)은 `keeper_turn_driver.ml`의
   Rotate_now 매치에서 `()`로 실패가 이 후보의 고장을 증명하지 않는다. 남기면
@@ -2130,7 +2130,7 @@ status: reference
   `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
   넘김이 그대로 통과한다.
   - **단일 자격증명 트랜잭션 직렬화 (Credential Admission Serialization)**: 인계 대상
-    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_machine_controller_authority.holder_left`),
+    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_machine_controller_authority.holder_left`), 적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_dos_controller.set_participation`),
     실제 제어권 변경(`Dos_lane.pass`)은 단일 Auth 자격증명 트랜잭션(`with_credential_transaction`)
     안에서 원자적으로 직렬화된다(#40577). 대상 회수가 먼저 완료되면 목록에서 제외되어 거절되고,
     인계가 먼저 권한을 얻으면 회수는 인계가 끝날 때까지 대기한 뒤 새 조종자의 권한을 해제한다.
@@ -3372,7 +3372,7 @@ status: reference
   `Self_owned`/`Held_by_other` 를 가르고, lifecycle 의 다른 전이는 같은 함수를
   `~same_agent` 라는 인자 이름으로 받는다. 이름표는 셋이지만 비교는 하나이므로,
   한쪽만 바꾸면 도구가 받아들일 전이를 lifecycle 이 거절한다.
-  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_machine_controller_authority.holder_left`,
+  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_machine_controller_authority.holder_left`, **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Machine_addon_host.release_shared_controller` 의 `~holder`,
   → 조종권 (Controller))도 홀더라고 부르지만, 그쪽은 기계 조종권을 쥔 이름이고
   Task 와 무관하다. Task 문맥의 홀더는 언제나 Assignee 다.
   → [Types_core](../../lib/types/types_core.mli),
@@ -3586,7 +3586,7 @@ status: reference
   정적 레이어 배리어(static batch barrier)로 인해 독립 분기(B)가 다른 완료 분기(A→C)의 후속 실행을 가로막던 문제를 해소하고, 선언된 의존성(`after` 간선 및 상류 JSON 출력 참조)이 해결된 노드를 레디 웨이브(ready wave)로 즉시 디스패치한다.
   - **분기 실패 정책 (Branch Failure Policy)**: 닫힌 타입 `Keeper_tool_plan.branch_failure_policy`의 두 값(`Fail_fast`, `Continue_independent`)으로 제어된다. 기본값은 `Fail_fast`다.
     - `Fail_fast`: 한 노드가 실패하면 아직 발송되지 않은 모든 노드의 실행을 즉시 중단한다.
-    - `Continue_independent`: 한 노드가 실패하면 그 노드의 하류 자손들만 차단(`Dependency_failed`)하고, 독립된 다른 분기의 실행과 완료는 정상 진행한다.
+    - `Continue_independent`: 한 노드가 실패하면 그 노드의 하류 자손들만 차단하고, 독립된 다른 분기의 실행과 완료는 정상 진행한다.
   - **직렬 체인 대기 해제 불변식 (Serial Chain Stand-Down)**: 직렬(`serial`) 및 종단(`terminal`) 노드는 정적 계획 순서대로 단독 실행된다. 선행 직렬 노드가 실패하거나 지연(`Deferred`, 원인 존재)되거나 건너뛰어지면, 분기 실패 정책과 무관하게 후속 직렬 체인의 모든 노드는 도구를 발송하지 않고 즉시 실행 대기를 해제(stand down)하며, 실패한 직렬 선행자가 계획 인덱스 순서에 따라 실패 원인(`cause`)을 끝까지 운반한다.
   - **결정론적 완료 순서 (Canonical Plan Order)**: 실행 완료된 결과는 비감소 `planned_index` 순서로 정규 보고되며, 진행 중인(in-flight) 노드가 모두 정착된 후에 가장 낮은 계획 인덱스를 가진 실패 원인을 최종 선정한다.
   → [Keeper_tool_plan](../../lib/keeper/keeper_tool_plan.mli) ·

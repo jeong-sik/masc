@@ -112,7 +112,7 @@ rejects legacy background flags and accepts only typed command fields:
 `job_id`, `request_id`, `poll`, or `cancel` fields.
 
 Asynchronous execution is provided by separate typed tool families:
-- **Keeper turn messaging**: `keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list` (serialized through `Keeper_turn_admission`).
+- **Keeper chat operations**: `masc_keeper_delegate` and `masc_keeper_msg` submit a turn and return an `operation_id` without waiting for it; `masc_keeper_delegate_status`, `masc_keeper_delegate_list` and `masc_keeper_delegate_cancel` read or cancel it.
 - **Isolated Docker jobs**: `keeper_job_start`, `keeper_job_status`, `keeper_job_result`, `keeper_job_cancel` (each job runs in an isolated container and delivers a wakeup on completion).
 - **Multi-Keeper compositions**: `keeper_composition_prepare`, `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel`.
 

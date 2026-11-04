@@ -50,7 +50,7 @@ reasoning/tool protocol support, and typed provider outcomes. agent core remains
 generic and imports no Keeper, Task, Goal, Board, Connector, or Gate module.
 
 Terminal turn outcomes distinguish explicit model refusal from content-free
-stops (`Empty_stop_reason` vs `Refusal_stop_reason`). Empty terminal completion
+stops (the `Refusal` stop reason vs an `Empty_completion` failure). Empty terminal completion
 without visible text or tool effects is recorded as an explicit empty-completion
 observation unless the active lane contract permits quiet completion (such as
 thinking-only or Muse code-lane turns that completed their side effect via

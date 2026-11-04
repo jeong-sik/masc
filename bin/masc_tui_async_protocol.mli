@@ -128,7 +128,8 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
+  http_overview: (overview_snapshot, string) result option;
+      (** [None] when the visible surface did not ask for the briefing. *)
   http_approvals: approval_observation option;
   http_scoped: http_scoped_surface_results;
   (* Mandatory on every refresh: the same endpoint may name a different

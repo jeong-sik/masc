@@ -6,9 +6,10 @@ module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
-type error = Submit.error
+type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string
-type wait = Submit.wait
+type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Missing_after_dispatch | Journal_recheck
 type call = expected:Durable.destination -> original:Owner.retained -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result
 type answer = {raw:Yojson.Safe.t;proposal:Memory_runtime.durable_step_proposal}

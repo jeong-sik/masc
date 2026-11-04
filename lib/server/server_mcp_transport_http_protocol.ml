@@ -10,7 +10,10 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
    Brings in Mcp_eio alias, Hashtbl tables, mutex, and all session functions. *)
 include Server_mcp_transport_http_session
 
-type auth_failure = Server_mcp_transport_http_types.auth_failure
+type auth_failure = Server_mcp_transport_http_types.auth_failure =
+  { message : string
+  ; auth_error_code : string option
+  }
 
 let auth_failure_data failure =
   Option.map

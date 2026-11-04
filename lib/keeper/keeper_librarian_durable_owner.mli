@@ -1,8 +1,11 @@
 (** Submit-once host owner for original completed-history Memory requests.
     Caller holds the workspace process lease and serializes this Keeper owner. *)
-type error = Lane_addon_submit_once.error
+type error = Lane_addon_submit_once.error =
+  | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
-type wait = Lane_addon_submit_once.wait
+type wait = Lane_addon_submit_once.wait =
+  | Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Missing_after_dispatch | Journal_recheck
 type publication =
   | Publication_pending of string
   | Publication_complete of Lane_addon_tool_request_owner.retained

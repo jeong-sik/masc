@@ -11,7 +11,7 @@ module Context = Workspace_memory_context
 module Submit = Lane_addon_submit_once
 open Result.Syntax
 
-type error = Submit.error
+type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string
 let runtime_error = Submit.error_of_runtime
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
@@ -75,7 +75,8 @@ let capture_briefing ~config ~prompt ~batch =
   capture ~config ~request_id (fun ~workspace ~destination ->
     Capture.briefing ~request_id ~workspace ~destination:(captured_destination destination) ~prompt ~batch)
 
-type wait = Submit.wait
+type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Owner.retained
   | Judgment of {capture:Capture.t;record:Owner.retained;final:Exact.final;expected:Capture.expected_commit}

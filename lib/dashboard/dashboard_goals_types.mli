@@ -21,7 +21,11 @@ type tree_node = {
 }
 (** Per-goal projection node returned by [build_forest]. *)
 
-type goal_detail_keeper = Dashboard_goals_types_accessor.goal_detail_keeper
+type goal_detail_keeper = {
+  meta : Keeper_meta_contract.keeper_meta;
+  latest_receipt : Yojson.Safe.t option;
+  runtime_trust : Yojson.Safe.t;
+}
 
 (** {1 Pure task-status helpers} *)
 
@@ -127,7 +131,18 @@ val build_goal_timeline :
 
 (** {1 Goal tree builder — recursive pure projection over context} *)
 
-type build_context = Dashboard_goals_types_builder.build_context
+type build_context = {
+  now_ts : float;
+  all_tasks : Masc_domain.task list;
+  pending_approvals : Yojson.Safe.t list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
+  latest_receipts : (string * Yojson.Safe.t) list;
+  runtime_trust_of : string -> Yojson.Safe.t option;
+      (** The Keeper's runtime trust snapshot, [None] for a name that is not
+          one of [keeper_metas]. [build_tree] asks only for the Keepers its
+          goal's tasks are assigned to. *)
+  goal_task_index : (string, string list) Hashtbl.t;
+}
 
 (** Recursive pure projection: given a [build_context] snapshot, build
     the [tree_node] for [goal] and all descendants found in [goals]. *)

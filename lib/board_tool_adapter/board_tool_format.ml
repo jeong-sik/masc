@@ -441,7 +441,12 @@ let sources_footer sources =
     error message derives from
     [Board_dispatch.valid_sort_order_strings] so adding a constructor
     automatically updates the user-facing list. *)
-type sort_order = Board_dispatch.sort_order
+type sort_order = Board_dispatch.sort_order =
+  | Hot
+  | Trending
+  | Recent
+  | Updated
+  | Discussed
 
 let parse_sort_order value =
   match Board_dispatch.sort_order_of_string_opt value with

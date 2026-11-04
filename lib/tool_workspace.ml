@@ -476,7 +476,10 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
 
 (* ── State inspection (shared by status and check) ──────── *)
 
-type agent_state = Workspace_assertions.agent_state
+type agent_state = Workspace_assertions.agent_state =
+  { task_claimed : bool
+  ; current_task_set : bool
+  }
 
 let inspect_state ctx =
   let actual_name, resolve_failures = safe_resolve_agent_name ctx ~session_bound:true in

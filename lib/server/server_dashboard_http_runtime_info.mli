@@ -259,7 +259,13 @@ val seed_git_rev_parse_short_cache_for_tests :
     so the next {!git_rev_parse_short} call against
     [dir] reads the seeded value (subject to TTL). *)
 
-type git_upstream_status = Server_dashboard_http_runtime_info_json.git_upstream_status
+type git_upstream_status = Server_dashboard_http_runtime_info_json.git_upstream_status = {
+  branch : string option;
+  upstream_ref : string option;
+  upstream_head_commit : string option;
+  ahead_count : int option;
+  behind_count : int option;
+}
 (** Local tracking-ref status for the server checkout.  This deliberately
     uses only already-fetched refs such as [@{upstream}] and does not perform
     network access. *)

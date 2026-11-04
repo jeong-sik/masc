@@ -1,10 +1,12 @@
 (** Dispatch and resume one already restored original host request. The caller
     holds the workspace process lease, serializes this owner, and has freshly
     restored its physical capture, revisions and original partition ancestry. *)
-type error = Lane_addon_submit_once.error
+type error = Lane_addon_submit_once.error =
+  | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
 
-type wait = Lane_addon_submit_once.wait
+type wait = Lane_addon_submit_once.wait = Capacity | Worker_pending | Worker_unknown
+  | Worker_unreachable | Missing_after_dispatch | Journal_recheck
 type result =
   | Pending of wait * Lane_addon_tool_request_owner.retained
   | Answered of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained

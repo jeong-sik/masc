@@ -377,9 +377,27 @@ val run_argv_pipeline_with_status_split :
     from the final stdout pipe and per-stage stderr pipes while the pipeline is
     still running. *)
 
-type detached_handle = Process_eio_detached.detached_handle
+type detached_handle = Process_eio_detached.detached_handle = {
+  pid : int;
+      (** Child process PID (also the process-group leader). *)
+  pgid : int;
+      (** Process group ID; always equal to [pid] for tree-kill. *)
+  stdout_fd : Unix.file_descr;
+      (** Read end of child's stdout pipe. Caller owns and must close. *)
+  stderr_fd : Unix.file_descr;
+      (** Read end of child's stderr pipe. Caller owns and must close. *)
+  started_at : float;
+      (** [Unix.gettimeofday ()] at spawn time. *)
+}
 
-type detached_devnull_handle = Process_eio_detached.detached_devnull_handle
+type detached_devnull_handle = Process_eio_detached.detached_devnull_handle = {
+  devnull_pid : int;
+      (** Child process PID (also the process-group leader). *)
+  devnull_pgid : int;
+      (** Process group ID; always equal to [pid] for tree-kill. *)
+  devnull_started_at : float;
+      (** [Unix.gettimeofday ()] at spawn time. *)
+}
 
 val spawn_detached :
   argv:string list ->

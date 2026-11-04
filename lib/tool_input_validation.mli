@@ -97,7 +97,12 @@ val validate_args :
   unit ->
   (Yojson.Safe.t, Tool_result.result) result
 
-type schema_shape = Tool_input_contract.schema_shape
+type schema_shape = Tool_input_contract.schema_shape =
+  { properties : string list
+  ; required : string list
+  ; one_of_required : string list list
+  ; errors : string list
+  }
 
 val schema_shape : Yojson.Safe.t -> schema_shape
 (** Validated JSON-schema shape projection used by dispatch diagnostics and

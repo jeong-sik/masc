@@ -1,7 +1,11 @@
 
 (** Tool_task - Core task CRUD operations *)
 
-type context = Tool_task_handlers.context
+type context = Tool_task_handlers.context = {
+  config: Workspace_core.config;
+  agent_name: string;
+  sw: Eio.Switch.t option;
+}
 
 val handle_add_task :
   ?created_by:string ->

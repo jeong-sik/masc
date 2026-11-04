@@ -6,9 +6,10 @@ module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
 open Result.Syntax
-type error = Submit.error
+type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string
-type wait = Submit.wait
+type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Missing_after_dispatch | Journal_recheck
 type publication = Publication_pending of string | Publication_complete of Owner.retained
   | Publication_superseded of Owner.retained
 type publish = original:Owner.retained -> request:Request.t ->

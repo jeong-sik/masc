@@ -8,6 +8,7 @@
 | `tool_calls/YYYY-MM/DD[.NNN].jsonl` | 도구 호출. `ts` 는 호출이 끝난 시각이에요 |
 | `keeper_turn_events/<keeper>/*.jsonl` | 턴 한 번이 파일 하나. 첫 줄과 마지막 줄의 `ts` 가 턴의 시작과 끝이에요 |
 | `keepers/<keeper>/chat-operations.sqlite3` | 위임·채팅 작업. Keeper 하나가 한 번에 하나만 돌려요 |
+| `agent-core-events/YYYY-MM/DD.jsonl` | 이벤트 중 `provider_admission:waited` 만 읽어요. 모델 요청이 계정의 허용 수가 모두 찬 상태를 만나 줄을 선 경우예요 |
 
 ## 다시 재기
 
@@ -26,6 +27,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 같은 결과 재조회: 같은 Keeper 가 같은 도구에 같은 입력(`input_fingerprint`)을 보내 1시간 안에 같은 결과(`output_fingerprint`)를 받은 호출이에요. `scripts/measure-tool-efficiency.py` 와 같은 규칙인데, 이 스크립트는 자정을 넘어서도 1시간을 이어서 세요.
 - 긴 Execute: 60초 이상 걸린 Execute 예요. 명령에 `sleep`, `for ... in`, `while`, `until` 이 있으면 폴링으로 세요. 명령 문장은 이 판정에만 써요.
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
+- 승인 대기: `provider_admission:waited` 이벤트의 `waited_ms` 예요. 허용을 바로 받은 요청은 기록되지 않아서, 이 이벤트는 줄을 선 요청만 세요.
 
 ## 결과(11-01 ~ 11-04T19:10Z, 91.17시간)
 
@@ -49,6 +51,16 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | `goo-yang-bong` | 3.2시간 | 59.0시간 | 5.4% |
 | `github-pr-checker` | 3.0시간 | 11.1시간 | 26.6% |
 
+제공자 승인 대기(줄을 선 요청만 기록돼요):
+
+| | 값 |
+|---|---:|
+| 이벤트 | 23,943건 |
+| 대기 합계 | 479.6시간(평균 72.1초, 중앙값 35.9초, p90 194.8초) |
+| GLM coding 계정 | 463.8시간(96.7%) |
+| 등급별 | standard 313.5시간, priority 123.6시간, background 42.5시간 |
+| 시계 1시간당 대기 | 중앙값 3.84시간, 대기가 있었던 87시간대 중 36시간대가 5시간 초과 |
+
 위임·채팅 작업(1,220건, 시작한 1,217건):
 
 | | 값 |
@@ -64,7 +76,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 
 - `ts` 가 끝난 시각이라는 것은 11-03 하루에서 확인했어요. 같은 턴에서 뒤 호출이 30초 이상 걸린 연이은 호출 270쌍 모두, 두 `ts` 의 차이가 뒤 호출의 길이 이상이었어요.
 - 턴 길이는 trace 파일의 첫 줄과 마지막 줄 시각으로 어림한 값이에요. 마지막 줄이 턴이 끝난 뒤에 늦게 써졌다면 턴이 길게 잡혀요. 이 경우가 있는지는 확인하지 못했어요.
-- "호출 사이 시간"에는 모델 추론과 제공자 쪽 대기가 함께 들어 있어서 둘을 가르지 못했어요.
+- "호출 사이 시간"에는 모델 추론과 제공자 쪽 대기가 함께 들어 있어서 둘을 가르지 못했어요. 승인 대기 합계(479.6시간)가 호출 사이 시간(510.1시간)과 비슷한 크기라서 대부분이 승인 줄일 것으로 보지만, 같은 요청끼리 짝지어 확인하지는 않았어요.
 - 작업 DB 만 있고 턴 trace 가 없는 Keeper 의 작업은 "같은 Keeper 의 턴과 겹친 시간"이 0으로 잡혀요.
 - 위임·채팅 작업만 봤어요. Board 멘션이나 일정으로 깨운 턴이 Execute 때문에 늦어졌는지는 못 쟀어요.
 - 작업 DB 의 보존 기간은 확인하지 못했어요. 날짜가 지난 뒤에 다시 돌리면 같은 값이 안 나올 수 있어요.

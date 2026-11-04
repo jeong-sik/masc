@@ -9,6 +9,9 @@ Reads three stores under `<base-path>/.masc`, never writes to them:
   line is the run's first event, the last line its last event.
 - `keepers/<keeper>/chat-operations.sqlite3`: delegated and chat operations,
   opened read-only. One operation per Keeper runs at a time.
+- `agent-core-events/YYYY-MM/DD.jsonl`: MASC bus events. Only the
+  `provider_admission:waited` ones are read: a model request that found every
+  permit of its provider account held and queued.
 
 Definitions:
 
@@ -27,6 +30,9 @@ Definitions:
   has `sleep`, a `for ... in`, `while` or `until`.
 - queue wait: `started_at` minus `created_at` of an operation. An operation is
   a delegate when its source has a `sender_keeper`.
+- admission wait: `waited_ms` of a `provider_admission:waited` event. A request
+  granted a permit at once is not reported, so the events are the requests that
+  queued.
 
 Nothing here reads message text. Command text is read only for the polling test.
 
@@ -62,6 +68,8 @@ REREAD_WINDOW_SEC = 3600.0
 TRACE_TAIL_BYTES = 65536
 SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
+ADMISSION_MARKER = b"provider_admission:waited"
+ADMISSION_WAIT_HOURS_HIGH = 5.0
 POLL_COMMAND = re.compile(r"\bsleep\b|\bfor\s+\w+\s+in\b|\bwhile\b|\buntil\b")
 
 Interval = tuple[float, float]
@@ -87,6 +95,15 @@ class Operation:
     started_at: float | None
     completed_at: float | None
     failure_kind: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AdmissionWait:
+    ts: float
+    provider: str
+    model: str
+    admission_class: str
+    waited_s: float
 
 
 def text_of(value: object) -> str | None:
@@ -242,6 +259,41 @@ def read_operations(base: pathlib.Path, since: float, until: float) -> list[Oper
     return operations
 
 
+def read_admission_waits(base: pathlib.Path, since: float, until: float) -> list[AdmissionWait]:
+    waits: list[AdmissionWait] = []
+    day = datetime.fromtimestamp(since, timezone.utc).date()
+    last = datetime.fromtimestamp(until, timezone.utc).date()
+    while day <= last:
+        path = base / ".masc" / "agent-core-events" / f"{day.year:04d}-{day.month:02d}" / f"{day.day:02d}.jsonl"
+        if path.is_file():
+            with path.open("rb") as handle:
+                for line in handle:
+                    if ADMISSION_MARKER not in line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    ts = number_of(event.get("ts_unix"))
+                    payload = event.get("payload")
+                    waited_ms = number_of(payload.get("waited_ms")) if isinstance(payload, dict) else None
+                    if ts is None or waited_ms is None or ts < since or ts > until or not isinstance(payload, dict):
+                        continue
+                    waits.append(
+                        AdmissionWait(
+                            ts,
+                            str(payload.get("provider_id")),
+                            str(payload.get("model")),
+                            str(payload.get("admission_class")),
+                            waited_ms / 1000.0,
+                        )
+                    )
+        day += timedelta(days=1)
+    return waits
+
+
 def quantiles(values: list[float]) -> dict[str, float | int]:
     if not values:
         return {"n": 0}
@@ -354,6 +406,28 @@ def summarize_operations(
     }
 
 
+def summarize_admission(waits: list[AdmissionWait]) -> dict[str, object]:
+    by_provider: dict[str, float] = defaultdict(float)
+    by_class: dict[str, float] = defaultdict(float)
+    by_hour: dict[str, float] = defaultdict(float)
+    for wait in waits:
+        by_provider[f"{wait.provider}/{wait.model}"] += wait.waited_s
+        by_class[wait.admission_class] += wait.waited_s
+        by_hour[datetime.fromtimestamp(wait.ts, timezone.utc).strftime("%Y-%m-%dT%HZ")] += wait.waited_s
+    hourly = sorted(seconds / SECONDS_PER_HOUR for seconds in by_hour.values())
+    return {
+        "events": len(waits),
+        "wait": quantiles([wait.waited_s for wait in waits]),
+        "by_provider_model_s": {
+            key: round(seconds, 1) for key, seconds in sorted(by_provider.items(), key=lambda item: -item[1])[:8]
+        },
+        "by_class_s": {key: round(seconds, 1) for key, seconds in sorted(by_class.items())},
+        "clock_hours_with_events": len(hourly),
+        "median_wait_hours_per_clock_hour": round(hourly[len(hourly) // 2], 2) if hourly else None,
+        "clock_hours_over_5_wait_hours": sum(1 for hours in hourly if hours > ADMISSION_WAIT_HOURS_HIGH),
+    }
+
+
 def parse_day(text: str) -> date:
     return date.fromisoformat(text)
 
@@ -390,6 +464,7 @@ def main() -> int:
         },
         "turn_time": summarize_calls(calls, busy_by_keeper),
         "chat_operations": summarize_operations(read_operations(base, since, args.until), long_execute, runs),
+        "provider_admission": summarize_admission(read_admission_waits(base, since, args.until)),
     }
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)
     print(text)

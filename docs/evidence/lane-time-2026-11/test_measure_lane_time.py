@@ -11,7 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -123,6 +123,43 @@ class StoreReadingTest(unittest.TestCase):
             operations = lane.read_operations(base, since=0.0, until=100.0)
         self.assertEqual(sorted(op.origin for op in operations), ["channel:dashboard", "delegate"])
         self.assertEqual({op.state for op in operations}, {"failed", "succeeded"})
+
+
+DAY_START = datetime(2026, 11, 1, tzinfo=timezone.utc).timestamp()
+
+
+def admission_event(ts: float, waited_ms: float | None, *, model: str = "glm-5.3", admission_class: str = "standard") -> str:
+    payload: dict[str, object] = {"provider_id": "glm-coding", "model": model, "admission_class": admission_class}
+    if waited_ms is not None:
+        payload["waited_ms"] = waited_ms
+    return json.dumps({"type": "agent_core:masc:provider_admission:waited", "ts_unix": ts, "payload": payload})
+
+
+class AdmissionTest(unittest.TestCase):
+    def test_waits_are_read_inside_the_window_and_summed_by_class_and_hour(self) -> None:
+        lines = [
+            admission_event(DAY_START + 100, 10_000),
+            admission_event(DAY_START + 4_000, 30_000, admission_class="priority"),
+            admission_event(DAY_START + 5_000, 99_000),  # after `until`
+            admission_event(DAY_START + 200, None),  # no clock could measure it
+            json.dumps({"type": "agent_core:tool_called", "ts_unix": DAY_START + 300}),
+            "provider_admission:waited {not json",
+        ]
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            events_dir = base / ".masc" / "agent-core-events" / "2026-11"
+            events_dir.mkdir(parents=True)
+            (events_dir / "01.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            waits = lane.read_admission_waits(base, since=DAY_START, until=DAY_START + 4_500)
+        self.assertEqual([w.waited_s for w in waits], [10.0, 30.0])
+        summary = lane.summarize_admission(waits)
+        self.assertEqual(summary["events"], 2)
+        self.assertEqual(summary["by_class_s"], {"priority": 30.0, "standard": 10.0})
+        self.assertEqual(summary["clock_hours_with_events"], 2)
+
+    def test_missing_events_directory_gives_no_waits(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertEqual(lane.read_admission_waits(pathlib.Path(raw), since=DAY_START, until=DAY_START + 10), [])
 
 
 if __name__ == "__main__":

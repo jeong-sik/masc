@@ -93,6 +93,34 @@
     "wait_overlapping_a_run_of_the_same_keeper_s": 84106.1,
     "wait_overlapping_long_execute_s": 7163.5
   },
+  "provider_admission": {
+    "by_class_s": {
+      "background": 153111.2,
+      "priority": 444884.6,
+      "standard": 1128634.8
+    },
+    "by_provider_model_s": {
+      "glm-coding/glm-5.3": 377491.8,
+      "glm-coding/glm-5.3-flash": 1292247.6,
+      "ollama_cloud/deepseek-v4.1-flash": 12480.4,
+      "opencode_go/deepseek-v4.1-flash": 35586.4,
+      "opencode_go/glm-5.3-flash": 3428.5,
+      "opencode_go/mimo-v2.6-flash": 1605.9,
+      "opencode_go/qwen3.8-flash": 2622.8,
+      "openrouter/nvidia/nemotron-3.5-super-vl:free": 1103.4
+    },
+    "clock_hours_over_5_wait_hours": 36,
+    "clock_hours_with_events": 87,
+    "events": 23943,
+    "median_wait_hours_per_clock_hour": 3.84,
+    "wait": {
+      "mean_s": 72.1,
+      "n": 23943,
+      "p50_s": 35.9,
+      "p90_s": 194.8,
+      "sum_s": 1726630.6
+    }
+  },
   "turn_time": {
     "between_calls": {
       "mean_s": 13.7,

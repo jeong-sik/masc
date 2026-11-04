@@ -25,9 +25,9 @@ val settled : t
 
 val changed : t -> t
 (** The server announced a change of this surface. A change while waiting
-    out a failure is read now: the failure may belong to another part of the
-    reading, and the change is new. The failures in a row are kept, so the
-    next failure still waits longer. *)
+    out a failure stays on the wait: the scheduled retry reads the changed
+    state, and the failures in a row are kept, so the next failure still
+    waits longer. *)
 
 val started : t -> t
 (** A read of this surface began, whatever started it. *)

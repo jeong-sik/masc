@@ -45,13 +45,14 @@ let test_the_wait_stops_growing () =
   check bool "capped wait has passed" true (O.due ~now:max_retry_s t);
   check bool "capped wait has not passed" false (O.due ~now:(max_retry_s -. 0.1) t)
 
-let test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff () =
+let test_a_change_during_a_failure_wait_keeps_the_scheduled_retry () =
   let t = failed ~now:0.0 (O.started (O.changed O.settled)) in
   let t = O.changed t in
-  check bool "the change is read now" true (O.due ~now:1.0 t);
-  let t = failed ~now:1.0 (O.started t) in
-  check bool "the next failure waits the doubled time" false (O.due ~now:4.9 t);
-  check bool "after the doubled time" true (O.due ~now:5.0 t)
+  check bool "the change waits for the scheduled retry" false (O.due ~now:1.9 t);
+  check bool "due at the scheduled retry" true (O.due ~now:2.0 t);
+  let t = failed ~now:2.0 (O.started t) in
+  check bool "the next failure waits the doubled time" false (O.due ~now:5.9 t);
+  check bool "after the doubled time" true (O.due ~now:6.0 t)
 
 (* An answer arriving when no read is in flight belongs to a read that did
    not carry the owed change (an audit still owed, for one), so it settles
@@ -103,8 +104,8 @@ let () =
         ; test_case "a failed read retries with backoff" `Quick
             test_a_failed_read_retries_with_backoff
         ; test_case "the wait stops growing" `Quick test_the_wait_stops_growing
-        ; test_case "a change during a failure wait is read now and keeps the backoff" `Quick
-            test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff
+        ; test_case "a change during a failure wait keeps the scheduled retry" `Quick
+            test_a_change_during_a_failure_wait_keeps_the_scheduled_retry
         ; test_case "an answer without a read in flight keeps what is owed" `Quick
             test_an_answer_without_a_read_in_flight_keeps_what_is_owed
         ; test_case "a read that never ran is owed again" `Quick

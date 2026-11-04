@@ -28,7 +28,10 @@ let test_open_addon_wins_over_the_lanes_surface () =
      = Decision.Read_addon "quiz-1");
   check bool "another instance is still ignored over Lanes" true
     (Decision.of_views ~lanes:true ~addon:(Some "someone-else") dataset
-     = Decision.Ignore)
+     = Decision.Ignore);
+  check bool "Lanes still reads underneath the open Add-on" true
+    (Decision.of_views ~lanes:true ~addon:(Some "quiz-1")
+       Masc.Workspace_dataset_event.Lanes = Decision.Read_lanes)
 
 let () =
   run "Lane read decision"

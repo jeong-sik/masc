@@ -617,6 +617,49 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
   check string "delivery and recovery never replay the answer write" original_log (Fs_compat.load_file log_path)
 ;;
 
+(* An answer for a Keeper whose meta file is gone is not enqueued, on either
+   recovery path. Its log stays, so storing the meta again lets the next pass
+   deliver it. *)
+let test_answers_wait_while_their_keeper_has_no_meta_file () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let kept = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"kept-answer" () in
+  let gone = persist_answer ~base_path ~keeper_name:"gone" ~ask_id:"gone-answer" () in
+  let gone_queue = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "gone")
+      Keeper_event_queue_persistence.snapshot_filename in
+  let report = reconcile_or_fail ~base_path in
+  check int "the stored Keeper's answer is enqueued" 1 report.enqueued;
+  check (list string) "the Keeper without a meta file is named" [ "gone" ] report.owners_absent;
+  check int "a missing meta file is not a failure" 0 (List.length report.failures);
+  check (list string) "the stored Keeper holds its answer" [ kept.ask_id ]
+    (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
+       (pending_asks ~base_path ~keeper_name:"alpha"));
+  check bool "no queue is written for the Keeper without a meta file" false
+    (Sys.file_exists gone_queue);
+  let reported = ref [] in
+  Eio.Switch.run (fun sw ->
+    let discoveries = Eio.Stream.create 1 in
+    let recovery = Wake.create ~base_path
+        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
+        ~on_report:(fun ~keeper_name _ -> reported := keeper_name :: !reported) () in
+    Wake.pulse ~sw recovery;
+    match Eio.Stream.take discoveries with
+    | Ok () -> ()
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error));
+  check (list string) "the pulse starts a worker only for the stored Keeper" [ "alpha" ] !reported;
+  check bool "the pulse writes no queue for the Keeper without a meta file" false
+    (Sys.file_exists gone_queue);
+  ensure_keeper "gone";
+  let restored = reconcile_or_fail ~base_path in
+  check int "the kept answer is delivered once the meta file is stored" 1 restored.enqueued;
+  check (list string) "no Keeper is absent" [] restored.owners_absent;
+  check (list string) "the restored Keeper holds its original answer" [ gone.ask_id ]
+    (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
+       (pending_asks ~base_path ~keeper_name:"gone"))
+;;
+
 let test_durable_write_failure_is_recovered_from_the_answer_record () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
@@ -1397,6 +1440,8 @@ let () =
             test_a_delivered_answer_is_a_success
         ; test_case "recorded answer recovers once on original continuation" `Quick
             test_recorded_answer_recovers_once_on_original_continuation
+        ; test_case "answers wait while their Keeper has no meta file" `Quick
+            test_answers_wait_while_their_keeper_has_no_meta_file
         ; test_case "durable write failure recovers from the answer record" `Quick
             test_durable_write_failure_is_recovered_from_the_answer_record
         ; test_case "corrupt delivery evidence cannot recreate accepted source" `Quick

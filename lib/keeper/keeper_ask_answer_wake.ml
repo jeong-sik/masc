@@ -7,6 +7,7 @@ type error =
   | Invalid_answered_record of string
   | Delivery_evidence_unavailable of Keeper_reaction_ledger.strict_delivery_evidence_error
   | Queue_storage_failed of string
+  | Owner_unavailable of string
 
 let error_to_string = function
   | Ask_store_unavailable error -> Keeper_ask_store.read_error_to_string error
@@ -16,6 +17,7 @@ let error_to_string = function
   | Delivery_evidence_unavailable error ->
       Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error
   | Queue_storage_failed detail -> "answer wake storage failed: " ^ detail
+  | Owner_unavailable detail -> "answer owner metadata unreadable: " ^ detail
 
 let wake_hint ~log_deferred ~base_path ~keeper_name ~ask_id =
   try
@@ -333,6 +335,7 @@ type report =
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
+  ; owners_absent : string list
   ; failures : failure list
   }
 
@@ -360,7 +363,7 @@ let delivery_window since =
 
 let empty_report =
   { inspected=0; evidence_window_reads=0; enqueued=0;
-    already_pending=0; already_delivered=0; failures=[] }
+    already_pending=0; already_delivered=0; owners_absent=[]; failures=[] }
 
 let reconcile_rows ~base_path ~keeper_name report rows =
   let open Result.Syntax in
@@ -418,6 +421,24 @@ let reconcile_rows ~base_path ~keeper_name report rows =
   { report with evidence_window_reads =
       report.evidence_window_reads + !window_reads }
 
+(* Only a missing meta file is a gone Keeper, the reading the approval queue
+   and the fleet health already use. A file this binary does not decode
+   ([Meta_not_current]) still names a Keeper that boot re-materialises from its
+   declaration. A gone Keeper has nobody to wake, so its answered asks stay in
+   its log; a pass after the name is stored again delivers them. *)
+type owner = Owner_present | Owner_absent | Owner_unreadable of string
+
+let owner_of ~base_path ~keeper_name =
+  match Keeper_meta_store.read_meta_presence (Workspace.default_config base_path) keeper_name with
+  | Error detail -> Owner_unreadable detail
+  | Ok Keeper_meta_store.Meta_absent -> Owner_absent
+  | Ok (Keeper_meta_store.Meta_present _ | Keeper_meta_store.Meta_not_current _) -> Owner_present
+
+let has_answered rows =
+  List.exists (fun (_, (_, resolution)) -> match resolution with
+    | Keeper_ask.Answered_by _ -> true
+    | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows
+
 let reconcile ~base_path =
   let open Result.Syntax in
   let* logs = Keeper_ask_store.discover_rows_result ~base_path in
@@ -427,9 +448,17 @@ let reconcile ~base_path =
           { report with failures = { keeper_name = None; ask_id = None;
               error = Ask_store_unavailable error } :: report.failures }
       | Keeper_ask_store.Canonical_rows { keeper_name; rows } ->
-          reconcile_rows ~base_path ~keeper_name report rows)
+          if not (has_answered rows) then report
+          else
+            match owner_of ~base_path ~keeper_name with
+            | Owner_present -> reconcile_rows ~base_path ~keeper_name report rows
+            | Owner_absent -> { report with owners_absent = keeper_name :: report.owners_absent }
+            | Owner_unreadable detail ->
+                { report with failures = { keeper_name = Some keeper_name; ask_id = None;
+                    error = Owner_unavailable detail } :: report.failures })
     empty_report logs in
-  Ok {report with failures=List.rev report.failures}
+  Ok {report with failures=List.rev report.failures;
+                  owners_absent=List.rev report.owners_absent}
 
 type recovery_phase = Reserved | Started | Settled of report | Interrupted | Raised
 
@@ -481,50 +510,63 @@ let discover_and_schedule ~sw supervisor =
   let open Result.Syntax in
   Eio.Switch.check sw;
   let* logs = Keeper_ask_store.discover_rows_result ~base_path:supervisor.base_path in
-  List.iter (function
+  let schedule keeper_name rows =
+    Eio.Switch.check sw;
+    let started_ns = Mtime_clock.elapsed_ns () in
+    supervisor.active <- Set_util.StringSet.add keeper_name supervisor.active;
+    let release () =
+      supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
+    try
+      observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Reserved;
+      Eio.Switch.check sw;
+      Eio.Fiber.fork ~sw (fun () ->
+        Fun.protect ~finally:release (fun () ->
+          try
+            (* Reserve all independent owners without joining their queues,
+               even when the configured filesystem completes inline. *)
+            Eio.Fiber.yield ();
+            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
+            let report = reconcile_rows ~base_path:supervisor.base_path
+                ~keeper_name empty_report rows in
+            let report = {report with failures=List.rev report.failures} in
+            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
+            (try supervisor.on_report ~keeper_name report with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s base_path=%S"
+                 keeper_name (Printexc.to_string exn) supervisor.base_path)
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Interrupted;
+              raise exn
+          | exn ->
+              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Raised;
+              Log.Server.warn "ask answer recovery worker retained keeper=%s: %s base_path=%S"
+                keeper_name (Printexc.to_string exn) supervisor.base_path))
+    with exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      release ();
+      Printexc.raise_with_backtrace exn bt in
+  let owners_absent = List.fold_left (fun owners_absent -> function
     | Keeper_ask_store.Unreadable_log error ->
         Log.Server.warn "ask answer recovery discovery retained error=%s base_path=%S"
-          (Keeper_ask_store.read_error_to_string error) supervisor.base_path
+          (Keeper_ask_store.read_error_to_string error) supervisor.base_path;
+        owners_absent
     | Keeper_ask_store.Canonical_rows {keeper_name; rows} ->
-        if not (Set_util.StringSet.mem keeper_name supervisor.active)
-           && List.exists (fun (_, (_, resolution)) -> match resolution with
-          | Keeper_ask.Answered_by _ -> true
-          | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows then (
-          Eio.Switch.check sw;
-          let started_ns = Mtime_clock.elapsed_ns () in
-          supervisor.active <- Set_util.StringSet.add keeper_name supervisor.active;
-          let release () =
-            supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
-          try
-            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Reserved;
-            Eio.Switch.check sw;
-            Eio.Fiber.fork ~sw (fun () ->
-              Fun.protect ~finally:release (fun () ->
-                try
-                  (* Reserve all independent owners without joining their queues,
-                     even when the configured filesystem completes inline. *)
-                  Eio.Fiber.yield ();
-                  observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
-                  let report = reconcile_rows ~base_path:supervisor.base_path
-                      ~keeper_name empty_report rows in
-                  let report = {report with failures=List.rev report.failures} in
-                  observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
-                  (try supervisor.on_report ~keeper_name report with
-                   | Eio.Cancel.Cancelled _ as exn -> raise exn
-                   | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s base_path=%S"
-                       keeper_name (Printexc.to_string exn) supervisor.base_path)
-                with
-                | Eio.Cancel.Cancelled _ as exn ->
-                    observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Interrupted;
-                    raise exn
-                | exn ->
-                    observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Raised;
-                    Log.Server.warn "ask answer recovery worker retained keeper=%s: %s base_path=%S"
-                      keeper_name (Printexc.to_string exn) supervisor.base_path))
-          with exn ->
-            let bt = Printexc.get_raw_backtrace () in
-            release ();
-            Printexc.raise_with_backtrace exn bt)) logs;
+        if Set_util.StringSet.mem keeper_name supervisor.active || not (has_answered rows)
+        then owners_absent
+        else
+          match owner_of ~base_path:supervisor.base_path ~keeper_name with
+          | Owner_present -> schedule keeper_name rows; owners_absent
+          | Owner_absent -> keeper_name :: owners_absent
+          | Owner_unreadable detail ->
+              Log.Server.warn "ask answer recovery retained keeper=%s error=%s base_path=%S"
+                keeper_name (error_to_string (Owner_unavailable detail)) supervisor.base_path;
+              owners_absent) [] logs in
+  (match owners_absent with
+   | [] -> ()
+   | _ :: _ ->
+       Log.Server.routine "ask answer recovery skipped keepers without metadata count=%d keepers=%s base_path=%S"
+         (List.length owners_absent) (String.concat "," (List.rev owners_absent)) supervisor.base_path);
   Ok ()
 
 type discovery_phase =

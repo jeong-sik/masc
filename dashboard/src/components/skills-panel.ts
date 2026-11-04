@@ -13,6 +13,7 @@ import type { AsyncRequestIdentity } from '../api/composition-observation'
 import {
   classifySkillEditorError,
   fetchAsyncRequestObservation,
+  fetchKeeperSkillUsage,
   fetchSkills,
   fetchSkillEvidence,
   previewSkillSource,
@@ -24,6 +25,7 @@ import {
   type SkillEditorPreview,
   type SkillEditorSaveReceipt,
   type AsyncRequestObservation,
+  type KeeperSkillUsage,
   type SkillIdentity,
   type SkillReference,
   type SkillSnapshotConfig,
@@ -31,13 +33,14 @@ import {
   type SkillSnapshotRejection,
   type SkillSurface,
   type SkillSurfaceProfile,
+  type SkillUsage,
   type SkillsResponse,
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
 import { currentStoredTokenRevision } from '../api/core'
 import { storedTokenRevision } from '../api/token-revision'
-import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
+import { executionWorkspaceAuthority, keepers, type ExecutionWorkspaceAuthority } from '../store'
 
 const POLL_INTERVAL_MS = 30_000
 
@@ -157,13 +160,69 @@ export function contextLabel(surface: SkillSurface | null, bodyBytes: number): s
   return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.body_bytes)} body`
 }
 
-export function usageLabel(surface: SkillSurface | null): string {
-  const usage = surface?.usage ?? []
-  if (surface?.usage === undefined) return 'Usage observation unavailable'
+export function usageLabel(usage: readonly SkillUsage[] | null): string {
+  if (usage === null) return 'Usage observation unavailable'
   if (usage.length === 0) return 'No invocation observed in retained sessions'
   return usage
     .map(row => `${row.keeper} ${row.invocations} invoked / ${row.deliveries} received / ${row.actions} observed actions · last activation ${row.last_used_at}`)
     .join(' · ')
+}
+
+/** Every Keeper's usage, joined to the catalog by exact Skill reference. */
+export interface KeeperUsageReading {
+  byReference: ReadonlyMap<string, readonly SkillUsage[]>
+  ledgersRead: number
+  unavailable: readonly string[]
+}
+
+export function referenceKey(reference: SkillReference): string {
+  return `${identityKey(reference.identity)}@${reference.content_revision}`
+}
+
+/** Joins each Keeper's `skill-usage` answer, in Keeper name order. A Keeper
+    with no session has nothing to count; one whose ledger or answer could
+    not be read is listed as unavailable. */
+export function keeperUsageReading(
+  readings: readonly { keeper: string; result: PromiseSettledResult<KeeperSkillUsage> }[],
+): KeeperUsageReading {
+  const byReference = new Map<string, SkillUsage[]>()
+  let ledgersRead = 0
+  const unavailable: string[] = []
+  const ordered = [...readings].sort((left, right) => left.keeper.localeCompare(right.keeper))
+  for (const { keeper, result } of ordered) {
+    if (result.status === 'rejected') {
+      const reason: unknown = result.reason
+      unavailable.push(`${keeper}: ${reason instanceof Error ? reason.message : String(reason)}`)
+      continue
+    }
+    const usage = result.value
+    switch (usage.state) {
+      case 'ready':
+        ledgersRead += 1
+        for (const row of usage.rows) {
+          const key = referenceKey(row.reference)
+          const rows = byReference.get(key) ?? []
+          rows.push({
+            keeper,
+            invocations: row.invocations,
+            deliveries: row.deliveries,
+            actions: row.actions,
+            last_used_at: row.last_used_at,
+          })
+          byReference.set(key, rows)
+        }
+        break
+      case 'no_catalog':
+        ledgersRead += 1
+        break
+      case 'no_session':
+        break
+      case 'unavailable':
+        unavailable.push(`${keeper}: ${usage.reason} (${usage.detail})`)
+        break
+    }
+  }
+  return { byReference, ledgersRead, unavailable }
 }
 
 export function formatBytes(bytes: number): string {
@@ -779,6 +838,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
   onMutation: (result: SkillMutationResult) => void
 }) {
   const response = useSignal<SkillsResponse | null>(null)
+  const keeperUsage = useSignal<KeeperUsageReading | null>(null)
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
@@ -821,6 +881,18 @@ function SkillsObservationPanel({ owner, onMutation }: {
       if (!current() || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
+      if (res.state === 'ready') {
+        // Each Keeper's usage is its own read (RFC-0483), so reading every
+        // Keeper does not carry every ledger.
+        const names = keepers.peek().map(keeper => keeper.name)
+        const settled = await Promise.allSettled(
+          names.map(name => fetchKeeperSkillUsage(name, { signal })),
+        )
+        if (!current() || generation !== catalogGeneration.current) return
+        keeperUsage.value = keeperUsageReading(
+          names.map((keeper, index) => ({ keeper, result: settled[index]! })),
+        )
+      }
     } catch (cause) {
       if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
       error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
@@ -927,10 +999,10 @@ function SkillsObservationPanel({ owner, onMutation }: {
       </div>
       <div class="ss-muted my-2" data-testid="skill-usage-coverage">
         Usage scope: exact revision · retained current Keeper sessions.
-        ${res.usage_coverage ? html`
-          ${res.usage_coverage.ledgers_loaded} ledgers read · ${res.usage_coverage.unavailable.length} unavailable.
-          ${res.usage_coverage.unavailable.length > 0 ? html`<details class="text-[var(--color-status-warn)]"><summary>Incomplete session coverage</summary>
-            ${res.usage_coverage.unavailable.map(detail => html`<div key=${detail}>${detail}</div>`)}
+        ${keeperUsage.value ? html`
+          ${keeperUsage.value.ledgersRead} ledgers read · ${keeperUsage.value.unavailable.length} unavailable.
+          ${keeperUsage.value.unavailable.length > 0 ? html`<details class="text-[var(--color-status-warn)]"><summary>Incomplete session coverage</summary>
+            ${keeperUsage.value.unavailable.map(detail => html`<div key=${detail}>${detail}</div>`)}
           </details>` : null}
         ` : html`Coverage unavailable; displayed users cannot establish fleet-wide usage.`}
         Received counts invocations handed to a provider/client, including asynchronous results. Actions are counted per Skill invocation; one tool call may contribute to several invocations. An observed action does not imply completion.
@@ -984,7 +1056,9 @@ function SkillsObservationPanel({ owner, onMutation }: {
                   <div class="ss-muted mono">${row.surface && row.surface.kind !== 'unavailable' ? row.surface.profile.activation_tool : 'unavailable'}</div>
                 </td>
                 <td>${contextLabel(row.surface, row.body_bytes)}</td>
-                <td>${usageLabel(row.surface)}</td>
+                <td>${usageLabel(row.surface && keeperUsage.value
+                  ? keeperUsage.value.byReference.get(referenceKey(row.surface.reference)) ?? []
+                  : null)}</td>
                 <td class="mono">${row.source}</td>
               </tr>
               ${isExpanded ? html`

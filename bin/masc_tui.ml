@@ -8212,7 +8212,12 @@ let owe_async_requests_read state =
 let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
-  | Lanes -> launch_lanes_load state ~mailbox
+  (* Arriving owes the inventory a read as well as starting one: a read
+     already in flight may have begun before a change announced while the
+     surface was off screen, and the owed read follows it. *)
+  | Lanes ->
+      owe_lanes_read state;
+      launch_lanes_load state ~mailbox
   | Clients -> launch_clients_load state ~mailbox
   (* The list draws nothing from the Keeper composite; Info and Secrets read
      it on entry and when it changes. *)

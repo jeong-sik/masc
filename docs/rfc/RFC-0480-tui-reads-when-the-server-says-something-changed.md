@@ -3,11 +3,11 @@ rfc: "0480"
 title: "TUI 는 2초마다 다시 읽지 않고, 서버가 바뀌었다고 알릴 때 읽는다"
 status: Draft
 created: 2026-11-02
-updated: 2026-11-03
+updated: 2026-11-04
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["0477", "0481", "0461", "observe-by-waking-not-polling"]
+related: ["0477", "0481", "0482", "0461", "observe-by-waking-not-polling"]
 ---
 
 # RFC-0480 — TUI 는 서버가 알릴 때 읽는다
@@ -190,11 +190,48 @@ TUI 가 켜진 뒤 처음 연결은 `Fresh` 라서, 시작할 때의 읽기와 �
 | L5 | 승인·gate 알림 → gate, tool-approvals, tool modes. `operator_snapshot` → operator 요약(승인 수). 스냅샷 문자열 비교를 생성자로 바꾼다(§3.2) | `approval:*` 가 gate 저장소의 모든 쓰기를 덮는지(아직 확인하지 못했다) |
 | L6 | Keeper_logs 의 Execute 출력도 SSE 로 받는다. snapshot 읽기를 지운다. 웹 대시보드도 그 경로를 쓰지 않으면 서버 경로도 지운다 | 화면 증거 |
 | L7 | 키퍼 행(RFC-0481 §5 의 층들). roster·turns 의 2초 읽기를 지운다 | RFC-0481 §5 |
-| L8~ | §1.4 데이터마다 서버 알림과 TUI 반응. 데이터 하나가 층 하나다. 로컬 파일(로컬 키퍼 목록, metrics 꼬리)은 파일 변경 감시로 바꾼다 | §3.4 의 세 조건 |
+| L8~ | §1.4 데이터마다 서버 알림과 TUI 반응. 데이터 하나가 층 하나다(§4.1). 로컬 파일(runtime.toml, 로컬 키퍼 목록)은 서버가 쓸 때만 알리고, CLI 나 손으로 고친 것은 화면에 들어갈 때와 `r` 때 읽는다. 파일 변경 감시는 들이지 않는다 | §3.4 의 세 조건 |
 | Ly | §3.5 의 읽기 아닌 일 옮기기(로그인 마감 타이머, 재시도 담당, 연결 상태) | 피드를 끊었다 열 때 다시 열리는지, 마감 시각에 대기가 끝나는지 |
 | Lz | §3.5 메인 루프 정리 | 2초 블록과 `--refresh` 가 없는지 |
 
 L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
+
+### 4.1 데이터별 층과 결정 (2026-11-04)
+
+모든 알림은 `workspace_dataset_changed {dataset[, keeper]}`(`lib/workspace_dataset_event.ml`) 하나로 낸다. 새 데이터는 닫힌 타입에 생성자를 하나 더하고, TUI 는 그 생성자마다 읽기 빚을 하나 더한다. 데이터 종류를 문자열로 가르지 않는다.
+
+| 데이터 | 쓰는 곳에서 내는 알림 | TUI | PR |
+|---|---|---|---|
+| repositories, verification requests | `Repo_store` 쓰기, 검증 저장소 쓰기 | 목록 읽기 빚 | #47994 |
+| 연결 상태(transport) | `transport_health_snapshot` | 묶음 출처 빚 | #47997 |
+| Keeper metrics 꼬리 | `append_keeper_metrics` 안 | 선택 Keeper 만 | #48003 |
+| harness | 판정·라벨 기록 뒤, 서버가 캐시를 먼저 지움. stale 시각은 응답이 알려 준 시각에 한 번 | 읽기 빚 | #48008 |
+| planning, Goal 트리 | `Goal_store.notify_projection_change`, task 쓰기 전에 planning 캐시 지움 | 묶음 출처 빚 | #48011 |
+| runtime.toml | 서버의 commit 시도마다, 계정 로그인 끝 | Config 화면 빚 | #48017 |
+| connectors | 상태 기록 함수가 값이 바뀔 때만(`Channel_gate_change.store`), 이름 배치당 한 번 | 읽기 빚 | #48032 |
+| OAuth 로그인 시도 | `Keeper_oauth_pending` 다섯 곳, Keeper 이름만 | 기다리는 Keeper 별 빚 + 동의 마감 한 번 | #48055 |
+| Skill 기록·카탈로그 | 원장 커밋마다 `skill_activations {keeper}`, snapshot 게시 때 `skill_catalog` | 선택 Keeper 범위와 카탈로그를 따로 | #48062 |
+| async 요청 상세 | 실행 저널 쓰기 시도마다 기존 `keeper_async_requests_changed` | 열린 상세만 | #48065 |
+| clients | `Workspace_agent_record` 하나가 모든 agent 레코드를 쓰고, 그리는 값이 바뀔 때만. heartbeat 는 안 냄 | 읽기 빚. registry 행 시각은 `null` | #48068, #48070 |
+
+아직 옮기지 않은 것과 정한 방향이다.
+
+| 데이터 | 방향 | 먼저 할 일 |
+|---|---|---|
+| Lanes 목록 | 그리는 값(instance phase·presence·revision, application, browser·machine 요약)을 계산해 이전 값과 다를 때만, 식별자 없이 알린다. worker 커밋은 1시간 727건인데 같은 시간 Lanes 가 그리는 값은 한 번도 바뀌지 않았다(11-04 실측) | `lane_addon_runtime` 의 상태 쓰기 14곳과 그 밖의 쓰기를 setter 하나로 모은다 |
+| Lane Add-ons Inspect | 열린 instance 의 커밋 알림을 받는다. `seq` 를 그리므로 커밋 하나가 변화 하나다 | 위와 같다. instance id 는 visibility 를 거른 독자에게만 보낸다 |
+| Memory health | 서버가 Keeper 별 health 를 저장할 때 증분으로 들고 그 Keeper 만 알린다. TUI 는 바뀐 Keeper 행만 읽는다 | 입력 저장소 10곳 넘는 쓰기 자리 정리, 저널을 처음부터 읽는 계산 제거 |
+| Usage(사용량·비용·quota·provider 이력) | 서버가 기록을 받을 때 증분 집계하고 알린다. 다시 집계하지 않는다 | 집계 상태를 어디에 둘지 |
+| Skill 사용 집계(`/api/v1/skills`) | Usage 와 같은 증분 집계. 지금은 사용 집계 창을 보는 동안 원장 줄마다 다시 읽는다(#48062) | 위와 같다 |
+| Runtime 화면(probe·resolved·metrics) | 측정값이라 서버가 값을 만들 때 알린다(§0 결정 5) | 쓰는 곳 조사 |
+| system logs | 신호 → 300줄 다시 읽기는 지금보다 무겁다. `since_seq` 를 가진 타입 스트림으로 옮긴다(§3.1) | 서버 로그 버퍼의 순번 |
+| briefing, `/health`, 연결 상태 | Ly 에서 연결 상태를 열린 스트림이 정하게 바꾼 뒤 옮긴다 | Ly |
+| 원본 Task 보기 | 본문은 `execution_snapshot` 으로 된다. 이력은 하위 라이브러리의 activity 기록에 알림 자리가 없다 | backlog 를 바꾸지 않는 이력 줄이 있는지 확인 |
+| ask follow-up | 끝 조건이 정해지지 않았다(§8) | 끝 조건 |
+| 로컬 Keeper 목록·로컬 작업 | 서버가 쓰는 경우만 알린다. CLI·손 편집은 진입과 `r` | 쓰는 곳 조사 |
+| 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0482 | RFC-0482 |
+
+화면에 "N초 전"을 다시 그리는 타이머는 데이터를 읽지 않으므로 남긴다. Lz 가 지우는 것은 읽기를 일으키는 2초 블록과 `--refresh` 다.
 
 ## 5. 죽은 코드
 
@@ -223,3 +260,6 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 ## 8. 결정이 필요한 것
 
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
+2. ask follow-up 관찰을 언제 끝낼지. 지금은 답이 기록된 뒤 2초 tick 이 관찰을 다시 연다.
+
+정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0482 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다.

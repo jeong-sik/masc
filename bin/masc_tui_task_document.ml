@@ -3,6 +3,23 @@ module Tui_decode = Masc.Tui_decode
 module Message_layout = Masc_tui_message_layout
 module Planning_detail = Masc_tui_planning_detail
 
+(* A Task opened from its Goal reads like the Goal: the same section title
+   style (info colour, bold) and the same receded rows for where a fact came
+   from ([Masc_tui_render_work.planning_detail_tone]). A style goes on a row
+   after the row is wrapped. The wrapper neutralises every escape sequence in
+   what it is given, so a style put on first would be spelled out on screen. *)
+let heading_style () = Theme.info () ^ Ansi.bold
+let provenance_style = Ansi.dim
+
+let paint style row =
+  if String.equal style "" then row else style ^ row ^ Ansi.reset
+
+let section_rows ~width title =
+  Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+  |> List.map (fun line -> "  " ^ paint (heading_style ()) line)
+
+let history_heading_rows ~width = section_rows ~width "4. 상태 전환 이력 (HISTORY)"
+
 let history_rows = function
         | [] -> [ "    (no events in the observed prefix)" ]
         | events ->
@@ -39,10 +56,6 @@ let history_rows = function
               events
 
 let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight ~continuing =
-  let header =
-    Masc_tui_text_block.rows ~max_cells:width "[ 4. 상태 전환 이력 (HISTORY) ]"
-    |> List.map (fun line -> "  " ^ line)
-  in
   let rows =
     match view with
     | Masc_tui_fetched.Ready _ -> []
@@ -74,58 +87,61 @@ let history_status_lines ~width ~(view : Masc.Tui_decode_task_inspection.history
       "    " ^ (match source with Tui_decode.Task_activity -> "Lifecycle" | Tui_decode.Task_audit -> "Audit")
       ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> ": observed stored prefix"
         | Masc.Tui_decode_task_inspection.Source_not_created -> ": store not yet created; no observations available")) history.history_sources in
-  ("" :: header @ (pending @ rows @ sources @ boundary))
+  pending @ rows @ sources @ boundary
 
 let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
   let width = max 1 (framed_inner_width cols - 2) in
-  let labeled_lines label text =
+  let labeled_lines ?(style = "") label text =
     let prefix = "  " ^ label ^ ": " in
     let prefix_width = Message_layout.display_width prefix in
-    if prefix_width < framed_inner_width cols then
-      Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - prefix_width) text
-      |> List.mapi (fun index line ->
-           (if index = 0 then prefix else String.make prefix_width ' ') ^ line)
-    else
-      (Message_layout.wrap_words ~max_cells:width label
-       |> List.map (fun line -> "  " ^ line))
-      @ (Masc_tui_text_block.rows ~max_cells:width text
-         |> List.map (fun line -> "  " ^ line))
+    (if prefix_width < framed_inner_width cols then
+       Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - prefix_width) text
+       |> List.mapi (fun index line ->
+            (if index = 0 then prefix else String.make prefix_width ' ') ^ line)
+     else
+       (Message_layout.wrap_words ~max_cells:width label
+        |> List.map (fun line -> "  " ^ line))
+       @ (Masc_tui_text_block.rows ~max_cells:width text
+          |> List.map (fun line -> "  " ^ line)))
+    |> List.map (paint style)
   in
-  let some_lines label = function None -> [] | Some text -> labeled_lines label text in
+  let some_lines ?style label = function
+    | None -> []
+    | Some text -> labeled_lines ?style label text
+  in
   let list_lines label items = List.concat_map (labeled_lines label) items in
   (* Status, actor and every transition's evidence are real rows in the same
      reading as the description. No metadata field is a one-line preview. *)
+  let status_row text = labeled_lines ~style:(task_state_style task.task_status) "status" text in
+  let when_lines label at = labeled_lines ~style:provenance_style label at in
   let status_lines =
     match task.task_status with
-    | Masc_domain.Todo -> labeled_lines "status" "todo — unclaimed"
+    | Masc_domain.Todo -> status_row "todo — unclaimed"
     | Masc_domain.Claimed { assignee; claimed_at } ->
-        labeled_lines "status" "claimed" @ labeled_lines "actor" assignee
-        @ labeled_lines "claimed" claimed_at
+        status_row "claimed" @ labeled_lines "actor" assignee
+        @ when_lines "claimed" claimed_at
     | Masc_domain.InProgress { assignee; started_at } ->
-        labeled_lines "status" "in progress" @ labeled_lines "actor" assignee
-        @ labeled_lines "started" started_at
+        status_row "in progress" @ labeled_lines "actor" assignee
+        @ when_lines "started" started_at
     | Masc_domain.AwaitingVerification { assignee; started_at; submitted_at; verification_id } ->
-        labeled_lines "status" "awaiting verification" @ labeled_lines "actor" assignee
-        @ labeled_lines "started" started_at @ labeled_lines "submitted" submitted_at
+        status_row "awaiting verification" @ labeled_lines "actor" assignee
+        @ when_lines "started" started_at @ when_lines "submitted" submitted_at
         @ labeled_lines "verification" verification_id
     | Masc_domain.Done { assignee; completed_at; notes } ->
-        labeled_lines "status" "done" @ labeled_lines "actor" assignee
-        @ labeled_lines "completed" completed_at @ some_lines "notes" notes
+        status_row "done" @ labeled_lines "actor" assignee
+        @ when_lines "completed" completed_at @ some_lines "notes" notes
     | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason } ->
-        labeled_lines "status" "cancelled" @ labeled_lines "actor" cancelled_by
-        @ labeled_lines "cancelled" cancelled_at @ some_lines "reason" reason
+        status_row "cancelled" @ labeled_lines "actor" cancelled_by
+        @ when_lines "cancelled" cancelled_at @ some_lines "reason" reason
   in
-  let section_head title =
-    Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
-    |> List.map (fun line -> "  " ^ line)
-  in
+  let section_head title = section_rows ~width title in
   let identity_section =
     section_head "1. 작업 식별 · 상태 및 목표 (Task Identity & Status)"
     @ labeled_lines "title" task.title
     @ labeled_lines "id" task.id
     @ goal_lines
     @ status_lines
-    @ labeled_lines "created" task.created_at
+    @ when_lines "created" task.created_at
     @ labeled_lines "creator"
         (match task.created_by with Some by -> by | None -> Masc_tui_theme.Glyph.no_value)
     @ labeled_lines "priority" (string_of_int task.priority)
@@ -159,7 +175,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
             else labeled_lines "handoff" handoff.Masc_domain.summary)
          @ some_lines "next" handoff.Masc_domain.next_step
          @ some_lines "failure" handoff.Masc_domain.failure_mode
-         @ some_lines "handoff updated" handoff.Masc_domain.updated_at
+         @ some_lines ~style:provenance_style "handoff updated" handoff.Masc_domain.updated_at
          @ some_lines "handoff updater" handoff.Masc_domain.updated_by
          @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
     @
@@ -200,20 +216,21 @@ let prepare_input = function
         Masc_tui_text_block.preformatted_rows
           ~max_cells:(max 1 (framed_inner_width cols)) line)
   | Body_input (cols,goals,task) ->
-      let field label text =
+      let field ?(style = "") label text =
         let prefix="  " ^ label ^ ": " in
         let inner=max 1 (framed_inner_width cols) in
         let lead=Message_layout.display_width prefix in
-        if lead < inner then
+        (if lead < inner then
           Masc_tui_text_block.rows ~max_cells:(inner-lead) text
           |> List.mapi (fun index line -> (if index=0 then prefix else String.make lead ' ') ^ line)
-        else Masc_tui_text_block.rows ~max_cells:inner (prefix ^ text) in
+        else Masc_tui_text_block.rows ~max_cells:inner (prefix ^ text))
+        |> List.map (paint style) in
       let goal_lines=match goals with
         | Unread -> field "goal" "(membership unknown: links not read)"
         | Unavailable detail -> field "goal" ("(membership unknown: " ^ detail ^ ")")
         | Membership [] -> field "goal" "(not linked to a goal)"
         | Membership ids -> List.concat_map (fun id -> field "goal" id
-            @ field "link" (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
+            @ field ~style:provenance_style "link" (Masc_tui_link.reference Masc_tui_link.Goal id)) ids
         | Canonical goal -> field "canonical goal" (Option.fold ~none:"없음(기록)" ~some:Fun.id goal) in
       body_lines ~cols ~goal_lines task
 

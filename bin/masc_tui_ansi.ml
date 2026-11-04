@@ -779,6 +779,17 @@ let task_status_icon status =
   | Masc_domain.Todo -> Masc_tui_theme.Glyph.progress_waiting
   | Masc_domain.Cancelled _ -> Masc_tui_theme.Glyph.progress_ended
 
+(** The colour a task's state wears wherever it is drawn, in a list row and in
+    the detail: in-flight in cyan, waiting dimmed. Terminal states never reach
+    the open-task list ([active_tasks_of_domain] filters them); they keep the
+    default so a caller showing one is visible rather than wrong. *)
+let task_state_style status =
+  match status with
+  | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> Theme.info ()
+  | Masc_domain.AwaitingVerification _ -> Theme.warn ()
+  | Masc_domain.Todo -> Ansi.dim
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ""
+
 (** Context ratio tone: healthy capacity recedes; only pressure and danger
     claim an attention colour. All three resolve against the terminal palette. *)
 let ctx_color ratio =

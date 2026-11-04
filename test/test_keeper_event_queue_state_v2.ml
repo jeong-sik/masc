@@ -1253,9 +1253,9 @@ let with_temp_dir prefix f =
 ;;
 
 let with_state_change_observer observer f =
-  Persistence.install_state_change_observer observer;
+  Persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> observer ());
   Fun.protect
-    ~finally:(fun () -> Persistence.install_state_change_observer ignore)
+    ~finally:(fun () -> Persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ()))
     f
 ;;
 
@@ -1326,7 +1326,7 @@ let test_transition_wal_commit_observer_exactly_once () =
   with_temp_dir "keeper-event-queue-observer-wal" (fun base_path ->
     let keeper_name = "wal-observer-keeper" in
     let source = stimulus "wal-observer-source" 1.0 in
-    Persistence.install_state_change_observer ignore;
+    Persistence.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ());
     Persistence.enqueue_stimulus_if_absent_result
       ~base_path
       ~keeper_name

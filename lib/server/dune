@@ -195,6 +195,7 @@
   time_compat
   fs_compat
   dated_jsonl
+  dated_jsonl_kept_days
   masc_http_client
   masc_log
   masc_types

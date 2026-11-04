@@ -125,6 +125,7 @@ let dispatch
                  ~channel:None)
         ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
         ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+        ; result_boundary = Tool_output.Sent_to_client
         }
         ~name
         ~args

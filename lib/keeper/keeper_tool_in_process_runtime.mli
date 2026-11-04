@@ -380,10 +380,13 @@ val handle_keeper_spawn_with_outcome
     [Remote_ssh] has no argv to background and is refused. *)
 
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
-    cluster handler for [masc_schedule_*] tools. *)
+    cluster handler for [masc_schedule_*] tools. [result_projection] is the
+    projection the lane running the call applies to a result; a paged answer
+    ([masc_schedule_notes_list]) cuts its page to that ceiling. *)
 val handle_masc_schedule_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
+  -> result_projection:Tool_output.model_projection
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> name:string
   -> args:Yojson.Safe.t

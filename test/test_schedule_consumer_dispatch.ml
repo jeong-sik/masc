@@ -1429,6 +1429,7 @@ let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellat
     ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    ; result_boundary = Tool_output.Sent_to_client
     }
   in
   let reason = "the operator stopped this wake" in
@@ -1676,6 +1677,7 @@ let test_schedule_cancel_mid_turn_withdraws_the_running_turns_wake () =
     ; stamp_keeper_wake_result_delivery = (fun ~payload -> Ok payload)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    ; result_boundary = Tool_output.Sent_to_client
     }
   in
   let result =

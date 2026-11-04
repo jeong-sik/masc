@@ -42,6 +42,13 @@ type context =
          Keeper ([Keeper_schedule_cancel_withdrawal.run]). Passed in, like
          [admit_keeper_wake_creation], so this module keeps no static Keeper
          dependency. *)
+  ; result_boundary : Tool_output.result_boundary
+      (* Where a result goes next, and so the byte ceiling it must stay under
+         to reach the reader whole. A Keeper turn passes the lane's own
+         projection: the ceiling is 16 KiB, 32 KiB or 64 KiB by lane. Every
+         other caller passes [Sent_to_client]. [masc_schedule_notes_list] cuts
+         its page to this ceiling; a result above it is stored as a blob and
+         read back page by page. *)
   }
 
 let ( let* ) = Result.bind
@@ -1441,12 +1448,22 @@ let notes_before_id notes before_note_id =
 type notes_page =
   { values : Schedule_domain.schedule_note list
   ; total_count : int
+  ; matched_count : int option
   ; has_more_older : bool
   ; next_before_note_id : string option
   }
 
-let make_notes_page ~limit ~before_note_id all_notes =
-  let* eligible = notes_before_id all_notes before_note_id in
+(* The anchor is looked up among all notes of the schedule, then the filter
+   applies to the notes before it. A page cursor is always a note id the
+   schedule owns, whether or not that note matches the text. *)
+let make_notes_page ~limit ~before_note_id ~contains all_notes =
+  let* before_anchor = notes_before_id all_notes before_note_id in
+  let matches (note : Schedule_domain.schedule_note) =
+    match contains with
+    | None -> true
+    | Some needle -> String_util.contains_substring note.body needle
+  in
+  let eligible = List.filter matches before_anchor in
   let count = List.length eligible in
   let has_more_older = count > limit in
   let values = List.filteri (fun i _ -> i >= count - limit) eligible in
@@ -1455,7 +1472,68 @@ let make_notes_page ~limit ~before_note_id all_notes =
     | true, (first : Schedule_domain.schedule_note) :: _ -> Some first.note_id
     | true, [] | false, _ -> None
   in
-  Ok { values; total_count = List.length all_notes; has_more_older; next_before_note_id }
+  Ok
+    { values
+    ; total_count = List.length all_notes
+    ; matched_count =
+        Option.map (fun _ -> List.length (List.filter matches all_notes)) contains
+    ; has_more_older
+    ; next_before_note_id
+    }
+;;
+
+let notes_page_json ~schedule_id ~limit page =
+  `Assoc
+    ([ "status", `String "ok"
+     ; "schedule_id", `String schedule_id
+     ; "limit", `Int limit
+     ; "total_count", `Int page.total_count
+     ]
+     @ (match page.matched_count with
+        | Some matched -> [ "matched_count", `Int matched ]
+        | None -> [])
+     @ [ "has_more_older", `Bool page.has_more_older
+       ; "next_before_note_id", optional_string_json page.next_before_note_id
+       ; "notes", `List (List.map Schedule_domain.schedule_note_to_yojson page.values)
+       ])
+;;
+
+(* A page above [ceiling] is stored as a blob and read back page by page, so
+   the model pays for the same notes twice. On 2026-11-01..04 that was 2,739
+   results of this tool, 158.6 MB, and 9,185 follow-up reads. [limit] says how
+   many notes at most; the bytes decide how many fit. The newest notes are
+   kept, the cursor moves to the oldest kept one, and one note is always
+   returned: a note alone above the ceiling is stored like any large result.
+
+   A partial page grows with every note added: the note is a JSON object of
+   over a hundred bytes of keys alone, while the cursor can only get shorter by
+   the difference of two ids, a few characters. So the largest page that fits
+   is found by halving. *)
+let fit_notes_page ~ceiling ~schedule_id ~limit page =
+  let count = List.length page.values in
+  let newest kept =
+    let values = List.filteri (fun i _ -> i >= count - kept) page.values in
+    let next_before_note_id =
+      match values with
+      | (first : Schedule_domain.schedule_note) :: _ -> Some first.note_id
+      | [] -> None
+    in
+    { page with values; has_more_older = true; next_before_note_id }
+  in
+  let fits_whole candidate =
+    String.length (Yojson.Safe.to_string (notes_page_json ~schedule_id ~limit candidate))
+    <= ceiling
+  in
+  let rec largest_fitting low high =
+    if low >= high
+    then low
+    else (
+      let middle = low + ((high - low + 1) / 2) in
+      if fits_whole (newest middle)
+      then largest_fitting middle high
+      else largest_fitting low (middle - 1))
+  in
+  if count <= 1 || fits_whole page then page else newest (largest_fitting 1 (count - 1))
 ;;
 
 let notes_before_id_of_args args =
@@ -1469,32 +1547,41 @@ let notes_before_id_of_args args =
     Error (Refusal "before_note_id must be a string")
 ;;
 
+let notes_contains_of_args args =
+  match Json_util.assoc_member_opt "contains" args with
+  | None | Some `Null -> Ok None
+  | Some (`String "") -> Error (Refusal "contains is empty; omit it to list every note")
+  | Some (`String needle) -> Ok (Some needle)
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) ->
+    Error (Refusal "contains must be a string")
+;;
+
 let handle_notes_list ~tool_name ~start_time ctx args =
   match
     let* schedule_id = plain (required_string args "schedule_id") in
     let* limit = list_limit_of_args args in
     let* before_note_id = notes_before_id_of_args args in
-    Ok (schedule_id, limit, before_note_id)
+    let* contains = notes_contains_of_args args in
+    Ok (schedule_id, limit, before_note_id, contains)
   with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
-  | Ok (schedule_id, limit, before_note_id) ->
+  | Ok (schedule_id, limit, before_note_id, contains) ->
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
        let all_notes = Schedule_store.notes_for_schedule state ~schedule_id in
-       (match make_notes_page ~limit ~before_note_id all_notes with
+       (match make_notes_page ~limit ~before_note_id ~contains all_notes with
         | Error refusal -> refusal_result ~tool_name ~start_time refusal
         | Ok page ->
           ok ~tool_name ~start_time
-            (`Assoc
-              [ "status", `String "ok"
-              ; "schedule_id", `String schedule_id
-              ; "limit", `Int limit
-              ; "total_count", `Int page.total_count
-              ; "has_more_older", `Bool page.has_more_older
-              ; "next_before_note_id", optional_string_json page.next_before_note_id
-              ; "notes", `List (List.map Schedule_domain.schedule_note_to_yojson page.values)
-              ])))
+            (notes_page_json
+               ~schedule_id
+               ~limit
+               (fit_notes_page
+                  ~ceiling:(Tool_output.result_ceiling_bytes ctx.result_boundary)
+                  ~schedule_id
+                  ~limit
+                  page))))
 ;;
 
 let dispatch ctx ~name ~args : Tool_result.result option =

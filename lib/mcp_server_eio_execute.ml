@@ -464,6 +464,7 @@ let execute_tool_eio
                          Keeper_schedule_creation_admission.run
                      ; withdraw_queued_keeper_wakes =
                          Keeper_schedule_cancel_withdrawal.run
+                     ; result_boundary = Tool_output.Sent_to_client
                      }
                      ~name
                      ~args:coerced_args

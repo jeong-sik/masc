@@ -276,10 +276,6 @@ let resources_page_of_body ~request_id body =
   | Some (`List rows) -> Ok (List.filter_map resource_of_row rows, next_cursor)
   | Some _ | None -> Error "resources/list answered with no resources"
 
-let resources_of_body ~request_id body =
-  let* resources, _ = resources_page_of_body ~request_id body in
-  Ok resources
-
 (* Every page of the listing, in server order. [fetch] answers the raw body of
    one [resources/list] request for the cursor it is given ([None] for the
    first page), so the HTTP caller keeps its framing and this stays a pure

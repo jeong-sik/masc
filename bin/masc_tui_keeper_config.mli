@@ -1,5 +1,4 @@
 val editable_snapshot : Yojson.Safe.t -> Yojson.Safe.t
-val editor_stem : Yojson.Safe.t -> string
 
 type editor_format = Toml | Json
 

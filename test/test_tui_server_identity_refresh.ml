@@ -3887,12 +3887,17 @@ let keeper_settings_request state =
   match Masc_tui_types.begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Json ~available:true ~started_ns:10L with
   | Some request -> request | None -> Alcotest.fail "settings preparation did not start"
 
+let json_editor_stem observed =
+  match Masc_tui_keeper_config.editor_document ~format:Masc_tui_keeper_config.Json observed with
+  | Ok stem -> stem
+  | Error detail -> Alcotest.fail detail
+
 let keeper_settings_snapshot () : Masc_tui_types.keeper_settings_snapshot =
   let observed = `Assoc [
     "config_revision", `Assoc ["manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'a')];
       "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]];
     "activation_mode",`String "autonomous";"prompt",`Assoc ["instructions",`String "original"]] in
-  {kss_observed=observed;kss_stem=Masc_tui_keeper_config.editor_stem observed}
+  {kss_observed=observed;kss_stem=json_editor_stem observed}
 
 let test_settings_preparation_hands_off_original_snapshot_once () =
   let open Masc_tui_types in
@@ -4066,7 +4071,7 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
     | Ok patch -> patch | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
   Alcotest.(check bool) "new patch uses current composite revision" true
     (Yojson.Safe.Util.member "expected_config_revision" patch = Yojson.Safe.Util.member "config_revision" current);
-  let snapshot = {kss_observed=current;kss_stem=Masc_tui_keeper_config.editor_stem current} in
+  let snapshot = {kss_observed=current;kss_stem=json_editor_stem current} in
   ignore (take_keeper_settings_editor_read state origin (Ok snapshot));
   ignore (take_ready_keeper_settings_editor state ~available:true ~input_pending:false);
   let successor = match begin_keeper_settings_save state ~origin

@@ -470,12 +470,9 @@ let identity_started_rows ~cols ~keeper_name logins =
     (List.filter (fun login -> String.equal login.ils_keeper keeper_name) logins)
 ;;
 
-(** Whether the login [login] started has landed: the service it was for now
-    reports tools for this Keeper.
-
-    This is what ends the tick's re-asking. A poll with no end condition is a
-    poll that runs for the life of the process, so the condition is named
-    here and tested rather than being a line inside the message handler. *)
+(** Whether [provider_id] is attached for this Keeper: its declaration
+    reports a tool list, an empty one included. Matched by id, not by the
+    label a screen shows. *)
 let identity_provider_attached ~providers ~provider_id =
   List.exists
     (function
@@ -497,10 +494,6 @@ let identity_provider_declared ~providers ~provider_id =
       | Identity_unreadable { idp_id; _ } ->
           String.equal idp_id provider_id)
     providers
-;;
-
-let identity_login_landed ~providers ~login =
-  identity_provider_attached ~providers ~provider_id:login.ils_provider
 ;;
 
 type identity_login_result =

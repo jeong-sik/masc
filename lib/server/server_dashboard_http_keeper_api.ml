@@ -264,58 +264,6 @@ let cached_assoc_body_or_self cached fields =
   | None -> cached
 ;;
 
-type state_diagram_runtime_projection = Server_dashboard_keeper_state_projection.state_diagram_runtime_projection =
-  { runtime_models : string list
-  ; last_provider_result : string option
-  ; runtime_models_source : string
-  ; last_provider_result_source : string
-  ; effective_runtime_reason : string option
-  }
-
-let state_diagram_runtime_projection (meta : Keeper_meta_contract.keeper_meta option) =
-  let evidence =
-    match meta with
-    | None -> Server_dashboard_keeper_state_projection.Missing_meta
-    | Some m ->
-      let last_runtime_attempt =
-        match m.runtime.last_runtime_attempt with
-        | Some attempt
-          when String.trim attempt.Keeper_meta_contract.provider_id <> "" ->
-          Some attempt
-        | Some _ | None -> None
-      in
-      let runtime_projection_evidence, runtime_projection_source =
-        try
-          let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
-          let has_evidence =
-            Provider_runtime_projection.default_execution_model_strings runtime_id
-            |> List.exists (fun label -> String.trim label <> "")
-          in
-          ( has_evidence
-          , if has_evidence
-            then "provider_runtime_projection.default_execution_model_strings"
-            else "provider_runtime_projection.empty" )
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | _ -> false, "provider_runtime_projection.unavailable"
-      in
-      Server_dashboard_keeper_state_projection.Present_meta
-        { has_last_attempt = Option.is_some last_runtime_attempt
-        ; runtime_projection_evidence
-        ; runtime_projection_source
-        }
-  in
-  Server_dashboard_keeper_state_projection.of_evidence evidence
-;;
-
-let state_diagram_runtime_projection_json =
-  Server_dashboard_keeper_state_projection.state_diagram_runtime_projection_json
-;;
-
-let state_diagram_runtime_fsm_mermaid =
-  Server_dashboard_keeper_state_projection.state_diagram_runtime_fsm_mermaid
-;;
-
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   [ Keeper_id.Trace_id.to_string m.runtime.trace_id ]
 ;;
@@ -2241,30 +2189,12 @@ let handle_keeper_get_subroutes state req request reqd =
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
-      let meta = Keeper_meta_store.read_meta
-          (Mcp_server.workspace_config state) name in
-      let runtime_projection =
-        state_diagram_runtime_projection
-          (match meta with
-           | Ok meta -> meta
-           | Error _ -> None)
-      in
-      let runtime_fsm_mermaid =
-        state_diagram_runtime_fsm_mermaid runtime_projection
-      in
-      let runtime_projection_fields =
-        match state_diagram_runtime_projection_json runtime_projection with
-        | `Assoc fields -> fields
-        | _ -> []
-      in
       let json =
         `Assoc
-          ([ "keeper", `String name
-           ; "current_phase", `String phase_str
-           ; "mermaid", `String mermaid
-           ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
-           ]
-           @ runtime_projection_fields)
+          [ "keeper", `String name
+          ; "current_phase", `String phase_str
+          ; "mermaid", `String mermaid
+          ]
       in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if req_path = prefix ^ "composite" then

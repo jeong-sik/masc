@@ -1364,87 +1364,6 @@ let test_native_task_read_epoch_retirement () =
     (workspace_reply_admitted state ~authority
        ~reading:(Some state.workspace_read_authority) ~kind:Workspace_observation)
 
-let overview_snapshot health : Masc_tui_types.overview_snapshot =
-  { ov_workspace_health = health
-  ; ov_keeper_listing = Masc.Keeper_snapshot_unread.Not_listed
-  ; ov_unreadable_keepers = 0
-  }
-
-let overview_preview_fixture () =
-  let open Masc_tui_types in
-  let state = create_state ~workspace:"preview" ~local_base_path:"/workspace/preview"
-      ~port:0 ~refresh_interval:0. () in
-  let confirmed = overview_snapshot Workspace_health_warning in
-  state.overview <- Some confirmed;
-  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
-  begin_http_refresh_state state ~ticket ~started_ns:0L;
-  let preview =
-    { op_ticket = ticket; op_authority = state.workspace_authority
-    ; op_identity = identity state.local_base_path
-    ; op_snapshot = overview_snapshot Workspace_health_ok } in
-  state, confirmed, preview
-
-let test_overview_preview_rejects_superseded_reading () =
-  let open Masc_tui_types in
-  let state, _, old = overview_preview_fixture () in
-  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
-  begin_http_refresh_state state ~ticket ~started_ns:1L;
-  accept_overview_preview state old;
-  Alcotest.(check bool) "superseded result leaves the new refresh unread" true
-    (state.overview_preview = None);
-  let current = { old with op_ticket = ticket } in
-  accept_overview_preview state current;
-  accept_overview_preview state old;
-  Alcotest.(check bool) "late old result cannot replace a current preview" true
-    (state.overview_preview = Some current)
-
-let test_overview_preview_preserves_confirmed_state_and_authority () =
-  let open Masc_tui_types in
-  let state, confirmed, preview = overview_preview_fixture () in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity and workspace = state.workspace_identity in
-  accept_overview_preview state preview;
-  Alcotest.(check bool) "current observation is retained" true
-    (state.overview_preview = Some preview);
-  Alcotest.(check bool) "readonly reading selects the preview data" true
-    (overview_refresh_reading state = (None, Some preview.op_snapshot));
-  Alcotest.(check bool) "confirmed overview is unchanged" true
-    (state.overview = Some confirmed && state.overview_error = None);
-  Alcotest.(check bool) "preview grants no workspace or server authority" true
-    (state.workspace_authority = authority && state.server_identity = identity
-     && state.workspace_identity = workspace)
-
-let test_overview_refresh_finish_retires_preview_and_late_delivery () =
-  let open Masc_tui_types in
-  let state, confirmed, preview = overview_preview_fixture () in
-  accept_overview_preview state preview;
-  finish_http_refresh_state state;
-  Alcotest.(check bool) "completion retires progress and its observation" true
-    (state.http_refresh_started_ns = None && state.overview_preview = None);
-  Alcotest.(check bool) "readonly reading returns confirmed data after completion" true
-    (overview_refresh_reading state = (None, Some confirmed));
-  accept_overview_preview state preview;
-  Alcotest.(check bool) "late result cannot revive a completed refresh" true
-    (state.overview_preview = None)
-
-let test_overview_preview_refuses_foreign_or_retired_authority () =
-  let open Masc_tui_types in
-  let state, confirmed, preview = overview_preview_fixture () in
-  accept_overview_preview state
-    { preview with op_identity = identity "/workspace/foreign" };
-  Alcotest.(check bool) "foreign reading cannot enter the preview" true
-    (state.overview_preview = None);
-  accept_overview_preview state preview;
-  let Workspace_authority generation = state.workspace_authority in
-  state.workspace_authority <- Workspace_authority (generation + 1);
-  Alcotest.(check bool) "retired authority cannot select cached preview data" true
-    (overview_refresh_reading state = (None, Some confirmed));
-  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
-  begin_http_refresh_state state ~ticket ~started_ns:1L;
-  accept_overview_preview state { preview with op_ticket = ticket };
-  Alcotest.(check bool) "current ticket cannot spend retired workspace authority" true
-    (state.overview_preview = None)
-
 let early_asks_fixture () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"asks" ~local_base_path:"/workspace/asks"
@@ -6862,18 +6781,10 @@ let () =
             test_question_answer_retires_pre_answer_reads
         ; Alcotest.test_case "question listings respect supersession and workspace suspension" `Quick
             test_question_read_supersession_and_workspace_suspension
-        ; Alcotest.test_case "overview rejects superseded refresh observations" `Quick
-            test_overview_preview_rejects_superseded_reading
-        ; Alcotest.test_case "overview preview preserves confirmed state and authority" `Quick
-            test_overview_preview_preserves_confirmed_state_and_authority
         ; Alcotest.test_case "initial page is not an explicit older demand" `Quick
             test_keeper_initial_page_is_not_an_explicit_older_demand
         ; Alcotest.test_case "history sources publish and settle independently" `Quick
             test_keeper_history_request_sources_are_owned_and_independent
-        ; Alcotest.test_case "overview completion retires previews and late delivery" `Quick
-            test_overview_refresh_finish_retires_preview_and_late_delivery
-        ; Alcotest.test_case "overview preview refuses foreign and retired authority" `Quick
-            test_overview_preview_refuses_foreign_or_retired_authority
         ; Alcotest.test_case "Child retirement preserves a running full audit" `Quick
             test_child_read_epoch_retains_running_audit
         ; Alcotest.test_case "native observations retire without losing queued audit" `Quick

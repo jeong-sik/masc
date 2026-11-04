@@ -7025,6 +7025,22 @@ let launch_harness_load state ~mailbox =
   end
   end
 
+(* The Home Health line, drawn on every surface. *)
+let launch_overview_load state ~mailbox =
+  if server_authority_ready state && not state.overview_inflight then begin
+    let enqueue_async = workspace_enqueue state in
+    state.overview_inflight <- true;
+    state.overview_owed <- Masc_tui_owed_read.started state.overview_owed;
+    let host = server_peer_host in
+    let port = state.port in
+    Masc_tui_async_read.launch
+      ~on_not_run:(fun () ->
+        state.overview_inflight <- false;
+        state.overview_owed <- Masc_tui_owed_read.abandoned state.overview_owed)
+      ~deliver:(fun result -> enqueue_async mailbox (Overview_loaded result))
+      (fun () -> Masc_tui_loader.load_overview ~host ~port)
+  end
+
 let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox =
   let enqueue_async = workspace_enqueue state in
   if server_authority_ready state then
@@ -8148,6 +8164,11 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
+(* The Home Health line reads when the server announces it moved, on a
+   revalidation, and again after a failed read (RFC-0480 §3.4). *)
+let owe_overview_read state =
+  state.overview_owed <- Masc_tui_owed_read.changed state.overview_owed
+
 (* The Runtime surface reads again when the server announces a probe landed,
    a runtime history row, a usage report, a standing change or a runtime.toml
    commit, which move its probe, history and resolved document, and after a
@@ -8247,8 +8268,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
   | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
   | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
-  (* Every refresh pass reads the Health line with the workspace identity. *)
-  | Masc.Workspace_dataset_event.Workspace_health -> ()
+  | Masc.Workspace_dataset_event.Workspace_health -> owe_overview_read state
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
 
@@ -9244,6 +9264,17 @@ let launch_owed_harness state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_harness_load state ~mailbox
   end
+
+(* Runs on every loop iteration. Every surface draws the line. A read already
+   in flight is let finish first. *)
+let launch_owed_overview state ~mailbox =
+  let read =
+    if state.overview_inflight then state.overview_owed
+    else Masc_tui_owed_read.abandoned state.overview_owed
+  in
+  state.overview_owed <- read;
+  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.overview_inflight then
+    launch_overview_load state ~mailbox
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -16587,7 +16618,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   ; http_account_emails
   }
 
-let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
+let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
     ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
@@ -16616,7 +16647,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
     (* Keeper questions and roster reads start with the other branches, not
        after the visible surface's transport/board/log requests. Every branch
        still belongs to this pass's initial and final workspace probes. *)
-    let (http_overview, http_approvals),
+    let http_approvals,
         ((http_asks, http_keeper_roster), http_scoped) =
       Masc_tui_loader.read_pair
         (fun () ->
@@ -16654,6 +16685,23 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                            | Some _, Error _ -> ());
                           observation))
                   approval_ticket))
+           Option.map
+             (fun ao_ticket ->
+                observe_http_reader ~on_progress
+                  Http_refresh_progress.Approvals
+                  ~outcome:(fun observation -> Http_refresh_progress.of_result observation.ao_result)
+                  (fun () ->
+                     let ao_result = match http_server_identity with
+                       | Ok expected_workspace ->
+                           Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port
+                       | Error detail -> Error detail in
+                     let observation = { ao_ticket; ao_result } in
+                     (match on_approvals, http_server_identity with
+                      | Some publish, Ok identity -> publish identity observation
+                      | None, (Ok _ | Error _)
+                      | Some _, Error _ -> ());
+                     observation))
+             approval_ticket)
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
@@ -16680,7 +16728,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
         { http_scoped with http_asks; http_keeper_roster;
           http_scoped_server_identity = identity_after } in
       Refresh_surfaces
-        { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
+        { http_approvals; http_scoped; http_server_identity = identity_after }
     else Refresh_workspace_unconfirmed
         { refresh_ticket; latest_identity = identity_after;
           detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
@@ -16688,6 +16736,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
             && (match http_overview with
                 | Some overview -> Result.is_error overview
                 | None -> true);
+          unreachable = Result.is_error http_server_identity && Result.is_error identity_after;
           approval_ticket }
   end
 
@@ -17882,6 +17931,7 @@ let apply_http_surfaces state ~mailbox results =
       ~identity:(reached results.http_server_identity)
       ~surfaces:(reached_if_asked results.http_overview
        @ reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
+      ~surfaces:(reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
        @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
             (fun observation -> reached observation.ao_result)
@@ -19170,6 +19220,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state;
        Masc_tui_types.revalidate_ask_followup_read state
+       owe_overview_read state;
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -19288,19 +19339,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           enqueue_async mailbox (Http_keeper_roster_loaded
             {er_ticket=refresh_ticket;er_authority=(!requests).hrr_authority;er_identity;er_observation}))
       else None in
-    let on_overview =
-      if state.view = Overview then
-        Some (fun op_identity op_snapshot ->
-          enqueue_async mailbox (Http_overview_loaded
-            { op_ticket = refresh_ticket; op_authority = (!requests).hrr_authority;
-              op_identity; op_snapshot }))
-      else None
-    in
     let run_refresh () =
       let completed = try
           Masc_tui_credential_preparation.await_initial state.credential_preparation;
           Http_refresh_done
-             (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
+             (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
                 ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_query
                 ~provider_history_days
@@ -19325,7 +19368,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              Masc_tui_credential_preparation.await_initial state.credential_preparation;
              apply_http_refresh_outcome state ~mailbox
-               (load_http_surfaces ~surface_request ~on_initial_identity:None ~on_progress:None ~on_dataset:None ~on_overview:None ~on_asks:None ~on_approvals:None ~on_roster:None ~ask_request ~roster_request
+               (load_http_surfaces ~surface_request ~on_initial_identity:None ~on_progress:None ~on_dataset:None ~on_asks:None ~on_approvals:None ~on_roster:None ~ask_request ~roster_request
                   ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_query
                 ~provider_history_days
@@ -23067,8 +23110,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.voice_continuous <- None;
         state.voice_floor <- None;
         report_voice_failure state ~keeper error)
-  | Http_overview_loaded preview ->
-      Masc_tui_types.accept_overview_preview state preview
   | Http_surface_read_completed (context, completed) ->
       let request=Surface_read_context.current context in
       (* Dataset admission and collector completion have different lifetimes.
@@ -28057,6 +28098,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
+  | Overview_loaded result ->
+      state.overview_inflight <- false;
+      state.overview_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.overview_owed
+         | Error _ -> failed_read state.overview_owed);
+      apply_overview_load state result
   | Harness_loaded result ->
       state.harness_inflight <- false;
       (match result with
@@ -33178,6 +33226,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_runtime_surface state ~mailbox:async_messages;
+      launch_owed_overview state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;

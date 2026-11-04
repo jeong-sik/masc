@@ -3,15 +3,18 @@ let event_type = "workspace_dataset_changed"
 type dataset =
   | Repositories
   | Verification_requests
+  | Harness_verdicts
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
   | Verification_requests -> "verification_requests"
+  | Harness_verdicts -> "harness_verdicts"
 ;;
 
 let dataset_of_wire = function
   | "repositories" -> Some Repositories
   | "verification_requests" -> Some Verification_requests
+  | "harness_verdicts" -> Some Harness_verdicts
   | _ -> None
 ;;
 

@@ -75,6 +75,11 @@ val notes_hash : task_title:string -> notes:string -> string
 
 (** {1 Recording} *)
 
+val install_written_observer : (base_path:string -> unit) -> unit
+(** Install the process-wide observer {!record_verdict} and
+    {!record_human_label} call after they append a record (RFC-0480 §3.4).
+    An append that raises calls nothing. The observer must not raise. *)
+
 val record_verdict :
   ?producer_execution:Runtime_response_identity.t ->
   base_path:string ->

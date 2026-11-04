@@ -225,6 +225,8 @@ let overview_json
     ]
 ;;
 
+let cache_key_prefix = "harness_health:"
+
 let json ?since ?until ~base_path () =
   let calibration = Eval_calibration.calibration_stats ?since ?until ~base_path () in
   let recent_verdicts = read_recent_verdicts ?since ?until ~base_path () in

@@ -37910,7 +37910,10 @@ Use relative paths for resources already held in the package. -->
                 (match Masc_tui_fetched.current state.code_diff with
                  | Some (loaded, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Loading))
                    when code_diff_target_equal loaded target -> ()
-                 | Some _ | None ->
+                 | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Loading
+                            | Masc_tui_fetched.Absent | Masc_tui_fetched.Stale (_, _)
+                            | Masc_tui_fetched.Failed _))
+                 | None ->
                      Masc_tui_code_requests.launch_diff_load state
                        ~host:server_peer_host
                        ~deliver:(workspace_enqueue state async_messages) ~target)

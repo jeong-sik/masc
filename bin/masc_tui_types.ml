@@ -14413,11 +14413,24 @@ let record_keeper_skill_usage state ~keeper result =
       (fun (left, _) (right, _) -> String.compare left right)
       ((keeper, reading) :: List.remove_assoc keeper state.tools_keeper_usage)
 
-(* The Usage readings of the Keepers on [roster]; an empty roster keeps
-   none. *)
-let keep_roster_skill_usage state ~roster =
-  state.tools_keeper_usage <-
-    List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage
+(* Whether [state.keepers] is the whole roster: read from this workspace,
+   with no error beside it. *)
+let roster_complete state =
+  match state.keepers_error, state.local_keepers with
+  | None, Local_workspace_read -> true
+  | Some _, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
+  | None, (Local_workspace_unread | Local_workspace_failed _) ->
+      false
+
+(* Keeps the Usage readings of the Keepers on the roster. Only a whole roster
+   drops a reading: one not read yet, or read with an error, may lack Keepers
+   that still exist. *)
+let keep_roster_skill_usage state =
+  if roster_complete state then begin
+    let roster = List.map (fun (row : keeper) -> row.k_name) state.keepers in
+    state.tools_keeper_usage <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage
+  end
 
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with

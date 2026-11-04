@@ -1817,70 +1817,77 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         let used = List.stable_sort compare_surface used in
         let all_usage = List.concat_map snd used @ outside in
         let keepers = all_usage |> List.map fst |> List.sort_uniq String.compare |> List.length in
-        (* Per Keeper: whether its answer is counted, and what the operator
-           needs to know about it. A Keeper with no answer at all is not
-           counted. *)
-        let ledgers_read, excluded, notes =
+        (* Per Keeper: whether its answer is counted, whether it comes from an
+           earlier read, and what the operator needs to know about it. A
+           Keeper with no answer at all is not counted. *)
+        let ledgers_read, earlier, excluded, notes =
           List.fold_left
-            (fun (read, excluded, notes) (keeper, reading) ->
+            (fun (read, earlier, excluded, notes) (keeper, reading) ->
                let failure, answer =
                  match reading with
                  | Masc_tui_types.Skill_usage_read answer -> None, Some answer
                  | Masc_tui_types.Skill_usage_read_failed { last; detail } -> Some detail, last
                in
-               let read, excluded, answer_note =
+               let counted, left_out, answer_note =
                  match answer with
                  | Some
                      ( Masc.Tui_decode_tools.Keeper_usage_ready _
                      | Masc.Tui_decode_tools.Keeper_usage_no_catalog ) ->
-                   read + 1, excluded, None
-                 | Some Masc.Tui_decode_tools.Keeper_usage_no_session -> read, excluded, None
+                   true, false, None
+                 | Some Masc.Tui_decode_tools.Keeper_usage_no_session -> false, false, None
                  | Some (Masc.Tui_decode_tools.Keeper_usage_unavailable { kua_reason; kua_detail }) ->
-                   read, excluded + 1, Some (Printf.sprintf "%s (%s)" kua_reason kua_detail)
-                 | None -> read, excluded + 1, None
+                   false, true, Some (Printf.sprintf "%s (%s)" kua_reason kua_detail)
+                 | None -> false, true, None
                in
                let note =
                  match failure, answer_note with
-                 | None, note -> note
-                 | Some detail, None ->
-                   Some
-                     ("read failed: " ^ detail
-                      ^ if Option.is_some answer then "; last answer shown" else "")
+                 | None, None -> None
+                 | None, Some note -> Some (Printf.sprintf "Unavailable: %s: %s" keeper note)
+                 | Some detail, None when counted ->
+                   Some (Printf.sprintf "Read failed, counts from the earlier answer: %s: %s" keeper detail)
+                 | Some detail, None -> Some (Printf.sprintf "Read failed: %s: %s" keeper detail)
                  | Some detail, Some note ->
-                   Some ("read failed: " ^ detail ^ "; last answer: " ^ note)
+                   Some (Printf.sprintf "Read failed: %s: %s; earlier answer: %s" keeper detail note)
                in
-               ( read
-               , excluded
+               ( (if counted then read + 1 else read)
+               , (if counted && Option.is_some failure then earlier + 1 else earlier)
+               , (if left_out then excluded + 1 else excluded)
                , match note with
                  | None -> notes
-                 | Some note -> (keeper ^ ": " ^ note) :: notes ))
-            (0, 0, []) state.tools_keeper_usage
+                 | Some note -> note :: notes ))
+            (0, 0, 0, []) state.tools_keeper_usage
         in
         let notes = List.rev notes in
         let coverage_lines =
           match state.keepers, state.tools_keeper_usage with
           | [], [] ->
-              (match state.keepers_error with
-               | None -> [ Ansi.dim, "No Keepers in the roster." ]
-               | Some _ -> [])
+              if Masc_tui_types.roster_complete state
+              then [ Ansi.dim, "No Keepers in the roster." ]
+              else []
           | _ :: _, [] -> [ Theme.warn (), "Activation ledger coverage: not read yet; totals may be partial." ]
           | ([] | _ :: _), _ :: _ ->
               ( Ansi.dim,
-                Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d"
-                  ledgers_read excluded )
+                Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d%s"
+                  ledgers_read excluded
+                  (if earlier > 0 then Printf.sprintf "; %d from an earlier read" earlier else "") )
               :: (if excluded > 0
                   then [Theme.warn (), "Partial totals: unavailable ledgers are excluded."]
                   else [])
+              @ (if earlier > 0
+                 then [Theme.warn (), "Some totals come from an earlier read."]
+                 else [])
         in
-        (* The ledgers read are the roster's Keepers; a roster read that
-           failed may list only some of them. *)
+        (* The ledgers read are the roster's Keepers; a roster not read yet,
+           or read with an error, may list only some of them. *)
         let roster_lines =
-          match state.keepers_error with
-          | None -> []
-          | Some detail ->
+          match state.keepers_error, state.local_keepers with
+          | Some detail, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
+          | None, Local_workspace_failed detail ->
               [ Theme.warn (),
                 "Keeper roster read failed: " ^ Terminal_text.single_line detail
                 ^ "; totals cover only the Keepers listed." ]
+          | None, Local_workspace_unread -> [ Ansi.dim, "Keeper roster not read yet." ]
+          | None, Local_workspace_read -> []
         in
         let heading = skill_usage_box ~cols
           ([ Ansi.bold,
@@ -1939,7 +1946,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
           | _ :: _ ->
               skill_usage_box ~cols
                 (( Ansi.bold,
-                   Printf.sprintf "Revisions outside this catalog reading — %d" (List.length outside) )
+                   Printf.sprintf "Usage rows outside this catalog reading — %d" (List.length outside) )
                  :: List.concat_map
                       (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
                          [ ( Ansi.bold,
@@ -1956,9 +1963,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                       outside)
         in
         let unavailable_rows =
-          List.map
-            (fun detail -> Theme.warn (), " Unavailable: " ^ Terminal_text.single_line detail)
-            notes
+          List.map (fun note -> Theme.warn (), " " ^ Terminal_text.single_line note) notes
         in
         let rejection_rows =
           match sc_rejections with

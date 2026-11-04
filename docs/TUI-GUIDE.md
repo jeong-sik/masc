@@ -2654,16 +2654,18 @@ reading; a prepared display does not make that reading fresh or complete.
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
 These are observations from current Keeper sessions at exact Skill revisions,
-not lifetime totals or success rates. Missing ledgers make the totals partial
-and are called out beside the summary.
+not lifetime totals or success rates. Each Keeper's usage is its own read.
+Missing ledgers make the totals partial and are called out beside the summary.
+A Keeper whose latest read failed keeps its earlier answer in the totals, and
+the summary counts those apart. When the Keeper roster is not read yet, or its
+read failed, the summary says the totals may miss Keepers.
 
 Skill cards follow in descending invocation order. Each card shows its own
-totals and Keeper rows, with the last use in this terminal's timezone.
-Narrow terminals stack a Keeper's counts and last use below its name;
-wider terminals align them in columns. Source configuration and rejected or
-shadowed entries follow the usage cards. If retained usage
-coverage has no time, the row says `time unavailable`; it does not turn
-bounded evidence into a `never used` claim.
+totals and Keeper rows, with the last use the ledger recorded. Narrow
+terminals stack a Keeper's counts and last use below its name; wider terminals
+align them in columns. Usage rows for a revision this catalog reading does not
+hold follow in their own box. Unavailable ledgers and failed reads are listed
+next, then source configuration and rejected or shadowed entries.
 
 The effective surface lists a skill's name, kind and sizes; a composition
 also carries the shape of its plan (`nodes`, `batches`, `parallel`), which an

@@ -4029,7 +4029,7 @@ let launch_tools_load ?(force = true) state ~mailbox =
      | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ()
      | Tools_usage ->
          (* A Keeper that left the roster leaves the readings with it. *)
-         keep_roster_skill_usage state ~roster:usage_keepers;
+         keep_roster_skill_usage state;
          List.iter
            (fun keeper ->
               launch_workspace_json_read state ~mailbox

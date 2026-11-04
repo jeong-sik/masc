@@ -173,12 +173,16 @@ let test_a_failed_read_keeps_the_last_answer () =
   let contains needle = String_util.contains_substring text needle in
   Alcotest.(check bool) "the last answer stays in the totals" true
     (contains "Keepers 1 · TRIGGERED 2 · DELIVERED 2 · ACTIONS 1");
-  Alcotest.(check bool) "the Keeper with no answer is not counted" true
-    (contains "Activation ledgers loaded: 1; unavailable: 1");
+  Alcotest.(check bool) "the earlier answer is counted apart" true
+    (contains "Activation ledgers loaded: 1; unavailable: 1; 1 from an earlier read");
+  Alcotest.(check bool) "the totals say part of them is earlier" true
+    (contains "Some totals come from an earlier read.");
   Alcotest.(check bool) "the kept answer is marked" true
-    (contains "Unavailable: alpha: read failed: timed out; last answer shown");
+    (contains "Read failed, counts from the earlier answer: alpha: timed out");
   Alcotest.(check bool) "the failed Keeper is named" true
-    (contains "Unavailable: bravo: read failed: connection refused")
+    (contains "Read failed: bravo: connection refused");
+  Alcotest.(check bool) "a failed read is not called unavailable" false
+    (contains "Unavailable: alpha")
 
 (* A Keeper answered against a catalog this reading does not hold: its row
    is drawn on its own and counted, not dropped. *)
@@ -191,29 +195,46 @@ let test_a_revision_outside_the_catalog_reading_is_drawn () =
   Alcotest.(check bool) "both rows are counted" true
     (contains "Keepers 1 · TRIGGERED 6 · DELIVERED 6 · ACTIONS 2");
   Alcotest.(check bool) "the outside rows are headed" true
-    (contains "Revisions outside this catalog reading — 1");
+    (contains "Usage rows outside this catalog reading — 1");
   Alcotest.(check bool) "the outside revision is named" true
     (contains ("capture-skill · rev " ^ other_revision));
   Alcotest.(check bool) "its Keeper's counts are drawn" true
     (contains "alpha · TRIGGERED 4 · DELIVERED 4 · ACTIONS 1")
 
-(* An empty roster leaves no readings and says so instead of waiting for a
-   read; a failed roster read says the totals may be missing Keepers. *)
-let test_an_empty_roster_leaves_no_readings () =
-  let state = usage_state () in
-  record_keeper_skill_usage state ~keeper:"alpha" (ready [ usage_row 2 ]);
-  state.keepers <- [];
-  keep_roster_skill_usage state ~roster:[];
-  Alcotest.(check int) "no reading is kept" 0 (List.length state.tools_keeper_usage);
-  Alcotest.(check bool) "the pane says there is no Keeper" true
-    (String_util.contains_substring (usage_text state) "No Keepers in the roster.");
-  state.keepers_error <- Some "roster unavailable";
-  let text = usage_text state in
-  Alcotest.(check bool) "a failed roster read is named" true
-    (String_util.contains_substring text
+(* Only a whole roster drops a reading. A roster read empty says there is no
+   Keeper; one not read yet, or whose read failed, keeps the readings and
+   says why the totals may miss Keepers. *)
+let test_only_a_whole_roster_drops_readings () =
+  let roster_state local =
+    let state = usage_state () in
+    record_keeper_skill_usage state ~keeper:"alpha" (ready [ usage_row 2 ]);
+    state.keepers <- [];
+    state.local_keepers <- local;
+    keep_roster_skill_usage state;
+    state
+  in
+  let unread = roster_state Local_workspace_unread in
+  Alcotest.(check int) "an unread roster keeps the reading" 1 (List.length unread.tools_keeper_usage);
+  Alcotest.(check bool) "and says the roster is not read" true
+    (String_util.contains_substring (usage_text unread) "Keeper roster not read yet.");
+  let failed = roster_state (Local_workspace_failed "roster unavailable") in
+  Alcotest.(check int) "a failed roster keeps the reading" 1 (List.length failed.tools_keeper_usage);
+  Alcotest.(check bool) "and names the failure" true
+    (String_util.contains_substring (usage_text failed)
        "Keeper roster read failed: roster unavailable; totals cover only the Keepers listed.");
-  Alcotest.(check bool) "it is not called an empty roster" false
-    (String_util.contains_substring text "No Keepers in the roster.")
+  let partial = roster_state Local_workspace_read in
+  partial.keepers_error <- Some "one keeper unreadable";
+  record_keeper_skill_usage partial ~keeper:"alpha" (ready [ usage_row 2 ]);
+  keep_roster_skill_usage partial;
+  Alcotest.(check int) "a roster read with an error keeps the reading" 1
+    (List.length partial.tools_keeper_usage);
+  let empty = roster_state Local_workspace_read in
+  Alcotest.(check int) "a whole empty roster keeps none" 0 (List.length empty.tools_keeper_usage);
+  let text = usage_text empty in
+  Alcotest.(check bool) "and says there is no Keeper" true
+    (String_util.contains_substring text "No Keepers in the roster.");
+  Alcotest.(check bool) "with no roster warning" false
+    (String_util.contains_substring text "Keeper roster")
 
 let () =
   let open Alcotest in
@@ -227,7 +248,7 @@ let () =
             test_a_failed_read_keeps_the_last_answer
         ; test_case "a revision outside the catalog reading is drawn" `Quick
             test_a_revision_outside_the_catalog_reading_is_drawn
-        ; test_case "an empty roster leaves no readings" `Quick
-            test_an_empty_roster_leaves_no_readings
+        ; test_case "only a whole roster drops readings" `Quick
+            test_only_a_whole_roster_drops_readings
         ] )
     ]

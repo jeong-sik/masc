@@ -41,6 +41,7 @@ type palette_action =
   | Palette_lsp of string * string
   | Palette_code_file of string
   | Palette_code_location of Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location
+  | Palette_code_branch of Masc.Tui_decode.git_branch
 
 val gate_lane_label : gate_lane -> string
 val gate_mode_label : Masc.Keeper_gate_mode.t -> string
@@ -56,6 +57,9 @@ val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 val selected_file : Masc_tui_types.state -> string option
 val selected_location : Masc_tui_types.state ->
   (Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location) option
+val branch_label : Masc.Tui_decode.git_branch -> string
+(** One palette row for a branch: checked-out mark, name, standing against the
+    upstream, tip date (UTC) and subject. *)
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 

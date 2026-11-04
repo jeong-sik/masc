@@ -22304,7 +22304,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
         | Preset_restored (_, _) | Preset_deleted (_, _) | Play_room_received (_, _)
         | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _)
-        | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _) | Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
+        | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _) | Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_branches_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
         | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
         | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _) | Code_lsp_answered (_, _)
         | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _ | Github_identity_view_loaded (_, _)
@@ -25015,6 +25015,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.runtime_config_view_error <- Some detail)
   | Code_catalog_loaded (request, result) ->
       Code_results.apply_catalog state request result
+  | Code_branches_loaded (request, result) ->
+      Code_results.apply_branches state request result
   | Code_finder_file_loaded (request, result) ->
       (* Publication is not navigation. The loop gives ready keys, pastes and
          incomplete terminal sequences priority before committing this read. *)
@@ -35569,7 +35571,7 @@ Use relative paths for resources already held in the package. -->
            let typed_question =
              match state.palette_mode with
              | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
-             | Palette_choice _ | Palette_files _ | Palette_locations _ -> None
+             | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _ -> None
            in
            let move_palette by =
              state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
@@ -35581,7 +35583,7 @@ Use relative paths for resources already held in the package. -->
             | "esc" -> close ()
             | "\r" when (match state.palette_mode with
                 | Palette_locations _ -> true
-                | Palette_jump | Palette_choice _ | Palette_files _ -> false) ->
+                | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ -> false) ->
                 (match Masc_tui_palette.selected_location state with
                  | None -> ()
                  | Some (offer, location) ->
@@ -35596,7 +35598,14 @@ Use relative paths for resources already held in the package. -->
                          Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
                            ~deliver:(workspace_enqueue state async_messages) owner request)
             | "\r" when (match state.palette_mode with
-                | Palette_files _ -> true | Palette_jump | Palette_choice _ | Palette_locations _ -> false) ->
+                | Palette_branches _ -> true
+                | Palette_files _ | Palette_jump | Palette_choice _ | Palette_locations _ -> false) ->
+                (* The list is read-only: a branch offers nothing to open, so
+                   Enter closes it the way Esc does. *)
+                close ()
+            | "\r" when (match state.palette_mode with
+                | Palette_files _ -> true
+                | Palette_jump | Palette_choice _ | Palette_locations _ | Palette_branches _ -> false) ->
                 Option.iter (fun path ->
                     Masc_tui_code_requests.open_found_file state ~host:server_peer_host
                       ~deliver:(workspace_enqueue state async_messages) ~path)
@@ -35642,7 +35651,8 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_board_hearth _
                         | Masc_tui_palette.Palette_board_post _
                         | Masc_tui_palette.Palette_code_file _
-                        | Masc_tui_palette.Palette_code_location _ ) )
+                        | Masc_tui_palette.Palette_code_location _
+                        | Masc_tui_palette.Palette_code_branch _ ) )
                   | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
@@ -35779,7 +35789,8 @@ Use relative paths for resources already held in the package. -->
                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
                        ~question ~symbol
                  | Some (_, (Masc_tui_palette.Palette_code_file _
-                     | Masc_tui_palette.Palette_code_location _)) | None -> ())
+                     | Masc_tui_palette.Palette_code_location _
+                     | Masc_tui_palette.Palette_code_branch _)) | None -> ())
             | "down" | "\014" -> move_palette 1
             | "up" | "\016" -> move_palette (-1)
             | "home" -> move_palette (-state.palette_cursor)
@@ -37768,6 +37779,9 @@ Use relative paths for resources already held in the package. -->
            pan_code_content state ~direction:1
        | Some "\016" when state.view = Code ->
            Masc_tui_code_requests.launch_file_finder state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state async_messages)
+       | Some "\018" when state.view = Code ->
+           Masc_tui_code_requests.launch_branches state ~host:server_peer_host
              ~deliver:(workspace_enqueue state async_messages)
        | Some "B" when state.view = Code ->
            Masc_tui_code_requests.return_to_reading state ~host:server_peer_host

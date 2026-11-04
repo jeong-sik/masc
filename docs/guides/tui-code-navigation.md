@@ -6,6 +6,13 @@ checkout, including files outside the current directory. Type to filter and
 press Enter to read a selection. Esc closes the finder. A failed selection
 keeps the original file and directory.
 
+Ctrl-R lists the local branches of that same checkout, newest tip first. Each
+row names the branch, marks the checked-out one, and shows how it stands against
+its upstream (commits ahead and behind, or that the upstream is gone), the date of
+its newest commit and that commit's subject. Type to filter by name or subject.
+At most 200 branches are listed and the palette says when more exist. The list
+is read-only: Enter and Esc both return to Code.
+
 `D` asks for a definition on the cursor line. `B` returns through the locations
 left by definition jumps and successful finder selections. A location includes
 the workspace scope, directory, file, cursor, vertical and horizontal offsets,

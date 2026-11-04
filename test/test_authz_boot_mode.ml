@@ -200,9 +200,17 @@ let test_single_user_keeps_its_settings () =
 ;;
 
 let test_mode_events () =
-  Alcotest.(check bool) "Fresh_bootstrap" true (B.made_by Authz_mode_event.Fresh_bootstrap = B.Made_multi_account);
-  Alcotest.(check bool) "Reactivate" true (B.made_by Authz_mode_event.Reactivate = B.Made_multi_account);
-  Alcotest.(check bool) "Off" true (B.made_by Authz_mode_event.Off = B.Made_off)
+  let workspace =
+    match Authz_types.Workspace_id.of_string "workspace-1" with
+    | Ok id -> id
+    | Error _ -> Alcotest.fail "fixture id rejected by Authz_id"
+  in
+  Alcotest.(check bool) "no bootstrap" true (B.of_mode_state Authz_mode_state.Not_bootstrapped = B.No_mode_event);
+  Alcotest.(check bool)
+    "Multi_account"
+    true
+    (B.of_mode_state (Authz_mode_state.Multi_account workspace) = B.Made_multi_account);
+  Alcotest.(check bool) "Off" true (B.of_mode_state (Authz_mode_state.Off workspace) = B.Made_off)
 ;;
 
 (* The account_mode member of config.json. *)

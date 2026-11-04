@@ -97,8 +97,9 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
 type reading =
   | Reading_succeeded
   | Reading_failed
-      (** The catalog or an attempt's status could not be read, or the server
-          says a consent still waits whose deadline [now] has passed. *)
+      (** The catalog, or the status of an attempt still waited on, could not be
+          read, or the server says such a consent still waits although its
+          deadline [now] has passed. *)
   | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
 
 let attempt_read_failed ~now status =
@@ -155,8 +156,13 @@ let providers_loaded (state : state) request ~now ~settle ~report ~attempts resu
      else
        match result with
        | Error _ -> Reading_failed
+       (* Only an attempt still waited on in this workspace can leave its
+          Keeper's read owed: one this reading just retired cannot. *)
        | Ok _ when List.exists (fun (expectation, status) ->
-           String.equal expectation.ile_keeper keeper_name && attempt_read_failed ~now status)
+           String.equal expectation.ile_keeper keeper_name
+           && List.exists ((=) expectation) state.identity_login_expectations
+           && identity_expectation_workspace_matches ~origin:expectation.ile_origin state
+           && attempt_read_failed ~now status)
            attempts -> Reading_failed
        | Ok _ -> Reading_succeeded)
 ;;

@@ -2840,7 +2840,10 @@ max-context = 1000000
 tools-support = true
 thinking-support = true
 streaming = true
-reasoning-effort = "low"
+# No effort ladder is expressible from runtime.toml (the adapter never sets
+# accepted_reasoning_efforts), so a declared effort is rejected before
+# dispatch. Uncontrolled: the gateway default decides.
+reasoning-uncontrolled = true
 
 [models.opencode-go-deepseek-flash.capabilities]
 max-output-tokens = 384000

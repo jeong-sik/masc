@@ -82,8 +82,8 @@ key from a whole fleet risks the account, not just the allowance.
 - `MissingSessionID` 400 — the headers table was dropped. Restore
   `[providers.opencode_go.headers]`.
 - `requires Global regions` 400 — step 1.3 not done.
-- `has no declared categorical reasoning-effort contract` — the model row
-  declares `reasoning-effort` without `thinking-control-format`. Restore the
-  shipped capabilities block.
+- `has no declared categorical reasoning-effort contract` — a `reasoning-effort`
+  declaration needs an effort ladder no runtime.toml key expresses. Keep the
+  row uncontrolled (shipped shape) until the ladder is plumbable.
 - Sub-cap rejection mid-month — expected at fleet scale; the lane's next
   candidate serves. Narrow the lane or add allowance; do not widen blindly.

@@ -5,6 +5,30 @@ type read_error =
   | Chat_store_unreadable of Keeper_chat_store.strict_decode_error
   | External_attention_unreadable of Keeper_external_attention.read_error
   | External_cursor_failed of string
+  | Counterpart_backlog_over_capacity of
+      { path : string
+      ; rows_past_cursor : int
+      ; bytes_past_cursor : int
+      ; row_cap : int
+      ; byte_cap : int
+      }
+  (** A streaming prescan over the external log past the admission cursor
+      proved the backlog exceeds a capacity cap before the full strict load
+      ran. [rows_past_cursor] counts rows past the cursor and
+      [bytes_past_cursor] their exact consumed bytes (a final line without a
+      trailing newline counts without it); the remainder of the file was not
+      read. At least one of the two counts exceeds its cap. The strict load
+      never ran, so cursor validity and row decoding are still unknown. *)
+  | Counterpart_selection_over_capacity of
+      { rows : int
+      ; bytes : int option
+      ; row_cap : int
+      ; byte_cap : int
+      }
+  (** The combined counterpart selection exceeds a capacity cap. [rows] is
+      the selected observation count and [bytes] the rendered prompt bytes;
+      [bytes = None] means the rows alone exceeded [row_cap] so bytes were
+      never measured. No snapshot is returned and no cursor advances. *)
 
 val read_error_to_string : read_error -> string
 

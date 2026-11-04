@@ -902,6 +902,128 @@ let test_cursor_observation_preserves_complete_preparation () =
    | _ -> Alcotest.fail "cursor observation envelope missing")
 ;;
 
+let test_prescan_refuses_malformed_over_capacity_backlog () =
+  with_temp_base "keeper-counterpart-capacity-malformed" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let keeper_name = "capacity-malformed" in
+  let path = A.attention_path ~base_path ~keeper_name in
+  (* 100 decodable rows followed by garbage: the prescan must refuse on row
+     count alone without surfacing a decode error. *)
+  let valid =
+    item ~keeper_name ~dedupe_key:"cap-valid" ~received_at:10. ()
+    |> fun it -> Yojson.Safe.to_string (A.event_to_json (A.Recorded it)) ^ "\n"
+  in
+  let garbage = String.make 120 'x' ^ "\n" in
+  let lines = Buffer.create (512 * 1024) in
+  for _ = 1 to 100 do Buffer.add_string lines valid done;
+  for _ = 1 to 4200 do Buffer.add_string lines garbage done;
+  write_file path (Buffer.contents lines);
+  match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
+  | Ok _ -> Alcotest.fail "over-capacity backlog with malformed tail was captured"
+  | Error
+      (Sources.Counterpart_backlog_over_capacity
+        { path = _; rows_past_cursor; bytes_past_cursor; row_cap; byte_cap }) ->
+    Alcotest.(check bool) "rows past cursor exceed row cap" true (rows_past_cursor > row_cap);
+    Alcotest.(check bool) "bytes past cursor counted" true (bytes_past_cursor > 0);
+    Alcotest.(check int) "row cap" 4096 row_cap;
+    Alcotest.(check int) "byte cap" 1048576 byte_cap
+  | Error error ->
+    Alcotest.failf "prescan did not fire before decoding: %s" (Sources.read_error_to_string error)
+
+let test_selection_refuses_rows_over_bytes_unmeasured () =
+  with_temp_base "keeper-counterpart-capacity-selection" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let module Chat = Masc.Keeper_chat_store in
+  let keeper_name = "capacity-selection" in
+  (* One small external event: the prescan passes and the strict load runs. *)
+  (match record ~base_path
+           (item ~keeper_name ~dedupe_key:"cap-sel-one" ~received_at:5. ()) with
+   | `Recorded -> ()
+   | `Duplicate _ -> Alcotest.fail "unexpected selection duplicate"
+   | `Error detail -> Alcotest.fail detail);
+  (* 4097 chat rows: the combined selection passes the row cap while the
+     external backlog stays tiny, so the post-selection backstop refuses
+     on row count alone and bytes are never measured. *)
+  let row i =
+    `Assoc
+      [ "id", `String (Printf.sprintf "cap-chat-%d" i)
+      ; "role", `String "user"
+      ; "content", `String "c"
+      ; "ts", `Float 10.
+      ; "speaker_id", `String "speaker"
+      ; "speaker_name", `String "Speaker"
+      ; "speaker_authority", `String "external"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let lines = Buffer.create (900 * 1024) in
+  for i = 1 to 4097 do
+    Buffer.add_string lines (row i);
+    Buffer.add_char lines '\n'
+  done;
+  write_file (Chat.chat_path ~base_dir:base_path ~keeper_name) (Buffer.contents lines);
+  match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
+  | Ok _ -> Alcotest.fail "rows-over selection was captured"
+  | Error (Sources.Counterpart_selection_over_capacity { rows; bytes; row_cap; byte_cap }) ->
+    Alcotest.(check bool) "selected rows exceed row cap" true (rows > row_cap);
+    Alcotest.(check bool) "bytes were never measured" true (Option.is_none bytes);
+    Alcotest.(check int) "row cap" 4096 row_cap;
+    Alcotest.(check int) "byte cap" 1048576 byte_cap
+  | Error error ->
+    Alcotest.failf "wrong refusal for rows-over selection: %s" (Sources.read_error_to_string error)
+
+let test_prescan_refuses_bytes_over_rows_under_backlog () =
+  with_temp_base "keeper-counterpart-capacity-bytes" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let keeper_name = "capacity-bytes" in
+  let path = A.attention_path ~base_path ~keeper_name in
+  (* 100 fat rows: past the byte cap while staying under the row cap. *)
+  let garbage = String.make 20000 'z' ^ "\n" in
+  let lines = Buffer.create (2 * 1024 * 1024) in
+  for _ = 1 to 100 do Buffer.add_string lines garbage done;
+  write_file path (Buffer.contents lines);
+  match Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20. with
+  | Ok _ -> Alcotest.fail "bytes-over backlog was captured"
+  | Error
+      (Sources.Counterpart_backlog_over_capacity
+        { path = _; rows_past_cursor; bytes_past_cursor; row_cap; byte_cap }) ->
+    Alcotest.(check bool) "bytes past cursor exceed byte cap" true (bytes_past_cursor > byte_cap);
+    Alcotest.(check bool) "rows stay under row cap" true (rows_past_cursor <= row_cap)
+  | Error error ->
+    Alcotest.failf "wrong refusal for bytes-over backlog: %s" (Sources.read_error_to_string error)
+
+let test_at_cap_backlog_reaches_strict_reader () =
+  with_temp_base "keeper-counterpart-capacity-boundary" @@ fun base_path ->
+  let module Sources = Masc.Keeper_librarian_input_sources in
+  let keeper_name = "capacity-boundary" in
+  let path = A.attention_path ~base_path ~keeper_name in
+  let garbage = String.make 100 'w' ^ "\n" in
+  let write_rows count =
+    let lines = Buffer.create (count * 110) in
+    for _ = 1 to count do Buffer.add_string lines garbage done;
+    write_file path (Buffer.contents lines)
+  in
+  let capture () =
+    Sources.capture_counterparts ~external_after:0 ~base_dir:base_path ~keeper_name ~after:None ~before:20.
+  in
+  (* Exactly 4096 rows past the cursor is within cap: the prescan passes and
+     the strict pipeline starts (the garbage then fails strict decoding, and
+     the chat store was never written, so any non-capacity error proves the
+     prescan did not refuse). *)
+  write_rows 4096;
+  (match capture () with
+  | Ok _ -> Alcotest.fail "malformed at-cap backlog was captured"
+  | Error (Sources.Counterpart_backlog_over_capacity _) ->
+    Alcotest.fail "prescan refused an exactly-at-cap backlog"
+  | Error _ -> ());
+  (* One more row trips the prescan. *)
+  write_rows 4097;
+  (match capture () with
+  | Ok _ -> Alcotest.fail "rows-over backlog was captured"
+  | Error (Sources.Counterpart_backlog_over_capacity _) -> ()
+  | Error error ->
+    Alcotest.failf "prescan did not fire past the cap: %s" (Sources.read_error_to_string error))
+
 let () =
   Alcotest.run "keeper_external_attention"
     [
@@ -946,5 +1068,15 @@ let () =
             test_strict_reader_rejects_torn_tail;
           Alcotest.test_case "Discord channel/thread lanes are distinct" `Quick
             test_discord_channel_and_thread_conversation_ids_stay_distinct;
+        ] );
+      ( "capacity",
+        [ Alcotest.test_case "prescan refuses over-capacity backlog before decoding" `Quick
+            test_prescan_refuses_malformed_over_capacity_backlog;
+          Alcotest.test_case "rows-over selection refuses with bytes unmeasured" `Quick
+            test_selection_refuses_rows_over_bytes_unmeasured;
+          Alcotest.test_case "bytes-over backlog refuses while rows stay under cap" `Quick
+            test_prescan_refuses_bytes_over_rows_under_backlog;
+          Alcotest.test_case "at-cap backlog reaches the strict reader" `Quick
+            test_at_cap_backlog_reaches_strict_reader;
         ] );
     ]

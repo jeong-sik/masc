@@ -83,7 +83,9 @@ type error =
 let publication_unfinished = function
   | Original_publication_blocked _ | Counterpart_input_capacity_refused _ -> true
   | Counterpart_observations_unreadable
-      (Keeper_librarian_input_sources.External_cursor_failed _) -> true
+      (Keeper_librarian_input_sources.External_cursor_failed _
+      | Keeper_librarian_input_sources.Counterpart_backlog_over_capacity _
+      | Keeper_librarian_input_sources.Counterpart_selection_over_capacity _) -> true
   | Keeper_meta_absent | Source_capture_failed _ | Keeper_meta_unreadable _
   | Boundary_log_unreadable _ | Progress_unreadable _ | Checkpoint_unreadable _
   | Position_in_other_trace _ | Position_not_in_history _ | Range_stopped _

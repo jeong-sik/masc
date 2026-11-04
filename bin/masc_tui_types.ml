@@ -4649,7 +4649,8 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
    cadence then leaves it out and its read is owed. *)
 let pushed_sources : Surface_read_source.t list =
   [ Surface_read_source.Transport; Surface_read_source.Planning; Surface_read_source.Overview_goals
-  ; Surface_read_source.Account_emails ]
+  ; Surface_read_source.Account_emails; Surface_read_source.Runtime_quota
+  ; Surface_read_source.Provider_history ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
@@ -10103,6 +10104,9 @@ type state = {
   mutable keeper_usage: keeper_usage_reading;
   mutable provider_history: provider_history_reading;
   mutable provider_history_days: int;
+  (* The provider history window starts at a UTC day; the reading is owed
+     again once the day it was taken on has ended. *)
+  mutable provider_history_reread_at: float option;
   mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -19600,6 +19604,7 @@ let create_state
   overview_providers = Providers_unread;
   keeper_usage = Keeper_usage_unread;
   provider_history = Provider_history_unread;
+  provider_history_reread_at = None;
   provider_history_days = 14;
   overview_account_emails = Account_emails_unread;
   overview_goals = Goals_unread;

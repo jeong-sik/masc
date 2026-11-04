@@ -28,7 +28,7 @@ let readiness_poll_interval_s = 0.25
 (* How much of the replacement's log is shown when it exits before ready. *)
 let failure_log_lines = 20
 
-let loopback_url port path = Printf.sprintf "http://127.0.0.1:%d%s" port path
+let loopback_url port path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path
 
 (* Restart reaches the running server and its replacement on 127.0.0.1, as
    setup does, so a replacement bound anywhere else would never be seen. A
@@ -77,7 +77,7 @@ let stop_error_message = function
 
 let observe ~clock ~run_dir ~base_path ~port =
   match Masc_http_client.get_sync ~clock ~headers:[]
-          ~url:(loopback_url port "/health?full=1") () with
+          ~url:(loopback_url port Server_health_paths.full) () with
   | Ok (200, body) ->
     (match Upgrade.decode_health body with
      | Ok identity when String.equal identity.base_path base_path ->

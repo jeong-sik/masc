@@ -30,7 +30,7 @@ let inspect ~base_path ~port =
   let base_path = try Unix.realpath base_path with Unix.Unix_error _ -> base_path in
   let observed = with_http (fun _ clock ->
     match Masc_http_client.get_sync ~clock ~headers:[]
-      ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
+      ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full) () with
     | Ok (200, body) -> decode ~base_path body
     | Ok _ | Error _ -> if port_free port then Free else Unknown_server) in
   let fields = match observed with
@@ -47,7 +47,7 @@ let inspect ~base_path ~port =
 let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login use =
   let open Result.Syntax in
   let* () = match Masc_http_client.get_sync ~clock ~headers:[]
-    ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
+    ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full) () with
     | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
         ~login:(fun () -> login () = 0)
     | Ok _ | Error _ -> Error Upgrade.Invalid_health in

@@ -486,7 +486,7 @@ let identity_provider_attached ~providers ~provider_id =
    be read: the provider can still complete a pending consent, and an
    unreadable row may come back readable on the next inventory. A provider
    absent from the inventory never can, which is what lets its login wait
-   retire instead of polling forever. *)
+   retire instead of being waited on forever. *)
 let identity_provider_declared ~providers ~provider_id =
   List.exists
     (function

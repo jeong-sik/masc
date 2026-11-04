@@ -25,9 +25,20 @@ val switch_set
     credentials retire only with the paired current successful catalog read;
     immutable failure/expiry facts need no catalog. Present only the selected Keeper.
     A successful read also holds the callback the server named. *)
+(** What one reading of a Keeper's providers and attempts tells the read that
+    owed it. *)
+type reading =
+  | Reading_succeeded
+  | Reading_failed
+      (** The catalog or an attempt's status could not be read, or the server
+          says a consent still waits whose deadline [now] has passed. *)
+  | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
+
 val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
+  -> now:float
+  -> settle:(reading -> unit)
   -> report:(string -> unit)
   -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   -> ( Masc_tui_identity_model.identity_provider list

@@ -92,7 +92,25 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
         report (Printf.sprintf "%s %s login: %s" expectation.ile_keeper
           expectation.ile_provider detail)) notice
 
-let providers_loaded (state : state) request ~report ~attempts result =
+(* What one reading of a Keeper's providers and attempts tells the read that
+   owed it. *)
+type reading =
+  | Reading_succeeded
+  | Reading_failed
+      (** The catalog or an attempt's status could not be read, or the server
+          says a consent still waits whose deadline [now] has passed. *)
+  | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
+
+let attempt_read_failed ~now status =
+  match status with
+  | Error _ -> true
+  | Ok (Masc_tui_identity_model.Consent_waiting deadline) -> deadline <= now
+  | Ok
+      ( Masc_tui_identity_model.Callback_in_progress | Credentials_published _
+      | Login_exchange_failed | Credential_publication_incomplete | Consent_expired
+      | Consent_superseded | Attempt_unavailable ) -> false
+
+let providers_loaded (state : state) request ~now ~settle ~report ~attempts result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -131,7 +149,16 @@ let providers_loaded (state : state) request ~report ~attempts result =
   if current then List.iter (fun (expectation, status) ->
     if String.equal expectation.ile_keeper keeper_name then
       apply_login_status state ~report ~catalog:(Result.to_option providers_result)
-        expectation status) attempts
+        expectation status) attempts;
+  settle
+    (if not current then Reading_superseded
+     else
+       match result with
+       | Error _ -> Reading_failed
+       | Ok _ when List.exists (fun (expectation, status) ->
+           String.equal expectation.ile_keeper keeper_name && attempt_read_failed ~now status)
+           attempts -> Reading_failed
+       | Ok _ -> Reading_succeeded)
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =
@@ -160,7 +187,7 @@ let login_started (state : state) request ~now ~report ~notice result =
       Option.iter (fun origin ->
         remember_identity_login_expectation state
           { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id
-          ; ile_attempt_id = attempt_id })
+          ; ile_attempt_id = attempt_id; ile_expires_at = expires_at })
         request.ilr_origin;
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;

@@ -1573,7 +1573,7 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
   let settled = state.http_refresh_progress in
   deliver (Progress.Completed (Progress.Questions, 80_000_000L, Progress.Failed));
   deliver (Progress.Completed (work, 80_000_000L, Progress.Received));
-  deliver (Progress.Completed (Progress.Overview, 80_000_000L, Progress.Received));
+  deliver (Progress.Completed (Progress.Approvals, 80_000_000L, Progress.Received));
   Alcotest.(check bool) "duplicate and undispatched settlements preserve the actual observation" true
     (state.http_refresh_progress = settled);
   Alcotest.(check bool) "diagnostics never confirm workspace identity or publish data" true

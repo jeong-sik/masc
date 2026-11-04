@@ -1094,7 +1094,9 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
 (* POST /api/v1/tui/preferences, after authentication: one change to the
    [tui] table of runtime.toml, parsed at the door (RFC-0482 §3.1). The edit
    goes through Runtime's config write lock and commit, so the commit
-   announces runtime_config_changed like every other save. The [tui] keys
+   announces runtime_config_changed like every other save. A change that
+   leaves the text as it is -- a second visit to the same chat, a hint
+   already retired -- writes, audits and announces nothing. The [tui] keys
    are not read by the Skill catalog, so, as when the terminal wrote them
    itself, the commit does not republish it. The answer carries the commit
    receipt and not the file: the reader already holds its choice. *)
@@ -1109,7 +1111,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
     let operation = Runtime_config_tui_preference change in
     let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
     (match
-       Runtime.edit_config_text
+       Runtime.edit_config_text_if_changed
          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
          (Tui_preference.edit change)
      with
@@ -1117,7 +1119,17 @@ let handle_tui_preference_post state agent_name req reqd body_str =
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
        respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-     | Ok receipt ->
+     | Ok (Runtime.Config_text_unchanged observation) ->
+       Http.Response.json_value ~request:req
+         (`Assoc
+            [ "ok", `Bool true
+            ; "state", `String "unchanged"
+            ; "change", Tui_preference.change_to_yojson change
+            ; ( "source_revision"
+              , `String (Runtime.config_source_revision_to_string observation.source_revision) )
+            ])
+         reqd
+     | Ok (Runtime.Config_text_committed receipt) ->
        let observation = receipt.Runtime.observation in
        Eio.Cancel.protect (fun () ->
          audit_runtime_config_write state agent_name ~path:observation.path ~receipt ~operation
@@ -1125,6 +1137,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
        Http.Response.json_value ~request:req
          (`Assoc
             [ "ok", `Bool true
+            ; "state", `String "committed"
             ; "change", Tui_preference.change_to_yojson change
             ; "commit", Runtime.config_commit_receipt_to_yojson receipt
             ])

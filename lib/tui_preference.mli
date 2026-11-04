@@ -13,7 +13,6 @@ module Key : sig
     | Language
     | Board_sort
     | Candle
-    | Audio_input_device
     | Help_hint_shown
 
   val name : t -> string
@@ -64,8 +63,6 @@ type change =
   | Language_chosen of language
   | Board_sort_chosen of Board_dispatch.sort_order
   | Candle_chosen of candle
-  | Audio_input_device_chosen of string option
-      (** [None] goes back to the operating system's default input. *)
   | Help_hint_retired
 
 val edit : change -> string -> string
@@ -78,7 +75,8 @@ val change_to_yojson : change -> Yojson.Safe.t
 val change_of_yojson : Yojson.Safe.t -> (change, string) result
 (** One change, as [{"change": <kind>, ...}] with exactly the fields its kind
     names. An unknown kind, a missing or extra field, a repeated field, a
-    value that does not parse, or a blank theme or device name is [Error]. *)
+    value that does not parse, or a theme name that is blank or has blanks
+    around it is [Error]. *)
 
 val change_kind : change -> string
 (** The [change] field's value for this change; audit records it. *)

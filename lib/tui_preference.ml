@@ -13,7 +13,6 @@ module Key = struct
     | Language
     | Board_sort
     | Candle
-    | Audio_input_device
     | Help_hint_shown
 
   let name = function
@@ -24,7 +23,6 @@ module Key = struct
     | Language -> "language"
     | Board_sort -> "board_sort"
     | Candle -> "candle"
-    | Audio_input_device -> "audio_input_device"
     | Help_hint_shown -> "help_hint_shown"
 
   let doc_path key = table ^ "." ^ name key
@@ -119,7 +117,6 @@ type change =
   | Language_chosen of language
   | Board_sort_chosen of Board_dispatch.sort_order
   | Candle_chosen of candle
-  | Audio_input_device_chosen of string option
   | Help_hint_retired
 
 let scalar content key value = Toml_line_editor.edit_table_scalar content ~path:table ~key:(Key.name key) ~value
@@ -142,7 +139,6 @@ let edit change content =
   | Board_sort_chosen sort ->
     scalar content Key.Board_sort (Some (Board_dispatch.sort_order_to_string sort))
   | Candle_chosen candle -> scalar content Key.Candle (Some (candle_to_string candle))
-  | Audio_input_device_chosen device -> scalar content Key.Audio_input_device device
   | Help_hint_retired ->
     Toml_line_editor.edit_table_bool content ~path:table ~key:(Key.name Key.Help_hint_shown)
       ~value:true
@@ -155,7 +151,6 @@ type valued_kind =
   | Language_kind
   | Board_sort_kind
   | Candle_kind
-  | Audio_input_device_kind
 [@@deriving enumerate]
 
 type kind =
@@ -169,7 +164,6 @@ let valued_kind_name = function
   | Language_kind -> "language"
   | Board_sort_kind -> "board_sort"
   | Candle_kind -> "candle"
-  | Audio_input_device_kind -> "audio_input_device"
 
 let kind_name = function
   | Valued valued -> valued_kind_name valued
@@ -181,7 +175,6 @@ let valued_field = function
   | Language_kind -> "language"
   | Board_sort_kind -> "sort"
   | Candle_kind -> "candle"
-  | Audio_input_device_kind -> "device"
 
 let kind_of_change = function
   | Chat_visited _ -> Valued Chat_visited_kind
@@ -189,7 +182,6 @@ let kind_of_change = function
   | Language_chosen _ -> Valued Language_kind
   | Board_sort_chosen _ -> Valued Board_sort_kind
   | Candle_chosen _ -> Valued Candle_kind
-  | Audio_input_device_chosen _ -> Valued Audio_input_device_kind
   | Help_hint_retired -> Help_hint_kind
 
 let kind_field_name = "change"
@@ -210,7 +202,6 @@ let change_to_yojson change =
     | Board_sort_chosen sort ->
       valued Board_sort_kind (`String (Board_dispatch.sort_order_to_string sort))
     | Candle_chosen candle -> valued Candle_kind (`String (candle_to_string candle))
-    | Audio_input_device_chosen device -> valued Audio_input_device_kind (optional_string device)
     | Help_hint_retired -> []
   in
   `Assoc ((kind_field_name, `String (change_kind change)) :: value_fields)
@@ -222,11 +213,13 @@ let string_value ~field = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
     Error (field ^ " must be a string")
 
-(* A theme or device name; [null] withdraws the stored one. A blank name is
-   neither a pick nor a withdrawal. *)
+(* A theme name; [null] withdraws the stored one. A blank name is neither a
+   pick nor a withdrawal, and blanks around a name are not part of any name. *)
 let name_or_null ~field = function
   | `Null -> Ok None
   | `String value when String.equal (String.trim value) "" -> Error (field ^ " must not be blank")
+  | `String value when not (String.equal (String.trim value) value) ->
+    Error (field ^ " must not start or end with blanks")
   | `String value -> Ok (Some value)
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
     Error (field ^ " must be a string or null")
@@ -250,8 +243,6 @@ let change_of_value kind ~field value =
       (fun sort -> Board_sort_chosen sort)
       (parsed ~field Board_dispatch.sort_order_of_string_opt value)
   | Candle_kind -> Result.map (fun candle -> Candle_chosen candle) (parsed ~field candle_of_string value)
-  | Audio_input_device_kind ->
-    Result.map (fun device -> Audio_input_device_chosen device) (name_or_null ~field value)
 
 let rec first_repeated = function
   | [] -> None

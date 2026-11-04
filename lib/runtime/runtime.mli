@@ -911,6 +911,20 @@ val edit_config_text :
     replace, the same receipt. Use this rather than loading the file and
     calling {!save_config_text}, which leaves that gap open. *)
 
+type config_edit =
+  | Config_text_unchanged of config_observation
+      (** The edit returned the text already stored. *)
+  | Config_text_committed of config_commit_receipt
+
+val edit_config_text_if_changed :
+  ?runtime_config_path:string ->
+  (string -> string) ->
+  (config_edit, string) result
+(** {!edit_config_text}, except that an edit returning the stored text
+    commits nothing: no write, no publication and no
+    [runtime_config_changed]. The comparison is made under the same write
+    lock as the read. *)
+
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill

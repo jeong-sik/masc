@@ -26,8 +26,6 @@ type failure_reason = Keeper_registry_types_failure.failure_reason =
   | Provider_runtime_error of
       { code : string
       ; detail : string
-      ; provider_id : string option
-      ; http_status : int option
       ; runtime_id : string option
       ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option

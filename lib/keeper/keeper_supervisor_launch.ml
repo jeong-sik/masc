@@ -146,7 +146,7 @@ let launch_supervised_fiber_body
                 lifecycle_token
                 reg
                 (Keeper_state_machine.Fiber_terminated
-                   { outcome = detail; provider_id = None; http_status = None })
+                   { outcome = detail })
             with
             | Ok _ -> true
             | Error transition_error ->
@@ -348,7 +348,7 @@ let launch_supervised_fiber_body
 	                Keeper_registry.dispatch_event
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
+	                  (Keeper_state_machine.Fiber_terminated { outcome })
 	              with
               | Ok _ -> ()
               | Error e ->
@@ -423,7 +423,7 @@ let launch_supervised_fiber_body
                   ~base_path
                   meta.name
                   (Keeper_state_machine.Fiber_terminated
-                     { outcome = "shutdown"; provider_id = None; http_status = None });
+                     { outcome = "shutdown" });
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore
                   (resolve_done
@@ -498,10 +498,7 @@ let launch_supervised_fiber_body
                   ~base_path
                   meta.name
                   (Keeper_state_machine.Fiber_terminated
-                     { outcome = "cancelled_by_parent"
-                     ; provider_id = None
-                     ; http_status = None
-                     });
+                     { outcome = "cancelled_by_parent" });
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore
                   (resolve_done
@@ -534,7 +531,7 @@ let launch_supervised_fiber_body
 	                Keeper_registry.dispatch_event_unit
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
+	                  (Keeper_state_machine.Fiber_terminated { outcome });
                 if
                   resolve_done ~source:"supervisor_unresolved_cleanup" (`Crashed reason)
                   |> should_publish_lifecycle_for_done_signal

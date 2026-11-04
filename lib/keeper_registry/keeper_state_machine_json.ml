@@ -51,19 +51,7 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Stop_requested -> obj "stop_requested" []
   | Drain_complete -> obj "drain_complete" []
   | Fiber_started -> obj "fiber_started" []
-  | Fiber_terminated r ->
-    let base = [ "outcome", `String r.outcome ] in
-    let with_prov =
-      match r.provider_id with
-      | None -> base
-      | Some p -> base @ [ "provider_id", `String p ]
-    in
-    let with_http =
-      match r.http_status with
-      | None -> with_prov
-      | Some s -> with_prov @ [ "http_status", `Int s ]
-    in
-    obj "fiber_terminated" with_http
+  | Fiber_terminated r -> obj "fiber_terminated" [ "outcome", `String r.outcome ]
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
   | Operator_clear_requested r ->

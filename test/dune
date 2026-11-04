@@ -613,7 +613,6 @@
   test_claimable_task_summaries
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio
@@ -966,7 +965,6 @@
   test_claimable_task_summaries
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio

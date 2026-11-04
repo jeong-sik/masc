@@ -67,7 +67,7 @@ let setup name =
 let crash_keeper name =
   let tr = dispatch name (KSM.Heartbeat_failed { consecutive = 5 }) in
   check phase_t "failing" KSM.Failing tr.new_phase;
-  let tr = dispatch name (KSM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None }) in
+  let tr = dispatch name (KSM.Fiber_terminated { outcome = "crash" }) in
   check phase_t "crashed" KSM.Crashed tr.new_phase
 
 let restart_keeper name ~attempt =
@@ -92,7 +92,7 @@ let test_heartbeat_failure_runtime () =
   check phase_t "2nd failure → failing" KSM.Failing tr.new_phase;
 
   let tr = dispatch "hb-fail"
-    (KSM.Fiber_terminated { outcome = "heartbeat exceeded max"; provider_id = None; http_status = None }) in
+    (KSM.Fiber_terminated { outcome = "heartbeat exceeded max" }) in
   check phase_t "fiber death → crashed" KSM.Crashed tr.new_phase
 
 let test_supervisor_restart_cycle () =
@@ -132,7 +132,7 @@ let test_full_chaos_sequence () =
   check phase_t "hb ok → running" KSM.Running tr.new_phase;
 
   let tr = dispatch "chaos"
-    (KSM.Fiber_terminated { outcome = "provider unreachable"; provider_id = None; http_status = None }) in
+    (KSM.Fiber_terminated { outcome = "provider unreachable" }) in
   check phase_t "crash" KSM.Crashed tr.new_phase;
 
   restart_keeper "chaos" ~attempt:1;

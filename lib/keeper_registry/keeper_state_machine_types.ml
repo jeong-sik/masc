@@ -65,11 +65,7 @@ type event =
   | Stop_requested
   | Drain_complete
   | Fiber_started
-  | Fiber_terminated of
-      { outcome : string
-      ; provider_id : string option
-      ; http_status : int option
-      }
+  | Fiber_terminated of { outcome : string }
   | Supervisor_restart_attempt of { attempt : int }
   | Operator_clear_requested of
       { preserve_system : bool
@@ -87,18 +83,7 @@ let event_to_string = function
   | Stop_requested -> "stop_requested"
   | Drain_complete -> "drain_complete"
   | Fiber_started -> "fiber_started"
-  | Fiber_terminated { outcome; provider_id = None; http_status = None } ->
-    Printf.sprintf "fiber_terminated(%s)" outcome
-  | Fiber_terminated { outcome; provider_id; http_status } ->
-    let prov =
-      Option.fold provider_id ~none:""
-        ~some:(Printf.sprintf " provider=%s")
-    in
-    let http =
-      Option.fold http_status ~none:""
-        ~some:(Printf.sprintf " http=%d")
-    in
-    Printf.sprintf "fiber_terminated(%s%s%s)" outcome prov http
+  | Fiber_terminated { outcome } -> Printf.sprintf "fiber_terminated(%s)" outcome
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Operator_clear_requested r ->

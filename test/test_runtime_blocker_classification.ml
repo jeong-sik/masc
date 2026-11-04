@@ -24,8 +24,6 @@ let provider_runtime_surface_exn
     Reg.Provider_runtime_error
       { code
       ; detail
-      ; provider_id = None
-      ; http_status = None
       ; runtime_id
       ; agent_core_timeout = None
       ; fenced_empty_turn_runtime = None

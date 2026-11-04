@@ -32,8 +32,6 @@ type failure_reason =
   | Provider_runtime_error of
       { code : string
       ; detail : string
-      ; provider_id : string option
-      ; http_status : int option
       ; runtime_id : string option
       ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
           (** Typed timeout observation carried from the terminal code
@@ -88,16 +86,8 @@ let failure_reason_to_string = function
   | Heartbeat_consecutive_failures n ->
     Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n -> Printf.sprintf "turn_consecutive_failures(%d)" n
-  | Provider_runtime_error { code; detail; provider_id; http_status; runtime_id = _ } ->
-    let prov =
-      Option.fold provider_id ~none:""
-        ~some:(Printf.sprintf " provider=%s")
-    in
-    let http =
-      Option.fold http_status ~none:""
-        ~some:(Printf.sprintf " http=%d")
-    in
-    Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
+  | Provider_runtime_error { code; detail; runtime_id = _ } ->
+    Printf.sprintf "provider_runtime_error(%s:%s)" code detail
   | Turn_configuration_error { code; field; detail } ->
     let field = Option.fold field ~none:"" ~some:(Printf.sprintf " field=%s") in
     Printf.sprintf "turn_configuration_error(%s:%s%s)" code detail field

@@ -1,5 +1,19 @@
 let event_type = "workspace_dataset_changed"
 
+type browser_view =
+  | Read
+  | Scene of { scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  | Viewport
+
+type browser_scope = {
+  source : Browser_lane.Lane_name.t;
+  client_id : string option;
+  tab_id : int;
+  view : browser_view;
+}
+
+type browser_observation = { scope : browser_scope; revision : string }
+
 type dataset =
   | Repositories
   | Verification_requests
@@ -22,6 +36,7 @@ type dataset =
   | Machine_live of { machine : Machine_lane.t }
   | Memory_health of { keeper : string }
   | Lane_addons of { instance_id : string }
+  | Browser_observation of browser_observation
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -44,6 +59,113 @@ let lanes_name = "lanes"
 let machine_live_name = "machine_live"
 let memory_health_name = "memory_health"
 let lane_addons_name = "lane_addons"
+let browser_observation_name = "browser_observation"
+
+let scene_view_name = function
+  | Browser_lane.Content -> "content"
+  | Browser_lane.Regions -> "regions"
+
+let region_json (target : Browser_lane.node_ref) =
+  `Assoc
+    [ "documentId", `String target.document_id
+    ; "nodeId", `String target.node_id ]
+
+let browser_scope_fields (scope : browser_scope) =
+  [ "source", `String (Browser_lane.Lane_name.to_wire scope.source)
+  ; ( "clientId"
+    , match scope.client_id with Some client -> `String client | None -> `Null )
+  ; "tabId", `Int scope.tab_id ]
+  @
+  match scope.view with
+  | Read -> [ "view", `String "read" ]
+  | Viewport -> [ "view", `String "viewport" ]
+  | Scene { scene_view; scope } ->
+      [ "view", `String "scene"
+      ; "sceneView", `String (scene_view_name scene_view)
+      ; ( "scope"
+        , match scope with Some target -> region_json target | None -> `Null ) ]
+
+let browser_scope_query scope =
+  let value = function
+    | `String text -> text
+    | `Int number -> string_of_int number
+    | `Null -> ""
+    | (`Assoc _ | `List _ | `Bool _ | `Float _ | `Intlit _) as json ->
+        Yojson.Safe.to_string json
+  in
+  Uri.encoded_of_query
+    (List.map (fun (name, json) -> name, [ value json ]) (browser_scope_fields scope))
+
+let browser_scope_of_fields fields =
+  let ( let* ) = Result.bind in
+  let* source =
+    match List.assoc_opt "source" fields with
+    | Some (`String source) ->
+        (match Browser_lane.Lane_name.of_wire source with
+         | Some source -> Ok source
+         | None -> Error (event_type ^ " browser_observation names an unknown source"))
+    | Some _ | None -> Error (event_type ^ " browser_observation names no source")
+  in
+  let* client_id =
+    match List.assoc_opt "clientId" fields with
+    | Some `Null -> Ok None
+    | Some (`String client) ->
+        Browser_lane.client_id_of_string client
+        |> Result.map (fun _ -> Some client)
+        |> Result.map_error (fun detail -> event_type ^ " browser_observation: " ^ detail)
+    | Some _ | None -> Error (event_type ^ " browser_observation names no client identity")
+  in
+  let* () =
+    match source, client_id with
+    | Browser_lane.Lane_name.Live, Some _ -> Ok ()
+    | Browser_lane.Lane_name.Live, None ->
+        Error (event_type ^ " browser_observation requires a live client")
+    | (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand), None -> Ok ()
+    | (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand), Some _ ->
+        Error (event_type ^ " browser_observation gives an owned browser a client")
+  in
+  let* tab_id =
+    match List.assoc_opt "tabId" fields with
+    | Some (`Int tab_id) when tab_id >= 0 -> Ok tab_id
+    | Some _ | None -> Error (event_type ^ " browser_observation names no valid tab")
+  in
+  let* view =
+    match List.assoc_opt "view" fields with
+    | Some (`String "read") -> Ok Read
+    | Some (`String "viewport") -> Ok Viewport
+    | Some (`String "scene") ->
+        let* scene_view =
+          match List.assoc_opt "sceneView" fields with
+          | Some (`String "content") -> Ok Browser_lane.Content
+          | Some (`String "regions") -> Ok Browser_lane.Regions
+          | Some _ | None -> Error (event_type ^ " browser_observation names no scene view")
+        in
+        let* scope =
+          match List.assoc_opt "scope" fields with
+          | Some `Null -> Ok None
+          | Some json -> Browser_scene.scope_of_json json |> Result.map Option.some
+          | None -> Error (event_type ^ " browser_observation names no scene scope")
+        in
+        Ok (Scene { scene_view; scope })
+    | Some _ | None -> Error (event_type ^ " browser_observation names no read view")
+  in
+  Ok { source; client_id; tab_id; view }
+
+let browser_observation_of_fields fields =
+  let ( let* ) = Result.bind in
+  let* scope = browser_scope_of_fields fields in
+  let* revision =
+    match List.assoc_opt "revision" fields with
+    | Some (`String revision)
+      when String.length revision = 64
+           && String.for_all
+                (fun char ->
+                  (Char.compare char '0' >= 0 && Char.compare char '9' <= 0)
+                  || (Char.compare char 'a' >= 0 && Char.compare char 'f' <= 0))
+                revision -> Ok revision
+    | Some _ | None -> Error (event_type ^ " browser_observation names no revision")
+  in
+  Ok { scope; revision }
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -67,6 +189,7 @@ let dataset_name = function
   | Machine_live _ -> machine_live_name
   | Memory_health _ -> memory_health_name
   | Lane_addons _ -> lane_addons_name
+  | Browser_observation _ -> browser_observation_name
 ;;
 
 let keeper_field = function
@@ -75,6 +198,8 @@ let keeper_field = function
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
   | Machine_live { machine } -> [ "machine", `String (Machine_lane.to_wire machine) ]
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
+  | Browser_observation { scope; revision } ->
+      browser_scope_fields scope @ [ "revision", `String revision ]
   | Memory_health { keeper }
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
@@ -121,6 +246,9 @@ let of_fields fields =
     Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
   | Some (`String name) when String.equal name lane_addons_name ->
     Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
+  | Some (`String name) when String.equal name browser_observation_name ->
+    Result.map (fun observation -> Browser_observation observation)
+      (browser_observation_of_fields fields)
   | Some (`String name) when String.equal name memory_health_name ->
     Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_metrics_name ->

@@ -755,11 +755,20 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
              Error "the machine query requires an observer stream"
          | (Some _ | None), Sse.Observer -> Ok machine)
   in
-  match machine with
-  | Error detail ->
+  let browser =
+    match Server_browser_spectator.scope_of_request_target request.target with
+    | Error _ as error -> error
+    | Ok browser ->
+        (match browser, sse_kind with
+         | Some _, (Sse.Agent_stream | Sse.Presence) ->
+             Error "a browser query requires an observer stream"
+         | (Some _ | None), Sse.Observer -> Ok browser)
+  in
+  match machine, browser with
+  | Error detail, _ | _, Error detail ->
       respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
         ~request_authority request reqd ~session_id ~protocol_version detail
-  | Ok machine ->
+  | Ok machine, Ok browser ->
   let observer_scope =
     match sse_kind with
     | Sse.Observer ->
@@ -1038,6 +1047,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 Option.iter (fun (_, (scope : Mcp_server.workspace_scope)) ->
                   Server_machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
                     ~machine ~config:scope.config) observer_scope) machine;
+              Option.iter (fun browser ->
+                Option.iter (fun (_, (scope : Mcp_server.workspace_scope)) ->
+                  Server_browser_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
+                    ~scope:browser ~config:scope.config) observer_scope) browser;
               Option.iter (fun (_, scope) ->
                 Eio.Fiber.fork_daemon ~sw (fun () ->
                   (match Eio.Fiber.first

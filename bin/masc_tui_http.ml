@@ -1743,16 +1743,19 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events_with_machine ~machine ~on_identity ~clock ~expected_base_path ~expected_masc_root
+let observe_runtime_events_with_machine ~machine ~browser ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let machine_query = match machine with
     | None -> ""
     | Some machine -> "&machine=" ^ Masc.Machine_lane.to_wire machine in
+  let browser_query = match browser with
+    | None -> ""
+    | Some scope -> "&" ^ Masc.Workspace_dataset_event.browser_scope_query scope in
   let url =
     url_of ~host ~port
-      ~path:(observer_stream_path ^ machine_query ^ "&" ^ expected_workspace_paths_query
+      ~path:(observer_stream_path ^ machine_query ^ browser_query ^ "&" ^ expected_workspace_paths_query
                ~base_path:expected_base_path ~masc_root:expected_masc_root)
   in
   let headers =
@@ -1797,7 +1800,7 @@ let observe_runtime_events ~on_identity ~clock ~expected_base_path ~expected_mas
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
-  observe_runtime_events_with_machine ~machine:None ~on_identity ~clock
+  observe_runtime_events_with_machine ~machine:None ~browser:None ~on_identity ~clock
     ~expected_base_path ~expected_masc_root ~host ~port ~session_id ~cursor ~on_open ~on_chunk
 
 (* A stream's server writes a keepalive comment at a fixed interval when it has

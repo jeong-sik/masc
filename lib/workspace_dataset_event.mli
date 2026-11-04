@@ -3,12 +3,37 @@
     The event is
     [{"type":"workspace_dataset_changed","dataset":<name>,"ts_unix":...}],
     with the ["keeper"], ["machine"] or ["instance_id"] scope of a dataset that
-    belongs to one such resource. It goes to the observers of [base_path]'s
+    belongs to one such resource, or a Browser target and revision. It goes to
+    the observers of [base_path]'s
     runtime only and carries no dataset rows: a reader that shows the named
     dataset reads it again from its own path.
 
     The server announces and the TUI decodes through this one type, so a
     dataset added here is a match arm both sides must handle. *)
+
+type browser_view =
+  | Read
+  | Scene of { scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
+  | Viewport
+
+type browser_scope = {
+  source : Browser_lane.Lane_name.t;
+  client_id : string option;
+  tab_id : int;
+  view : browser_view;
+}
+
+type browser_observation = { scope : browser_scope; revision : string }
+
+val browser_scope_fields : browser_scope -> (string * Yojson.Safe.t) list
+(** The target identity shared by the event and the observer subscription.
+    Contains no page contents or image bytes. *)
+
+val browser_scope_query : browser_scope -> string
+(** URI-encoded query parameters preserving {!browser_scope_fields}. *)
+
+val browser_scope_of_fields :
+  (string * Yojson.Safe.t) list -> (browser_scope, string) result
 
 type dataset =
   | Repositories
@@ -89,6 +114,9 @@ type dataset =
   | Lane_addons of { instance_id : string }
       (** The open Add-on Inspect of [instance_id] has a newly committed
           observation. The event carries the instance only, never its rows. *)
+  | Browser_observation of browser_observation
+      (** The selected browser target has a changed observation revision.
+          Carries identity only: no page contents or image bytes. *)
 
 val event_type : string
 

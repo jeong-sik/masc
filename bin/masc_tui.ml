@@ -8090,6 +8090,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
   | Masc.Workspace_dataset_event.Machine_live { machine } -> owe_machine_live_read state machine
+  | Masc.Workspace_dataset_event.Browser_observation _ -> ()
   | Masc.Workspace_dataset_event.Memory_health _ ->
       state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
@@ -9104,6 +9105,8 @@ let launch_owed_machine_live state ~mailbox =
     (fun owed -> state.msx_live_owed <- owed) launch_msx_live_read;
   launch Masc.Machine_lane.Dos state.msx_open state.dos_live_owed state.dos_live_in_flight
     (fun owed -> state.dos_live_owed <- owed) launch_dos_live_poll
+
+let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
@@ -12168,7 +12171,6 @@ let terminal_draws_images = ref None
 let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 let image_cell_pixels = ref None
 let browser_image_region : Masc_tui_graphics.image_region option ref = ref None
-let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 (* Said the same at both doors a picture comes through: the capability was
    asked once and the answer cannot change, so neither does the sentence that
@@ -18667,7 +18669,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events_with_machine ~machine ~clock
+                Masc_tui_http.observe_runtime_events_with_machine ~machine ~browser:None ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
                   ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
                   ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)

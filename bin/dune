@@ -34,6 +34,7 @@
   masc.browser_lane
   masc.voice_config
   masc.voice_setup
+  masc.voice_wizard
   masc.web_search_setup
   masc.runtime_setting_set
   masc.keeper_runtime

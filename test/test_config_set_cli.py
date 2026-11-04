@@ -7,7 +7,8 @@ that is not seeded fails here. Every case works in a scratch workspace under a
 scratch HOME.
 
 RFC-0482 §3.2: while the workspace's server answers on the port, the keys go
-through it. A stand-in server answers health and runtime.toml the way the
+through it, and so do web-search-setup's section and voice-local-setup's
+changes. A stand-in server answers health and runtime.toml the way the
 real one does, so the command's side of that exchange is checked here; the
 server's side is test_dashboard_http_core's.
 """
@@ -65,7 +66,7 @@ class StandIn:
 
     def __init__(self, base_path, ready=True, save_status=200):
         self.base_path, self.ready, self.save_status = base_path, ready, save_status
-        self.saves, self.authorizations = [], []
+        self.saves, self.save_paths, self.authorizations = [], [], []
         stand_in = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -94,6 +95,7 @@ class StandIn:
             def do_POST(self):
                 length = int(self.headers.get("content-length", "0"))
                 stand_in.authorizations.append(self.headers.get("authorization"))
+                stand_in.save_paths.append(self.path)
                 stand_in.saves.append(json.loads(self.rfile.read(length)))
                 self.answer(stand_in.save_status, {"ok": stand_in.save_status == 200})
 
@@ -269,6 +271,40 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(len(server.saves), 1)
         self.assertIn("timeout_sec = 30", server.saves[0]["source_text"])
         self.assertEqual(server.saves[0]["expected_source_revision"], REVISION)
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # voice-local-setup sends its changes to the server's voice route, with the
+    # revision it decided them on, and leaves the file to the server.
+    def test_voice_local_setup_sends_its_changes_to_a_running_server(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(base)
+        model = str(root / "ggml-base.bin")
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--model", model)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("through the running server", result.stdout)
+        self.assertEqual(server.save_paths, ["/api/v1/voice/setup"])
+        save = server.saves[0]
+        self.assertRegex(save["expected_revision"], r"\S")
+        self.assertEqual(save["changes"], [{
+            "change": "put_endpoint", "section": "stt",
+            "endpoint": {"id": "whisper-local", "kind": "whisper_cli",
+                         "enabled": True, "model": model}}])
+        self.assertTrue(all(value == "Bearer " + TOKEN for value in server.authorizations))
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML,
+                         "the command wrote the file under a running server")
+
+    def test_voice_local_setup_refused_by_the_server_writes_nothing(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(base, save_status=409)
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--model", str(root / "ggml-base.bin"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("HTTP 409", result.stderr)
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
 
     def test_a_file_changed_on_the_server_is_not_overwritten(self):

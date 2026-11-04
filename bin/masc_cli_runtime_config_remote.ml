@@ -17,6 +17,7 @@ type saved =
 
 let health_path = "/health?full=1"
 let raw_path = "/api/v1/runtime/config/raw"
+let voice_setup_path = "/api/v1/voice/setup"
 
 (* This workspace's server answers on the port and is ready: it is the
    writer. This workspace's server is still starting, or answers without a
@@ -116,6 +117,20 @@ let save ~clock server ~edit =
   let* source = fetch ~clock server in
   let* edited = edit source.text in
   store ~clock server source ~edited
+
+(* Voice setup goes to the server's voice route, not the text route: voice
+   also reads voice_config.json, which the text route does not hold. The server
+   applies [changes] under its lock against [revision], the revision they were
+   decided on, and refuses (409) when the file moved since. *)
+let apply_voice_setup ~clock server ~revision changes =
+  let body = Yojson.Safe.to_string (Voice_wizard.request_json ~revision changes) in
+  match
+    Masc_http_client.post_sync ~clock ~url:(server.origin ^ voice_setup_path) ~headers:server.headers ~body ()
+  with
+  | Error detail ->
+    Error ("The setup was sent, and the server's answer did not arrive, so whether it was stored is unknown: " ^ detail)
+  | Ok (200, _) -> Ok ()
+  | Ok (status, body) -> Error (error_of_body ~status body)
 
 (* The Eio context the HTTP client needs, for a command that otherwise runs
    without one. *)

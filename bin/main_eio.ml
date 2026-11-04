@@ -2384,7 +2384,7 @@ let voice_local_voices_exit () =
            [ "voices", `List (List.map Masc.Voice_bridge.catalogue_voice_json voices) ]));
     0
 
-let voice_local_setup_exit base_path speak_voice hear_model =
+let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   let refuse message = prerr_endline message; 1 in
@@ -2485,14 +2485,43 @@ let voice_local_setup_exit base_path speak_voice hear_model =
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
           2
       | changes ->
-          match
-            Voice_setup.apply ~runtime_config_path ~standalone_path
-              ~expected_revision:revision changes
-          with
-          | Error error -> refuse (Voice_setup.error_message error)
-          | Ok _revision ->
-              print_endline "voice is configured";
-              0
+          (* With no server answering on the port, the command writes the
+             file itself: then nothing else writes it and no reader is
+             waiting to be told. *)
+          let apply_locally () =
+            match
+              Voice_setup.apply ~runtime_config_path ~standalone_path
+                ~expected_revision:revision changes
+            with
+            | Error error -> refuse (Voice_setup.error_message error)
+            | Ok _revision ->
+                print_endline "voice is configured";
+                0
+          in
+          (match Unix.realpath base_path with
+           | exception Unix.Unix_error _ -> apply_locally ()
+           | real_base_path ->
+               let route =
+                 Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+                   match
+                     Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path
+                       ~port ~agent
+                   with
+                   | Error message -> `Refused message
+                   | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+                   | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+                       (* RFC-0482 §3.2: the running server is the writer. *)
+                       `Through_server
+                         (Masc_cli_runtime_config_remote.apply_voice_setup ~clock server
+                            ~revision changes))
+               in
+               (match route with
+                | `Refused message -> refuse message
+                | `Local -> apply_locally ()
+                | `Through_server (Error message) -> refuse message
+                | `Through_server (Ok ()) ->
+                    print_endline "voice is configured through the running server";
+                    0))
 
 let browser_lane_setup_cmd =
   let modes =
@@ -2771,7 +2800,7 @@ let voice_local_setup_cmd =
   Cmd.v
     (Cmd.info
        "voice-local-setup"
-       ~doc:"Turn on voice that needs no server, without one running."
+       ~doc:"Turn on voice that needs no server."
        ~man:
          [ `S Manpage.s_description
          ; `P
@@ -2779,14 +2808,19 @@ let voice_local_setup_cmd =
               formula. Both run once and exit, so neither needs a server -- which is why \
               this can run during setup, before there is anything to talk to over HTTP."
          ; `P
-             "Writes through the same writer the HTTP route uses: the same revision \
-              guard, and the same refusal to publish a section the loader would reject."
+             "While this workspace's server answers on the port, the changes go to its \
+              voice setup route, which saves them and tells its readers. With no server \
+              answering, the command writes the file itself with the same writer: the \
+              same revision guard, and the same refusal to publish a section the loader \
+              would reject."
          ])
     Term.(
-      const (fun base_path voice model list_voices ->
+      const (fun base_path port agent voice model list_voices ->
         if list_voices then voice_local_voices_exit ()
-        else voice_local_setup_exit base_path voice model)
+        else voice_local_setup_exit base_path ~port ~agent voice model)
       $ base_path
+      $ port
+      $ login_agent
       $ voice
       $ model
       $ list_voices)
@@ -2847,10 +2881,11 @@ let web_search_setup_cmd =
               search order a call would use now, and the variable to export for a \
               provider that is missing."
          ; `P
-             "Writes only the [web_search] section of runtime.toml, through the same \
-              locked writer as voice-local-setup, keeping comments and other tables as \
-              they are. An API key is never written: it is read from the environment \
-              of the process that starts the server."
+             "Writes only the [web_search] section of runtime.toml, keeping comments \
+              and other tables as they are. While this workspace's server answers on the \
+              port, the section is saved through that server; otherwise the command \
+              writes the file itself. An API key is never written: it is read from the \
+              environment of the process that starts the server."
          ])
     Term.(
       const (fun base_path port agent searxng_url provider provider_order fallbacks timeout_sec

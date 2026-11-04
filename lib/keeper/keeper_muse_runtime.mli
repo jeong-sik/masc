@@ -130,7 +130,26 @@ val run :
     vendor session and sends the current goal and context. No top-level
     runtime routing is exposed here. *)
 
+type catalog_reading =
+  | Catalog_lists_model
+  | Catalog_omits_model of
+      { model : string
+      ; source : Runtime_muse_msp.model_catalog_source
+      ; listed : int
+      }
+(** What the account's [model/list] says about the configured model after a
+    non-retryable [modelError] without quota. An omission from the provider's
+    own catalog makes the reported [error_type] [model_not_in_account_catalog];
+    an omission from any other list keeps [modelError] and adds the list's
+    source and size to the detail. Retry and effect handling stay those of
+    [modelError]. *)
+
 module For_testing : sig
+  val catalog_reading : model:string -> Runtime_muse_msp.model_catalog -> catalog_reading
+
+  val catalog_checked_model :
+    configured_model:string option -> Runtime_muse_serve.error -> string option
+
   val usage_reports
     :  turn_count:int
     -> position:Keeper_usage_resolution.cumulative_position
@@ -170,7 +189,8 @@ module For_testing : sig
       opens and closes with the MASC tool blocks and is released when the
       held blocks reach the stream. *)
 
-  val runtime_error_to_core_error : ?now:float -> Runtime_muse_serve.error -> Agent_core.Error.t
+  val runtime_error_to_core_error :
+    ?now:float -> ?catalog:catalog_reading -> Runtime_muse_serve.error -> Agent_core.Error.t
 
   val recovery_failure_of_runtime_error : ?current:Keeper_official_client_session_store.recovery_failure ->
     Runtime_muse_serve.error -> Keeper_official_client_session_store.recovery_failure

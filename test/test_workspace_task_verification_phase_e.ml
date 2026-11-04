@@ -19,9 +19,7 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   ; contract
   ; handoff_context
   ; cycle_count = 0
-  ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 
@@ -72,7 +70,6 @@ let test_handoff_context_evidence_refs_survive_typed () =
     ; reason = None
     ; next_step = None
     ; failure_mode = None
-    ; reclaim_policy = None
     ; evidence_refs = [ "note:see retro"; "note:n/a"; "  " ]
     ; updated_at = None
     ; updated_by = None

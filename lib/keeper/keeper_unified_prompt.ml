@@ -1705,9 +1705,9 @@ let prepare_prompt_internal
                 Prompt_names.keeper_world_namespace_state_claimable
                 [ "count", "0" ]
               ^ "\n");
-         (* The difference is exactly two things: a Todo task still holding a
-           verification verdict, and a Todo task this keeper wrote itself. No
-           goal, tool, or keeper scope narrows the claim pool. *)
+         (* The difference is exactly one thing: a Todo task still holding a
+           verification verdict. No goal, tool, or keeper scope narrows the
+           claim pool. *)
          let unclaimed_not_offered =
            max 0 (observation.unclaimed_task_count - claimable_task_count)
          in

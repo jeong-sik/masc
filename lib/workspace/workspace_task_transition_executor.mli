@@ -2,8 +2,8 @@
 
     This module was extracted from [Workspace_task] as part of #16078.
     It owns the pure backlog-shape construction for task lifecycle
-    transitions: normalizing tasks before status changes, computing
-    release counters, and building the persisted backlog update.
+    transitions: counting releases and building the persisted backlog
+    update.
 
     It sits between {!Workspace_task_lifecycle.decide} and the
     storage/event side effects in {!Workspace_task.transition_task_r}. *)

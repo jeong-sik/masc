@@ -1669,11 +1669,6 @@ let test_holder_cancel_ends_the_task () =
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
-    let refused =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Cancel ()
-    in
-    Alcotest.(check bool) "a cancel with no reason is refused" true (Result.is_error refused);
     (match
        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
          ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
@@ -1742,7 +1737,6 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
            ; reason = None
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
            ; updated_by = None
@@ -1825,7 +1819,6 @@ let test_operator_cancel_refuses_invalid_requests_without_write () =
       Alcotest.(check int) "refusal has no write" before.version
         (Workspace.read_backlog config).version)
       [ List.remove_assoc "expected_workspace" fields
-      ; ("reason", `String "   ") :: List.remove_assoc "reason" fields
       ; ("operator_id", `String test_agent_a) :: fields
       ; ("agent_name", `String test_agent_a) :: fields
       ; ("task_id", `String "task-002") :: fields
@@ -1841,7 +1834,7 @@ let test_operator_cancel_pending_submission_refuses_late_verdict () =
     (match Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
       ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
       ~handoff_context:{ summary = "owner evidence"; reason = None; next_step = None;
-        failure_mode = None; reclaim_policy = None; evidence_refs = [];
+        failure_mode = None; evidence_refs = [];
         updated_at = Some "2026-10-21T00:00:00Z"; updated_by = Some test_agent_a }
       ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
         Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
@@ -2479,64 +2472,6 @@ let test_read_current_task_preserves_unavailable_and_missing () =
     | Keeper_world_observation_inputs.Recovered_current_task _
     | Keeper_world_observation_inputs.Current_task_missing _ ->
       Alcotest.fail "unreadable backlog did not remain explicitly unavailable")
-
-let test_self_authored_scoped_task_does_not_hide_peer_work () =
-  with_test_env (fun config ->
-    let keeper = "keeper-goal-filter-agent" in
-    let meta = keeper_meta_for_goal_filter keeper in
-    let _ =
-      Workspace.add_task config ~goal_id:"goal-a" ~created_by:meta.name
-        ~title:"Own goal routing task" ~priority:1 ~description:""
-    in
-    let _ =
-      Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
-        ~title:"Peer work outside active goal" ~priority:1 ~description:""
-    in
-    let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "self-authored scoped work does not suppress peer fallback"
-      1
-      (List.length snapshot.claimable_tasks))
-;;
-
-(* The self-authored exclusion must hold through [read_backlog_snapshot], not
-   only in [task_is_self_authored_todo]: dropping the filter clause leaves every
-   predicate-level test green while the feedback loop stays open. Rows are
-   compared against a baseline because the fixture seeds its own tasks. *)
-let test_read_backlog_snapshot_excludes_self_authored_task () =
-  with_test_env (fun config ->
-    let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let before = Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta in
-    let claimable_before = List.length before.claimable_tasks in
-    let _ =
-      Workspace.add_task config ~created_by:meta.name
-        ~title:"self-authored routing task" ~priority:3 ~description:""
-    in
-    let after_self =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "a keeper's own task is not offered back to it as claimable"
-      claimable_before
-      (List.length after_self.claimable_tasks);
-    let _ =
-      Workspace.add_task config ~created_by:"peer-keeper"
-        ~title:"peer authored task" ~priority:3 ~description:""
-    in
-    let after_peer =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "a peer-authored task is still claimable"
-      (claimable_before + 1)
-      (List.length after_peer.claimable_tasks);
-    Alcotest.(check int)
-      "the unclaimed count still reports both tasks"
-      (after_self.unclaimed_count + 1)
-      after_peer.unclaimed_count
-  )
 
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
   with_test_env (fun config ->
@@ -3659,12 +3594,6 @@ let () =
         test_read_backlog_snapshot_preserves_unreadable_observation;
       Alcotest.test_case "read current task preserves unavailable and missing" `Quick
         test_read_current_task_preserves_unavailable_and_missing;
-      Alcotest.test_case "self-authored scoped task does not hide peer work"
-        `Quick
-        test_self_authored_scoped_task_does_not_hide_peer_work;
-      Alcotest.test_case "backlog snapshot excludes self-authored task"
-        `Quick
-        test_read_backlog_snapshot_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
     ];

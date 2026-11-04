@@ -575,7 +575,7 @@ let test_memory_reinit_preserves_local_backlog_with_dropped_task_fields () =
                (Workspace_init.Mirror_unverified { path; _ }) ->
                assert (String.equal path primary));
           assert (In_channel.with_open_bin primary In_channel.input_all = before))
-        [ "handoff_context"; "reclaim_policy" ])
+        [ "handoff_context" ])
 
 let test_memory_reinit_allows_identical_backlog_with_dropped_task_fields () =
   with_tmp (fun dir ->

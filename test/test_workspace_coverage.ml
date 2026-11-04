@@ -545,225 +545,33 @@ let test_status_hides_stale_agent_current_task_without_writing () =
         (Masc_domain.agent_status_to_string agent_after.status)))
 ;;
 
-(* ============================================================ *)
-(* #10421: claim_next existing-task preservation                 *)
-(* ============================================================ *)
-
-(** Same agent calling claim_next twice should keep the current task bound.
-    Implicit release creates keeper hot-potato loops when a model repeats the
-    claim tool before doing the work. *)
-let test_claim_next_preserves_existing_task () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"First" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Second" ~priority:2 ~description:"" in
-    let r1 = claim_next config ~agent_name:"claude" in
-    Alcotest.(check bool) "first claim has task-001" true (str_contains r1 "task-001");
-    let r2 = claim_next config ~agent_name:"claude" in
-    Alcotest.(check bool)
-      "second claim keeps current task"
-      true
-      (str_contains r2 "already holds");
-    Alcotest.(check bool)
-      "second claim mentions task-001"
-      true
-      (str_contains r2 "task-001");
-    Alcotest.(check bool)
-      "second claim does not move to task-002"
-      false
-      (str_contains r2 "task-002");
-    let tasks = Workspace.get_tasks_raw config in
-    let task_001 =
-      List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-001") tasks
-    in
-    let task_002 =
-      List.find_opt (fun (t : Masc_domain.task) -> t.id = "task-002") tasks
-    in
-    (match task_001 with
-     | Some t ->
-       Alcotest.(check string)
-         "task-001 stays claimed"
-         "claimed"
-         (Masc_domain.task_status_to_string t.task_status)
-     | None -> Alcotest.fail "task-001 not found in backlog");
-    match task_002 with
-    | Some t ->
-      Alcotest.(check string)
-        "task-002 stays todo"
-        "todo"
-        (Masc_domain.task_status_to_string t.task_status)
-    | None -> Alcotest.fail "task-002 not found in backlog")
-;;
-
-(** A repeated claim by the owner must not make the current task claimable by
-    other agents. Peers should move to the next Todo task. *)
-let test_claim_next_preserved_task_not_claimable_by_others () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Task A" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Task B" ~priority:2 ~description:"" in
-    let _ = claim_next config ~agent_name:"claude" in
-    let _ = claim_next config ~agent_name:"claude" in
-    let r = claim_next config ~agent_name:"gemini" in
-    Alcotest.(check bool)
-      "gemini does not get preserved task"
-      false
-      (str_contains r "task-001");
-    Alcotest.(check bool) "gemini gets task-002" true (str_contains r "task-002"))
-;;
-
-(** Repeated owner calls preserve the current task instead of releasing it. *)
-let test_claim_next_r_preserves_current_task () =
+(** An agent that already holds a Task claims the next unclaimed one. *)
+let test_claim_next_claims_another_task_while_holding_one () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
-    let r1 = Workspace.claim_next_r config ~agent_name:"claude" () in
-    (match r1 with
-     | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.(check string) "first claim is task-001" "task-001" task_id
-     | _ -> Alcotest.fail "first claim should succeed");
-    let r2 = Workspace.claim_next_r config ~agent_name:"claude" () in
-    match r2 with
-    | Workspace.Claim_next_claimed { task_id; message; _ } ->
-      Alcotest.(check string) "still task-001" "task-001" task_id;
-      Alcotest.(check bool)
-        "message says already holds"
-        true
-        (str_contains message "already holds")
-    | _ -> Alcotest.fail "second claim should succeed")
-;;
-
-(** The single-claim refusal has to carry its own correction hint: the prompt
-    used to spell out the escape route in prose because the message named the
-    held Task but not the way out. *)
-let test_claim_next_refusal_names_the_release_path () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_next_r config ~agent_name:"claude" () in
-    match Workspace.claim_next_r config ~agent_name:"claude" () with
-    | Workspace.Claim_next_claimed { message; _ } ->
-      Alcotest.(check bool)
-        "names the transition tool"
-        true
-        (str_contains message "masc_transition");
-      Alcotest.(check bool)
-        "names the release action"
-        true
-        (str_contains message "action=release");
-      Alcotest.(check bool)
-        "names the required handoff summary"
-        true
-        (str_contains message "handoff_context.summary")
-    | _ -> Alcotest.fail "second claim should be refused with the held task")
-;;
-
-let test_release_hard_stop_todo_stays_claimable () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
-    let _ = Workspace.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
-    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
-    let handoff_context : Masc_domain.task_handoff_context =
-      { summary = "PR #6561 belongs to a completed upstream scope"
-      ; reason = Some "phantom artifact"
-      ; next_step = Some "cancel the stale task"
-      ; failure_mode = Some "not_found"
-      ; reclaim_policy = Some Masc_domain.Block_reclaim
-      ; evidence_refs = [ "PR#6561" ]
-      ; updated_at = None
-      ; updated_by = Some claude
-      }
+    let claimed_id = function
+      | Workspace.Claim_next_claimed { task_id; _ } -> task_id
+      | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected a claim, got none"
+      | Workspace.Claim_next_error e -> Alcotest.fail e
     in
-    (match
-       Workspace.release_task_r
-         config
-         ~agent_name:claude
-         ~task_id:"task-001"
-         ~handoff_context
-         ()
-     with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    let task_001 =
-      match
-        List.find_opt
-          (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
-          (Workspace.get_tasks_raw config)
-      with
-      | Some task -> task
-      | None -> Alcotest.fail "task-001 not found after release"
+    let first = claimed_id (Workspace.claim_next_r config ~agent_name:"claude" ()) in
+    let second = claimed_id (Workspace.claim_next_r config ~agent_name:"claude" ()) in
+    Alcotest.(check (list string))
+      "both tasks claimed in priority order"
+      [ "task-001"; "task-002" ]
+      [ first; second ];
+    let holders =
+      Workspace.get_tasks_raw config
+      |> List.filter_map (fun (task : Masc_domain.task) ->
+        match Masc_domain.task_assignee_of_status task.task_status with
+        | Some holder -> Some (task.id, holder)
+        | None -> None)
     in
-    Alcotest.(check string)
-      "task-001 back to todo"
-      "todo"
-      (Masc_domain.task_status_to_string task_001.task_status);
-    Alcotest.(check int) "release increments cycle count" 1 task_001.cycle_count;
-    Alcotest.(check (option string))
-      "hard-stop reason persisted"
-      (Some "PR #6561 belongs to a completed upstream scope")
-      task_001.do_not_reclaim_reason;
-    Alcotest.(check (option string))
-      "typed hard-stop persisted"
-      (Some "block_reclaim")
-      (Option.map Masc_domain.task_reclaim_policy_to_string task_001.reclaim_policy);
-    (* task-1869 (#23661): reclaim_policy gates Done -> re-claim only, so the
-       released Todo task stays claimable and claim_next picks it back up by
-       priority. The pre-#23661 pin expected task-002 here and sat latent-red
-       while main was compile-red. The persisted policy/reason above re-arm
-       once the task reaches Done. *)
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string)
-        "claim_next re-claims released todo despite block policy"
-        "task-001" task_id
-    | _ -> Alcotest.fail "expected claim_next_r to claim the released task-001")
-;;
-
-let test_release_hard_stop_allows_direct_todo_reclaim () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ = Workspace.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () in
-    let handoff_context : Masc_domain.task_handoff_context =
-      { summary = "PR #6561 belongs to a completed upstream scope"
-      ; reason = Some "phantom artifact"
-      ; next_step = Some "cancel the stale task"
-      ; failure_mode = Some "not_found"
-      ; reclaim_policy = Some Masc_domain.Block_reclaim
-      ; evidence_refs = [ "PR#6561" ]
-      ; updated_at = None
-      ; updated_by = Some claude
-      }
-    in
-    (match
-       Workspace.release_task_r
-         config
-         ~agent_name:claude
-         ~task_id:"task-001"
-         ~handoff_context
-         ()
-     with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    (* task-1869 (#23661): a Todo task is always claimable — Block_reclaim
-       re-arms only at Done -> re-claim. Direct re-claim of the released
-       task therefore succeeds; the typed policy stays persisted on the task. *)
-    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.fail
-         ("direct todo re-claim should succeed under task-1869: "
-          ^ Masc_domain.masc_error_to_string e));
-    match
-      List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
-        (Workspace.get_tasks_raw config)
-    with
-    | Some task ->
-      Alcotest.(check (option string))
-        "typed hard-stop policy survives the re-claim"
-        (Some "block_reclaim")
-        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
-    | None -> Alcotest.fail "task-001 not found after re-claim")
+    Alcotest.(check (list (pair string string)))
+      "claude holds both tasks"
+      [ "task-001", "claude"; "task-002", "claude" ]
+      holders)
 ;;
 
 let write_tasks config tasks =
@@ -861,21 +669,16 @@ let done_status assignee =
     { assignee; completed_at = Masc_domain.now_iso (); notes = Some "completed" }
 ;;
 
-(* RFC-0323 G-10 (#23731): a Done task is terminal for every actor regardless
-   of reclaim_policy — re-running completed work creates a NEW task linked via
-   predecessor_task_id (types_core.ml Claim_block_not_todo arm). This test
-   previously pinned the retired #23632 Done-reclaim mechanism. *)
-let test_claim_next_done_allow_reclaim_is_terminal () =
+(* A Done task is terminal for every actor — re-running completed work
+   creates a new task linked via predecessor_task_id. *)
+let test_claim_next_done_task_is_terminal () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ =
       Workspace.add_task config ~title:"Completed coordination task" ~priority:1 ~description:""
     in
     update_task config "task-001" (fun (t : Masc_domain.task) ->
-      { t with
-        task_status = done_status "prior-agent"
-      ; reclaim_policy = Some Masc_domain.Allow_reclaim
-      });
+      { t with task_status = done_status "prior-agent" });
     match Workspace.claim_next_r config ~agent_name:claude () with
     | Workspace.Claim_next_no_unclaimed ->
       let task = task_by_id config "task-001" in
@@ -884,142 +687,11 @@ let test_claim_next_done_allow_reclaim_is_terminal () =
         "done"
         (Masc_domain.task_status_to_string task.task_status)
     | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.failf "Done task must be terminal (RFC-0323 G-10), got claim of %s" task_id
+      Alcotest.failf "Done task must be terminal, got claim of %s" task_id
     | Workspace.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-(* RFC-0323 G-10: Block_reclaim on a Done task is moot because Done is
-   terminal and never enters the claim pool. *)
-let test_claim_next_done_block_reclaim_is_terminal () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ =
-      Workspace.add_task config ~title:"Completed blocked task" ~priority:1 ~description:""
-    in
-    update_task config "task-001" (fun (t : Masc_domain.task) ->
-      { t with
-        task_status = done_status "prior-agent"
-      ; reclaim_policy = Some Masc_domain.Block_reclaim
-      ; do_not_reclaim_reason = Some "completed upstream scope"
-      });
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_no_unclaimed ->
-      let task = task_by_id config "task-001" in
-      Alcotest.(check string)
-        "completed task preserved"
-        "done"
-        (Masc_domain.task_status_to_string task.task_status)
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.failf "Block_reclaim completed task must not be claimed, got %s" task_id
-    | Workspace.Claim_next_error msg -> Alcotest.fail msg)
-;;
-
-let test_claim_next_ignores_non_authoritative_auto_cycle_text () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ =
-      Workspace.add_task config ~title:"Legacy soft-blocked task" ~priority:1 ~description:""
-    in
-    let backlog = Workspace.read_backlog config in
-    let tasks =
-      List.map
-        (fun (t : Masc_domain.task) ->
-           if String.equal t.id "task-001"
-           then
-             { t with cycle_count = 3; do_not_reclaim_reason = Some "auto: 3 releases" }
-           else t)
-        backlog.tasks
-    in
-    write_tasks config tasks;
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string)
-        "narrative text does not block claim"
-        "task-001"
-        task_id;
-      let task = task_by_id config task_id in
-      Alcotest.(check (option string))
-        "narrative text cleared after claim"
-        None
-        task.do_not_reclaim_reason
-    | Workspace.Claim_next_no_unclaimed ->
-      Alcotest.fail "expected one claimable task"
-    | Workspace.Claim_next_error msg -> Alcotest.fail msg)
-;;
-
-let test_claim_next_ignores_routing_handoff_text () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ =
-      Workspace.add_task config ~title:"Rerouted coding task" ~priority:1 ~description:""
-    in
-    let _ =
-      Workspace.add_task config ~title:"Normal lower-priority work" ~priority:5 ~description:""
-    in
-    let backlog = Workspace.read_backlog config in
-    let tasks =
-      List.map
-        (fun (t : Masc_domain.task) ->
-           if String.equal t.id "task-001"
-           then
-             { t with
-               cycle_count = 1
-             ; do_not_reclaim_reason =
-                 Some
-                   "Auto-claimed by sandbox-isolated keeper with no \
-                    access to masc source. Releasing for keeper with repo access."
-             }
-           else t)
-        backlog.tasks
-    in
-    write_tasks config tasks;
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "free-text routing handoff remains claimable" "task-001" task_id
-    | Workspace.Claim_next_no_unclaimed ->
-      Alcotest.fail "expected normal unblocked task"
-    | Workspace.Claim_next_error msg -> Alcotest.fail msg)
-;;
-
-let test_claim_next_does_not_deprioritize_narrative_text () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ =
-      Workspace.add_task
-        config
-        ~title:"Legacy soft-blocked urgent"
-        ~priority:1
-        ~description:""
-    in
-    let _ =
-      Workspace.add_task
-        config
-        ~title:"Normal lower-priority work"
-        ~priority:5
-        ~description:""
-    in
-    let backlog = Workspace.read_backlog config in
-    let tasks =
-      List.map
-        (fun (t : Masc_domain.task) ->
-           if String.equal t.id "task-001"
-           then
-             { t with cycle_count = 3; do_not_reclaim_reason = Some "auto: 3 releases" }
-           else t)
-        backlog.tasks
-    in
-    write_tasks config tasks;
-    match Workspace.claim_next_r config ~agent_name:claude () with
-    | Workspace.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string)
-        "priority still wins despite narrative text"
-        "task-001"
-        task_id
-    | Workspace.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
-    | Workspace.Claim_next_error msg -> Alcotest.fail msg)
-;;
-
-let test_release_cycles_do_not_create_auto_do_not_reclaim () =
+let test_release_cycles_keep_the_task_claimable () =
   with_test_env (fun config ->
     let claude = find_agent_name_by_prefix config "claude" in
     let _ = Workspace.add_task config ~title:"Retryable task" ~priority:1 ~description:"" in
@@ -1033,49 +705,11 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
     done;
     let task = task_by_id config "task-001" in
     Alcotest.(check int) "release cycles still tracked" 3 task.cycle_count;
-    Alcotest.(check (option string)) "no auto hard stop" None task.do_not_reclaim_reason;
     match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
     | Ok _ -> ()
     | Error e ->
       Alcotest.fail
         ("retryable task should remain claimable: " ^ Masc_domain.masc_error_to_string e))
-;;
-
-let test_release_cycle_15_does_not_create_auto_hard_stop () =
-  with_test_env (fun config ->
-    let claude = find_agent_name_by_prefix config "claude" in
-    let _ = Workspace.add_task config ~title:"Oscillating task" ~priority:1 ~description:"" in
-    let backlog = Workspace.read_backlog config in
-    let tasks =
-      List.map
-        (fun (t : Masc_domain.task) ->
-           if String.equal t.id "task-001"
-           then { t with cycle_count = 14; reclaim_policy = None; do_not_reclaim_reason = None }
-           else t)
-        backlog.tasks
-    in
-    write_tasks config tasks;
-    (match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    (match Workspace.release_task_r config ~agent_name:claude ~task_id:"task-001" () with
-     | Ok _ -> ()
-     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
-    let task = task_by_id config "task-001" in
-    Alcotest.(check int) "cycle count reaches former threshold" 15 task.cycle_count;
-    Alcotest.(check (option string))
-      "no auto typed hard-stop"
-      None
-      (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy);
-    Alcotest.(check (option string))
-      "no auto hard-stop reason"
-      None
-      task.do_not_reclaim_reason;
-    match Workspace.claim_task_r config ~agent_name:claude ~task_id:"task-001" () with
-    | Ok _ -> ()
-    | Error e ->
-      Alcotest.fail
-        ("cycle count alone should not block reclaim: " ^ Masc_domain.masc_error_to_string e))
 ;;
 
 (* ============================================================ *)
@@ -1127,23 +761,6 @@ let test_update_priority_corrupt_backlog_is_error () =
 (* Cancel Task Tests                                             *)
 (* ============================================================ *)
 
-let seed_block_reclaim config ~task_id =
-  let backlog = Workspace.read_backlog config in
-  let tasks =
-    List.map
-      (fun (t : Masc_domain.task) ->
-         if String.equal t.id task_id
-         then
-           { t with
-             reclaim_policy = Some Masc_domain.Block_reclaim
-           ; do_not_reclaim_reason = Some "operator hard stop"
-           }
-         else t)
-      backlog.tasks
-  in
-  write_tasks config tasks
-;;
-
 let test_cancel_task_todo () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1159,42 +776,6 @@ config
     match result with
     | Ok msg -> Alcotest.(check bool) "cancel success" true (str_contains msg "cancelled")
     | Error _ -> Alcotest.fail "Expected Ok")
-;;
-
-let test_cancel_task_clears_reclaim_policy () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~title:"Blocked stale task" ~priority:1 ~description:""
-    in
-    seed_block_reclaim config ~task_id:"task-001";
-    let seeded = task_by_id config "task-001" in
-    Alcotest.(check (option string))
-      "seeded reclaim policy"
-      (Some "block_reclaim")
-      (Option.map Masc_domain.task_reclaim_policy_to_string seeded.reclaim_policy);
-    (match
-       Workspace.transition_task_r
-config
-~agent_name:"claude"
-~task_id:"task-001"
-~action:Masc_domain.Cancel
-~reason:"operator cancel"
-()
-     with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.failf
-         "cancel transition failed: %s"
-         (Masc_domain.masc_error_to_string e));
-    let cancelled = task_by_id config "task-001" in
-    Alcotest.(check (option string))
-      "reclaim policy cleared"
-      None
-      (Option.map Masc_domain.task_reclaim_policy_to_string cancelled.reclaim_policy);
-    Alcotest.(check (option string))
-      "do not reclaim reason cleared"
-      None
-      cancelled.do_not_reclaim_reason)
 ;;
 
 let test_cancel_task_claimed_by_self () =
@@ -1615,46 +1196,6 @@ let test_transition_cancel_idempotent () =
         (Masc_domain.masc_error_to_string e))
 ;;
 
-let test_transition_cancel_clears_reclaim_policy () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~title:"Blocked stale task" ~priority:1 ~description:""
-    in
-    seed_block_reclaim config ~task_id:"task-001";
-    let seeded = task_by_id config "task-001" in
-    Alcotest.(check (option string))
-      "seeded reclaim policy"
-      (Some "block_reclaim")
-      (Option.map Masc_domain.task_reclaim_policy_to_string seeded.reclaim_policy);
-    (match
-       Workspace.transition_task_r
-         config
-         ~agent_name:"claude"
-         ~task_id:"task-001"
-         ~action:Masc_domain.Cancel
-         ~reason:"stale task cancelled before reclaim"
-         ()
-     with
-     | Ok _ -> ()
-     | Error e ->
-       Alcotest.failf
-         "transition_task_r cancel failed: %s"
-         (Masc_domain.masc_error_to_string e));
-    let cancelled = task_by_id config "task-001" in
-    Alcotest.(check string)
-      "task cancelled"
-      "cancelled"
-      (Masc_domain.task_status_to_string cancelled.task_status);
-    Alcotest.(check (option string))
-      "reclaim policy cleared"
-      None
-      (Option.map Masc_domain.task_reclaim_policy_to_string cancelled.reclaim_policy);
-    Alcotest.(check (option string))
-      "do not reclaim reason cleared"
-      None
-      cancelled.do_not_reclaim_reason)
-;;
-
 (* ============================================================ *)
 (* Observability Tests                                           *)
 (* ============================================================ *)
@@ -2037,7 +1578,7 @@ let test_transition_done_from_claimed_emits_observability () =
            ]))
 ;;
 
-let test_claim_next_existing_task_does_not_emit_release_observability () =
+let test_claim_next_while_holding_does_not_emit_release_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
     let claude = find_agent_name_by_prefix config "claude" in
@@ -2048,8 +1589,8 @@ let test_claim_next_existing_task_does_not_emit_release_observability () =
      | _ -> Alcotest.fail "expected first claim_next_r to succeed");
     (match Workspace.claim_next_r config ~agent_name:claude () with
      | Workspace.Claim_next_claimed { task_id; _ } ->
-       Alcotest.(check string) "keeps task id" "task-001" task_id
-     | _ -> Alcotest.fail "expected existing task on second claim_next_r");
+       Alcotest.(check string) "claims the next task" "task-002" task_id
+     | _ -> Alcotest.fail "expected a second claim from claim_next_r");
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool)
       "audit release not recorded"
@@ -2418,7 +1959,7 @@ let test_claim_task_r_blocks_done_default_policy () =
       Workspace.add_task config ~title:"Completed default-policy task" ~priority:1 ~description:""
     in
     update_task config "task-001" (fun (t : Masc_domain.task) ->
-      { t with task_status = done_status "prior-agent"; reclaim_policy = None });
+      { t with task_status = done_status "prior-agent" });
     match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
     | Error _ ->
       let task = task_by_id config "task-001" in
@@ -2427,38 +1968,6 @@ let test_claim_task_r_blocks_done_default_policy () =
         "done"
         (Masc_domain.task_status_to_string task.task_status)
     | Ok _ -> Alcotest.fail "completed default-policy task must not be claimable")
-;;
-
-(* RFC-0323 G-10 (#23731): even Allow_reclaim does not make Done claimable —
-   completed work is terminal for every actor and the caller is pointed at the
-   predecessor_task_id re-run path (workspace_task_claim.ml `Terminal arm). *)
-let test_claim_task_r_done_allow_reclaim_is_terminal () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~title:"Completed allow-reclaim task" ~priority:1 ~description:""
-    in
-    update_task config "task-001" (fun (t : Masc_domain.task) ->
-      { t with
-        task_status = done_status "prior-agent"
-      ; reclaim_policy = Some Masc_domain.Allow_reclaim
-      });
-    match Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () with
-    | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
-      Alcotest.(check bool)
-        "terminal rejection points at the linked re-run path"
-        true
-        (str_contains msg "predecessor_task_id");
-      let task = task_by_id config "task-001" in
-      Alcotest.(check string)
-        "completed task stays done"
-        "done"
-        (Masc_domain.task_status_to_string task.task_status)
-    | Error e ->
-      Alcotest.fail
-        ("expected InvalidState terminal rejection, got: "
-         ^ Masc_domain.masc_error_to_string e)
-    | Ok _ ->
-      Alcotest.fail "Done task must not be claimable (RFC-0323 G-10)")
 ;;
 
 let test_claim_task_r_already_claimed () =
@@ -2508,9 +2017,7 @@ let gc_make_task ~id ~created_at ~status : Masc_domain.task =
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
-  ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 ;;
@@ -2965,9 +2472,7 @@ let test_next_task_number_rejects_unreadable_or_broken_event_history () =
             ; contract = None
             ; handoff_context = None
             ; cycle_count = 0
-            ; reclaim_policy = None
             ; execution_links = Masc_domain.no_execution_links
-            ; do_not_reclaim_reason = None
             ; skills = []
             }
           ]
@@ -3118,9 +2623,7 @@ let test_append_archive_tasks () =
       ; contract = None
       ; handoff_context = None
       ; cycle_count = 0
-      ; reclaim_policy = None
       ; execution_links = Masc_domain.no_execution_links
-      ; do_not_reclaim_reason = None
       ; skills = []
       }
     in
@@ -3872,57 +3375,17 @@ let () =
             `Quick
             test_claim_next_reconciles_stale_agent_current_task
         ; Alcotest.test_case
-            "#10421: preserves existing task"
+            "claims another task while holding one"
             `Quick
-            test_claim_next_preserves_existing_task
+            test_claim_next_claims_another_task_while_holding_one
         ; Alcotest.test_case
-            "#10421: preserved task not claimable"
+            "completed task is terminal"
             `Quick
-            test_claim_next_preserved_task_not_claimable_by_others
+            test_claim_next_done_task_is_terminal
         ; Alcotest.test_case
-            "#10421: preserved task result"
+            "release cycles keep the task claimable"
             `Quick
-            test_claim_next_r_preserves_current_task
-        ; Alcotest.test_case
-            "single-claim refusal names the release path"
-            `Quick
-            test_claim_next_refusal_names_the_release_path
-        ; Alcotest.test_case
-            "release hard-stop persists policy, todo stays claimable"
-            `Quick
-            test_release_hard_stop_todo_stays_claimable
-        ; Alcotest.test_case
-            "release hard-stop allows direct todo re-claim (task-1869)"
-            `Quick
-            test_release_hard_stop_allows_direct_todo_reclaim
-        ; Alcotest.test_case
-            "completed allow-reclaim task is terminal (RFC-0323 G-10)"
-            `Quick
-            test_claim_next_done_allow_reclaim_is_terminal
-        ; Alcotest.test_case
-            "completed block-reclaim task is terminal (RFC-0323 G-10)"
-            `Quick
-            test_claim_next_done_block_reclaim_is_terminal
-        ; Alcotest.test_case
-            "non-authoritative auto-cycle text is ignored"
-            `Quick
-            test_claim_next_ignores_non_authoritative_auto_cycle_text
-        ; Alcotest.test_case
-            "routing handoff text is ignored"
-            `Quick
-            test_claim_next_ignores_routing_handoff_text
-        ; Alcotest.test_case
-            "narrative text does not alter priority"
-            `Quick
-            test_claim_next_does_not_deprioritize_narrative_text
-        ; Alcotest.test_case
-            "release cycles do not create auto block"
-            `Quick
-            test_release_cycles_do_not_create_auto_do_not_reclaim
-        ; Alcotest.test_case
-            "cycle 15 release does not create auto hard stop"
-            `Quick
-            test_release_cycle_15_does_not_create_auto_hard_stop
+            test_release_cycles_keep_the_task_claimable
         ] )
     ; (* === Update Priority === *)
       ( "update_priority"
@@ -3937,10 +3400,6 @@ let () =
     ; (* === Cancel Task === *)
       ( "cancel"
       , [ Alcotest.test_case "todo task" `Quick test_cancel_task_todo
-        ; Alcotest.test_case
-            "clears reclaim policy"
-            `Quick
-            test_cancel_task_clears_reclaim_policy
         ; Alcotest.test_case "claimed by self" `Quick test_cancel_task_claimed_by_self
         ; Alcotest.test_case "claimed by other" `Quick test_cancel_task_claimed_by_other
         ; Alcotest.test_case "nonexistent" `Quick test_cancel_task_nonexistent
@@ -3974,10 +3433,6 @@ let () =
         ; Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch
         ; Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent
         ; Alcotest.test_case "cancel idempotent" `Quick test_transition_cancel_idempotent
-        ; Alcotest.test_case
-            "cancel clears reclaim policy"
-            `Quick
-            test_transition_cancel_clears_reclaim_policy
         ] )
     ; (* === Observability === *)
       ( "observability"
@@ -3998,9 +3453,9 @@ let () =
             `Quick
             test_transition_done_from_claimed_emits_observability
         ; Alcotest.test_case
-            "claim_next existing task no release fan-out"
+            "claim_next while holding a task no release fan-out"
             `Quick
-            test_claim_next_existing_task_does_not_emit_release_observability
+            test_claim_next_while_holding_does_not_emit_release_observability
         ] )
     ; (* === Pause/Resume === *)
       ( "pause_resume"
@@ -4057,10 +3512,6 @@ let () =
             "claim_task_r blocks default completed task"
             `Quick
             test_claim_task_r_blocks_done_default_policy
-        ; Alcotest.test_case
-            "claim_task_r treats allow-reclaim completed task as terminal"
-            `Quick
-            test_claim_task_r_done_allow_reclaim_is_terminal
         ; Alcotest.test_case
             "claim_task_r already claimed"
             `Quick

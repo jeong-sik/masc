@@ -194,9 +194,7 @@ let add_task_with_result
              ; contract
              ; handoff_context = None
              ; cycle_count = 0
-             ; reclaim_policy = None
              ; execution_links = Masc_domain.no_execution_links
-             ; do_not_reclaim_reason = None
              ; skills
              }
            in
@@ -320,9 +318,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; contract
                   ; handoff_context = None
                   ; cycle_count = 0
-                  ; reclaim_policy = None
                   ; execution_links = Masc_domain.no_execution_links
-                  ; do_not_reclaim_reason = None
                   ; skills = []
                   }
                 in

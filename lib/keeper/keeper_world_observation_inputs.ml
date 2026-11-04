@@ -126,29 +126,6 @@ let tasks_with_identities_memoized tasks =
     result
 ;;
 
-(* A keeper must not treat a task it authored itself as work waiting for it.
-   Without this, a Keeper whose response to "an unclaimed task exists" is to
-   create a routing/report task produces a closed positive feedback loop: the
-   new task is itself an unclaimed Todo authored by the same keeper, so it
-   re-satisfies the trigger on the next observation. In the live incident, one Keeper
-   authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
-   templates re-emitted once per iteration (#28..#90), none ever claimed.
-
-   Only unclaimed [Todo] work is excluded. [AwaitingVerification] is not
-   claimable or actionable by any Keeper, regardless of who authored it. *)
-let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
-  match task.task_status, task.created_by with
-  | Masc_domain.Todo, Some author -> String.equal author meta.name
-  | Masc_domain.Todo, None -> false
-  | ( Masc_domain.AwaitingVerification _
-    | Masc_domain.Claimed _
-    | Masc_domain.InProgress _
-    | Masc_domain.Done _
-    | Masc_domain.Cancelled _ )
-    , (None | Some _) ->
-    false
-;;
-
 (** Read one authoritative backlog snapshot. Counts, claimable rows, and
     revision are projected from the same primary read. *)
 let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -203,12 +180,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
        let claimable_tasks =
          unclaimed_tasks
          |> List.filter_map (fun (task, task_id) ->
-              if
-                Workspace_task_schedule.task_is_claim_pool_candidate task
-                (* Self-authored tasks stay in [unclaimed] (the count stays an
-                   honest view of the backlog) but are not offered back to their
-                   author as claimable work — that edge is the feedback loop. *)
-                && not (task_is_self_authored_todo ~meta task)
+              if Workspace_task_schedule.task_is_claim_pool_candidate task
               then Some { task_id; priority = task.priority; created_at = task.created_at }
               else None)
          (* Claim order -- the same key the auto-claim scheduler sorts by

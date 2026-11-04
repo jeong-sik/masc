@@ -88,7 +88,7 @@
             (Held_by_other → AlreadyClaimed 거부, 상태 변경 없음)</rule>
       <rule>완료는 자기 선언이 아니라 검증 제출(AwaitingVerification)을 거친다.
             verification_id 가 증거 레코드와 조인된다.</rule>
-      <rule>맡은 쪽은 자기 Task 를 사유와 함께 바로 취소한다. 판정 제출 중인 Task 도 같다.
+      <rule>맡은 쪽은 자기 Task 를 바로 취소한다. 판정 제출 중인 Task 도 같다.
             취소는 판정이나 승인을 거치지 않는다. (RFC-0417 §4.1, workspace_task_lifecycle.ml)</rule>
 
       <lifecycle src="lib/types/types_core.mli">
@@ -117,18 +117,6 @@
         <evidence>Board attention candidate 도 같다. 판단과 전달이 성공할 때까지 durable 하게 남는다.</evidence>
         <rationale>시간이 지났다는 사실은 상태를 죽일 근거가 아니다. forbidden#budget_gate 와 같은 뿌리다.</rationale>
       </expiry>
-
-      <reclaim src="lib/workspace/workspace_task_claim.mli">
-        <policy>Allow_reclaim | Block_reclaim</policy>
-        <rule note="RFC-0323 갱신: typed reclaim claim gate 는 폐지됐다.
-                    reclaim_policy 는 claim 을 막지 않고 release/cancel 데이터 파이프라이닝
-                    용도로만 생존한다. Done 재실행은 predecessor_task_id 로 새 task 를 만든다.">
-              정책은 handoff context 의 reclaim_policy 필드에서 유도한다.
-              claim 경로에 policy 파라미터는 없고, release 시점 handoff context 가 원천이다.</rule>
-        <rule>claim 직전 clear_reclaim_decision 으로 non-blocking 회수 메타데이터를 지운다.
-              Block_reclaim 메타데이터는 claim 후에도 생존한다.</rule>
-        <rule>소유권 충돌은 claim 시점에 판정하고 거절 사유를 문장으로 돌려준다.</rule>
-      </reclaim>
 
       <goal_link src="lib/task/task_goal_assignment.mli">
         <rule>goalless Task 는 정상 상태다. Goal 없이 살아 있어도 된다 (RFC-0267 §2).</rule>

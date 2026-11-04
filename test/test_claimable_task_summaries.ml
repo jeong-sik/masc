@@ -105,27 +105,6 @@ let test_the_list_and_the_count_agree () =
     check int "one row per counted task" 3 (List.length observed.claimable_tasks))
 ;;
 
-(* [task_is_self_authored_todo]: a keeper's own unclaimed task stays in the
-   backlog count but is not offered back to its author. The list must apply the
-   same exclusion, or the rows would advertise work the claim path refuses. *)
-let test_self_authored_tasks_are_not_offered_back () =
-  with_config (fun config meta ->
-    let _mine = add config ~title:"Mine" ~created_by:"claimable-probe" in
-    let theirs = add config ~title:"Theirs" ~created_by:"someone-else" in
-    let observed = snapshot config meta in
-    let task_ids =
-      List.map
-        (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
-           Keeper_id.Task_id.to_string row.task_id)
-        observed.claimable_tasks
-    in
-    check (list string)
-      "only the other keeper's task is offered"
-      [ Keeper_id.Task_id.to_string theirs ]
-      task_ids;
-    check int "and the count agrees" 1 (List.length observed.claimable_tasks))
-;;
-
 let test_an_empty_backlog_offers_nothing () =
   with_config (fun config meta ->
     let observed = snapshot config meta in
@@ -328,8 +307,6 @@ let () =
       , [ test_case "a claimable task is named" `Quick test_a_claimable_task_is_named
         ; test_case "the list and the count agree" `Quick
             test_the_list_and_the_count_agree
-        ; test_case "self-authored tasks are not offered back" `Quick
-            test_self_authored_tasks_are_not_offered_back
         ; test_case "an empty backlog offers nothing" `Quick
             test_an_empty_backlog_offers_nothing
         ; test_case "recovery snapshot is not claimable" `Quick

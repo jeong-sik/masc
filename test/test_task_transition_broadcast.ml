@@ -61,9 +61,7 @@ let make_task ~id ~status : D.task =
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
-  ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 ;;
@@ -133,21 +131,6 @@ let test_cancel_of_an_unclaimed_task_is_announced_as_terminal () =
     Alcotest.(check (list string))
       "an unclaimed cancellation is announced as done"
       [ "Cancelled task-13 - the defect was fixed elsewhere" ]
-      (contents config ~baseline_seq))
-;;
-
-(* An unclaimed Task's cancel is gated like a held one's: with no reason of
-   its own the cancel is refused rather than committed bare, so the author's
-   wake never lacks the sentence it exists to carry. *)
-let test_cancel_without_reason_is_refused () =
-  with_test_env (fun config ~baseline_seq ->
-    seed config (make_task ~id:"task-2" ~status:D.Todo);
-    (match transition config ~task_id:"task-2" ~action:D.Cancel () with
-     | Ok message ->
-       Alcotest.failf "a reason-less cancel was accepted: %s" message
-     | Error (D.Task (D.Task_error.InvalidState _)) -> ()
-     | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
-    Alcotest.(check (list string)) "a refused cancel is silent" []
       (contents config ~baseline_seq))
 ;;
 
@@ -246,19 +229,6 @@ let test_auto_start_claim_and_idempotent_in_progress_retry () =
      | Error err ->
        Alcotest.failf "idempotent claim_task_with_details_r failed: %s"
          (D.masc_error_to_string err));
-    let expected_held_refusal =
-      match Workspace.find_task_in_backlog_opt (Workspace.read_backlog config) "task-20" with
-      | Some held -> Workspace.held_tasks_refusal_message ~agent_name:owner [ held ]
-      | None -> Alcotest.fail "task-20 missing from backlog"
-    in
-    (match Workspace.claim_next_r config ~agent_name:owner ~auto_start:true () with
-     | D.Claim_next_claimed { task_id; message; _ } ->
-       Alcotest.(check string) "claim_next returns held task" "task-20" task_id;
-       Alcotest.(check string)
-         "claim_next on already in_progress task returns exact held-task refusal without auto-start suffix"
-         expected_held_refusal
-         message
-     | _ -> Alcotest.fail "expected Claim_next_claimed for held task");
     Alcotest.(check int)
       "idempotent retries on already in_progress task do not bump backlog revision"
       version_after_claim_and_start
@@ -267,29 +237,6 @@ let test_auto_start_claim_and_idempotent_in_progress_retry () =
       "idempotent retries on already in_progress task emit no duplicate broadcasts"
       [ "Started task-20"; "Claimed task-20" ]
       (contents config ~baseline_seq);
-    (* Verify already-held Claimed -> InProgress auto-start via claim_next_r *)
-    seed config
-      (make_task ~id:"task-21" ~status:(D.Claimed { assignee = owner; claimed_at = now }));
-    let expected_claimed_refusal =
-      match Workspace.find_task_in_backlog_opt (Workspace.read_backlog config) "task-21" with
-      | Some held ->
-        Workspace.held_tasks_refusal_message ~agent_name:owner [ held ]
-        ^ " Task auto-started — begin work now."
-      | None -> Alcotest.fail "task-21 missing from backlog"
-    in
-    let version_before_claimed_start = (Workspace.read_backlog config).version in
-    (match Workspace.claim_next_r config ~agent_name:owner ~auto_start:true () with
-     | D.Claim_next_claimed { task_id; message; _ } ->
-       Alcotest.(check string) "claim_next returns held Claimed task" "task-21" task_id;
-       Alcotest.(check string)
-         "claim_next on held Claimed task transitions to InProgress and appends auto-start notice"
-         expected_claimed_refusal
-         message
-     | _ -> Alcotest.fail "expected Claim_next_claimed for held Claimed task");
-    Alcotest.(check int)
-      "starting held Claimed task bumps backlog revision once"
-      (version_before_claimed_start + 1)
-      (Workspace.read_backlog config).version;
     (* Verify concurrent claim_task_with_details_r ~auto_start:true grants exclusive ownership *)
     seed config (make_task ~id:"task-22" ~status:D.Todo);
     (* [Fiber.both] runs both fibers for effect and returns unit; this test
@@ -413,7 +360,6 @@ let test_current_task_projection_interleaved_release_and_read_failure () =
               ; reason = Some "interleaved release"
               ; next_step = None
               ; failure_mode = None
-              ; reclaim_policy = None
               ; evidence_refs = []
               ; updated_at = None
               ; updated_by = None
@@ -482,10 +428,9 @@ let test_submit_defers_to_board () =
       (contents config ~baseline_seq))
 ;;
 
-(* [release_task_r] takes no [reason]: it forwards only [handoff_context], and
-   the production release tool requires one for a strict release. Driving the
-   real wrapper here rather than [transition] pins the entry point that was
-   publishing a bare "Released <id>" while holding the explanation. *)
+(* [release_task_r] takes no [reason]: it forwards only [handoff_context].
+   Driving the real wrapper here rather than [transition] pins the entry point
+   that was publishing a bare "Released <id>" while holding the explanation. *)
 let test_release_wrapper_broadcasts_its_handoff_reason () =
   with_test_env (fun config ~baseline_seq ->
     seed config
@@ -495,7 +440,6 @@ let test_release_wrapper_broadcasts_its_handoff_reason () =
       ; reason = Some "cannot verify without the service"
       ; next_step = Some "re-file once the sandbox ships it"
       ; failure_mode = None
-      ; reclaim_policy = None
       ; evidence_refs = []
       ; updated_at = None
       ; updated_by = None
@@ -510,10 +454,9 @@ let test_release_wrapper_broadcasts_its_handoff_reason () =
       (contents config ~baseline_seq))
 ;;
 
-(* A strict release is rejected without [handoff_context.summary] while
-   [reason] stays optional, so a release whose whole explanation is its summary
-   is a valid and ordinary shape. Reading only [reason] published a bare
-   "Released <id>" and dropped text the caller was required to supply. *)
+(* A release whose whole explanation is its summary is an ordinary shape.
+   Reading only [reason] published a bare "Released <id>" and dropped the
+   caller's text. *)
 let test_release_broadcasts_a_summary_only_handoff () =
   with_test_env (fun config ~baseline_seq ->
     seed config
@@ -523,7 +466,6 @@ let test_release_broadcasts_a_summary_only_handoff () =
       ; reason = None
       ; next_step = None
       ; failure_mode = None
-      ; reclaim_policy = None
       ; evidence_refs = []
       ; updated_at = None
       ; updated_by = None
@@ -553,7 +495,6 @@ let test_explicit_reason_outranks_handoff_context () =
            ; reason = Some "older note"
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
            ; updated_by = None
@@ -578,7 +519,6 @@ let held_with_the_previous_owners_note ~id =
         ; reason = None
         ; next_step = None
         ; failure_mode = None
-        ; reclaim_policy = None
         ; evidence_refs = []
         ; updated_at = None
         ; updated_by = None
@@ -639,13 +579,6 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
   with_test_env (fun config ~baseline_seq ->
   with_captured_activity (fun emitted ->
     seed config (held_with_the_previous_owners_note ~id:"task-14");
-    (match transition config ~task_id:"task-14" ~action:D.Cancel () with
-     | Ok message ->
-       Alcotest.failf "a cancel with no reason of its own was accepted: %s" message
-     | Error (D.Task (D.Task_error.InvalidState _)) -> ()
-     | Error err -> Alcotest.failf "unexpected rejection: %s" (D.masc_error_to_string err));
-    Alcotest.(check (list string)) "a refused cancel is silent" []
-      (contents config ~baseline_seq);
     check_ok "cancel"
       (transition config ~task_id:"task-14" ~action:D.Cancel ~reason:"the premise is gone" ());
     Alcotest.(check (option string)) "the Cancelled record carries this owner's reason"
@@ -667,6 +600,17 @@ let test_cancel_does_not_borrow_the_previous_owners_note () =
     | None -> Alcotest.fail "task-14 vanished"))
 ;;
 
+(* A cancel that states no reason commits with none: the previous owner's note
+   is not put forward as this owner's reason. *)
+let test_cancel_without_reason_records_none () =
+  with_test_env (fun config ~baseline_seq:_ ->
+    seed config (held_with_the_previous_owners_note ~id:"task-2");
+    check_ok "cancel" (transition config ~task_id:"task-2" ~action:D.Cancel ());
+    Alcotest.(check (option string)) "the Cancelled record carries no reason"
+      None
+      (cancelled_reason config ~task_id:"task-2"))
+;;
+
 (* A stop stated only in handoff_context.summary — the shape the tool schema
    asks for — reaches every surface with that sentence: the record, the
    message log, the committed Task, the activity event and the durable
@@ -685,7 +629,6 @@ let test_cancel_stated_in_the_summary_reaches_every_surface () =
            ; reason = None
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
            ; updated_by = None
@@ -856,8 +799,8 @@ let () =
             test_cancel_broadcasts_reason
         ; Alcotest.test_case "an unclaimed cancel is terminal" `Quick
             test_cancel_of_an_unclaimed_task_is_announced_as_terminal
-        ; Alcotest.test_case "cancel without reason is refused" `Quick
-            test_cancel_without_reason_is_refused
+        ; Alcotest.test_case "cancel without reason records none" `Quick
+            test_cancel_without_reason_records_none
         ; Alcotest.test_case "release carries its reason" `Quick
             test_release_broadcasts_reason
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast

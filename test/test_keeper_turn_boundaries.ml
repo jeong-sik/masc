@@ -901,8 +901,8 @@ let test_admission_context_survives_task_and_goal_changes () =
         task_status = Claimed { assignee = keeper_id; claimed_at = "2026-10-02T00:00:00Z" };
         priority = 3; files = []; created_at = "2026-10-02T00:00:00Z";
         created_by = None; predecessor_task_id = None; contract = None;
-        handoff_context = None; cycle_count = 0; reclaim_policy = None;
-        execution_links = Masc_domain.no_execution_links; do_not_reclaim_reason = None; skills = [] }
+        handoff_context = None; cycle_count = 0;
+        execution_links = Masc_domain.no_execution_links; skills = [] }
     in
     Workspace_backlog.write_backlog config
       { tasks = [task]; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = [];

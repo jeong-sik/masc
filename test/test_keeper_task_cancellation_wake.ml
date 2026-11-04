@@ -66,9 +66,7 @@ let seed_task ?handoff_context config ~task_id ~created_by ~status =
     ; contract = None
     ; handoff_context
     ; cycle_count = 0
-    ; reclaim_policy = None
     ; execution_links = Masc_domain.no_execution_links
-    ; do_not_reclaim_reason = None
     ; skills = []
     }
   in
@@ -179,7 +177,6 @@ let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
         ; D.reason = Some "cannot verify without the service"
         ; next_step = None
         ; failure_mode = None
-        ; reclaim_policy = None
         ; evidence_refs = []
         ; updated_at = None
         ; updated_by = None

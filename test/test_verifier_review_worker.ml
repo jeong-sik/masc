@@ -374,7 +374,7 @@ let test_reject_commit_is_confirmed_by_its_relation () = with_workspace_runtime 
     let backlog=get (Workspace_backlog.read_backlog_r config) in
     Workspace_core.write_backlog config {backlog with tasks=List.map (fun (task:Masc_domain.task) ->
       {task with handoff_context=Some {Masc_domain.summary="resumed the repair";reason=None;next_step=Some "fix it";
-        failure_mode=None;reclaim_policy=None;evidence_refs=["board:p-1"];updated_at=None;updated_by=Some producer}})
+        failure_mode=None;evidence_refs=["board:p-1"];updated_at=None;updated_by=Some producer}})
       backlog.tasks};
     let finished=loaded (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
     match P.phase (O.progress finished) with

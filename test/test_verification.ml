@@ -218,98 +218,6 @@ let check_omits content needles =
     needles
 ;;
 
-(* The stalled-review board projection is the only surface that tells the
-   assignee a terminal deferral happened and how to move forward.
-   Pin the content naming both forward paths and the typed metadata. *)
-let test_stalled_projection_names_forward_paths () =
-  let content =
-    VP.For_testing.stalled_board_content
-      ~subject:(VP.Task_review { task_id = "task-101"; verification_id = "vrf-101"; disposition = VP.No_retry_armed })
-      ~gate:"artifact_unreadable"
-      ~detail:"evidence path escapes the playground"
-  in
-  check_names content
-    [ "task-101"
-    ; "vrf:vrf-101"
-    ; "artifact_unreadable"
-    ; "evidence path escapes the playground"
-    ; "no retry armed"
-    ; "submit_for_verification"
-    ; "HITL"
-    ];
-  check_omits content [ "retry scheduled"; "will not retry" ]
-;;
-
-(* Audit U2 (2026-09-12): since 09-07, 18 of 21 "will not retry" posts were
-   retried by the authority within 60 s and later committed; readers who
-   followed the post resubmitted and superseded a review about to pass. A
-   scheduled retry must say so and must not name the forward paths that
-   supersede it. *)
-let test_stalled_projection_says_retry_when_one_is_scheduled () =
-  let content =
-    VP.For_testing.stalled_board_content
-      ~subject:(VP.Task_review { task_id = "task-101"; verification_id = "vrf-101"; disposition = (VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }) })
-      ~gate:"evaluator_unavailable"
-      ~detail:"requested runtime or lane not found"
-  in
-  check_names content
-    [ "task-101"
-    ; "vrf:vrf-101"
-    ; "evaluator_unavailable"
-    ; "requested runtime or lane not found"
-    ; "retry scheduled in 60 s"
-    ];
-  check_omits content [ "no retry armed"; "will not retry"; "Forward path"; "HITL" ]
-;;
-
-(* A verification that joins a batch whose timer is already running retries
-   when that timer fires — 1 s after the post if it joined 59 s in. The post
-   says a retry is armed and names no number it does not hold. *)
-let test_stalled_projection_names_no_interval_for_a_shared_timer () =
-  let content =
-    VP.For_testing.stalled_board_content
-      ~subject:(VP.Task_review { task_id = "task-101"; verification_id = "vrf-101"; disposition = (VP.Retry_scheduled { delay = VP.Shared_timer }) })
-      ~gate:"evaluator_unavailable"
-      ~detail:"requested runtime or lane not found"
-  in
-  check_names content [ "task-101"; "vrf:vrf-101"; "retry scheduled"; "timer" ];
-  check_omits content
-    [ "retry scheduled in"; "60 s"; "no retry armed"; "Forward path"; "HITL" ]
-;;
-
-let test_stalled_projection_names_last_runtime_and_next_attempt () =
-  let subject =
-    VP.Task_review
-      { task_id = "task-101"
-      ; verification_id = "vrf-101"
-      ; disposition = VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }
-      }
-  in
-  let content =
-    VP.For_testing.stalled_board_content_with_runtime
-      ~subject
-      ~gate:"evaluator_unavailable"
-      ~detail:"Rate limited: slow (retry_after: 120.000s)"
-      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
-      ~now:0.0
-  in
-  check_names content
-    [ "last runtime: glm-coding.glm-5-3"
-    ; "retry_after: 120.000s"
-    ; "next attempt around 1970-01-01T00:01:00Z"
-    ];
-  let metadata =
-    VP.For_testing.stalled_metadata_with_runtime
-      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "test-runtime" })
-      ~subject
-      ~gate:"evaluator_unavailable"
-      ~detail:"Rate limited: slow (retry_after: 120.000s)"
-      ~evaluator_runtime:(Some "glm-coding.glm-5-3")
-  in
-  Alcotest.(check string) "runtime in metadata" "glm-coding.glm-5-3"
-    (Yojson.Safe.Util.(metadata |> member "evaluator_runtime" |> to_string))
-;;
-
 let stall_authority_for_decoding =
   Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-decode" }
 ;;
@@ -318,7 +226,7 @@ let test_stalled_metadata_preserves_typed_authority () =
   let metadata =
     VP.For_testing.stalled_metadata
       ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-9" })
-      ~subject:(VP.Task_review { task_id = "task-102"; verification_id = "vrf-102"; disposition = (VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }) })
+      ~subject:(VP.Goal_review { goal_id = "goal-102"; request_id = "req-102"; disposition = (VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }) })
       ~gate:"review_preparation"
       ~detail:"required artifact list is empty"
   in
@@ -337,9 +245,9 @@ let test_stalled_metadata_preserves_typed_authority () =
     (metadata |> member "disposition" |> member "retry_delay" |> member "kind"
      |> to_string);
   Alcotest.(check string)
-    "task id"
-    "task-102"
-    (metadata |> member "task_id" |> to_string);
+    "goal id"
+    "goal-102"
+    (metadata |> member "goal_id" |> to_string);
   Alcotest.(check string)
     "authority kind"
     "system_llm_agent"
@@ -361,7 +269,7 @@ let test_stall_disposition_metadata_decodes_strictly () =
   let disposition_field disposition =
     VP.For_testing.stalled_metadata
       ~authority:stall_authority_for_decoding
-      ~subject:(VP.Task_review { task_id = "task-103"; verification_id = "vrf-103"; disposition = disposition })
+      ~subject:(VP.Goal_review { goal_id = "goal-103"; request_id = "req-103"; disposition = disposition })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
     |> Yojson.Safe.Util.member "disposition"
@@ -391,11 +299,10 @@ let test_stall_disposition_metadata_decodes_strictly () =
     ]
 ;;
 
-(* A stalled review is rediscovered by every backlog walk, because the Task
-   keeps its verification_id while it waits for its producer. Posting on each
-   rediscovery turned one stall into 40+ Board posts over 1h44m
-   (goal-failure-storm-cost-20260828). The Board is what the repeat is about,
-   so the Board is what the notice asks. *)
+(* A stalled review is rediscovered by every scan while its request stands.
+   Posting on each rediscovery turned one stall into 40+ Board posts over
+   1h44m (goal-failure-storm-cost-20260828). The Board is what the repeat is
+   about, so the Board is what the notice asks. *)
 let stall_authority =
   Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-stall" }
 ;;
@@ -403,14 +310,13 @@ let stall_authority =
 (* Count this test's own stall posts, by the same typed metadata the notice
    reads, so sibling tests posting to the shared hearth cannot move the
    number. *)
-let stalled_posts_for ~verification_id =
+let stalled_posts_for ~request_id =
   Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
   |> List.filter (fun (post : Masc.Board.post) ->
     match post.meta_json with
     | Some (`Assoc fields) ->
       List.assoc_opt "type" fields = Some (`String "verification_stalled")
-      && List.assoc_opt "verification_id" fields
-         = Some (`String verification_id)
+      && List.assoc_opt "request_id" fields = Some (`String request_id)
     | Some _ | None -> false)
   |> List.length
 ;;
@@ -421,12 +327,12 @@ let test_the_same_stall_is_posted_once () =
   Masc.Board_dispatch.reset_for_test ();
   for _ = 1 to 3 do
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-1"; disposition = VP.No_retry_armed })
+      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-1"; disposition = VP.No_retry_armed })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   done;
   Alcotest.(check int) "three rediscoveries, one post" 1
-    (stalled_posts_for ~verification_id:"vrf-stall-1")
+    (stalled_posts_for ~request_id:"req-stall-1")
 ;;
 
 (* Pending journal observations share one notice despite different diagnostics
@@ -435,11 +341,11 @@ let test_original_observation_notice_is_posted_once_until_repair () =
   with_eio_temp_dir @@ fun base_path ->
   with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
-  let verification_id = "vrf-original-observation-stall" in
+  let request_id = "req-original-observation-stall" in
   let notify cause disposition detail =
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Task_review { task_id = "task-original-observation"; verification_id; disposition })
-      ~gate:(CA.For_testing.stalled_gate cause) ~detail
+      ~subject:(VP.Goal_review { goal_id = "goal-original-observation"; request_id; disposition })
+      ~gate:(CA.For_testing.stop_cause_label cause) ~detail
   in
   List.iter
     (fun (detail, delay) ->
@@ -454,7 +360,7 @@ let test_original_observation_notice_is_posted_once_until_repair () =
     ; "journal has no terminal yet", VP.Full_interval { seconds = 60.0 }
     ];
   Alcotest.(check int) "changing detail and timer do not repost the original observation" 1
-    (stalled_posts_for ~verification_id);
+    (stalled_posts_for ~request_id);
   let detail = "original effect requires operator reconciliation" in
   let cause = CA.For_testing.Execution_repair_required { detail } in
   (match CA.For_testing.retry_request_of_stop_cause cause with
@@ -464,7 +370,7 @@ let test_original_observation_notice_is_posted_once_until_repair () =
   notify cause VP.Original_repair_required detail;
   notify cause VP.Original_repair_required "same repair with more diagnostic detail";
   Alcotest.(check int) "repair is new information and is posted once" 2
-    (stalled_posts_for ~verification_id)
+    (stalled_posts_for ~request_id)
 ;;
 
 (* Re-submitting one task posted the same 'Verify: <title>' each time
@@ -513,20 +419,20 @@ let test_a_different_stall_still_reaches_the_board () =
   with_prepared_board ~base_path @@ fun () ->
   Masc.Board_dispatch.reset_for_test ();
   VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-1"; disposition = VP.No_retry_armed })
+    ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-1"; disposition = VP.No_retry_armed })
     ~gate:"evaluator_unavailable"
     ~detail:"requested runtime or lane not found";
   VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-1"; disposition = VP.No_retry_armed })
+    ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-1"; disposition = VP.No_retry_armed })
     ~gate:"review_preparation"
     ~detail:"requested runtime or lane not found";
   VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-1"; disposition = VP.No_retry_armed })
+    ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-1"; disposition = VP.No_retry_armed })
     ~gate:"evaluator_unavailable"
     ~detail:"the evaluator answered with an empty verdict";
   Alcotest.(check int)
     "a new gate is its own stall; a new detail under the same gate is not" 2
-    (stalled_posts_for ~verification_id:"vrf-stall-1")
+    (stalled_posts_for ~request_id:"req-stall-1")
 ;;
 
 (* Codex review of #35352: a retry that keeps failing with a different
@@ -539,7 +445,7 @@ let test_a_changed_detail_under_an_armed_retry_is_not_news () =
   List.iter
     (fun detail ->
        VP.notify_stalled_verification ~authority:stall_authority
-         ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-3"; disposition = (VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }) })
+         ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-3"; disposition = (VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }) })
          ~gate:"evaluator_unavailable"
          ~detail)
     [ "requested runtime or lane not found"
@@ -548,7 +454,7 @@ let test_a_changed_detail_under_an_armed_retry_is_not_news () =
     ];
   Alcotest.(check int)
     "three retries with two diagnostics, one post" 1
-    (stalled_posts_for ~verification_id:"vrf-stall-3")
+    (stalled_posts_for ~request_id:"req-stall-3")
 ;;
 
 (* The same gate and detail, first while a retry is armed and then once the
@@ -561,7 +467,7 @@ let test_a_disposition_change_is_its_own_stall () =
   Masc.Board_dispatch.reset_for_test ();
   let notify ~disposition =
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-2"; disposition = disposition })
+      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-2"; disposition = disposition })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -572,7 +478,7 @@ let test_a_disposition_change_is_its_own_stall () =
   notify ~disposition:VP.No_retry_armed;
   Alcotest.(check int)
     "one post per disposition, not per rediscovery" 2
-    (stalled_posts_for ~verification_id:"vrf-stall-2")
+    (stalled_posts_for ~request_id:"req-stall-2")
 ;;
 
 (* Codex review of #35352: the comparison is against the latest post, not
@@ -587,7 +493,7 @@ let test_returning_to_an_earlier_disposition_posts_again () =
   Masc.Board_dispatch.reset_for_test ();
   let notify ~disposition =
     VP.notify_stalled_verification ~authority:stall_authority
-      ~subject:(VP.Task_review { task_id = "task-stall"; verification_id = "vrf-stall-4"; disposition = disposition })
+      ~subject:(VP.Goal_review { goal_id = "goal-stall"; request_id = "req-stall-4"; disposition = disposition })
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
   in
@@ -597,7 +503,7 @@ let test_returning_to_an_earlier_disposition_posts_again () =
   notify ~disposition:(VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } });
   Alcotest.(check int)
     "retry, settled, retry again: three notices" 3
-    (stalled_posts_for ~verification_id:"vrf-stall-4")
+    (stalled_posts_for ~request_id:"req-stall-4")
 ;;
 
 (* A Goal notice must not promise that request_complete starts a new review:
@@ -682,27 +588,6 @@ let test_the_same_goal_stall_is_posted_once () =
   notify ~request_id:"req-stall-2";
   Alcotest.(check int) "a new request is its own stall" 2
     (stalled_goal_posts_for ~goal_id:"goal-stall")
-;;
-
-(* The subject is compared by its own identity fields. A Task and a Goal
-   whose ids happen to share spellings are two subjects: neither silences
-   the other. *)
-let test_a_task_stall_does_not_silence_a_goal_stall () =
-  with_eio_temp_dir @@ fun base_path ->
-  with_prepared_board ~base_path @@ fun () ->
-  Masc.Board_dispatch.reset_for_test ();
-  VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Task_review { task_id = "shared-301"; verification_id = "shared-req-301"; disposition = VP.No_retry_armed })
-    ~gate:"evaluator_unavailable"
-    ~detail:"requested runtime or lane not found";
-  VP.notify_stalled_verification ~authority:stall_authority
-    ~subject:(VP.Goal_review { goal_id = "shared-301"; request_id = "shared-req-301" ; disposition = VP.No_retry_armed })
-    ~gate:"evaluator_unavailable"
-    ~detail:"requested runtime or lane not found";
-  Alcotest.(check int) "the Task stall posted" 1
-    (stalled_posts_for ~verification_id:"shared-req-301");
-  Alcotest.(check int) "the Goal stall posted too" 1
-    (stalled_goal_posts_for ~goal_id:"shared-301")
 ;;
 
 let test_rejected_verdict_event_preserves_wire_type () =
@@ -963,31 +848,18 @@ let test_system_llm_stop_and_retry_lines_name_the_next_move () =
 ;;
 
 (* Only the evaluator's typed error can ask for a retry; every other stop
-   requests nothing, by the shape of the sum rather than by a check. The
-   Board keys its repeat check on the evaluator's gate for a reviewed stop
-   and on the constructor label for every other one. *)
+   requests nothing, by the shape of the sum rather than by a check. *)
 let test_only_a_reviewed_stop_can_request_a_retry () =
   (match CA.For_testing.retry_request_of_stop_cause retryable_stop with
    | CA.For_testing.Retry_requested -> ()
    | CA.For_testing.Observe_original_requested | CA.For_testing.No_retry_requested ->
      Alcotest.fail "a retryable reviewed stop must carry its request");
-  Alcotest.(check string) "a reviewed stop is keyed by its gate" "evaluator_unavailable"
-    (CA.For_testing.stalled_gate retryable_stop);
   List.iter
     (fun (cause, label) ->
-       (match CA.For_testing.retry_request_of_stop_cause cause with
-        | CA.For_testing.No_retry_requested -> ()
-        | CA.For_testing.Observe_original_requested | CA.For_testing.Retry_requested -> Alcotest.failf "%s must not request a retry" label);
-       let expected_gate =
-         match cause with
-         | CA.For_testing.Not_reviewed { gate; _ } -> gate
-         | CA.For_testing.Infrastructure_unavailable _
-         | CA.For_testing.Commit_failed _
-         | CA.For_testing.Execution_pending _ | CA.For_testing.Execution_repair_required _
-         | CA.For_testing.Raised _ -> label
-       in
-       Alcotest.(check string) ("board key of " ^ label) expected_gate
-         (CA.For_testing.stalled_gate cause))
+       match CA.For_testing.retry_request_of_stop_cause cause with
+       | CA.For_testing.No_retry_requested -> ()
+       | CA.For_testing.Observe_original_requested | CA.For_testing.Retry_requested ->
+         Alcotest.failf "%s must not request a retry" label)
     stop_causes_with_labels
 ;;
 
@@ -1006,29 +878,22 @@ let misc_entries_of run =
   value, Log.Ring.recent ~since_seq:cursor ~module_filter:"Misc" ~order:`Oldest_first ()
 ;;
 
-(* A Board sink that records what it was told instead of posting. *)
-let recording_notify calls ~task_id ~verification_id ~gate ~detail ~disposition =
-  calls := (task_id, verification_id, gate, detail, disposition) :: !calls
-;;
-
 let at_level expected (entry : Log.Ring.entry) =
   Alcotest.(check string) "severity"
     (Log.level_to_string expected) (Log.level_to_string entry.Log.Ring.level)
 ;;
 
 (* Codex review of #35354: the production contract, not the formatter. Every
-   stop cause reaches the ring as one WARN naming its constructor, the retry
-   case reaches it as one WARN saying so, and the Board sink is told the
-   same key and the same disposition the line was chosen by. *)
+   stop cause reaches the ring as one WARN naming its constructor, and the
+   retry case reaches it as one WARN saying so. *)
 let test_announce_stall_logs_one_warn_per_stop_cause_and_for_the_retry () =
   let announce ~cause ~disposition =
-    let calls = ref [] in
     let (), entries =
       misc_entries_of (fun () ->
-        CA.For_testing.announce_stall ~notify:(recording_notify calls)
+        CA.For_testing.announce_stall
           ~task_id:"task-1480" ~verification_id:"vrf-2" ~cause ~disposition)
     in
-    entries, List.rev !calls
+    entries
   in
   let one_warn ~needle entries =
     match entries with
@@ -1037,77 +902,15 @@ let test_announce_stall_logs_one_warn_per_stop_cause_and_for_the_retry () =
       check_names entry.Log.Ring.message [ needle; "task-1480"; "vrf-2" ]
     | other -> Alcotest.failf "expected one line, got %d" (List.length other)
   in
-  let told_once ~gate ~disposition calls =
-    match calls with
-    | [ (task_id, verification_id, told_gate, _detail, told) ] ->
-      Alcotest.(check string) "task" "task-1480" task_id;
-      Alcotest.(check string) "verification" "vrf-2" verification_id;
-      Alcotest.(check string) "board key" gate told_gate;
-      Alcotest.(check bool) "board told the same disposition" true (told = disposition)
-    | other -> Alcotest.failf "the Board is told once, got %d" (List.length other)
-  in
   List.iter
     (fun (cause, label) ->
-       let entries, calls = announce ~cause ~disposition:VP.No_retry_armed in
-       one_warn ~needle:("stopped: " ^ label) entries;
-       told_once ~gate:(CA.For_testing.stalled_gate cause) ~disposition:VP.No_retry_armed calls)
+       one_warn ~needle:("stopped: " ^ label)
+         (announce ~cause ~disposition:VP.No_retry_armed))
     stop_causes_with_labels;
   List.iter
     (fun (disposition, needle) ->
-       let entries, calls = announce ~cause:retryable_stop ~disposition in
-       one_warn ~needle entries;
-       told_once ~gate:"evaluator_unavailable" ~disposition calls)
+       one_warn ~needle (announce ~cause:retryable_stop ~disposition))
     [ full_interval, "will retry"; shared_timer, "in=shared_timer" ]
-;;
-
-(* Codex review of #35354: the WARN is the lane's own record and no Board
-   effect can keep it from being written. A Board sink that raises leaves
-   the WARN in place, adds an ERROR line carrying the exception as evidence,
-   and lets nothing escape. *)
-let test_announce_stall_keeps_its_warn_when_the_board_sink_raises () =
-  let raising ~task_id:_ ~verification_id:_ ~gate:_ ~detail:_ ~disposition:_ =
-    failwith "board down"
-  in
-  let (), entries =
-    misc_entries_of (fun () ->
-      CA.For_testing.announce_stall ~notify:raising
-        ~task_id:"task-1481" ~verification_id:"vrf-3"
-        ~cause:retryable_stop ~disposition:full_interval)
-  in
-  match entries with
-  | [ warn; failure ] ->
-    at_level Log.Warn warn;
-    check_names warn.Log.Ring.message [ "will retry"; "in_sec=60.0"; "task-1481" ];
-    at_level Log.Error failure;
-    check_names failure.Log.Ring.message
-      [ "did not reach the Board"; "board down"; "task-1481"; "vrf-3" ]
-  | other ->
-    Alcotest.failf "expected the WARN then the failure line, got %d" (List.length other)
-;;
-
-(* Cancellation is not a Board failure and is not contained: the WARN is
-   already written, and the cancellation continues to the fiber's owner. *)
-let test_announce_stall_does_not_absorb_cancellation () =
-  let cancelling ~task_id:_ ~verification_id:_ ~gate:_ ~detail:_ ~disposition:_ =
-    raise (Eio.Cancel.Cancelled (Failure "shutdown"))
-  in
-  let escaped, entries =
-    misc_entries_of (fun () ->
-      match
-        CA.For_testing.announce_stall ~notify:cancelling
-          ~task_id:"task-1482" ~verification_id:"vrf-4"
-          ~cause:root_unreadable_stop ~disposition:VP.No_retry_armed
-      with
-      | () -> false
-      | exception Eio.Cancel.Cancelled _ -> true)
-  in
-  Alcotest.(check bool) "cancellation escapes" true escaped;
-  match entries with
-  | [ warn ] ->
-    at_level Log.Warn warn;
-    check_names warn.Log.Ring.message
-      [ "stopped: Infrastructure_unavailable{stage=review_preparation}"; "task-1482" ]
-  | other -> Alcotest.failf "expected the WARN alone, got %d" (List.length other)
 ;;
 
 (* One submission must review that submission. The backlog read stays whole —
@@ -2289,7 +2092,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           let handoff_context : Masc_domain.task_handoff_context =
             { summary = ""; reason = None; next_step = None; failure_mode = None
-            ; reclaim_policy = None; evidence_refs; updated_at = None; updated_by = None
+            ; evidence_refs; updated_at = None; updated_by = None
             }
           in
           ignore
@@ -2903,7 +2706,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   let summary = "alpha-only artifact ready for inspection" in
   let handoff_context : Masc_domain.task_handoff_context =
     { summary; reason = None; next_step = None; failure_mode = None
-    ; reclaim_policy = None; evidence_refs = [reference]
+    ; evidence_refs = [reference]
     ; updated_at = Some "2026-10-25T00:00:00Z"; updated_by = Some producer } in
   ignore (W.add_task config ~title:"Independent artifact retry" ~priority:1
     ~description:"No Goal association is required for a Task submission");
@@ -5405,10 +5208,6 @@ let () =
         test_only_a_reviewed_stop_can_request_a_retry;
       Alcotest.test_case "announce_stall logs one WARN per stop cause and for the retry" `Quick
         test_announce_stall_logs_one_warn_per_stop_cause_and_for_the_retry;
-      Alcotest.test_case "announce_stall keeps its WARN when the Board sink raises" `Quick
-        test_announce_stall_keeps_its_warn_when_the_board_sink_raises;
-      Alcotest.test_case "announce_stall does not absorb cancellation" `Quick
-        test_announce_stall_does_not_absorb_cancellation;
       Alcotest.test_case "joining a running retry timer posts no interval" `Quick
         test_joining_a_running_retry_timer_posts_no_interval;
       Alcotest.test_case "concurrent verification retries share one timer without losing keys" `Quick
@@ -5471,14 +5270,6 @@ let () =
         test_verdict_event_preserves_typed_authority;
       Alcotest.test_case "rejected verdict keeps wire type" `Quick
         test_rejected_verdict_event_preserves_wire_type;
-      Alcotest.test_case "stalled projection names forward paths" `Quick
-        test_stalled_projection_names_forward_paths;
-      Alcotest.test_case "stalled projection says retry when one is scheduled" `Quick
-        test_stalled_projection_says_retry_when_one_is_scheduled;
-      Alcotest.test_case "stalled projection names no interval for a shared timer" `Quick
-        test_stalled_projection_names_no_interval_for_a_shared_timer;
-      Alcotest.test_case "stalled projection names last runtime and next attempt" `Quick
-        test_stalled_projection_names_last_runtime_and_next_attempt;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
       Alcotest.test_case "stall disposition metadata decodes strictly" `Quick
@@ -5501,8 +5292,6 @@ let () =
         test_goal_stalled_metadata_names_its_subject;
       Alcotest.test_case "the same goal stall is posted once" `Quick
         test_the_same_goal_stall_is_posted_once;
-      Alcotest.test_case "a task stall does not silence a goal stall" `Quick
-        test_a_task_stall_does_not_silence_a_goal_stall;
       Alcotest.test_case "the Verify title names the verification" `Quick
         test_verify_title_names_the_verification;
     ];

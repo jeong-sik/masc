@@ -22,7 +22,6 @@ let handoff ?(summary = "prior owner note") ?(updated_by = "keeper-a") () :
   ; reason = None
   ; next_step = Some "read the spec before starting"
   ; failure_mode = None
-  ; reclaim_policy = None
   ; evidence_refs = [ "note:probe" ]
   ; updated_at = Some "2026-08-06T00:00:00Z"
   ; updated_by = Some updated_by
@@ -43,8 +42,6 @@ let task ?handoff_context ~status id : Domain.task =
   ; execution_links = Domain.no_execution_links
   ; handoff_context
   ; cycle_count = 0
-  ; reclaim_policy = None
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 ;;
@@ -210,7 +207,6 @@ let render_carries_attribution_and_refs () =
            ; reason = None
            ; next_step = Some "post the token"
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = [ "artifact:9f3c"; "board:p-c068" ]
            ; updated_at = Some "2026-08-05T13:34:46Z"
          ; updated_by = Some "keeper-a"
@@ -245,7 +241,6 @@ let render_marks_an_unattributed_note () =
            ; reason = None
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
          ; updated_by = None

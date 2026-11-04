@@ -486,7 +486,7 @@ World State sections sent with only the rows you have not yet received in this s
 - ({{count}} more — read them with keeper_tasks_list)
 
 ### world.namespace_state.unclaimed_not_offered (vars: count)
-- Unclaimed but not offered to you (awaiting a verdict, or authored by you): {{count}}
+- Unclaimed but not offered to you: {{count}}
 
 ### world.namespace_state.failed (vars: count)
 - Failed tasks: {{count}}

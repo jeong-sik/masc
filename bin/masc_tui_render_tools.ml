@@ -320,7 +320,7 @@ let async_source_task_lines ~cols state source =
       let warnings=List.concat_map (fun (name,outcome) -> match outcome with
         | Masc_domain.Field_absent | Field_decoded -> []
         | Field_unreadable reason -> text (Theme.warn ()) (" Task " ^ name ^ " 조회 불가: " ^ reason))
-        ["handoff",detail.diagnostics.handoff_context_outcome;"reclaim policy",detail.diagnostics.reclaim_policy_outcome] in
+        ["handoff",detail.diagnostics.handoff_context_outcome] in
       warnings @ (task_document_lines state ~cols Masc_tui_task_document.Body
         |> List.map (fun line -> "",line)) in
   text Ansi.bold (" 원본 Task · " ^ source.ats_task_id ^ " · r:본문·이력 재조회 · Esc:원본 요청")

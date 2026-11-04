@@ -1802,28 +1802,6 @@ let wait_for_control t (options : Browser_lane.Action.control_wait) =
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
 
-(* The owning agent's own release of a pending native input. The native frame
-   only proves the agent still holds this Space (an operator-held Space is
-   refused before any effect); it sends no input. The assertion is then
-   recorded for the exact generation [space_status] reported. It is not native
-   release proof and never replays the original command. *)
-let release_input t ~generation =
-  t.space_observation <- None;
-  match run_native_step t ~step:"space.release_input" ~args:(obj []) (String.concat "\n" [
-    "    emit({ok: true, value: {spaceId: task.spaceId, ownership: task.ownership}});" ]) with
-  | Error failure -> Error (Live.Before_effect (step_failure_message failure))
-  | Ok (`Assoc fields) when List.sort String.compare (List.map fst fields)=["ownership";"spaceId"] ->
-    (match List.assoc_opt "spaceId" fields,List.assoc_opt "ownership" fields with
-     | Some (`Int id),Some (`String owner) when id=t.space.id && String.equal owner agent_ownership ->
-       let released_result outcome = obj ["action",str "release_input";"spaceId",`Int t.space.id;
-         "outcome",str outcome;"generation",str generation;"inputLock",Input.lock_report t.input ~owner:(Some agent_ownership)] in
-       (match Input.reset t.input ~authority:Input.Keeper ~generation ~now:(t.now ()) with
-        | Input.Reset_applied -> Ok (released_result "released")
-        | Input.Reset_already_applied -> Ok (released_result "already_released")
-        | Input.Reset_rejected rejection -> Error (Live.Before_effect rejection.Input.reason))
-     | (None|Some _),(None|Some _) -> Error (Live.Before_effect "release_input requires an agent-owned Space; the observed owner differs"))
-  | Ok _ -> Error (Live.Before_effect "invalid native release_input observation")
-
 let space_status t =
   (* Only an authoritative inventory can establish absence. A failed query
      remains unknown; neither outcome changes the original attachment. *)
@@ -1835,7 +1813,7 @@ let space_status t =
   match presence.state,observation with
   | Present,Some observation ->
     (match Observation.to_json observation with
-     | `Assoc fields -> Ok (obj (("action",str "space_status")::fields @ ["inputLock",Input.lock_report t.input ~owner:(Some observation.ownership)]))
+     | `Assoc fields -> Ok (obj (("action",str "space_status")::fields))
      | _ -> Error (Live.Before_effect "invalid encoded Space observation"))
   | Missing,None -> Error (Live.Before_effect space_missing_refused)
   | Unknown reason,None -> Error (Live.Before_effect (unknown_presence_message reason))
@@ -1903,7 +1881,6 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> take_over t
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Wait_for_control options)) -> wait_for_control t options
   | Ok (Browser_lane.Action.Control Browser_lane.Action.Space_status) -> space_status t
-  | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_input {generation})) -> release_input t ~generation
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Finish_space keep)) -> finish_space t keep
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Adopt_tab {tab_id;label})) -> manage_tab t ~tab_id (Adopt label)
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_tab tab_id)) -> manage_tab t ~tab_id Release
@@ -2070,7 +2047,7 @@ let admit_after_finish t ~verb args =
     | Browser_info -> Ok ()
     | Page_act -> (match Browser_lane.Action.parse args with
         | Ok (Control (Space_status|Finish_space _)) -> Ok ()
-        | Ok (Open_tab _|Open_window _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _|Release_input _)|On_tab _)
+        | Ok (Open_tab _|Open_window _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
         | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
     | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
     | Page_downloads|Page_interact|Page_native_workflow ->

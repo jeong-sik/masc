@@ -265,7 +265,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
       Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> Ok ()
     | Browser_selection.Exact (Browser_lane.Live_route None),
       Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|
-        Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _|Release_input _))
+        Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
     | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
         refuse "live creation, control and Page management actions require an explicit observed clientId"
     | Exact (Browser_lane.Automation_route|Stagehand_route),Browser_lane.Page_act (Browser_lane.Action.Control _) ->

@@ -15,9 +15,20 @@ LANES = "/api/v1/lanes"
 ADDONS = "/api/v1/lane-addons"
 
 
+def exact_lane_id(name: str) -> str:
+    return {
+        "librarian": "librarian_exact",
+        "hitl_auto_judge": "hitl_auto_judge",
+        "board_attention": "board_attention_exact",
+        "verifier": "verifier_exact",
+        "browser_stagehand": "browser_stagehand_exact",
+        "candle_appraiser": "candle_appraiser",
+    }[name]
+
+
 def exact_lane(name: str) -> dict:
     return {
-        "lane_id": name,
+        "lane_id": exact_lane_id(name),
         "label": name,
         "purpose": name,
         "required": name in {"hitl_auto_judge", "board_attention"},
@@ -48,11 +59,12 @@ def exact_lane(name: str) -> dict:
 
 def exact_row(name: str) -> dict:
     lane = exact_lane(name)
+    lane_id = exact_lane_id(name)
     return {
-        "id": f"exact/{name}",
+        "id": f"exact/{lane_id}",
         "label": name,
         "purpose": name,
-        "selection": {"kind": "exact", "lane_id": name},
+        "selection": {"kind": "exact", "lane_id": lane_id},
         "state": {
             "kind": "exact",
             "configuration": {

@@ -320,7 +320,7 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
         ~failed_runtime_id:retry.failed_runtime_id ~next_runtime_id:retry.next_runtime_id
         ~later_runtime_ids:retry.later_runtime_ids
         ~failure:(Agent_core.Error.Internal "restored Gate and runtime continuation")
-      |> Keeper_turn_driver.quota_ordered_deferred_runtime_lane ~now:(Time_compat.now ())) waiting.runtime_retry in
+      |> Keeper_turn_driver.resumed_runtime_lane ~now:(Time_compat.now ())) waiting.runtime_retry in
     Ok (Some {authority; transmitted_input=None; selected; resolution; runtime_lane})
 
 let discharge ~config ~keeper_name ~operation_id ~user_message ~checkpoint admission =

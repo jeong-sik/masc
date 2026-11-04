@@ -247,8 +247,46 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   List.map fst (ordered @ unresolvable)
 ;;
 
-let quota_ordered_deferred_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (deferred_runtime_ids hint) with
+(* The candidates a turn resuming [hint] walks, before ordering. The hint only
+   says where the walk starts, so its suffix comes first. Every other
+   candidate the assignment's current lane declares follows in declared
+   order, and the runtime that failed goes after all of them: the input is not
+   handed straight back to it, and the walk still reaches it. A failed runtime
+   the suffix itself names (a chat operation resumed on the path it failed on)
+   keeps its suffix place. An assignment that resolves to no lane adds
+   nothing to the suffix. *)
+let resumed_walk_ids hint =
+  let suffix = deferred_runtime_ids hint in
+  let lane =
+    match Runtime.resolve_assignment hint.assignment_id with
+    | `Lane lane -> Runtime_lane.ordered_candidates lane
+    | `Missing | `Unavailable _ -> []
+  in
+  let names ids id = List.exists (String.equal id) ids in
+  let others =
+    List.fold_left
+      (fun others id ->
+         if names suffix id || names others id || String.equal id hint.failed_runtime_id
+         then others
+         else id :: others)
+      []
+      lane
+    |> List.rev
+  in
+  let failed =
+    if names lane hint.failed_runtime_id && not (names suffix hint.failed_runtime_id)
+    then [ hint.failed_runtime_id ]
+    else []
+  in
+  suffix @ others @ failed
+;;
+
+(* The resumed walk in the order the next turn dispatches it: [resumed_walk_ids]
+   under the quota and backpressure demotion that orders the rest of every
+   walk. A lane already resumed names every candidate in its suffix, so
+   resuming it again only re-reads that demotion. *)
+let resumed_runtime_lane ~now hint =
+  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (resumed_walk_ids hint) with
   | next_runtime_id :: later_runtime_ids ->
     { hint with next_runtime_id; later_runtime_ids }
   | [] -> hint
@@ -401,11 +439,12 @@ let walk_rest ~now ~head ~later =
     Walk_waits_until { release_at; resting_runtime_id }
 ;;
 
-(* The deferred suffix in the order the next turn walks it
-   ([quota_ordered_deferred_runtime_lane]). *)
+(* The walk a turn resuming the deferred suffix dispatches
+   ([resumed_runtime_lane]), so a resting suffix path does not hold the turn
+   while a lane candidate that was not told to rest can take it. *)
 let deferred_lane_rest ~now hint =
-  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
-  walk_rest ~now ~head:ordered.next_runtime_id ~later:ordered.later_runtime_ids
+  let resumed = resumed_runtime_lane ~now hint in
+  walk_rest ~now ~head:resumed.next_runtime_id ~later:resumed.later_runtime_ids
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
@@ -475,12 +514,13 @@ let assignment_next_dated_release ~now assignment_id =
    the chat lane's deferred retry so both answer one failure the same way
    (RFC-provider-path-rest §3.1).
 
-   A deferred suffix names where the input goes next, and its walk decides.
-   Without a suffix a multi-candidate assignment follows its fresh walk's
-   rest. A final candidate's quota does not rest siblings that failed for
-   unrelated reasons; a serving head returns to ordinary cadence, not an
-   immediate replay. A single/unresolved assignment also retains the failed
-   response's rest. Other failures without a suffix have no provider wait. *)
+   A deferred suffix names where the resumed walk starts, and that walk
+   ([deferred_lane_rest]) decides. Without a suffix a multi-candidate
+   assignment follows its fresh walk's rest. A final candidate's quota does
+   not rest siblings that failed for unrelated reasons; a serving head returns
+   to ordinary cadence, not an immediate replay. A single/unresolved
+   assignment also retains the failed response's rest. Other failures without
+   a suffix have no provider wait. *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
@@ -1173,9 +1213,10 @@ let dedupe_runtimes_preserve_order runtimes =
    observation names no time and only an answer ends it, so it keeps the
    candidate in the set, demoted: while a text-only lane head serves, an image
    turn led by that candidate is the dispatch that can end the observation.
-   A deferred lane offers no candidates: its walk dispatches the frozen suffix
-   ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
-   head would be recorded as a reroute the walk never performs. *)
+   A deferred lane offers no candidates: it dispatches the resumed walk
+   ordered before pre-dispatch ([lane_candidate_ids] in [run_agent_turn]), so a
+   decision that moved the head would be recorded as a reroute the walk never
+   performs. *)
 let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
@@ -2073,9 +2114,10 @@ let run_named
      siblings, never remembered as a preference. *)
   (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
-     selecting a fresh lane walk. A deferred suffix was already frozen before
-     pre-dispatch shaping, so re-reading wall-clock quota state here could make
-     the actual provider differ from the runtime used to shape the request. *)
+     selecting a fresh lane walk. A resumed walk was already ordered before
+     pre-dispatch shaping ([resumed_runtime_lane]), so re-reading wall-clock
+     quota state here could make the actual provider differ from the runtime
+     used to shape the request. *)
   let pre_tool_rejects =
     match pre_tool_rejects with
     | Some rejects -> rejects
@@ -2109,7 +2151,7 @@ let run_named
       Ok (saved_runtime :: List.filter (fun id -> not (String.equal id saved_runtime)) fallback)
     | None -> (match output_contract, deferred_runtime_lane with
     | Tool_verdict, _ -> Ok [runtime_id]
-    | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
+    | Provider_default, Some hint -> Ok (resumed_walk_ids hint)
     | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok []
@@ -2144,7 +2186,7 @@ let run_named
     | first :: _ -> first
     | [] -> runtime_id
   in
-  (* A reload between cycles can remove an id the deferred suffix (or the
+  (* A reload between cycles can remove an id the resumed walk (or the
      fresh order) still names. Missing ids drop out of the walk instead of
      failing it: the walk rotates past them. Only when nothing resolves
      does the turn fail, with the head's own error. *)
@@ -2180,7 +2222,7 @@ let run_named
     | None, [] -> []
   in
   (* This decision is reported, not applied: the image walk already leads with
-     the capable candidate a [Reroute] names. On a deferred lane the suffix order
+     the capable candidate a [Reroute] names. On a deferred lane the walk order
      was frozen before pre-dispatch shaping, so [modality_reroute_candidates]
      is [[]] and the decision can only be [No_reroute_needed] or
      [No_capable_runtime], and the image walk is empty. The media degrade

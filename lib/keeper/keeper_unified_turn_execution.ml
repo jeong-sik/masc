@@ -24,10 +24,9 @@ type declared_lane_failure =
    declared-byte refusal. *)
 (* How this lane continues after a failed turn. It restarts its cycle: the next
    cycle is a new turn, and a hint that named the path this one failed on would
-   become [turn_state.deferred_runtime_lane] below, replacing the next cycle's
-   candidates with that single path and taking its failover with it
-   (RFC last-path-resumes-after-progress §3.5). Read by a test, because the
-   only caller of [run] is production.  *)
+   become [turn_state.deferred_runtime_lane] below and start the next cycle on
+   that path again (RFC last-path-resumes-after-progress §3.5). Read by a test,
+   because the only caller of [run] is production.  *)
 let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 
 (* The paused agent's question is logged cut to this many bytes. *)

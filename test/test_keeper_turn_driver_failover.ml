@@ -251,6 +251,13 @@ let runtime_toml_quota_lane =
   runtime_toml_quota_lane_with_shared_credential "SHARED_QUOTA_TEST_KEY"
 ;;
 
+(* [quota_lane] declaring only [candidate_ids]; every runtime stays declared.
+   A resumed walk covers its whole lane, so a test about a walk of some of the
+   paths declares a lane of those paths. *)
+let runtime_toml_quota_lane_of candidate_ids =
+  runtime_toml_quota_lane_with_shared_credential ~candidate_ids "SHARED_QUOTA_TEST_KEY"
+;;
+
 let runtime_toml_official_provider_named_like_registry =
   {|
 [runtime]
@@ -3214,6 +3221,9 @@ let observed_candidate runtime_id =
     ~now:(Unix.gettimeofday ()) ~candidate:runtime.candidate_backpressure
 ;;
 
+(* The order demotion gives [runtime_ids]. The resumed walk adds the lane's
+   other candidates after them; demotion places each candidate by its own
+   evidence, so keeping only [runtime_ids] leaves their order as it is. *)
 let backpressure_order runtime_ids =
   match runtime_ids with
   | [] -> []
@@ -3222,8 +3232,9 @@ let backpressure_order runtime_ids =
       ~assignment_id:"quota_lane" ~failed_runtime_id:"previous.test_model"
       ~next_runtime_id ~later_runtime_ids
       ~failure:(retryable_network_error "previous attempt") in
-    Driver.quota_ordered_deferred_runtime_lane ~now:(Unix.gettimeofday ()) hint
+    Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ()) hint
     |> Driver.deferred_runtime_ids
+    |> List.filter (fun id -> List.mem id runtime_ids)
 ;;
 
 let test_http_429_preserves_unknown_scope_and_fallback () =
@@ -4095,9 +4106,12 @@ let test_the_production_answer_test_reads_provider_turns () =
    walk order decides whether a failed cycle waits. A serving head takes the
    input at once. A resting head waits until the next turn's head can serve,
    and that wait does not serve a wakeup before it ends, so a stimulus arriving
-   meanwhile cannot re-dispatch a resting path. *)
+   meanwhile cannot re-dispatch a resting path. The lane is the two shared
+   paths, so the two-path walk is the whole lane. *)
 let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
+  with_runtime_config
+    (runtime_toml_quota_lane_of [ "shared_a.test_model"; "shared_b.test_model" ])
+    (fun () ->
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
@@ -4160,7 +4174,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
 ;;
 
 let test_provider_resets_outlive_the_fallback_cap () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
+  with_runtime_config
+    (runtime_toml_quota_lane_of [ "shared_a.test_model"; "other.test_model" ])
+    (fun () ->
     reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let now = Unix.gettimeofday () in
@@ -4282,9 +4298,10 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
    at once; a resting head holds the retry until its release; a provider's
-   capacity refusal is walked like a server error (#38061). *)
+   capacity refusal is walked like a server error (#38061). The lane is the
+   one resting path, so a suffix of it alone has nothing else to walk. *)
 let test_a_chat_retry_follows_the_shared_next_dispatch () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
+  with_runtime_config (runtime_toml_quota_lane_of [ "shared_a.test_model" ]) (fun () ->
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       reset_quota_lane_rests ();
       let now = Unix.gettimeofday () in
@@ -4794,7 +4811,7 @@ let test_deferred_quota_order_is_frozen_before_predispatch () =
              ~failure:(retryable_network_error "previous cycle failed")
          in
          let ordered =
-           Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
+           Driver.resumed_runtime_lane ~now:100.0 hint
          in
          Alcotest.(check (list string))
            "pre-dispatch and driver share the same reordered suffix"
@@ -4820,7 +4837,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
              ~failure:(retryable_network_error "previous cycle failed")
          in
          let frozen =
-           Driver.quota_ordered_deferred_runtime_lane
+           Driver.resumed_runtime_lane
              ~now:(Unix.gettimeofday ())
              hint
          in
@@ -4868,6 +4885,158 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
            "dispatch keeps the runtime frozen before pre-dispatch"
            [ "http://127.0.0.1:1" ]
            (List.rev !transformed_urls)))
+
+(* Three accounts, each its own quota scope, declared [A; C; B]. *)
+let runtime_toml_three_account_lane =
+  {|
+[runtime]
+default = "acct_a.test_model"
+
+[runtime.lanes.three_accounts]
+candidates = [ "acct_a.test_model", "acct_c.test_model", "acct_b.test_model" ]
+
+[providers.acct_a]
+display-name = "Account A"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.acct_b]
+display-name = "Account B"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.acct_c]
+display-name = "Account C"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[acct_a.test_model]
+is-default = true
+
+[acct_b.test_model]
+
+[acct_c.test_model]
+|}
+
+(* A failed after its walk could no longer retry, and the walk left B alone:
+   the 2026-11-03 code-reviewer-mother hint, which a restart restored while
+   the quota window that demoted B lived only in memory. *)
+let three_account_hint () =
+  Driver.For_testing.make_deferred_runtime_lane
+    ~assignment_id:"three_accounts"
+    ~failed_runtime_id:"acct_a.test_model"
+    ~next_runtime_id:"acct_b.test_model"
+    ~later_runtime_ids:[]
+    ~failure:(retryable_network_error "A failed after a checkpoint")
+;;
+
+let three_account_of_url = function
+  | "http://127.0.0.1:1" -> "A"
+  | "http://127.0.0.1:2" -> "B"
+  | "http://127.0.0.1:3" -> "C"
+  | other -> other
+;;
+
+(* Runs the turn [run_named] dispatches for a resumed lane. [answer] gives each
+   account's transform result; the returned list is the accounts in the order
+   the walk reached them. *)
+let walk_three_accounts ~trace_id ~answer lane =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let reached = ref [] in
+  let result =
+    Driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      ~system_prompt:"You are the runtime failover test Keeper."
+      ~runtime_id:"three_accounts"
+      ~keeper_name:trace_id
+      ~base_path:(Filename.get_temp_dir_name ()) ~media_store:(Tool_blob_media_store.of_base_path ~base_path:(Filename.get_temp_dir_name ()))
+      ~agent_core_tools:[]
+      ~goal:"walk the resumed lane"
+      ~deferred_runtime_lane:lane
+      ~provider_config_transform:(fun provider_config ->
+        let account = three_account_of_url provider_config.base_url in
+        reached := account :: !reached;
+        Error (answer account))
+      ~sw
+      ~net:env#net
+      ()
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "every account answers with an error in this walk");
+  List.rev !reached
+;;
+
+let stop_the_walk =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
+       { field = "provider-config-transform"; detail = "stop the walk here" })
+;;
+
+(* The restored hint named B alone, so the resumed walk was [B]: B's 429 came
+   at index 0, which was also the last index, and the turn ended with C
+   serving and untried. The resumed walk is the hint, then the rest of the
+   lane, the runtime that failed last; a quota error on B rotates on. *)
+let test_a_resumed_walk_goes_on_past_the_hint_and_reaches_the_failed_runtime_last () =
+  with_runtime_config runtime_toml_three_account_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let lane = Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ()) (three_account_hint ()) in
+      Alcotest.(check (list string)) "the hint, the rest of the lane, then the failed runtime"
+        [ "acct_b.test_model"; "acct_c.test_model"; "acct_a.test_model" ]
+        (Driver.deferred_runtime_ids lane);
+      let reached =
+        walk_three_accounts ~trace_id:"resumed-walk-past-the-hint" lane
+          ~answer:(function
+            | "B" ->
+              Agent_core.Error.Provider
+                (Llm_provider.Error.HardQuota
+                   { provider = "acct_b"; retry_after = Some 88441.0; detail = "weekly limit reached" })
+            | "C" -> retryable_network_error "C dropped the connection"
+            | _ -> stop_the_walk)
+      in
+      Alcotest.(check (list string)) "B's quota error does not end the turn: C next, A last"
+        [ "B"; "C"; "A" ] reached))
+;;
+
+(* At 10:25:59Z the failed cycle waited 88441 s for B, the hint's only path,
+   while C kept serving. The wait reads the same resumed walk the dispatch
+   does, so a resting hint path does not hold a lane candidate that serves. *)
+let test_a_resting_hint_path_does_not_hold_a_serving_lane_candidate () =
+  with_runtime_config runtime_toml_three_account_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let now = Unix.gettimeofday () in
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "acct_b.test_model"))
+        ~resets_at:(now +. 88441.0);
+      let hint = three_account_hint () in
+      let hard_quota =
+        Keeper_runtime_failure_route.Retry_after_observed
+          { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = Some 88441.0 }
+      in
+      Alcotest.(check string) "the failed cycle does not wait for the resting hint path"
+        "dispatch acct_c.test_model"
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:hard_quota
+              ~assignment_id:"three_accounts" (Some hint)));
+      let lane = Driver.resumed_runtime_lane ~now hint in
+      Alcotest.(check (list string)) "the resting hint path moves behind the serving ones"
+        [ "acct_c.test_model"; "acct_a.test_model"; "acct_b.test_model" ]
+        (Driver.deferred_runtime_ids lane);
+      Alcotest.(check (list string)) "the next turn dispatches C first"
+        [ "C" ]
+        (walk_three_accounts ~trace_id:"resting-hint-path" lane ~answer:(fun _ -> stop_the_walk))))
+;;
 
 let test_official_client_does_not_inherit_registry_api_key_scope () =
   with_runtime_config runtime_toml_official_provider_named_like_registry (fun () ->
@@ -4997,7 +5166,7 @@ let test_the_recorder_walks_the_head_again_on_its_next_cycle () =
         ~assignment_id:"resilient" ~failed_runtime_id:"previous.test_model"
         ~next_runtime_id:lane_head ~later_runtime_ids:[ lane_fallback ]
         ~failure:(head_timeout () |> Result.get_error)
-      |> Driver.quota_ordered_deferred_runtime_lane ~now:(Unix.gettimeofday ())
+      |> Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ())
       |> Driver.deferred_runtime_ids
     in
     Alcotest.(check (list string)) "the retry of a failed turn still keeps the head behind"
@@ -6202,18 +6371,19 @@ let test_the_heartbeat_lane_restarts_its_cycle () =
      | Driver.Resume_operation_checkpoint _ -> false)
 ;;
 
-(* §3.4: the wait of a same-path suffix is the rest recorded on the path. A
-   server error records none, so the retry dispatches at once; a 429 that
-   stated its wait holds the path until then.
+(* §3.4: in a lane of that one path, the wait of a same-path suffix is the
+   rest recorded on the path. A server error records none, so the retry
+   dispatches at once; a 429 that stated its wait holds the path until then.
+   A lane with another candidate walks on to it instead of waiting.
 
-   This pins a branch the resume relies on and does not change: it passes on
-   main too, because a suffix naming one path already read that path's rest.
-   It is here as the record of what the resume inherits -- in particular that
-   a server error, a dropped stream and a timeout resume with no wait at all,
-   which is the case RFC §1.1 was written about (RFC §7 measures how often a
-   resume with no wait fails again before running a tool). *)
+   This pins a branch the resume relies on and does not change: a walk of one
+   path reads that path's rest. It is here as the record of what the resume
+   inherits -- in particular that a server error, a dropped stream and a
+   timeout resume with no wait at all, which is the case RFC §1.1 was written
+   about (RFC §7 measures how often a resume with no wait fails again before
+   running a tool). *)
 let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
-  with_runtime_config runtime_toml_quota_lane (fun () ->
+  with_runtime_config (runtime_toml_quota_lane_of [ "other.test_model" ]) (fun () ->
     reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let path = "other.test_model" in
@@ -7128,6 +7298,14 @@ let () =
             "deferred dispatch preserves pre-dispatch quota order"
             `Quick
             test_deferred_dispatch_preserves_predispatch_quota_order;
+          Alcotest.test_case
+            "a resumed walk goes on past the hint to the failed runtime last"
+            `Quick
+            test_a_resumed_walk_goes_on_past_the_hint_and_reaches_the_failed_runtime_last;
+          Alcotest.test_case
+            "a resting hint path does not hold a serving lane candidate"
+            `Quick
+            test_a_resting_hint_path_does_not_hold_a_serving_lane_candidate;
           Alcotest.test_case
             "official client quota excludes registry API-key scope"
             `Quick

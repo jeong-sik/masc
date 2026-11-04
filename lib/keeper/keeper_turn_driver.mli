@@ -36,6 +36,11 @@ type output_contract = Provider_default | Tool_verdict
     caller owns the typed verdict protocol. *)
 
 
+(** Where the next walk of a failed turn starts. A walk that cannot retry the
+    turn's input on its next candidate records the candidates it had not
+    tried ([next_runtime_id], then [later_runtime_ids]) and the runtime whose
+    failure ended it. The next turn walks {!resumed_runtime_lane} of it, not
+    the suffix alone. *)
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
@@ -60,6 +65,7 @@ type lane_terminal_error =
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+(** The suffix the lane names: [next_runtime_id], then [later_runtime_ids]. *)
 
 (** How the lane that dispatched a turn continues after the turn fails
     (RFC last-path-resumes-after-progress §3.5).
@@ -80,12 +86,16 @@ type runtime_retry_deferral =
   { continuation : failure_continuation
   ; on_deferred : deferred_runtime_lane -> unit
   }
-val quota_ordered_deferred_runtime_lane :
+val resumed_runtime_lane :
   now:float -> deferred_runtime_lane -> deferred_runtime_lane
-(** Apply active quota-window ordering to a frozen deferred suffix while
-    preserving its assignment and failure evidence. Call once before building
+(** The walk a turn resuming a deferred suffix dispatches, as a lane whose
+    [next_runtime_id] is its head and [later_runtime_ids] the rest: the suffix,
+    then every other candidate the assignment's current lane declares, and the
+    runtime that failed after them unless the suffix names it, all ordered by
+    the quota and backpressure demotion that orders the rest of every walk.
+    The assignment and failure evidence are kept. Call once before building
     pre-dispatch execution so prompt shaping and dispatch consume the same
-    selected runtime. *)
+    selected runtime. Resuming a resumed lane only re-reads the demotion. *)
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
@@ -142,7 +152,9 @@ type walk_start = Runtime_candidate_standing.walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
   | Every_mark_demotes
 
-(** A deferred suffix in the order the next turn walks it. *)
+(** The rest of the walk a turn resuming a deferred suffix dispatches
+    ({!resumed_runtime_lane}). A resting suffix path does not hold the turn
+    while a lane candidate that was not told to rest can take it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
 (** The candidates a fresh walk of an assignment dispatches, in [order]: the
@@ -150,11 +162,14 @@ val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
     resting or exhausted candidate behind its siblings and excludes none.
     Nothing else reorders it: a success leaves no preference behind, so the
     cycle after a failover starts from the declared head again. The walk may
-    still replace the head for an input modality it cannot take (RFC-0265);
-    a turn that failed and deferred its input walks the suffix it deferred
-    instead: the candidates after the one that failed, or, for a chat
-    operation whose last candidate failed after saving tool results, that
-    candidate again. *)
+    still replace the head for an input modality it cannot take (RFC-0265).
+    A turn that failed and deferred its input walks {!resumed_runtime_lane}
+    instead. The suffix it deferred only says where that walk starts: the
+    candidates after the one that failed, or, for a chat operation whose last
+    candidate failed after saving tool results, that candidate again. The walk
+    goes on through the rest of the lane, the runtime that failed placed after
+    the others (demotion still orders all of them), so the walk's last
+    candidate is the end of the lane rather than the end of the suffix. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
@@ -184,7 +199,8 @@ val assignment_next_dated_release : now:float -> string -> float option
 
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
-    A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
+    A deferred suffix dispatches now when the head of its resumed walk
+    serves, else waits as {!deferred_lane_rest} says.
     Without a suffix a multi-candidate assignment uses its fresh walk's rest:
     a serving head returns [None] (ordinary cadence), while a resting head
     waits for that walk's release. A single or unresolved assignment also

@@ -69,8 +69,9 @@ let start ~sw =
 ;;
 
 let install ~sw =
-  Keeper_skill_activation_ledger.install_commit_observer (start ~sw);
+  let observer = start ~sw in
+  Keeper_skill_activation_ledger.install_commit_observer observer;
   (* Nothing drains the changes once the fiber's switch ends. *)
   Eio.Switch.on_release sw (fun () ->
-    Keeper_skill_activation_ledger.install_commit_observer (fun ~config:_ ~trace_id:_ -> ()))
+    Keeper_skill_activation_ledger.withdraw_commit_observer observer)
 ;;

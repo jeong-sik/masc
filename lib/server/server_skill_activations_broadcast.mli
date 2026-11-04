@@ -22,4 +22,5 @@ val install : sw:Eio.Switch.t -> unit
     announced; it is counted on [keeper_sse_broadcast_failures] with reason
     [unnamed_trace]. A failed lookup or broadcast is counted with reason
     [broadcast] and logged; the fiber goes on. When [sw] ends the ledger's
-    observer is reset, since nothing drains the changes after that. *)
+    observer is withdrawn, since nothing drains the changes after that; an
+    observer installed later stays. *)

@@ -114,7 +114,7 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 - 한 줄이라도 붙이려 했으면 쓰기 잠금은 세션 잠금을 푼 뒤 commit observer 를 한 번 부른다. 붙이기가 실패하거나 쓰기가 예외로 끝나도 부른다. 행이 디스크에 남았을 수 있고, 알림은 다시 읽으라는 뜻뿐이라 한 번 더 읽는 것밖에 잃지 않는다. 장부는 trace 만 넘긴다. 장부 함수의 시그니처와 저장 형식은 그대로다.
 - 서버는 시작할 때 observer 를 설치한다. observer 는 바뀐 trace 를 기록하고 fiber 를 깨운다. fiber 는 registry 에서 그 trace 의 Keeper 를 찾아 `keeper_skill_activations_changed {name, trace_id}` 를 보낸다. 기다리는 동안 들어온 기록은 Keeper 마다 한 번으로 묶인다.
 - registry 에 없는 trace(턴 도중에 지워진 Keeper)는 보여 줄 곳이 없어 알리지 않고, `keeper_sse_broadcast_failures` 에 `unnamed_trace` 로 센다.
-- 알리는 fiber 는 쓰기 하나보다 오래 산다. 이름 찾기나 보내기가 실패하면 `broadcast` 로 세고 로그를 남긴 뒤 다음 변경으로 넘어간다. fiber 의 switch 가 끝나면 observer 를 빈 함수로 되돌린다.
+- 알리는 fiber 는 쓰기 하나보다 오래 산다. 이름 찾기나 보내기가 실패하면 `broadcast` 로 세고 로그를 남긴 뒤 다음 변경으로 넘어간다. fiber 의 switch 가 끝나면 자기가 설치한 observer 를 거둔다. 그 뒤에 다른 observer 가 설치돼 있으면 그대로 둔다.
 - 쓰지 않은 관찰(새로 볼 것이 없음)은 알리지 않는다.
 
 ### 4.3 TUI: pane 이 보이는 동안 그 pane 의 원천만 읽는다

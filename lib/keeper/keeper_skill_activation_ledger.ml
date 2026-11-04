@@ -2377,10 +2377,15 @@ let load_existing ~config ~trace_id =
    nothing and announces nothing. *)
 type writer = { mutable appended : bool }
 
+let no_commit_observer ~config:_ ~trace_id:_ = ()
+
 let commit_observer : (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit) Atomic.t =
-  Atomic.make (fun ~config:_ ~trace_id:_ -> ())
+  Atomic.make no_commit_observer
 
 let install_commit_observer observer = Atomic.set commit_observer observer
+
+let withdraw_commit_observer observer =
+  ignore (Atomic.compare_and_set commit_observer observer no_commit_observer : bool)
 
 let with_write_lock ~config ~trace_id operation =
   let writer = { appended = false } in

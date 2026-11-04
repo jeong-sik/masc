@@ -142,19 +142,17 @@ let summary = function
   | Observer.Event (Observer.Workspace_store_changed Observer.Schedule_store) -> "schedule_store_invalidated"
   | Observer.Event (Observer.Workspace_store_changed Observer.Pending_confirms) -> "pending_confirm_invalidated"
   | Observer.Event (Observer.Dataset_changed dataset) ->
-      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
-  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
-      "dataset(" ^ Masc.Workspace_dataset_event.dataset_name dataset
+      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset
       ^ (match dataset with
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
-         | Masc.Workspace_dataset_event.Harness_verdicts
-         | Masc.Workspace_dataset_event.Runtime_config
+         | Masc.Workspace_dataset_event.Harness_verdicts -> "")
       ^ ")"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
+  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->

@@ -15093,6 +15093,16 @@ let update_identity_login_read (state : state) keeper_name f =
 let owe_identity_login_read (state : state) keeper_name =
   update_identity_login_read state keeper_name Masc_tui_owed_read.changed
 
+(* A change while the observer feed or the reading authority was gone reached
+   nobody, so every Keeper a login waits on owes a read. Expectations are kept
+   across an authority loss; whether this workspace may read them is decided
+   when the read starts. *)
+let owe_every_identity_login_read (state : state) =
+  state.identity_login_expectations
+  |> List.map (fun expectation -> expectation.ile_keeper)
+  |> List.sort_uniq String.compare
+  |> List.iter (owe_identity_login_read state)
+
 (* The server reports a passed deadline only when the attempt is read, so
    each attempt still waited on owes its Keeper one read once [now] is past
    its deadline. A server whose clock has not reached the deadline answers

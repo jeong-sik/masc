@@ -18922,6 +18922,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_harness_read state;
        List.iter (Masc_tui_types.owe_identity_login_read state)
          (Masc_tui_types.identity_login_pending_keepers state ~now:(Unix.gettimeofday ()));
+       Masc_tui_types.owe_every_identity_login_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
        owe_tools_async_task_read state;
@@ -19287,8 +19288,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
   let moved = workspace_moved || before.read_detail != state.detail_read_authority in
   resume_goal_confirmation_identity_refresh state ~mailbox;
   (* The detail goes first: it restores the remembered Keeper focus and
-     marks its identity read pending, so the side reads below neither poll
-     the same login again nor ask about the Keeper the cursor fell on. *)
+     marks its identity read pending, so the owed login reads below wait for
+     it rather than read the same login again. *)
   refresh_visible_detail_after_authority_recovery state ~mailbox
     ~previous_authority:before.read_detail;
   if moved && server_authority_ready state then begin
@@ -19321,6 +19322,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_schedules_read state;
     owe_keeper_schedules_read state;
     owe_chat_journal_reads state;
+    Masc_tui_types.owe_every_identity_login_read state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
     launch_tick_side_reads state ~mailbox ~needs:(current_surface_needs state);

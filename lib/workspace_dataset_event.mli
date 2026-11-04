@@ -2,8 +2,10 @@
 
     The event is
     [{"type":"workspace_dataset_changed","dataset":<wire>,"ts_unix":...}] and
-    goes to the observers of [base_path]'s runtime only. It carries no data: a
-    reader that shows the named dataset reads it again from its own path.
+    goes to the observers of [base_path]'s runtime only. A dataset that
+    belongs to one Keeper carries ["keeper"] beside the dataset name. It
+    carries no data: a reader that shows the named dataset reads it again
+    from its own path.
 
     The server announces and the TUI decodes through this one type, so a
     dataset added here is a match arm both sides must handle. *)
@@ -18,14 +20,18 @@ type dataset =
           read by [GET /api/v1/dashboard/harness-health]. *)
   | Keeper_oauth_attempts of { keeper : string }
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
-          [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads. The event names the Keeper only: no provider, attempt id,
-          state, code or consent URL. *)
+          [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
+          The event names the Keeper only: no provider, attempt id, state,
+          code or consent URL. *)
 
 val event_type : string
 
 val dataset_to_wire : dataset -> string
 
-val dataset_of_wire : string -> dataset option
+val of_fields : (string * Yojson.Safe.t) list -> (dataset, string) result
+(** Reads the event's fields: the dataset name, and the Keeper a
+    Keeper-naming dataset carries. A dataset push without its Keeper, or one
+    this build was not taught, is an [Error]. *)
 
 val announce : base_path:string -> dataset -> unit
 (** Broadcast the event to [base_path]'s runtime observers. A store calls this
@@ -37,7 +43,3 @@ val announce : base_path:string -> dataset -> unit
     suspension point still sees a cancellation. *)
 
 val install_store_observers : unit -> unit
-(** Make the stores that live in libraries below this one report their writes
-    to {!announce}. {!Repo_store} reports every catalog write attempt, under
-    the catalog file lock. {!Keeper_oauth_pending} reports each attempt
-    change, under its table lock, as {!Keeper_oauth_attempts}. *)

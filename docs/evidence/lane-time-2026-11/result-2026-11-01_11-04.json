@@ -1,0 +1,207 @@
+{
+  "chat_operations": {
+    "by_origin": {
+      "channel:": {
+        "failure_kinds": {
+          "Turn_cancelled": 29,
+          "Turn_exception": 37
+        },
+        "operations": 211,
+        "run": {
+          "mean_s": 239.2,
+          "n": 211,
+          "p50_s": 50.2,
+          "p90_s": 726.8,
+          "sum_s": 50467.8
+        },
+        "states": {
+          "failed": 66,
+          "succeeded": 145
+        },
+        "wait": {
+          "mean_s": 223.2,
+          "n": 211,
+          "p50_s": 0.0,
+          "p90_s": 634.0,
+          "sum_s": 47100.7
+        }
+      },
+      "channel:agent": {
+        "failure_kinds": {
+          "Interrupted_by_restart": 1,
+          "Turn_cancelled": 41,
+          "Turn_exception": 52
+        },
+        "operations": 634,
+        "run": {
+          "mean_s": 336.5,
+          "n": 633,
+          "p50_s": 124.3,
+          "p90_s": 765.4,
+          "sum_s": 212980.6
+        },
+        "states": {
+          "cancelled": 1,
+          "failed": 94,
+          "succeeded": 539
+        },
+        "wait": {
+          "mean_s": 379.6,
+          "n": 633,
+          "p50_s": 5.3,
+          "p90_s": 881.5,
+          "sum_s": 240269.5
+        }
+      },
+      "delegate": {
+        "failure_kinds": {
+          "Turn_cancelled": 36,
+          "Turn_exception": 32
+        },
+        "operations": 375,
+        "run": {
+          "mean_s": 304.6,
+          "n": 373,
+          "p50_s": 109.7,
+          "p90_s": 807.7,
+          "sum_s": 113604.6
+        },
+        "states": {
+          "cancelled": 2,
+          "failed": 68,
+          "succeeded": 305
+        },
+        "wait": {
+          "mean_s": 238.4,
+          "n": 373,
+          "p50_s": 0.1,
+          "p90_s": 586.4,
+          "sum_s": 88910.6
+        }
+      }
+    },
+    "created_during_long_execute": {
+      "mean_s": 302.9,
+      "n": 17,
+      "p50_s": 223.2,
+      "p90_s": 575.2,
+      "sum_s": 5150.1
+    },
+    "operations": 1220,
+    "started": 1217,
+    "total_wait_s": 376280.7,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 84106.1,
+    "wait_overlapping_long_execute_s": 7163.5
+  },
+  "turn_time": {
+    "between_calls": {
+      "mean_s": 13.7,
+      "n": 134311,
+      "overlapping_pairs": 3174,
+      "p50_s": 1.1,
+      "p90_s": 21.9,
+      "sum_s": 1836189.7
+    },
+    "calls": 144183,
+    "execute_time_s": 343286.2,
+    "long_execute": {
+      "calls": 562,
+      "polling_by_keeper": {
+        "build-maniac": {
+          "polling_s": 151.2,
+          "turn_time_s": 10555.7
+        },
+        "code-reviewer": {
+          "polling_s": 418.6,
+          "turn_time_s": 134589.3
+        },
+        "code-reviewer-father": {
+          "polling_s": 880.6,
+          "turn_time_s": 109851.2
+        },
+        "code-reviewer-mother": {
+          "polling_s": 143.4,
+          "turn_time_s": 45404.5
+        },
+        "code-reviewer-sister": {
+          "polling_s": 145.7,
+          "turn_time_s": 33608.6
+        },
+        "code-reviewer-uncle": {
+          "polling_s": 173.4,
+          "turn_time_s": 65968.4
+        },
+        "context-reviewer": {
+          "polling_s": 875.0,
+          "turn_time_s": 119207.5
+        },
+        "e-masc-the-leader": {
+          "polling_s": 940.0,
+          "turn_time_s": 122063.9
+        },
+        "github-pr-checker": {
+          "polling_s": 10681.2,
+          "turn_time_s": 40113.8
+        },
+        "goo-yang-bong": {
+          "polling_s": 11534.4,
+          "turn_time_s": 212247.7
+        },
+        "masc-productor-owner": {
+          "polling_s": 26255.2,
+          "turn_time_s": 239465.4
+        },
+        "ocaml-agent-ic": {
+          "polling_s": 1022.7,
+          "turn_time_s": 129416.3
+        },
+        "ocaml-refactor-woman": {
+          "polling_s": 319.2,
+          "turn_time_s": 0.0
+        },
+        "pr-updater": {
+          "polling_s": 654.6,
+          "turn_time_s": 124717.8
+        },
+        "sangsu": {
+          "polling_s": 1451.7,
+          "turn_time_s": 115614.1
+        },
+        "wkbl-data": {
+          "polling_s": 30638.1,
+          "turn_time_s": 190956.9
+        },
+        "wkbl-front": {
+          "polling_s": 17991.7,
+          "turn_time_s": 149348.9
+        },
+        "wkbl-growth": {
+          "polling_s": 989.4,
+          "turn_time_s": 54801.6
+        },
+        "wkbl-web-leader": {
+          "polling_s": 303.3,
+          "turn_time_s": 101263.2
+        }
+      },
+      "polling_calls": 331,
+      "polling_time_s": 105569.2,
+      "time_s": 151343.5
+    },
+    "other_turn_time_s": 354301.4,
+    "rereads_after_first_call": {
+      "calls": 32545,
+      "turn_time_s": 74735.4
+    },
+    "tool_time_s": 364853.7,
+    "turn_time_s": 2555344.8,
+    "turns": 9872
+  },
+  "window": {
+    "from": "2026-11-01",
+    "hours": 91.17,
+    "keepers_with_turn_traces": 28,
+    "to": "2026-11-04",
+    "until": "2026-11-04T19:10:00+00:00"
+  }
+}

@@ -103,6 +103,8 @@ let get_current_task (config : Workspace.config) : string option =
         path msg;
       None
 
+(* The raw write. Callers outside this file use [set_current_task], which turns
+   the exceptions raised here into [Error]. *)
 let persist_current_task (config : Workspace.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
   Fs_compat.mkdir_p (Filename.dirname path);

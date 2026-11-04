@@ -19,22 +19,6 @@ let curl_write_out =
   curl_meta_marker
   ^ "%{http_code}\n%{url_effective}\n%{redirect_url}\n%{content_type}\n%{size_download}"
 
-let find_last_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 || needle_len > haystack_len then None
-  else
-    let rec loop idx best =
-      if idx > haystack_len - needle_len then best
-      else
-        let best =
-          if String.equal (String.sub haystack idx needle_len) needle then Some idx
-          else best
-        in
-        loop (idx + 1) best
-    in
-    loop 0 None
-
 let parse_downloaded_bytes raw =
   match parse_int_opt (String.trim raw) with
   | Some _ as value -> value
@@ -64,7 +48,7 @@ let response_of_payload_and_meta payload meta =
       }
 
 let split_http_body_and_response body =
-  match find_last_substring ~needle:curl_meta_marker body with
+  match String_util.rfind_substring body curl_meta_marker with
   | Some marker_idx ->
       let payload = String.sub body 0 marker_idx in
       let meta_start = marker_idx + String.length curl_meta_marker in

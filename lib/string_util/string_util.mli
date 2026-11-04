@@ -76,6 +76,12 @@ val find_substring : ?pos:int -> string -> string -> int option
     matching [Re.exec_opt (Re.str "" |> Re.compile)] semantics. Raises
     [Invalid_argument] when [pos] is negative. *)
 
+val rfind_substring : string -> string -> int option
+(** [rfind_substring haystack needle] returns the byte index of the last
+    occurrence of [needle] in [haystack], or [None] if absent. Occurrences
+    may overlap, so ["aaa"] last occurs at [1] in ["aaaa"]. Empty needle
+    returns [Some (String.length haystack)]. *)
+
 val replace_substring : needle:string -> by:string -> string -> string
 (** [replace_substring ~needle ~by haystack] substitutes [by] for every
     non-overlapping occurrence of [needle] in [haystack]. Returns

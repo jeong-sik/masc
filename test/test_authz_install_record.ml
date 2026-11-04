@@ -504,7 +504,6 @@ let store_path_names_its_first_problem () =
     ; "UTF-8 beyond ASCII", "/stores/\xed\x95\x9c", "ok /stores/\xed\x95\x9c"
     ]
 ;;
-;;
 
 let failed_write_leaves_the_old_record () =
   skip_for_superuser ();

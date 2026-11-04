@@ -647,6 +647,17 @@ let refusals =
           Unix.symlink (Filename.concat dirs.root "nowhere") volume;
           { (request dirs) with B.external_store = Filename.concat volume "external.jsonl" })
     }
+  ; { label = "a link to the directory of the log before it is made"
+    ; expected = "Path_not_inspected"
+    ; prepare =
+        (fun dirs ->
+          (* The link leads nowhere until the log is opened, which makes the
+             directory. It is refused before then, so the store is never made
+             inside the directory of the log. *)
+          let link = Filename.concat dirs.root "auth-link" in
+          Unix.symlink (Filename.dirname (log_file dirs)) link;
+          { (request dirs) with B.external_store = Filename.concat link "external.jsonl" })
+    }
   ; { label = "a link that leads nowhere at the path that the install record names"
     ; expected = "External_store_in_the_way"
     ; prepare =

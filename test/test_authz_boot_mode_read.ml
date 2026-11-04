@@ -493,7 +493,9 @@ let test_corrupt_log_beside_a_store () =
   with_dirs (fun dirs ->
     bootstrap dirs;
     (match (input dirs).B.high_water with
-     | B.Judged _ -> ()
+     | B.Judged Authz_high_water.Matches -> ()
+     | B.Judged (Authz_high_water.Absent | Authz_high_water.Mismatch _) ->
+       Alcotest.fail "the store of the bootstrap does not match its log"
      | B.Store_unreadable reason -> Alcotest.failf "the store of the bootstrap was not judged: %s" reason);
     write_log_line dirs "not a record";
     check_refused_by "the log is unreadable" log_unreadable dirs;

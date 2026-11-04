@@ -3781,8 +3781,8 @@ type client_row = {
   cr_status : client_status;
   cr_current_task : string option;
   cr_keeper_name : string option;
-  cr_session_bound_at : string;
-  cr_last_seen : string;
+  cr_session_bound_at : string option;
+  cr_last_seen : string option;
   cr_capabilities : string list;
 }
 
@@ -3817,8 +3817,8 @@ let decode_client_row json =
   let* cr_status = client_status_of_string status in
   let* cr_current_task = required_nullable_string_field json "current_task" in
   let* cr_keeper_name = required_nullable_string_field json "keeper_name" in
-  let* cr_session_bound_at = required_string_field json "session_bound_at" in
-  let* cr_last_seen = required_string_field json "last_seen" in
+  let* cr_session_bound_at = required_nullable_string_field json "session_bound_at" in
+  let* cr_last_seen = required_nullable_string_field json "last_seen" in
   let* capabilities = required_list_field json "capabilities" in
   let* cr_capabilities = decode_string_list "capabilities" capabilities in
   Ok

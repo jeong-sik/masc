@@ -51,12 +51,15 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ~last_seen:(`String agent.last_seen) agent
 ;;
 
-(* A Keeper registry row carries the time of the read in both fields; the
-   Clients roster shows no time for it rather than that one. *)
+(* Only an agent record has session and observation times of its own. A
+   Keeper registry row carries the time of the read in both fields and a
+   workspace-state row the workspace's start; the Clients roster shows no
+   time for them rather than those. *)
 let dashboard_client_json ((agent : Masc_domain.agent), (source : Workspace.agent_source)) =
   match source with
-  | Workspace.Agent_record | Workspace.Workspace_state -> dashboard_agent_json agent
-  | Workspace.Keeper_registry -> agent_json ~session_bound_at:`Null ~last_seen:`Null agent
+  | Workspace.Agent_record -> dashboard_agent_json agent
+  | Workspace.Workspace_state | Workspace.Keeper_registry ->
+    agent_json ~session_bound_at:`Null ~last_seen:`Null agent
 ;;
 
 let dashboard_message_json (message : Masc_domain.message) =

@@ -31,12 +31,21 @@ let v4_reserved =
     ]
 
 let v6_nat64_well_known = Ipaddr.V6.Prefix.of_string_exn "64:ff9b::/96"
+let v6_link_local = Ipaddr.V6.Prefix.of_string_exn "fe80::/10"
 let v6_site_local = Ipaddr.V6.Prefix.of_string_exn "fec0::/10"
 
-let v6_reserved =
+(* IPv6 is admitted only from the global unicast block. Everything outside it
+   that is not judged above (the IPv4-compatible ::/96 block, the local-use
+   NAT64 64:ff9b:1::/48, the discard-only 100::/64, unassigned space) is
+   reserved. *)
+let v6_global_unicast = Ipaddr.V6.Prefix.of_string_exn "2000::/3"
+
+let v6_reserved_global_unicast =
   List.map Ipaddr.V6.Prefix.of_string_exn
-    [ "100::/64" (* discard-only, RFC 6666 *)
+    [ "2001::/23" (* IETF protocol assignments, RFC 2928: Teredo, ORCHID *)
     ; "2001:db8::/32" (* documentation, RFC 3849 *)
+    ; "2002::/16" (* 6to4, RFC 3056: the relay connects to the IPv4 inside *)
+    ; "3fff::/20" (* documentation, RFC 9637 *)
     ]
 
 let v4_refusal v4 =
@@ -67,14 +76,17 @@ let ip_refusal = function
             Some Unspecified
           else if Ipaddr.V6.Prefix.mem v6 v6_nat64_well_known then
             v4_refusal (nat64_embedded_v4 v6)
-          else if Ipaddr.V6.Prefix.(mem v6 link) then Some Link_local
+          else if Ipaddr.V6.Prefix.mem v6 v6_link_local then Some Link_local
           else if
             Ipaddr.V6.Prefix.(mem v6 unique_local)
             || Ipaddr.V6.Prefix.mem v6 v6_site_local
           then Some Private_network
           else if Ipaddr.V6.Prefix.(mem v6 multicast) then Some Multicast
-          else if List.exists (Ipaddr.V6.Prefix.mem v6) v6_reserved then
+          else if not (Ipaddr.V6.Prefix.mem v6 v6_global_unicast) then
             Some Reserved
+          else if
+            List.exists (Ipaddr.V6.Prefix.mem v6) v6_reserved_global_unicast
+          then Some Reserved
           else None)
 
 let ipaddr_of_eio ip =

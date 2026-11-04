@@ -97,7 +97,8 @@ val http_get_text_response_with_headers :
 
     It is the metadata-preserving form of
     {!http_get_text_with_status_with_headers}. With [pinned_resolution], curl
-    connects only to its addresses for that host and port. *)
+    connects only to its addresses for that host and port, with or without a
+    trailing dot, and ignores proxy environment variables. *)
 
 val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->

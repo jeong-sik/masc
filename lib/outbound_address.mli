@@ -21,11 +21,13 @@ type refusal =
       (** RFC 1918 IPv4, IPv6 unique local [fc00::/7], and the deprecated
           IPv6 site-local [fec0::/10]. *)
   | Shared_address_space  (** [100.64.0.0/10], RFC 6598 carrier-grade NAT. *)
-  | Link_local
+  | Link_local  (** [169.254.0.0/16] and [fe80::/10]. *)
   | Multicast
   | Reserved
       (** Documentation, benchmarking, IETF protocol assignment, discard-only
-          and the reserved [240.0.0.0/4] block, broadcast included. *)
+          and the reserved [240.0.0.0/4] block, broadcast included. For IPv6,
+          every address outside global unicast [2000::/3], and inside it
+          [2001::/23], [2001:db8::/32], 6to4 [2002::/16] and [3fff::/20]. *)
 
 val refusal_to_string : refusal -> string
 (** A phrase for a reply a model or an operator reads, such as

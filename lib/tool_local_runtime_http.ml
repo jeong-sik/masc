@@ -112,7 +112,13 @@ type pinned_resolution =
 (* curl matches a [--resolve] entry against the URL's host as written,
    trailing dot included, and ignores case (measured with curl 8.7.1). An
    entry that does not match leaves curl to its own lookup, so [host] must be
-   the URL's host. IPv6 addresses are bracketed. *)
+   the URL's host. A curl that strips the trailing dot before the lookup
+   matches the entry without it, so a dotted host gets both. IPv6 addresses
+   are bracketed.
+
+   A proxy taken from the environment ([http_proxy], [https_proxy],
+   [all_proxy]) receives the host name and resolves it itself, so a pinned
+   request never uses a proxy. *)
 let resolve_args = function
   | None -> []
   | Some { host; port; first_address; other_addresses } ->
@@ -120,10 +126,16 @@ let resolve_args = function
       | Ipaddr.V4 v4 -> Ipaddr.V4.to_string v4
       | Ipaddr.V6 v6 -> "[" ^ Ipaddr.V6.to_string v6 ^ "]"
     in
-    [ "--resolve"
-    ; Printf.sprintf "%s:%d:%s" host port
-        (String.concat "," (List.map address (first_address :: other_addresses)))
-    ]
+    let addresses =
+      String.concat "," (List.map address (first_address :: other_addresses))
+    in
+    let entry host = [ "--resolve"; Printf.sprintf "%s:%d:%s" host port addresses ] in
+    let dotless =
+      if String.ends_with ~suffix:"." host
+      then entry (String.sub host 0 (String.length host - 1))
+      else []
+    in
+    [ "--noproxy"; "*" ] @ entry host @ dotless
 
 let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     ?(follow_redirects = false) ?(max_redirects = 3) ?(compressed = false)

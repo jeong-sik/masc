@@ -52,8 +52,19 @@ let test_special_purpose_block_boundaries () =
     ; "64:ff9b::808:808", None
     ; "fec0::1", Some "private-network address"
     ; "fe80::1", Some "link-local address"
+    ; "fe80:0:0:1::1", Some "link-local address"
+    ; "febf:ffff::1", Some "link-local address"
     ; "ff02::1", Some "multicast address"
     ; "100::1", Some "reserved address"
+    ; "::7f00:1", Some "reserved address"
+    ; "64:ff9b:1::7f00:1", Some "reserved address"
+    ; "2001::1", Some "reserved address"
+    ; "2001:1ff:ffff::1", Some "reserved address"
+    ; "2001:200::1", None
+    ; "2002:7f00:1::1", Some "reserved address"
+    ; "3fff::1", Some "reserved address"
+    ; "4000::1", Some "reserved address"
+    ; "2606:4700:4700::1111", None
     ]
 ;;
 
@@ -68,6 +79,34 @@ let test_ipv6_documentation_prefix_boundary () =
     ; "2001:db80::1", false
     ; "2001:db8f::1", false
     ]
+;;
+
+(* The pin is what keeps curl on the admitted addresses: every spelling of
+   the host curl may look up maps to them, and an environment proxy, which
+   would resolve the name itself, is off. *)
+let test_pinned_request_keeps_curl_on_admitted_addresses () =
+  let argv =
+    Masc.Tool_local_runtime_http.curl_get_argv_for_test
+      ~pinned_resolution:
+        { Masc.Tool_local_runtime_http.host = "pin.invalid."
+        ; port = 8935
+        ; first_address = Ipaddr.of_string_exn "203.0.114.5"
+        ; other_addresses = [ Ipaddr.of_string_exn "2606:4700:4700::1111" ]
+        }
+      "http://pin.invalid.:8935/page"
+  in
+  let rec values flag = function
+    | name :: value :: rest when String.equal name flag ->
+      value :: values flag rest
+    | _ :: rest -> values flag rest
+    | [] -> []
+  in
+  check (list string) "resolve entries"
+    [ "pin.invalid.:8935:203.0.114.5,[2606:4700:4700::1111]"
+    ; "pin.invalid:8935:203.0.114.5,[2606:4700:4700::1111]"
+    ]
+    (values "--resolve" argv);
+  check (list string) "no proxy" [ "*" ] (values "--noproxy" argv)
 ;;
 
 let with_net f = Eio_main.run (fun env -> f env)
@@ -178,6 +217,8 @@ let () =
             test_special_purpose_block_boundaries
         ; test_case "IPv6 documentation prefix boundary" `Quick
             test_ipv6_documentation_prefix_boundary
+        ; test_case "pinned request keeps curl on admitted addresses" `Quick
+            test_pinned_request_keeps_curl_on_admitted_addresses
         ; test_case "refused hosts" `Quick test_refused_hosts
         ; test_case
             "document fetch refuses before connecting"

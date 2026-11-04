@@ -156,6 +156,12 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     [status_filter] used to be parsed and cache-keyed here while the projection
     discarded them, which fragmented the cache across keys that computed
     identical payloads — they are gone rather than silently ignored. *)
+let gate_cache_prefix ~base_path = Printf.sprintf "gate:%s;" base_path
+
+let invalidate_gate_snapshots ~base_path =
+  Dashboard_cache.invalidate_prefix (gate_cache_prefix ~base_path)
+;;
+
 let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   let limit =
     int_query_param
@@ -179,8 +185,8 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   in
   let cache_key =
     Printf.sprintf
-      "gate:%s;%d;%d;%d"
-      base_path
+      "%s%d;%d;%d"
+      (gate_cache_prefix ~base_path)
       limit
       window_minutes
       approval_queue_revision

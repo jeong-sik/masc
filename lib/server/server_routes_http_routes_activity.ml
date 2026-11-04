@@ -409,12 +409,17 @@ let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
 ;;
 
 (* RFC-0483: a read of one Keeper's skill activation ledger, named by the
-   [keeper] query parameter. *)
+   [keeper] query parameter. Loading and encoding the ledger keeps a core
+   busy, so it runs on the pool like the tools projection that read it
+   before. *)
 let keeper_ledger_read answer state request reqd =
   match Server_utils.query_param request "keeper" with
   | Some keeper_name when not (String.equal (String.trim keeper_name) "") ->
     let config = Mcp_server.workspace_config state in
-    Http.Response.json_value (answer ~config ~keeper_name:(String.trim keeper_name)) reqd
+    let keeper_name = String.trim keeper_name in
+    Http.Response.json_value
+      (Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> answer ~config ~keeper_name)))
+      reqd
   | Some _ | None ->
     respond_json_value_with_cors ~status:`Bad_request request reqd
       (`Assoc [ "error", `String "keeper is required" ])

@@ -16,6 +16,7 @@ type persisted_delivery =
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
+  ; operator_settlement : operator_settlement option
   }
 
 type log_row =
@@ -66,7 +67,14 @@ val validate_pending_snapshot : base_path:string -> Yojson.Safe.t -> (unit, stri
     reset), a malformed snapshot, or the first entry the loader would drop.
     The append log is not read. *)
 val replay_results_of_yojson :
-  Yojson.Safe.t -> (resolution_replay_outcome Set_util.StringMap.t, string) result
+  Yojson.Safe.t ->
+  ( resolution_replay_outcome Set_util.StringMap.t
+    * operator_settlement Set_util.StringMap.t
+  , string )
+  result
+(** v2: [outcomes] stays as it was and [settlements] joins it — the
+    operator's terminal judgements on grants whose replay outcome stayed
+    absent (#26191). *)
 val log_row_of_yojson : base_path:string -> Yojson.Safe.t -> (decoded_log_row, string) result
 val apply_log_row :
   pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t ->

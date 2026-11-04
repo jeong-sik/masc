@@ -709,10 +709,43 @@ let reconcile_spent_selection
                 | Ok () -> Ok Spent_grant_replay_acknowledged)))
      | Ok
          { request
+         ; state = Keeper_approval_queue_result.Resolution_consumed
+         ; replay_outcome = None
+         ; operator_settlement = Some _
+         ; _
+         } ->
+       (* #26191: the operator terminally settled a grant whose replay outcome
+          stayed absent after a restart. The settlement is durable before
+          this point (recorded with an fsynced sidecar), so retiring the
+          wake here preserves the repair-record-before-ACK ordering. There
+          is no replay outcome to project and no continuation turn to wait
+          for — the operator's judgement is the terminal fact. *)
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Error message -> Error ("approval resolution projection failed: " ^ message)
+        | Ok () ->
+          (match
+             Keeper_registry_event_queue.ack_pending_result
+               ~base_path:config.Workspace_utils.base_path
+               keeper_name
+               ~selection
+           with
+           | Error message ->
+             Error ("operator-settled grant ack failed: " ^ message)
+           | Ok () -> Ok Spent_grant_replay_acknowledged))
+     | Ok
+         { request
          ; state =
              ( Keeper_approval_queue_result.Resolution_unconsumed
              | Keeper_approval_queue_result.Resolution_consumed )
          ; replay_outcome = None
+         ; operator_settlement = (None | Some _)
          ; _
          }
      | Ok

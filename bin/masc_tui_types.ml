@@ -11022,6 +11022,11 @@ type state = {
      tries a revalidation again, waiting longer after each failure. *)
   mutable contact_retry_owner: unit ref option;
   mutable contact_failures: int;
+  mutable revalidation_discarded: bool;
+      (** The last revalidation's bundle was discarded and none has landed
+          since. Discarding settles every owed read, so even when its last
+          probe found the same workspace again nothing reads until another
+          revalidation lands. *)
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
@@ -18573,6 +18578,21 @@ let withdraw_usage_workspace (state : state) =
   state.usage_scope_id <- None;
   reset_metrics_scroll state
 
+(* Whether nothing but a revalidation brings the reading back:
+   - the server cannot be reached or is booting;
+   - the last revalidation's bundle was discarded
+     ([revalidation_discarded]);
+   - or the workspace it names is not yet confirmed (an unconfirmed workspace
+     withdraws the reading, and with it the feed). *)
+let contact_needed (state : state) =
+  (match state.connection_status with
+   | Disconnected | Connecting | Booting -> true
+   | Connected | Degraded -> false)
+  || state.revalidation_discarded
+  || (match state.workspace_identity with
+      | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> true
+      | Workspace_identity_match | Workspace_identity_mismatch _ -> false)
+
 (* A later navigation can own a dataset from the previous workspace when a
    full refresh confirms its successor. That navigation is retired at the
    authority change, so visible unread datasets need a new workspace read. *)
@@ -20369,6 +20389,7 @@ let create_state
   observer_retry_owner = None;
   contact_retry_owner = None;
   contact_failures = 0;
+  revalidation_discarded = false;
   observer_recovery_owner = None;
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;

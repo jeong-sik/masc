@@ -2144,6 +2144,30 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_contact_is_needed_until_a_revalidation_lands () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"contact" ~local_base_path:"/workspace/a"
+      ~port:8935 ~refresh_interval:0. () in
+  state.workspace_identity <- Workspace_identity_match;
+  let needed status = state.connection_status <- status; contact_needed state in
+  Alcotest.(check bool) "an unreachable server is contacted again" true (needed Disconnected);
+  Alcotest.(check bool) "a connecting server is contacted again" true (needed Connecting);
+  Alcotest.(check bool) "a booting server is contacted again" true (needed Booting);
+  Alcotest.(check bool) "a Degraded status alone does not revalidate" false
+    (needed Degraded);
+  Alcotest.(check bool) "a reached, matched server needs no revalidation" false (needed Connected);
+  state.revalidation_discarded <- true;
+  Alcotest.(check bool) "a discarded revalidation is run again though the last probe matched" true
+    (needed Degraded);
+  state.revalidation_discarded <- false;
+  state.workspace_identity <- Workspace_identity_unread;
+  Alcotest.(check bool) "an unread workspace is contacted again while connected" true
+    (needed Connected);
+  state.workspace_identity <-
+    Workspace_identity_mismatch { local_base_path = "/workspace/a"; server_base_path = "/workspace/b" };
+  Alcotest.(check bool) "a server serving another workspace is not revalidated" false
+    (needed Connected)
+
 let test_observer_retry_retires_with_workspace_read_authority () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
@@ -6729,6 +6753,8 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "contact is needed until a revalidation lands" `Quick
+            test_contact_is_needed_until_a_revalidation_lands
         ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
             test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick

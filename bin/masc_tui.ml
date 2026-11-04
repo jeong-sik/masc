@@ -9270,9 +9270,13 @@ let launch_owed_tools state ~mailbox =
       | Tools_activations ->
           (* The pane follows the selected Keeper however the selection
              moved: the roster loading, a Keeper leaving it, or a key. *)
+          (* A wait after the other Keeper's failed read is not this
+             Keeper's: the read is owed now, with no failures behind it. *)
           (match state.tools_activations_owed with
-           | Masc_tui_owed_read.Settled when activations_held_for_another state selected ->
-               owe_tools_activations_read state
+           | Masc_tui_owed_read.(Settled | Waiting _)
+             when activations_held_for_another state selected ->
+               state.tools_activations_owed <-
+                 Masc_tui_owed_read.changed Masc_tui_owed_read.settled
            | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
           if due Tools_activations_read state.tools_activations_owed
                (fun owed -> state.tools_activations_owed <- owed)

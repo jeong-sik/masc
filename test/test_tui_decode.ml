@@ -4473,19 +4473,29 @@ let test_decode_keeper_activations_refuses_another_keeper_or_schema () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "an answer under another schema was accepted");
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-activations/v1"
+          ; "keeper", `String "imp"
+          ; "skill_activations", projection
+          ; "extra", `Null
+          ])
+   with
+   | Error detail ->
+       Alcotest.(check string) "the extra field is named"
+         "skill activations has unexpected field \"extra\"" detail
+   | Ok _ -> Alcotest.fail "an answer with a field outside its schema was accepted");
   match
     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
       (`Assoc
          [ "schema", `String "masc.keeper-skill-activations/v1"
          ; "keeper", `String "imp"
-         ; "skill_activations", projection
-         ; "extra", `Null
+         ; "skill_activations", `Assoc [ "status", `String "no_session"; "keeper_name", `String "other" ]
          ])
   with
-  | Error detail ->
-      Alcotest.(check string) "the extra field is named"
-        "skill activations has unexpected field \"extra\"" detail
-  | Ok _ -> Alcotest.fail "an answer with a field outside its schema was accepted"
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a projection naming another Keeper was accepted"
 
 let test_decode_async_actions_keeps_original_scope () =
   let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in

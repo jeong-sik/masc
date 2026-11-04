@@ -2122,7 +2122,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     else
       List.exists reads_this_pane state.tools_skill_pending
       || (match state.tools_read_inflight with
-          | Some request when request.tri_generation = state.tools_request_generation ->
+          | Some request
+            when request.tri_generation = state.tools_request_generation
+                 && Option.equal String.equal request.tri_keeper
+                      (Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)) ->
               List.exists reads_this_pane request.tri_pending
           | Some _ | None -> false)
   in

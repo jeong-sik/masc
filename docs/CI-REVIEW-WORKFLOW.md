@@ -239,6 +239,15 @@ summing them showed the schedule path present and — scoped to its phase — ze
 after the test cleared its list, which was the actual finding. Parse the
 structure and count it; do not scan it.
 
+A failure count is per framework, and one anchor does not catch both. Alcotest
+prints `2 failures! in 0.027s.` and `[FAIL] name index …`; Python unittest prints
+`^FAILED (failures=N)` and `^FAIL: name`. Counting `^FAIL:` reported 5 or 6 where
+the log held 47 alcotest suites plus 5 unittest suites — 52 failing suites in a
+run described as four. Count the per-suite summary line of each framework
+(`^[0-9]+ failures?! in` and `^FAILED \(`), and say whether the number is
+suites, cases or lines. `[FAIL]` lines also repeat when the row is wrapped, so
+deduplicate on `(suite, index)` before quoting cases.
+
 Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
 is not the line that follows its own invocation. Taking the next result line
 attributes another suite's summary to the one being read: a `test_mcp_server_eio`

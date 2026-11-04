@@ -18646,7 +18646,7 @@ let schedule_observer_retry state ~mailbox owner =
            (* This is a control tick, not a source reading. Deliver it even
               while readiness is unconfirmed; its authority and token are
               checked before it can start another connection. *)
-           enqueue_async mailbox (Observer_retry_due (authority, owner)))
+           enqueue_async mailbox (Retry_due (Observer_retry (authority, owner))))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> unavailable (Printexc.to_string exn))
@@ -18693,7 +18693,7 @@ let reconcile_contact_retry state ~mailbox ~refresh_inflight =
             (try
                fork_workspace_job ~observation:true state ~sw (fun () ->
                  Eio.Time.sleep clock delay;
-                 enqueue_async mailbox (Contact_retry_due (authority, owner)))
+                 enqueue_async mailbox (Retry_due (Contact_retry (authority, owner))))
              with
              | Eio.Cancel.Cancelled _ as exn -> raise exn
              | exn ->
@@ -18710,7 +18710,7 @@ let schedule_fleet_stream_retry state ~mailbox =
       (try
          fork_workspace_job ~observation:true state ~sw (fun () ->
            Eio.Time.sleep clock stream_reconnect_s;
-           enqueue_async mailbox (Fleet_stream_retry_due authority))
+           enqueue_async mailbox (Retry_due (Fleet_stream_retry authority)))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> Log.Transport.warn "tui_fleet_stream_retry_unavailable: %s" (Printexc.to_string exn))
@@ -22213,7 +22213,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Contact_retry_due _ | Fleet_stream_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
+        | Observer_received (_, _) | Observer_closed _ | Retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -23521,7 +23521,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
-  | Observer_retry_due (authority, expected) ->
+  | Retry_due (Observer_retry (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with
             | (Workspace_identity_match | Workspace_identity_mismatch _), (Connected | Degraded) ->
@@ -23588,10 +23588,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
       state.fleet_stream_reader <- Fleet_stream_idle;
       schedule_fleet_stream_retry state ~mailbox
-  | Fleet_stream_retry_due authority ->
+  | Retry_due (Fleet_stream_retry authority) ->
       if authority = state.workspace_authority then
         open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox
-  | Contact_retry_due (authority, owner) ->
+  | Retry_due (Contact_retry (authority, owner)) ->
       (match state.contact_retry_owner with
        | Some current when current == owner ->
            state.contact_retry_owner <- None;

@@ -30,6 +30,8 @@ let rank = function
 
 let compare a b = Int.compare (rank a) (rank b)
 
+let equal a b = Int.equal (rank a) (rank b)
+
 let to_string = function
   | None_ -> "none"
   | Minimal -> "minimal"

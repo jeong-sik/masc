@@ -1045,6 +1045,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; "thinking-control-format"
     ; thinking_control_token_key
     ; "anthropic-thinking-control"
+    ; "accepted-reasoning-efforts"
     ; "reasoning-streaming-format"
     ; "supports-tool-choice"
     ; "supports-required-tool-choice"
@@ -1165,9 +1166,61 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
+  (* The efforts a categorical reasoning-effort wire accepts from this model,
+     probed against the operator's own endpoint. The dispatch check refuses
+     an effort until some layer declares this list, and the catalog cannot
+     know an operator's gateway: without this key the refusal has no
+     operator-side answer (2026-11-04, opencode_go deepseek-v4.1-flash). *)
+  let accepted_reasoning_efforts_result =
+    match Otoml.find_opt tbl Fun.id [ "accepted-reasoning-efforts" ] with
+    | None -> Ok None
+    | Some (Otoml.TomlArray entries) ->
+      let efforts, errs =
+        List.fold_left
+          (fun (efforts, errs) entry ->
+             match entry with
+             | Otoml.TomlString value ->
+               (match Llm_provider.Reasoning_effort.of_string value with
+                | Some effort -> efforts @ [ effort ], errs
+                | None ->
+                  ( efforts
+                  , errs
+                    @ error
+                        (path ^ ".accepted-reasoning-efforts")
+                        (Printf.sprintf
+                           "unknown reasoning effort %S — expected one of %s"
+                           value
+                           (String.concat
+                              ", "
+                              Llm_provider.Reasoning_effort.all_wire_values)) ))
+             | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+             | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ->
+               ( efforts
+               , errs
+                 @ error
+                     (path ^ ".accepted-reasoning-efforts")
+                     "accepted-reasoning-efforts entries must be strings" ))
+          ([], [])
+          entries
+      in
+      (match efforts, errs with
+       | [], [] -> Ok None
+       | efforts, [] -> Ok (Some efforts)
+       | _, errs -> Error errs)
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+    | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
+    | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlTable _)
+    | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
+      Error (error (path ^ ".accepted-reasoning-efforts") "accepted-reasoning-efforts must be an array of strings")
+  in
   let* thinking_control_format = thinking_control_format_result in
   let* reasoning_streaming_format = reasoning_streaming_format_result in
   let* anthropic_thinking_control = anthropic_thinking_control_result in
+  let* accepted_reasoning_efforts = accepted_reasoning_efforts_result in
   let* max_output_tokens = positive_int_opt_field "max-output-tokens" in
   let* supports_tool_choice = b "supports-tool-choice" in
   let* supports_required_tool_choice = b "supports-required-tool-choice" in
@@ -1197,6 +1250,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
         (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
          | None -> None
          | Some _ -> Some thinking_control_format)
+    ; accepted_reasoning_efforts
     ; anthropic_thinking_control
     ; reasoning_streaming_format
     ; supports_image_input

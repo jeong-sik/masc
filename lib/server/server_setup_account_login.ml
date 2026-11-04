@@ -120,6 +120,11 @@ let start ~actor ~base_path ~body request reqd =
                  | Ok reference -> Some reference
                  | Error _ -> !receipt.account_ref) in
           save { !receipt with account_ref; status } in
+        (* The official client rewrote its credential file however the login
+           ended, a cancelled one included, and the Config panes list the
+           account emails those files hold. *)
+        let credentials_rewritten () =
+          Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Runtime_config in
         Fun.protect ~finally:(fun () -> Httpun.Body.Writer.close writer) (fun () ->
           let on_ready () = send "started" (Receipt.to_json !receipt) in
           let on_output stream text = send "output" (`Assoc ["stream", `String stream; "text", `String text]) in
@@ -144,17 +149,15 @@ let start ~actor ~base_path ~body request reqd =
                 |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->
               Eio.Cancel.protect (fun () ->
-                match !receipt.status with
-                | Receipt.Complete _ -> ()
-                | Running | Failed | Cancelled | Interrupted ->
-                  (match recover Receipt.Interrupted with
-                   | Ok () -> ()
-                   | Error _ -> Log.Server.warn "Setup login interruption receipt could not be saved"));
+                (match !receipt.status with
+                 | Receipt.Complete _ -> ()
+                 | Running | Failed | Cancelled | Interrupted ->
+                   (match recover Receipt.Interrupted with
+                    | Ok () -> ()
+                    | Error _ -> Log.Server.warn "Setup login interruption receipt could not be saved"));
+                credentials_rewritten ());
               raise exn in
-          (* The official client rewrote its credential file however the login
-             ended, and the Config panes list the account emails those files
-             hold. *)
-          Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Runtime_config;
+          credentials_rewritten ();
           (match !receipt.status, completed with
            | Receipt.Complete _, _ ->
              Log.Server.info "Setup login %s completed" (Session.id session);

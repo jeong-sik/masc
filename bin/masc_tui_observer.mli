@@ -213,16 +213,10 @@ type workspace_store =
   | Pending_confirms
       (** Pending confirmations may have changed
           ({!Masc.Pending_confirm_invalidation_event}). *)
-  | Verification_requests
-      (** The verification request store was written
-          ({!Masc.Verification_request_broadcast}). *)
   | Goal_projection
       (** A Goal projection source changed: the Goal store, the verification
           ledger, the measurement store or the verifier's observations
           ({!Masc.Goal_projection_broadcast}). *)
-  | Repository_catalog
-      (** The repository catalog was written
-          ({!Masc.Repository_catalog_broadcast}). *)
 
 type event =
   | Agent_core of agent_core
@@ -299,6 +293,10 @@ type event =
   | Workspace_store_changed of workspace_store
       (** The named workspace store was written: a server push with no
           payload. *)
+  | Dataset_changed of Masc.Workspace_dataset_event.dataset
+      (** One of the workspace's datasets was written. A server push named by
+          {!Masc.Workspace_dataset_event}; it carries the dataset's name and
+          none of its data. *)
   | Gate_connector_changed of { connector : string }
       (** [connector]'s bindings, recorded names or drawn connection state
           changed. A server push named by {!Masc.Gate_connector_changed_event}. *)
@@ -382,8 +380,11 @@ val tool_modes_changed : event -> bool
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
 
-val repositories_changed : event -> bool
-(** The repository catalog changed. *)
+val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
+(** The workspace dataset a push owes a read: the dataset it names as
+    written, or the verification requests when the verification run registry
+    their rows read changed. The goal-verification and exact-lane registries
+    owe nothing. A backlog commit arrives as {!Execution_snapshot}. *)
 
 val gate_connector_changed : event -> bool
 (** [true] for {!Gate_connector_changed}. The Connectors list and a Keeper's
@@ -392,12 +393,6 @@ val gate_connector_changed : event -> bool
 val goal_projection_changed : event -> bool
 (** Whether [event] is a {!Goal_projection} store change. The Planning screen reads
     its Goals again on this. *)
-val verification_requests_changed : event -> bool
-(** The verification request store, or the verification run registry a
-    request row reads its review from, changed. The goal-verification and
-    exact-lane registries do not count. A backlog commit arrives as the
-    execution {!Snapshot}. *)
-
 val roster_change : event -> roster_change option
 (** What a Keeper roster push owes the roster. *)
 

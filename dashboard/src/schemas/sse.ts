@@ -121,12 +121,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // A Keeper's running-turn preview was written
   // (lib/server/server_turn_preview_broadcast.ml). A turns reader re-reads on it.
   'keeper_turn_preview_changed',
-  // A workspace's verification request store was written
-  // (lib/verification_request_broadcast.ml). A request reader re-reads on it.
-  'verification_requests_changed',
-  // A workspace's repository catalog was written
-  // (lib/repository_catalog_broadcast.ml). A repository reader re-reads on it.
-  'repositories_changed',
+  // One of a workspace's datasets was written (lib/workspace_dataset_event.ml).
+  // [dataset] names it; a reader of that dataset re-reads on it.
+  'workspace_dataset_changed',
   // One Keeper's event queue or reaction record was written
   // (lib/server/server_keeper_event_queue_broadcast.ml). [keeper] names it.
   'keeper_event_queue_changed',

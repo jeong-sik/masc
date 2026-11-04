@@ -70,7 +70,7 @@ def goal_projection_changed() -> dict[str, object]:
 
 
 def repositories_changed() -> dict[str, object]:
-    return {"type": "repositories_changed", "ts_unix": 1.0}
+    return {"type": "workspace_dataset_changed", "dataset": "repositories", "ts_unix": 1.0}
 
 
 class PlanningGoalSignalTest(unittest.TestCase):

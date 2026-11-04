@@ -49,11 +49,7 @@ end
 
 **소스**: `lib/types/types_core.ml`
 
-### 2.1 Legacy Task Role (removed)
-
-`Writer`/`Reviewer`/`Unassigned` 기반 task assignment role 시스템은 제거되었다. task claim은 더 이상 role 매칭에 의존하지 않고, 상태와 owner 유무만 검사하는 열린 규칙을 사용한다.
-
-### 2.2 Agent Status
+### 2.1 Agent Status
 
 ```ocaml
 type agent_status =
@@ -65,7 +61,7 @@ type agent_status =
 
 JSON 직렬화 시 소문자 문자열(`"active"`, `"busy"`, ...)로 표현된다.
 
-### 2.3 Agent Meta
+### 2.2 Agent Meta
 
 ```ocaml
 type agent_meta = {
@@ -81,7 +77,7 @@ type agent_meta = {
 
 세션 식별과 환경 정보를 담는다. `pid`/`hostname`/`tty`는 디버깅 용도이며 선택 필드다.
 
-### 2.4 Agent
+### 2.3 Agent
 
 ```ocaml
 type agent = {
@@ -96,7 +92,7 @@ type agent = {
 }
 ```
 
-### 2.5 Workspace Info / Workspace Registry
+### 2.4 Workspace Info / Workspace Registry
 
 ```ocaml
 type workspace_info = {
@@ -116,7 +112,7 @@ type workspace_registry = {
 }
 ```
 
-### 2.6 Task Status (상태 기계)
+### 2.5 Task Status (상태 기계)
 
 ```ocaml
 type task_status =
@@ -135,7 +131,7 @@ type task_status =
 
 각 variant가 메타데이터(who, when)를 직접 보유한다. 이 설계는 "상태와 컨텍스트를 분리하지 않는다"는 원칙을 따른다. 상태 전이 규칙은 [INV-TYPE-003] 참조.
 
-### 2.7 Task
+### 2.6 Task
 
 ```ocaml
 type task = {
@@ -150,7 +146,7 @@ type task = {
 }
 ```
 
-### 2.8 Worktree Info
+### 2.7 Worktree Info
 
 ```ocaml
 type worktree_info = {
@@ -161,7 +157,7 @@ type worktree_info = {
 }
 ```
 
-### 2.9 Message
+### 2.8 Message
 
 ```ocaml
 type message = {
@@ -174,7 +170,7 @@ type message = {
 }
 ```
 
-### 2.10 Workspace State
+### 2.9 Workspace State
 
 ```ocaml
 type workspace_state = {
@@ -195,7 +191,7 @@ type workspace_state = {
 
 RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
 
-### 2.11 Backlog
+### 2.10 Backlog
 
 ```ocaml
 type backlog = {
@@ -205,7 +201,7 @@ type backlog = {
 }
 ```
 
-### 2.12 A2A Task (Google A2A Protocol)
+### 2.11 A2A Task (Google A2A Protocol)
 
 ```ocaml
 type a2a_task_status = A2APending | A2ARunning | A2ACompleted | A2AFailed | A2ACanceled
@@ -222,7 +218,7 @@ type a2a_task = {
 }
 ```
 
-### 2.13 SSE Session
+### 2.12 SSE Session
 
 ```ocaml
 type sse_session = {
@@ -233,7 +229,7 @@ type sse_session = {
 }
 ```
 
-### 2.14 Tool Result (core)
+### 2.13 Tool Result (core)
 
 `types_core.ml`에 정의된 기본 tool_result:
 
@@ -245,7 +241,7 @@ type tool_result = {
 }
 ```
 
-### 2.15 Claim Next Result
+### 2.14 Claim Next Result
 
 스케줄링 결과를 구조화한 ADT. brittle한 문자열 파싱을 방지한다:
 
@@ -267,8 +263,6 @@ type claim_next_result =
 ## 3. Error Hierarchy
 
 MASC 는 비즈니스 로직 에러를 모듈화된 sum type `masc_error` 로 표현한다.
-
-> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
 ### 3 masc_error (Unified)
 
@@ -377,8 +371,7 @@ type module_tag =
 
 Variant SSOT는 `lib/tool/tool_tag_types.mli`다 (`tool_dispatch.mli`는 같은
 타입을 재노출한다). 도구 이름으로 O(1) tag
-lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈
-이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
+lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다.
 
 ### 4.4 Tool_result.result (structured)
 
@@ -402,7 +395,7 @@ type failure_payload = {
 type result = (success_payload, failure_payload) Stdlib.Result.t
 ```
 
-도구 핸들러는 `Tool_result.result`를 직접 반환한다. 기존 `(bool * string)` 튜플과 legacy record 기반 dispatch 계약은 제거됐고, 성공/실패는 `Ok`/`Error` variant로만 표현된다.
+도구 핸들러는 `Tool_result.result`를 직접 반환한다. 성공/실패는 `Ok`/`Error` variant로만 표현된다.
 
 ---
 
@@ -468,7 +461,7 @@ end
 type agent_role = Worker | Admin | Player
 ```
 
-인증/인가 역할은 `Worker`, `Admin`, 그리고 공유 머신 초대용 `Player`로 구성된다. task assignment 전용 role 타입은 제거되었다.
+인증/인가 역할은 `Worker`, `Admin`, 그리고 공유 머신 초대용 `Player`로 구성된다.
 
 ### 9.2 Permission
 

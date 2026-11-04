@@ -22119,7 +22119,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
         | Voice_calibrated _ | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-        | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
+        | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
         | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
         | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
         | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
@@ -22133,7 +22133,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_streamed _) | Keeper_composite_loaded (_, _, _)
         | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
-        | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
+        | Verification_loaded _ | Harness_loaded _ | Overview_loaded _ | Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
         | Memory_recall_standing_loaded (_, _) | Repositories_loaded _

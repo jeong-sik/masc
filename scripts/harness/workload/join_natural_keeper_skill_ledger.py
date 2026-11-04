@@ -541,7 +541,7 @@ def validate_effective_keeper_surface(
     surface = cast(dict[str, Any], surface_value)
     status = required_string(surface, "status", "effective Keeper surface")
     require(
-        status in {"available", "unavailable", "warming"},
+        status in {"available", "unavailable"},
         f"effective Keeper surface status is unsupported: {status}",
     )
     surface_keeper = required_string(surface, "keeper_name", "effective Keeper surface")
@@ -550,8 +550,6 @@ def validate_effective_keeper_surface(
         "status": status,
         "keeper_name": surface_keeper,
     }
-    if status == "warming":
-        return observation
     if status == "unavailable":
         observation.update(
             {

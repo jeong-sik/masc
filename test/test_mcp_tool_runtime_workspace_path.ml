@@ -164,7 +164,7 @@ let test_masc_start_refuses_a_keeper_name_case_folded () =
       then Alcotest.failf "unexpected refusal message: %s" message)
 ;;
 
-let test_masc_start_surfaces_claim_failure_after_task_commit () =
+let test_masc_start_claims_a_second_task_after_task_commit () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -207,13 +207,12 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
               ; ("task_title", `String "must remain visible")
               ])
       in
-      Alcotest.(check bool) "claim failure is not success" false
+      Alcotest.(check bool) "a second claim succeeds" true
         (Tool_result.is_success result);
-      Alcotest.(check (option string)) "claim conflict is workflow rejection"
-        (Some "workflow_rejection")
+      Alcotest.(check (option string)) "no claim conflict is reported" None
         (Tool_result.failure_class result
          |> Option.map Tool_result.tool_failure_class_to_string);
-      Alcotest.(check bool) "claim failure is explicit" true
+      Alcotest.(check bool) "no claim-failure text" false
         (String_util.contains_substring (Tool_result.message result) "claim failed");
       let data = Tool_result.data result in
       Alcotest.(check string) "created task remains a post-effect"
@@ -880,9 +879,9 @@ let () =
             `Quick
             test_masc_start_tilde_rejects_empty_initial_home
         ; Alcotest.test_case
-            "surfaces claim failure after task commit"
+            "claims a second task after task commit"
             `Quick
-            test_masc_start_surfaces_claim_failure_after_task_commit
+            test_masc_start_claims_a_second_task_after_task_commit
         ; Alcotest.test_case
             "refuses a Keeper name at the join boundary"
             `Quick

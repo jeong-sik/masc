@@ -214,7 +214,7 @@ class ChatOwedHistoryTest(unittest.TestCase):
                 log under the base path. Print its "[diag task-3231]" lines so a
                 passing run also shows how many agenda reads answered, not only
                 a failing one."""
-                if os.environ.get("MASC_TUI_DIAG") != "1":
+                if os.environ.get("MASC_TUI_DIAG") == "0":
                     return
                 lines: list[str] = []
                 for log in sorted(pathlib.Path(base).glob(".masc/logs/masc-tui-*.log")):

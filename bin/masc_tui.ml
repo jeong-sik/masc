@@ -7063,39 +7063,6 @@ let launch_lanes_reread state ~mailbox =
   then state.standalone_lanes_reread_pending <- true
   else launch_lanes_load state ~mailbox
 
-let launch_owed_lanes state ~mailbox =
-  if state.view <> Lanes then
-    state.lanes_owed <- Masc_tui_owed_read.settled
-  else begin
-    if not state.standalone_lanes_inflight then
-      state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.lanes_owed then
-      launch_lanes_load state ~mailbox
-  end
-
-let launch_owed_lane_addons state ~mailbox =
-  match state.lane_addons, state.lane_addons_owed with
-  | Some ({ Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ } as view),
-    Some ((owner, epoch), owed)
-    when String.equal owner open_id && String.equal epoch incarnation ->
-      let busy =
-        Option.is_some view.draft || Option.is_some view.document_key
-        || Option.is_some view.action_menu || Option.is_some view.installer
-        || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
-        || Option.is_some (Masc_tui_lane_addons.pending_action view)
-      in
-      if view.loading || busy then ()
-      else begin
-        let owed = Masc_tui_owed_read.abandoned owed in
-        state.lane_addons_owed <- Some ((owner, epoch), owed);
-        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
-          launch_lane_addons state ~mailbox
-            ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
-            Masc_tui_lane_addons.Inspect
-      end
-  | Some _, Some _ | None, Some _ -> state.lane_addons_owed <- None
-  | Some _, None | None, None -> ()
-
 let launch_machine_activity_read state ~mailbox owner =
   if server_authority_ready state then begin
   match Masc_tui_types.machine_activity_session state owner with
@@ -9185,6 +9152,39 @@ let launch_owed_connectors state ~mailbox =
       | Changes | Runtime | Config | Resources | Tools | System_logs | Keepers _ ),
       (Some _ | None) ) ->
     state.connectors_owed <- Masc_tui_owed_read.settled
+
+let launch_owed_lanes state ~mailbox =
+  if state.view <> Lanes then
+    state.lanes_owed <- Masc_tui_owed_read.settled
+  else begin
+    if not state.standalone_lanes_inflight then
+      state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.lanes_owed then
+      launch_lanes_load state ~mailbox
+  end
+
+let launch_owed_lane_addons state ~mailbox =
+  match state.lane_addons, state.lane_addons_owed with
+  | Some ({ Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ } as view),
+    Some ((owner, epoch), owed)
+    when String.equal owner open_id && String.equal epoch incarnation ->
+      let busy =
+        Option.is_some view.draft || Option.is_some view.document_key
+        || Option.is_some view.action_menu || Option.is_some view.installer
+        || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
+        || Option.is_some (Masc_tui_lane_addons.pending_action view)
+      in
+      if view.loading || busy then ()
+      else begin
+        let owed = Masc_tui_owed_read.abandoned owed in
+        state.lane_addons_owed <- Some ((owner, epoch), owed);
+        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
+          launch_lane_addons state ~mailbox
+            ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
+            Masc_tui_lane_addons.Inspect
+      end
+  | Some _, Some _ | None, Some _ -> state.lane_addons_owed <- None
+  | Some _, None | None, None -> ()
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)

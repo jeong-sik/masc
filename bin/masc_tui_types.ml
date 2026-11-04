@@ -5759,6 +5759,34 @@ type tools_activations =
 (* A failed Activations read, held for the Keeper it was made for. *)
 type activations_failure = { taf_keeper : string; taf_detail : string }
 
+(* Whether the Activations reading, or the failure held without one, belongs
+   to a Keeper other than [selected], or to one while none is selected. *)
+let activations_held_for_another ~selected reading failure =
+  match selected, reading, failure with
+  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
+      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
+  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
+  | Some _, Some Activations_no_keeper, (Some _ | None)
+  | None, Some (Activations_read _), (Some _ | None)
+  | None, (Some Activations_no_keeper | None), Some _ -> true
+  | Some _, None, None
+  | None, (Some Activations_no_keeper | None), None -> false
+
+(* A read for another Keeper than the one its held reading or failure is for
+   starts with no failures behind it: that Keeper's backoff is not this
+   one's. *)
+let start_owed_read ~for_another owed =
+  Masc_tui_owed_read.started
+    (if for_another then Masc_tui_owed_read.changed Masc_tui_owed_read.settled else owed)
+
+(* The inventory failure the Tools screen draws: the one held for [selected].
+   One held for another Keeper waits for the selected Keeper's read, which
+   drops it. *)
+let held_tools_error ~selected ~held_keeper error =
+  match error with
+  | Some _ when Option.equal String.equal held_keeper selected -> error
+  | Some _ | None -> None
+
 (* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
    beside the failure. *)
 type keeper_skill_usage_reading =
@@ -12773,6 +12801,11 @@ let keeper_list_select_name state keeper_name =
 
 let selected_keeper (state : state) =
   List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+let selected_tools_error (state : state) =
+  held_tools_error
+    ~selected:(Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state))
+    ~held_keeper:state.tools_inventory_keeper state.tools_error
 
 let keeper_preference_unresolved_warnings (state : state) =
   List.filter_map Fun.id
@@ -22112,7 +22145,7 @@ let surface_body_rows (state : state) ~terminal_rows =
 
 let tools_scroll_layout state ~count =
   { sc_count = count
-  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
+  ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
   ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
   ; sc_preview_keep = None }
 ;;

@@ -4066,12 +4066,13 @@ let launch_tools_parts state ~mailbox parts =
       | Tools_inventory_read ->
           (* A reading or a failure held for another Keeper is not this
              Keeper's, so neither is kept on screen while this read runs. *)
-          if not (Option.equal String.equal state.tools_inventory_keeper keeper) then begin
+          let for_another = not (Option.equal String.equal state.tools_inventory_keeper keeper) in
+          if for_another then begin
             state.tools_inventory <- None;
             state.tools_inventory_keeper <- None;
             state.tools_error <- None
           end;
-          state.tools_inventory_owed <- Masc_tui_owed_read.started state.tools_inventory_owed;
+          state.tools_inventory_owed <- start_owed_read ~for_another state.tools_inventory_owed;
           launch_workspace_json_read state ~mailbox
             ~deliver:(fun result -> Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result }))
             (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
@@ -4089,6 +4090,10 @@ let launch_tools_parts state ~mailbox parts =
                (* A reading or a failure held for no Keeper or for another one
                   is not this Keeper's, so it is not kept on screen while this
                   read runs. *)
+               let for_another =
+                 activations_held_for_another ~selected:(Some keeper)
+                   state.tools_activations state.tools_activations_error
+               in
                (match state.tools_activations with
                 | Some (Activations_read projection)
                   when String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper -> ()
@@ -4098,7 +4103,8 @@ let launch_tools_parts state ~mailbox parts =
                 | Some failure when not (String.equal failure.taf_keeper keeper) ->
                     state.tools_activations_error <- None
                 | Some _ | None -> ());
-               state.tools_activations_owed <- Masc_tui_owed_read.started state.tools_activations_owed;
+               state.tools_activations_owed <-
+                 start_owed_read ~for_another state.tools_activations_owed;
                launch_workspace_json_read state ~mailbox
                  ~deliver:(fun result ->
                    Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }))
@@ -4167,6 +4173,10 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.tools_error <- None;
     state.tools_activations <- None;
     state.tools_activations_error <- None;
+    (* The cleared readings no longer say whose failures the owed reads
+       carry, so the next Keeper's reads start with none behind them. *)
+    state.tools_inventory_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
+    state.tools_activations_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
     tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
@@ -9248,19 +9258,6 @@ let launch_owed_tools_async_task state ~mailbox =
       launch_tools_async_task state ~mailbox
   end
 
-(* Whether the Activations reading on screen, or the failure held without
-   one, belongs to a Keeper other than [selected], or to none while one is
-   selected. *)
-let activations_held_for_another state selected =
-  match selected, state.tools_activations, state.tools_activations_error with
-  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
-      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
-  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
-  | Some _, Some Activations_no_keeper, (Some _ | None)
-  | None, Some (Activations_read _), (Some _ | None) -> true
-  | Some _, None, None
-  | None, (Some Activations_no_keeper | None), (Some _ | None) -> false
-
 (* Runs on every loop iteration. The selected Keeper's inventory reads while
    any pane but Async is on screen, the skills catalog and each roster
    Keeper's Usage answer while the Usage pane is, the selected Keeper's
@@ -9335,7 +9332,8 @@ let launch_owed_tools state ~mailbox =
              Keeper's: the read is owed now, with no failures behind it. *)
           (match state.tools_activations_owed with
            | Masc_tui_owed_read.(Settled | Waiting _)
-             when activations_held_for_another state selected ->
+             when activations_held_for_another ~selected state.tools_activations
+                    state.tools_activations_error ->
                state.tools_activations_owed <-
                  Masc_tui_owed_read.changed Masc_tui_owed_read.settled
            | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());

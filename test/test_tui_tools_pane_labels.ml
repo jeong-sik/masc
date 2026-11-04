@@ -236,6 +236,44 @@ let test_only_a_whole_roster_drops_readings () =
   Alcotest.(check bool) "with no roster warning" false
     (String_util.contains_substring text "Keeper roster")
 
+(* A reading or a failure is held for one Keeper. The Tools screen treats
+   one held for another Keeper, or for one while none is selected, as
+   another Keeper's: it reads the selected Keeper without the other's
+   backoff and draws none of the other's failure. *)
+let test_readings_and_failures_belong_to_their_keeper () =
+  let reading keeper =
+    Some (Activations_read
+            (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name = keeper }))
+  in
+  let failure keeper = Some { taf_keeper = keeper; taf_detail = "read failed" } in
+  let held ~selected reading failure = activations_held_for_another ~selected reading failure in
+  Alcotest.(check bool) "the selected Keeper's reading" false (held ~selected:(Some "a") (reading "a") None);
+  Alcotest.(check bool) "another Keeper's reading" true (held ~selected:(Some "b") (reading "a") None);
+  Alcotest.(check bool) "the selected Keeper's failure" false (held ~selected:(Some "a") None (failure "a"));
+  Alcotest.(check bool) "another Keeper's failure" true (held ~selected:(Some "b") None (failure "a"));
+  Alcotest.(check bool) "a failure while no Keeper is selected" true (held ~selected:None None (failure "a"));
+  Alcotest.(check bool) "no Keeper, nothing held" false
+    (held ~selected:None (Some Activations_no_keeper) None);
+  Alcotest.(check bool) "a no-Keeper reading once one is selected" true
+    (held ~selected:(Some "a") (Some Activations_no_keeper) None);
+  Alcotest.(check bool) "nothing held yet" false (held ~selected:(Some "a") None None);
+  let waiting = Masc_tui_owed_read.Waiting { failures = 3; retry_at = 100. } in
+  let failures = function
+    | Masc_tui_owed_read.Reading { failures; _ } -> failures
+    | Masc_tui_owed_read.(Settled | Owed _ | Waiting _) -> Alcotest.fail "the read did not start"
+  in
+  Alcotest.(check int) "another Keeper's read starts with no failures" 0
+    (failures (start_owed_read ~for_another:true waiting));
+  Alcotest.(check int) "the same Keeper's read keeps backing off" 3
+    (failures (start_owed_read ~for_another:false waiting));
+  let error = Some "inventory read failed" in
+  Alcotest.(check (option string)) "the selected Keeper's error is drawn" error
+    (held_tools_error ~selected:(Some "a") ~held_keeper:(Some "a") error);
+  Alcotest.(check (option string)) "another Keeper's error is not" None
+    (held_tools_error ~selected:(Some "b") ~held_keeper:(Some "a") error);
+  Alcotest.(check (option string)) "an error read with no Keeper selected" error
+    (held_tools_error ~selected:None ~held_keeper:None error)
+
 let () =
   let open Alcotest in
   run "TUI tools pane labels"
@@ -250,5 +288,7 @@ let () =
             test_a_revision_outside_the_catalog_reading_is_drawn
         ; test_case "only a whole roster drops readings" `Quick
             test_only_a_whole_roster_drops_readings
+        ; test_case "readings and failures belong to their Keeper" `Quick
+            test_readings_and_failures_belong_to_their_keeper
         ] )
     ]

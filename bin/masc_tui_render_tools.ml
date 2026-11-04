@@ -781,8 +781,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
        "tool inventory load failed" row sent the reader to [r] for a read
        that had already been made and refused. *)
     | None ->
-        [ ( (if Option.is_some state.tools_error then Theme.bad () else Theme.warn ())
-          , " Effective Keeper Surface " ^ title_missing_reading ~error:state.tools_error )
+        [ ( (if Option.is_some (selected_tools_error state) then Theme.bad () else Theme.warn ())
+          , " Effective Keeper Surface " ^ title_missing_reading ~error:(selected_tools_error state) )
         ]
     | Some { Masc.Tui_decode_tools.ts_effective = None; _ } ->
         [ (Theme.warn ()), " Effective Keeper Surface — no Keeper selected" ]
@@ -2089,7 +2089,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   let part, source, observed, error = match state.tools_pane with
     | Tools_surface | Tools_catalog ->
         Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
-        state.tools_error
+        (selected_tools_error state)
     | Tools_activations ->
         Tools_activations_read, "Skill activations", Option.is_some state.tools_activations,
         Option.map (fun failure -> failure.taf_detail) state.tools_activations_error
@@ -2134,7 +2134,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         [ Ansi.dim, " " ^ source ^ " not read · r:refresh" ]
     | false, true, None | false, false, Some _ -> []
   in
-  let error_lines = match state.tools_error with
+  let error_lines = match (selected_tools_error state) with
     | None -> []
     | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
   in

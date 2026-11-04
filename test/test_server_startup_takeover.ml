@@ -408,11 +408,12 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                   Unix.close err_fd
                 with Unix.Unix_error _ -> ());
                ignore (Unix.write_substring queued_write "S" 0 1 : int);
+               (* Close only what is open here: the parent already closed
+                  waiting_write, won_write and go_read, so their numbers were
+                  recycled by the queued pipe itself; naming them would close
+                  the queued pipe out from under this child (EBADF). *)
                close_quietly waiting_read;
-               close_quietly waiting_write;
                close_quietly won_read;
-               close_quietly won_write;
-               close_quietly go_read;
                close_quietly go_write;
                close_quietly queued_read;
                close_quietly release_owner;

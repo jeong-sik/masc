@@ -2332,6 +2332,16 @@ candidates = [
   "antigravity_subscription.antigravity-gemini-3-8-flash-high",
 ]
 
+# Subscription-first worker route: OpenCode Go head, then Ollama Cloud and
+# Z.AI fallbacks on independent quotas. Select explicitly in live assignments;
+# the public seed never assigns deployment-local keeper names.
+[runtime.lanes.go-deepseek-then-glm]
+candidates = [
+  "opencode_go.opencode-go-deepseek-flash",
+  "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "glm-coding.glm-5-3-flash",
+]
+
 # The judge seat of the shipped Fusion presets. A seat names a route and walks
 # its candidates in order (RFC fusion-seat-routes §2.2), so a judge whose first
 # runtime is rate-limited, timing out or refusing the request still answers from
@@ -2657,6 +2667,31 @@ refresh-s = 600.0
 HTTP-Referer = "https://github.com/jeong-sik/masc"
 X-Title = "MASC"
 
+# ── OpenCode Go (subscription gateway) ─────────────────────────────────────
+# Go/Go Plus subscription, metered at official rates against a monthly dollar
+# allowance per model (DeepSeek V4.1 Flash: $100 Go / $200 Go Plus as of
+# 2026-11-02, 20% per 5h, 50% per week). Key from the OpenCode Console.
+# DeepSeek models need Regions = Global in workspace Privacy settings.
+# Endpoint verified 2026-11-04: /models 200, chat completions 200 with
+# x-opencode-session; billing_source go-plus observed. Docs:
+# https://opencode.ai/v2/docs/console/go/
+[providers.opencode_go]
+display-name = "OpenCode Go"
+protocol = "openai-compatible-http"
+endpoint = "https://opencode.ai/zen/go/v1"
+
+[providers.opencode_go.healthcheck]
+path = "/models"
+
+[providers.opencode_go.credentials]
+type = "env"
+key = "OPENCODE_API_KEY"
+
+[providers.opencode_go.headers]
+# Required: the API answers 400 MissingSessionID without it. Static for all
+# keepers; per-conversation ids would improve routing/cache affinity.
+x-opencode-session = "masc-keeper-fleet"
+
 
 # ── OpenRouter models ────────────────────────────────────────────────────────
 # Twelve ids probed live on 2026-09-10; every one answered HTTP 200 on a plain
@@ -2795,6 +2830,27 @@ reasoning-effort = "high"
 
 [openrouter.openrouter-deepseek-v4-flash]
 wizard-default = true
+
+[models.opencode-go-deepseek-flash]
+api-name = "deepseek-v4.1-flash"
+# The DeepSeek V4 model cards (Flash and Pro) recommend temperature 1.0. This host
+# honours temperature, so without this line the keeper default 0.4 is sent.
+temperature = 1.0
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.opencode-go-deepseek-flash.capabilities]
+max-output-tokens = 384000
+# The Go gateway takes reasoning_effort low/high/max (probed 2026-11-04);
+# without this contract openai_compat refuses to send the effort.
+thinking-control-format = "reasoning-effort"
+# SSE streams reasoning under delta.reasoning_content (probed 2026-11-04).
+reasoning-streaming-format = "delta:reasoning_content"
+
+[opencode_go.opencode-go-deepseek-flash]
 
 [models.openrouter-deepseek-v4-1-flash]
 api-name = "deepseek/deepseek-v4.1-flash-1017"

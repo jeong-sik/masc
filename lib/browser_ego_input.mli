@@ -32,8 +32,10 @@ val begin_holding : t -> scope:scope -> page_label:string -> (pending, string) r
 val command_settled : t -> generation:string -> Browser_ego_release.proof -> (unit, string) result
 (** Settle from the one Release judge, not a script flag, for the pending
     generation only. Native-window evidence additionally requires this
-    Pending's command, generation, source Page label and this Space. This module does not
-    inspect or attest physical keys. *)
+    Pending's command, generation, source Page label and this Space. A settled
+    command replaces any earlier uncertainty, because readiness describes the
+    latest holding command; {!not_started} instead restores what came before.
+    This module does not inspect or attest physical keys. *)
 
 val not_started : t -> generation:string -> (unit, string) result
 (** Restore the readiness before this pending generation. *)

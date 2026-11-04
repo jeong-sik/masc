@@ -239,11 +239,11 @@ binding is no takeover authorization or proof of visible UI/login completion.
 
 ### Input readiness
 
-An input-holding command records a fresh generation, its issued command ID,
-historical tab number, Page label and operation before its native effect. It
-settles only from a proof that `Browser_ego_release` builds from the answers
-the SDK declared for its holding steps; a refusal before the press restores
-the readiness it had. Every result object and failure the connection returns
+An input-holding command records a fresh generation, its command ID, Page
+label and scope before its native effect. It settles only from a proof that
+`Browser_ego_release` builds from the answers the SDK declared for its holding
+steps, and a settled command replaces any earlier uncertainty; a refusal before
+the press restores the readiness it had. Every result object and failure the connection returns
 carries `inputReadiness`: `command_settled`, or `release_uncertain` when the
 last holding command ended without that proof. Native workflows stop on a
 receipt-less holding step without using Page.info to infer release or counting

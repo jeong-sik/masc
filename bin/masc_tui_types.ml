@@ -5822,7 +5822,6 @@ type tools_read_inflight =
   { tri_generation : int
   ; tri_keeper : string option
   ; tri_pending : tools_read_part list
-  ; tri_failed : bool  (** A part already answered with an error. *)
   }
 
 type runtime_param_edit_mode = Friendly_value | Advanced_json
@@ -10559,8 +10558,11 @@ type state = {
   mutable tools_inventory: Masc.Tui_decode_tools.tool_snapshot option;
   mutable tools_request_generation: int;
   mutable tools_read_inflight: tools_read_inflight option;
-  (* What the Tools catalog and selected-Keeper read owes after a push. *)
-  mutable tools_owed: Masc_tui_owed_read.t;
+  (* What each part of the Tools read owes after a push: the selected
+     Keeper's surface ([/dashboard/tools?keeper=]) and the Skill catalog with
+     its usage counts ([/api/v1/skills]). *)
+  mutable tools_surface_owed: Masc_tui_owed_read.t;
+  mutable tools_catalog_owed: Masc_tui_owed_read.t;
   mutable tools_error: string option;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
@@ -14567,6 +14569,8 @@ let suspend_workspace_readings state =
   state.repositories_inflight <- false;
   state.repositories_owed <- Masc_tui_owed_read.settled;
   state.tools_read_inflight <- None;
+  state.tools_surface_owed <- Masc_tui_owed_read.settled;
+  state.tools_catalog_owed <- Masc_tui_owed_read.settled;
   state.harness_inflight <- false;
   state.harness_owed <- Masc_tui_owed_read.settled;
   state.harness_stale_at <- None;
@@ -19841,7 +19845,8 @@ let create_state
   tools_inventory = None;
   tools_request_generation = 0;
   tools_read_inflight = None;
-  tools_owed = Masc_tui_owed_read.settled;
+  tools_surface_owed = Masc_tui_owed_read.settled;
+  tools_catalog_owed = Masc_tui_owed_read.settled;
   tools_error = None;
   skills_catalog = None;
   skills_catalog_error = None;

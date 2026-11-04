@@ -43,7 +43,6 @@ type result_child =
   ; skill_tool_use_id : string
   ; activation_frame_sha256 : string
   }
-let keeper_name (context : t) = context.keeper_name
 let bound_keeper_name bound = bound.context.keeper_name
 let bound_trace_id bound = bound.context.trace_id
 let bound_turn_ref bound = bound.context.turn_ref

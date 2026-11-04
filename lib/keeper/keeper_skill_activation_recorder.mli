@@ -14,7 +14,6 @@ type result_child =
   ; skill_tool_use_id : string
   ; activation_frame_sha256 : string
   }
-val keeper_name : t -> string
 val bound_keeper_name : bound_context -> string
 val bound_trace_id : bound_context -> Keeper_id.Trace_id.t
 val bound_turn_ref : bound_context -> Ids.Turn_ref.t

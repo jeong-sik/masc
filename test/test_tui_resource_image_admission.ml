@@ -172,7 +172,7 @@ let test_skill_image_owner () =
   check bool "failed skill refresh is indicated" true (Types.image_cell_source_unconfirmed state image);
   state.tools_error <- None;
   state.tools_read_inflight <- Some {tri_generation=state.tools_request_generation;
-    tri_keeper=None;tri_pending=[Tools_inventory_read];tri_failed=false};
+    tri_keeper=None;tri_pending=[Tools_inventory_read]};
   check bool "pending skill refresh retains the last confirmed observation" false
     (Types.image_cell_source_unconfirmed state image);
   state.tools_read_inflight <- None;

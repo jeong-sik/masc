@@ -3930,53 +3930,76 @@ let launch_tools_async_observation_load state ~mailbox =
           ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
           (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
 
-let launch_tools_load ?(force = true) state ~mailbox =
+let tools_part_owed state = function
+  | Tools_inventory_read -> state.tools_surface_owed
+  | Tools_catalog_read -> state.tools_catalog_owed
+  | Tools_async_read -> Masc_tui_owed_read.settled
+
+let set_tools_part_owed state part read =
+  match part with
+  | Tools_inventory_read -> state.tools_surface_owed <- read
+  | Tools_catalog_read -> state.tools_catalog_owed <- read
+  | Tools_async_read -> ()
+
+(* Starts [parts] of the Tools read for the selected Keeper. A part joins a
+   read already in flight for that Keeper; a read for another Keeper is
+   replaced, and its answers are ignored. A part already in flight is not
+   started again. *)
+let launch_tools_parts state ~mailbox parts =
   if server_authority_ready state then begin
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
   in
-  let already_reading =
+  let generation, pending =
     match state.tools_read_inflight with
-    | Some request -> Option.equal String.equal request.tri_keeper keeper
-    | None -> false
+    | Some request when Option.equal String.equal request.tri_keeper keeper ->
+        request.tri_generation, request.tri_pending
+    | Some _ | None ->
+        state.tools_request_generation <- state.tools_request_generation + 1;
+        state.tools_request_generation, []
   in
-  if force || not already_reading then begin
-    state.tools_request_generation <- state.tools_request_generation + 1;
-    let generation = state.tools_request_generation in
+  let starting = List.filter (fun part -> not (List.mem part pending)) parts in
+  if starting <> [] then begin
     state.tools_read_inflight <- Some
-      { tri_generation = generation
-      ; tri_keeper = keeper
-      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read ]
-      ; tri_failed = false
-      };
-    state.tools_owed <- Masc_tui_owed_read.started state.tools_owed;
+      { tri_generation = generation; tri_keeper = keeper; tri_pending = pending @ starting };
     let host = server_peer_host in
     let port = state.port in
-    launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Skills_catalog_loaded (generation,
-        Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
-      (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
-    launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
-      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+    List.iter
+      (fun part ->
+         set_tools_part_owed state part (Masc_tui_owed_read.started (tools_part_owed state part));
+         match part with
+         | Tools_catalog_read ->
+             launch_workspace_json_read state ~mailbox
+               ~deliver:(fun result -> Skills_catalog_loaded (generation,
+                 Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
+               (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port)
+         | Tools_inventory_read ->
+             launch_workspace_json_read state ~mailbox
+               ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
+               (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+         | Tools_async_read -> ())
+      starting
   end
   end
 
-(* Settles one part of the current Tools read. Once its last part answers,
-   says whether any part failed. *)
-let settle_tools_read state ~generation ~failed part =
+(* Entering the surface and [r] read both parts; [force] replaces a read
+   already in flight. *)
+let launch_tools_load ?(force = true) state ~mailbox =
+  if force then state.tools_read_inflight <- None;
+  launch_tools_parts state ~mailbox [ Tools_inventory_read; Tools_catalog_read ]
+
+(* Settles one part of the current Tools read; [true] when the answer was the
+   one that part was waiting for. *)
+let settle_tools_read state ~generation part =
   match state.tools_read_inflight with
-  | Some request when request.tri_generation = generation ->
+  | Some request when request.tri_generation = generation && List.mem part request.tri_pending ->
       let pending = List.filter (fun pending -> pending <> part) request.tri_pending in
-      let failed = failed || request.tri_failed in
-      (match pending with
-       | [] ->
-           state.tools_read_inflight <- None;
-           Some failed
-       | _ ->
-           state.tools_read_inflight <- Some { request with tri_pending = pending; tri_failed = failed };
-           None)
-  | Some _ | None -> None
+      state.tools_read_inflight <-
+        (match pending with
+         | [] -> None
+         | _ -> Some { request with tri_pending = pending });
+      true
+  | Some _ | None -> false
 
 let normalize_tools_skill_cursor state =
   let count = List.length (tools_skill_profiles state) in
@@ -8001,22 +8024,30 @@ let owe_runtime_config_read state =
 let owe_connectors_read state =
   state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
 
-(* The Tools catalog and selected-Keeper read reads again when the Skill
-   catalog is published, when a Skill ledger row is written for the selected
-   Keeper (for any Keeper while the usage counts are shown), when that
-   Keeper's row or the backlog changes, on a revalidation, and after a failed
-   read (RFC-0480 §3.4). *)
-let owe_tools_read state =
-  state.tools_owed <- Masc_tui_owed_read.changed state.tools_owed
+(* The Tools surface part reads again when the Skill catalog is published,
+   when a Skill ledger row is written for the selected Keeper, and when that
+   Keeper's row or the backlog changes. The catalog part reads again when the
+   catalog is published and, while the usage pane is shown, when any Keeper's
+   ledger takes a row; entering that pane reads it. Both read on a
+   revalidation and after a failed read (RFC-0480 §3.4). *)
+let owe_tools_surface_read state =
+  state.tools_surface_owed <- Masc_tui_owed_read.changed state.tools_surface_owed
 
+let owe_tools_catalog_read state =
+  state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
+
+let owe_tools_read state =
+  owe_tools_surface_read state;
+  owe_tools_catalog_read state
+
+(* A ledger row of the selected Keeper changes its Skill record; any Keeper's
+   row changes the usage counts, which only the usage pane draws. *)
 let owe_tools_read_for_keeper state keeper =
-  let selected =
-    Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
-  in
+  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
+  then owe_tools_surface_read state;
   match state.tools_pane with
-  | Tools_usage -> owe_tools_read state
-  | Tools_surface | Tools_async | Tools_activations | Tools_catalog ->
-      if selected then owe_tools_read state
+  | Tools_usage -> owe_tools_catalog_read state
+  | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ()
 
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
@@ -17786,15 +17817,9 @@ let launch_owed_identity_logins state ~mailbox =
          end)
 ;;
 
-(* The last part of a Tools read answered: [Some true] when a part failed. *)
-let settle_tools_owed state = function
-  | None -> ()
-  | Some false -> state.tools_owed <- Masc_tui_owed_read.succeeded state.tools_owed
-  | Some true -> state.tools_owed <- failed_read state.tools_owed
-
 (* Runs on every loop iteration. Off the Tools surface nothing is owed:
    arriving reads it. While an async request or its source Task is open the
-   read waits for the list to come back. A read in flight is let finish
+   reads wait for the list to come back. A part in flight is let finish
    first. *)
 let launch_owed_tools state ~mailbox =
   match state.view with
@@ -17804,18 +17829,30 @@ let launch_owed_tools state ~mailbox =
         || (state.tools_pane = Tools_async && state.tools_async_detail_open)
       in
       if not async_open then begin
-        let reading = Option.is_some state.tools_read_inflight in
-        let read =
-          if reading then state.tools_owed else Masc_tui_owed_read.abandoned state.tools_owed
+        let pending =
+          match state.tools_read_inflight with
+          | Some request -> request.tri_pending
+          | None -> []
         in
-        state.tools_owed <- read;
-        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
-          launch_tools_load ~force:false state ~mailbox
+        let due =
+          List.filter
+            (fun part ->
+               let reading = List.mem part pending in
+               let read =
+                 if reading then tools_part_owed state part
+                 else Masc_tui_owed_read.abandoned (tools_part_owed state part)
+               in
+               set_tools_part_owed state part read;
+               Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading)
+            [ Tools_inventory_read; Tools_catalog_read ]
+        in
+        if due <> [] then launch_tools_parts state ~mailbox due
       end
   | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
   | Schedules | Verification | Harness | Repositories | Fusion | Code | Changes | Runtime
   | Config | Resources | Connectors | System_logs | Keepers _ ->
-      state.tools_owed <- Masc_tui_owed_read.settled
+      state.tools_surface_owed <- Masc_tui_owed_read.settled;
+      state.tools_catalog_owed <- Masc_tui_owed_read.settled
 
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
@@ -17911,6 +17948,11 @@ let enter_metrics_section state section =
    shorter section opens it part-way down for no reason the reader gave. *)
 let enter_tools_pane state pane =
   if pane <> Tools_async then close_tools_async_detail state;
+  (* The usage counts move with every Keeper's ledger, which other panes do
+     not follow. *)
+  (match pane with
+   | Tools_usage -> owe_tools_catalog_read state
+   | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ());
   state.tools_pane <- pane;
   tools_task_user_scroll state 0
 ;;
@@ -18486,10 +18528,10 @@ let owe_keeper_roster_change state = function
       state.keeper_roster_owed <-
         Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed;
       if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
-      then owe_tools_read state
+      then owe_tools_surface_read state
   | Masc_tui_observer.Every_row_changed ->
       owe_whole_keeper_roster_read state;
-      owe_tools_read state
+      owe_tools_surface_read state
 
 let fail_keeper_roster_read state read =
   state.keeper_roster_owed <-
@@ -22999,7 +23041,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          owe_verification_read state;
          owe_goal_projection_reads state;
          (* The call scope reads the selected Keeper's current Task. *)
-         owe_tools_read state
+         owe_tools_surface_read state
        end);
       (* The Goal tree carries the approvals waiting on each Goal. *)
       (if !gate_changed && not !observer_source_loss_seen then
@@ -26602,9 +26644,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.terminal_safe_text detail)));
       read_again ())
   | Tools_loaded (generation, keeper_name, result) ->
-      settle_tools_owed state
-        (settle_tools_read state ~generation ~failed:(Result.is_error result) Tools_inventory_read);
+      let current = settle_tools_read state ~generation Tools_inventory_read in
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
+      (* An answer for a Keeper no longer selected is dropped below, and the
+         Keeper now selected is still owed its read. *)
+      if current then
+        state.tools_surface_owed <-
+          (if not (Option.equal String.equal keeper_name selected_name)
+           then Masc_tui_owed_read.changed (Masc_tui_owed_read.succeeded state.tools_surface_owed)
+           else match result with
+             | Ok _ -> Masc_tui_owed_read.succeeded state.tools_surface_owed
+             | Error _ -> failed_read state.tools_surface_owed);
       if generation = state.tools_request_generation
          && Option.equal String.equal keeper_name selected_name then (
       match result with
@@ -26629,8 +26679,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Skills_catalog_loaded (generation, result) ->
-      settle_tools_owed state
-        (settle_tools_read state ~generation ~failed:(Result.is_error result) Tools_catalog_read);
+      if settle_tools_read state ~generation Tools_catalog_read then
+        state.tools_catalog_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.tools_catalog_owed
+           | Error _ -> failed_read state.tools_catalog_owed);
       if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->

@@ -260,12 +260,18 @@ let active_runtime_agents config =
       agents
   , failure )
 
-let merge_agents primary secondary =
+type agent_source =
+  | Agent_record
+  | Workspace_state
+  | Keeper_registry
+
+(* The first source to name an agent keeps the row. *)
+let merge_sourced primary secondary =
   let module Agent_name_set = Set.Make (String) in
-  let add_if_new (seen, acc) (agent : Masc_domain.agent) =
+  let add_if_new (seen, acc) (((agent : Masc_domain.agent), _) as row) =
     if Agent_name_set.mem agent.name seen
     then seen, acc
-    else Agent_name_set.add agent.name seen, agent :: acc
+    else Agent_name_set.add agent.name seen, row :: acc
   in
   let seen, acc = List.fold_left add_if_new (Agent_name_set.empty, []) primary in
   let _seen, acc = List.fold_left add_if_new (seen, acc) secondary in
@@ -282,16 +288,23 @@ let get_agents_raw config =
     roster is merged from three sources and one can fail while the others
     answer, so a caller that shows the roster to a person can say so instead of
     presenting a short list as a complete one. *)
-let get_active_agents_observed config =
+let get_active_agent_sources_observed config =
   if not (is_initialized config)
   then [], []
   else (
+    let tag source agents = List.map (fun agent -> agent, source) agents in
     let agents_path = agents_dir config in
-    let workspace_agents = load_agents_from_dir config agents_path ~include_inactive:false in
-    let state_agents = state_backed_active_agents config in
+    let workspace_agents =
+      tag Agent_record (load_agents_from_dir config agents_path ~include_inactive:false)
+    in
+    let state_agents = tag Workspace_state (state_backed_active_agents config) in
     let runtime, runtime_failure = active_runtime_agents config in
-    ( merge_agents (merge_agents workspace_agents state_agents) runtime
+    ( merge_sourced (merge_sourced workspace_agents state_agents) (tag Keeper_registry runtime)
     , Option.to_list runtime_failure ))
+
+let get_active_agents_observed config =
+  let rows, failures = get_active_agent_sources_observed config in
+  List.map fst rows, failures
 
 (** Return active agents only.  Returns [[]] when MASC is not
     initialized — safe for dashboard and display contexts.

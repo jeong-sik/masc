@@ -1022,8 +1022,10 @@ type client_row = {
   cr_status : client_status;
   cr_current_task : string option;
   cr_keeper_name : string option;
-  cr_session_bound_at : string;
-  cr_last_seen : string;
+  cr_session_bound_at : string option;
+      (** [None] for a Keeper registry row, which has no session time. *)
+  cr_last_seen : string option;
+      (** [None] for a Keeper registry row, which has no observation time. *)
   cr_capabilities : string list;
 }
 

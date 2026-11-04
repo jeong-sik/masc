@@ -192,6 +192,38 @@ val file_paths_at :
     appear: the caller checks availability and its own file access policy.
     The caller must establish that [local_path] is its authorised Git root. *)
 
+(** One local branch. *)
+type branch_entry = {
+  be_name : string;
+  be_current : bool;  (** The checked-out branch. A detached HEAD marks none. *)
+  be_upstream : upstream_state;
+  be_commit_epoch : int;  (** Committer time of the branch tip, Unix seconds. *)
+  be_subject : string;  (** First line of the tip commit message. *)
+}
+
+type branch_list = {
+  bl_entries : branch_entry list;  (** Newest tip first. *)
+  bl_truncated : bool;  (** More branches existed than [max_entries]. *)
+}
+
+val branch_list_of_for_each_ref :
+  max_entries:int -> string -> (branch_list, string) result
+(** Pure reader for the [for-each-ref] output of {!branches_at}: one line per
+    branch, six NUL-separated fields. A malformed record, an unreadable
+    ahead/behind field, or counts without an upstream is an [Error _]; none is
+    skipped or read as "in step". *)
+
+val branches_at :
+  ?timeout_sec:float ->
+  local_path:string ->
+  max_entries:int ->
+  unit ->
+  (branch_list, string) result
+(** Local branches of the checkout at [local_path], newest tip first, with each
+    one's upstream relation. Read-only ([--no-optional-locks]) and bounded by
+    [timeout_sec]. The caller proves that [local_path] is its authorised Git
+    root. An empty repository is [Ok] with no entries. *)
+
 val status_snapshot_at :
   ?timeout_sec:float ->
   local_path:string ->

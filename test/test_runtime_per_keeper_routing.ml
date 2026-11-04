@@ -1045,29 +1045,33 @@ let test_first_run_runtime_binds_supporting_lanes () =
    commits, or the two writers disagree. *)
 let test_text_edits_are_what_the_writers_commit () =
   with_runtime_file (fun path ->
+    let edited label = function
+      | Ok text -> text
+      | Error detail -> Alcotest.failf "%s: %s" label detail
+    in
     let original = read_file path in
-    let expected_first_run =
-      match Runtime.first_run_runtime_text ~fallback_runtime_ids:[] ~runtime_id:"openai.gpt" original with
-      | Ok text -> text
-      | Error detail -> Alcotest.fail detail
-    in
-    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
-     | Ok _ -> ()
-     | Error detail -> Alcotest.fail detail);
-    Alcotest.(check string) "first run" expected_first_run (read_file path);
-    (match Runtime.first_run_runtime_text ~runtime_id:"missing.runtime" original with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "an unknown runtime is refused by the text edit too");
-    let current = read_file path in
     let expected_default =
-      match Runtime.runtime_default_text ~runtime_id:"openai.gpt" current with
-      | Ok text -> text
-      | Error detail -> Alcotest.fail detail
+      edited "default" (Runtime.runtime_default_text ~runtime_id:"openai.gpt" original)
     in
+    Alcotest.(check bool) "the default edit changes the text" false
+      (String.equal expected_default original);
     (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
      | Ok _ -> ()
      | Error detail -> Alcotest.fail detail);
     Alcotest.(check string) "default" expected_default (read_file path);
+    let current = read_file path in
+    let expected_first_run =
+      edited "first run" (Runtime.first_run_runtime_text ~runtime_id:"openai.gpt" current)
+    in
+    Alcotest.(check bool) "the first-run edit changes the text" false
+      (String.equal expected_first_run current);
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    Alcotest.(check string) "first run" expected_first_run (read_file path);
+    (match Runtime.first_run_runtime_text ~runtime_id:"missing.runtime" current with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "an unknown runtime is refused by the text edit too");
     match Runtime.runtime_default_text ~runtime_id:" " current with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail "a blank runtime id is refused")

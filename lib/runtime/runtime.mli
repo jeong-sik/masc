@@ -982,8 +982,10 @@ val first_run_runtime_text :
   string ->
   (string, string) result
 (** The edit {!set_first_run_runtime} commits, applied to a runtime.toml text,
-    for the same reason as {!runtime_default_text}. [Error] for the same
-    selections {!set_first_run_runtime} refuses. *)
+    for the same reason as {!runtime_default_text}. [Error] when an id is
+    blank, repeated or spans lines, or names no enabled, materialized runtime
+    of the text, with the model catalog this process loaded. The validation
+    of the whole file is the writer's, on commit. *)
 
 val set_first_run_runtime :
   ?runtime_config_path:string ->

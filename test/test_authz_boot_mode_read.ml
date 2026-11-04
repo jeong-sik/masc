@@ -384,6 +384,50 @@ let test_log_without_mode_event () =
     | other -> Alcotest.failf "expected an unreadable log, got %s" (decision_label other))
 ;;
 
+(* A record in the chain after the bootstrap, of a kind that no layer reads. The
+   store matches the log, so the fold of the log is what refuses it, at its
+   line, for its kind. *)
+let test_record_after_the_bootstrap () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    let body =
+      match Authz_body.of_yojson (`Assoc [ "note", `String "repair" ]) with
+      | Ok body -> body
+      | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
+    in
+    let path = L.path_of_base_path ~base_path:dirs.base in
+    (match L.open_at_start ~path ~init:() ~step:(fun () _record -> (Ok () : (unit, unit) result)) with
+     | Error _ -> Alcotest.fail "the log of the bootstrap did not open"
+     | Ok (log, (), _recovered) ->
+       let appended =
+         L.with_writer log (fun writer head ->
+           match
+             R.make
+               ~head
+               ~at_ms:(at_ms + 1)
+               ~author:Authz_records.Author.Local_operator
+               ~kind:R.Kind.Local_recovery
+               ~body
+           with
+           | Error _ -> Alcotest.fail "fixture record refused"
+           | Ok record -> L.append writer [ record ])
+       in
+       (match appended with
+        | Ok (Ok _) -> ()
+        | Ok (Error error) -> Alcotest.failf "the record was not appended: %s" (L.append_error_to_string error)
+        | Error _ -> Alcotest.fail "the log stopped"));
+    let expected =
+      L.open_error_to_string
+        Authz_state.refusal_to_string
+        (L.Fold_refused { path; line_number = 2; reason = Authz_state.Kind_not_read R.Kind.Local_recovery })
+    in
+    (match (input dirs).B.log_mode with
+     | B.Log_unreadable detail -> Alcotest.(check string) "the line and the kind" expected detail
+     | B.No_mode_event | B.Made_multi_account | B.Made_off -> Alcotest.fail "expected an unreadable log");
+    check_refused_by "a record that no layer reads" log_unreadable dirs)
+;;
+
 (* ---- whether a file is there ---- *)
 
 let presence_label = function
@@ -495,6 +539,7 @@ let () =
         ; Alcotest.test_case "install record lost" `Quick test_install_record_lost
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
+        ; Alcotest.test_case "record after the bootstrap" `Quick test_record_after_the_bootstrap
         ; Alcotest.test_case "a single user boot writes nothing" `Quick test_boot_writes_nothing
         ; Alcotest.test_case "corrupt log" `Quick test_corrupt_log
         ; Alcotest.test_case "corrupt store" `Quick test_corrupt_store

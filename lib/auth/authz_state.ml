@@ -31,24 +31,33 @@ let mode_event state (record : R.t) =
      | Error refusal -> Error (Mode refusal))
 ;;
 
-(* A kind that no layer reads yet. *)
-let not_read state kind =
-  match state.mode with
-  | Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
-  | Authz_mode_state.Multi_account _ | Authz_mode_state.Off _ -> Error (Kind_not_read kind)
-;;
-
+(* Every kind but a mode event is matched with the mode, so the branch of a
+   kind says what a record of it means before the bootstrap, and a layer gets
+   the workspace of the bootstrap only from a branch that has one. *)
 let step state (record : R.t) =
-  match record.R.kind with
-  | K.Mode_event -> mode_event state record
-  | ( K.Runtime_grant
-    | K.Delegate_policy
-    | K.Principal
-    | K.Internal_service_credential
-    | K.Permission_revocation
-    | K.Trigger_evidence
-    | K.Lease_terminal_evidence
-    | K.Preauthorized_expiry
-    | K.Migration_diagnostic
-    | K.Local_recovery ) as kind -> not_read state kind
+  match record.R.kind, state.mode with
+  | K.Mode_event, (Authz_mode_state.Not_bootstrapped | Multi_account _ | Off _) ->
+    mode_event state record
+  | ( ( K.Runtime_grant
+      | K.Delegate_policy
+      | K.Principal
+      | K.Internal_service_credential
+      | K.Permission_revocation
+      | K.Trigger_evidence
+      | K.Lease_terminal_evidence
+      | K.Preauthorized_expiry
+      | K.Migration_diagnostic
+      | K.Local_recovery ) as kind )
+    , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
+  | ( ( K.Runtime_grant
+      | K.Delegate_policy
+      | K.Principal
+      | K.Internal_service_credential
+      | K.Permission_revocation
+      | K.Trigger_evidence
+      | K.Lease_terminal_evidence
+      | K.Preauthorized_expiry
+      | K.Migration_diagnostic
+      | K.Local_recovery ) as kind )
+    , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;

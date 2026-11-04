@@ -19,6 +19,11 @@ let equal a b =
   | Off _, (Not_bootstrapped | Multi_account _) -> false
 ;;
 
+let workspace = function
+  | Not_bootstrapped -> None
+  | Multi_account workspace | Off workspace -> Some workspace
+;;
+
 let to_string = function
   | Not_bootstrapped -> "not bootstrapped"
   | Multi_account workspace -> "multi-account for " ^ W.to_string workspace

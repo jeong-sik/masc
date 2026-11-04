@@ -21,7 +21,10 @@
     {!step} stricter refuses logs that were written before.
 
     The first record of every log is a [Fresh_bootstrap] mode event (design
-    8.4), so any other record before it is refused. *)
+    8.4), so any other record before it is refused. {!step} matches every kind
+    but a mode event together with the mode, so each kind names what it means
+    before the bootstrap, and the workspace of the bootstrap reaches a layer
+    only from a branch that has one. *)
 
 type t = private { mode : Authz_mode_state.t }
 

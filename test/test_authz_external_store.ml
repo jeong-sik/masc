@@ -53,20 +53,34 @@ let committed record_hash = S.Committed { record_hash }
 let boot_digest = hash_of 'f'
 let bootstrap_entries = [ pending ~digest:boot_digest bootstrap; committed boot_digest ]
 
+(* The lines that switch a set-up store off. A reactivation needs them in
+   front. *)
+let off_digest = hash_of 'e'
+let off_entries = [ pending ~digest:off_digest (mode C.Off workspace); committed off_digest ]
+let reactivation = mode C.Reactivate workspace
+
 (* The changes that a store refuses as its first intent, and the mode changes
-   that name a workspace. The append cases and the replay cases use the same
-   tables, so the two paths are held to the same rules. *)
+   that it refuses right after the bootstrap of [bootstrapped], each with the
+   rule it breaks. The append cases and the replay cases use the same tables,
+   so the two paths are held to the same rules. *)
 let first_intent_refusals =
-  [ "a revocation first", revoke_grant
-  ; "a grant first", authz C.Grant human
-  ; "a switch off first", mode C.Off workspace
-  ; "a reactivation first", mode C.Reactivate workspace
+  [ "a revocation first", revoke_grant, "Intent_before_bootstrap"
+  ; "a grant first", authz C.Grant human, "Intent_before_bootstrap"
+  ; "a switch off first", mode C.Off workspace, "Mode_refused Out_of_order"
+  ; "a reactivation first", mode C.Reactivate workspace, "Mode_refused Out_of_order"
   ]
 ;;
 
-let mode_changes_for workspace_id =
-  [ "a switch off for " ^ Workspace_id.to_string workspace_id, mode C.Off workspace_id
-  ; "a reactivation for " ^ Workspace_id.to_string workspace_id, mode C.Reactivate workspace_id
+let refusals_after_bootstrap ~bootstrapped ~other =
+  let name = Workspace_id.to_string in
+  [ ( "a second bootstrap for " ^ name bootstrapped
+    , mode C.Fresh_bootstrap bootstrapped
+    , "Mode_refused Out_of_order" )
+  ; "a second bootstrap for " ^ name other, mode C.Fresh_bootstrap other, "Mode_refused Out_of_order"
+  ; ( "a reactivation while on, for " ^ name bootstrapped
+    , mode C.Reactivate bootstrapped
+    , "Mode_refused Out_of_order" )
+  ; "a switch off for " ^ name other, mode C.Off other, "Mode_refused Workspace_differs"
   ]
 ;;
 
@@ -131,8 +145,8 @@ let violation_name : S.violation -> string = function
   | S.Aborted_without_intent -> "Aborted_without_intent"
   | S.Aborted_other_intent -> "Aborted_other_intent"
   | S.Intent_before_bootstrap -> "Intent_before_bootstrap"
-  | S.Bootstrap_already_committed -> "Bootstrap_already_committed"
-  | S.Workspace_mismatch -> "Workspace_mismatch"
+  | S.Mode_refused (Authz_mode_state.Out_of_order _) -> "Mode_refused Out_of_order"
+  | S.Mode_refused (Authz_mode_state.Workspace_differs _) -> "Mode_refused Workspace_differs"
 ;;
 
 let line_error_name : S.line_error -> string = function
@@ -322,6 +336,16 @@ let all_changes =
   @ List.map (fun event -> mode event workspace) C.mode_events
 ;;
 
+let apply_ok state entries =
+  List.fold_left
+    (fun state entry ->
+      match S.apply state entry with
+      | Ok state -> state
+      | Error violation -> Alcotest.failf "the fixture breaks a rule: %s" (S.violation_to_string violation))
+    state
+    entries
+;;
+
 (* The entries hold hashes, ids and variants only, so [=] compares every member. *)
 let check_reads_back label state entry =
   let line = S.to_line entry in
@@ -340,10 +364,18 @@ let every_change_reads_back () =
   with_path (fun path ->
     let store, _, _ = open_ok ~path in
     let bootstrapped = append_ok store bootstrap_entries in
+    let off = apply_ok bootstrapped off_entries in
     List.iter
       (fun change ->
-        (* A bootstrap reads at the start of a store, every other change after one. *)
-        let state = if C.equal change bootstrap then S.State.empty else bootstrapped in
+        (* A bootstrap reads at the start of a store, a reactivation after a
+           switch off, and every other change after a bootstrap. *)
+        let state =
+          if C.equal change bootstrap
+          then S.State.empty
+          else if C.equal change reactivation
+          then off
+          else bootstrapped
+        in
         check_reads_back (C.to_string change) state (pending change))
       all_changes)
 ;;
@@ -364,20 +396,27 @@ let every_change_is_appended_and_replayed () =
     let store, _, _ = open_ok ~path in
     ignore (append_ok store [ pending bootstrap; aborted bootstrap ] : S.State.t);
     ignore (append_ok store bootstrap_entries : S.State.t);
-    let others = List.filter (fun change -> not (C.equal change bootstrap)) all_changes in
-    let state =
-      append_ok store (List.concat_map (fun change -> [ pending change; aborted change ]) others)
+    let others =
+      List.filter
+        (fun change -> not (C.equal change bootstrap || C.equal change reactivation))
+        all_changes
     in
-    let expected = List.map (fun change -> intent change) (bootstrap :: others) in
+    let given_up change = [ pending change; aborted change ] in
+    let state =
+      append_ok
+        store
+        (List.concat_map given_up others @ off_entries @ given_up reactivation)
+    in
+    let expected = List.map (fun change -> intent change) ((bootstrap :: others) @ [ reactivation ]) in
     check_intents "every change is kept, in file order" expected (S.State.aborted state);
     let reopened, entries, _ = open_ok ~path in
     Alcotest.(check int)
       "every line is replayed"
-      (4 + (2 * List.length others))
+      (4 + (2 * List.length others) + 4)
       (List.length entries);
     let again = state_of reopened in
     check_intents "a reopened file adds up to the same" expected (S.State.aborted again);
-    check_hash "with the commit of the bootstrap" (Some boot_digest) (S.State.last_committed again);
+    check_hash "with the commit of the switch off" (Some off_digest) (S.State.last_committed again);
     check_pending "and nothing pending" None again;
     Alcotest.(check bool) "and the workspace of the bootstrap" true
       (match S.State.workspace_id again with
@@ -456,16 +495,17 @@ let rules_when_appending () =
     check_append "an intent and its answer in one list" "Ok" store [ pending ~digest:other_digest block_runtime; committed other_digest ])
 ;;
 
-(* A store starts with a bootstrap. Until one is committed the file takes only a
-   bootstrap. After it, a second bootstrap is refused, and a switch off or a
-   reactivation names the workspace that the bootstrap set up. *)
+(* A store starts with a bootstrap, and takes no authorization change until one
+   is committed. The mode changes follow the order of the log: one bootstrap,
+   then a switch off and a reactivation in turn, each for the workspace that
+   the bootstrap set up. *)
 let a_store_starts_with_a_bootstrap () =
   with_path (fun path ->
     let store, _, _ = open_ok ~path in
-    List.iter
-      (fun (label, change) ->
-        check_append label "Rejected index=0 Intent_before_bootstrap" store [ pending change ])
-      first_intent_refusals;
+    let refused (label, change, expected) =
+      check_append label ("Rejected index=0 " ^ expected) store [ pending change ]
+    in
+    List.iter refused first_intent_refusals;
     Alcotest.(check bool) "nothing was written" false (Sys.file_exists path);
     ignore (append_ok store [ pending bootstrap; aborted bootstrap ] : S.State.t);
     check_append
@@ -479,42 +519,41 @@ let a_store_starts_with_a_bootstrap () =
       (match S.State.workspace_id (state_of store) with
        | Some id -> Workspace_id.equal id other_workspace
        | None -> false);
-    List.iter
-      (fun (label, change) ->
-        check_append label "Rejected index=0 Bootstrap_already_committed" store [ pending change ])
-      [ "a second bootstrap for the same workspace", second
-      ; "a second bootstrap for another workspace", bootstrap
-      ];
-    List.iter
-      (fun (label, change) ->
-        check_append label "Rejected index=0 Workspace_mismatch" store [ pending change ])
-      (mode_changes_for workspace);
+    List.iter refused (refusals_after_bootstrap ~bootstrapped:other_workspace ~other:workspace);
     check_append "an authorization change" "Ok" store [ pending revoke_grant; aborted revoke_grant ];
-    List.iter
-      (fun (label, change) -> check_append label "Ok" store [ pending change; aborted change ])
-      (mode_changes_for other_workspace);
+    let off = mode C.Off other_workspace in
+    check_append "a switch off" "Ok" store [ pending off; aborted off ];
     check_append
       "an abort of a mode change that differs only in the workspace"
       "Rejected index=1 Aborted_other_intent"
       store
-      [ pending (mode C.Off other_workspace); aborted (mode C.Off workspace) ])
+      [ pending off; aborted (mode C.Off workspace) ];
+    ignore (append_ok store [ pending ~digest:off_digest off; committed off_digest ] : S.State.t);
+    List.iter
+      refused
+      [ "a second switch off", off, "Mode_refused Out_of_order"
+      ; "a bootstrap after a switch off", second, "Mode_refused Out_of_order"
+      ; "a reactivation for another workspace", mode C.Reactivate workspace, "Mode_refused Workspace_differs"
+      ];
+    let reactivate = mode C.Reactivate other_workspace in
+    check_append "a reactivation after a switch off" "Ok" store [ pending reactivate; aborted reactivate ];
+    check_append "an authorization change while off" "Ok" store [ pending revoke_grant; aborted revoke_grant ])
 ;;
 
-(* The file keeps the workspace of the bootstrap and not the mode. The design does
-   not say which mode event may follow which, so the file takes a switch off
-   twice, a reactivation twice, and an authorization change after a switch off.
-   The layers that write them decide the order. A rule added here later would
-   refuse files that are taken today, so this case holds the present choice. *)
-let mode_events_may_repeat_and_come_in_any_order () =
+(* The file takes the mode events in the order that the log replays them with
+   ({!Authz_mode_state.apply}): a switch off and a reactivation in turn, as
+   often as they come, and an authorization change in either mode. A second
+   switch off in a row is refused, and nothing of its list is written. *)
+let mode_events_follow_the_order_of_the_log () =
   with_path (fun path ->
     let store, _, _ = open_ok ~path in
     ignore (append_ok store bootstrap_entries : S.State.t);
     let steps =
       [ mode C.Off workspace
-      ; mode C.Off workspace
-      ; mode C.Reactivate workspace
       ; mode C.Reactivate workspace
       ; mode C.Off workspace
+      ; revoke_grant
+      ; mode C.Reactivate workspace
       ; revoke_grant
       ]
     in
@@ -530,7 +569,17 @@ let mode_events_may_repeat_and_come_in_any_order () =
       "every line is replayed"
       (List.length bootstrap_entries + List.length entries)
       (List.length replayed);
-    check_hash "a reopened file says the same" (Some (hash_of '6')) (S.State.last_committed (state_of reopened)))
+    check_hash "a reopened file says the same" (Some (hash_of '6')) (S.State.last_committed (state_of reopened));
+    let written = read_file path in
+    check_append
+      "a second switch off in a row"
+      "Rejected index=2 Mode_refused Out_of_order"
+      store
+      [ pending ~digest:(hash_of '7') (mode C.Off workspace)
+      ; committed (hash_of '7')
+      ; pending ~digest:(hash_of '8') (mode C.Off workspace)
+      ];
+    Alcotest.(check string) "and nothing of the list was written" written (read_file path))
 ;;
 
 (* Two writers that both start from a missing file. The one that appends second
@@ -567,11 +616,15 @@ let apply_refuses_with_the_rule_of_the_file () =
     ; ( "a second bootstrap"
       , booted_state
       , pending ~digest:other_digest (mode C.Fresh_bootstrap other_workspace)
-      , "Bootstrap_already_committed" )
+      , "Mode_refused Out_of_order" )
+    ; ( "a reactivation while on"
+      , booted_state
+      , pending ~digest:other_digest (mode C.Reactivate workspace)
+      , "Mode_refused Out_of_order" )
     ; ( "a switch off for another workspace"
       , booted_state
       , pending ~digest:other_digest (mode C.Off other_workspace)
-      , "Workspace_mismatch" )
+      , "Mode_refused Workspace_differs" )
     ]
 ;;
 
@@ -756,20 +809,20 @@ let files_that_break_the_rules () =
       , "Line_rejected line=2 Breaks_a_rule Aborted_other_intent" )
     ; ( "a second bootstrap after a committed one"
       , text_of (bootstrap_entries @ [ pending ~digest:other_digest again ])
-      , "Line_rejected line=3 Breaks_a_rule Bootstrap_already_committed" )
+      , "Line_rejected line=3 Breaks_a_rule Mode_refused Out_of_order" )
     ]
     @ List.map
-        (fun (label, change) ->
+        (fun (label, change, expected) ->
           ( label ^ ", in a file"
           , text_of [ pending change ]
-          , "Line_rejected line=1 Breaks_a_rule Intent_before_bootstrap" ))
+          , "Line_rejected line=1 Breaks_a_rule " ^ expected ))
         first_intent_refusals
     @ List.map
-        (fun (label, change) ->
+        (fun (label, change, expected) ->
           ( label ^ ", in a file"
           , text_of (bootstrap_entries @ [ pending ~digest:other_digest change ])
-          , "Line_rejected line=3 Breaks_a_rule Workspace_mismatch" ))
-        (mode_changes_for other_workspace))
+          , "Line_rejected line=3 Breaks_a_rule " ^ expected ))
+        (refusals_after_bootstrap ~bootstrapped:workspace ~other:other_workspace))
 ;;
 
 let lines_that_are_not_entries () =
@@ -839,8 +892,9 @@ let texts_name_the_file_the_line_and_the_rule () =
     ; S.Aborted_without_intent
     ; S.Aborted_other_intent
     ; S.Intent_before_bootstrap
-    ; S.Bootstrap_already_committed
-    ; S.Workspace_mismatch
+    ; S.Mode_refused (Authz_mode_state.Out_of_order { state = Authz_mode_state.Not_bootstrapped; event = C.Off })
+    ; S.Mode_refused
+        (Authz_mode_state.Workspace_differs { bootstrapped = workspace; named = other_workspace })
     ]
   in
   Alcotest.(check int)
@@ -869,7 +923,7 @@ let () =
     ; ( "rules"
       , [ Alcotest.test_case "appending" `Quick rules_when_appending
         ; Alcotest.test_case "a store starts with a bootstrap" `Quick a_store_starts_with_a_bootstrap
-        ; Alcotest.test_case "mode events in any order" `Quick mode_events_may_repeat_and_come_in_any_order
+        ; Alcotest.test_case "mode events follow the log" `Quick mode_events_follow_the_order_of_the_log
         ; Alcotest.test_case "apply refuses as the file does" `Quick apply_refuses_with_the_rule_of_the_file
         ; Alcotest.test_case "apply gives the state of the file" `Quick apply_gives_the_state_of_the_file
         ] )

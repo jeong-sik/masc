@@ -129,13 +129,12 @@ type violation =
   | Aborted_other_intent
       (** An [Aborted_intent] that is not the pending intent, field for field. *)
   | Intent_before_bootstrap
-      (** An [Intent_pending] that is not a [Fresh_bootstrap], while no
+      (** An [Intent_pending] for an authorization change while no
           [Fresh_bootstrap] is committed. *)
-  | Bootstrap_already_committed
-      (** An [Intent_pending] for a [Fresh_bootstrap] while one is committed. *)
-  | Workspace_mismatch
-      (** An [Intent_pending] for [Off] or [Reactivate] that names another
-          workspace than the committed [Fresh_bootstrap]. *)
+  | Mode_refused of Authz_mode_state.refusal
+      (** An [Intent_pending] for a mode change that cannot follow the
+          committed mode changes. The order is {!Authz_mode_state.apply}, the
+          rule that the log replays the same mode events with. *)
 
 val violation_to_string : violation -> string
 

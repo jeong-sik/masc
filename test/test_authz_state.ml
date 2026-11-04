@@ -62,17 +62,22 @@ let step_label = function
   | Error refusal -> "refused: " ^ S.refusal_to_string refusal
 ;;
 
-let bootstrapped () =
-  match S.step S.empty (mode_record M.Fresh_bootstrap workspace) with
+let step_ok state record =
+  match S.step state record with
   | Ok state -> state
-  | Error refusal -> Alcotest.failf "the bootstrap was refused: %s" (S.refusal_to_string refusal)
+  | Error refusal -> Alcotest.failf "the fixture record was refused: %s" (S.refusal_to_string refusal)
 ;;
+
+let bootstrapped () = step_ok S.empty (mode_record M.Fresh_bootstrap workspace)
+let switched_off () = step_ok (bootstrapped ()) (mode_record M.Off workspace)
 
 (* ---- the mode events ---- *)
 
 type expected =
   | Becomes of Mode.t
   | Out_of_order
+
+let states = [ Mode.Not_bootstrapped; Mode.Multi_account workspace; Mode.Off workspace ]
 
 (* Every pair of a state and an event, written out. *)
 let pairs =
@@ -88,11 +93,17 @@ let pairs =
   ]
 ;;
 
+let pair_name state event = Printf.sprintf "%s after %s" (M.event_label event) (Mode.to_string state)
+
 let test_every_pair () =
-  Alcotest.(check int) "three states times every event" (3 * List.length M.events) (List.length pairs);
+  let sorted names = List.sort String.compare names in
+  Alcotest.(check (list string))
+    "each state with each event, once"
+    (sorted (List.concat_map (fun state -> List.map (pair_name state) M.events) states))
+    (sorted (List.map (fun (state, event, _) -> pair_name state event) pairs));
   List.iter
     (fun (state, event, expected) ->
-      let name = Printf.sprintf "%s after %s" (M.event_label event) (Mode.to_string state) in
+      let name = pair_name state event in
       match Mode.apply state { M.event; workspace_id = workspace }, expected with
       | Ok next, Becomes expected -> Alcotest.check mode name expected next
       | Error (Mode.Out_of_order { state = refused_state; event = refused_event }), Out_of_order ->
@@ -114,7 +125,30 @@ let test_workspace_differs () =
     | Error refusal -> Alcotest.failf "%s: %s" name (Mode.refusal_to_string refusal)
   in
   check "off" (Mode.Multi_account workspace) M.Off;
-  check "reactivate" (Mode.Off workspace) M.Reactivate
+  check "reactivate" (Mode.Off workspace) M.Reactivate;
+  (* The order is judged before the workspace. *)
+  match Mode.apply (Mode.Multi_account workspace) { M.event = M.Reactivate; workspace_id = other_workspace } with
+  | Error (Mode.Out_of_order _) -> ()
+  | Ok next -> Alcotest.failf "a reactivation while on: became %s" (Mode.to_string next)
+  | Error refusal -> Alcotest.failf "a reactivation while on: %s" (Mode.refusal_to_string refusal)
+;;
+
+(* A log of mode events adds up event by event: on, off, on and off again. *)
+let test_mode_events_in_turn () =
+  let events = [ M.Fresh_bootstrap; M.Off; M.Reactivate; M.Off ] in
+  let expected =
+    [ Mode.Multi_account workspace; Mode.Off workspace; Mode.Multi_account workspace; Mode.Off workspace ]
+  in
+  ignore
+    (List.fold_left2
+       (fun state event expected ->
+         let next = step_ok state (mode_record event workspace) in
+         Alcotest.check mode (M.event_label event) expected next.S.mode;
+         next)
+       S.empty
+       events
+       expected
+     : S.t)
 ;;
 
 (* ---- records ---- *)
@@ -140,16 +174,19 @@ let test_mode_event_unreadable () =
 let test_kinds_not_read () =
   Alcotest.(check bool) "there are other kinds" true (other_kinds <> []);
   let body = body_of_json (`Assoc [ "note", `String "x" ]) in
-  let state = bootstrapped () in
+  let after = [ "on", bootstrapped (); "off", switched_off () ] in
   List.iter
     (fun kind ->
       let name = K.to_string kind in
       (match S.step S.empty (record kind body) with
        | Error (S.Before_bootstrap refused) when refused = kind -> ()
        | other -> Alcotest.failf "%s before the bootstrap: %s" name (step_label other));
-      match S.step state (record kind body) with
-      | Error (S.Kind_not_read refused) when refused = kind -> ()
-      | other -> Alcotest.failf "%s after the bootstrap: %s" name (step_label other))
+      List.iter
+        (fun (mode_name, state) ->
+          match S.step state (record kind body) with
+          | Error (S.Kind_not_read refused) when refused = kind -> ()
+          | other -> Alcotest.failf "%s while %s: %s" name mode_name (step_label other))
+        after)
     other_kinds
 ;;
 
@@ -200,6 +237,7 @@ let () =
     [ ( "mode events"
       , [ Alcotest.test_case "every pair" `Quick test_every_pair
         ; Alcotest.test_case "workspace differs" `Quick test_workspace_differs
+        ; Alcotest.test_case "in turn" `Quick test_mode_events_in_turn
         ] )
     ; ( "records"
       , [ Alcotest.test_case "bootstrap" `Quick test_bootstrap_record

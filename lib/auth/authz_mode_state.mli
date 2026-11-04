@@ -20,6 +20,9 @@ type t =
 val empty : t
 val equal : t -> t -> bool
 
+(** The workspace that the bootstrap set up, once there is one. *)
+val workspace : t -> Authz_types.Workspace_id.t option
+
 (** A label for messages. *)
 val to_string : t -> string
 

@@ -1,0 +1,240 @@
+# 2026-11-05: Tools 효율 점검
+
+도구 호출 원장(`.masc/tool_calls`)을 읽어 시간과 컨텍스트가 새는 곳을 재고, 고칠 수 있는 곳은 고친 기록이에요.
+측정은 개발 머신 한 대(`~/me`)의 11-01~11-04 UTC 원장이고, 11-04 는 11-04T19:10Z 까지만 들어 있어요. 이 보고서의 원장 숫자는 모두 그 시각으로 잘라서 센 값이에요. 서버는 0.67.0, 커밋 `b7a4aa5a81f` 였어요.
+고친 것은 모두 Draft PR 이고 아직 배포 전이라 배포 뒤 측정값은 없어요. "이후" 로 적은 숫자는 실제 기록을 새 규칙으로 다시 돌려 본 재생 값이에요.
+
+## 한눈에
+
+- 4일 동안 도구를 144,182번 불렀고 결과 바이트는 934 MB 예요.
+- 결과 바이트의 33.2%(310 MB)는 같은 Keeper 가 1시간 안에 같은 입력으로 다시 받은 같은 결과예요. 그중 88%가 도구 둘, `masc_schedule_notes_list`(153 MB)와 `keeper_artifact_read`(121 MB)예요.
+- 결과 바이트의 39.1%(366 MB)는 레인의 결과 상한을 넘어 blob 으로 저장됐어요. 그중 `masc_schedule_notes_list` 가 159 MB, `masc_dos_screen` 이 150 MB 예요.
+- Execute 호출 시간 95.4시간 가운데 29.7시간(31.2%)은 `sleep N; gh run view ...` 처럼 기다리는 명령이에요. 기다리는 동안 그 턴은 아무것도 못 해요.
+- 고친 것: 노트 목록(#48291), 저장된 결과 읽기(#48282), 도구 실행 통계 엔드포인트와 화면(#48223, #48240, #48248).
+- 못 고친 것: 비동기 실행. 설계는 이미 `RFC-keeper-async-fleet-continuity` 에 있어서 새 설계를 만들지 않았고, 가장 작은 조각을 아래 "비동기 실행" 에 적었어요.
+
+## 1. 측정
+
+### 1.1 방법
+
+- `scripts/measure-tool-efficiency.py`(#48223)가 `<base>/.masc/tool_calls/YYYY-MM/DD[.NNN].jsonl` 의 `tool_call` 행을 읽어요. 날짜별로 병렬로 읽고, 결과는 `--json-out` 으로 남겨요.
+- "같은 결과 재조회"는 같은 Keeper 가 같은 도구에 같은 입력(`input_fingerprint`)을 보내 같은 결과(`output_fingerprint`)를 받은 호출이에요. 1시간 안일 때만 세요. 이 창은 측정 값이고 런타임은 읽지 않아요.
+- "blob 으로 넘침"은 출력이 `_blob` 참조인 호출이에요. 모델은 `keeper_artifact_read` 로 16 KiB 씩 되읽어야 해요.
+- "기다림"은 Execute 명령 문장에 `sleep N`, `until ...; do` 반복문, `--watch` 같은 말이 든 호출이에요. 문장을 보고 가른 값이라 휴리스틱이에요. 11-01~11-04 에서 `sleep $VAR` 처럼 숫자가 아닌 값을 주는 sleep 은 없었어요.
+- 읽지 못한 줄과 시각이 없는 호출은 두 기간 모두 0이에요. 날짜가 바뀌는 경계의 재조회는 놓치는데, 이어서 세어 비교하니 26호출(0.08%)이었어요.
+- 10-05~10-31 도 같은 방법으로 재서 기준선으로 두었어요. 기준선 JSON 과 읽는 법은 `docs/evidence/tool-efficiency-baseline-2026-11` 에 있어요.
+
+### 1.2 기준선
+
+| | 10-05 ~ 10-31 | 11-01 ~ 11-04 |
+|---|---:|---:|
+| 도구 호출 | 690,216 | 144,182 |
+| 기록된 도구 시간 | 731 시간 | 101.3 시간 |
+| 결과 바이트 | 3,997 MB | 934 MB |
+| 같은 결과를 다시 받은 호출 | 79,698 (11.6%) | 33,848 (23.5%) |
+| 같은 결과 재조회 바이트 | 923 MB (23.1%) | 310 MB (33.2%) |
+| blob 으로 넘친 결과 | 22,026 호출, 1,034 MB (25.9%) | 7,865 호출, 366 MB (39.1%) |
+| 넘친 결과를 읽으러 온 `keeper_artifact_read` | 98,751 호출, 1,344 MB | 17,015 호출, 211 MB |
+| Execute 호출 / 시간 | 299,877 / 659 시간 | 67,598 / 95.4 시간 |
+| 그중 sleep·폴링 대기 | 3,219 호출, 70.8 시간 (10.8%) | 647 호출, 29.7 시간 (31.2%) |
+| 빈 입력으로 실패한 호출 | 1,644 | 676 |
+
+날짜별(UTC)로 보면 11-01 한 날에 재조회 231 MB, 11-02 에 대기 13.4시간이 몰려 있어요.
+
+| 날짜 | 호출 | 실패 | 시간 | 결과 MB | 넘침 MB | 재조회 MB | 대기 시간 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 11-01 | 58,600 | 366 | 18.4 h | 398 | 127 | 231 | 0.6 h |
+| 11-02 | 49,075 | 1,338 | 39.5 h | 356 | 167 | 68 | 13.4 h |
+| 11-03 | 18,315 | 798 | 23.5 h | 97 | 43 | 3 | 8.7 h |
+| 11-04(19:10Z 까지) | 18,192 | 693 | 19.9 h | 83 | 28 | 9 | 7.1 h |
+
+시간별 값은 같은 JSON 의 `hourly` 에 있어요. 화면으로 보는 것은 #48248 이에요.
+
+### 1.3 읽을 때 주의
+
+- 재조회는 줄일 수 있는 양의 상한이 아니에요. "새 정보가 없었던 호출"의 수예요. Codex 같은 official client 레인은 턴마다 새 컨텍스트로 시작할 수 있어서 그 레인에는 필요한 재조회가 섞여 있어요. 재조회 중 모델이 꼭 필요했던 비율은 재지 못했어요.
+- 도구 시간은 호출마다 `duration_ms` 한 값이에요. 이 값은 Agent Core 가 호출마다 재서 넘겨요(`lib/keeper/keeper_hooks_agent_core.ml:754-756`). 실행 시간과 기다린 시간이 섞였는지는 이 저장소 안에서 못 가려요. 10초 이상 걸린 호출이 4,106행(2.8%), 100초 이상이 433행이에요.
+
+## 2. 도구별 병폐
+
+표의 수치는 11-01~11-04 원장 값이에요. "처리"는 아직 모두 Draft 라서 배포 전이에요.
+
+| 도구 | 증상 | 원인 | 처리 |
+|---|---|---|---|
+| `masc_schedule_notes_list` | 20,488호출. 그중 18,045호출(88%)이 같은 결과를 다시 받음, 153 MB. 2,739호출은 결과가 넘쳐 blob 이 됨(159 MB) | 한 쪽을 `limit` 개로만 자르고 바이트를 안 봐서, 노트가 길면 한 쪽이 레인 상한을 넘음. 특정 글자가 든 노트를 찾는 방법이 없어서 처음부터 끝까지 읽음 | #48291: `contains` 추가, 한 쪽을 레인 상한 안에 담음 |
+| `keeper_artifact_read` | 17,015호출, 211 MB. 8,366호출(49%)이 같은 결과 재조회 | 호출의 66%(11,242건)는 다른 도구의 넘친 결과를 16 KiB 씩 되읽는 것(`masc_schedule_notes_list` 9,185건, `Execute` 1,647건 순). 읽은 blob 의 74%는 줄바꿈 없는 한 줄 JSON 이라 줄 검색이 소용없어요. 줄바꿈이 있는 글을 같은 턴에서 여러 위치로 읽은 호출은 22%(3,776건) | #48282: `contains` 줄 검색(줄일 수 있는 양의 상한이 22%). 한 줄 JSON 의 근원은 위 노트 목록 |
+| `Execute` | 시간의 31.2%가 기다리는 명령 | Keeper 체크아웃에서 도는 프로세스를 턴 밖으로 보내고 끝나면 깨우는 도구가 없어요. 격리 job(`keeper_job_*`)은 있지만 0호출이에요. 그래서 모델이 `sleep` 으로 직접 기다리는 것으로 읽었어요(추정) | 미구현(아래 "비동기 실행") |
+| `masc_dos_screen` | 1,700호출 중 1,563호출이 중앙값 95 KB 로 넘침(150 MB), 호출당 0.5초 | 넘친 결과 하나를 열어 보니(95,048바이트) 이미지 블록의 base64 가 83,464자예요. 텍스트 5,594자는 `structuredContent`(5,685바이트)와 같은 JSON 이라 같은 본문이 두 번 들어 있어요 | 처리 안 함. 화면 이미지를 싣는 도구라 큰 것이 정상일 수 있어요. Keeper 에게 이미지와 본문 중 무엇이 가는지는 확인하지 못했어요 |
+| `keeper_tools_list` | 47호출이 모두 넘침, 호출당 약 300 KB(14.2 MB) | 이름대로 도구 목록 전체를 한 번에 돌려줘요 | 처리 안 함 |
+| `masc_board_comment` | 실패율 10-05~10-31 31.3%(23,298호출 중 7,303), 11-01~11-04 16.5%(3,948호출 중 653) | 실패 원인을 전부 가르지는 못했어요. 호출 인자를 `{"_blob": ...}` 모양으로 보낸 호출이 이 도구에서만 1,336건이에요(아래 "`_blob` 흉내") | #47642 에 달 초안을 부록에 두었어요 |
+| 빈 입력 호출 | 실패 676건. muse-spark 프로필이 397건(3.6%), 프로필 기록 없음 226건(19%), codex 는 76,628호출 중 2건 | 프로필마다 크게 달라요. Muse 쪽 원인은 이슈 #48214 에 적혀 있고 이 세션에서 확인하지 않았어요 | 이 작업 범위 밖 |
+| `if_revision`(변경 없음 응답) | 11-01~11-04 에 `masc_board_list` 5/1,052호출, `keeper_tasks_list` 0/2,505호출이 씀 | 있는 기능인데 모델이 인자를 안 넘겨요. 쓴 5호출은 모두 revision 이 바뀌어 약 3 KB 짜리 snapshot 을 받았고, 변경 없음 응답의 크기는 원장에서 못 봤어요 | 처리 안 함 |
+| `masc_keeper_delegate` | 394호출 중 19건 실패(4.8%). 11건은 `keeper not found: <이름>`(에이전트 이름이나 `root`, `admin` 을 넣음), 7건은 입력 모양 오류, 1건은 서버가 막 재시작한 직후. `_status` 는 164호출 | 모두 실행 전에 거절됨 | 처리 안 함(아래 "Delegate") |
+| `keeper_spawn*`, `keeper_job_*` | 10-05~11-04 31일 동안 0호출. `keeper_composition_run` 18, `_result` 1 | 핸들 도구가 모두 `defer_loading = true`, `keeper_spawn` 은 턴이 끝나면 SIGTERM | 아래 "비동기 실행" |
+
+### `_blob` 흉내
+
+도구 호출 인자 안에 `{"_blob": {...}}` 키가 든 `tool_call` 행이 10-19~11-04 에 2,816건이에요. 거절이 2,558건(`_blob` 하나뿐 2,463건, 다른 키와 섞인 95건), 성공이 258건이에요.
+성공한 258건 중 257건은 진짜 인자 옆에 `_blob` 키를 하나 더 붙여 보낸 것이고, 도구가 모르는 키를 무시해서 실행됐어요. 11-02 이전에도 있어서 deepseek 로 옮긴 뒤 시작된 일이 아니에요.
+도구별로는 `masc_board_comment` 1,336건, `Write` 527건, `Execute` 345건, `keeper_memory_write` 236건이에요. `runtime_profile` 이 비어 있는 행이 78%라 모델별로는 못 나눠요.
+이슈 #47642 에는 아직 달지 않았어요. 달 때 쓸 초안은 [부록](#부록-47642-에-달-코멘트-초안)에 있어요.
+
+## 3. 시스템이 거는 제약과 관측의 구멍
+
+결과가 넘치거나 기다림이 생기는 구조와, 통계로 못 보는 곳이에요. 코드 위치는 이 보고서를 쓰면서 main(`62c9806093a`)에서 열어 확인했어요. 확인하지 못한 것은 "추정"이나 "미확인"으로 적었어요.
+
+| 제약 | 결과 |
+|---|---|
+| 레인마다 결과 상한이 다르고(Claude Code 32,768, Codex·Antigravity·Muse 16,384, Agent Core 65,536 바이트) 넘으면 blob 으로 저장됨 | 큰 목록 응답은 한 번 더 읽어야 해요. 도구가 상한을 모르면 한 쪽이 항상 넘칠 수 있어요(`Tool_output.model_projection`) |
+| `keeper_spawn` 이 턴 스위치에 묶여 있고 스위치가 닫히면 SIGTERM(`lib/process/spawn_registry.ml:199-206`) | 턴을 끝내면 프로세스가 죽어서, 기다리려면 턴 안에서 `sleep` 해야 해요 |
+| 핸들 도구가 `defer_loading = true`(`config/tools/keeper_spawn.toml:8`, `keeper_job_result.toml:22`) | 깨어난 턴이 결과 도구를 부르지 못할 수 있어요(추정). 압축 뒤 도구 검색 결과가 사라지는 문제는 이슈 #48214 가 다뤄요(본문은 이 세션에서 읽지 않았어요) |
+| 도구 통계 저장소(`tool-metrics.sqlite3`)에 `failure_class`·Keeper·결과 크기 컬럼이 없음 | 실패와 거절을 나눠 못 봐요. 원장은 실패 3,195행 중 1,262행(약 40%)에만 `failure_class` 가 있고, 그 1,262행의 77.7%가 거절이에요(policy_rejection 579, workflow_rejection 402, dependency_unavailable 159, runtime_failure 122). 이 값을 읽는 화면은 못 찾았어요 |
+| 도구 이름 체계가 둘(원장 `Execute`, 저장소 `tool_execute`) | 원장과 통계 화면을 이름으로 곧바로 못 이어요. 시리즈 응답은 `public_names` 를 같이 줘요 |
+| 백분위 식이 셋(`tool_metrics.ml:221-227`, `model_inference_metrics_entry.ml:287-296`, `scheduler_lag.ml:72-76`) | 화면마다 p50 이 달라요. #48223 과 #48240 은 `Tool_metrics` 식을 따라요 |
+| 실패 3,195행 중 1,933행(60.5%)에 `disposition` 이 없음 | typed dispatch 를 안 탄 호출은 응답 결과(`wire_outcome`)만 기록해요(`lib/tool_types/tool_result.mli:90-98`). 이런 행은 통계 저장소 observer 에 안 들어갈 가능성이 높아요(추정, 미확인) |
+
+## 4. 바깥에서 가져온 것
+
+하위 조사에서 원문을 열어 확인한 값이고, 이 보고서를 쓰면서 다시 열어 보지는 않았어요. 날짜는 문서 표기를 따랐고, 표기가 없으면 "날짜 없음"이에요. "미확인"은 원문에서 못 찾은 것이에요.
+
+| 주제 | 출처 | 내용 | masc 에 주는 의미 |
+|---|---|---|---|
+| 도구가 핸들만 주고 모델이 계속하는 방식 | OpenAI *Async tool calling*, developers.openai.com/api/docs/guides/async-tool-calling, changelog 2026-09-03 | `async: true` 로 호출하면 끝난 뒤 `previous_response_id` 와 원래 `call_id` 로 결과를 줌. 앱이 정의하는 `wait_for_tasks`. GPT-6 Astra 이상. 동작은 시험하지 않음(미확인) | 턴을 끝내고, 결과가 나중에 같은 호출 식별자로 돌아오는 모양이에요 |
+| MCP 의 task 확장 | MCP spec draft *Tasks*, modelcontextprotocol.io/specification/draft/basic/utilities/tasks, 개정 2026-07-28 | `tasks/get`, `pollIntervalMs`·`ttlMs`, 상태 working / input_required / completed / failed / cancelled. 폴링이 기본이고 push 는 선택. 클라이언트 지원은 원문 미직독(미확인) | job·spawn·ask·delegate 가 같은 상태 낱말을 쓰게 할 수 있어요 |
+| 오래 걸리는 명령을 백그라운드로 | Claude Code *Tools reference*, code.claude.com/docs/en/tools-reference.md, 날짜 없음 | 포그라운드 명령은 기본 120초에 백그라운드로 넘어감. Monitor 는 출력 한 줄마다 이벤트. 메인 세션 Bash 완료가 모델을 다시 깨우는지는 공식 문서에서 못 찾음(미확인) | 기다리는 Execute 647호출의 평균은 165초(107,064초 ÷ 647)라 이미 이 한도를 넘어요 |
+| 장기 실행 도구 | Google ADK *Function tools*(LongRunningFunctionTool), google.github.io/adk-docs/tools-custom/function-tools/, 날짜 없음 | 작업 ID 만 돌려주면 러너가 멈추고 클라이언트가 나중에 결과를 보냄 | 위와 같은 모양 |
+| 완료를 인터럽트로 알리기 | *AsyncLM*, arxiv.org/abs/2412.07017, 2024-12-09(Preliminary work) | 동기 호출보다 1.6~5.4배 빠름(Abstract), 함수가 길수록 이득(§6.3). 실험 함수가 30~500ms(§6.2)라 수 분짜리 호출에 적용하는 것은 추정 | 이득이 큰 쪽은 긴 호출이에요 |
+| 호출 중복과 캐시 | arxiv.org/abs/2608.15127, 2026-08-15 / *ToolCaching*, arxiv.org/abs/2601.15335, 2026-01-20 | 고유 질의 27%가 호출의 67.3%(§7.3), 10분 TTL 이 중복 검색 35.2% 제거(§8.4) / 반복 40% 이상(§1), 키는 도구 이름과 순서 없는 인자 직렬화(§5.1), COMMAND 와 TTL 60초 이하는 캐시 제외(§5.2). 둘 다 프리프린트이고 교차 세션 또는 시뮬레이션 값 | masc 에서 같은 결과를 다시 받은 호출은 23.5%(바이트로는 33.2%)예요. 문헌 값은 다른 작업과 시뮬레이션에서 나왔고 masc 는 Keeper 마다 컨텍스트가 달라서, 값을 그대로 옮기지 못해요 |
+| 변경 없음 판정 | anthropics/claude-code#60684, 2026-05-19 / MCP caching 2026-07-28 | Claude Code Read 는 "file unchanged since your last Read" 로 답함. MCP 캐시 힌트는 tools/list·resources/read 에만 있고 tools/call 에는 없음 | `if_revision` 이 같은 일을 하는데 채택이 낮아요(위 표) |
+| 반복 호출 감지 | Datadog LLM Observability *Insights*, docs.datadoghq.com/llm_observability/investigate/insights.md, 날짜 없음 | "Tool call retry loops", "Large tool results"를 정의해 둠 | 이 보고서의 "같은 턴의 반복 호출"과 "큰 결과" 측정과 같은 종류예요 |
+| 큰 결과 | Cursor *Dynamic context discovery*, cursor.com/blog/dynamic-context-discovery, 2026-01-06 §1 / Claude Code Tools reference *Output limits* | 잘라 버리지 않고 파일로 쓰고 tail·검색으로 읽게 함. Bash 약 30,000자까지 인라인, 넘으면 파일 경로와 앞 2,000자 | #48282 의 `contains` 가 같은 방향이에요 |
+| 도구 정의가 응답을 정함 | Anthropic *Writing effective tools for agents*, anthropic.com/engineering/writing-tools-for-agents, 2025-09-11 | `response_format` concise/detailed 72 대 206 토큰, 응답 상한 25,000 토큰, 고칠 방법을 말하는 오류, 중복 호출이 많으면 pagination·limit 조정 | `limit` 만 있고 바이트 기준이 없던 노트 목록이 이 지침에 걸려요 |
+| 예시와 strict | Anthropic *Introducing advanced tool use*, anthropic.com/engineering/advanced-tool-use, 2025-11-24 / OpenAI function-calling 가이드 | 예시 1~5개로 72→90%(내부 시험). OpenAI 는 추론 모델에서 예시가 해칠 수 있다고 함. 레인별 효과는 미확인 | 빈 입력 실패는 레인별로 달라서 확인 뒤에 써야 해요 |
+| 오류 유형 | LiveMCP-101, arxiv.org/abs/2508.15760, v2 2026-05-22 / τ-bench, arxiv.org/abs/2406.12045, 2024-06-17 | 구문 오류는 상위 모델에서 적고 의미 오류가 지배적 | 구문 오류보다 의미 오류가 많다는 보고라서, 빈 입력 실패가 어느 쪽인지 따로 봐야 해요 |
+
+## 5. 이번에 만든 것
+
+모두 Draft PR 이에요. 스택(#48223 → #48240 → #48248)은 `gh stack` 으로 올렸고 나머지 둘은 `main` 에서 따로 땄어요.
+
+| PR | 내용 | 증거 |
+|---|---|---|
+| #48223 | `scripts/measure-tool-efficiency.py`, 기준선 JSON 둘 | 시험 22개, 변형 14개를 모두 잡음 |
+| #48240 | `GET /api/v1/tool-metrics/series`: 시간별·일별 호출, 실패, 시간 합계, p50, p95, 최대, 상위 도구 20개 | 80만 9천 행 복사본에서 169개 구간을 다시 계산한 값과 맞춤(불일치 0). 앞선 머리에서 `test.yml` 통과, 현재 머리에서 `type-check` 통과 |
+| #48248 | Tools 화면의 "도구 실행 통계" 카드 | 사진 넷, vitest 43개 |
+| #48282 | `keeper_artifact_read` 에 `contains` 줄 검색 | 시험 15개, CI 통과 |
+| #48291 | `masc_schedule_notes_list` 에 `contains`, `matched_count`, 한 쪽을 레인 상한에 맞춤 | 시험 둘이 늘었고 CI 통과, 실제 기록 재생 |
+
+### 노트 목록(#48291) 재생 값
+
+실제 스케줄(노트 2,397개, 노트 JSON 합 850,690바이트)을 처음부터 끝까지 읽는 호출 수를 새 규칙 소스로 세었어요. 상한은 16 KiB 이고, 되읽기는 쪽 크기에서 계산한 추정이에요.
+
+| 읽는 방식 | 호출 | 되읽기(추정) | 호출 합 |
+|---|---:|---:|---:|
+| `limit` 200, 개수로 자름(이전) | 12 | 57 | 69 |
+| `limit` 200, 바이트로 자름(이후) | 54 | 0 | 54 |
+| `limit` 100, 이전 | 24 | 68 | 92 |
+| `limit` 100, 이후 | 54 | 0 | 54 |
+| `limit` 50, 이전 | 48 | 37 | 85 |
+| `limit` 50, 이후 | 66 | 0 | 66 |
+| `limit` 20, 이전 | 120 | 24 | 144 |
+| `limit` 20, 이후 | 123 | 0 | 123 |
+| `limit` 10(이전과 이후 같음) | 240 | 0 | 240 |
+
+- 큰 `limit` 로 읽을 때는 되읽기가 사라져 호출이 줄고, `limit` 10 이하로 읽던 호출(11-01 의 80%)은 달라지지 않아요.
+- 줄이는 쪽은 `contains` 예요. 노트에 `#46993` 같은 PR 번호가 들어 있어서 번호 하나를 `limit` 50 으로 찾으면 1~5호출이에요(전체를 `limit` 10 으로 읽으면 240호출).
+- 11-01 기록에는 `code-reviewer` 한 명이 이 도구를 19,586번 불렀고(171턴, 턴당 중앙값 26번, 최대 570번), 1,916번(9.8%)이 blob 이 됐어요. 그 호출이 모두 번호 찾기였는지는 몰라요.
+
+### 저장된 결과 읽기(#48282)가 겨냥하는 곳
+
+`keeper_artifact_read` 17,015건이 읽은 blob 을 열어 보니 74%(12,600건)는 줄바꿈이 없는 한 줄 JSON 이라 줄 검색이 소용없어요. 줄 검색이 줄일 수 있는 호출은 줄바꿈이 있는 글을 같은 턴에서 여러 위치로 읽은 3,776건(22%)이 상한이에요. 그중 글자를 찾던 호출이 몇 건인지는 몰라요.
+
+가장 많이 읽힌 blob(861건)은 21,754바이트짜리 하나를 한 턴에서 두 위치로 번갈아 858번 읽은 반복이라 이 변경으로 안 풀려요. 한 줄 JSON 되읽기는 근원인 노트 목록이 상한 안에 들어오면 줄어요(#48291). 다만 되읽은 11,242건 중 9,185건이 노트 목록이고 나머지 2,057건은 `Execute` 등이라, 노트 목록을 고쳐도 66% 전부가 사라지지는 않아요.
+
+### 도구 실행 통계(#48223, #48240, #48248)
+
+- 서버: SQLite 보존 기록(호출 1건당 1행)을 시간별 또는 일별로 묶어요. 일 구간은 요청의 `utc_offset_min` 으로 시작해서 서울이면 00:00 KST 에서 시작하고, 인도(+05:30)나 서쪽(-05:00, -03:30)도 시험으로 확인했어요. 한 달 창은 약 80만 행, 읽기 0.34초와 정렬 0.56초(CPU)예요.
+- 화면: 구간 칩 셋(24시간·7일 시간별, 30일 일별), 타일 여섯, 그래프 셋, 시간을 가장 많이 쓴 도구 표. 도구 이름을 누르면 그 도구만 봐요.
+- 적대적 리뷰에서 P2 1건(공백이 낀 `tool` 값이 캐시 키만 공유)과 P3 여러 건이 나왔고 모두 처리하거나 PR 본문에 남겼어요.
+
+## 6. 비동기 실행
+
+**결론: 새 설계는 필요 없어요.** 턴을 끝내고 완료 때 깨우는 길은 격리 job(`keeper_job_*`)에 이미 있어요(`lib/keeper/keeper_owned_job_completion_wake.ml`: 결과가 저장된 뒤에 같은 `post_id` 로 한 번만 큐에 넣고 wake 힌트를 보내요). 빠진 것은 Keeper 체크아웃에서 도는 Workspace process 이고, `docs/rfc/RFC-keeper-async-fleet-continuity.md`(Draft, #36941·#42799)가 이미 정의해요. 이 단락은 그 RFC 에 측정 수요를 대는 것이고, 코드는 없어요.
+
+수요(11-01~11-04):
+
+- Execute 호출 시간의 31.2%(647호출, 29.7시간)가 기다리는 명령이에요. 647호출 중 583호출(90%, 28.9시간)에 `gh run`, `gh pr`, `gh api`, `gh workflow` 가 같이 들어 있어서, 대부분 GitHub Actions 실행을 기다리는 호출로 보여요(추정). 명령 안의 `sleep` 은 중앙값 40초, 최대 870초예요. 가장 많이 기다린 Keeper 는 `masc-productor-owner` 143호출, `wkbl-data` 91호출, `wkbl-front` 80호출, `github-pr-checker` 78호출, `pr-updater` 60호출이에요.
+- 한 턴에서 같은 도구를 부르는 폭주는 `keeper_artifact_read` 862번 77초, `masc_schedule_notes_list` 570번 35초 등이에요.
+- `keeper_spawn*`, `keeper_job_*` 는 31일 동안 0호출이에요. 이유는 가리지 못했어요. 두 계열의 도구 8개가 모두 `defer_loading = true` 라서 도구 검색을 거쳐야 보이는 것이 의심스러워요.
+
+기존 설계와 왜 안 맞는지:
+
+- `keeper_spawn` 은 수단이 안 돼요. 턴 스위치에 묶여 스위치가 닫히면 SIGTERM 이고(`lib/keeper/keeper_tool_in_process_runtime.ml:1985`, `lib/process/spawn_registry.ml:199-206`), argv 를 그대로 받고 Gate 가 승인하지 않아요. RFC 는 비동기 Workspace process 도 Execute 와 같은 Gate 승인을 거쳐야 한다고 해요.
+- `RFC-0290` 은 코드 0건이고 동시 실행 상한이 Workaround Rejection Bar 와 부딪혀요. `RFC-spawn-a-process-that-outlives-the-call` 은 Execute 에 background 플래그를 다는 안을 거절하고 스폰이 턴을 넘겨야 하는지를 열어 둬요.
+
+가장 작은 조각(하위 조사가 낸 제안이고 구현은 안 했어요):
+
+1. Docker 프로필 한정 Workspace process 시작 도구 하나. 시작은 Execute 와 같은 Gate 입구를 지나고, microVM 과 SSH 는 시작 전에 거절해요.
+2. 결과를 먼저 저장하고, 새 typed payload 를 한 번만 큐에 넣고, 깨우는 힌트를 보내요. 서버 재시작 뒤 복구 경로도 같이 둬요. 저장 없이 깨우기만 하는 조각은 RFC 의 알림 규칙(§5)과 A11 에 어긋나요.
+3. 증명은 A05 예요. 턴 A 가 핸들을 받고 끝나고, 완료 전에 내부 턴 B 가 돌고, 완료 자극으로 깨어나 정확한 결과를 써요.
+
+기존 `keeper_owned_job_completion_wake` 를 복사해 두 번째 wake 를 만들면 N-of-M 패치예요. 공통부를 뽑거나 payload 를 일반화해야 해요.
+
+이 조각을 시작하지 않은 이유: RFC 는 이미 진행 중인 계획(`goal-keeper-async-fleet-20261026`)이라, 새 설계를 겹쳐 쓰지 않고 측정 근거만 더했어요. 이 변경은 Gate, 프로세스 수명, 재시작 복구를 함께 건드려요. 이 저장소 규칙으로는 로컬 dune 빌드 없이 CI 로만 확인하는데, type-check 한 번이 8분 30초 걸려요(run 41895911884).
+
+## 7. Delegate
+
+- `masc_keeper_delegate` 394호출 중 375호출(95.2%)이 성공했어요. 10-05~10-31 에는 1,362호출 중 187건(13.7%)이 실패했어요.
+- 11-01~11-04 실패 19건은 이름 오류 11건, 입력 모양 오류 7건, 서버가 막 재시작한 직후 1건이에요. 이름 오류는 `keeper not found: <이름>` 이고, 이름이 에이전트 식별자(`masc-pro-builder`, `claude-8241c5b1`)이거나 `root`, `admin` 이에요. 입력 모양 오류는 `prompt` 대신 `message` 를 쓴 호출 4건, `target` 안에 `keeper_name` 을 쓴 호출 1건, 빈 입력 1건, `_blob` 모양 입력 1건이에요. 모두 실행 전에 거절돼서 비용은 호출 한 번이에요.
+- 상태 조회(`masc_keeper_delegate_status`)는 164호출(위임 호출의 42%)이에요. 완료 wake 는 이미 있어서(`keeper_delegate_completion_wake`) 폴링은 필요하지 않은 호출로 보이지만, 호출당 비용이 작고 모델이 답을 기다리며 부르는지 의도적으로 확인하는지는 가리지 못했어요.
+- 개선 후보는 "없는 이름이면 가능한 이름을 알려 준다"와 "`message` 로 보내면 `prompt` 를 쓰라고 알려 준다"예요. 하지만 4.8%의 실패에서 호출 하나씩을 아끼는 정도라서 이번에는 하지 않았어요. 이 도구의 병폐는 호출이 아니라 기다림(비동기 실행)에 있어요.
+
+## 8. 아직 모르는 것
+
+- 이 개선이 실제 Keeper 의 호출 수와 결과 바이트를 얼마나 줄이는지는 배포 뒤에야 알아요. 재생 값은 하나의 스케줄에서 나온 추정이에요.
+- 재조회 중 모델이 꼭 필요했던 비율, Official client 레인의 필요한 재조회 몫.
+- `keeper_artifact_read` 중 글자를 찾으려고 여러 쪽을 읽은 호출이 몇 건인지. 줄바꿈이 있는 글을 같은 턴에서 여러 위치로 읽은 3,776건(22%)이 상한이에요.
+- `masc_dos_screen` 의 큰 결과가 Keeper 의 모델 입력에 얼마나 들어가는지.
+- Execute 호출 시간의 p99 가 47초인데, 이 값이 실행 시간인지 기다림인지(Agent Core 가 재서 준 값이에요).
+- 통계 화면의 실서버 응답과 브라우저 확인(#48240 배포 뒤).
+- 도구 통계 저장소에 `failure_class` 를 넣는 것은 스키마 변경이라 하드 컷 규칙을 정해야 해서 하지 않았어요.
+
+## 9. 배포 뒤 다시 재기
+
+```bash
+scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음 날짜> --to-date <기준선과 같은 일수가 되는 날짜> --json-out after.json
+```
+
+기준선 JSON 과 같은 항목을 `after.json` 에서 비교해요. 기준선과 같은 일수로 재야 하고, 모델이 새 인자를 쓰기 시작하기까지 시간이 걸릴 수 있어요(추정). 비교할 행:
+
+- `masc_schedule_notes_list` 의 호출 수, `spilled_calls`, `reread_bytes`
+- `keeper_artifact_read` 의 호출 수와 `reread_bytes`
+- 결과 바이트 중 `identical_rereads.bytes_pct`, `spilled_results.bytes_pct`
+- `blocked_waits.wait_time_pct_of_execute`(비동기 실행이 생기기 전에는 안 바뀌어요)
+
+## 부록: #47642 에 달 코멘트 초안
+
+원장을 10-19 ~ 11-04T19:10Z 로 넓혀서 다시 셌어요. 11-02 이전에도 있었고, 성공하는 호출에도 같은 모양이 섞여 있어요.
+
+입력에 `_blob` 키가 든 `tool_call` 행이 2,816건이에요. 거절 2,558건(`_blob` 하나뿐 2,463건, 다른 키와 섞인 것 95건), 성공 258건이에요.
+
+| 날짜(UTC) | 호출 | 그중 성공 |
+|---|---:|---:|
+| 10-19 | 541 | 0 |
+| 10-20 | 45 | 0 |
+| 10-21 | 67 | 0 |
+| 10-23 | 17 | 17 |
+| 10-26 | 434 | 1 |
+| 10-27 | 414 | 0 |
+| 10-28 | 38 | 0 |
+| 10-30 | 46 | 26 |
+| 10-31 | 4 | 0 |
+| 11-02 | 861 | 214 |
+| 11-03 | 344 | 0 |
+| 11-04 | 5 | 0 |
+
+- 11-02 하루를 끝까지 세면 `_blob` 하나뿐인 호출이 610건(전부 실행 전 거절), 다른 키와 섞인 호출이 251건(성공 214건, 거절 37건)이에요. 이슈 본문에 적힌 377건보다 많아요.
+- 날짜별로 많은 Keeper 는 10-19 에 code-reviewer 156건, masc-productor-owner 140건, context-reviewer 127건, 10-26 에 code-reviewer-sister 122건, code-reviewer 110건, 10-27 에 code-reviewer-sister 109건, 11-02 에 wkbl-front 381건, masc-productor-owner 362건, wkbl-data 71건이에요.
+- 도구별로는 `masc_board_comment` 1,336건, `Write` 527건, `Execute` 345건, `keeper_memory_write` 236건, `masc_board_post` 109건, `Edit` 49건이에요.
+- 성공한 258건 중 257건은 진짜 인자 옆에 `_blob` 키를 하나 더 붙여 보낸 호출이에요(예: `keeper_surface_post` 의 입력이 `{"_blob": {...}, "surface": "dashboard", "content": "..."}`). 도구가 모르는 키를 무시해서 실행은 됐어요.
+- 같은 모양이 모델 입력에 들어가는 길로, 지난 호출의 인자를 `{"_blob": ...}` 로 줄이는 코드(`lib/keeper/keeper_model_input_demotion.ml`, `docs/rfc/RFC-0363-historical-tool-result-demotion.md`, Draft, 2026-08-05 작성)가 있어요. 이 길이 실제 요청에 `_blob` 을 넣었는지는 wire-capture 로 확인하지 못했어요.
+- 센 방법: `~/me/.masc/tool_calls/2026-10`, `2026-11` 의 `record_kind = tool_call` 행에서 `input` 이 `_blob` 키를 가진 행. 거절은 `disposition` 이 `completed` 가 아니거나 `wire_outcome` 이 `ok` 가 아닌 행이에요. 고친 뒤에는 `_blob` 하나뿐인 호출과 섞인 호출을 따로 세면 둘 다 0 에 가까워져야 해요.

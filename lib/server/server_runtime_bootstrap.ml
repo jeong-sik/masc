@@ -555,7 +555,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Server_keeper_event_queue_broadcast.install ~sw;
   Skill_catalog_snapshot_service.install_publication_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
+    (Server_skill_catalog_broadcast.publication_observer ~base_path
+       ~invalidate_full_health:Server_routes_http_runtime.invalidate_full_health_snapshot);
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net

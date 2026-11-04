@@ -43,16 +43,7 @@ val is_terminal : phase -> bool
 
 (** Observable boolean conditions computed from keeper state.
     Phase is DERIVED from conditions via [derive_phase].
-    Conditions are the primitive; phase is the projection.
-    [launch_pending]: fresh registration exists, but the keepalive fiber
-    has not started yet. [fiber_alive]: [done_p] unresolved AND
-    [fiber_stop] not set. [heartbeat_healthy]: result of the latest
-    heartbeat observation. [turn_healthy]: result of the latest completed
-    turn observation. [operator_paused]: [meta.paused = true].
-    [stop_requested]: [Atomic.get fiber_stop = true].
-    [restart_requested]: supervisor requested immediate restart of a
-    stopped fiber. [drain_complete]: current turn finished, no pending
-    work. *)
+    Conditions are the primitive; phase is the projection. *)
 type conditions = Keeper_state_machine_types.conditions = {
   launch_pending : bool;
   (** Fresh registration exists, but the keepalive fiber has not started yet. *)

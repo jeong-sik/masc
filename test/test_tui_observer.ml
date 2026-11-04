@@ -992,6 +992,13 @@ let test_a_repository_push_reads_the_list () =
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]));
+  check (list string) "Clients and provider usage pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
+          ]));
   check (list string) "Skill pushes decode with the Keeper a ledger row names"
     [ "dataset(skill_activations:alpha)"; "dataset(skill_catalog)" ]
     (List.map summary

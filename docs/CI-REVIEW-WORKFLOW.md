@@ -223,6 +223,14 @@ and quote the input size beside any count — `lines=41703 grep=0` means the
 symbol is absent, `lines=0 grep=0` means the read failed. A count on an empty
 input is not evidence of absence.
 
+Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
+is not the line that follows its own invocation. Taking the next result line
+attributes another suite's summary to the one being read: a `test_mcp_server_eio`
+block that failed at `test_mcp_server_eio.ml:3045` was read as
+`Test Successful in 0.014s. 8 tests run.` from a different suite. Pair a summary
+with its suite by the sandbox path (`_build/.sandbox/<hash>/...`) or by a name
+inside the result block, never by adjacency.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

@@ -3830,6 +3830,7 @@ type client_row = {
 type clients_snapshot = {
   cls_observed_at : string;
   cls_clients : client_row list;
+  cls_read_failures : string list;
 }
 
 (* The clients roster's status is the agent_status ADT on the wire. The
@@ -3887,7 +3888,9 @@ let decode_clients_snapshot json =
   in
   let* rows = required_list_field json "clients" in
   let* cls_clients = decode_list "clients" decode_client_row rows in
-  Ok { cls_observed_at; cls_clients }
+  let* failures = required_list_field json "read_failures" in
+  let* cls_read_failures = decode_string_list "read_failures" failures in
+  Ok { cls_observed_at; cls_clients; cls_read_failures }
 
 let decode_keeper_secret_projection ~keeper json =
   let* status = required_string_field json "status" in

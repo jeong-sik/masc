@@ -27846,10 +27846,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
       if generation = state.clients_surface_generation then (
+        (* Rows the server could not read are missing, so the roster is read
+           again like a failed read. *)
         state.clients_owed <-
           (match result with
-           | Ok _ -> Masc_tui_owed_read.succeeded state.clients_owed
-           | Error _ -> failed_read state.clients_owed);
+           | Ok { Masc.Tui_decode.cls_read_failures = []; _ } ->
+               Masc_tui_owed_read.succeeded state.clients_owed
+           | Ok { Masc.Tui_decode.cls_read_failures = _ :: _; _ } | Error _ ->
+               failed_read state.clients_owed);
         match result with
         | Ok snapshot ->
             state.clients_surface <- Some snapshot;

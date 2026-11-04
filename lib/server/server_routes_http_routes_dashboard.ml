@@ -3561,11 +3561,12 @@ let add_routes ~sw ~clock router =
             joining a session to its task binding is a read, and the
             backlog stays the authority on ownership. *)
          let config = Mcp_server.workspace_config state in
+         let rows, read_failures = Workspace.get_active_agent_sources_observed config in
          let agents =
            List.sort
              (fun ((a : Masc_domain.agent), _) ((b : Masc_domain.agent), _) ->
                 String.compare a.name b.name)
-             (fst (Workspace.get_active_agent_sources_observed config))
+             rows
          in
          let json =
            `Assoc
@@ -3573,6 +3574,9 @@ let add_routes ~sw ~clock router =
              ; ("generated_at", `String (Masc_domain.now_iso ()))
              ; ("observation_only", `Bool true)
              ; ("clients", `List (List.map Server_dashboard_http_core_entities.dashboard_client_json agents))
+               (* A source that could not be read leaves its rows out; the
+                  reader is told so and reads again. *)
+             ; ("read_failures", `List (List.map (fun detail -> `String detail) read_failures))
              ]
          in
          Http.Response.json_value ~compress:true ~request:req json reqd

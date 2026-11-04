@@ -1,0 +1,28 @@
+F
+======================================================================
+FAIL: test_scoped_reads_trailing_retry_and_reconnect (__main__.BrowserPushTest.test_scoped_reads_trailing_retry_and_reconnect)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_browser_push.py", line 221, in test_scoped_reads_trailing_retry_and_reconnect
+    owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_chat_owed_history.py", line 254, in run_chat
+    scenario(server, step)
+    ~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_browser_push.py", line 169, in scenario
+    step("wait", lambda: browser.count("open", f"observer:live:{CLIENT_A}:2:read") >= 1,
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         "the observer did not carry the exact Browser target")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_chat_owed_history.py", line 233, in step
+    wait_until(cast(Callable[[], bool], predicate), cast(str, label))
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_chat_owed_history.py", line 223, in wait_until
+    self.fail(f"{label}; exit={process.poll()}, requests={server.requests!r}")
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: the observer did not carry the exact Browser target; exit=None, requests=Counter({('setup', '/health'): 26, ('open', '/health'): 26, ('open', 'clients'): 14, ('open', 'read:01a16363-ef67-7000-ad62-05bcd0320d99:2'): 13, ('open', '/api/v1/stream/fleet'): 13, ('setup', '/api/v1/operator'): 6, ('setup', '/api/v1/keepers/asks'): 5, ('setup', '/api/v1/keepers/turns'): 5, ('setup', '/api/v1/gate/keepers'): 4, ('setup', '/api/v1/dashboard/gate'): 4, ('open', '/api/v1/keepers/turns'): 4, ('setup', '/api/v1/dashboard/briefing'): 3, ('setup', '/api/v1/dashboard/scheduled-automation'): 3, ('setup', '/api/v1/keepers/tool-approvals'): 3, ('setup', '/api/v1/stream/fleet'): 2, ('setup', '/api/v1/keepers/tool-approval-mode'): 2, ('setup', '/api/v1/async-requests'): 2, ('setup', '/api/v1/dashboard/gate/keeper-settings'): 2, ('open', '/api/v1/dashboard/scheduled-automation'): 2, ('setup', '/api/v1/tui/preferences'): 1, ('setup', '/api/v1/verification/requests'): 1, ('setup', '/api/v1/dashboard/goals'): 1, ('setup', '/api/v1/dashboard/planning'): 1, ('open', 'read:01a16363-ef67-7000-ad62-05bcd0320d99:None'): 1})
+
+----------------------------------------------------------------------
+Ran 1 test in 31.213s
+
+FAILED (failures=1)

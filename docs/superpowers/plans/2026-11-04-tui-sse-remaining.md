@@ -85,9 +85,9 @@
 - Produces: observation sequence/freshness for the visible browser client, tab, viewport, and machine incarnation; no periodic `cadence_operation`, live route, or machine tick reads.
 - Consumes: existing observation commit and `seq`, Browser `Screenshot`/`Scene`, and machine live projections.
 
-- [ ] Write failing request tests: a changed observation updates only its matching client/tab/machine; unchanged observations emit no read; pointer gestures retain their original ownership.
-- [ ] Verify RED: current TUI polls these paths every 0.3/2 seconds.
-- [ ] Implement server-side changed-observation notification plus the existing read/stream path, single-flight trailing reads, and reconnect revalidation. Do not put large image bytes in `workspace_dataset_changed`.
+- [x] Write failing request tests: a changed observation updates only its matching client/tab/machine; unchanged observations emit no read; pointer gestures retain their original ownership.
+- [x] Verify RED: current TUI polls these paths every 0.3/2 seconds.
+- [x] Implement server-side changed-observation notification plus the existing read/stream path, single-flight trailing reads, and reconnect revalidation. Do not put large image bytes in `workspace_dataset_changed`.
 - [ ] Verify GREEN and measure request counts, PTY frame cadence, and screenshot/incarnation continuity.
 - [ ] Commit: `feat(tui): stream browser and machine observation changes`.
 

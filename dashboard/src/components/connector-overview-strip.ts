@@ -73,7 +73,7 @@ function deriveHeartbeatState(
 }
 
 
-/** Pure: derive a compact "up X" string from the sidecar's last_ready_at
+/** Pure: derive a compact "up X" string from the connector's last_ready_at
     timestamp. Returns null when the timestamp is empty/invalid/in the
     future — the tile then hides the chip rather than rendering NaN. */
 export function formatConnectorUptime(
@@ -382,7 +382,7 @@ export function deriveTileNotice(
 }
 
 const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
-  // Rose for hard errors (sidecar reported an explicit failure),
+  // Rose for hard errors (the connector reported an explicit failure),
   // amber for stale (data hasn't refreshed but no explicit error).
   // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
   error: 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]',
@@ -489,7 +489,7 @@ interface ConnectorStripSummary {
 }
 
 /** Pure: roll up the at-a-glance stats that feed the strip header line.
-    Counts only KNOWN sidecars (matches the tile grid) so "3 of 4" always
+    Counts only known connectors (matches the tile grid) so "3 of 4" always
     lines up with what the operator sees below. Bindings are summed across
     every connector — Grafana's "stat panel" convention: total across rows,
     not per-row.
@@ -528,7 +528,7 @@ export function summarizeConnectorStrip(
     \"missing from the connectors array\" is ambiguous, could be
     bootstrapping rather than offline).
 
-    Why this exists: StatusSummaryLine says \"3 of 4 sidecars running\"
+    Why this exists: StatusSummaryLine says \"3/4 healthy\"
     but doesn't name the missing 1 — the operator has to scan four
     tiles below to find it. This lets the summary line annotate which
     specific connector(s) are offline, matching Statuspage's

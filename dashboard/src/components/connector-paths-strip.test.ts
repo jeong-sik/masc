@@ -38,7 +38,7 @@ describe('ConnectorPathsStrip', () => {
     expect(container.querySelector('[data-paths-row]')).toBeNull()
   })
 
-  it('expands on header click and reveals keeper + sidecar rows', async () => {
+  it('expands on header click and reveals keeper + server config rows', async () => {
     render(html`<${ConnectorPathsStrip} />`, container)
     const toggle = container.querySelector<HTMLButtonElement>('[data-panel="connector-paths-strip"] button')!
     toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))

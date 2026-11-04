@@ -1,5 +1,5 @@
-// SetupGuideCard — collapsible "처음 설치하나요?" card rendered next to a
-// sidecar's lifecycle commands when the bridge is offline. Data source:
+// SetupGuideCard — collapsible "처음 설치하나요?" card rendered in a
+// connector's "gateway not running" panel. Data source:
 // CONNECTOR_SETUP_GUIDES.
 
 import { html } from 'htm/preact'

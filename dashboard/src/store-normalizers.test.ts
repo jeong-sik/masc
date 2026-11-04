@@ -264,7 +264,7 @@ describe('mergeMessages', () => {
       id: undefined,
       seq: undefined,
       type: 'event',
-      workspace: 'sidecar',
+      workspace: 'other',
     })
 
     const merged = mergeMessages(current, [incoming])

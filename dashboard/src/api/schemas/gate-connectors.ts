@@ -163,11 +163,10 @@ const GateConnectorInfoRawSchema = object({
   stale_after_sec: fallback(number(), 0),
   // In-process gateway machine state (RFC-0203 / #20813): disconnected /
   // awaiting_hello / identifying / resuming / connected /
-  // reconnect_pending / failed. Sidecar connectors don't emit it —
-  // empty means "not advertised".
+  // reconnect_pending / failed. Empty means "not advertised".
   gateway_state: fallback(string(), ''),
   // 'in_process_gateway' for connectors whose status comes from the
-  // typed gateway state machine; empty for sidecar status files.
+  // typed gateway state machine; empty when the server did not send it.
   status_source: fallback(string(), ''),
   error: fallback(string(), ''),
   status_path: fallback(string(), ''),

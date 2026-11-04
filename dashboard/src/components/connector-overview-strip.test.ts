@@ -43,7 +43,7 @@ describe('ConnectorOverviewStrip', () => {
     document.body.removeChild(container)
   })
 
-  it('always renders one tile per known sidecar (4 tiles)', () => {
+  it('always renders one tile per known connector (4 tiles)', () => {
     render(
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
       container,
@@ -122,7 +122,7 @@ describe('ConnectorOverviewStrip', () => {
     expect(banner?.textContent).toContain('최근 5분')
   })
 
-  it('hides incident banner when no sidecar has dropped (baseline offline)', () => {
+  it('hides incident banner when no connector has dropped (baseline offline)', () => {
     _testResetStripMemory()
     render(
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
@@ -148,13 +148,13 @@ describe('ConnectorOverviewStrip', () => {
     expect(container.querySelector('[data-overview-tile="imessage"]')).toBeNull()
   })
 
-  it('does not render the old celebration banner even when all 4 sidecars are up', () => {
+  it('does not render the old celebration banner even when all 4 connectors are up', () => {
     const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id => mkConnector({ connector_id: id, available: true }))
     render(html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`, container)
     expect(container.querySelector('[data-celebration]')).toBeNull()
   })
 
-  it('uptime chip renders inside tile when sidecar is up and last_ready_at is recent', () => {
+  it('uptime chip renders inside tile when the connector is up and last_ready_at is recent', () => {
     const readyAt = new Date(Date.now() - 65 * 1000).toISOString()
     render(
       html`<${ConnectorOverviewStrip}
@@ -169,7 +169,7 @@ describe('ConnectorOverviewStrip', () => {
     expect(chip?.textContent).toMatch(/^up 1m/)
   })
 
-  it('uptime chip absent when sidecar is down, even with a stale last_ready_at', () => {
+  it('uptime chip absent when the connector is down, even with a stale last_ready_at', () => {
     const readyAt = new Date(Date.now() - 60 * 1000).toISOString()
     render(
       html`<${ConnectorOverviewStrip}
@@ -288,7 +288,7 @@ describe('countConfiguredConnectors', () => {
     expect(countConfiguredConnectors([])).toBe(0)
   })
 
-  it('counts only available=true known sidecars', () => {
+  it('counts only available=true known connectors', () => {
     const list = [
       mkConnector({ connector_id: 'discord', available: true }),
       mkConnector({ connector_id: 'slack', available: false }),
@@ -301,7 +301,7 @@ describe('countConfiguredConnectors', () => {
 describe('stripMemory pure helpers', () => {
   const NOW = 1_700_000_000_000
 
-  it('updateStripMemory records timestamp for each up sidecar, leaves down ones untouched', () => {
+  it('updateStripMemory records timestamp for each up connector, leaves down ones untouched', () => {
     const prev = { lastSeenUp: { discord: NOW - 10_000 } }
     const next = updateStripMemory(prev, [
       mkConnector({ connector_id: 'discord', available: true }),

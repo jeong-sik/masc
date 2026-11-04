@@ -25,8 +25,8 @@ export interface CopyableCodeProps {
   label?: string
   ariaLabel?: string
   /** Visual weight. `primary` = accented border + brighter label,
-      used for the main CTA command in a sequence (e.g. the Start cmd
-      in a sidecar onboarding block). `secondary` (default) = muted,
+      used for the main CTA command in a sequence (e.g. the first
+      command of a setup block). `secondary` (default) = muted,
       used for diagnostic / follow-up commands grouped below the
       primary. Inspired by Vercel "Deploy your project" and Railway
       deploy-log next-steps hierarchy. */

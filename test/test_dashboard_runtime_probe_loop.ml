@@ -2,7 +2,7 @@
    [dashboard_runtime_probe_cache_ttl_sec], and at once when a forced read past
    the recent window asks. A probe a read asked for is announced as
    [runtime_probe]; a periodic one only when what it found differs from the
-   last probe, the times it was checked aside. *)
+   last probe, the times and latencies it was measured with aside. *)
 
 open Alcotest
 open Masc
@@ -12,13 +12,15 @@ module Info = Server_dashboard_http_runtime_info
 let probes = ref 0
 let finding = ref "a"
 
-(* Each probe is checked at a new time; what it finds is [!finding]. *)
+(* Each probe is checked at a new time and reports its own latency; what it
+   finds is [!finding]. *)
 let runner () : Yojson.Safe.t =
   incr probes;
   `Assoc
     [ "probe_ok", `Bool true
     ; "status", `String "reachable"
     ; "marker", `String !finding
+    ; "latency_ms", `Int !probes
     ; "checked_at", `String (string_of_int !probes)
     ; "providers", `List [ `Assoc [ "runtime_id", `String "p.m1"; "checked_at", `Int !probes ] ]
     ]
@@ -103,6 +105,7 @@ let test_a_periodic_probe_is_announced_when_its_findings_move () =
   Eio_mock.Clock.advance clock;
   settle ();
   check int "the interval probes again" 2 !probes;
+  (* [checked_at] and [latency_ms] both moved; neither counts as a finding. *)
   check int "the same findings at a new time are not announced" 1 !heard;
   finding := "b";
   Eio_mock.Clock.advance clock;

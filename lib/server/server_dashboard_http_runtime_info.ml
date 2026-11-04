@@ -1305,14 +1305,24 @@ let probe_dashboard_runtimes () =
   Atomic.set dashboard_runtime_probe_cache (Some { probe; refreshed_at = Time_compat.now () })
 ;;
 
-let rec without_check_times = function
+(* [probe_volatile_key] names what changes on every probe even when nothing
+   about the runtime did: when it was checked and how long the check took.
+   The comparison in [dashboard_runtime_probe_moved] is about what the probe
+   found, not when or how fast it measured. *)
+let probe_volatile_key key =
+  String.equal key "checked_at" || String.equal key "latency_ms"
+;;
+
+let rec without_probe_volatile_fields = function
   | `Assoc fields ->
     `Assoc
       (List.filter_map
          (fun (key, value) ->
-            if String.equal key "checked_at" then None else Some (key, without_check_times value))
+            if probe_volatile_key key
+            then None
+            else Some (key, without_probe_volatile_fields value))
          fields)
-  | `List items -> `List (List.map without_check_times items)
+  | `List items -> `List (List.map without_probe_volatile_fields items)
   | other -> other
 ;;
 
@@ -1320,7 +1330,10 @@ let dashboard_runtime_probe_moved ~previous ~current =
   match previous with
   | None -> true
   | Some previous ->
-    not (Yojson.Safe.equal (without_check_times previous) (without_check_times current))
+    not
+      (Yojson.Safe.equal
+         (without_probe_volatile_fields previous)
+         (without_probe_volatile_fields current))
 ;;
 
 let start_dashboard_runtime_probe_loop ~sw ~clock ~base_path =

@@ -4887,6 +4887,40 @@ let installation_questions ~config =
       in
       loop [] ids))
 
+type inspect_reading = { configuration : Yojson.Safe.t; instances : (string * Yojson.Safe.t) list }
+
+(* The operator's Inspect, split per instance for a reader that compares it
+   over time. A live instance also carries its current and queued action
+   receipts, which Inspect leaves out and Action_status reads. *)
+let inspect_reading ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> Ok None
+  | Some m ->
+      let* json = snapshot m ~access:Lane_addon_sources.Operator_configuration () in
+      let actions = entries m |> List.map (fun e ->
+        e.instance_id, `Assoc [
+          "current", Option.fold ~none:`Null ~some:Lane_addon_action.to_json e.current_action;
+          "queued", `List (List.of_seq (Seq.map Lane_addon_action.to_json (Queue.to_seq e.action_queue)))]) in
+      match json with
+      | `Assoc fields ->
+          let configuration = Option.value ~default:`Null (List.assoc_opt "configuration" fields) in
+          let items = match List.assoc_opt "instances" fields with Some (`List items) -> items | Some _ | None -> [] in
+          let instance item = match item with
+            | `Assoc item_fields ->
+                (match List.assoc_opt "instance_id" item_fields with
+                 | Some (`String id) ->
+                     Ok (id, `Assoc ["inspect", item;
+                       "actions", Option.value ~default:`Null (List.assoc_opt id actions)])
+                 | Some _ | None -> Error "an inspected instance names no instance_id")
+            | _ -> Error "an inspected instance is not an object" in
+          let* instances = List.fold_right (fun item acc ->
+            let* rest = acc in
+            let* one = instance item in
+            Ok (one :: rest)) items (Ok []) in
+          Ok (Some {configuration; instances})
+      | _ -> Error "Inspect did not answer an object")
+
 module For_testing = struct
   let browser_source_table = browser_source_table
   type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string

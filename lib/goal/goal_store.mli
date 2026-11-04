@@ -258,8 +258,8 @@ val write_state : Workspace_utils.config -> state -> unit
     production writers go through the locked read-modify-write operations below. *)
 
 val projection_source_changed : Workspace_utils.config -> unit
-(** A Goal projection source kept outside the Goal file (the verification
-    ledger, the measurement store) was published. Advance the projection
+(** A Goal projection source kept outside the Goal file (the audit event
+    ledger, the verification ledger, the measurement store) was published. Advance the projection
     generation and run the Goal projection mutation hook. Callers run it under
     their store lock after the primary write; the hook must not yield or
     reenter the Goal store. *)

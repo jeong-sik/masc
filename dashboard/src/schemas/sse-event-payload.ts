@@ -22,7 +22,6 @@ import {
   readContentReplacementReplacedPayload,
   readHandoffCompletedPayload,
   readHandoffRequestedPayload,
-  readSlotSchedulerObservedPayload,
   readToolCalledPayload,
   readToolCompletedPayload,
   readTurnCompletedPayload,
@@ -37,7 +36,6 @@ import {
   type ContentReplacementReplacedPayload,
   type HandoffCompletedPayload,
   type HandoffRequestedPayload,
-  type SlotSchedulerObservedPayload,
   type ToolCalledPayload,
   type ToolCompletedPayload,
   type TurnCompletedPayload,
@@ -81,7 +79,6 @@ export type TypedAgentCorePayload =
   | { kind: 'handoff_completed'; payload: HandoffCompletedPayload }
   | { kind: 'content_replacement_replaced'; payload: ContentReplacementReplacedPayload }
   | { kind: 'content_replacement_kept'; payload: ContentReplacementKeptPayload }
-  | { kind: 'slot_scheduler_observed'; payload: SlotSchedulerObservedPayload }
 
 /** Discriminant extracted from the closed union.  Keeping the kind literal in
  *  one place (the union above) eliminates the manual array/switch duplication
@@ -112,7 +109,6 @@ const READERS: ReaderMap = {
   handoff_completed: readHandoffCompletedPayload,
   content_replacement_replaced: readContentReplacementReplacedPayload,
   content_replacement_kept: readContentReplacementKeptPayload,
-  slot_scheduler_observed: readSlotSchedulerObservedPayload,
 }
 
 /** Runtime inventory derived from the reader keys.  The type assertion is
@@ -179,8 +175,7 @@ export function parseAgentCorePayload(
     case 'handoff_requested':
     case 'handoff_completed':
     case 'content_replacement_replaced':
-    case 'content_replacement_kept':
-    case 'slot_scheduler_observed': {
+    case 'content_replacement_kept': {
       const result = tryRead(eventType, READERS[suffix] as PayloadReader<unknown>, raw)
       if (!result.success) return result
       return ok(buildPayload(suffix, result.data as TypedAgentCorePayload['payload']))

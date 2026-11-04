@@ -275,8 +275,7 @@ let test_turn_ready_byte_equal () =
   Alcotest.(check string) "turn_ready typed == baseline" baseline typed
 ;;
 
-(* === PR-4 byte-equal cases: handoff, context, content_replacement,
-   slot_scheduler === *)
+(* === PR-4 byte-equal cases: handoff, context, content_replacement === *)
 
 let baseline_handoff_requested ~from_agent ~to_agent ~reason =
   let payload =
@@ -349,31 +348,6 @@ let baseline_content_replacement_kept ~tool_use_id ~seen_count_after =
     ~correlation_id:common_corr
     ~run_id:common_run
     ~event_type:"content_replacement_kept"
-    ~payload
-    ()
-;;
-
-let baseline_slot_scheduler_observed
-      ~max_slots
-      ~active
-      ~available
-      ~queue_length
-      ~state
-  =
-  let payload =
-    `Assoc
-      [ "max_slots", `Int max_slots
-      ; "active", `Int active
-      ; "available", `Int available
-      ; "queue_length", `Int queue_length
-      ; "state", `String state
-      ]
-  in
-  baseline_wrap_event
-    ~ts:common_ts
-    ~correlation_id:common_corr
-    ~run_id:common_run
-    ~event_type:"slot_scheduler_observed"
     ~payload
     ()
 ;;
@@ -462,34 +436,6 @@ let test_content_replacement_kept_byte_equal () =
   in
   Alcotest.(check string)
     "content_replacement_kept typed == baseline"
-    baseline
-    typed
-;;
-
-let test_slot_scheduler_observed_byte_equal () =
-  let baseline =
-    Yojson.Safe.to_string
-      (baseline_slot_scheduler_observed
-         ~max_slots:8
-         ~active:5
-         ~available:3
-         ~queue_length:0
-         ~state:"idle")
-  in
-  let typed =
-    Yojson.Safe.to_string
-      (Sse_event.slot_scheduler_observed
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
-         ~max_slots:8
-         ~active:5
-         ~available:3
-         ~queue_length:0
-         ~state:"idle")
-  in
-  Alcotest.(check string)
-    "slot_scheduler_observed typed == baseline"
     baseline
     typed
 ;;
@@ -691,8 +637,6 @@ let () =
             test_content_replacement_replaced_byte_equal
         ; Alcotest.test_case "content_replacement_kept" `Quick
             test_content_replacement_kept_byte_equal
-        ; Alcotest.test_case "slot_scheduler_observed" `Quick
-            test_slot_scheduler_observed_byte_equal
         ; Alcotest.test_case "agent_completed (success)" `Quick
             test_agent_completed_response_byte_equal
         ; Alcotest.test_case "agent_failed payload" `Quick

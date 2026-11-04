@@ -71,14 +71,6 @@ export type ContentReplacementKeptPayload = {
   seen_count_after: number /*int*/;
 }
 
-export type SlotSchedulerObservedPayload = {
-  max_slots: number /*int*/;
-  active: number /*int*/;
-  available: number /*int*/;
-  queue_length: number /*int*/;
-  state: string;
-}
-
 export type AgentCompletedPayload = {
   agent_name: string;
   task_id: string;
@@ -268,26 +260,6 @@ export function readContentReplacementKeptPayload(x: any, context: any = x): Con
   return {
     tool_use_id: _atd_read_required_field('ContentReplacementKeptPayload', 'tool_use_id', _atd_read_string, x['tool_use_id'], x),
     seen_count_after: _atd_read_required_field('ContentReplacementKeptPayload', 'seen_count_after', _atd_read_int, x['seen_count_after'], x),
-  };
-}
-
-export function writeSlotSchedulerObservedPayload(x: SlotSchedulerObservedPayload, context: any = x): any {
-  return {
-    'max_slots': _atd_write_required_field('SlotSchedulerObservedPayload', 'max_slots', _atd_write_int, x.max_slots, x),
-    'active': _atd_write_required_field('SlotSchedulerObservedPayload', 'active', _atd_write_int, x.active, x),
-    'available': _atd_write_required_field('SlotSchedulerObservedPayload', 'available', _atd_write_int, x.available, x),
-    'queue_length': _atd_write_required_field('SlotSchedulerObservedPayload', 'queue_length', _atd_write_int, x.queue_length, x),
-    'state': _atd_write_required_field('SlotSchedulerObservedPayload', 'state', _atd_write_string, x.state, x),
-  };
-}
-
-export function readSlotSchedulerObservedPayload(x: any, context: any = x): SlotSchedulerObservedPayload {
-  return {
-    max_slots: _atd_read_required_field('SlotSchedulerObservedPayload', 'max_slots', _atd_read_int, x['max_slots'], x),
-    active: _atd_read_required_field('SlotSchedulerObservedPayload', 'active', _atd_read_int, x['active'], x),
-    available: _atd_read_required_field('SlotSchedulerObservedPayload', 'available', _atd_read_int, x['available'], x),
-    queue_length: _atd_read_required_field('SlotSchedulerObservedPayload', 'queue_length', _atd_read_int, x['queue_length'], x),
-    state: _atd_read_required_field('SlotSchedulerObservedPayload', 'state', _atd_read_string, x['state'], x),
   };
 }
 

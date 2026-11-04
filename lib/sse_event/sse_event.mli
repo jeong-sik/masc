@@ -106,17 +106,6 @@ val content_replacement_kept
   -> seen_count_after:int
   -> Yojson.Safe.t
 
-val slot_scheduler_observed
-  :  ts_unix:float
-  -> correlation_id:string
-  -> run_id:string
-  -> max_slots:int
-  -> active:int
-  -> available:int
-  -> queue_length:int
-  -> state:string
-  -> Yojson.Safe.t
-
 (** [agent_completed] carries a variable-shape success-response tail beyond
     the three base fields ([agent_name], [task_id], [elapsed_s]).
     The tail comes from a runtime-local helper that closes over

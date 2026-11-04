@@ -19064,6 +19064,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight
        owe_harness_read state;
        owe_runtime_config_read state;
        owe_connectors_read state;
+       if Option.is_some (observer_browser_scope state) then
+         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_tools_read state;
        owe_tools_async_task_read state;

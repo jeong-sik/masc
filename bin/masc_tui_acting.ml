@@ -444,7 +444,7 @@ let keeper_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Harness_verdicts | Masc.Workspace_dataset_event.Goals
       | Masc.Workspace_dataset_event.Runtime_config | Masc.Workspace_dataset_event.Connectors
       | Masc.Workspace_dataset_event.Skill_catalog | Masc.Workspace_dataset_event.Clients
-      | Masc.Workspace_dataset_event.Provider_usage )
+      | Masc.Workspace_dataset_event.Provider_usage | Masc.Workspace_dataset_event.Provider_standing )
   | Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -504,6 +504,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> "skills"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> "clients"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> "provider usage"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> "provider standing"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -675,7 +676,9 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a workspace client row changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "provider usage or a runtime's quota standing changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a provider usage report was recorded" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime's quota or rate-limit standing changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

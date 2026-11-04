@@ -540,7 +540,7 @@ let branches_fixture () =
     match state.palette_mode with
     | Palette_branches origin -> origin
     | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _
-    | Palette_worktrees _ ->
+    | Palette_worktrees _ | Palette_search _ ->
         Alcotest.fail "the branch palette did not open"
   in
   let reading, request =
@@ -635,7 +635,7 @@ let worktrees_fixture () =
     match state.palette_mode with
     | Palette_worktrees origin -> origin
     | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _
-    | Palette_branches _ -> Alcotest.fail "the worktree palette did not open"
+    | Palette_branches _ | Palette_search _ -> Alcotest.fail "the worktree palette did not open"
   in
   let reading, request =
     start_read ~equal:code_scope_path_equal state.code_worktrees
@@ -719,6 +719,99 @@ let test_worktree_list_needs_the_palette_and_directory_it_was_asked_in () =
     (match code_worktrees_view state with
      | Fetched.Failed _ -> true
      | Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Stale _ -> false)
+
+let search_match path line text =
+  { Decode.wsm_path = path; wsm_line = line; wsm_text = text }
+
+let search_answer matches =
+  { Decode.wss_root = ""; wss_query = "needle"; wss_ignore_case = false
+  ; wss_matches = matches; wss_truncated = false }
+
+let search_key state query =
+  { css_scope = state.code_scope; css_dir = state.code_dir; css_query = query
+  ; css_ignore_case = false }
+
+(* The Code pane has src/old.ml open at its third line, with the search palette
+   open over it and one answer for "needle" landed. *)
+let search_fixture () =
+  let state, origin = finder_fixture () in
+  state.palette_mode <- Palette_search origin;
+  state.palette_query <- "needle";
+  let reading, request =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "needle") in
+  state.code_search <- reading;
+  let here = search_match "src/old.ml" 2 "let b = needle" in
+  let elsewhere = search_match "lib/new.ml" 7 "let needle = 1" in
+  Code_results.apply_search state request (Ok (search_answer [ here; elsewhere ]));
+  state, request, here, elsewhere
+
+let test_search_answer_lands_unfiltered_and_late_answers_are_dropped () =
+  let state, _, here, _ = search_fixture () in
+  (match code_search_current state with
+   | Some (_, Fetched.Ready answer) ->
+       Alcotest.(check int) "answer kept" 2 (List.length answer.Decode.wss_matches)
+   | Some _ | None -> Alcotest.fail "the answer did not land");
+  state.palette_query <- "zzz-not-in-any-line";
+  Alcotest.(check int) "typed text is the search, not a filter over its answer" 2
+    (List.length (Masc_tui_palette.palette_matches state));
+  (match Masc_tui_palette.palette_matches state with
+   | (_, Masc_tui_palette.Palette_code_search_match first) :: _ ->
+       Alcotest.(check bool) "server order is kept" true (first == here)
+   | _ -> Alcotest.fail "expected search entries first");
+  let reading, newer =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "other") in
+  state.code_search <- reading;
+  let stale_request =
+    snd (start_read ~equal:code_search_key_equal Fetched.initial (search_key state "needle")) in
+  Code_results.apply_search state stale_request (Ok (search_answer [ here ]));
+  Alcotest.(check bool) "an answer for the older key cannot fill the newer one" true
+    (match code_search_current state with
+     | Some (key, Fetched.Loading) -> String.equal key.css_query "other"
+     | Some _ | None -> false);
+  Code_results.apply_search state newer (Error "git failed");
+  Alcotest.(check bool) "a failure is kept, not an empty answer" true
+    (match code_search_current state with
+     | Some (_, Fetched.Failed _) -> true
+     | Some _ | None -> false)
+
+let test_search_answer_needs_the_search_palette_it_was_asked_in () =
+  let state, origin = finder_fixture () in
+  let reading, request =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "needle") in
+  state.code_search <- reading;
+  Code_results.apply_search state request (Ok (search_answer []));
+  Alcotest.(check bool) "a file finder palette does not take a search answer" true
+    (match Fetched.current state.code_search with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.palette_mode <- Palette_search origin;
+  state.code_dir <- "elsewhere";
+  Code_results.apply_search state request (Ok (search_answer []));
+  Alcotest.(check bool) "a palette whose directory moved does not take it" true
+    (match Fetched.current state.code_search with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false)
+
+let test_choosing_a_search_match_opens_it_at_its_line () =
+  let state, _, here, _ = search_fixture () in
+  let foreign = search_match "src/old.ml" 2 "let b = needle" in
+  (match Code_results.choose_search_match state foreign with
+   | Code_results.No_followup -> ()
+   | Code_results.Reveal_cursor | Code_results.Choose_location
+   | Code_results.Read_location_file _ -> Alcotest.fail "a match of no answer was followed");
+  Alcotest.(check bool) "a refused choice leaves the palette open" true state.palette_open;
+  (match Code_results.choose_search_match state here with
+   | Code_results.Reveal_cursor -> ()
+   | Code_results.No_followup | Code_results.Choose_location
+   | Code_results.Read_location_file _ -> Alcotest.fail "the open file should only move its cursor");
+  Alcotest.(check int) "cursor is on the match line" 1 state.code_file_cursor;
+  Alcotest.(check bool) "choosing closes the palette" false state.palette_open;
+  let state, _, _, elsewhere = search_fixture () in
+  (match Code_results.choose_search_match state elsewhere with
+   | Code_results.Read_location_file _ -> ()
+   | Code_results.No_followup | Code_results.Choose_location | Code_results.Reveal_cursor ->
+       Alcotest.fail "another file should be read first");
+  Alcotest.(check bool) "its palette closes too" false state.palette_open
 
 let test_finder_failure_and_cancel_preserve_original () =
   let state, origin = finder_fixture () in
@@ -1663,7 +1756,7 @@ let test_location_picker_survives_finder_idle_and_late_replies () =
        && code_location_offer_current state offer
        && (match state.palette_mode with
            | Palette_locations current -> current == offer
-           | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_jump
+           | Palette_files _ | Palette_search _ | Palette_branches _ | Palette_worktrees _ | Palette_jump
            | Palette_choice _ -> false)
        && state.code_file == source && state.code_jump_back == history
        && state.code_file_cursor=2 && state.code_file_scroll=2
@@ -2116,6 +2209,12 @@ let () =
             test_finder_failure_and_cancel_preserve_original
         ; Alcotest.test_case "scope, authority, source and view retain ownership" `Quick
             test_finder_does_not_borrow_changed_owners
+        ; Alcotest.test_case "search answer lands unfiltered and late answers drop" `Quick
+            test_search_answer_lands_unfiltered_and_late_answers_are_dropped
+        ; Alcotest.test_case "search answer needs the palette and directory it was asked in" `Quick
+            test_search_answer_needs_the_search_palette_it_was_asked_in
+        ; Alcotest.test_case "choosing a search match opens it at its line" `Quick
+            test_choosing_a_search_match_opens_it_at_its_line
         ; Alcotest.test_case "catalog decoder keeps identity and refuses malformed data" `Quick
             test_catalog_decoder_keeps_identity_and_rejects_missing_data
         ; Alcotest.test_case "branches decoder keeps order and every upstream shape" `Quick

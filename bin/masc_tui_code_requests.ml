@@ -66,7 +66,7 @@ let launch_branches state ~host ~deliver =
                    ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
     | Palette_branches _, None ->
         Masc_tui_loader.report_action state "error" "Branches have no workspace identity"
-    | (Palette_files _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
+    | (Palette_files _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
         ()
   end
 
@@ -93,7 +93,7 @@ let launch_worktrees state ~host ~deliver =
     | Palette_worktrees _, None ->
         Masc_tui_loader.report_action state "error" "Worktrees have no workspace identity"
     | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump
-      | Palette_choice _), (Some _ | None) -> ()
+      | Palette_search _ | Palette_choice _), (Some _ | None) -> ()
   end
 
 let open_found_file state ~host ~deliver ~path =
@@ -112,7 +112,7 @@ let open_found_file state ~host ~deliver ~path =
              ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
-  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
+  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump
     | Palette_choice _),
     (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()

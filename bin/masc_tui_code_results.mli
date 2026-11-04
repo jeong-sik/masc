@@ -106,6 +106,16 @@ val apply_worktrees : Masc_tui_types.state ->
   (Masc.Tui_decode.git_worktrees, string) result -> unit
 (** Lands only while the worktree palette that asked is still open over the
     same directory; a late list for another key is dropped. *)
+val apply_search : Masc_tui_types.state ->
+  Masc_tui_types.code_search_key Masc_tui_fetched.request ->
+  (Masc.Tui_decode.workspace_search, string) result -> unit
+(** Lands only while the search palette that asked is still open in the
+    directory it opened in; a late answer for an older key is dropped. *)
+val choose_search_match : Masc_tui_types.state ->
+  Masc.Tui_decode.workspace_search_match -> followup
+(** Open a match of the answer the search palette shows, at its line. Selection
+    closes the palette; anything that is not a member of that answer changes
+    nothing. *)
 val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_file_source, string) result -> bool

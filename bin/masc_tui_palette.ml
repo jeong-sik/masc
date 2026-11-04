@@ -69,6 +69,7 @@ type palette_action =
   | Palette_code_location of code_location_offer * Masc.Tui_decode.lsp_location
   | Palette_code_branch of Masc.Tui_decode.git_branch
   | Palette_code_worktree of Masc.Tui_decode.git_worktree
+  | Palette_code_search_match of Masc.Tui_decode.workspace_search_match
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
@@ -384,6 +385,7 @@ let palette_action_words = function
   | Palette_code_location (_, location) -> [location.Masc.Tui_decode.ll_path]
   | Palette_code_branch branch -> [branch.Masc.Tui_decode.gb_name; branch.gb_subject]
   | Palette_code_worktree worktree -> [worktree.Masc.Tui_decode.gw_name]
+  | Palette_code_search_match found -> [found.Masc.Tui_decode.wsm_path]
 
 (* One branch row: the checked-out mark, the name, how it stands against its
    upstream, the tip's UTC date and its subject. The date comes from the tip
@@ -467,7 +469,7 @@ let palette_matches (state : state) =
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
                    | Palette_code_location _ | Palette_code_branch _
-                   | Palette_code_worktree _ ) ) -> false) entries
+                   | Palette_code_worktree _ | Palette_code_search_match _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
@@ -493,6 +495,17 @@ let palette_matches (state : state) =
                listing.Tui_decode.gws_worktrees
          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
          | Masc_tui_fetched.Failed _ -> [])
+    | Palette_search _ ->
+        (* The typed text is the search, not a filter over its answer: the
+           server already matched every row, so none is ranked away below. *)
+        (match code_search_current state with
+         | Some (_, (Masc_tui_fetched.Ready search | Masc_tui_fetched.Stale (search, _))) ->
+             List.map (fun (found : Masc.Tui_decode.workspace_search_match) ->
+               Printf.sprintf "%s:%d  %s" found.wsm_path found.wsm_line found.wsm_text,
+               Palette_code_search_match found) search.Masc.Tui_decode.wss_matches
+         | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                    | Masc_tui_fetched.Failed _))
+         | None -> [])
     | Palette_locations offer ->
         if not (code_location_offer_current state offer) then []
         else List.map (fun location ->
@@ -516,12 +529,14 @@ let palette_matches (state : state) =
     else if List.exists (palette_subsequence ~needle) texts then Some Characters_in_order
     else None
   in
-  entries
-  |> List.filter_map (fun entry ->
-         Option.map (fun r -> (r, entry)) (rank entry))
-  |> List.stable_sort (fun (a, _) (b, _) ->
-         Int.compare (answer_order a) (answer_order b))
-  |> List.map snd
+  match state.palette_mode with
+  | Palette_search _ -> entries
+  | Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _ | Palette_worktrees _ ->
+      entries
+      |> List.filter_map (fun entry ->
+             Option.map (fun r -> (r, entry)) (rank entry))
+      |> List.stable_sort (fun (a, _) (b, _) -> Int.compare (answer_order a) (answer_order b))
+      |> List.map snd
 
 let selected_file state =
   let matches = palette_matches state in
@@ -533,7 +548,7 @@ let selected_file state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_location _ | Palette_code_branch _ | Palette_code_worktree _))
+    | Palette_code_location _ | Palette_code_branch _ | Palette_code_worktree _ | Palette_code_search_match _))
   | None -> None
 
 let selected_location state =
@@ -546,5 +561,19 @@ let selected_location state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_file _ | Palette_code_branch _ | Palette_code_worktree _))
+    | Palette_code_file _ | Palette_code_branch _ | Palette_code_worktree _ | Palette_code_search_match _))
+  | None -> None
+
+let selected_search_match state =
+  let matches = palette_matches state in
+  let cursor = max 0 (min state.palette_cursor (List.length matches - 1)) in
+  match List.nth_opt matches cursor with
+  | Some (_, Palette_code_search_match found) -> Some found
+  | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
+    | Palette_goto _ | Palette_goal_payouts
+    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
+    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+    | Palette_code_file _ | Palette_code_location _ | Palette_code_branch _
+    | Palette_code_worktree _))
   | None -> None

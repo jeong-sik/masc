@@ -36088,7 +36088,7 @@ Use relative paths for resources already held in the package. -->
              match state.palette_mode with
              | Palette_jump -> Masc_tui_palette.palette_typed_question state.palette_query
              | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
-             | Palette_worktrees _ -> None
+             | Palette_worktrees _ | Palette_search _ -> None
            in
            let move_palette by =
              state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
@@ -36099,9 +36099,26 @@ Use relative paths for resources already held in the package. -->
            (match k with
             | "esc" -> close ()
             | "\r" when (match state.palette_mode with
+                | Palette_search _ -> true
+                | Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
+                | Palette_worktrees _ -> false) ->
+                (match Masc_tui_palette.selected_search_match state with
+                 | None -> ()
+                 | Some found ->
+                     match Code_results.choose_search_match state found with
+                     | Code_results.No_followup | Code_results.Choose_location -> ()
+                     | Code_results.Reveal_cursor ->
+                         state.code_file_scroll <- Masc_tui_scroll.ensure_visible
+                           ~cursor:state.code_file_cursor
+                           ~height:(Masc_tui_render_code.code_pane_content_height state)
+                           state.code_file_scroll
+                     | Code_results.Read_location_file (owner, request) ->
+                         Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
+                           ~deliver:(workspace_enqueue state async_messages) owner request)
+            | "\r" when (match state.palette_mode with
                 | Palette_locations _ -> true
                 | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _
-                | Palette_worktrees _ -> false) ->
+                | Palette_worktrees _ | Palette_search _ -> false) ->
                 (match Masc_tui_palette.selected_location state with
                  | None -> ()
                  | Some (offer, location) ->
@@ -36117,14 +36134,15 @@ Use relative paths for resources already held in the package. -->
                            ~deliver:(deliver_code state async_messages) owner request)
             | "\r" when (match state.palette_mode with
                 | Palette_branches _ | Palette_worktrees _ -> true
-                | Palette_files _ | Palette_jump | Palette_choice _ | Palette_locations _ -> false) ->
+                | Palette_files _
+                | Palette_jump | Palette_choice _ | Palette_locations _ | Palette_search _ -> false) ->
                 (* The lists are read-only: a branch or a worktree offers
                    nothing to open, so Enter closes it the way Esc does. *)
                 close ()
             | "\r" when (match state.palette_mode with
                 | Palette_files _ -> true
                 | Palette_jump | Palette_choice _ | Palette_locations _ | Palette_branches _
-                | Palette_worktrees _ -> false) ->
+                | Palette_worktrees _ | Palette_search _ -> false) ->
                 Option.iter (fun path ->
                     Masc_tui_code_requests.open_found_file state ~host:server_peer_host
                       ~deliver:(deliver_code state async_messages) ~path)
@@ -36172,7 +36190,8 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_code_file _
                         | Masc_tui_palette.Palette_code_location _
                         | Masc_tui_palette.Palette_code_branch _
-                        | Masc_tui_palette.Palette_code_worktree _ ) )
+                        | Masc_tui_palette.Palette_code_worktree _
+                        | Masc_tui_palette.Palette_code_search_match _ ) )
                   | None ->
                       report_action state "error"
                         (question ^ " needs a symbol: :" ^ question
@@ -36311,7 +36330,8 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, (Masc_tui_palette.Palette_code_file _
                      | Masc_tui_palette.Palette_code_location _
                      | Masc_tui_palette.Palette_code_branch _
-                     | Masc_tui_palette.Palette_code_worktree _)) | None -> ())
+                     | Masc_tui_palette.Palette_code_worktree _
+                     | Masc_tui_palette.Palette_code_search_match _)) | None -> ())
             | "down" | "\014" -> move_palette 1
             | "up" | "\016" -> move_palette (-1)
             | "home" -> move_palette (-state.palette_cursor)

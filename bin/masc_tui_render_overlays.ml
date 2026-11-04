@@ -375,6 +375,7 @@ let palette_noun : palette_mode -> string * string = function
   | Masc_tui_types.Palette_locations _ -> ("location", "locations")
   | Masc_tui_types.Palette_branches _ -> ("branch", "branches")
   | Masc_tui_types.Palette_worktrees _ -> ("worktree", "worktrees")
+  | Masc_tui_types.Palette_search _ -> ("match", "matches")
 
 let palette_count mode count =
   let singular, plural = palette_noun mode in
@@ -391,7 +392,7 @@ let render_palette (state : state) =
         Masc_tui_palette.palette_typed_question state.palette_query
     | Masc_tui_types.Palette_choice _ | Masc_tui_types.Palette_files _
     | Masc_tui_types.Palette_locations _ | Masc_tui_types.Palette_branches _
-    | Masc_tui_types.Palette_worktrees _ -> None
+    | Masc_tui_types.Palette_worktrees _ | Masc_tui_types.Palette_search _ -> None
   in
   let explicit_question =
     match typed_question with
@@ -423,6 +424,8 @@ let render_palette (state : state) =
         (" MASC Branches", "filter:", "close")
     | Masc_tui_types.Palette_worktrees _ ->
         (" MASC Worktrees", "filter:", "close")
+    | Masc_tui_types.Palette_search _ ->
+        (" MASC Search in files", "search:", "open")
     | Masc_tui_types.Palette_locations offer ->
         let query = Masc_tui_fetched.request_key offer.clo_query in
         (Printf.sprintf " %s · %s" query.clq_question
@@ -488,6 +491,19 @@ let render_palette (state : state) =
                    (if String.equal listing.gbs_root "" then "workspace checkout"
                     else listing.gbs_root)
                    (if listing.gbs_truncated then " · newest only" else "") ])
+    | Palette_search _ ->
+        List.map Terminal_text.single_line
+          (match code_search_current state with
+           | None -> [ "Type text, then Enter to search the checkout" ]
+           | Some (key, Masc_tui_fetched.Loading) ->
+               [ "Searching for " ^ key.css_query ^ "…" ]
+           | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
+               [ detail ]
+           | Some (_, Masc_tui_fetched.Ready search) ->
+               [ Printf.sprintf "%d matches%s"
+                   (List.length search.Tui_decode.wss_matches)
+                   (if search.wss_truncated then " · more exist, narrow the text" else "") ]
+           | Some (_, Masc_tui_fetched.Absent) -> [])
     | Palette_locations offer ->
         if code_location_offer_current state offer then
           ["Choose a returned file and line · Esc keeps the current reading"]
@@ -566,8 +582,9 @@ let render_palette (state : state) =
                      | Masc_tui_fetched.Ready _ -> false
                      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                      | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _ -> true) -> ()
-             | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
-               | Palette_jump | Palette_choice _),
+             | (Palette_files _ | Palette_search _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
+               | Palette_jump
+               | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
                  c.push ("   No matching "

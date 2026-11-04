@@ -151,6 +151,30 @@ let test_mode_events_in_turn () =
      : S.t)
 ;;
 
+(* A mode event is an intent of the external store with the same event and
+   workspace (design 8.2). *)
+let test_mode_events_are_intents () =
+  let change =
+    Alcotest.testable
+      (fun fmt c -> Format.pp_print_string fmt (Authz_external_store.Change.to_string c))
+      Authz_external_store.Change.equal
+  in
+  ignore
+    (List.fold_left
+       (fun state event ->
+         match S.apply state (mode_record event workspace) with
+         | Error refusal -> Alcotest.failf "%s refused: %s" (M.event_label event) (S.refusal_to_string refusal)
+         | Ok { S.state = next; high_water } ->
+           Alcotest.(check (option change))
+             (M.event_label event)
+             (Some (Authz_external_store.Change.Mode { event; workspace_id = workspace }))
+             high_water;
+           next)
+       S.empty
+       [ M.Fresh_bootstrap; M.Off; M.Reactivate ]
+     : S.t)
+;;
+
 (* ---- records ---- *)
 
 let test_bootstrap_record () =
@@ -238,6 +262,7 @@ let () =
       , [ Alcotest.test_case "every pair" `Quick test_every_pair
         ; Alcotest.test_case "workspace differs" `Quick test_workspace_differs
         ; Alcotest.test_case "in turn" `Quick test_mode_events_in_turn
+        ; Alcotest.test_case "intents of the store" `Quick test_mode_events_are_intents
         ] )
     ; ( "records"
       , [ Alcotest.test_case "bootstrap" `Quick test_bootstrap_record

@@ -139,6 +139,23 @@ module Probe : sig
       The records are those that {!Authz_log} has checked, so their hashes and
       links are not checked again. *)
   val add : t -> Authz_record.t -> t
+
+  (** The probe after the external store took [entry], for a writer that keeps
+      one probe while it writes both files, so that it does not read the log
+      again. [Error] is the violation the store refuses [entry] with
+      ({!Authz_external_store.apply}): the writer asks here before it writes
+      the entry.
+
+      An [Intent_pending] is taken to have no record after its previous hash.
+      That holds for an intent at the last record fed to the probe, as the
+      intent of a writer is. An intent at an earlier record reads as
+      {!Intent_unplaced}, and never as {!Abort}. A [Committed] counts as in the
+      log when the record after the previous hash of the intent it closes was
+      fed. *)
+  val store_moved
+    :  t
+    -> Authz_external_store.entry
+    -> (t, Authz_external_store.violation) result
 end
 
 (** Items 2, 3 and 5: what closes the pending intent. [Error] holds the reason

@@ -62,19 +62,6 @@ let read_config ~base_path =
           absent ("not a JSON object: " ^ Yojson.Safe.to_string json)))
 ;;
 
-(* What the fold over the log keeps: the probe of the high-water mark and the
-   state of the records. *)
-type fold =
-  { probe : H.Probe.t
-  ; state : Authz_state.t
-  }
-
-let step acc (record : R.t) =
-  match Authz_state.step acc.state record with
-  | Ok state -> Ok { probe = H.Probe.add acc.probe record; state }
-  | Error refusal -> Error refusal
-;;
-
 (* The state of the external store that the install record names. [None] when
    there is no config directory, no record, or no store where the record points
    (design 8.4). *)
@@ -102,7 +89,7 @@ let store_state ~config_dir ~base_path : (S.State.t option, string) result =
 type log_read =
   | Log_not_there
   | Log_cannot_check of string
-  | Log_opened of (fold, string) result
+  | Log_opened of (Authz_zone.Replay.t, string) result
 
 let read_log ~base_path ~state =
   let path = L.path_of_base_path ~base_path in
@@ -111,10 +98,10 @@ let read_log ~base_path ~state =
   | P.Cannot_check detail -> Log_cannot_check (Printf.sprintf "%s: %s" path detail)
   | P.There ->
     (match
-       L.open_at_start ~path ~init:{ probe = H.Probe.create state; state = Authz_state.empty } ~step
+       L.open_at_start ~path ~init:(Authz_zone.Replay.init state) ~step:Authz_zone.Replay.step
      with
      | Error error -> Log_opened (Error (L.open_error_to_string Authz_state.refusal_to_string error))
-     | Ok (_log, fold, _recovered) -> Log_opened (Ok fold))
+     | Ok (_log, replay, _recovered) -> Log_opened (Ok replay))
 ;;
 
 let read_log_and_store ~base_path ~config_dir =
@@ -129,13 +116,13 @@ let read_log_and_store ~base_path ~config_dir =
     match log with
     | Log_not_there -> B.No_mode_event
     | Log_cannot_check detail | Log_opened (Error detail) -> B.Log_unreadable detail
-    | Log_opened (Ok fold) -> B.of_mode_state fold.state.Authz_state.mode
+    | Log_opened (Ok replay) -> B.of_mode_state replay.Authz_zone.Replay.state.Authz_state.mode
   in
   let high_water =
     match store, log with
     | Error detail, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Store_unreadable detail
     | Ok None, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Judged H.Absent
-    | Ok (Some _), Log_opened (Ok fold) -> B.Judged (H.judge fold.probe)
+    | Ok (Some _), Log_opened (Ok replay) -> B.Judged (H.judge replay.Authz_zone.Replay.probe)
     | Ok (Some state), Log_not_there -> B.Judged (H.judge (H.Probe.create state))
     | Ok (Some _), (Log_cannot_check _ | Log_opened (Error _)) ->
       B.Store_unreadable "it was not judged, because the authorization log cannot be read"

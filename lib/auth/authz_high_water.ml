@@ -57,6 +57,28 @@ module Probe = struct
     in
     { probe with head = record.Authz_record.hash; after_previous; commit_seen }
   ;;
+
+  (* No record follows the previous hash of a new intent when that hash is the
+     head, as it is for the intent of a writer. An intent at an earlier record
+     keeps [after_previous] at [None] with a head that differs, which [settle]
+     reads as [Intent_unplaced], never as [Abort]. A [Committed] closes the
+     pending intent with the hash it named, so it is in the log when the record
+     after the previous hash of that intent was fed. *)
+  let store_moved probe entry =
+    match Store.apply probe.state entry with
+    | Error violation -> Error violation
+    | Ok state ->
+      (match entry with
+       | Store.Intent_pending _ | Store.Aborted_intent _ ->
+         Ok { probe with state; after_previous = None }
+       | Store.Committed { record_hash } ->
+         let commit_seen =
+           match probe.after_previous with
+           | Some found -> Hash.equal found record_hash
+           | None -> false
+         in
+         Ok { probe with state; after_previous = None; commit_seen })
+  ;;
 end
 
 (* Items 2, 3 and 5 of design 8.2: the record after the previous hash of the

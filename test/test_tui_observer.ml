@@ -157,7 +157,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Clients -> "")
          | Masc.Workspace_dataset_event.Clients
-         | Masc.Workspace_dataset_event.Provider_usage -> "")
+         | Masc.Workspace_dataset_event.Provider_usage
+         | Masc.Workspace_dataset_event.Provider_standing -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -935,6 +936,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
+                  | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config )
               | None -> false)
@@ -1001,6 +1003,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
+                  | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config )
               | None -> false)
@@ -1021,6 +1024,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Clients )
               | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Provider_usage
+              | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
           | None -> true)
@@ -1066,12 +1070,19 @@ let test_a_connector_push_names_its_connector () =
       fail
         ("a connector push without a connector was read: "
          ^ String.concat ", " (List.map summary decoded))
-  check (list string) "Clients and provider usage pushes decode by name"
-    [ "dataset(clients)"; "dataset(provider_usage)" ]
+  check (list string) "Clients and provider usage and standing pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)"; "dataset(provider_standing)" ]
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]));
+  check (list string) "a Keeper's metrics push names its Keeper"
+    [ "dataset(keeper_metrics:alpha)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]));
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
           ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
           ]));
 
 

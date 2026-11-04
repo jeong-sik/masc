@@ -30,11 +30,14 @@ type dataset =
           agent record's row ({!Workspace_agent_record}) or a purge. Keeper
           registry rows change with [keeper_row_changed] instead. *)
   | Provider_usage
-      (** A provider usage report was recorded (the windows of
+      (** A provider usage report was recorded: the windows of
           [GET /api/v1/runtime/resolved] and the points of
-          [GET /api/v1/dashboard/provider-usage-history]), or a runtime's
-          quota or rate-limit standing in that document changed, a reset
-          passing included. *)
+          [GET /api/v1/dashboard/provider-usage-history] moved. *)
+  | Provider_standing
+      (** A runtime's quota or rate-limit standing in
+          [GET /api/v1/runtime/resolved] changed, a reset passing included,
+          or the standing stopped or started building. The history does not
+          move with it. *)
 
 val event_type : string
 

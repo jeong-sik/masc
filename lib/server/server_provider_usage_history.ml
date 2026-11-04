@@ -13,12 +13,16 @@ let scope_id = Runtime_quota_window.scope_id
 let install config =
   let journal = store config in
   Usage.set_record_observer (fun ~scope ~observed_at report ->
-    Dated_jsonl.append journal
-      (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report));
-    (* The windows the resolved document draws and the history points both
-       moved. *)
-    Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
-      Workspace_dataset_event.Provider_usage)
+    (* The windows the resolved document draws moved whatever the journal
+       took, and a report it refused leaves the history answer incomplete:
+       a reader looks either way. *)
+    Fun.protect
+      ~finally:(fun () ->
+        Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+          Workspace_dataset_event.Provider_usage)
+      (fun () ->
+        Dated_jsonl.append journal
+          (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report))))
 
 type window = One_day | Seven_days | Fourteen_days
 

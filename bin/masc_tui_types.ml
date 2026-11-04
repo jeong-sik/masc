@@ -5756,6 +5756,9 @@ type tools_activations =
   | Activations_no_keeper
   | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
 
+(* A failed Activations read, held for the Keeper it was made for. *)
+type activations_failure = { taf_keeper : string; taf_detail : string }
+
 (* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
    beside the failure. *)
 type keeper_skill_usage_reading =
@@ -10634,7 +10637,7 @@ type state = {
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable tools_activations: tools_activations option;
-  mutable tools_activations_error: string option;
+  mutable tools_activations_error: activations_failure option;
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
      Keeper that left the roster leaves this list at the next read. *)
   mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;

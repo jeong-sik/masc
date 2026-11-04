@@ -4086,15 +4086,18 @@ let launch_tools_parts state ~mailbox parts =
              own route answers (RFC-0483). *)
           Option.iter
             (fun keeper ->
-               (* A reading held for no Keeper or for another one is not this
-                  Keeper's, so it is not kept on screen while this read runs. *)
+               (* A reading or a failure held for no Keeper or for another one
+                  is not this Keeper's, so it is not kept on screen while this
+                  read runs. *)
                (match state.tools_activations with
                 | Some (Activations_read projection)
                   when String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper -> ()
-                | Some (Activations_read _ | Activations_no_keeper) ->
-                    state.tools_activations <- None;
-                    state.tools_activations_error <- None
+                | Some (Activations_read _ | Activations_no_keeper) -> state.tools_activations <- None
                 | None -> ());
+               (match state.tools_activations_error with
+                | Some failure when not (String.equal failure.taf_keeper keeper) ->
+                    state.tools_activations_error <- None
+                | Some _ | None -> ());
                state.tools_activations_owed <- Masc_tui_owed_read.started state.tools_activations_owed;
                launch_workspace_json_read state ~mailbox
                  ~deliver:(fun result ->
@@ -9255,14 +9258,18 @@ let launch_owed_tools_async_task state ~mailbox =
       launch_tools_async_task state ~mailbox
   end
 
-(* Whether the Activations reading on screen belongs to a Keeper other than
-   [selected], or to none while one is selected. *)
+(* Whether the Activations reading on screen, or the failure held without
+   one, belongs to a Keeper other than [selected], or to none while one is
+   selected. *)
 let activations_held_for_another state selected =
-  match selected, state.tools_activations with
-  | Some keeper, Some (Activations_read projection) ->
+  match selected, state.tools_activations, state.tools_activations_error with
+  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
       not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
-  | Some _, Some Activations_no_keeper | None, Some (Activations_read _) -> true
-  | Some _, None | None, (Some Activations_no_keeper | None) -> false
+  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
+  | Some _, Some Activations_no_keeper, (Some _ | None)
+  | None, Some (Activations_read _), (Some _ | None) -> true
+  | Some _, None, None
+  | None, (Some Activations_no_keeper | None), (Some _ | None) -> false
 
 (* Runs on every loop iteration. The selected Keeper's inventory reads while
    any pane but Async is on screen, the skills catalog and each roster
@@ -27155,7 +27162,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_activations_error <- None;
           state.tools_activations_owed <- Masc_tui_owed_read.succeeded state.tools_activations_owed
       | Error detail ->
-          state.tools_activations_error <- Some detail;
+          state.tools_activations_error <- Some { taf_keeper = keeper; taf_detail = detail };
           state.tools_activations_owed <- failed_read state.tools_activations_owed)
   | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
       settle_tools_skill_read state ~generation (Tools_usage_read keeper);

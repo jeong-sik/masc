@@ -1657,8 +1657,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     lazy begin
       (match state.tools_activations_error with
        | None -> []
-       | Some error ->
-           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line error ])
+       | Some { taf_detail; _ } ->
+           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line taf_detail ])
       @ Lazy.force activation_reading_lines
     end
   in
@@ -2092,7 +2092,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         state.tools_error
     | Tools_activations ->
         Tools_activations_read, "Skill activations", Option.is_some state.tools_activations,
-        state.tools_activations_error
+        Option.map (fun failure -> failure.taf_detail) state.tools_activations_error
     | Tools_usage ->
         Tools_catalog_read, "Skills catalog", Option.is_some state.skills_catalog,
         state.skills_catalog_error

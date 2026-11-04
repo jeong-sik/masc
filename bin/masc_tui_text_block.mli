@@ -7,6 +7,12 @@
 
 val rows : max_cells:int -> string -> string list
 
+val preformatted_rows : max_cells:int -> string -> string list
+(** {!rows} for text whose indentation is its structure: pretty-printed JSON,
+    code, an indented list. A line keeps the spaces it opens with, up to half
+    of [max_cells], and the rows it wraps to start at the same indent. {!rows}
+    reads the same text as prose and drops those spaces. *)
+
 val lines : string -> string list
 (** Split at LF, removing a trailing CR only when it belongs to that LF's
     CRLF terminator. Preserve blank lines, spaces, and standalone CR,

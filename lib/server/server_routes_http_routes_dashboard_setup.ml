@@ -6,9 +6,6 @@ module Mcp_eio = Mcp_server_eio
 module Pages = Server_routes_http_pages
 module Keeper_api = Server_dashboard_http_keeper_api
 
-(* Dashboard /logs JSON builder extracted to
-   [Server_dashboard_logs_json] (godfile decomp). *)
-let dashboard_logs_json = Server_dashboard_logs_json.build
 
 module Provider_logs = Server_routes_http_dashboard_provider_logs
 

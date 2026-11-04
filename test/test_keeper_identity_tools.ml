@@ -124,7 +124,8 @@ let transports_of_post send =
 
 let execute_offered ?(post = never_post) ~base_path
     (offered : Identity_tools.offered_tool) arguments =
-  Identity_tools.tool_result_of_call
+  Identity_tools.tool_result_of_call ~base_path
+    ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes
     (Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path)
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
@@ -1370,11 +1371,16 @@ let test_post_send_401_does_not_refresh_and_repeat () =
    | Ok _ -> Alcotest.fail "post-send 401 became success");
   check Alcotest.int "tool request was sent only once" 1 !calls
 
+(* The model's view of an answer far below the ceiling: nothing is stored. *)
+let small_answer_view answer =
+  Identity_tools.tool_result_of_call ~base_path:(Filename.get_temp_dir_name ())
+    ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+
 let test_tool_error_does_not_authorize_retry () =
   let result : Mcp_client.tool_result =
     { is_error = true; text = "provider failed"; content = `List []; structured_content = None }
   in
-  match Identity_tools.tool_result_of_call (Ok result) with
+  match small_answer_view (Ok result) with
   | Error error ->
     check Alcotest.bool "a partial external effect cannot be excluded" false
       error.Agent_core.Types.recoverable
@@ -1394,7 +1400,7 @@ let test_post_send_errors_do_not_prove_no_effect () =
     let call_error = Identity_tools.Mcp { phase = Identity_tools.Tool_call; error } in
     check Alcotest.bool "post-send response leaves effect unknown" true
       (Identity_tools.effect_disposition_of_call_error call_error = Tool_result.Effect_outcome_unknown);
-    match Identity_tools.tool_result_of_call (Error call_error) with
+    match small_answer_view (Error call_error) with
     | Error result -> check Alcotest.bool "do not offer an automatic retry" false result.Agent_core.Types.recoverable
     | Ok _ -> Alcotest.fail "remote error became success")
     [ Mcp_client.Unauthorized { resource_metadata = None }

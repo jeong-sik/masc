@@ -22,6 +22,8 @@
         "stale_image_share_keep_latest_3": 0.812,
         "stale_image_share_median_keep_latest_1": 0.812,
         "stale_image_share_median_keep_latest_3": 0.799,
+        "system_prompt_bytes_p50": 125602,
+        "tool_schema_bytes_p50": 98223,
         "unanswered_body_bytes": 2786260898,
         "unanswered_requests": 37,
         "untraced_requests": 0
@@ -43,6 +45,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 123527,
+        "tool_schema_bytes_p50": 91372,
         "unanswered_body_bytes": 691375,
         "unanswered_requests": 1,
         "untraced_requests": 4
@@ -64,6 +68,8 @@
         "stale_image_share_keep_latest_3": 0.015,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 121248,
+        "tool_schema_bytes_p50": 92865,
         "unanswered_body_bytes": 56033165,
         "unanswered_requests": 25,
         "untraced_requests": 8
@@ -85,6 +91,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 121336,
+        "tool_schema_bytes_p50": 102970,
         "unanswered_body_bytes": 21775527,
         "unanswered_requests": 13,
         "untraced_requests": 6
@@ -106,6 +114,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 122824,
+        "tool_schema_bytes_p50": 82440,
         "unanswered_body_bytes": 13929356,
         "unanswered_requests": 11,
         "untraced_requests": 102
@@ -127,6 +137,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 123078,
+        "tool_schema_bytes_p50": 83060,
         "unanswered_body_bytes": 0,
         "unanswered_requests": 0,
         "untraced_requests": 2
@@ -148,6 +160,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 121010,
+        "tool_schema_bytes_p50": 97928,
         "unanswered_body_bytes": 7804621,
         "unanswered_requests": 5,
         "untraced_requests": 3
@@ -169,6 +183,8 @@
         "stale_image_share_keep_latest_3": 0.0,
         "stale_image_share_median_keep_latest_1": 0.0,
         "stale_image_share_median_keep_latest_3": 0.0,
+        "system_prompt_bytes_p50": 121513,
+        "tool_schema_bytes_p50": 90996,
         "unanswered_body_bytes": 8250057,
         "unanswered_requests": 6,
         "untraced_requests": 49
@@ -176,6 +192,98 @@
     ],
     "keepers": 25,
     "requests": 3217,
+    "tool_schemas": {
+      "heaviest_by_total_bytes": [
+        {
+          "bytes_p50": 22093,
+          "bytes_sum": 72191167,
+          "requests": 3213,
+          "share_of_requests": 0.999,
+          "share_of_tool_bytes": 0.225,
+          "tool": "keeper_skill"
+        },
+        {
+          "bytes_p50": 4725,
+          "bytes_sum": 15081718,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.047,
+          "tool": "BrowserSession"
+        },
+        {
+          "bytes_p50": 4423,
+          "bytes_sum": 13992628,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.044,
+          "tool": "BrowserTabs"
+        },
+        {
+          "bytes_p50": 25659,
+          "bytes_sum": 12638607,
+          "requests": 498,
+          "share_of_requests": 0.155,
+          "share_of_tool_bytes": 0.039,
+          "tool": "BrowserInteract"
+        },
+        {
+          "bytes_p50": 3629,
+          "bytes_sum": 12497788,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.039,
+          "tool": "keeper_tool_search"
+        },
+        {
+          "bytes_p50": 3185,
+          "bytes_sum": 10246145,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.032,
+          "tool": "keeper_tasks_list"
+        },
+        {
+          "bytes_p50": 2914,
+          "bytes_sum": 9374338,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.029,
+          "tool": "masc_board_post"
+        },
+        {
+          "bytes_p50": 5433,
+          "bytes_sum": 9252399,
+          "requests": 1703,
+          "share_of_requests": 0.529,
+          "share_of_tool_bytes": 0.029,
+          "tool": "masc_schedule_create"
+        },
+        {
+          "bytes_p50": 2755,
+          "bytes_sum": 8862835,
+          "requests": 3217,
+          "share_of_requests": 1.0,
+          "share_of_tool_bytes": 0.028,
+          "tool": "keeper_memory_search"
+        },
+        {
+          "bytes_p50": 3645,
+          "bytes_sum": 8474625,
+          "requests": 2325,
+          "share_of_requests": 0.723,
+          "share_of_tool_bytes": 0.026,
+          "tool": "keeper_memory_write"
+        }
+      ],
+      "requests": 3217,
+      "system_prompt_bytes_p50": 121419,
+      "tool_bytes_max": 171592,
+      "tool_bytes_mean": 99781,
+      "tool_bytes_p50": 93177,
+      "tools_and_system_share_of_body_p50": 0.176,
+      "tools_max": 60,
+      "tools_p50": 45
+    },
     "unanswered_body_bytes": 2915441193,
     "unanswered_requests": 131,
     "untraced_requests": 232
@@ -381,6 +489,119 @@
     "mean_input_tokens": 357004,
     "output_tokens": 23058703,
     "requests": 35684
+  },
+  "skill_calls": {
+    "calls": 1235,
+    "calls_by_keepers_without_usage_events": 183,
+    "calls_per_100_requests": 2.95,
+    "calls_without_identity": 1,
+    "carrying_keepers": 23,
+    "carrying_keepers_without_calls": 0,
+    "carrying_keepers_without_calls_requests": 0,
+    "keepers_with_calls": 27,
+    "keepers_with_calls_and_no_usage_events": 4,
+    "model_requests": 35684,
+    "skills_opened": 40,
+    "tool": "keeper_skill",
+    "top_keepers": [
+      {
+        "calls": 221,
+        "calls_per_100_requests": 14.14,
+        "keeper": "code-reviewer",
+        "requests": 1563,
+        "share_of_calls": 0.179
+      },
+      {
+        "calls": 180,
+        "calls_per_100_requests": 85.31,
+        "keeper": "code-reviewer-mother",
+        "requests": 211,
+        "share_of_calls": 0.146
+      },
+      {
+        "calls": 178,
+        "calls_per_100_requests": 99.44,
+        "keeper": "code-reviewer-brother",
+        "requests": 179,
+        "share_of_calls": 0.144
+      },
+      {
+        "calls": 165,
+        "calls_per_100_requests": null,
+        "keeper": "you-never-change",
+        "requests": 0,
+        "share_of_calls": 0.134
+      },
+      {
+        "calls": 121,
+        "calls_per_100_requests": 288.1,
+        "keeper": "code-reviewer-sister",
+        "requests": 42,
+        "share_of_calls": 0.098
+      },
+      {
+        "calls": 91,
+        "calls_per_100_requests": 8.67,
+        "keeper": "context-reviewer",
+        "requests": 1050,
+        "share_of_calls": 0.074
+      },
+      {
+        "calls": 86,
+        "calls_per_100_requests": 8.16,
+        "keeper": "code-reviewer-uncle",
+        "requests": 1054,
+        "share_of_calls": 0.07
+      },
+      {
+        "calls": 31,
+        "calls_per_100_requests": 0.69,
+        "keeper": "msx-retro-mania",
+        "requests": 4463,
+        "share_of_calls": 0.025
+      }
+    ],
+    "top_skills": [
+      {
+        "calls": 371,
+        "share_of_calls": 0.3,
+        "skill": "masc-pr-adversarial-read"
+      },
+      {
+        "calls": 233,
+        "share_of_calls": 0.189,
+        "skill": "masc-pr-review-grades"
+      },
+      {
+        "calls": 120,
+        "share_of_calls": 0.097,
+        "skill": "masc-guard-approval"
+      },
+      {
+        "calls": 67,
+        "share_of_calls": 0.054,
+        "skill": "verify-before-claiming-done"
+      },
+      {
+        "calls": 47,
+        "share_of_calls": 0.038,
+        "skill": "root-cause-first"
+      }
+    ]
+  },
+  "skill_catalog": {
+    "block_bytes_max": 23201,
+    "block_bytes_p50": 19425,
+    "description_bytes_per_row_mean": 287,
+    "description_share_of_block": 0.731,
+    "distinct_lists": 20,
+    "identity_bytes_per_row_mean": 103,
+    "identity_share_of_block": 0.261,
+    "lists_read": 3213,
+    "lists_unreadable": 0,
+    "requests_with_tool": 3213,
+    "rows_max": 56,
+    "rows_p50": 50
   },
   "window": {
     "from": "2026-11-01",

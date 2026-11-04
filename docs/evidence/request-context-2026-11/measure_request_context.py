@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure how much context each Keeper's model requests carry.
 
-Reads two stores under `<base-path>/.masc`, never writes to them:
+Reads four stores under `<base-path>/.masc`, never writes to them:
 
 - `keeper_turn_events/<keeper>/<trace_id>-<absolute_turn>-<hash>.jsonl`: one turn
   trace per file. An `agent_core_stream_message_delta` event with a `usage`
@@ -12,6 +12,9 @@ Reads two stores under `<base-path>/.masc`, never writes to them:
   the size of the HTTP body. Every message lists its `media`. Other requests of
   the same turn are not captured, so the sizes describe the captured requests
   only.
+- `tool_blobs/<sha[:2]>/<sha>`: the stored JSON of a tool schema, named by the
+  `sha256=` in the capture's `content_ref`.
+- `tool_calls/YYYY-MM/DD[.NNN].jsonl`: the tool-call ledger.
 
 Definitions:
 
@@ -27,6 +30,19 @@ Definitions:
   policy that exists: no code drops images from the history today.
 - same-size requests: the largest number of captured requests of one Keeper that
   share one `body_bytes` value, and that value.
+- tool schema bytes: the sum of `tool_schemas[].artifact.bytes` of a captured
+  request. Each entry is the JSON of one tool (name, description, input schema)
+  as the Keeper sent it. A tool's total is the sum of its schema bytes over the
+  captured requests that carry it. `system_prompt.bytes` is the system prompt.
+- skill list: the `Available:` block at the end of the `keeper_skill` schema's
+  description. Each row is the skill's identity as one JSON object, `: `, and the
+  skill's own description. A row's identity bytes are the JSON object; its
+  description bytes are the text after `: ` up to the next row. A request counts
+  as unreadable when its blob is missing or holds no list in that shape.
+- skill call: a ledger row in the window whose `tool` is `keeper_skill`.
+  `keeper_compose_<name>` tools have their own schemas and are not counted. A
+  Keeper carries the list when one of its captured requests has the
+  `keeper_skill` schema.
 
 Nothing here reads message text or image bytes.
 
@@ -40,9 +56,11 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import statistics
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -50,12 +68,26 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "lib"))
 
 import masc_base_path  # noqa: E402
+from tool_call_log_paths import tool_call_log_paths  # noqa: E402
 
 USAGE_EVENT = "agent_core_stream_message_delta"
 USAGE_MARKER = b'"usage"'
 IMAGE_MEDIA_PREFIX = "image/"
 KEEP_LATEST_IMAGES = (1, 3)
 TOP_BODY_KEEPERS = 8
+TOP_TOOL_SCHEMAS = 10
+TOP_SKILL_KEEPERS = 8
+TOP_SKILLS = 5
+SKILL_TOOL = "keeper_skill"
+SKILL_TOOL_BYTES = SKILL_TOOL.encode("ascii")
+SKILL_LIST_MARKER = "\n\nAvailable:\n"
+SKILL_IDENTITY_KEYS = frozenset({"source_id", "package_id", "name"})
+SKILL_IDENTITY_SEPARATOR = ": "
+BLOB_REF_SHA = re.compile(r"sha256=([0-9a-f]{64})")
+BLOB_DIR_PREFIX_CHARS = 2
+TOOL_CALL_RECORD_KIND = "tool_call"
+UNKNOWN_KEEPER = "?"
+PER_HUNDRED = 100
 BASE64_GROUP_BYTES = 3
 BASE64_GROUP_CHARS = 4
 TRACE_NAME_PARTS = 3
@@ -92,6 +124,28 @@ class RequestBody:
     body_bytes: int
     image_bytes: tuple[int, ...]
     turn: TurnKey | None
+    tools: tuple[tuple[str, int], ...] = ()
+    system_bytes: int = 0
+    skill_schema_sha: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillRow:
+    identity_bytes: int
+    description_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SkillList:
+    rows: tuple[SkillRow, ...]
+    block_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SkillCalls:
+    by_keeper: Counter[str]
+    by_skill: Counter[str]
+    without_identity: int
 
 
 def number_of(value: object) -> float | None:
@@ -192,6 +246,89 @@ def image_sizes(messages: object) -> tuple[int, ...]:
     return tuple(sizes)
 
 
+def tool_schema_sizes(tool_schemas: object) -> tuple[tuple[str, int], ...]:
+    """(tool name, schema bytes) of every well-formed entry of `tool_schemas`."""
+    sizes: list[tuple[str, int]] = []
+    if not isinstance(tool_schemas, list):
+        return ()
+    for entry in tool_schemas:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        artifact = entry.get("artifact") if isinstance(entry, dict) else None
+        size = artifact.get("bytes") if isinstance(artifact, dict) else None
+        if isinstance(name, str) and isinstance(size, int) and not isinstance(size, bool):
+            sizes.append((name, size))
+    return tuple(sizes)
+
+
+def system_prompt_bytes(system_prompt: object) -> int:
+    return count_of(system_prompt.get("bytes")) if isinstance(system_prompt, dict) else 0
+
+
+def blob_sha(content_ref: object) -> str | None:
+    match = BLOB_REF_SHA.search(content_ref) if isinstance(content_ref, str) else None
+    return match.group(1) if match else None
+
+
+def skill_schema_sha(tool_schemas: object) -> str | None:
+    """The blob sha of the `keeper_skill` entry of `tool_schemas`, None when there is none to read."""
+    if not isinstance(tool_schemas, list):
+        return None
+    for entry in tool_schemas:
+        if isinstance(entry, dict) and entry.get("name") == SKILL_TOOL:
+            artifact = entry.get("artifact")
+            return blob_sha(artifact.get("content_ref")) if isinstance(artifact, dict) else None
+    return None
+
+
+def identity_end(line: str) -> int | None:
+    """Where the identity object that starts a skill row ends, None when `line` does not start a row."""
+    try:
+        value, end = json.JSONDecoder().raw_decode(line)
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or not SKILL_IDENTITY_KEYS <= value.keys():
+        return None
+    return end if line.startswith(SKILL_IDENTITY_SEPARATOR, end) else None
+
+
+def parse_skill_list(schema_text: str) -> SkillList | None:
+    """The rows of the `Available:` block of a `keeper_skill` schema; None when it holds no list in that shape."""
+    try:
+        schema = json.loads(schema_text)
+    except ValueError:
+        return None
+    description = schema.get("description") if isinstance(schema, dict) else None
+    if not isinstance(description, str):
+        return None
+    _, marker, block = description.partition(SKILL_LIST_MARKER)
+    if not marker:
+        return None
+    identity_sizes: list[int] = []
+    description_lines: list[list[str]] = []
+    for line in block.split("\n") if block else []:
+        end = identity_end(line)
+        if end is not None:
+            identity_sizes.append(len(line[:end].encode("utf-8")))
+            description_lines.append([line[end + len(SKILL_IDENTITY_SEPARATOR) :]])
+        elif description_lines:
+            description_lines[-1].append(line)
+        else:
+            return None
+    rows = tuple(
+        SkillRow(identity, len("\n".join(lines).encode("utf-8")))
+        for identity, lines in zip(identity_sizes, description_lines)
+    )
+    return SkillList(rows, len(block.encode("utf-8")))
+
+
+def read_blob_text(base: pathlib.Path, sha: str) -> str | None:
+    path = base / ".masc" / "tool_blobs" / sha[:BLOB_DIR_PREFIX_CHARS] / sha
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def capture_turn(row: dict[str, object]) -> TurnKey | None:
     trace_id = row.get("trace_id")
     turn = row.get("absolute_turn")
@@ -226,13 +363,63 @@ def read_request_bodies(base: pathlib.Path, first: date, last: date, since: floa
                     if captured is None or body is None or not since <= captured <= until:
                         continue
                     bodies.append(
-                        RequestBody(keeper_dir.name, int(body), image_sizes(row.get("messages")), capture_turn(row))
+                        RequestBody(
+                            keeper_dir.name,
+                            int(body),
+                            image_sizes(row.get("messages")),
+                            capture_turn(row),
+                            tool_schema_sizes(row.get("tool_schemas")),
+                            system_prompt_bytes(row.get("system_prompt")),
+                            skill_schema_sha(row.get("tool_schemas")),
+                        )
                     )
     return bodies
 
 
+def skill_name_of(tool_input: object) -> str | None:
+    identity = tool_input.get("identity") if isinstance(tool_input, dict) else None
+    name = identity.get("name") if isinstance(identity, dict) else None
+    return name if isinstance(name, str) else None
+
+
+def read_skill_calls(base: pathlib.Path, first: date, last: date, since: float, until: float) -> SkillCalls:
+    by_keeper: Counter[str] = Counter()
+    by_skill: Counter[str] = Counter()
+    without_identity = 0
+    day = first
+    while day <= last:
+        live = base / ".masc" / "tool_calls" / f"{day.year:04d}-{day.month:02d}" / f"{day.day:02d}.jsonl"
+        day += timedelta(days=1)
+        for path in tool_call_log_paths(base, live):
+            with path.open("rb") as handle:
+                for line in handle:
+                    if SKILL_TOOL_BYTES not in line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(row, dict) or row.get("record_kind") != TOOL_CALL_RECORD_KIND:
+                        continue
+                    stamp = number_of(row.get("ts"))
+                    if row.get("tool") != SKILL_TOOL or stamp is None or not since <= stamp <= until:
+                        continue
+                    keeper = row.get("keeper")
+                    by_keeper[keeper if isinstance(keeper, str) else UNKNOWN_KEEPER] += 1
+                    name = skill_name_of(row.get("input"))
+                    if name is None:
+                        without_identity += 1
+                    else:
+                        by_skill[name] += 1
+    return SkillCalls(by_keeper, by_skill, without_identity)
+
+
 def quantile(ordered: list[float], fraction: float) -> float:
     return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
+
+
+def median_or_zero(values: list[float]) -> int:
+    return round(quantile(sorted(values), MEDIAN)) if values else 0
 
 
 def answer_state(body: RequestBody, traces: TraceReading) -> str:
@@ -305,6 +492,8 @@ def keeper_body_row(keeper: str, items: list[RequestBody], traces: TraceReading)
         "unanswered_requests": sum(1 for _, state in states if state == UNANSWERED),
         "unanswered_body_bytes": sum(item.body_bytes for item, state in states if state == UNANSWERED),
         "untraced_requests": sum(1 for _, state in states if state == UNTRACED),
+        "tool_schema_bytes_p50": median_or_zero([float(sum(size for _, size in item.tools)) for item in items if item.tools]),
+        "system_prompt_bytes_p50": median_or_zero([float(item.system_bytes) for item in items if item.system_bytes]),
     }
     for keep in KEEP_LATEST_IMAGES:
         stale = sum(stale_image_chars(item.image_bytes, keep) for item in items)
@@ -312,6 +501,45 @@ def keeper_body_row(keeper: str, items: list[RequestBody], traces: TraceReading)
         row[f"stale_image_share_keep_latest_{keep}"] = round(stale / total, 3) if total else 0.0
         row[f"stale_image_share_median_keep_latest_{keep}"] = round(quantile(shares, MEDIAN), 3)
     return row
+
+
+def summarize_tool_schemas(bodies: list[RequestBody]) -> dict[str, object]:
+    carrying = [body for body in bodies if body.tools]
+    if not carrying:
+        return {"requests": 0}
+    per_tool: dict[str, list[int]] = defaultdict(list)
+    for body in carrying:
+        for name, size in body.tools:
+            per_tool[name].append(size)
+    totals = sorted(float(sum(size for _, size in body.tools)) for body in carrying)
+    counts = sorted(float(len(body.tools)) for body in carrying)
+    systems = sorted(float(body.system_bytes) for body in carrying)
+    shares = sorted(
+        (sum(size for _, size in body.tools) + body.system_bytes) / body.body_bytes for body in carrying if body.body_bytes
+    )
+    all_tool_bytes = sum(sum(sizes) for sizes in per_tool.values())
+    heaviest = sorted(per_tool.items(), key=lambda entry: (-sum(entry[1]), entry[0]))[:TOP_TOOL_SCHEMAS]
+    return {
+        "requests": len(carrying),
+        "tool_bytes_p50": round(quantile(totals, MEDIAN)),
+        "tool_bytes_mean": round(statistics.fmean(totals)),
+        "tool_bytes_max": round(totals[-1]),
+        "tools_p50": round(quantile(counts, MEDIAN)),
+        "tools_max": round(counts[-1]),
+        "system_prompt_bytes_p50": round(quantile(systems, MEDIAN)),
+        "tools_and_system_share_of_body_p50": round(quantile(shares, MEDIAN), 3) if shares else 0.0,
+        "heaviest_by_total_bytes": [
+            {
+                "tool": name,
+                "bytes_p50": round(quantile(sorted(float(size) for size in sizes), MEDIAN)),
+                "requests": len(sizes),
+                "share_of_requests": round(len(sizes) / len(carrying), 3),
+                "bytes_sum": sum(sizes),
+                "share_of_tool_bytes": round(sum(sizes) / all_tool_bytes, 3) if all_tool_bytes else 0.0,
+            }
+            for name, sizes in heaviest
+        ],
+    }
 
 
 def summarize_bodies(bodies: list[RequestBody], traces: TraceReading) -> dict[str, object]:
@@ -332,7 +560,89 @@ def summarize_bodies(bodies: list[RequestBody], traces: TraceReading) -> dict[st
         "unanswered_requests": sum(1 for _, state in states if state == UNANSWERED),
         "unanswered_body_bytes": sum(body.body_bytes for body, state in states if state == UNANSWERED),
         "untraced_requests": sum(1 for _, state in states if state == UNTRACED),
+        "tool_schemas": summarize_tool_schemas(bodies),
         "by_keeper": rows[:TOP_BODY_KEEPERS],
+    }
+
+
+def carrying_keepers(bodies: list[RequestBody]) -> frozenset[str]:
+    return frozenset(body.keeper for body in bodies if any(name == SKILL_TOOL for name, _ in body.tools))
+
+
+def summarize_skill_catalog(bodies: list[RequestBody], read_schema: Callable[[str], str | None]) -> dict[str, object]:
+    carrying = [body for body in bodies if any(name == SKILL_TOOL for name, _ in body.tools)]
+    parsed_by_sha: dict[str, SkillList | None] = {}
+    lists: list[SkillList] = []
+    for body in carrying:
+        sha = body.skill_schema_sha
+        if sha is None:
+            continue
+        if sha not in parsed_by_sha:
+            text = read_schema(sha)
+            parsed_by_sha[sha] = None if text is None else parse_skill_list(text)
+        parsed = parsed_by_sha[sha]
+        if parsed is not None:
+            lists.append(parsed)
+    summary: dict[str, object] = {
+        "requests_with_tool": len(carrying),
+        "lists_read": len(lists),
+        "lists_unreadable": len(carrying) - len(lists),
+    }
+    if not lists:
+        return summary
+    rows = sum(len(item.rows) for item in lists)
+    identity = sum(row.identity_bytes for item in lists for row in item.rows)
+    description = sum(row.description_bytes for item in lists for row in item.rows)
+    block = sum(item.block_bytes for item in lists)
+    summary.update(
+        {
+            "distinct_lists": sum(1 for parsed in parsed_by_sha.values() if parsed is not None),
+            "rows_p50": median_or_zero([float(len(item.rows)) for item in lists]),
+            "rows_max": max(len(item.rows) for item in lists),
+            "block_bytes_p50": median_or_zero([float(item.block_bytes) for item in lists]),
+            "block_bytes_max": max(item.block_bytes for item in lists),
+            "identity_bytes_per_row_mean": round(identity / rows) if rows else 0,
+            "description_bytes_per_row_mean": round(description / rows) if rows else 0,
+            "identity_share_of_block": round(identity / block, 3) if block else 0.0,
+            "description_share_of_block": round(description / block, 3) if block else 0.0,
+        }
+    )
+    return summary
+
+
+def summarize_skill_use(calls: SkillCalls, usages: list[Usage], carriers: frozenset[str]) -> dict[str, object]:
+    requests = Counter(usage.keeper for usage in usages)
+    total_calls = sum(calls.by_keeper.values())
+    calls_with_requests = sum(count for keeper, count in calls.by_keeper.items() if requests[keeper])
+    idle = carriers - calls.by_keeper.keys()
+    ranked_keepers = sorted(calls.by_keeper.items(), key=lambda entry: (-entry[1], entry[0]))[:TOP_SKILL_KEEPERS]
+    ranked_skills = sorted(calls.by_skill.items(), key=lambda entry: (-entry[1], entry[0]))[:TOP_SKILLS]
+    return {
+        "tool": SKILL_TOOL,
+        "calls": total_calls,
+        "calls_by_keepers_without_usage_events": total_calls - calls_with_requests,
+        "model_requests": len(usages),
+        "calls_per_100_requests": round(PER_HUNDRED * calls_with_requests / len(usages), 2) if usages else 0.0,
+        "keepers_with_calls": len(calls.by_keeper),
+        "keepers_with_calls_and_no_usage_events": sum(1 for keeper in calls.by_keeper if not requests[keeper]),
+        "carrying_keepers": len(carriers),
+        "carrying_keepers_without_calls": len(idle),
+        "carrying_keepers_without_calls_requests": sum(requests[keeper] for keeper in idle),
+        "calls_without_identity": calls.without_identity,
+        "skills_opened": len(calls.by_skill),
+        "top_skills": [
+            {"skill": name, "calls": count, "share_of_calls": round(count / total_calls, 3)} for name, count in ranked_skills
+        ],
+        "top_keepers": [
+            {
+                "keeper": keeper,
+                "calls": count,
+                "requests": requests[keeper],
+                "calls_per_100_requests": round(PER_HUNDRED * count / requests[keeper], 2) if requests[keeper] else None,
+                "share_of_calls": round(count / total_calls, 3),
+            }
+            for keeper, count in ranked_keepers
+        ],
     }
 
 
@@ -356,6 +666,7 @@ def main() -> int:
 
     since = datetime(args.from_date.year, args.from_date.month, args.from_date.day, tzinfo=timezone.utc).timestamp()
     traces = read_traces(base, since, args.until)
+    bodies = read_request_bodies(base, args.from_date, args.to_date, since, args.until)
     summary = {
         "window": {
             "from": args.from_date.isoformat(),
@@ -363,8 +674,12 @@ def main() -> int:
             "until": datetime.fromtimestamp(args.until, timezone.utc).isoformat(),
         },
         "model_requests": summarize_usage(traces.usages),
-        "captured_request_bodies": summarize_bodies(
-            read_request_bodies(base, args.from_date, args.to_date, since, args.until), traces
+        "captured_request_bodies": summarize_bodies(bodies, traces),
+        "skill_catalog": summarize_skill_catalog(bodies, lambda sha: read_blob_text(base, sha)),
+        "skill_calls": summarize_skill_use(
+            read_skill_calls(base, args.from_date, args.to_date, since, args.until),
+            traces.usages,
+            carrying_keepers(bodies),
         ),
     }
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)

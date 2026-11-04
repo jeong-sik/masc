@@ -5,13 +5,17 @@ Run: python3 -m unittest discover -s docs/evidence/request-context-2026-11
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import pathlib
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from datetime import date
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -21,6 +25,9 @@ SINCE = 1000.0
 UNTIL = 2000.0
 DAY = date(2026, 11, 1)
 NO_TRACES = ctx.TraceReading([], frozenset(), frozenset())
+SHA_A = "a" * 64
+SHA_B = "b" * 64
+SHA_C = "c" * 64
 
 
 def usage_row(ts: float, usage: object, *, event_type: str = ctx.USAGE_EVENT) -> str:
@@ -45,12 +52,18 @@ def capture_row(
     *,
     trace_id: object = None,
     absolute_turn: object = None,
+    tool_schemas: object = None,
+    system_prompt: object = None,
 ) -> str:
     row: dict[str, object] = {"captured_at": captured_at, "wire": {"body_bytes": body_bytes}, "messages": messages}
     if trace_id is not None:
         row["trace_id"] = trace_id
     if absolute_turn is not None:
         row["absolute_turn"] = absolute_turn
+    if tool_schemas is not None:
+        row["tool_schemas"] = tool_schemas
+    if system_prompt is not None:
+        row["system_prompt"] = system_prompt
     return json.dumps(row)
 
 
@@ -60,8 +73,57 @@ def write_captures(base: pathlib.Path, keeper: str, day: date, lines: list[str])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def body(keeper: str, size: int, images: tuple[int, ...] = (), turn: ctx.TurnKey | None = None) -> ctx.RequestBody:
-    return ctx.RequestBody(keeper, size, images, turn)
+def body(
+    keeper: str,
+    size: int,
+    images: tuple[int, ...] = (),
+    turn: ctx.TurnKey | None = None,
+    *,
+    tools: tuple[tuple[str, int], ...] = (),
+    system: int = 0,
+    sha: str | None = None,
+) -> ctx.RequestBody:
+    return ctx.RequestBody(keeper, size, images, turn, tools, system, sha)
+
+
+def blob_ref(sha: str) -> str:
+    return f'[masc:blob sha256={sha} bytes=10 mime=application/json preview=""]'
+
+
+def schema_entry(name: str, size: int, sha: str | None = None) -> dict[str, object]:
+    artifact: dict[str, object] = {"bytes": size}
+    if sha is not None:
+        artifact["content_ref"] = blob_ref(sha)
+    return {"index": 0, "name": name, "artifact": artifact}
+
+
+def identity_json(name: str) -> str:
+    """One skill row's identity the way the server prints it: compact, UTF-8."""
+    identity = {"source_id": "src", "package_id": "pkg", "name": name}
+    return json.dumps(identity, separators=(",", ":"), ensure_ascii=False)
+
+
+def skill_schema_text(rows: list[tuple[str, str]], *, head: str = "Read one Skill.") -> str:
+    block = "\n".join(f"{identity_json(name)}: {text}" for name, text in rows)
+    return json.dumps({"name": ctx.SKILL_TOOL, "description": f"{head}\n\nAvailable:\n{block}", "input_schema": {}})
+
+
+def ledger_row(ts: object, keeper: object, tool: str, tool_input: object = None, *, record_kind: str = "tool_call") -> str:
+    row: dict[str, object] = {"ts": ts, "record_kind": record_kind, "keeper": keeper, "tool": tool}
+    if tool_input is not None:
+        row["input"] = tool_input
+    return json.dumps(row)
+
+
+def skill_input(name: str) -> dict[str, object]:
+    return {"identity": {"source_id": "src", "package_id": "pkg", "name": name}}
+
+
+def write_ledger(base: pathlib.Path, day: date, lines: list[str], *, segment: int | None = None) -> None:
+    name = f"{day.day:02d}.jsonl" if segment is None else f"{day.day:02d}.{segment:03d}.jsonl"
+    path = base / ".masc" / "tool_calls" / f"{day.year:04d}-{day.month:02d}" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def traces(traced: set[ctx.KeeperTurn], answered: set[ctx.KeeperTurn]) -> ctx.TraceReading:
@@ -264,6 +326,14 @@ class ReadRequestBodiesTest(unittest.TestCase):
         bodies = ctx.read_request_bodies(self.base, DAY, DAY, SINCE, UNTIL)
         self.assertEqual(bodies, [ctx.RequestBody("alpha", 5000, (30, 60), ("trace-9-0", 7))])
 
+    def test_reads_tool_schema_sizes_the_system_prompt_and_the_skill_blob_reference(self) -> None:
+        schemas = [schema_entry("alpha_tool", 10), schema_entry(ctx.SKILL_TOOL, 20, SHA_A)]
+        row = capture_row(1500.0, 5000, [], tool_schemas=schemas, system_prompt={"bytes": 77, "content_ref": "x"})
+        write_captures(self.base, "alpha", DAY, [row])
+        (item,) = ctx.read_request_bodies(self.base, DAY, DAY, SINCE, UNTIL)
+        self.assertEqual(item.tools, (("alpha_tool", 10), (ctx.SKILL_TOOL, 20)))
+        self.assertEqual((item.system_bytes, item.skill_schema_sha), (77, SHA_A))
+
     def test_a_capture_without_a_usable_trace_id_or_turn_has_no_turn(self) -> None:
         rows = [
             capture_row(1500.0, 1, [], trace_id="trace-9-0"),
@@ -438,6 +508,565 @@ class SummarizeBodiesTest(unittest.TestCase):
         summary = ctx.summarize_bodies([], NO_TRACES)
         self.assertEqual((summary["requests"], summary["body_bytes_sum"], summary["body_bytes_max"], summary["by_keeper"]), (0, 0, 0, []))
         self.assertEqual((summary["unanswered_requests"], summary["untraced_requests"]), (0, 0))
+
+    def test_a_keeper_row_takes_the_tool_and_system_medians_over_the_requests_that_have_them(self) -> None:
+        bodies = [
+            body("alpha", 10, tools=(("a", 300),), system=3000),
+            body("alpha", 10, tools=(("a", 100),), system=1000),
+            body("alpha", 10),  # a capture with neither: counted as a zero it would make the medians 100 and 1000
+        ]
+        row = first_row(ctx.summarize_bodies(bodies, NO_TRACES))
+        self.assertEqual((row["tool_schema_bytes_p50"], row["system_prompt_bytes_p50"]), (300, 3000))
+
+    def test_a_keeper_row_without_any_tool_or_system_bytes_gives_zeros(self) -> None:
+        row = first_row(ctx.summarize_bodies([body("alpha", 10)], NO_TRACES))
+        self.assertEqual((row["tool_schema_bytes_p50"], row["system_prompt_bytes_p50"]), (0, 0))
+
+
+class ToolSchemaReadingTest(unittest.TestCase):
+    def test_every_well_formed_entry_gives_its_name_and_size_in_order(self) -> None:
+        entries = [schema_entry("b", 20), schema_entry("a", 10)]
+        self.assertEqual(ctx.tool_schema_sizes(entries), (("b", 20), ("a", 10)))
+
+    def test_entries_without_a_name_a_size_or_an_artifact_are_left_out(self) -> None:
+        entries = [
+            schema_entry("ok", 5),
+            {"artifact": {"bytes": 7}},
+            {"name": "no-artifact"},
+            {"name": "no-size", "artifact": {}},
+            {"name": "bool-size", "artifact": {"bytes": True}},
+            {"name": "text-size", "artifact": {"bytes": "9"}},
+            {"name": 3, "artifact": {"bytes": 1}},
+            "not an entry",
+        ]
+        self.assertEqual(ctx.tool_schema_sizes(entries), (("ok", 5),))
+
+    def test_a_capture_without_a_tool_list_has_no_tools(self) -> None:
+        for value in (None, {}, "x", 3):
+            with self.subTest(value=value):
+                self.assertEqual(ctx.tool_schema_sizes(value), ())
+
+    def test_the_system_prompt_size_is_its_bytes_field(self) -> None:
+        self.assertEqual(ctx.system_prompt_bytes({"bytes": 123, "content_ref": "x"}), 123)
+        for value in (None, {}, {"bytes": "9"}, {"bytes": True}, "x"):
+            with self.subTest(value=value):
+                self.assertEqual(ctx.system_prompt_bytes(value), 0)
+
+
+class SkillSchemaShaTest(unittest.TestCase):
+    def test_the_sha_is_read_from_the_keeper_skill_entry_and_no_other_tool(self) -> None:
+        entries = [schema_entry("other", 1, SHA_A), schema_entry(ctx.SKILL_TOOL, 2, SHA_B)]
+        self.assertEqual(ctx.skill_schema_sha(entries), SHA_B)
+
+    def test_a_schema_with_nothing_to_read_gives_none(self) -> None:
+        cases: dict[str, object] = {
+            "no keeper_skill entry": [schema_entry("other", 1, SHA_A)],
+            "no artifact": [{"name": ctx.SKILL_TOOL}],
+            "no content_ref": [schema_entry(ctx.SKILL_TOOL, 1)],
+            "reference without a sha": [{"name": ctx.SKILL_TOOL, "artifact": {"content_ref": "[masc:blob bytes=1]"}}],
+            "sha too short": [{"name": ctx.SKILL_TOOL, "artifact": {"content_ref": "[masc:blob sha256=abc]"}}],
+            "reference is not text": [{"name": ctx.SKILL_TOOL, "artifact": {"content_ref": 5}}],
+            "no tool list": None,
+        }
+        for label, value in cases.items():
+            with self.subTest(label):
+                self.assertIsNone(ctx.skill_schema_sha(value))
+
+
+class ParseSkillListTest(unittest.TestCase):
+    def test_a_row_counts_its_identity_and_its_description_apart(self) -> None:
+        parsed = ctx.parse_skill_list(skill_schema_text([("one", "abc"), ("twenty-two", "defgh")]))
+        assert parsed is not None
+        # Names and descriptions differ in length on purpose, so swapped or merged fields are caught.
+        self.assertEqual(
+            parsed.rows,
+            (ctx.SkillRow(len(identity_json("one")), 3), ctx.SkillRow(len(identity_json("twenty-two")), 5)),
+        )
+        block = f"{identity_json('one')}: abc\n{identity_json('twenty-two')}: defgh"
+        self.assertEqual(parsed.block_bytes, len(block))
+
+    def test_sizes_are_utf8_bytes_and_not_characters(self) -> None:
+        parsed = ctx.parse_skill_list(skill_schema_text([("한글", "설명")]))
+        assert parsed is not None
+        self.assertEqual(parsed.rows[0].description_bytes, len("설명".encode("utf-8")))
+        self.assertEqual(parsed.rows[0].identity_bytes, len(identity_json("한글").encode("utf-8")))
+        self.assertEqual(parsed.block_bytes, len(f"{identity_json('한글')}: 설명".encode("utf-8")))
+
+    def test_only_the_text_after_the_marker_is_the_list(self) -> None:
+        parsed = ctx.parse_skill_list(skill_schema_text([("one", "abc")], head="x" * 500))
+        assert parsed is not None
+        self.assertEqual(parsed.block_bytes, len(f"{identity_json('one')}: abc"))
+
+    def test_a_line_that_does_not_start_a_row_continues_the_row_before_it(self) -> None:
+        # Lines that begin like a JSON number, list or string are still text of the row before them.
+        extra = 'second line\n42 is a number\n[1] a list\n"quoted" text'
+        block = f"{identity_json('one')}: first\n{extra}\n{identity_json('two')}: next"
+        parsed = ctx.parse_skill_list(json.dumps({"description": f"Head\n\nAvailable:\n{block}"}))
+        assert parsed is not None
+        self.assertEqual([row.description_bytes for row in parsed.rows], [len(f"first\n{extra}"), len("next")])
+
+    def test_an_object_without_the_identity_keys_does_not_start_a_row(self) -> None:
+        other = json.dumps({"name": "x"}, separators=(",", ":"))
+        block = f"{identity_json('one')}: first\n{other}: not a row"
+        parsed = ctx.parse_skill_list(json.dumps({"description": f"Head\n\nAvailable:\n{block}"}))
+        assert parsed is not None
+        self.assertEqual(len(parsed.rows), 1)
+        self.assertEqual(parsed.rows[0].description_bytes, len(f"first\n{other}: not a row"))
+
+    def test_an_identity_needs_the_separator_right_after_it_to_start_a_row(self) -> None:
+        block = f"{identity_json('one')}: first\n{identity_json('two')} no separator"
+        parsed = ctx.parse_skill_list(json.dumps({"description": f"Head\n\nAvailable:\n{block}"}))
+        assert parsed is not None
+        self.assertEqual(len(parsed.rows), 1)
+
+    def test_an_empty_list_has_no_rows_and_no_bytes(self) -> None:
+        parsed = ctx.parse_skill_list(json.dumps({"description": "Head\n\nAvailable:\n"}))
+        self.assertEqual(parsed, ctx.SkillList((), 0))
+
+    def test_a_schema_without_a_readable_list_gives_none(self) -> None:
+        cases = {
+            "not json": "{",
+            "not an object": "[]",
+            "no description": json.dumps({"name": "x"}),
+            "description is not text": json.dumps({"description": 5}),
+            "no marker": json.dumps({"description": "Available: none"}),
+            "first line is not a row": json.dumps({"description": "Head\n\nAvailable:\nstray line"}),
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                self.assertIsNone(ctx.parse_skill_list(text))
+
+
+class ReadBlobTextTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = pathlib.Path(self._tmp.name)
+
+    def test_a_blob_sits_under_the_first_two_characters_of_its_sha(self) -> None:
+        path = self.base / ".masc" / "tool_blobs" / SHA_A[:2] / SHA_A
+        path.parent.mkdir(parents=True)
+        path.write_text("한글", encoding="utf-8")
+        self.assertEqual(ctx.read_blob_text(self.base, SHA_A), "한글")
+
+    def test_a_missing_or_undecodable_blob_gives_none(self) -> None:
+        self.assertIsNone(ctx.read_blob_text(self.base, SHA_A))
+        path = self.base / ".masc" / "tool_blobs" / SHA_B[:2] / SHA_B
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"\xff\xfe\x00bad")
+        self.assertIsNone(ctx.read_blob_text(self.base, SHA_B))
+
+
+class ReadSkillCallsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = pathlib.Path(self._tmp.name)
+
+    def calls(self, first: date = DAY, last: date = DAY) -> ctx.SkillCalls:
+        return ctx.read_skill_calls(self.base, first, last, SINCE, UNTIL)
+
+    def test_calls_are_counted_per_keeper_and_per_skill_name(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            [
+                ledger_row(1500.0, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+                ledger_row(1501.0, "alpha", ctx.SKILL_TOOL, skill_input("two")),
+                ledger_row(1502.0, "beta", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        calls = self.calls()
+        self.assertEqual(dict(calls.by_keeper), {"alpha": 2, "beta": 1})
+        self.assertEqual(dict(calls.by_skill), {"one": 2, "two": 1})
+        self.assertEqual(calls.without_identity, 0)
+
+    def test_only_the_keeper_skill_tool_counts_even_when_other_rows_name_it(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            [
+                ledger_row(1500.0, "alpha", "Execute", {"command": "echo keeper_skill"}),
+                ledger_row(1501.0, "alpha", "keeper_skill_extra", skill_input("one")),
+                ledger_row(1502.0, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        self.assertEqual(dict(self.calls().by_keeper), {"alpha": 1})
+
+    def test_only_tool_call_records_count(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            [
+                ledger_row(1500.0, "alpha", ctx.SKILL_TOOL, skill_input("one"), record_kind="other"),
+                ledger_row(1501.0, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        self.assertEqual(dict(self.calls().by_keeper), {"alpha": 1})
+
+    def test_window_bounds_are_inclusive_and_nothing_outside_counts(self) -> None:
+        stamps = (SINCE - 0.001, SINCE, UNTIL, UNTIL + 0.001)
+        write_ledger(self.base, DAY, [ledger_row(ts, "alpha", ctx.SKILL_TOOL, skill_input("one")) for ts in stamps])
+        self.assertEqual(self.calls().by_keeper["alpha"], 2)
+
+    def test_a_row_without_a_usable_time_is_not_counted(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            [
+                ledger_row(None, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+                ledger_row("1500", "alpha", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        self.assertEqual(dict(self.calls().by_keeper), {})
+
+    def test_a_call_without_a_skill_name_counts_for_its_keeper_and_is_tallied_apart(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            [
+                ledger_row(1500.0, "alpha", ctx.SKILL_TOOL),
+                ledger_row(1501.0, "alpha", ctx.SKILL_TOOL, {"identity": {}}),
+                ledger_row(1502.0, "alpha", ctx.SKILL_TOOL, "stored elsewhere"),
+                ledger_row(1503.0, "alpha", ctx.SKILL_TOOL, {"identity": {"name": 5}}),
+                ledger_row(1504.0, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        calls = self.calls()
+        self.assertEqual(dict(calls.by_keeper), {"alpha": 5})
+        self.assertEqual(dict(calls.by_skill), {"one": 1})
+        self.assertEqual(calls.without_identity, 4)
+
+    def test_a_keeper_that_is_not_text_is_counted_under_one_unknown_name(self) -> None:
+        write_ledger(self.base, DAY, [ledger_row(1500.0, None, ctx.SKILL_TOOL, skill_input("one"))])
+        self.assertEqual(dict(self.calls().by_keeper), {ctx.UNKNOWN_KEEPER: 1})
+
+    def test_rotated_segments_and_the_live_file_are_all_read(self) -> None:
+        for segment in (1, 2):
+            write_ledger(self.base, DAY, [ledger_row(1500.0, f"seg{segment}", ctx.SKILL_TOOL, skill_input("one"))], segment=segment)
+        write_ledger(self.base, DAY, [ledger_row(1500.0, "live", ctx.SKILL_TOOL, skill_input("one"))])
+        self.assertEqual(sorted(self.calls().by_keeper), ["live", "seg1", "seg2"])
+
+    def test_every_day_in_the_range_is_read_and_no_other_day(self) -> None:
+        first, last = date(2026, 11, 1), date(2026, 11, 2)
+        for day in (date(2026, 10, 31), first, last, date(2026, 11, 3)):
+            write_ledger(self.base, day, [ledger_row(1500.0, f"d{day.day}", ctx.SKILL_TOOL, skill_input("one"))])
+        self.assertEqual(sorted(self.calls(first, last).by_keeper), ["d1", "d2"])
+
+    def test_days_across_a_month_boundary_are_found(self) -> None:
+        for day in (date(2026, 10, 31), date(2026, 11, 1)):
+            write_ledger(self.base, day, [ledger_row(1500.0, f"d{day.day}", ctx.SKILL_TOOL, skill_input("one"))])
+        self.assertEqual(sorted(self.calls(date(2026, 10, 31), date(2026, 11, 1)).by_keeper), ["d1", "d31"])
+
+    def test_unreadable_lines_are_skipped_without_stopping_the_file(self) -> None:
+        write_ledger(
+            self.base,
+            DAY,
+            ["not json keeper_skill", '["keeper_skill"]', ledger_row(1500.0, "alpha", ctx.SKILL_TOOL, skill_input("one"))],
+        )
+        self.assertEqual(dict(self.calls().by_keeper), {"alpha": 1})
+
+    def test_a_store_without_a_ledger_gives_nothing(self) -> None:
+        calls = self.calls()
+        self.assertEqual((dict(calls.by_keeper), dict(calls.by_skill), calls.without_identity), ({}, {}, 0))
+
+
+class SummarizeSkillCatalogTest(unittest.TestCase):
+    LIST_A = [("one", "abc"), ("twenty-two", "defgh")]
+    LIST_B = [(f"n{index}", "x" * (10 * index)) for index in range(1, 7)]
+
+    def reader(self, blobs: dict[str, str]):  # type: ignore[no-untyped-def]
+        self.reads: list[str] = []
+
+        def read(sha: str) -> str | None:
+            self.reads.append(sha)
+            return blobs.get(sha)
+
+        return read
+
+    @staticmethod
+    def carrying(sha: str | None) -> ctx.RequestBody:
+        return body("alpha", 100, tools=((ctx.SKILL_TOOL, 10),), sha=sha)
+
+    @staticmethod
+    def sizes(rows: list[tuple[str, str]]) -> tuple[int, int, int]:
+        """(rows, identity bytes, description bytes) of a list, counted without the parser."""
+        return len(rows), sum(len(identity_json(name)) for name, _ in rows), sum(len(text) for _, text in rows)
+
+    @staticmethod
+    def block_bytes(rows: list[tuple[str, str]]) -> int:
+        return len("\n".join(f"{identity_json(name)}: {text}" for name, text in rows))
+
+    def test_requests_with_the_tool_and_requests_whose_list_cannot_be_read_are_counted(self) -> None:
+        bodies = [
+            self.carrying(SHA_A),
+            self.carrying(SHA_B),  # blob missing
+            self.carrying(None),  # no reference to read
+            self.carrying(SHA_C),  # blob without a list
+            body("alpha", 100, tools=(("other", 10),), sha=SHA_A),  # does not carry the tool
+        ]
+        summary = ctx.summarize_skill_catalog(bodies, self.reader({SHA_A: skill_schema_text(self.LIST_A), SHA_C: "{}"}))
+        self.assertEqual((summary["requests_with_tool"], summary["lists_read"], summary["lists_unreadable"]), (4, 1, 3))
+
+    def test_a_blob_shared_by_requests_is_read_once_and_counted_for_each_request(self) -> None:
+        read = self.reader({SHA_A: skill_schema_text(self.LIST_A)})
+        summary = ctx.summarize_skill_catalog([self.carrying(SHA_A)] * 3, read)
+        self.assertEqual(self.reads, [SHA_A])
+        self.assertEqual((summary["lists_read"], summary["distinct_lists"]), (3, 1))
+
+    def test_a_blob_that_cannot_be_read_is_asked_for_once_and_not_called_a_distinct_list(self) -> None:
+        read = self.reader({SHA_A: skill_schema_text(self.LIST_A)})
+        summary = ctx.summarize_skill_catalog([self.carrying(SHA_B), self.carrying(SHA_B), self.carrying(SHA_A)], read)
+        self.assertEqual(self.reads.count(SHA_B), 1)
+        self.assertEqual((summary["lists_read"], summary["lists_unreadable"], summary["distinct_lists"]), (1, 2, 1))
+
+    def test_sizes_come_from_the_list_each_request_carried(self) -> None:
+        blobs = {SHA_A: skill_schema_text(self.LIST_A), SHA_B: skill_schema_text(self.LIST_B)}
+        # Three requests carry the short list and one the long list, so the median is the short one and the max the long one.
+        summary = ctx.summarize_skill_catalog([self.carrying(SHA_A)] * 3 + [self.carrying(SHA_B)], self.reader(blobs))
+        rows_a, identity_a, description_a = self.sizes(self.LIST_A)
+        rows_b, identity_b, description_b = self.sizes(self.LIST_B)
+        rows = 3 * rows_a + rows_b
+        identity = 3 * identity_a + identity_b
+        description = 3 * description_a + description_b
+        block = 3 * self.block_bytes(self.LIST_A) + self.block_bytes(self.LIST_B)
+        self.assertEqual((summary["rows_p50"], summary["rows_max"]), (rows_a, rows_b))
+        self.assertEqual((summary["block_bytes_p50"], summary["block_bytes_max"]), (self.block_bytes(self.LIST_A), self.block_bytes(self.LIST_B)))
+        self.assertEqual(
+            (summary["identity_bytes_per_row_mean"], summary["description_bytes_per_row_mean"]),
+            (round(identity / rows), round(description / rows)),
+        )
+        self.assertEqual(
+            (summary["identity_share_of_block"], summary["description_share_of_block"]),
+            (round(identity / block, 3), round(description / block, 3)),
+        )
+        self.assertEqual(summary["distinct_lists"], 2)
+
+    def test_without_a_readable_list_only_the_counts_are_given(self) -> None:
+        summary = ctx.summarize_skill_catalog([self.carrying(SHA_A)], self.reader({}))
+        self.assertEqual(summary, {"requests_with_tool": 1, "lists_read": 0, "lists_unreadable": 1})
+        empty = ctx.summarize_skill_catalog([], self.reader({}))
+        self.assertEqual(empty, {"requests_with_tool": 0, "lists_read": 0, "lists_unreadable": 0})
+
+    def test_an_empty_list_gives_zero_rows_and_zero_shares(self) -> None:
+        empty_list = json.dumps({"description": "Head\n\nAvailable:\n"})
+        summary = ctx.summarize_skill_catalog([self.carrying(SHA_A)], self.reader({SHA_A: empty_list}))
+        self.assertEqual((summary["rows_p50"], summary["block_bytes_p50"]), (0, 0))
+        self.assertEqual((summary["identity_bytes_per_row_mean"], summary["identity_share_of_block"]), (0, 0.0))
+
+    def test_carrying_keepers_are_the_keepers_with_a_request_that_has_the_tool(self) -> None:
+        bodies = [self.carrying(SHA_A), body("beta", 1, tools=(("other", 1),)), body("gamma", 1)]
+        self.assertEqual(ctx.carrying_keepers(bodies), frozenset({"alpha"}))
+
+
+def usage_of(keeper: str, count: int = 1) -> list[ctx.Usage]:
+    return [ctx.Usage(keeper, 1, 0, 0) for _ in range(count)]
+
+
+def skill_calls(by_keeper: dict[str, int], by_skill: dict[str, int] | None = None, without: int = 0) -> ctx.SkillCalls:
+    return ctx.SkillCalls(Counter(by_keeper), Counter(by_skill or {}), without)
+
+
+class SummarizeSkillUseTest(unittest.TestCase):
+    def test_the_call_rate_counts_only_keepers_that_have_usage_events(self) -> None:
+        # beta made calls but has no usage event, so its calls cannot be set against any request.
+        usages = usage_of("alpha", 100) + usage_of("gamma", 50)
+        summary = ctx.summarize_skill_use(skill_calls({"alpha": 3, "beta": 2, "gamma": 1}), usages, frozenset())
+        self.assertEqual((summary["calls"], summary["model_requests"], summary["calls_per_100_requests"]), (6, 150, round(100 * 4 / 150, 2)))
+        self.assertEqual((summary["calls_by_keepers_without_usage_events"], summary["keepers_with_calls_and_no_usage_events"]), (2, 1))
+        self.assertEqual(summary["keepers_with_calls"], 3)
+
+    def test_keepers_are_ranked_by_calls_then_name_and_the_list_is_capped(self) -> None:
+        extra = 2
+        count = ctx.TOP_SKILL_KEEPERS + extra
+        # Calls are 1, 1, 2, 2, ...: neighbours tie, so the name has to break the tie.
+        by_keeper = {f"k{index:02d}": 1 + index // 2 for index in reversed(range(count))}
+        usages = [usage for index in range(count) for usage in usage_of(f"k{index:02d}", 10 * (index + 1))]
+        summary = ctx.summarize_skill_use(skill_calls(by_keeper), usages, frozenset())
+        rows = summary["top_keepers"]
+        assert isinstance(rows, list)
+        self.assertEqual(len(rows), ctx.TOP_SKILL_KEEPERS)
+        self.assertEqual([row["keeper"] for row in rows[:4]], ["k08", "k09", "k06", "k07"])
+        calls = [row["calls"] for row in rows]
+        self.assertEqual(calls, sorted(calls, reverse=True))
+        top = rows[0]
+        total = sum(by_keeper.values())
+        self.assertEqual((top["calls"], top["requests"], top["calls_per_100_requests"]), (5, 90, round(100 * 5 / 90, 2)))
+        self.assertEqual(top["share_of_calls"], round(5 / total, 3))
+
+    def test_a_keeper_without_usage_events_has_no_rate(self) -> None:
+        summary = ctx.summarize_skill_use(skill_calls({"alpha": 4}), [], frozenset())
+        (row,) = summary["top_keepers"]  # type: ignore[misc]
+        self.assertEqual((row["requests"], row["calls_per_100_requests"], row["share_of_calls"]), (0, None, 1.0))
+
+    def test_skills_are_ranked_by_calls_then_name_and_the_list_is_capped(self) -> None:
+        extra = 2
+        by_skill = {f"s{index:02d}": 1 + index // 2 for index in reversed(range(ctx.TOP_SKILLS + extra))}
+        calls = skill_calls({"alpha": sum(by_skill.values())}, by_skill)
+        summary = ctx.summarize_skill_use(calls, usage_of("alpha", 10), frozenset())
+        rows = summary["top_skills"]
+        assert isinstance(rows, list)
+        self.assertEqual(len(rows), ctx.TOP_SKILLS)
+        # Calls are s06=4, s04=s05=3, s02=s03=2, s00=s01=1: ties go by name, and the two names with 1 call fall off the list.
+        self.assertEqual([row["skill"] for row in rows], ["s06", "s04", "s05", "s02", "s03"])
+        self.assertEqual(rows[0]["share_of_calls"], round(4 / sum(by_skill.values()), 3))
+        self.assertEqual(summary["skills_opened"], len(by_skill))
+
+    def test_carrying_keepers_without_calls_are_counted_with_their_requests(self) -> None:
+        usages = usage_of("alpha", 10) + usage_of("beta", 4) + usage_of("gamma", 6)
+        summary = ctx.summarize_skill_use(skill_calls({"alpha": 1}), usages, frozenset({"alpha", "beta", "gamma"}))
+        self.assertEqual(summary["carrying_keepers"], 3)
+        self.assertEqual((summary["carrying_keepers_without_calls"], summary["carrying_keepers_without_calls_requests"]), (2, 10))
+
+    def test_calls_without_a_skill_name_are_reported_apart_from_the_names(self) -> None:
+        summary = ctx.summarize_skill_use(skill_calls({"alpha": 5}, {"one": 2}, without=3), usage_of("alpha", 10), frozenset())
+        self.assertEqual((summary["calls_without_identity"], summary["skills_opened"]), (3, 1))
+
+    def test_no_usage_events_and_no_calls_give_zeros_without_dividing(self) -> None:
+        summary = ctx.summarize_skill_use(skill_calls({}), [], frozenset())
+        self.assertEqual((summary["calls"], summary["calls_per_100_requests"], summary["top_keepers"], summary["top_skills"]), (0, 0.0, [], []))
+        busy = ctx.summarize_skill_use(skill_calls({}), usage_of("alpha", 5), frozenset())
+        self.assertEqual((busy["calls"], busy["calls_per_100_requests"]), (0, 0.0))
+
+
+class SummarizeToolSchemasTest(unittest.TestCase):
+    def test_totals_counts_system_prompt_and_share_come_from_the_requests_that_carry_tools(self) -> None:
+        bodies = [
+            body("a", 1000, tools=(("x", 10), ("y", 20)), system=100),  # tools 30, share 0.13
+            body("a", 600, tools=(("x", 30),), system=300),  # tools 30, share 0.55
+            body("a", 2000, tools=(("x", 50), ("y", 60), ("z", 70)), system=800),  # tools 180, share 0.49
+            body("a", 9999),  # no tools: not a request that carries any
+        ]
+        summary = ctx.summarize_tool_schemas(bodies)
+        self.assertEqual(summary["requests"], 3)
+        # The mean (80) and the median (30) differ on purpose.
+        self.assertEqual((summary["tool_bytes_p50"], summary["tool_bytes_mean"], summary["tool_bytes_max"]), (30, 80, 180))
+        self.assertEqual((summary["tools_p50"], summary["tools_max"]), (2, 3))
+        self.assertEqual(summary["system_prompt_bytes_p50"], 300)
+        self.assertEqual(summary["tools_and_system_share_of_body_p50"], 0.49)
+
+    def test_the_heaviest_tools_are_ranked_by_total_bytes_then_name_and_the_list_is_capped(self) -> None:
+        extra = 2
+        # "common" is small but in every request; "rare" is bigger but in one. Their order depends on the totals.
+        bodies = [body("a", 100, tools=(("common", 40), ("rare", 70))), body("a", 100, tools=(("common", 40),))]
+        names = [f"t{index:02d}" for index in range(ctx.TOP_TOOL_SCHEMAS + extra)]
+        bodies.append(body("a", 100, tools=tuple((name, 1) for name in reversed(names))))  # ties must not follow this order
+        bodies.append(body("a", 100))  # a request without tools is not part of the shares
+        summary = ctx.summarize_tool_schemas(bodies)
+        rows = summary["heaviest_by_total_bytes"]
+        assert isinstance(rows, list)
+        self.assertEqual(len(rows), ctx.TOP_TOOL_SCHEMAS)
+        self.assertEqual([row["tool"] for row in rows[:4]], ["common", "rare", "t00", "t01"])
+        common = rows[0]
+        all_bytes = 40 + 70 + 40 + len(names)
+        self.assertEqual((common["bytes_sum"], common["requests"], common["bytes_p50"]), (80, 2, 40))
+        self.assertEqual(common["share_of_requests"], round(2 / 3, 3))
+        self.assertEqual(common["share_of_tool_bytes"], round(80 / all_bytes, 3))
+        self.assertEqual(rows[1]["share_of_requests"], round(1 / 3, 3))
+
+    def test_a_tool_size_median_is_over_the_requests_that_carry_that_tool(self) -> None:
+        bodies = [body("a", 100, tools=(("x", size),)) for size in (10, 90, 20)]
+        (row,) = ctx.summarize_tool_schemas(bodies)["heaviest_by_total_bytes"]  # type: ignore[misc]
+        self.assertEqual(row["bytes_p50"], 20)
+
+    def test_requests_without_tools_give_only_the_request_count(self) -> None:
+        self.assertEqual(ctx.summarize_tool_schemas([body("a", 100)]), {"requests": 0})
+        self.assertEqual(ctx.summarize_tool_schemas([]), {"requests": 0})
+
+    def test_a_body_of_zero_bytes_has_no_share_and_does_not_divide(self) -> None:
+        summary = ctx.summarize_tool_schemas([body("a", 0, tools=(("x", 10),), system=5)])
+        self.assertEqual(summary["tools_and_system_share_of_body_p50"], 0.0)
+
+    def test_the_summary_of_bodies_carries_the_tool_schema_section(self) -> None:
+        summary = ctx.summarize_bodies([body("a", 100, tools=(("x", 10),), system=5)], NO_TRACES)
+        section = summary["tool_schemas"]
+        assert isinstance(section, dict)
+        self.assertEqual((section["requests"], section["tool_bytes_p50"]), (1, 10))
+
+
+class MainTest(unittest.TestCase):
+    """Runs the command on small stores that hold one of everything on each of two days, so each reader feeds the right summary."""
+
+    FIRST_DAY = date(2026, 11, 1)
+    SECOND_DAY = date(2026, 11, 2)
+    NOON = 1793534400.0  # 2026-11-01T12:00:00Z
+    DAY_SECONDS = 86400.0
+    UNTIL_TEXT = "2026-11-02T18:00:00Z"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = pathlib.Path(self._tmp.name)
+
+    def run_main(self) -> dict[str, object]:
+        out = self.base / "result.json"
+        argv = [
+            "measure_request_context.py",
+            "--base-path",
+            str(self.base),
+            "--from-date",
+            "2026-11-01",
+            "--to-date",
+            "2026-11-02",
+            "--until",
+            self.UNTIL_TEXT,
+            "--json-out",
+            str(out),
+        ]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ctx.main(), 0)
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_every_section_is_built_from_its_own_store(self) -> None:
+        usage = {"input_tokens": 100, "output_tokens": 7, "cache_read_input_tokens": 60}
+        blob = self.base / ".masc" / "tool_blobs" / SHA_A[:2] / SHA_A
+        blob.parent.mkdir(parents=True)
+        blob.write_text(skill_schema_text([("one", "abc"), ("two", "defgh")]), encoding="utf-8")
+        schemas = [schema_entry("other", 11), schema_entry(ctx.SKILL_TOOL, 22, SHA_A)]
+        for turn, day in ((5, self.FIRST_DAY), (6, self.SECOND_DAY)):
+            noon = self.NOON + (day - self.FIRST_DAY).days * self.DAY_SECONDS
+            write_trace(self.base, "alpha", f"trace-1-0-{turn}-abc.jsonl", [usage_row(noon, usage)])
+            capture = capture_row(
+                noon, 9000, [], trace_id="trace-1-0", absolute_turn=turn, tool_schemas=schemas, system_prompt={"bytes": 33}
+            )
+            write_captures(self.base, "alpha", day, [capture])
+        write_ledger(
+            self.base,
+            self.FIRST_DAY,
+            [
+                ledger_row(self.NOON, "alpha", ctx.SKILL_TOOL, skill_input("one")),
+                ledger_row(self.NOON, "beta", ctx.SKILL_TOOL, skill_input("one")),
+            ],
+        )
+        write_ledger(self.base, self.SECOND_DAY, [ledger_row(self.NOON + self.DAY_SECONDS, "alpha", ctx.SKILL_TOOL, skill_input("two"))])
+        result = self.run_main()
+        self.assertEqual(result["window"], {"from": "2026-11-01", "to": "2026-11-02", "until": "2026-11-02T18:00:00+00:00"})
+        usage_section = result["model_requests"]
+        assert isinstance(usage_section, dict)
+        self.assertEqual((usage_section["requests"], usage_section["input_tokens"]), (2, 200))
+        bodies = result["captured_request_bodies"]
+        assert isinstance(bodies, dict)
+        self.assertEqual((bodies["requests"], bodies["body_bytes_sum"], bodies["unanswered_requests"]), (2, 18000, 0))
+        tool_section = bodies["tool_schemas"]
+        assert isinstance(tool_section, dict)
+        self.assertEqual((tool_section["tool_bytes_p50"], tool_section["system_prompt_bytes_p50"]), (33, 33))
+        catalog = result["skill_catalog"]
+        assert isinstance(catalog, dict)
+        self.assertEqual((catalog["lists_read"], catalog["distinct_lists"], catalog["rows_p50"]), (2, 1, 2))
+        calls = result["skill_calls"]
+        assert isinstance(calls, dict)
+        # beta has no usage event, so only alpha's two calls are set against the two requests.
+        self.assertEqual((calls["calls"], calls["calls_per_100_requests"], calls["carrying_keepers"]), (3, 100.0, 1))
+        self.assertEqual((calls["carrying_keepers_without_calls"], calls["keepers_with_calls_and_no_usage_events"]), (0, 1))
+        self.assertEqual(calls["skills_opened"], 2)
+
+    def test_a_window_with_no_data_still_gives_every_section(self) -> None:
+        (self.base / ".masc").mkdir()
+        result = self.run_main()
+        self.assertEqual(sorted(result), ["captured_request_bodies", "model_requests", "skill_calls", "skill_catalog", "window"])
+        catalog = result["skill_catalog"]
+        assert isinstance(catalog, dict)
+        self.assertEqual(catalog["requests_with_tool"], 0)
 
 
 if __name__ == "__main__":

@@ -191,8 +191,6 @@ let core_error_to_runtime_outcome err =
         | Agent_core.Error.HookExecutionFailed _
         | Agent_core.Error.TerminalToolEffectFailed _
         | Agent_core.Error.TerminalToolDurabilityFailed _
-        | Agent_core.Error.GuardrailViolation _
-        | Agent_core.Error.TripwireViolation _
         | Agent_core.Error.InputRequired _ )
      | Agent_core.Error.Config _
      | Agent_core.Error.Mcp _

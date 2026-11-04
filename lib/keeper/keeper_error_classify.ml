@@ -635,7 +635,7 @@ let extract_input_required (err : Agent_core.Error.t)
   =
   match err with
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired ir) -> Some ir
-  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.TerminalToolEffectFailed _ | (Agent_core.Error.TerminalToolDurabilityFailed _ | (Agent_core.Error.GuardrailViolation _ | Agent_core.Error.TripwireViolation _))))))
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.TerminalToolEffectFailed _ | Agent_core.Error.TerminalToolDurabilityFailed _))))
   | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
@@ -651,9 +651,7 @@ let is_input_required_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Agent (ToolRoundLimitExceeded _)
   | Agent_core.Error.Agent (HookExecutionFailed _)
   | Agent_core.Error.Agent (TerminalToolEffectFailed _)
-  | Agent_core.Error.Agent (TerminalToolDurabilityFailed _)
-  | Agent_core.Error.Agent (GuardrailViolation _)
-  | Agent_core.Error.Agent (TripwireViolation _) -> false
+  | Agent_core.Error.Agent (TerminalToolDurabilityFailed _) -> false
   | Agent_core.Error.Api _
   | Agent_core.Error.Provider _
   | Agent_core.Error.Mcp _

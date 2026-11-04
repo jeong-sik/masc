@@ -33,7 +33,7 @@ Single-agent execution engine.
 sdk_error
 ├── Api of api_error          (provider API and transport failures)
 ├── Provider of provider_error (provider configuration, request, and parse failures)
-├── Agent of agent_error      (stop reason, hook, guardrail, tripwire, or input request)
+├── Agent of agent_error      (stop reason, round limit, hook, terminal tool, or input request)
 ├── Mcp of mcp_error          (server, initialization, list, call, or HTTP failure)
 ├── Config of config_error    (missing, unsupported, invalid, or sensitive configuration)
 ├── Serialization of serialization_error

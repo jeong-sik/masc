@@ -162,8 +162,6 @@ let reaches_typed_internal_error : Agent_core.Error.agent_error -> bool = functi
   | Agent_core.Error.UnrecognizedStopReason _
   | Agent_core.Error.ToolRoundLimitExceeded _
   | Agent_core.Error.HookExecutionFailed _
-  | Agent_core.Error.GuardrailViolation _
-  | Agent_core.Error.TripwireViolation _
   | Agent_core.Error.InputRequired _ -> false
 ;;
 
@@ -202,8 +200,6 @@ let one_of_each_agent_error : Agent_core.Error.agent_error list =
       ; effect_disposition = E.unknown_terminal_effect
       ; detail = "receipt persistence failed"
       }
-  ; E.GuardrailViolation { validator = "content_filter"; reason = "toxic" }
-  ; E.TripwireViolation { tripwire = "disallow_shell"; reason = "exec detected" }
   ; E.InputRequired
       { request_id = "req-1"
       ; participant_name = Some "user"

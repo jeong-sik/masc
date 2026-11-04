@@ -155,7 +155,6 @@ let test_to_string_each_variant () =
     ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad body")
     ; `Tool_exec_failed ("search", "crash")
     ; `Tool_timeout ("calc", 30.0)
-    ; `Guardrail_violation ("typed-input", "rejected")
     ; `Unrecognized_stop_reason "weird"
     ; `Missing_env_var "SECRET"
     ; `Unsupported_provider "unknown_llm"
@@ -194,7 +193,6 @@ let test_all_variants_convert () =
     ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "x")
     ; `Tool_exec_failed ("t", "d")
     ; `Tool_timeout ("t", 1.0)
-    ; `Guardrail_violation ("typed-input", "rejected")
     ; `Unrecognized_stop_reason "x"
     ; `Missing_env_var "X"
     ; `Unsupported_provider "x"

@@ -291,7 +291,7 @@ let test_retryable_api_server_error () =
 
 let test_retryable_agent () =
   let err =
-    Error.Agent (GuardrailViolation { validator = "typed-input"; reason = "rejected" })
+    Error.Agent (UnrecognizedStopReason { reason = "typed-input" })
   in
   check bool "agent error not retryable" false (Error.is_retryable err)
 ;;

@@ -33,9 +33,7 @@ type tool_error =
   ]
 
 type agent_error =
-  [ `Guardrail_violation of string * string
-  | `Tripwire_violation of string * string
-  | `Input_required of string * string
+  [ `Input_required of string * string
   | `Hook_execution_failed of string * string * string option * string option * string
   | `Terminal_tool_effect_failed of string * Error.closed_terminal_effect * string
   | `Terminal_tool_durability_failed of
@@ -157,8 +155,6 @@ let of_core_error (err : Error.t) : core_error_poly =
   match err with
   | Error.Api err -> (of_api_error err :> core_error_poly)
   | Error.Provider err -> (of_provider_error err :> core_error_poly)
-  | Error.Agent (GuardrailViolation r) -> `Guardrail_violation (r.validator, r.reason)
-  | Error.Agent (TripwireViolation r) -> `Tripwire_violation (r.tripwire, r.reason)
   | Error.Agent (InputRequired r) -> `Input_required (r.request_id, r.question)
   | Error.Agent (HookExecutionFailed r) ->
     `Hook_execution_failed (r.hook_name, r.stage, r.tool_name, r.tool_use_id, r.detail)
@@ -238,10 +234,6 @@ let provider_to_error : provider_error -> Error.t = function
 let to_core_error (err : core_error_poly) : Error.t =
   match err with
   | #provider_error as e -> provider_to_error e
-  | `Guardrail_violation (validator, reason) ->
-    Error.Agent (GuardrailViolation { validator; reason })
-  | `Tripwire_violation (tripwire, reason) ->
-    Error.Agent (TripwireViolation { tripwire; reason })
   | `Input_required (request_id, question) ->
     Error.Agent
       (InputRequired
@@ -330,8 +322,6 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Payment_required _
   | `Tool_exec_failed _
   | `Tool_timeout _
-  | `Guardrail_violation _
-  | `Tripwire_violation _
   | `Input_required _
   | `Hook_execution_failed _
   | `Terminal_tool_effect_failed _

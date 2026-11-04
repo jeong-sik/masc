@@ -1456,9 +1456,7 @@ let run_blocks_internal_in_scope
              | Agent_core.Error.ToolRoundLimitExceeded _
              | Agent_core.Error.HookExecutionFailed _
              | Agent_core.Error.TerminalToolEffectFailed _
-             | Agent_core.Error.TerminalToolDurabilityFailed _
-             | Agent_core.Error.GuardrailViolation _
-             | Agent_core.Error.TripwireViolation _ )
+             | Agent_core.Error.TerminalToolDurabilityFailed _ )
          | Agent_core.Error.Mcp _
          | Agent_core.Error.Config _
          | Agent_core.Error.Serialization _

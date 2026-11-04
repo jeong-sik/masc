@@ -745,7 +745,13 @@ let for_surface = function
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
-      ; b Act "Left / Esc" "back" ~help:"close the post"
+        (* Left closes the open post and does nothing on the list
+           ([Board_list | Board_compose -> ()] in the [Some "left"] arm of
+           masc_tui.ml); Esc leaves the list for the Dashboard. One row per
+           state, so the list footer stops offering a key that does nothing
+           there. *)
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Dashboard"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
@@ -833,7 +839,10 @@ let for_surface = function
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
       ; b Act "Right / Enter" "detail" ~detail:List_only
-      ; b Act "Left / Esc" "back"
+        (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
+           in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
+      ; b Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
@@ -863,7 +872,9 @@ let for_surface = function
           ~help:"previous / next server page; pages are separate observations"
       ; b Act "Right / Enter" "details" ~detail:List_only
           ~help:"open schedule details"
-      ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only
+          ~help:"back to the schedule list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
@@ -882,7 +893,8 @@ let for_surface = function
                  every request ever submitted, which nothing removes"
       ; b Act "Right / Enter" "details" ~detail:List_only
           ~help:"read the request and evidence"
-      ; b Act "Left / Esc" "back" ~help:"back to the list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "< / >" "newer / older"
@@ -918,7 +930,9 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~detail:List_only
           ~help:"open the full evaluator verdict"
-      ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only
+          ~help:"back to the verdict list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
         (* One item, spelled the way Verification spells its own pair. Apart,
@@ -1216,7 +1230,8 @@ let for_surface = function
           ~help:"cycle through the categories this page carries"
       ; b Act "Right / Enter" "detail"
           ~help:"show the full message, source, category, turn, and JSON details"
-      ; b Act "Left / Esc" "back"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"

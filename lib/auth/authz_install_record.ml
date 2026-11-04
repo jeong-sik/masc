@@ -116,8 +116,6 @@ let read_error_to_string = function
     Printf.sprintf "the install record %s is corrupt: %s" path (corruption_to_string reason)
 ;;
 
-(* Both members, nothing else. With exactly two members that carry the two
-   names, no name can repeat. *)
 (* An absolute path without an empty segment, a [.] or a [..], and without a
    separator at the end. The install record keeps the spelling that is given
    and a boot opens the store by it, so the spelling must leave no doubt about
@@ -131,6 +129,8 @@ let normal_form path =
   | "" :: [] | _ :: _ | [] -> false
 ;;
 
+(* Both members, nothing else. With exactly two members that carry the two
+   names, no name can repeat. *)
 let members_of_json = function
   | `Assoc [ (first_name, `String first); (second_name, `String second) ] ->
     if String.equal first_name base_path_member && String.equal second_name external_store_member

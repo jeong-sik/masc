@@ -9952,6 +9952,27 @@ let test_decode_server_identity_reads_a_probe () =
     Alcotest.(check (option string)) "process identity" (Some "process-a")
       identity.Tui_decode.sid_runtime_instance_id
 
+let test_decode_server_identity_reads_the_operator_rollup () =
+  let with_rollup fields =
+    match health_probe with
+    | `Assoc base -> `Assoc (base @ fields)
+    | _ -> Alcotest.fail "the probe fixture is an object"
+  in
+  let read json =
+    match Tui_decode.decode_server_identity json with
+    | Ok identity -> identity.Tui_decode.sid_operator_action
+    | Error detail -> Alcotest.fail detail
+  in
+  let reason = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  Alcotest.(check (option (list string))) "the reasons when the operator has to act" (Some [ reason ])
+    (read (with_rollup [ "operator_action_required", `Bool true
+                       ; "operator_action_reasons", `List [ `String reason ] ]));
+  Alcotest.(check (option (list string))) "nothing to do is an answer too" (Some [])
+    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List [] ]));
+  Alcotest.(check (option (list string))) "an older server cannot say" None (read health_probe);
+  Alcotest.(check (option (list string))) "a flag that disagrees with its list is not read" None
+    (read (with_rollup [ "operator_action_required", `Bool true; "operator_action_reasons", `List [] ]))
+
 let test_decode_server_identity_survives_a_bare_health () =
   match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
   | Error detail -> Alcotest.fail detail
@@ -14734,6 +14755,8 @@ let () =
           test_decode_server_identity_reads_a_probe;
         Alcotest.test_case "survives a bare health" `Quick
           test_decode_server_identity_survives_a_bare_health;
+        Alcotest.test_case "reads the operator rollup" `Quick
+          test_decode_server_identity_reads_the_operator_rollup;
         Alcotest.test_case "takes an integer age" `Quick
           test_decode_server_identity_takes_an_integer_age;
         Alcotest.test_case "reads the worktree verdict" `Quick

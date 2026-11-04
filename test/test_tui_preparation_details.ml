@@ -124,7 +124,7 @@ let workspace_admission_preserves_selected_preparation () =
       ; sid_binary_commit_age_s=None; sid_runtime_instance_id = None; sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path)
       ; sid_masc_root=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
       ; sid_executable_in_worktree=None; sid_state_ready=Some true
-      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None } in
     let served = ref config and conditional = ref false in
     let receipt = Workspace.read_precondition_admission_header in
     let receipts = ref [receipt] in

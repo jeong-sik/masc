@@ -278,7 +278,7 @@ let confirmed_approval_state () =
       sid_base_path = Decode.Canonical_path.of_path "/owned-workspace";
       sid_masc_root = Decode.Canonical_path.of_path "/owned-workspace/.masc";
       sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
-      sid_sse_clients = None; sid_gc = None; sid_scheduler = None };
+      sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
   state.workspace_identity <- Workspace_identity_match;
   state.view <- Approvals;
   state.approval_detail_open <- true;

@@ -65,13 +65,21 @@ type status_item =
       { gerund : string
       ; keeper : string
       }
+  (* The server's rollup says the operator has to act: credit to add, a key to
+     change, a Keeper to move to a route with quota left (RFC-0484 §3.3).
+     [first] is the first reason, [count] how many there are. Built only from
+     a non-empty list, so the notice always has a reason to show. *)
+  | Operator_action of
+      { first : string
+      ; count : int
+      }
   | Port of int
 
 (* A working surface needs decisions and warnings. Passive diagnostics and
    other Keepers' activity have their own System/Activity surfaces. *)
 let needs_operator = function
   | Workspace_mismatch _ | Workspace_unconfirmed | Server_worktree_binary | Tui_build_mismatch _
-  | Keeper_action_armed _ | Keeper_action_running _ | Task_creation _ -> true
+  | Keeper_action_armed _ | Keeper_action_running _ | Task_creation _ | Operator_action _ -> true
   | Refresh_interval _ | Server_build _ | Server_base_path _
   | Keeper_answering _ | Keeper_answered _ | Port _ -> false
 
@@ -102,6 +110,11 @@ type retention =
   | Workspace_conflict
   | Build_conflict
   | Worktree_conflict
+  (* Leads the row like a conflict: left in the tail it is dropped on every
+     surface whose keys fill the row, and nothing else on any surface says the
+     operator has something to fix. It follows the conflicts, which say
+     whether this screen can be trusted at all. *)
+  | Operator_notice
 
 type projected_status =
   { text : string
@@ -172,6 +185,11 @@ let status_item_projection = function
     Some
       { text = Printf.sprintf "press %s again to %s %s" key action keeper
       ; retention = Armed_action
+      }
+  | Operator_action { first; count } ->
+    Some
+      { text = Printf.sprintf "ACTION NEEDED %d \xc2\xb7 %s" count first
+      ; retention = Operator_notice
       }
   | Keeper_action_running { gerund; keeper } ->
     Some
@@ -275,7 +293,7 @@ let omission_order =
 let leads_the_row item =
   match item.retention with
   | Armed_action | Workspace_conflict | Build_conflict
-  | Worktree_conflict ->
+  | Worktree_conflict | Operator_notice ->
     true
   | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
   | Live_activity -> false
@@ -289,6 +307,7 @@ let conflict_order =
   ; Workspace_conflict
   ; Build_conflict
   ; Worktree_conflict
+  ; Operator_notice
   ]
 
 let ordered_conflicts items =

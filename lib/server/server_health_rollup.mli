@@ -16,6 +16,13 @@ val is_cached : string -> bool
     The list itself stays inside the module: it is the rollup's own reach, and
     an export with no caller is one the dead-surface ratchet counts. *)
 
+val operator_field_names : string list
+(** The three rollup fields that say whether the operator has to act:
+    [overall_status], [operator_action_required], [operator_action_reasons].
+    Cached like the rest; the [/health] probe also carries the snapshot's copy
+    so the TUI, which reads the probe on every refresh, can show them
+    (RFC-0484 §3.3). *)
+
 type t =
   { overall_status : string
   ; operator_action_required : bool

@@ -426,7 +426,7 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base)
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Filename.concat base ".masc"))
     ; sid_executable_in_worktree = None; sid_state_ready = Some true
-    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
   in
   let identity_a = identity base_a and identity_b = identity base_b in
   let history context =
@@ -577,7 +577,7 @@ let test_file_changes_read_keeps_its_workspace () =
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path
         (Unix.realpath (Filename.concat base ".masc"))
     ; sid_executable_in_worktree = None; sid_state_ready = Some true
-    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
   in
   let config_a = Masc.Workspace.default_config base_a in
   let config_b = Masc.Workspace.default_config base_b in

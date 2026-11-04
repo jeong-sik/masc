@@ -151,7 +151,7 @@ let preset_identity base : D.server_identity =
   ; sid_base_path = D.Canonical_path.of_path base
   ; sid_masc_root = D.Canonical_path.of_path (base ^ "/.masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true
-  ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None
+  ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None
   }
 
 let preset_state () =

@@ -301,7 +301,7 @@ let test_home_visit_stays_with_local_workspace () =
         sid_masc_root = canonical (Filename.concat base ".masc");
         sid_executable_in_worktree = None; sid_state_ready = Some true;
         sid_uptime = None; sid_sse_clients = None; sid_gc = None;
-        sid_scheduler = None } in
+        sid_scheduler = None; sid_operator_action = None } in
     let alpha = keeper "alpha" and beta = keeper "beta" in
     Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
       let sent = ref [] in

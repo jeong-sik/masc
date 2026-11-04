@@ -288,12 +288,14 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("scheduler", scheduler_json ());
     ]
 
-let make_health_probe_json ?timing ?(listener = "http/1.1") ~request_authority request =
+let make_health_probe_json ?timing ?(listener = "http/1.1") ?(extra_fields = [])
+    ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
        ~full_health_url:"/health?full=1" ~request_authority request
      @ [ "auxiliary_startup",
-         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ])
+         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ]
+     @ extra_fields)
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
    extracted to [Server_routes_http_runtime_fleet_scan] (godfile decomp). *)
@@ -1790,12 +1792,27 @@ end
 let full_health_requested request =
   Server_utils.bool_query_param request "full" ~default:false
 
+(* RFC-0484 §3.3: the probe the TUI reads on every refresh carries the
+   operator rollup the last full-health snapshot computed. The probe never
+   computes the rollup, so it and [?full=1] always report the same snapshot;
+   before the first snapshot it carries none, and the TUI shows nothing. *)
+let probe_operator_rollup_fields () =
+  match (full_health_snapshot_state ()).observation.snapshot with
+  | None -> []
+  | Some snapshot ->
+    List.filter
+      (fun (name, _) -> List.exists (String.equal name) Server_health_rollup.operator_field_names)
+      snapshot.Health_observation.fields
+;;
+
 let make_health_response_json ?timing ?(listener = "http/1.1") ~request_authority
     request =
   measure_health_phase timing Server_timing.Health_response (fun () ->
     if full_health_requested request
     then make_cached_full_health_json ?timing ~listener ~request_authority request
-    else make_health_probe_json ?timing ~listener ~request_authority request)
+    else
+      make_health_probe_json ?timing ~listener ~request_authority
+        ~extra_fields:(probe_operator_rollup_fields ()) request)
 
 let make_health_response_body ?listener ~request_authority request =
   let timing = Server_timing.create () in

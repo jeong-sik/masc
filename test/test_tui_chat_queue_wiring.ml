@@ -1085,7 +1085,7 @@ let test_preflight_first_post_respects_control_epoch () =
     { Tui_decode.sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path "/workspace/.masc";
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
-      sid_sse_clients=None; sid_gc=None; sid_scheduler=None };
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None };
   let entry, item = preflight_input () in
   let priority = {item with Masc_tui_keeper_chat_queue.intent=
     Masc_tui_keeper_chat_queue.Run_next {automatic=false}} in
@@ -1654,7 +1654,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
     { sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path root;
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
-      sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None } in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";

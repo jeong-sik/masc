@@ -122,7 +122,7 @@ let connector_read_ready state base_path =
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path (Filename.concat base_path ".masc")
     ; sid_executable_in_worktree = None
     ; sid_state_ready = Some true
-    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None
+    ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None
     }
   in
   state.Tui.server_identity <- Some identity;

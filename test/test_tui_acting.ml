@@ -219,7 +219,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; agent_core ~kind:Observer.Telemetry "analyst"
     ; heartbeat "bandleader"
     ; Observer.Keeper_composite_changed { keeper = "largo"; at = 100. }
-    ; Observer.Snapshot "execution_snapshot"
+    ; Observer.Snapshot (Observer.Unread_projection "operator_snapshot")
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "brand_new_push"
@@ -553,7 +553,7 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
     ; ( "the internal runs push"
       , Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification )
     ; ("the schedules push", Observer.Schedule_store_invalidated)
-    ; ("a snapshot", Observer.Snapshot "execution_snapshot")
+    ; ("a snapshot", Observer.Snapshot (Observer.Unread_projection "operator_snapshot"))
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
     ; ("a settlement", settled "largo")

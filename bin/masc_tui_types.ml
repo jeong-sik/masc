@@ -1296,6 +1296,15 @@ type keeper_calls_owed = {
   kclo_read : Masc_tui_owed_read.t;
 }
 
+(* The metrics read the logs view and the Info tab owe the selected Keeper.
+   The metrics file is appended by the Keeper's heartbeat and by its finished
+   turn, and each append is announced right after it is written. *)
+type keeper_logs_owed = {
+  klgo_keeper : string;
+  klgo_reading : unit ref;
+  klgo_read : Masc_tui_owed_read.t;
+}
+
 (* The read the schedules of one Keeper owe while the chat pane or the
    Automation tab draws them. *)
 type keeper_schedules_owed = {
@@ -10143,6 +10152,7 @@ type state = {
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
+  mutable keeper_logs_owed: keeper_logs_owed option;
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
@@ -19530,6 +19540,7 @@ let create_state
   keeper_log_read = None;
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
+  keeper_logs_owed = None;
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;

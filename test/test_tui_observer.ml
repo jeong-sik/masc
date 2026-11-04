@@ -117,6 +117,8 @@ let summary = function
         (match o.Observer.to_total_turns with Some n -> string_of_int n | None -> "-")
   | Observer.Event (Observer.Keeper_composite_changed { keeper; _ }) ->
       "composite(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Keeper_metrics_appended { keeper; _ }) ->
+      "metrics(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
       Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
   | Observer.Event (Observer.Keeper_memory_journal_appended { keeper; _ }) ->
@@ -429,6 +431,28 @@ let test_a_frame_its_type_decides_is_not_read_past_the_type () =
     (List.map summary
        (decode_all
           [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
+
+(* The metrics file's own announcement, not the heartbeat: the in-turn pulse
+   sends [keeper_heartbeat] without writing a row. *)
+let test_a_metrics_append_names_its_keeper () =
+  check (list string) "the append reads as the Keeper's metrics change"
+    [ "metrics(lane-smith)" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
+              Masc.Keeper_metrics_broadcast.appended_event ]));
+  check (option string) "and the logs view reads that Keeper" (Some "lane-smith")
+    (match decode_all
+             [ "data: {\"type\":\"keeper_metrics_appended\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]
+     with
+     | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
+     | _ -> None);
+  check (option string) "a heartbeat is not a metrics append" None
+    (match decode_all
+             [ "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]
+     with
+     | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
+     | _ -> None)
 
 (* A delta has a slice too, and reading the table for "does this have one"
    rather than "does it replace a projection" would swallow this one: the
@@ -1328,6 +1352,8 @@ let () =
             test_a_frame_its_type_decides_is_not_read_past_the_type
         ; test_case "a delta with a slice is not a snapshot" `Quick
             test_a_delta_with_a_slice_is_not_a_snapshot
+        ; test_case "a metrics append names its Keeper" `Quick
+            test_a_metrics_append_names_its_keeper
         ; test_case "only a chat-appended event names a reload keeper" `Quick
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "only a memory journal event names a journal keeper" `Quick

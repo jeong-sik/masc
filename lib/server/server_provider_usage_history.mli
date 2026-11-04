@@ -28,7 +28,12 @@ val read :
     A successful complete empty scope/day appears in [reported_no_windows]
     with its opaque [scope_id] and [observed_at], unless another source retains
     windows for that scope/day. Missing days have neither a point nor an empty
-    report. A stored line that cannot be read is logged,
-    skipped, and counted in [unreadable_reports]; the rest are still read. A
-    store that cannot be read at all, or a report that failed to persist in
-    the window, fails the read. *)
+    report.
+
+    Each journal day file of the widest window is folded once and kept for
+    the workspace: a read folds only what the files gained since the last
+    one, and reads a rotated file again from its start. A stored line that
+    cannot be read is logged once, skipped, and counted in
+    [unreadable_reports]; the rest are still read. A store that cannot be
+    read at all, or a report that failed to persist in the window, fails the
+    read. *)

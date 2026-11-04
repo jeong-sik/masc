@@ -243,6 +243,39 @@ let consume_item t json =
 
 let note_unreadable t = { t with unreadable_reports = t.unreadable_reports + 1 }
 
+let unbounded () = create ~since_at:Float.neg_infinity ~now:Float.infinity
+
+(* [kept] holds, per source, day and window, the latest reading of the rows it
+   consumed, so passing it through the rules [consume_item] applies yields
+   what consuming those rows here would have: a day starts on a UTC midnight
+   and so does [t]'s window, so a day's readings are all in it or all out of
+   it. A reading later than [t.now] hides an earlier one of its own day until
+   [t.now] passes it, which only a wall clock set back can produce. *)
+let absorb t kept =
+  let t = { t with unreadable_reports = t.unreadable_reports + kept.unreadable_reports } in
+  Source_day_map.fold
+    (fun key (held : source_day) t ->
+      let t =
+        match held.snapshot with
+        | Some snapshot when in_window t snapshot.observed_at ->
+            update_source_day t key (fun current ->
+              match current.snapshot with
+              | Some previous when previous.observed_at >= snapshot.observed_at -> current
+              | Some _ | None -> { current with snapshot = Some snapshot })
+        | Some _ | None -> t
+      in
+      Window_map.fold
+        (fun window_key (point : point) t ->
+          if not (in_window t point.observed_at) then t
+          else
+            update_source_day t key (fun current ->
+              match Window_map.find_opt window_key current.windows with
+              | Some previous when previous.observed_at >= point.observed_at -> current
+              | Some _ | None ->
+                  { current with windows = Window_map.add window_key point current.windows }))
+        held.windows t)
+    kept.sources t
+
 let daily_points t =
   (* Retain source rows until this fold: a delayed append must still be judged
      against the latest complete snapshot from its own observation day. *)

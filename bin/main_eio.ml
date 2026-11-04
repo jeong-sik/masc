@@ -4578,12 +4578,15 @@ let runtime_setup_render_cmd =
 
 let runtime_setup_inventory_cmd =
   Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")
-    Term.(const (fun base_path -> Masc_cli_runtime_setup.inventory ~base_path) $ base_path)
+    Term.(const (fun base_path port agent -> Masc_cli_runtime_setup.inventory ~base_path ~port ~agent)
+      $ base_path $ port $ login_agent)
 
 let runtime_setup_batch_cmd =
   let request = Arg.(required & opt (some string) None & info ["request"] ~doc:"Private setup selection JSON file.") in
   Cmd.v (Cmd.info "runtime-setup-batch" ~doc:"Validate and save the selected runtimes against their original revision.")
-    Term.(const (fun base_path request_path -> Masc_cli_runtime_setup.configure ~base_path ~request_path) $ base_path $ request)
+    Term.(const (fun base_path port agent request_path ->
+        Masc_cli_runtime_setup.configure ~base_path ~port ~agent ~request_path)
+      $ base_path $ port $ login_agent $ request)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]

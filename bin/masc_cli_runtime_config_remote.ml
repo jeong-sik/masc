@@ -142,20 +142,20 @@ type voice_ground =
   ; speaking : (string * Voice_config.endpoint_kind option) list
   }
 
-let voice_answer_field name = function
+let answer_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let voice_answer_unread what = Error ("The server's voice setup answer has no readable " ^ what ^ ".")
 
 let voice_source json =
-  match voice_answer_field "source" json with
+  match answer_field "source" json with
   | None | Some `Null -> Ok None
   | Some source ->
-    (match voice_answer_field "kind" source with
+    (match answer_field "kind" source with
      | Some (`String "runtime_toml") -> Ok None
      | Some (`String "standalone_json") ->
-       (match voice_answer_field "path" source with
+       (match answer_field "path" source with
         | Some (`String path) -> Ok (Some path)
         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
           voice_answer_unread "voice_config.json path")
@@ -163,9 +163,9 @@ let voice_source json =
        voice_answer_unread "source")
 
 let speaking_endpoint entry =
-  match voice_answer_field "id" entry with
+  match answer_field "id" entry with
   | Some (`String id) ->
-    (match voice_answer_field "kind" entry with
+    (match answer_field "kind" entry with
      | Some (`String kind) -> Ok (id, Voice_config.endpoint_kind_of_name kind)
      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
        voice_answer_unread "speaking endpoint kind")
@@ -173,10 +173,10 @@ let speaking_endpoint entry =
     voice_answer_unread "speaking endpoint id"
 
 let voice_speaking json =
-  match voice_answer_field "tts" json with
+  match answer_field "tts" json with
   | None | Some `Null -> Ok []
   | Some tts ->
-    (match voice_answer_field "endpoints" tts with
+    (match answer_field "endpoints" tts with
      | Some (`List entries) ->
        List.fold_right
          (fun entry acc ->
@@ -206,7 +206,7 @@ let fetch_voice_ground ~clock server =
     else Error (error_of_body ~status body)
   in
   let* revision =
-    match voice_answer_field "revision" json with
+    match answer_field "revision" json with
     | Some (`String revision) -> Ok revision
     | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
       voice_answer_unread "revision"
@@ -228,6 +228,85 @@ let apply_voice_setup ~clock server ~revision changes =
     Error ("The server's answer to the setup did not arrive, so whether it was stored is unknown: " ^ detail)
   | Ok (200, _) -> Ok ()
   | Ok (status, body) -> Error (error_of_body ~status body)
+
+let answer_string what name json =
+  match answer_field name json with
+  | Some (`String value) -> Ok value
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+    Error (Printf.sprintf "%s has no readable %s" what name)
+
+let lock_warning_of_answer row =
+  match answer_field "code" row, answer_field "detail" row with
+  | Some (`String "runtime_config_lock_release_unconfirmed"), Some (`String detail) ->
+    Ok (Runtime.Config_lock_release_unconfirmed detail)
+  | (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)),
+    (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)) ->
+    Error "a lock warning this command does not know"
+
+(* The server's commit receipt in its answer to a text save, as the setup
+   batch reports it. *)
+let commit_record_of_answer body =
+  let open Result.Syntax in
+  let* json =
+    match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error detail -> Error ("the answer is not JSON: " ^ detail)
+  in
+  let* commit =
+    match answer_field "commit" json with
+    | Some (`Assoc _ as commit) -> Ok commit
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+      Error "the answer carries no commit"
+  in
+  let* source_revision = answer_string "the commit" "source_revision" commit in
+  let* order = answer_string "the commit" "order" commit in
+  let* durability =
+    match answer_string "the commit" "durability" commit with
+    | Ok "durable" -> Ok Runtime.Durable
+    | Ok "unconfirmed" ->
+      let* detail = answer_string "the commit" "durability_detail" commit in
+      Ok (Runtime.Durability_unconfirmed { detail })
+    | Ok other -> Error ("the commit names an unknown durability " ^ other)
+    | Error reason -> Error reason
+  in
+  let* lock_warnings =
+    match answer_field "warnings" commit with
+    | Some (`List rows) ->
+      List.fold_right
+        (fun row acc ->
+           let* rest = acc in
+           let* warning = lock_warning_of_answer row in
+           Ok (warning :: rest))
+        rows (Ok [])
+    | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+      Error "the commit lists no lock warnings"
+  in
+  Ok { Runtime_setup_batch.source_revision; order; durability; lock_warnings }
+
+(* The commit of a setup batch decided against the running server's text:
+   the validated text saved over [source], the text the batch started from.
+   It is saved even when it equals [source], as the local commit would be, so
+   the receipt is the server's. *)
+let publish_setup_text ~clock server source ~text =
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "source_text", `String text
+         ; "expected_source_revision", `String source.revision
+         ; "expected_source_path", `String source.path
+         ])
+  in
+  match
+    Masc_http_client.post_sync ~clock ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
+  with
+  | Error detail -> Error (Runtime_setup_batch.Commit_unobserved detail)
+  | Ok (409, _) -> Error Runtime_setup_batch.Changed_configuration
+  | Ok (200, body) ->
+    Result.map_error
+      (fun reason ->
+        Runtime_setup_batch.Commit_unobserved ("the server answered 200 and " ^ reason))
+      (commit_record_of_answer body)
+  | Ok (status, body) -> Error (Runtime_setup_batch.Commit_refused (error_of_body ~status body))
 
 (* The running server as a table edit's store (browser-lane-setup): it reads
    the text the server holds and commits through the text route. The path is

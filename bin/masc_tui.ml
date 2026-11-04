@@ -4062,6 +4062,12 @@ let launch_keeper_chat_schedules_load state ~mailbox ~keeper_name =
      && not (keeper_schedule_page_pending state ~keeper_name schedule_first_page) then
     launch_keeper_schedules_load state ~mailbox ~keeper_name
 
+(* An agenda read began, whatever started it: a schedule change announced
+   from now on overtakes it ([apply_schedule_agenda_read]), and one announced
+   before it is answered by it. *)
+let note_schedule_agenda_read_started state =
+  state.schedules_owed <- Masc_tui_owed_read.started state.schedules_owed
+
 let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -4079,6 +4085,7 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
     else
       let read, ticket = Snapshot_read.start ~intent state.schedules_agenda_read in
       state.schedules_agenda_read <- read;
+      if Option.is_some ticket then note_schedule_agenda_read_started state;
       ticket
   in
   let request = Schedule_page_read
@@ -4102,6 +4109,7 @@ let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
     match request with
     | None -> ()
     | Some ticket ->
+        note_schedule_agenda_read_started state;
         let host = server_peer_host in
         let port = state.port in
         Masc_tui_async_read.launch
@@ -4110,21 +4118,6 @@ let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
           (capture_workspace_json_read state (fun () ->
             Masc_tui_loader.load_schedules ~host ~port ~cursor:None))
   end
-
-(* A change during an existing read needs one successor, since that read may
-   have observed the store before the change. Bursts share that successor. *)
-let launch_pending_schedule_agenda_load state ~mailbox =
-  if state.schedules_agenda_event_pending
-     && server_authority_ready state
-     && not (Snapshot_read.in_flight state.schedules_agenda_read) then begin
-    state.schedules_agenda_event_pending <- false;
-    launch_schedule_agenda_load state ~mailbox
-  end
-
-let request_schedule_agenda_revalidation state ~mailbox =
-  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
-  state.schedules_agenda_event_pending <- true;
-  launch_pending_schedule_agenda_load state ~mailbox
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
    applied to is named in the message so a load that returns after the
@@ -8865,6 +8858,14 @@ let launch_owed_async_requests state ~mailbox =
 let owe_schedules_read state =
   state.schedules_owed <- Masc_tui_owed_read.changed state.schedules_owed
 
+(* The agenda strip says its list may be behind until a read that began after
+   this point answers: on a schedule change, on a newly opened observer and
+   after lost events. A read in flight is overtaken; its successor is the
+   owed read, which bursts share. *)
+let owe_agenda_revalidation state =
+  state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
+  owe_schedules_read state
+
 let settle_schedules_read state = function
   | Ok _ -> state.schedules_owed <- Masc_tui_owed_read.succeeded state.schedules_owed
   | Error _ -> state.schedules_owed <- failed_read state.schedules_owed
@@ -8892,8 +8893,7 @@ let launch_owed_schedules state ~mailbox =
        launch_schedules_load ~intent state ~mailbox;
        if Option.is_some state.schedules_page.sp_cursor then
          launch_schedule_agenda_load ~intent state ~mailbox
-     end else launch_schedule_agenda_load ~intent state ~mailbox);
-    if schedules_reading state then state.schedules_owed <- Masc_tui_owed_read.started read
+     end else launch_schedule_agenda_load ~intent state ~mailbox)
   end
 
 (* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
@@ -16342,7 +16342,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.schedules_agenda <- None;
   state.schedules_agenda_error <- None;
   state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
-  state.schedules_agenda_event_pending <- false;
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   state.schedule_detail_id <- None;
   state.schedule_cancel_armed <- None;
@@ -18651,9 +18650,6 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
         update_history_owed state ~keeper_name Masc_tui_owed_read.changed;
         launch_owed_history state ~mailbox)
       state.msg_target_keeper_name;
-    (* A suspended agenda needs its own read on authority recovery. Do not
-       leave that demand to the periodic side-read path. *)
-    launch_pending_schedule_agenda_load state ~mailbox;
     (* A Gate change while the reading was withdrawn reached nobody, and a
        cold admission has read no Gate yet. The same holds for the questions. *)
     owe_gate_snapshot_read state;
@@ -22311,7 +22307,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
         record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
         launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
-        request_schedule_agenda_revalidation state ~mailbox;
+        owe_agenda_revalidation state;
         (* A change can land between the initial read and subscription, or
            during a disconnected interval. Read under the current authority. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
@@ -22559,8 +22555,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-      if !observer_source_loss_seen then
-        request_schedule_agenda_revalidation state ~mailbox;
+      if !observer_source_loss_seen then owe_agenda_revalidation state;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
         (match acting_pane_changes_keeper state with
@@ -22667,10 +22662,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !pending_confirms_changed && not !observer_source_loss_seen then
          owe_pending_confirms_read state);
       (if !schedules_changed && not !observer_source_loss_seen then begin
-         (* The agenda strip says its list may be behind until the owed read
-            answers. *)
-         state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
-         owe_schedules_read state;
+         owe_agenda_revalidation state;
          owe_keeper_schedules_read state
        end);
       (if !event_queue_keepers <> [] && not !observer_source_loss_seen then
@@ -24519,10 +24511,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
-      if current then begin
-        settle_schedules_read state result;
-        launch_pending_schedule_agenda_load state ~mailbox
-      end
+      if current then settle_schedules_read state result
   | Schedules_loaded (Schedule_page_read request, result) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
@@ -24531,8 +24520,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Snapshot_read.is_current state.schedules_read request.spr_ticket || current_agenda
       in
       apply_schedule_page_read state request result;
-      if current then settle_schedules_read state result;
-      if current_agenda then launch_pending_schedule_agenda_load state ~mailbox
+      if current then settle_schedules_read state result
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
@@ -32249,14 +32237,19 @@ Use relative paths for resources already held in the package. -->
            launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
-             state ~mailbox:async_messages;
-           launch_schedules_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages);
         start_http_refresh state ~host ~port ~intent:Revalidate
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup
-          ~mailbox:async_messages
+          ~mailbox:async_messages;
+        (* After the revalidation owes the schedules a read, so this read
+           answers that debt instead of being overtaken by it. *)
+        (match state.connection_status with
+         | Booting -> ()
+         | Disconnected | Connecting | Degraded | Connected ->
+           launch_schedules_load ~intent:Snapshot_read.Refresh
+             state ~mailbox:async_messages)
       in
       (match key, browser_lane_on_screen state with
        | Some _, Some view ->

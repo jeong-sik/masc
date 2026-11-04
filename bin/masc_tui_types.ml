@@ -10469,7 +10469,6 @@ type state = {
   mutable schedules_agenda: schedule_snapshot option;
   mutable schedules_agenda_error: string option;
   mutable schedules_agenda_read: Snapshot_read.t;
-  mutable schedules_agenda_event_pending: bool;
   mutable schedules_agenda_freshness: Masc_tui_agenda.schedule_freshness;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
@@ -14534,7 +14533,6 @@ let suspend_workspace_readings state =
   (* The Observer is stopped above, so the retained agenda can no longer
      claim to have followed changes until the workspace is confirmed again. *)
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
-  state.schedules_agenda_event_pending <- true;
   state.keeper_sandbox_logs_inflight <- None;
   (* The retired read's owed record belongs to the retired detail reading;
      the visible tab reads again when the detail is recovered. *)
@@ -17022,18 +17020,18 @@ let apply_schedule_agenda_read state ticket result =
   | None -> ()
   | Some read ->
       state.schedules_agenda_read <- read;
-      (* A change observed during this read means its result may precede the
-         change. Retire it without publishing; the caller starts a successor. *)
-      if not state.schedules_agenda_event_pending then
-        (* A change announced while the read ran, or one no read has answered
-           yet, is still owed: the list may predate it. *)
-        let change_unread =
-          match state.schedules_owed with
-          | Masc_tui_owed_read.Settled
-          | Masc_tui_owed_read.Reading { changed_since = false; _ } -> false
-          | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _
-          | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true
-        in
+      (* A change announced while the read ran means its result may precede
+         the change: it is retired without publishing, and the owed read that
+         follows answers instead. A change no read has answered yet leaves a
+         published list uncertain. *)
+      let overtaken, change_unread =
+        match state.schedules_owed with
+        | Masc_tui_owed_read.Settled
+        | Masc_tui_owed_read.Reading { changed_since = false; _ } -> false, false
+        | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true, true
+        | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ -> false, true
+      in
+      if not overtaken then
         (match result with
          | Ok snapshot ->
              state.schedules_agenda <- Some snapshot;
@@ -19710,7 +19708,6 @@ let create_state
   schedules_agenda = None;
   schedules_agenda_error = None;
   schedules_agenda_read = Snapshot_read.idle;
-  schedules_agenda_event_pending = false;
   schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed;
   schedule_cursor = 0;
   schedule_scroll = 0;

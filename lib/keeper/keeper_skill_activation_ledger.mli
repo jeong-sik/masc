@@ -84,7 +84,7 @@ type invocation =
       ; scope : nested_composition_scope
       }
 
-type transition_rejection =
+type transition_rejection = Keeper_skill_activation_types.transition_rejection =
   | Delivery_order_rejected of
       { skill_tool_use_id : string
       ; activation_turn_ref : Ids.Turn_ref.t
@@ -126,31 +126,11 @@ type activation = private
 
 type t
 
-type summary =
-  { instruction_invocations : int
-  ; skill_bodies_served : int
-  ; skill_resources_served : int
-  ; instruction_provider_deliveries : int
-  ; instruction_official_client_handoffs : int
-  ; instruction_actions_observed : int
-  ; composition_invocations : int
-  ; composition_provider_deliveries : int
-  ; composition_official_client_handoffs : int
-  ; composition_actions_observed : int
-  ; invalid_transitions : int
-  }
+type summary = Keeper_skill_activation_types.summary
 
-type summary_scope =
-  { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
-  ; turn_ref : Ids.Turn_ref.t
-  ; invocation_runtime_id : string
-  ; reference : Skill_reference.t
-  }
+type summary_scope = Keeper_skill_activation_types.summary_scope
 
-type runtime_count =
-  { runtime_id : string
-  ; count : int
-  }
+type runtime_count = Keeper_skill_activation_types.runtime_count
 
 type scoped_summary =
   { scope : summary_scope

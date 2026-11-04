@@ -18,17 +18,9 @@ module Worker_epoch : sig
   val equal : t -> t -> bool
 end
 
-type completed_item =
-  { candidate_id : string
-  ; judgment : Candidate.judgment
-  }
+type completed_item = Keeper_board_attention_partition_types.completed_item
 
-type exact_provenance =
-  { slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  }
+type exact_provenance = Keeper_board_attention_partition_types.exact_provenance
 (** Opaque AGENT_CORE attempt identity. MASC compares and persists these fields but
     never derives provider, model, tier, retry, or failover policy from them. *)
 
@@ -49,19 +41,12 @@ type advance_source =
 (** Opaque source of one AGENT_CORE advancement. A predispatch rejection has no
     execution receipt and therefore carries only its candidate visit. *)
 
-type running_progress =
-  | Unbound
-  | Bound of exact_provenance
-  | Advancing of
-      { execution_anchor : exact_provenance option
-      ; last_from : candidate_visit option
-      ; next : candidate_visit
-      }
+type running_progress = Keeper_board_attention_partition_types.running_progress
 
 (** Each cause is its own constructor and carries the durable progress it
     had, so the cause is never overwritten by the progress and a reader
     tells the causes apart by constructor, not by [detail] text. *)
-type blocked_reason =
+type blocked_reason = Keeper_board_attention_partition_types.blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string

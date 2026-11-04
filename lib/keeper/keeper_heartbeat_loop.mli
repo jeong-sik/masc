@@ -68,12 +68,7 @@ val should_run_turn_after_event_intake :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
   bool
 
-type keepalive_scheduling_decision = {
-  turn_decision : Keeper_world_observation.keeper_cycle_decision;
-  should_run_turn : bool;
-  verdict_reasons : string list;
-  channel : string;
-}
+type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision
 
 val decide_keepalive_scheduling :
   ?wake:Keeper_world_observation.cycle_wake ->

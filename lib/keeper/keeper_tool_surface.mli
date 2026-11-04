@@ -1,16 +1,7 @@
 
 (** Public keeper MCP tools. *)
 
-type 'a context = 'a Keeper_types_profile.context = {
-  config : Workspace.config;
-  agent_name : string;
-  sw : Eio.Switch.t;
-  clock : 'a Eio.Time.clock;
-  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  publication_recovery_provider :
-    Keeper_publication_recovery_availability.provider;
-}
+type 'a context = 'a Keeper_types_profile.context
 
 type tool_result = Keeper_types_profile.tool_result
 

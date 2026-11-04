@@ -345,7 +345,7 @@ type event_queue_trigger =
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
-type turn_reason =
+type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending

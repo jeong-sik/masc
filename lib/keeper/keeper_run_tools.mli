@@ -41,7 +41,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
     Hook mutations flow through {!acc}, receipt refs are kept for
     facade post-processing writes, and [agent_cell] is made here rather
     than at the AGENT_CORE call site because the turn's tools capture it. *)
-type agent_setup =
+type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
     (** See {!Keeper_tools_agent_core.tool_bundle}: the Agent Core lane

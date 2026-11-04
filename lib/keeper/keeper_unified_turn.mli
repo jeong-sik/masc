@@ -9,13 +9,7 @@
 
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
-type turn_event_bus_summary =
-  { correlation_id : string option
-  ; run_id : string option
-  ; caused_by : string option
-  ; event_count : int
-  ; payload_kinds : string list
-  }
+type turn_event_bus_summary = Keeper_turn_runtime_budget_event_bus.turn_event_bus_summary
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
     failures. Exposed for targeted tests. *)

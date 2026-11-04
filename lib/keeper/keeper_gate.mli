@@ -4,11 +4,7 @@
     complete concrete input. It never parses a command, tool name, provider,
     connector, or product-specific payload. *)
 
-type causal_context =
-  { turn_id : int option
-  ; origin : Keeper_approval_origin.t
-  ; snapshot : Yojson.Safe.t
-  }
+type causal_context = Keeper_gate_types.causal_context
 (** Exact outer-turn evidence captured before the tool call. The Gate stores
     and forwards [snapshot] without interpreting its fields. *)
 
@@ -68,10 +64,7 @@ val replayable_operation : string -> replayable option
     follows this: a "host replays this exact call" promise made over an
     unrecognized operation starves the approved effect silently. *)
 
-type boxed_execution =
-  { run : Keeper_types_profile_sandbox.observation_run
-  ; result : Masc_exec.Exec_dispatch.dispatch_result
-  }
+type boxed_execution = Keeper_gate_types.boxed_execution
 (** A request that already ran, including the exact result the caller must
     return. [Observe] reaches this state only on exit 0. [Guest_local] reaches
     it for every process status: guest writes may already have landed. *)

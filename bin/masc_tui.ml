@@ -8173,7 +8173,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Lanes -> owe_lanes_read state
   | Masc.Workspace_dataset_event.Lane_addon_instance { instance_id } ->
       if lane_addons_show_instance state instance_id then owe_lane_addons_read state
-  | Masc.Workspace_dataset_event.Memory_health _ | Masc.Workspace_dataset_event.Memory_execution ->
+  | Masc.Workspace_dataset_event.Memory_health _ ->
       owe_memory_health_read state
   | Masc.Workspace_dataset_event.Lane_addon_configuration ->
       if Option.is_some state.lane_addons then begin
@@ -8226,7 +8226,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
            launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
   (* Arriving owes the health a read as well as starting one: a read already
      in flight may have begun before a change announced while the surface was
-     off screen. *)
+     off screen. Metrics shows the same health and owes it the same way. *)
   | Memory ->
       owe_memory_health_read state;
       launch_memory_health_load state ~mailbox
@@ -8262,6 +8262,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Resources -> launch_resources_load state ~mailbox
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
   | Metrics ->
+      owe_memory_health_read state;
       launch_memory_health_load state ~mailbox;
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;

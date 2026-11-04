@@ -90,8 +90,6 @@ type dataset =
       (** [keeper]'s row in [GET /api/v1/dashboard/keeper-memory-health]
           moved, or the Keeper appeared or left. The server computes the
           health on its own clock and compares it per Keeper. *)
-  | Memory_execution
-      (** The Memory execution availability that answer carries moved. *)
 
 val event_type : string
 

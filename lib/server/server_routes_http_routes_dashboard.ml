@@ -2927,14 +2927,26 @@ let add_routes ~sw ~clock router =
            Http.Response.json_value ~compress:true ~request:req json reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-memory-health" (fun state req reqd ->
          (* The answer the server keeps and announces from, so a reader told
-            that a row moved reads the answer that moved it. *)
+            that a row moved reads the answer that moved it. Before the first
+            answer, or after one that failed, the read waits for the
+            workspace's one computation. *)
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let json =
+         let answer =
            match Server_memory_health_watch.latest ~base_path with
-           | Some json -> json
-           | None -> Server_memory_health_watch.compute ~base_path
+           | Some (Server_memory_health_watch.Computed _ as computed) -> Ok computed
+           | Some (Server_memory_health_watch.Failed _) | None ->
+             Dashboard_cache.within_default_compute_window
+               ~key:(Server_memory_health_watch.compute_window_key ~base_path)
+               (fun () -> Server_memory_health_watch.compute ~base_path)
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         match answer with
+         | Ok (Server_memory_health_watch.Computed json) ->
+           Http.Response.json_value ~compress:true ~request:req json reqd
+         | Ok (Server_memory_health_watch.Failed detail) ->
+           Http.Response.json_value ~status:`Service_unavailable ~request:req
+             (`Assoc [ "error", `String detail ]) reqd
+         | Error envelope ->
+           Http.Response.json_value ~status:`Gateway_timeout ~request:req envelope reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-observables" (fun _state req reqd ->
          let json =

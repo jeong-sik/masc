@@ -22,7 +22,6 @@ type dataset =
   | Lane_addon_instance of { instance_id : string }
   | Lane_addon_configuration
   | Memory_health of { keeper : string }
-  | Memory_execution
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -45,7 +44,6 @@ let lanes_name = "lanes"
 let lane_addon_instance_name = "lane_addon_instance"
 let lane_addon_configuration_name = "lane_addon_configuration"
 let memory_health_name = "memory_health"
-let memory_execution_name = "memory_execution"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -69,14 +67,12 @@ let dataset_name = function
   | Lane_addon_instance _ -> lane_addon_instance_name
   | Lane_addon_configuration -> lane_addon_configuration_name
   | Memory_health _ -> memory_health_name
-  | Memory_execution -> memory_execution_name
 ;;
 
 let subject_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Provider_usage | Provider_standing | Keeper_costs
-  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes | Lane_addon_configuration
-  | Memory_execution -> []
+  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes | Lane_addon_configuration -> []
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper }
   | Memory_health { keeper } ->
     [ "keeper", `String keeper ]
@@ -117,7 +113,6 @@ let of_fields fields =
     Ok Lane_addon_configuration
   | Some (`String name) when String.equal name lane_addon_instance_name ->
     Result.map (fun instance_id -> Lane_addon_instance { instance_id }) (instance_of_fields name fields)
-  | Some (`String name) when String.equal name memory_execution_name -> Ok Memory_execution
   | Some (`String name) when String.equal name memory_health_name ->
     Result.map (fun keeper -> Memory_health { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_metrics_name ->

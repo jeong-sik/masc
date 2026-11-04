@@ -15,7 +15,12 @@
     It must not yield and must not raise: an exception from
     [Sse.broadcast_to_sse_runtime_observers] or from resolving the runtime, a
     [Cancelled] included, is counted on [keeper_sse_broadcast_failures] and
-    logged at WARN. *)
+    logged at WARN. This differs from [Keeper_metrics_broadcast], which raises
+    [Cancelled] again because the announcement is the last step of its caller.
+    Here the caller still has steps after the announcement: it persists the
+    entry, wakes its waiters or stops it ([Lane_addon_runtime.detach_entry],
+    the operator call's retire). A raise would skip them. The fiber's
+    cancellation is still seen at its next suspension point. *)
 
 val changed_event : string
 

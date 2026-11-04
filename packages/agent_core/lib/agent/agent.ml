@@ -238,7 +238,7 @@ let run_loop_turns_detailed
           ~turn_start
           ~turn_index
           ~model:response.model
-          ~stop:(stop_reason_label response.stop_reason);
+          ~stop:(Types.stop_reason_to_string response.stop_reason);
         Ok response
       | Ok (`ToolsExecuted _) ->
         incr tool_rounds;
@@ -926,7 +926,7 @@ module Advanced = struct
             ~turn_start
             ~turn_index
             ~model:response.model
-            ~stop:(stop_reason_label response.stop_reason);
+            ~stop:(Types.stop_reason_to_string response.stop_reason);
           Ok (Completed { response; provider_turn_ordinal = turn_index })
         | Ok (`ToolsExecuted checkpoint_stage) ->
           log_turn

@@ -117,9 +117,7 @@ let build_forest =
 let build_goal_events_projection ~(config : Workspace.config) goals =
   ignore goals;
   let goal_events =
-    let path =
-      Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
-    in
+    let path = Goal_store.goal_events_path config in
     if Workspace.path_exists config path then
       Fs_compat.load_jsonl path
     else
@@ -348,9 +346,7 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
 (* The file read kept apart from the counting above, so the counting is testable
    without a workspace on disk. *)
 let unlisted_goal_history_json ~(config : Workspace.config) ~goals =
-  let path =
-    Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
-  in
+  let path = Goal_store.goal_events_path config in
   let rows, malformed_lines =
     if Workspace.path_exists config path
     then Fs_compat.load_jsonl_diagnostics path

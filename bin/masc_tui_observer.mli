@@ -284,6 +284,9 @@ type event =
       (** The workspace's verification request store was written. A server
           push with no payload, named by {!Masc.Verification_request_broadcast}. *)
   | Repositories_changed
+  (* Server push: a connector's bindings, recorded names or drawn connection
+     state changed. A reader that shows connectors re-fetches them. *)
+  | Gate_connector_changed of { connector : string }
       (** The workspace's repository catalog was written. A server push with
           no payload, named by {!Masc.Repository_catalog_broadcast}. *)
   | Keeper_event_queue_changed of { keeper : string }
@@ -368,6 +371,10 @@ val async_requests_changed : event -> bool
 
 val repositories_changed : event -> bool
 (** The repository catalog changed. *)
+
+val gate_connector_changed : event -> bool
+(** [true] for {!Gate_connector_changed}. The Connectors list and a Keeper's
+    channels tab read the connectors again on it. *)
 
 val verification_requests_changed : event -> bool
 (** The verification request store, or the verification run registry a

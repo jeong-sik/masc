@@ -10644,6 +10644,7 @@ type state = {
   (* The read the repository list owes after a catalog change, a
      revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
   mutable repositories_owed: Masc_tui_owed_read.t;
+  mutable connectors_owed: Masc_tui_owed_read.t;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -19817,6 +19818,7 @@ let create_state
   repositories_error = None;
   repositories_inflight = false;
   repositories_owed = Masc_tui_owed_read.settled;
+  connectors_owed = Masc_tui_owed_read.settled;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;

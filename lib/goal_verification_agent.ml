@@ -200,12 +200,28 @@ type observation_snapshot = {
 let observations = Atomic.make { reconciliation=None; original_reads=[] }
 let capture_observations () = Atomic.get observations
 
+(* What the planning projection shows of an observation snapshot: the scan's
+   failures and each original read's failure. An in-flight read with no
+   failure shows nothing. *)
+let shown snapshot =
+  ( snapshot.reconciliation
+  , List.filter_map
+      (fun observed -> Option.map (fun failure -> observed.binding, failure) observed.failure)
+      snapshot.original_reads )
+
+(* The observations live in this process only, so the planning projection
+   changes with them and no store write announces it (RFC-0480 §3.4). *)
+let announce_if_shown_changed config ~before ~after =
+  if shown before <> shown after then Goal_store.notify_projection_change config
+
 (* A refused scan keeps the previous completed scan's observation. *)
 let publish_unreconciled config failures =
   let rec publish () =
     let current = Atomic.get observations in
     let next = {current with reconciliation=Some (Workspace.masc_dir config, failures)} in
-    if not (Atomic.compare_and_set observations current next) then publish ()
+    if Atomic.compare_and_set observations current next
+    then announce_if_shown_changed config ~before:current ~after:next
+    else publish ()
   in
   publish ();
   List.iter
@@ -226,7 +242,7 @@ let same_original_binding left right =
   && String.equal left.request_id right.request_id
   && Goal_store.criterion_equal left.criterion right.criterion
 
-let begin_original_read binding =
+let begin_original_read config binding =
   let rec replace () =
     let current = Atomic.get observations in
     let failure = match List.find_opt (fun observed -> same_original_binding observed.binding binding) current.original_reads with
@@ -235,10 +251,12 @@ let begin_original_read binding =
     let observed = {binding; failure} in
     let original_reads = observed :: List.filter (fun previous -> not (same_original_goal previous.binding binding)) current.original_reads in
     let next = {current with original_reads} in
-    if Atomic.compare_and_set observations current next then observed else replace ()
+    if Atomic.compare_and_set observations current next
+    then (announce_if_shown_changed config ~before:current ~after:next; observed)
+    else replace ()
   in replace ()
 
-let finish_original_read observed failure =
+let finish_original_read config observed failure =
   let rec replace () =
     let current = Atomic.get observations in
     if not (List.exists (fun candidate -> candidate == observed) current.original_reads) then false
@@ -247,15 +265,17 @@ let finish_original_read observed failure =
         if candidate == observed then Option.map (fun failure -> {observed with failure=Some failure}) failure
         else Some candidate) current.original_reads in
       let next = {current with original_reads} in
-      if Atomic.compare_and_set observations current next then true else replace ()
+      if Atomic.compare_and_set observations current next
+      then (announce_if_shown_changed config ~before:current ~after:next; true)
+      else replace ()
   in replace ()
 
-let abandon_original_read observed =
+let abandon_original_read config observed =
   (* Cancellation/exception is not a successful original read. Preserve a
      previously observed failure, if any, rather than clearing it as repaired. *)
-  ignore (finish_original_read observed observed.failure)
+  ignore (finish_original_read config observed observed.failure)
 
-let retire_observations snapshot ~root =
+let retire_observations config snapshot ~root =
   let retired_reads = List.filter (fun observed -> String.equal observed.binding.root root) snapshot.original_reads in
   let rec replace () =
     let current = Atomic.get observations in
@@ -266,7 +286,9 @@ let retire_observations snapshot ~root =
     let original_reads = List.filter (fun candidate ->
       not (List.exists (fun observed -> candidate == observed) retired_reads)) current.original_reads in
     let next = {reconciliation; original_reads} in
-    if not (Atomic.compare_and_set observations current next) then replace ()
+    if Atomic.compare_and_set observations current next
+    then announce_if_shown_changed config ~before:current ~after:next
+    else replace ()
   in replace ()
 
 let unreconciled_from_snapshot_to_yojson snapshot ~config ~record (goal : Goal_store.goal) =
@@ -333,16 +355,16 @@ let original_read_binding config ~goal_id =
   | Error _ -> None
 
 let observe_original_read config ~goal_id read =
-  let observed = Option.map begin_original_read (original_read_binding config ~goal_id) in
-  Fun.protect ~finally:(fun () -> Option.iter abandon_original_read observed) (fun () ->
+  let observed = Option.map (begin_original_read config) (original_read_binding config ~goal_id) in
+  Fun.protect ~finally:(fun () -> Option.iter (abandon_original_read config) observed) (fun () ->
     match read () with
     | Ok _ as result ->
-      Option.iter (fun observed -> ignore (finish_original_read observed None)) observed;
+      Option.iter (fun observed -> ignore (finish_original_read config observed None)) observed;
       result
     | Error error as result ->
       (* Keep the failure. Unknown authority is not a successful original
          read. Projection checks the current binding. *)
-      Option.iter (fun observed -> ignore (finish_original_read observed (Some error))) observed;
+      Option.iter (fun observed -> ignore (finish_original_read config observed (Some error))) observed;
       result)
 
 let new_run () : Worker.run_identity =
@@ -950,7 +972,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
       then (
         (* No scan runs after this, so its last list would read as current. *)
         Atomic.set runtime.scheduling {ready=[]; in_flight=[]; retries=[]};
-        retire_observations snapshot ~root:(Workspace.masc_dir config);
+        retire_observations config snapshot ~root:(Workspace.masc_dir config);
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

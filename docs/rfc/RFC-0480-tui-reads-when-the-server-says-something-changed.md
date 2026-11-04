@@ -7,7 +7,7 @@ updated: 2026-11-04
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["0477", "0481", "0482", "0461", "observe-by-waking-not-polling"]
+related: ["0477", "0481", "0482", "0485", "0461", "observe-by-waking-not-polling"]
 ---
 
 # RFC-0480 — TUI 는 서버가 알릴 때 읽는다
@@ -233,7 +233,7 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 | Lane Add-ons Inspect | 열린 instance 의 커밋 알림을 받는다. `seq` 를 그리므로 커밋 하나가 변화 하나다 | 위와 같다. instance id 는 visibility 를 거른 독자에게만 보낸다 |
 | Memory health | 서버가 Keeper 별 health 를 저장할 때 증분으로 들고 그 Keeper 만 알린다. TUI 는 바뀐 Keeper 행만 읽는다 | 입력 저장소 10곳 넘는 쓰기 자리 정리, 저널을 처음부터 읽는 계산 제거 |
 | Skill 사용 집계(`/api/v1/skills`) | 서버가 증분으로 집계한다. 지금은 사용 집계 창을 보는 동안 원장 줄마다 모든 Keeper 원장을 다시 읽는다(#48062) | 집계 상태를 어디에 둘지 |
-| 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0482 | RFC-0482 |
+| 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0485 | RFC-0485 |
 
 화면에 "N초 전"을 다시 그리는 타이머는 데이터를 읽지 않으므로 남긴다. Lz 가 지우는 것은 읽기를 일으키는 2초 블록과 `--refresh` 다.
 
@@ -265,4 +265,4 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
 
-정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0482 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.
+정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0485 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.

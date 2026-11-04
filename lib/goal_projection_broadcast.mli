@@ -5,7 +5,8 @@
     subscribers: an external callback may wait, and this runs under the
     writer's lock. A reader that shows Goals
     ([GET /api/v1/dashboard/planning], [GET /api/v1/dashboard/goals]) reads them
-    again.
+    again. The task counts and linked tasks those answers carry follow task
+    writes, which announce [execution_snapshot] instead.
 
     The server's Goal projection mutation hook
     ({!Workspace_hooks.on_goal_projection_mutation_fn}) sends it after it drops

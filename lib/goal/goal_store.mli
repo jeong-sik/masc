@@ -263,8 +263,8 @@ val notify_projection_change : Workspace_utils.config -> unit
     does not, such as the verifier's in-process observations. *)
 
 val projection_source_changed : Workspace_utils.config -> unit
-(** A Goal projection source kept outside the Goal file (the verification
-    ledger, the measurement store) was published. Advance the projection
+(** A Goal projection source kept outside the Goal file (the audit event
+    ledger, the verification ledger, the measurement store) was published. Advance the projection
     generation and run the Goal projection mutation hook. Callers run it under
     their store lock after the primary write; the hook must not yield or
     reenter the Goal store. *)

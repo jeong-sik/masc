@@ -640,7 +640,11 @@ let acquire_base_path_lock ~previous_owner ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~executable_path host port cli_base_path accept_store_quarantine =
+(* [prepare_identity] runs in the process that serves, after the runtime events
+   step: that step may exec this binary again, and the work done before it is
+   done twice. Hashing the executable and probing the repository belong to the
+   serving process only (#48156). *)
+let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~prepare_identity ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   (* Read before the workspace directory is created or its lease taken, so a
      host the socket cannot bind leaves nothing behind. *)
@@ -729,6 +733,12 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
           ~handoff_error_to_string:Server_startup_takeover.base_path_lock_rejection_to_string
           error);
      exit 1);
+  (match prepare_identity () with
+   | Ok () -> ()
+   | Error (message, code) ->
+     Server_startup_takeover.release_base_path_lease base_path_lease;
+     Printf.eprintf "%s\n" message;
+     exit code);
   Log.init_from_env ();
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
@@ -1145,22 +1155,30 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
           ~backtrace:(Printexc.get_backtrace ()));
      exit 1)
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
+(* The identity a serving process reports and the dashboard it installs. *)
+let initialize_served_identity () =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
-    ~binary_commit:identity.binary_commit;
-  match provenance_path, provenance_sha256, provenance_device, provenance_inode with
-  | None, None, None, None ->
-    run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+    ~binary_commit:identity.binary_commit
+
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
+  let serve ~bind_provenance =
+    let prepare_identity () =
+      initialize_served_identity ();
+      bind_provenance ()
+    in
+    run_cmd ~record_default ~previous_owner ~prepare_identity
+      ~executable_path:Build_identity.resolved_executable_path
+      host port base_path accept_store_quarantine;
     Cmd.Exit.ok
+  in
+  match provenance_path, provenance_sha256, provenance_device, provenance_inode with
+  | None, None, None, None -> serve ~bind_provenance:(fun () -> Ok ())
   | Some path, Some sha256, Some device, Some inode ->
-    (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
-     | Ok () ->
-       run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
-       Cmd.Exit.ok
-     | Error message ->
-       Printf.eprintf "invalid build provenance: %s\n" message;
-       Cmd.Exit.some_error)
+    serve ~bind_provenance:(fun () ->
+      Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode
+      |> Result.map_error (fun message ->
+        (Printf.sprintf "invalid build provenance: %s" message, Cmd.Exit.some_error)))
   | _ ->
     Printf.eprintf
       "all build provenance path, SHA-256, device, and inode fields must be provided together\n";
@@ -1603,10 +1621,9 @@ let schema_observe_cmd =
       prerr_endline "schema-observe requires an explicit --base-path for its owned workspace";
       Cmd.Exit.cli_error
     | Some workspace ->
-    let identity = Build_identity.current () in
-    Installed_dashboard.initialize ~executable_path:identity.executable_path
-      ~binary_commit:identity.binary_commit;
-    run_cmd ~schema_observation:(mode, directory) ~executable_path:identity.executable_path
+    run_cmd ~schema_observation:(mode, directory)
+      ~prepare_identity:(fun () -> initialize_served_identity (); Ok ())
+      ~executable_path:Build_identity.resolved_executable_path
       host port (Some workspace) false;
     Cmd.Exit.ok
   in

@@ -279,8 +279,8 @@ category: test
 At {{target}}, even with {{behind}} behind.
 
 ### section (vars: count, rows)
-### Repository Checkouts ({{count}})
-Where each checkout stands.
+### Open Pull Requests ({{count}})
+Where each pull request stands.
 
 {{rows}}
 
@@ -298,11 +298,11 @@ let test_fragment_group_slots () =
       check string "the last slot keeps its paragraph" "Diverged; no numbers."
         (Prompt_registry.get_prompt "test.group.standing.diverged");
       check string "a heading with spaces stays inside its slot"
-        "### Repository Checkouts ({{count}})\nWhere each checkout stands.\n\n{{rows}}"
+        "### Open Pull Requests ({{count}})\nWhere each pull request stands.\n\n{{rows}}"
         (Prompt_registry.get_prompt "test.group.section");
       check bool "a heading with spaces is not a slot" false
         (List.exists
-           (fun (key, _) -> String.starts_with ~prefix:"test.group.Repository" key)
+           (fun (key, _) -> String.starts_with ~prefix:"test.group.Open" key)
            (registered_surfaces ()));
       (match
          Prompt_registry.render_prompt_template "test.group.standing.current"

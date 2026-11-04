@@ -20,7 +20,6 @@ let all_layers =
     L.Workspace_memory;
     L.Wiki;
     L.Lane_updates;
-    L.Repository_freshness;
     L.Autonomous_trigger;
     L.Scheduled_automation;
     L.Completion_authority;

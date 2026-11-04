@@ -532,8 +532,11 @@ type auth_config = {
   workspace_secret_hash : string option;
   require_token : bool;
   token_expiry_hours : int;     (* 기본값: 24 *)
+  account_mode : account_mode option;  (* 기본값: None. Single_user | Multi_account *)
 }
 ```
+
+`account_mode`는 요청이다. 서버가 어떤 모드로 뜰지는 부팅 때 한 번 정한다. `Authz_boot_mode_read`가 `config.json`, 권한 기록(`authz.jsonl`)의 마지막 모드 사건, 설치 기록이 가리키는 외부 저장소를 읽고, `Authz_boot_mode.judge`가 설계 §5.1 표대로 판정한다. 지금 서버는 단일 사용자로만 뜨고, `Multi_account` 요청과 다계정 흔적은 부팅을 거절한다.
 
 ### 9.5 Rate Limit
 

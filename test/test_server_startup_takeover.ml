@@ -403,11 +403,23 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
                let on_wait _ =
                  ignore (Unix.write_substring queued_write "Q" 0 1 : int)
                in
+               (* The contender must block on the winner's lease until the
+                  parent stops it; any return or crash is reported back so a
+                  failure names the outcome instead of hanging on EOF. *)
                (match
                   Server_startup_takeover.acquire_base_path_lock_after_owner_exits
                     ~run_dir ~on_wait base_path
                 with
-                | Ok _ | Error _ -> Unix._exit 7)
+                | Ok _ ->
+                  ignore (Unix.write_substring queued_write "O" 0 1 : int);
+                  Unix._exit 7
+                | Error _ ->
+                  ignore (Unix.write_substring queued_write "E" 0 1 : int);
+                  Unix._exit 7
+                | exception _ ->
+                  (try ignore (Unix.write_substring queued_write "X" 0 1 : int)
+                   with Unix.Unix_error _ -> ());
+                  Unix._exit 9)
              | contender_pid ->
                close_quietly queued_write;
                contender_pid
@@ -416,8 +428,16 @@ let test_recorded_owner_is_not_refused_as_second_waiter () =
              ~finally:(fun () ->
                if process_alive contender_pid then stop_process contender_pid)
              (fun () ->
-                Alcotest.(check int) "the contender queued behind the winner" 1
-                  (Unix.read queued_read buffer 0 1);
+                let got = Unix.read queued_read buffer 0 1 in
+                if got <> 1
+                then
+                  Alcotest.failf
+                    "contender pipe gave %d bytes (EOF means it exited early)"
+                    got
+                else
+                  Alcotest.(check char)
+                    "the contender is waiting (Q), not returned (O), refused (E), or crashed (X)"
+                    'Q' (Bytes.get buffer 0);
                 ignore (Unix.write_substring go_write "1" 0 1 : int);
                 (match waitpid_nointr waiter_pid with
                  | Some (_, Unix.WEXITED 0) -> ()

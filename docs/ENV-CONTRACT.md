@@ -94,12 +94,12 @@ env.
 
 | Effective contract | Examples | Operator path |
 | --- | --- | --- |
-| `immediate_dynamic` | `keeper.keepalive_interval_sec`, `keeper.supervisor_sweep_sec`, `keeper.work_as_hb_enabled`, `keeper.smart_hb_enabled` | update via the typed `Runtime_params` dashboard endpoints |
+| `immediate_dynamic` | `keeper.keepalive_interval_sec`, `keeper.supervisor_sweep_sec`, `keeper.work_as_hb_enabled` | update via the typed `Runtime_params` dashboard endpoints |
 | `request_dynamic` | keeper temperature/max_tokens and similar registered params | next `Runtime_params.get` call observes the override |
 
 Representative code paths:
 
-- [`runtime_params.ml`](../lib/runtime_params.ml)
+- [`runtime_params.ml`](../lib/core/runtime_params.ml)
 - [`keeper_config.ml`](../lib/keeper/keeper_config.ml)
 - [`server_routes_http_routes_activity.ml`](../lib/server/server_routes_http_routes_activity.ml)
 
@@ -158,27 +158,7 @@ always lands, even if that single record exceeds the byte target, and cleanup
 remains best effort on filesystem errors. Auxiliary logs, turn records,
 provider-input snapshots and other Keepers' histories have separate stores.
 
-### 4. Execute exec gates (`request_dynamic`, additive-only)
-
-Flags introduced by the P1–P6 exec rework. Each is opt-in: the
-default keeps the pre-Execute JSON shape and execution path, and
-turning a flag on only adds new fields or new code branches. No
-field is ever removed by these flags, so downstream consumers
-never break by enabling them.
-
-Operator rollout procedure and observer log interpretation: see
-[`EXECUTE-RUNBOOK.md`](./EXECUTE-RUNBOOK.md).
-
-Representative code paths:
-
-- [`exec_buffer.ml`](../lib/core/exec_buffer.ml)
-- [`exec_policy.ml`](../lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
-
-Because every flag here is `request_dynamic` on the Execute path
-(read at tool-invocation time), operators can flip a flag without a
-restart and the next `Execute` call picks it up.
-
-### 5. WebSearch provider selection (`boot_static` seed, request-time read)
+### 4. WebSearch provider selection (`boot_static` seed, request-time read)
 
 The WebSearch backend reads these values while handling each search request.
 They are authored in `<resolved-config-root>/runtime.toml` under `[web_search]`.
@@ -245,7 +225,7 @@ Representative code paths:
 - [`keeper_runtime_config.ml`](../lib/keeper_runtime/keeper_runtime_config.ml)
 - [`masc_network_defaults.ml`](../lib/config/masc_network_defaults.ml)
 
-### 6. Test-only boot overrides
+### 5. Test-only boot overrides
 
 The following flags exist only to make OCaml test executables deterministic:
 

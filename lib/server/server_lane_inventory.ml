@@ -182,7 +182,7 @@ type cached_sources = {
   directory : string;
   declarations : Config.snapshot;
   exact : Exact_projection.observation;
-  machine_configuration : Machine_configuration.t;
+  machine_configuration : Machine_configuration.t option;
   inventory : Addon.inventory;
 }
 

@@ -36,7 +36,8 @@ main and on the stack (#48260). The artifacts were uploaded after that failure.
   three Tasks, one Board post with one comment. `task-002` was claimed,
   started, and submitted for verification with a note and one evidence note.
   Three Keeper definitions (`imp`, `relay`, `scout`) are present but none can
-  run on this machine, so every footer starts with `ACTION NEEDED 3`.
+  run on this machine, so every footer starts with `ACTION NEEDED 3`. Each
+  side seeds its own fresh workspace, so timestamps differ between the sides.
 - The key sequences are in the sections below. Each capture starts a new TUI
   process, waits for `HTTP [connected]`, settles for a few seconds, and then
   sends the keys. The capture driver is not part of the repository.
@@ -76,9 +77,27 @@ after   z:Candle  j/k:move  v:next Work tab  f:filter  Left / Esc:back  q:quit  
 `t` toggles Goals and Tasks on the list only. With the footer no longer
 spending a slot on it, two more keys fit.
 
-The Board list and post footers are the same before and after at 200x55.
-`c:reply` did not fit in either, so the Board part of layer 3 changes the key
-table without changing that screen.
+At 400x50 no footer is cut. Goal detail, with the middle of the row left out:
+
+```
+before  z:Candle  j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  …  Y:copy link  /:find  q:quit  …?
+after   z:Candle  j/k:move  v:next Work tab  …  Y:copy link  Tab:next  q:quit  ?:help
+```
+
+`t`, `p` and `/` are gone from the open detail. `p` is Pause there, so
+`p:Approvals` named the wrong action.
+
+Board list at 400x50:
+
+```
+before  … v / V:up / down  c:reply  Y:copy link  …
+after   … v / V:up / down  Y:copy link  …
+```
+
+The Board post footer keeps `c:reply` on both sides. At 200x55 the Board list
+footer is the same before and after, because `c:reply` did not fit in either.
+The Work Goals list, Tasks list and Task detail footers are the same before
+and after at 400x50.
 
 ### Layer 4: search keys leave the detail footers (#48250)
 

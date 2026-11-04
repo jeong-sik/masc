@@ -1,5 +1,6 @@
 (** Otoml-backed semantic parser for keeper configuration. *)
 
+(** A single parsed TOML value. *)
 type toml_value =
   | Toml_string of string
   | Toml_int of int
@@ -15,6 +16,8 @@ type toml_value =
   | Toml_local_date of string
   | Toml_local_time of string
 
+(** A parsed TOML document: mapping from dotted key (e.g. ["keeper.instructions"])
+    to value. Tables are flattened with dot separators. *)
 type toml_doc = (string * toml_value) list
 
 val normalize_source : string -> string

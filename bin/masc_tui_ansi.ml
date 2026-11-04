@@ -839,27 +839,34 @@ let framed_divider buf cols =
 let border_padding = String.make Masc_tui_frame.border_padding_cells ' '
 let frame_margin = String.make Masc_tui_frame.margin_cells ' '
 
+(* A body row is a few fixed pieces around its content. The body-row writers
+   below put the pieces straight into the frame's buffer instead of into a
+   formatted copy that is then copied; the once-per-frame borders and rules
+   still format theirs. *)
+let add_row buf pieces =
+  List.iter (Buffer.add_string buf) pieces;
+  Buffer.add_char buf '\n'
+
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset border_padding
-    (fit_width content inner)
-    border_padding Ansi.gray Ansi.box_v Ansi.reset)
+  add_row buf
+    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding
+    ; fit_width content inner
+    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
 
 let framed_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n" Ansi.gray Ansi.box_v
-       Ansi.reset border_padding style content Ansi.reset border_padding
-       Ansi.gray Ansi.box_v Ansi.reset)
+  add_row buf
+    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
+    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
 
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset border_padding
-    (String.make inner ' ')
-    border_padding Ansi.gray Ansi.box_v Ansi.reset)
+  add_row buf
+    [ Ansi.gray; Ansi.box_v; Ansi.reset; border_padding
+    ; String.make inner ' '
+    ; border_padding; Ansi.gray; Ansi.box_v; Ansi.reset ]
 
 (* Full-screen surfaces draw without the outer box: the terminal edge is
    already the frame, and a border around everything separates nothing (the
@@ -886,8 +893,7 @@ let box_divider buf cols =
    measures a row (the PTY suite does) reads the same width either way. *)
 let box_line buf cols content =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s\n" frame_margin (fit_width content inner) frame_margin)
+  add_row buf [ frame_margin; fit_width content inner; frame_margin ]
 
 (* Where a body row's content starts, in cells from the terminal's left edge:
    [box_line] pads the margin before it and [framed_line] draws the border in
@@ -897,9 +903,7 @@ let framed_content_column = Masc_tui_frame.content_column
 let box_line_styled buf cols ~style content =
   let inner = framed_inner_width cols in
   let content = fit_width content inner in
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" frame_margin style content Ansi.reset
-       frame_margin)
+  add_row buf [ frame_margin; style; content; Ansi.reset; frame_margin ]
 
 (* A notice or refusal detail can carry the server's own line breaks: the
    exact-lane save refusal names the [providers.<id>] table and the missing
@@ -1058,9 +1062,9 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
    styled row with [Masc_tui_theme.strip_sgr] first. *)
 let box_line_selected buf cols content =
   let inner = framed_inner_width cols in
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" Masc_tui_theme.selection frame_margin
-       (fit_width content inner) frame_margin Ansi.reset)
+  add_row buf
+    [ Masc_tui_theme.selection; frame_margin; fit_width content inner; frame_margin
+    ; Ansi.reset ]
 
 let box_empty buf cols =
   Buffer.add_string buf (String.make cols ' ');

@@ -68,6 +68,10 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
     : '(' + step.source + ')(JSON.parse(' + JSON.stringify(step.argumentJson) + '))';
   let effectStarted = false, completedEffect = false;
   let inputReleased = true;
+  const thrownError = error => ({
+    name: typeof error?.name === 'string' ? error.name : null,
+    kind: typeof error?.kind === 'string' ? error.kind : null
+  });
   const failure = (index, method, error, extra = {}) => {
     const nativeError = method === 'popupWait' ? undefined : nativeErrorObservation(error);
     return {
@@ -134,7 +138,7 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
               pages.transitions.push({index,source:pages.current,popup:acquired.identity,selected:false});
             } catch (error) { identityError = error; }
           }
-          if (triggerError) return failure(index, step.method, triggerError);
+          if (triggerError) return failure(index, step.method, triggerError, {thrown: thrownError(triggerError)});
           if (!inputReleased) return failure(index, step.method,
             'the popup trigger did not confirm input release; never replay it',
             receipt?.dialog ? {dialog:receipt.dialog} : {});
@@ -305,7 +309,9 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
       // The SDK's mouse.up can swallow a dialog interruption as normal void.
       // It also lacks the original selector click's coordinates on this Page
       // handle. Do not synthesize cleanup or treat that void as release proof.
-      return failure(index, step.method, error);
+      // Hand the error's declared name and kind to the host, which alone
+      // judges whether a holding step was refused before its press.
+      return failure(index, step.method, error, {thrown: thrownError(error)});
     }
     if (holdingInput) {
       // The SDK's raw keyboard.type boundary can swallow a dialog interruption
@@ -521,6 +527,15 @@ let popup_step (step:Browser_lane.Native_workflow.step) = match step.action with
   | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> false
 let popup_at (request:Browser_lane.Native_workflow.t) index =
   match List.nth_opt request.steps index with Some step -> popup_step step | None -> false
+(* The steps that call the SDK's page.click, page.dblclick or page.dragAndDrop. *)
+let refusable_gesture (step:Browser_lane.Native_workflow.step) = match step.action with
+  | Click _ | Click_and_wait_for_popup _ -> Some Release.Click
+  | Double_click _ -> Some Release.Double_click
+  | Drag_and_drop _ -> Some Release.Drag_and_drop
+  | Hover _|Mouse_click _|Mouse_move _|Mouse_wheel _
+  | Fill _|Press _|Focus _|Reload|Keyboard_type _|Keyboard_insert_text _|Keyboard_paste _|Keyboard_press _
+  | Select_option _|Goto _|Wait_for_url _|Wait_for_selector _|Wait_for_load_state _
+  | Evaluate _|Wait_for_function _|Fetch _|Cancel_download _|Url|Title|Info|Snapshot|Events|Wait_for_timeout _ -> None
 let raw_step (step:Browser_lane.Native_workflow.step) = match step.action with
   | Keyboard_type _ -> true
   | Click _|Click_and_wait_for_popup _|Double_click _|Hover _|Drag_and_drop _|Mouse_click _|Mouse_move _|Mouse_wheel _
@@ -651,7 +666,7 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
     let* ()=if truncated=(chars>request.max_chars) then Ok () else Error "workflow snapshot cut flags disagree" in
     Ok (Completed {reply=public_receipt `Null; input;pages})
   | `Assoc _ ->
-    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError";"eventError";"nativeInputWindow"] failure in
+    let* failed=object_fields ["index";"method";"message";"dialog";"nativeError";"eventError";"nativeInputWindow";"thrown"] failure in
     let* index=integer "index" failed in let* method_=text "method" failed in let* message=text "message" failed in
     let* ()=if cleanup_pending=(method_="nativeCleanup") then Ok () else Error "workflow native cleanup failure disagrees with progress" in
     let* ()=if not cleanup_pending || (pending=None &&
@@ -684,6 +699,8 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
     (* A malformed diagnostic from the separately failed nonholding cleanup
        cannot erase an already authenticated raw tail or become public JSON. *)
     let public_failed=if Option.is_none native_error then List.remove_assoc "nativeError" failed else failed in
+    (* [thrown] is the script's raw SDK error name and kind: only the judge below reads it. *)
+    let public_failed=List.remove_assoc "thrown" public_failed in
     (* [entered]: when the failed step holds input, what the SDK did not give for it: no answer, or a dialog. *)
     let* expected_started,entered=match method_ with
       | "nativeTyping" ->
@@ -729,8 +746,15 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
         if expected<>method_ then Error "workflow failed method does not match its step"
         else if index=count then
           (match remaining with
-           | step::_ -> Ok (has_effect || Browser_lane.Native_workflow.is_effect step.action,
-               if Browser_lane.Native_workflow.holds_input step.action && pending=None then Some (index,Release.of_unreleased Release.Never_returned) else None)
+           | step::_ ->
+             (* A thrown click, double click or drag is a refusal before its press only when
+                the SDK error's declared name and kind say so; anything else gave no answer. *)
+             let answer=match refusable_gesture step with
+               | Some gesture -> Release.answer_of_refusal gesture
+                   (Option.value (List.assoc_opt "thrown" failed) ~default:`Null)
+               | None -> Release.of_unreleased Release.Never_returned in
+             Ok (has_effect || Browser_lane.Native_workflow.is_effect step.action,
+               if Browser_lane.Native_workflow.holds_input step.action && pending=None then Some (index,answer) else None)
            | [] -> Error "workflow failed step is outside request")
         else if index+1=count && List.mem_assoc "dialog" failed then
           Ok (has_effect,if holds_at index then Some (index,Release.of_unreleased Release.Receipt_with_dialog) else None)
@@ -742,7 +766,17 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
       | true,Release.Settled _ -> Ok judged
       | true,Release.Unconfirmed reason -> Error (receipts_do_not_show reason)
       | false,Release.Unconfirmed _ -> Ok judged
-      | false,Release.Settled _ -> Ok (Release.Unconfirmed Release.Held_by_script_report) in
+      | false,Release.Settled _ ->
+        (* The script marks a holding step held before calling it. A step the SDK refused
+           before its press never clears that mark, so the mark says nothing the judge lacks. *)
+        (match entered with
+         | Some (_,Release.Refused_before_press _) -> Ok judged
+         | Some (_,(Release.Receipt_without_dialog | Release.Native_window_tail _ | Release.Unreleased _)) | None ->
+           Ok (Release.Unconfirmed Release.Held_by_script_report)) in
+    let public_failed=public_failed @ (match entered with
+      | Some (_,Release.Refused_before_press resolution) ->
+        ["refusedBeforePress",`Assoc ["kind",`String (Release.resolution_to_wire resolution)]]
+      | Some (_,(Release.Receipt_without_dialog | Release.Native_window_tail _ | Release.Unreleased _)) | None -> []) in
     let public_failure,message=match native_failure with
       | Some (_,reason) ->
         let message="native typing completion is unconfirmed; never replay this step" in

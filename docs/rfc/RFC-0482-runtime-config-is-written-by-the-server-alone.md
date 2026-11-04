@@ -105,7 +105,10 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 | 층 | 내용 | 통과 조건 |
 |---|---|---|
 | L1 | 서버: TUI 화면 설정 route 와 닫힌 변경 타입(`lib/tui_preference.ml`). `edit_config_text` 로 `tui` 이름공간만 고친다 | 변경마다 `runtime_config_changed` 가 나가는지, 모르는 키를 파싱에서 거절하는지 |
-| L2 | 서버: `GET /api/v1/tui/preferences`. TUI: 시작할 때 `[tui]` 를 이 route 로 읽고, 1.2 의 쓰기를 L1 route 로 바꾼다. `Runtime.edit_config_text` 호출과 TUI 쪽 `text_with_*` 편집 함수를 지우고, `[tui]` 키 읽기와 언어·candle·opening 타입은 `Tui_preference` 것을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
+| L2a | 서버: `GET /api/v1/tui/preferences`. `[tui]` 키와 `[voice].send_on_stop` 을 읽는 함수를 `Tui_preference` 로 옮기고, 타입이 있는 JSON 으로 돌려준다. runtime.toml 원문은 싣지 않는다(provider 설정이 들어 있다) | 응답에 `[tui]` 밖의 키가 없는지, 파일이 없을 때·못 읽을 때가 지금 TUI 의 `load` 와 같은 값인지 |
+| L2b | TUI: 시작할 때 L2a 로 읽는다. 토큰 준비와 읽기의 순서, 서버가 아직 없는 첫 설치, 읽기가 실패했을 때 기본값으로 여는 규칙을 둔다 | 서버가 쓴 값으로 열리는지, 서버가 없으면 기본값으로 열리고 그 사실을 알리는지(PTY) |
+| L2c | TUI: 1.2 의 쓰기를 순서를 지키는 writer 하나로 L1 route 에 보낸다(지금 chat visit writer 를 넓힌다). Worker TUI 는 저장하지 못했다고 한 번 알린다 | 빠르게 두 번 고른 값이 고른 순서대로 저장되는지 |
+| L2d | TUI: `Runtime.edit_config_text` 호출, `text_with_*`, `[tui]` 읽기 함수를 지운다. 언어·candle·opening 은 `Tui_preference` 타입을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
 | L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다 | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
 | L4 | TUI Config 화면이 `runtime_config_changed` 에 읽고 실패하면 다시 읽는다. 2초 분기를 지운다 | 알림 하나에 읽기 하나, 주기에는 읽지 않는지(PTY) |
 

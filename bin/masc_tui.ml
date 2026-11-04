@@ -29837,7 +29837,10 @@ Use relative paths for resources already held in the package. -->
           with
           | Ok _ ->
             report_action state "system" (name ^ ": repository added");
-            launch_repositories_load state ~mailbox:async_messages
+            (* The server announces [repositories_changed] for this write
+               too; owing the read lets that announcement fold into the one
+               read the loop launches instead of starting a second. *)
+            owe_repositories_read state
           | Error detail -> report_action state "error" detail))
   in
   let handle_schedule_form ~action ~stem ~post =

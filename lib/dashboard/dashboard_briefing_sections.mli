@@ -9,7 +9,6 @@ val json :
   Yojson.Safe.t
 
 module For_test : sig
-  val compact_keeper_json : Yojson.Safe.t -> Yojson.Safe.t
   val compact_agent_json : Masc_domain.agent -> Yojson.Safe.t
   val reset_cache : unit -> unit
   val seed_cache :
@@ -19,7 +18,6 @@ module For_test : sig
     Yojson.Safe.t ->
     unit
   val collect_metadata_gaps :
-    keepers:Yojson.Safe.t list ->
     agents:Yojson.Safe.t list ->
     Yojson.Safe.t list
   val build_briefing_sections :

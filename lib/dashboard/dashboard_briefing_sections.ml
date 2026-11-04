@@ -47,7 +47,6 @@ let with_cache_lock f =
 (* ── For_test ───────────────────────────────────────────────────── *)
 
 module For_test = struct
-  let compact_keeper_json = Briefing_compactors.compact_keeper_json
   let compact_agent_json = Briefing_compactors.compact_agent_json
   let collect_metadata_gaps = Briefing_gaps.collect_metadata_gaps
   let build_briefing_sections = Briefing_sections.build_briefing_sections
@@ -115,7 +114,6 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
       | `List items -> items
       | _ -> []
     in
-    let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
     let agents_json = Workspace.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in
     let messages_json =
@@ -145,7 +143,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
         ]
     in
     let metadata_gaps =
-      Briefing_gaps.collect_metadata_gaps ~keepers:compact_keepers ~agents:compact_agents
+      Briefing_gaps.collect_metadata_gaps ~agents:compact_agents
     in
     let watch_summary, sections =
       Briefing_sections.build_briefing_sections ~briefing_summary_json

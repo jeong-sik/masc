@@ -183,26 +183,6 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       check string "summary preserved" "cached summary"
         (json |> member "summary" |> to_string))
 
-let test_compact_keeper_json_normalizes_missing_fields () =
-  let json =
-    `Assoc
-      [
-        ("name", `String "keeper-a");
-        ("status", `Null);
-        ("agent_name", `Null);
-        ("diagnostic", `Assoc []);
-        ("current_task_id", `Null);
-      ]
-  in
-  let compact = Briefing.compact_keeper_json json in
-  check_null_field compact "status";
-  (* agent_name is not asked for here: #31279 purged the echo keys RFC-0393
-     left behind, and this compactor stopped emitting one. A keeper is named
-     by [name]. *)
-  check_null_field compact "current_task";
-  check_null_field compact "last_reply_status";
-  check_null_field compact "last_reply_preview"
-
 let test_compact_agent_json_uses_current_focus () =
   let agent : Masc_domain.agent =
     {
@@ -222,37 +202,6 @@ let test_compact_agent_json_uses_current_focus () =
   check_null_field compact "current_focus";
   check_null_field compact "goal_hint";
   check_list_field compact "capabilities" 2
-
-let test_collect_metadata_gaps_separates_null_like_inputs () =
-  let keepers =
-    [
-      Briefing.compact_keeper_json
-        (`Assoc
-          [
-            ("name", `String "keeper-gap");
-            ("diagnostic", `Assoc []);
-            ("current_task_id", `Null);
-          ]);
-    ]
-  in
-  let agent : Masc_domain.agent =
-    {
-      id = None;
-      name = "agent-gap";
-      agent_type = "codex";
-      capabilities = [];
-      current_task = None;
-      status = Masc_domain.Active;
-      session_bound_at = "2026-03-11T08:00:00Z";
-      last_seen = "2026-03-11T08:05:00Z";
-      meta = None;
-    }
-  in
-  let gaps =
-    Briefing.collect_metadata_gaps ~keepers
-      ~agents:[ Briefing.compact_agent_json agent ]
-  in
-  check int "gap count" 2 (List.length gaps)
 
 let test_collect_metadata_gaps_ignores_inactive_agents () =
   let inactive_agent : Masc_domain.agent =
@@ -276,7 +225,7 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
     }
   in
   let gaps =
-    Briefing.collect_metadata_gaps ~keepers:[]
+    Briefing.collect_metadata_gaps
       ~agents:
         [
           Briefing.compact_agent_json inactive_agent;
@@ -287,80 +236,6 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
   match gaps with
   | [ json ] -> check_string_field json "kind" "agent_focus_missing"
   | _ -> fail "expected one live agent focus gap"
-
-let test_build_briefing_sections_demotes_metadata_only_communication () =
-  let briefing_summary_json =
-    `Assoc
-      [
-        ("workspace_health", `String "ok");
-        ("incident_count", `Int 0);
-        ("recommended_action_count", `Int 0);
-        ("top_attention_summary", `String "");
-      ]
-  in
-  let watch_summary, sections =
-    Briefing.build_briefing_sections ~briefing_summary_json
-      ~agents:[] ~recent_messages:[]
-      ~metadata_gaps:
-        [
-          `Assoc
-            [
-              ("kind", `String "keeper_last_reply_missing");
-              ("summary", `String "Keeper last reply status is not recorded.");
-              ("scope_type", `String "keeper");
-              ("scope_id", `String "keeper-a");
-              ("severity", `String "info");
-            ];
-        ]
-  in
-  let communication = find_section sections "communication" in
-  let watch = find_section sections "watch" in
-  check string "watch summary" "No immediate operator action is flagged by the namespace summary."
-    watch_summary;
-  check_string_field communication "status" "unclear";
-  check_string_field communication "signal_class" "metadata_gap";
-  check_string_field communication "evidence_quality" "missing";
-  check_string_field watch "status" "ok"
-
-let test_build_briefing_sections_keeps_metadata_evidence_visible () =
-  let briefing_summary_json =
-    `Assoc
-      [
-        ("workspace_health", `String "ok");
-        ("incident_count", `Int 0);
-        ("recommended_action_count", `Int 0);
-        ("top_attention_summary", `String "");
-      ]
-  in
-  let _watch_summary, sections =
-    Briefing.build_briefing_sections ~briefing_summary_json
-      ~agents:[] ~recent_messages:[ `Assoc [ ("from", `String "agent-a") ] ]
-      ~metadata_gaps:
-        [
-          `Assoc
-            [
-              ("kind", `String "keeper_last_reply_missing");
-              ("summary", `String "Keeper last reply status is not recorded.");
-              ("scope_type", `String "keeper");
-              ("scope_id", `String "keeper-a");
-              ("severity", `String "info");
-            ];
-        ]
-  in
-  let communication = find_section sections "communication" in
-  check_string_field communication "status" "watch";
-  match get_field "evidence" communication with
-  | `List items ->
-      let found =
-        List.exists
-          (function
-            | `String value ->
-                String.equal value "Keeper last reply status is not recorded."
-            | _ -> false)
-          items
-      in
-      check bool "metadata evidence remains visible" true found
-  | _ -> fail "expected communication evidence list"
 
 let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
   let briefing_summary_json =
@@ -397,21 +272,13 @@ let () =
         ] );
       ( "normalization",
         [
-          test_case "keeper defaults" `Quick
-            test_compact_keeper_json_normalizes_missing_fields;
           test_case "agent current focus" `Quick
             test_compact_agent_json_uses_current_focus;
         ] );
       ( "filtering",
         [
-          test_case "metadata gaps collected" `Quick
-            test_collect_metadata_gaps_separates_null_like_inputs;
           test_case "inactive agents ignored for focus gaps" `Quick
             test_collect_metadata_gaps_ignores_inactive_agents;
-          test_case "metadata-only communication becomes unclear" `Quick
-            test_build_briefing_sections_demotes_metadata_only_communication;
-          test_case "metadata evidence remains visible in communication" `Quick
-            test_build_briefing_sections_keeps_metadata_evidence_visible;
           test_case "watch evidence uses namespace wording" `Quick
             test_build_briefing_sections_watch_evidence_uses_namespace_wording;
         ] );

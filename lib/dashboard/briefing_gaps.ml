@@ -12,40 +12,25 @@ let metadata_gap_json ~kind ~summary ~scope_type ~scope_id ~severity =
       ("severity", `String severity);
     ]
 
-let collect_metadata_gaps ~keepers ~agents =
+let collect_metadata_gaps ~agents =
   let agent_needs_focus json =
     List.mem
       (String.lowercase_ascii (String.trim (string_field "status" json)))
       [ "active"; "busy" ]
   in
-  let keeper_gaps =
-    keepers
-    |> List.filter_map (fun json ->
-           let status = string_field "last_reply_status" json in
-           if is_missing_or_unknown status then
-             Some
-               (metadata_gap_json ~kind:"keeper_last_reply_missing"
-                  ~summary:"Keeper last reply status is not recorded."
-                  ~scope_type:"keeper"
-                  ~scope_id:(Some (string_field "name" json))
-                  ~severity:"info")
-           else None)
-  in
-  let agent_gaps =
-    agents
-    |> List.filter_map (fun json ->
-           if string_field "assignment_status" json = "unassigned"
-              && agent_needs_focus json
-           then
-             Some
-               (metadata_gap_json ~kind:"agent_focus_missing"
-                  ~summary:"Active agent has no current focus bound."
-                  ~scope_type:"agent"
-                  ~scope_id:(Some (string_field "name" json))
-                  ~severity:"watch")
-           else None)
-  in
-  take 8 (keeper_gaps @ agent_gaps)
+  agents
+  |> List.filter_map (fun json ->
+         if string_field "assignment_status" json = "unassigned"
+            && agent_needs_focus json
+         then
+           Some
+             (metadata_gap_json ~kind:"agent_focus_missing"
+                ~summary:"Active agent has no current focus bound."
+                ~scope_type:"agent"
+                ~scope_id:(Some (string_field "name" json))
+                ~severity:"watch")
+         else None)
+  |> take 8
 
 type section =
   | Communication
@@ -53,9 +38,8 @@ type section =
   | Watch
 
 let gap_kinds_for_section = function
-  | Communication -> [ "keeper_last_reply_missing" ]
   | Alignment -> [ "agent_focus_missing" ]
-  | Watch -> []
+  | Communication | Watch -> []
 
 let count_metadata_gaps_for_section ~section gaps =
   let allowed = gap_kinds_for_section section in

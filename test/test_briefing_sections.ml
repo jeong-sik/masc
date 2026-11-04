@@ -16,8 +16,9 @@
        [communication / alignment / watch] in that order.
     2. {b Watch branches} — risky workspace → "risk"; incidents or
        recommended actions → "watch"; otherwise "ok".
-    3. {b Communication branches} — positive signal vs
-       metadata gaps vs live-session-count vs known mode count.
+    3. {b Communication branches} — recent messages vs none, with
+       and without open operator attention. Gaps from other sections
+       do not change it.
     4. {b Alignment branches} — active agents vs metadata gaps
        vs bound goals vs assignment status.
     5. {b annotate_section attributes} — every section emits
@@ -198,9 +199,8 @@ let test_watch_clean_state_ok () =
 
 (* ── (3) Communication section branches ────────────────────── *)
 
-let test_communication_positive_signal_no_gaps_healthy () =
-  (* recent_messages > 0, no metadata gaps in communication
-     allow-list → "healthy". *)
+let test_communication_positive_signal_healthy () =
+  (* recent_messages > 0 → "healthy". *)
   let _ws, sections =
     S.build_briefing_sections
       ~briefing_summary_json:(briefing_summary ())
@@ -210,17 +210,17 @@ let test_communication_positive_signal_no_gaps_healthy () =
   let c = by_id sections "communication" in
   assert (section_status c = "healthy")
 
-let test_communication_positive_signal_with_gaps_watch () =
-  (* recent_messages > 0 AND a Communication gap → "watch". *)
+let test_communication_ignores_alignment_gaps () =
+  (* recent_messages > 0 AND an Alignment gap → still "healthy". *)
   let _ws, sections =
     S.build_briefing_sections
       ~briefing_summary_json:(briefing_summary ())
-            ~agents:[]
+      ~agents:[]
       ~recent_messages:[ recent_msg () ]
-      ~metadata_gaps:[ gap ~kind:"keeper_last_reply_missing" () ]
+      ~metadata_gaps:[ gap ~kind:"agent_focus_missing" () ]
   in
   let c = by_id sections "communication" in
-  assert (section_status c = "watch")
+  assert (section_status c = "healthy")
 
 let test_communication_no_activity_watch () =
   (* No messages, no gaps, clean namespace summary -> "watch". *)
@@ -247,17 +247,6 @@ let test_communication_no_activity_open_attention_watch () =
     section_summary c
     = "No communication activity is recorded while the namespace still has \
        open operator attention.")
-
-let test_communication_metadata_gap_unclear () =
-  let _ws, sections =
-    S.build_briefing_sections
-      ~briefing_summary_json:(briefing_summary ())
-            ~agents:[]
-      ~recent_messages:[]
-      ~metadata_gaps:[ gap ~kind:"keeper_last_reply_missing" () ]
-  in
-  let c = by_id sections "communication" in
-  assert (section_status c = "unclear")
 
 (* ── (4) Alignment section branches ────────────────────────── *)
 
@@ -341,11 +330,10 @@ let () =
   test_watch_incidents_only ();
   test_watch_recommended_actions_only ();
   test_watch_clean_state_ok ();
-  test_communication_positive_signal_no_gaps_healthy ();
-  test_communication_positive_signal_with_gaps_watch ();
+  test_communication_positive_signal_healthy ();
+  test_communication_ignores_alignment_gaps ();
   test_communication_no_activity_watch ();
   test_communication_no_activity_open_attention_watch ();
-  test_communication_metadata_gap_unclear ();
   test_alignment_no_active_agents_unclear ();
   test_alignment_metadata_gap_unclear ();
   test_alignment_all_assigned_aligned ();

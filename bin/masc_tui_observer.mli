@@ -366,6 +366,9 @@ val tool_modes_changed : event -> bool
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
 
+val async_requests_keeper : event -> string option
+(** The Keeper whose async requests, or the execution journal of one, changed. *)
+
 val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
 (** The workspace dataset a push owes a read: the dataset it names as
     written, or the verification requests when the verification run registry

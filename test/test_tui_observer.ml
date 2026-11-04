@@ -740,6 +740,17 @@ let test_only_an_async_request_change_reads_the_async_requests () =
     (count Observer.async_requests_changed [ async_requests_frame ]);
   check int "no question, Gate, held call or mode change does" 0
     (count Observer.async_requests_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  let keepers frames =
+    List.filter_map
+      (function
+        | Observer.Event event -> Some (Observer.async_requests_keeper event)
+        | Observer.Undecodable _ -> None)
+      (decode_all frames)
+  in
+  check (list (option string)) "it names the Keeper whose open detail reads again"
+    [ Some "lane-smith" ] (keepers [ async_requests_frame ]);
+  check bool "no question, Gate, held call or mode change names one" true
+    (List.for_all Option.is_none (keepers (asks_frames @ gate_frames @ tool_approval_frames)));
   check bool "a change without its Keeper says why it was not read" true
     (match decode_all [ {|data: {"type":"keeper_async_requests_changed"}
 

@@ -16,7 +16,9 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
           ended and what it wrote to stderr. *)
   | Commit_refused of string
       (** The commit that publishes the saved text refused it: the final
-          in-process validation disagreed with what the staged child accepted.
+          validation (in this process, or in the running server's save)
+          disagreed with what the staged child accepted, or the running server
+          refused the save.
           The string is the commit's refusal, several lines at most, carried
           whole by {!error_detail} rather than the one-line summary. *)
   | Verification_failed of { runtime_id : string; code : string; message : string; detail : string option }
@@ -32,9 +34,10 @@ type error = Invalid_selection | Invalid_configuration | Changed_configuration
           the diagnostic is for the operator's terminal, never an HTTP error. *)
   | Lock_unavailable
   | Commit_unobserved of string
-      (** {!configure_text} sent the validated text to the workspace's running
-          server, and no answer arrived or the answer's receipt could not be
-          read. The string says which. *)
+      (** {!configure_text} published the validated text to the workspace's
+          running server, and whether the server saved it is unknown: no
+          answer arrived, the server answered with an error after receiving
+          it, or its receipt could not be read. The string says which. *)
 type usage_limited = { runtime_id : string; code : string }
 (** A runtime whose provider declined the verification for the account's
     usage: a spent quota or a rate limit. It is published without a

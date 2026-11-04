@@ -90,7 +90,7 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 
 이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
-`runtime-default-set --setup-lanes` 의 편집은 CLI 가 읽은 모델 카탈로그로 정한다(어느 runtime 이 만들어지는지, 판정 lane 에 넣을 수 있는지). CLI 는 서버 시작과 같은 카탈로그 원본을 읽지만, 셸에서 `AGENT_CORE_MODEL_CATALOG` 를 서버와 다르게 내보내면 서버의 저장 검사가 거절하거나(400), 서버였다면 고르지 않았을 판정 slot 이 저장될 수 있다. `runtime-setup-batch` 의 임시 사본 검증과 probe 도 CLI 의 카탈로그로 하고, 저장할 때 서버가 다시 검사한다. 이 차이를 없애려면 서버 route 로 선택만 보내야 하고, 지금은 CLI 의 선택(임시 credential 참조 포함)을 받는 route 가 없다.
+`runtime-default-set --setup-lanes` 의 편집은 CLI 가 읽은 모델 카탈로그로 정한다(어느 runtime 이 만들어지는지, 판정 lane 에 넣을 수 있는지). CLI 는 서버 시작과 같은 카탈로그 원본을 읽지만, 셸에서 `AGENT_CORE_MODEL_CATALOG` 를 서버와 다르게 내보내면 서버의 저장 검사가 거절하거나(400), 서버였다면 고르지 않았을 판정 slot 이 저장될 수 있다. `runtime-setup-batch` 의 임시 사본 검증과 probe 도 CLI 의 카탈로그로 하고, 저장할 때 서버가 다시 검사한다. 이 차이를 없애려면 서버 route 로 선택만 보내야 한다. 서버의 setup route(`/api/v1/setup/connections`)는 선택을 받지만 credential 파일 경로는 받지 않고 credential 을 서버에서 준비한다. 그래서 `runtime-store-credential` 이 만든 임시 credential 을 참조하는 CLI 의 선택은 그대로 보낼 수 없다.
 
 재시작이 필요한 설정은 서버로 저장해도 바로 쓰이지 않는다. 서버는 부팅 때 적용한 값과 저장된 값을 비교하고, 다르면 그 키를 `pending_restart` 로 보여 준다(`lib/keeper_runtime/keeper_runtime_config.ml` `application_status`). 그래서 CLI 의 "실행 중인 서버는 재시작할 때 읽는다" 안내는 서버로 쓸 때도 맞다.
 

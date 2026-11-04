@@ -47,7 +47,7 @@ let error_message = function
      {!error_detail}: like the child's stderr it can run to several lines the
      setup screen would drop. *)
   | Commit_refused _ ->
-    "Selected runtime configuration did not pass the final commit validation"
+    "Selected runtime configuration was refused when it was saved"
   | Verification_failed { runtime_id; code; detail } ->
     Printf.sprintf "Runtime %S did not pass response and tool verification (%s)%s" runtime_id code (with_detail detail)
   | Verification_unreadable { runtime_id; exit; stderr = _; reason } ->
@@ -55,7 +55,7 @@ let error_message = function
   | Write_failed _ -> "Configuration could not be saved; the previous configuration is unchanged."
   | Lock_unavailable -> "Another configuration operation is active; retry after it finishes."
   | Commit_unobserved _ ->
-    "The configuration was sent to the workspace's running server, and its answer could not be read; inspect the workspace before retrying."
+    "Whether the workspace's running server saved the configuration is unknown; inspect the workspace before retrying."
 let error_detail = function
   | Validation_failed { stderr; _ } | Verification_unreadable { stderr; _ } -> child_detail stderr
   | Commit_refused reason | Write_failed reason | Commit_unobserved reason -> child_detail reason

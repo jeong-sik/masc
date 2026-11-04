@@ -42,7 +42,6 @@ TUI 의 Config 편집기는 이미 서버로 저장한다. preview 를 받은 �
 | `set_theme` (:158) | 테마 |
 | `set_language` (:184) | 언어 |
 | `set_tui_string` (:423) | 문자열 키. `set_board_sort`(:431), `set_candle`(:583) 이 쓴다 |
-| `set_audio_input_device` (:595) | 오디오 입력 장치 |
 | `set_help_hint_shown` (:609) | 도움말 안내를 봤는지 |
 
 Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml 이 아니라 같은 폴더의 `tui-keepers.toml` 에 쓴다. Config 화면은 이 파일을 읽지 않으므로 이 RFC 에 들지 않는다.
@@ -70,10 +69,15 @@ CLI 는 "실행 중인 서버는 재시작할 때 읽는다"고 안내한다. �
 서버에 TUI 화면 설정을 쓰는 route `POST /api/v1/tui/preferences` 를 둔다. 권한은 runtime config 저장 route 와 같은 `CanAdmin` 이다.
 
 - 요청 본문은 변경 하나다. `{"change": <종류>, <값 필드>}` 꼴이고, 종류는 닫혀 있다. 서버는 받는 자리에서 파싱한다(Parse, don't validate). 1.2 표의 값마다 생성자 하나를 둔다(`lib/tui_preference.ml` 의 `change`). 아무 키나 받는 `set_tui_string` 은 키마다 생성자로 바꾼다. 모르는 종류, 빠지거나 남는 필드, 겹친 필드, 읽을 수 없는 값, 빈 테마·장치 이름은 400 이다.
-- 언어·candle 은 닫힌 타입으로, board 정렬은 서버의 `Board_dispatch.sort_order` 로 읽는다. 테마와 오디오 장치 이름은 열린 이름이라 문자열로 받고, `null` 은 저장한 값을 지운다.
+- 언어·candle 은 닫힌 타입으로, board 정렬은 서버의 `Board_dispatch.sort_order` 로 읽는다. 테마 이름은 열린 이름이라 문자열로 받고, `null` 은 저장한 테마를 지운다. 비었거나 앞뒤에 공백이 붙은 이름은 받지 않는다.
+- 편집 결과가 지금 파일과 같으면(같은 chat 을 다시 열거나, 이미 끈 도움말 안내) 서버는 쓰지 않는다. audit 도 알림도 없고, 응답은 `state: "unchanged"` 다. 비교는 읽을 때와 같은 쓰기 잠금 안에서 한다(`Runtime.edit_config_text_if_changed`).
 - 서버는 `Runtime.edit_config_text` 로 `tui` 이름공간만 고친다. 그래서 `commit_config_text_locked` 를 지나고, `runtime_config_changed` 가 나간다. audit 에는 `tui_preference` 로 남는다. `tui` 키는 Skill catalog 가 읽지 않으므로 skill catalog 를 다시 만들지 않는다. TUI 가 직접 쓸 때도 그랬다.
 - 응답은 변경과 commit receipt(`source_revision`, `durability`, `ignored_legacy_keys` 등)다. 파일 원문은 싣지 않는다.
 - TUI 의 `Runtime.edit_config_text` 호출은 모두 지운다.
+- TUI 는 시작할 때 `[tui]` 도 서버에서 읽는다(`GET /api/v1/tui/preferences`). 쓰는 곳과 읽는 곳이 서버 하나라서, 두 프로세스가 runtime.toml 을 서로 다른 경로로 찾아도 TUI 는 서버가 쓴 값을 읽는다. 읽기 권한은 `CanReadState` 다.
+- 쓰기 권한은 `CanAdmin` 그대로다. runtime.toml 은 서버 설정 파일이라서다. 운영자가 Worker 로 좁힌 TUI 는 고른 값을 화면에는 바로 쓰고, 저장하지 못했다는 안내를 한 번 보여 준다.
+
+사용자 결정(2026-11-04): 시작할 때 `[tui]` 를 서버에서 읽는다. 쓰기 권한은 `CanAdmin` 을 유지한다.
 
 TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버가 없을 수는 없다. 서버가 쓰기를 거절하면, TUI 는 지금 `edit_config_text` 의 오류를 보여 주는 자리에 그 이유를 보여 준다.
 
@@ -101,7 +105,10 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 | 층 | 내용 | 통과 조건 |
 |---|---|---|
 | L1 | 서버: TUI 화면 설정 route 와 닫힌 변경 타입(`lib/tui_preference.ml`). `edit_config_text` 로 `tui` 이름공간만 고친다 | 변경마다 `runtime_config_changed` 가 나가는지, 모르는 키를 파싱에서 거절하는지 |
-| L2 | TUI: 1.2 의 쓰기 6곳을 L1 route 로 바꾼다. `Runtime.edit_config_text` 호출과 TUI 쪽 `text_with_*` 편집 함수를 지우고, `[tui]` 키 읽기와 언어·candle·opening 타입은 `Tui_preference` 것을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
+| L2a | 서버: `GET /api/v1/tui/preferences`. `[tui]` 키와 `[voice].send_on_stop` 을 읽는 함수를 `Tui_preference` 로 옮기고, 타입이 있는 JSON 으로 돌려준다. runtime.toml 원문은 싣지 않는다(provider 설정이 들어 있다) | 응답에 `[tui]` 밖의 키가 없는지, 파일이 없을 때·못 읽을 때가 지금 TUI 의 `load` 와 같은 값인지 |
+| L2b | TUI: 시작할 때 L2a 로 읽는다. 토큰 준비와 읽기의 순서, 서버가 아직 없는 첫 설치, 읽기가 실패했을 때 기본값으로 여는 규칙을 둔다 | 서버가 쓴 값으로 열리는지, 서버가 없으면 기본값으로 열리고 그 사실을 알리는지(PTY) |
+| L2c | TUI: 1.2 의 쓰기를 순서를 지키는 writer 하나로 L1 route 에 보낸다(지금 chat visit writer 를 넓힌다). Worker TUI 는 저장하지 못했다고 한 번 알린다 | 빠르게 두 번 고른 값이 고른 순서대로 저장되는지 |
+| L2d | TUI: `Runtime.edit_config_text` 호출, `text_with_*`, `[tui]` 읽기 함수를 지운다. 언어·candle·opening 은 `Tui_preference` 타입을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
 | L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다 | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
 | L4 | TUI Config 화면이 `runtime_config_changed` 에 읽고 실패하면 다시 읽는다. 2초 분기를 지운다 | 알림 하나에 읽기 하나, 주기에는 읽지 않는지(PTY) |
 
@@ -109,4 +116,6 @@ L4 는 L1~L3 과 #48036 뒤에만 들어간다.
 
 ## 5. 열린 질문
 
-1. CLI 가 그 워크스페이스의 서버를 찾는 방법. TUI 는 `--port` 로 서버를 정하고, `Masc_tui_http.install_operator_token` 이 `.masc/auth/masc-tui.token` 을 읽거나 잠금을 잡고 새로 받는다. CLI 가 이 모듈을 같이 쓸지, 다른 운영자 토큰을 쓸지 정해야 한다. 이 모듈은 지금 `bin/` 의 TUI 쪽에 있다.
+L3 에 앞서 정할 것:
+
+- CLI 가 그 워크스페이스의 서버를 찾는 방법. TUI 는 `--port` 로 서버를 정하고, `Masc_tui_http.install_operator_token` 이 `.masc/auth/masc-tui.token` 을 읽거나 잠금을 잡고 새로 받는다. CLI 가 이 모듈을 같이 쓸지, 다른 운영자 토큰을 쓸지 정해야 한다. 이 모듈은 지금 `bin/` 의 TUI 쪽에 있다.

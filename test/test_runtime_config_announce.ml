@@ -88,14 +88,21 @@ let test_committed_text_announces_and_publications_do_not () =
    | Ok _ -> ()
    | Error detail -> failf "save: %s" detail);
   expect_change "a committed text";
-  (* RFC-0482 §3.1: a terminal reader's pick goes through the same commit. *)
-  (match
-     Runtime.edit_config_text ~runtime_config_path:path
-       (Tui_preference.edit (Tui_preference.Theme_chosen (Some "ayu-dark")))
-   with
-   | Ok _ -> ()
-   | Error detail -> failf "tui preference: %s" detail);
+  (* RFC-0482 §3.1: a terminal reader's pick goes through the same commit,
+     and the same pick again leaves the text and the readers alone. *)
+  let pick () =
+    match
+      Runtime.edit_config_text_if_changed ~runtime_config_path:path
+        (Tui_preference.edit (Tui_preference.Theme_chosen (Some "ayu-dark")))
+    with
+    | Ok (Runtime.Config_text_committed _) -> `Committed
+    | Ok (Runtime.Config_text_unchanged _) -> `Unchanged
+    | Error detail -> failf "tui preference: %s" detail
+  in
+  check bool "a new pick commits" true (pick () = `Committed);
   expect_change "a TUI preference";
+  check bool "the same pick again commits nothing" true (pick () = `Unchanged);
+  expect_quiet "an unchanged pick";
   Runtime.enter_setup_required ~reason:Runtime_startup_state.Config_missing ();
   expect_quiet "setup-required writes no text"
 

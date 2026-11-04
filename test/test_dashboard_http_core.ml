@@ -7375,14 +7375,33 @@ let test_tui_preference_route_writes_one_parsed_change () =
       Keeper_toml_loader.toml_string_opt doc
         Lib.Tui_preference.(Key.doc_path Key.Theme)
   in
+  let open Yojson.Safe.Util in
+  let state_of body =
+    let raw, json = post body in
+    expect_http_status body 200 raw;
+    json |> member "state" |> to_string
+  in
+  let audit_rows () = List.length (Lib.Audit_log.read_entries config) in
+  let rows_before = audit_rows () in
   let raw, json = post {|{"change":"theme","theme":"ayu-dark"}|} in
   expect_http_status "a theme pick commits" 200 raw;
-  let open Yojson.Safe.Util in
+  check string "the answer says it committed" "committed" (json |> member "state" |> to_string);
   check string "the answer names the change" "theme"
     (json |> member "change" |> member "change" |> to_string);
   check bool "the answer carries the commit" true
     (String.length (json |> member "commit" |> member "source_revision" |> to_string) > 0);
   check (option string) "the pick is stored" (Some "ayu-dark") (stored_theme ());
+  check int "a committed pick is audited once" (rows_before + 1) (audit_rows ());
+  check string "the same pick again is unchanged" "unchanged"
+    (state_of {|{"change":"theme","theme":"ayu-dark"}|});
+  check int "an unchanged pick is not audited" (rows_before + 1) (audit_rows ());
+  check string "a chat visit commits" "committed"
+    (state_of {|{"change":"chat_visited","keeper":"analyst"}|});
+  check string "a second visit to the same chat is unchanged" "unchanged"
+    (state_of {|{"change":"chat_visited","keeper":"analyst"}|});
+  check string "retiring the hint commits" "committed" (state_of {|{"change":"help_hint_retired"}|});
+  check string "retiring it again is unchanged" "unchanged"
+    (state_of {|{"change":"help_hint_retired"}|});
   let audit_before = Lib.Audit_log.read_entries config in
   List.iter
     (fun (label, body) ->

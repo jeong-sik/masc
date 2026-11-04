@@ -25,8 +25,6 @@ let every_change =
   ; P.Language_chosen P.Lang_en
   ; P.Board_sort_chosen Masc.Board_dispatch.Discussed
   ; P.Candle_chosen P.Dotted
-  ; P.Audio_input_device_chosen (Some "macbook mic")
-  ; P.Audio_input_device_chosen None
   ; P.Help_hint_retired
   ]
 
@@ -53,7 +51,7 @@ let test_a_change_outside_the_shape_is_refused () =
   refused "a repeated field" {|{"change":"candle","candle":"dotted","candle":"painted"}|};
   refused "a value on a kind without one" {|{"change":"help_hint_retired","value":true}|};
   refused "a blank theme" {|{"change":"theme","theme":"  "}|};
-  refused "a blank device" {|{"change":"audio_input_device","device":""}|};
+  refused "a theme with blanks around it" {|{"change":"theme","theme":" ayu-dark"}|};
   refused "an unknown language" {|{"change":"language","language":"fr"}|};
   refused "an unknown sort" {|{"change":"board_sort","sort":"oldest"}|};
   refused "an unknown candle" {|{"change":"candle","candle":"neon"}|};
@@ -83,11 +81,22 @@ let test_each_change_writes_its_key () =
     (stored P.Key.Board_sort (P.edit (P.Board_sort_chosen Masc.Board_dispatch.Discussed) original));
   check (option string) "candle" (Some "dotted")
     (stored P.Key.Candle (P.edit (P.Candle_chosen P.Dotted) original));
-  check (option string) "device" (Some "macbook mic")
-    (stored P.Key.Audio_input_device (P.edit (P.Audio_input_device_chosen (Some "macbook mic")) original));
   check (option bool) "the help hint is a bare boolean" (Some true)
     (Toml.toml_bool_opt (doc_of (P.edit P.Help_hint_retired original))
        (P.Key.doc_path P.Key.Help_hint_shown))
+
+(* The server skips a commit whose text did not move; these are the picks a
+   reader repeats. *)
+let test_a_repeated_pick_leaves_the_text_as_it_is () =
+  let once change text = P.edit change text in
+  List.iter
+    (fun change ->
+       let first = once change "[runtime]\ndefault = \"x.y\"\n" in
+       check string (P.change_kind change) first (once change first))
+    [ P.Chat_visited (keeper "analyst")
+    ; P.Theme_chosen (Some "ayu-dark")
+    ; P.Help_hint_retired
+    ]
 
 let test_a_chat_visit_moves_the_opening_target_only_on_last () =
   let visit text = P.edit (P.Chat_visited (keeper "analyst")) text in
@@ -112,6 +121,8 @@ let () =
         ] )
     ; ( "edit"
       , [ test_case "each change writes its key" `Quick test_each_change_writes_its_key
+        ; test_case "a repeated pick leaves the text as it is" `Quick
+            test_a_repeated_pick_leaves_the_text_as_it_is
         ; test_case "a chat visit moves the opening target only on last" `Quick
             test_a_chat_visit_moves_the_opening_target_only_on_last
         ] )

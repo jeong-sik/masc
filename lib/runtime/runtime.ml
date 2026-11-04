@@ -2707,6 +2707,31 @@ let edit_config_text ?runtime_config_path edit =
   Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
+type config_edit =
+  | Config_text_unchanged of
+      { observation : config_observation
+      ; lock_warnings : config_lock_warning list
+      }
+  | Config_text_committed of config_commit_receipt
+
+let edit_config_text_if_changed ?runtime_config_path edit =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      let edited = edit content in
+      if String.equal edited content
+      then Ok (`Unchanged (config_observation ~path content))
+      else
+        Result.map (fun receipt -> `Committed receipt) (commit_runtime_config_text ~path edited))
+  in
+  let* outcome = locked.value in
+  match outcome with
+  | `Unchanged observation ->
+    Ok (Config_text_unchanged { observation; lock_warnings = locked.warnings })
+  | `Committed receipt -> Ok (Config_text_committed (attach_lock_warnings locked.warnings receipt))
+;;
+
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* (loaded : materialized_config), exact_output_lanes, _degradation, _declared_media_failover =

@@ -8045,14 +8045,18 @@ let owe_lanes_read state =
 let owe_lane_addons_read state =
   state.lane_addons_owed <- Masc_tui_owed_read.changed state.lane_addons_owed
 
-(* The overview shows every instance; a detail shows its own. *)
+(* The overview shows every instance; a detail shows its own; a pending
+   action's status is shown whatever the screen. *)
 let lane_addons_show_instance state instance_id =
   match state.lane_addons with
   | None -> false
   | Some view ->
-      (match view.Masc_tui_lane_addons.screen with
-       | Masc_tui_lane_addons.Overview -> true
-       | Masc_tui_lane_addons.Detail (id, _) -> String.equal id instance_id)
+      (match Masc_tui_lane_addons.pending_action view with
+       | Some action -> String.equal action.Masc_tui_lane_addons.instance_id instance_id
+       | None -> false)
+      || (match view.Masc_tui_lane_addons.screen with
+          | Masc_tui_lane_addons.Overview -> true
+          | Masc_tui_lane_addons.Detail (id, _) -> String.equal id instance_id)
 
 (* The Runtime surface reads again when the server announces a probe landed,
    a runtime history row, a usage report, a standing change or a runtime.toml
@@ -22492,13 +22496,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, target, result) ->
-      if state.lane_addons_owed_generation = Some generation then begin
-        state.lane_addons_owed_generation <- None;
-        state.lane_addons_owed <-
-          (match result with
-           | Ok _ -> Masc_tui_owed_read.succeeded state.lane_addons_owed
-           | Error _ -> failed_read state.lane_addons_owed)
-      end;
+      (* A read that fails is owed again whoever started it: opening the
+         pane, a recovered authority, the inspection after an action. A
+         refused request is not, so nothing is sent twice. *)
+      let owned = state.lane_addons_owed_generation = Some generation in
+      if owned then state.lane_addons_owed_generation <- None;
+      (match result with
+       | Ok _ ->
+           if owned then
+             state.lane_addons_owed <- Masc_tui_owed_read.succeeded state.lane_addons_owed
+       | Error (`Inventory _ | `Detail _) ->
+           state.lane_addons_owed <- failed_read state.lane_addons_owed
+       | Error (`Request _) ->
+           if owned then
+             state.lane_addons_owed <- Masc_tui_owed_read.abandoned state.lane_addons_owed);
       let showing = Option.is_some state.lane_addons in
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else

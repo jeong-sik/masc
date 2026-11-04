@@ -498,7 +498,8 @@ type inspect_reading = {
   configuration : Yojson.Safe.t;  (** Inspect's [configuration]. *)
   instances : (string * Yojson.Safe.t) list;
       (** Per instance id, its Inspect entry and, for a live instance, its
-          current and queued action receipts. *)
+          current and queued action receipts and how many receipts it has
+          saved. *)
 }
 
 val inspect_reading : config:Workspace.config -> (inspect_reading option, string) result

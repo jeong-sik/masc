@@ -8939,12 +8939,18 @@ let owe_schedule_reads_for_queue_writes state ~keepers =
      | Approvals | Planning | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
      | Runtime | Config | Resources | Tools | System_logs | Keepers _), _ ->
        ());
-  match keeper_schedules_on_screen state, state.keeper_schedules with
-  | Some keeper, Some (listed, snapshot)
-    when String.equal keeper listed && schedule_rows_read_queue_of ~keepers snapshot.scs_rows ->
-      owe_keeper_schedules_read state
-  | Some keeper, (Some _ | None) when List.mem keeper keepers -> owe_keeper_schedules_read state
-  | Some _, (Some _ | None) | None, (Some _ | None) -> ()
+  match keeper_schedules_on_screen state with
+  | None -> ()
+  | Some keeper ->
+      let rows_read_the_queue =
+        match state.keeper_schedules with
+        | Some (listed, snapshot) when String.equal keeper listed ->
+            schedule_rows_read_queue_of ~keepers snapshot.scs_rows
+        (* The drawn Keeper's rows are not read yet; its own queue may be
+           theirs. *)
+        | Some _ | None -> List.mem keeper keepers
+      in
+      if rows_read_the_queue then owe_keeper_schedules_read state
 
 let settle_keeper_schedules_read state ~keeper result =
   match state.keeper_schedules_owed with

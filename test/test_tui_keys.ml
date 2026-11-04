@@ -88,8 +88,9 @@ let schedule_form_row : schedule_row =
 (* The wire carries both an encoded target and a display name. When the
    latter is absent, an older server's target stays intact. *)
 (* A queue or reaction write owes the schedule list a read only for a Keeper
-   a drawn row reads: its target, the Keeper its reaction names, or the one a
-   transferred occurrence waits with. *)
+   a drawn row reads: its target, the Keeper its reaction names, the one a
+   transferred occurrence waits with, the one whose queue has yet to record
+   its result, or either end of a transfer not yet recorded. *)
 let test_a_schedule_row_reads_only_its_keepers_queues () =
   let reads keepers row = Masc_tui_types.schedule_rows_read_queue_of ~keepers [ row ] in
   Alcotest.(check bool) "its target's queue" true (reads [ "edgar.a.poe" ] schedule_form_row);
@@ -105,6 +106,17 @@ let test_a_schedule_row_reads_only_its_keepers_queues () =
        { schedule_form_row with
          sch_occurrence =
            { Masc.Tui_schedule_observation.stage = Queued_at "holder"; due_at_iso = None } });
+  let at stage = { schedule_form_row with
+                   sch_occurrence = { Masc.Tui_schedule_observation.stage; due_at_iso = None } } in
+  Alcotest.(check bool) "the Keeper whose queue has yet to record the result" true
+    (reads [ "resolver" ] (at (Masc.Tui_schedule_observation.Settling "resolver")));
+  let transfer =
+    at (Masc.Tui_schedule_observation.Transferring { owner = "giver"; target = "taker" }) in
+  Alcotest.(check bool) "the Keeper that handed the occurrence over" true
+    (reads [ "giver" ] transfer);
+  Alcotest.(check bool) "the Keeper it was handed to" true (reads [ "taker" ] transfer);
+  Alcotest.(check bool) "a transfer reads no third Keeper's queue" false
+    (reads [ "someone.else" ] transfer);
   Alcotest.(check bool) "no drawn row" false
     (Masc_tui_types.schedule_rows_read_queue_of ~keepers:[ "edgar.a.poe" ] [])
 

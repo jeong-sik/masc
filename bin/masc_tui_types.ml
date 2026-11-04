@@ -3120,19 +3120,22 @@ let chat_schedule_proximity ~now = function
       else Schedule_later
 
 (* The Keepers whose event queue a schedule row reads: its target, the
-   Keeper its reaction names, and the one a transferred occurrence waits
-   with. A queue or reaction write for any other Keeper leaves the row as it
-   is. *)
+   Keeper its reaction names, the one a transferred occurrence waits with,
+   the one whose queue has yet to record its result, and both ends of a
+   transfer not yet recorded. A queue or reaction write for any other Keeper
+   leaves the row as it is. *)
 let schedule_row_queue_keepers row =
-  let holder =
+  let holders =
     match row.sch_occurrence.Tui_schedule_observation.stage with
-    | Tui_schedule_observation.Queued_at owner -> Some owner
+    | Tui_schedule_observation.Queued_at owner | Tui_schedule_observation.Settling owner ->
+        [ owner ]
+    | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
     | Missing | Turn_started | Turn_ended | Consumed | Completed | Failed _ | Cancelled _
-    | Settling | Transferring | Unknown _ ->
-        None
+    | Unknown _ ->
+        []
   in
-  List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name; holder ]
+  List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name ] @ holders
 
 let schedule_rows_read_queue_of ~keepers rows =
   List.exists
@@ -3153,7 +3156,7 @@ let chat_schedule_entries ~keeper_name snapshot =
     | Error _ -> true in
   let unsettled row =
     match row.sch_occurrence.Tui_schedule_observation.stage with
-    | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling | Transferring | Unknown _
+    | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _ | Transferring _ | Unknown _
     | Dispatching -> true
     | No_occurrence | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> false in
   let observed row =
@@ -3168,8 +3171,8 @@ let chat_schedule_entries ~keeper_name snapshot =
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
          | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> true
-         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling
-         | Transferring | Unknown _ -> false)
+         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _
+         | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
     |> List.take 1 in
   let selected = List.filter (fun row -> active row || unsettled row) rows @ latest_result in
@@ -25230,8 +25233,8 @@ let keeper_message_schedule_rows state ~now ~max_rows =
               | Completed -> Schedule_settled, "최근 회차 턴 완료"
               | Failed error -> Schedule_failed, reason "최근 회차 처리 실패" error
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
-              | Settling -> Schedule_pending, "최근 회차 결과 기록 중"
-              | Transferring -> Schedule_pending, "최근 회차 인계 기록 중"
+              | Settling _ -> Schedule_pending, "최근 회차 결과 기록 중"
+              | Transferring _ -> Schedule_pending, "최근 회차 인계 기록 중"
               | Unknown why -> Schedule_pending, plain why in
             let hold = match row.sch_runner_hold with
               | None -> ""
@@ -25253,11 +25256,11 @@ let keeper_message_schedule_rows state ~now ~max_rows =
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                         | Failed _ | Cancelled _ | Settling | Transferring) ->
+                         | Failed _ | Cancelled _ | Settling _ | Transferring _) ->
                   " · 다음 예정 " ^ plain at
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                      | Failed _ | Cancelled _ | Settling | Transferring) -> "" in
+                      | Failed _ | Cancelled _ | Settling _ | Transferring _) -> "" in
             tone, occurrence ^ hold ^ " · " ^ plain title ^ " · " ^ clock ^ next in
           let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
           match entries with

@@ -74,6 +74,10 @@ CLI 는 "실행 중인 서버는 재시작할 때 읽는다"고 안내한다. �
 - 서버는 `Runtime.edit_config_text` 로 `tui` 이름공간만 고친다. 그래서 `commit_config_text_locked` 를 지나고, `runtime_config_changed` 가 나간다. audit 에는 `tui_preference` 로 남는다. `tui` 키는 Skill catalog 가 읽지 않으므로 skill catalog 를 다시 만들지 않는다. TUI 가 직접 쓸 때도 그랬다.
 - 응답은 변경과 commit receipt(`source_revision`, `durability`, `ignored_legacy_keys` 등)다. 파일 원문은 싣지 않는다.
 - TUI 의 `Runtime.edit_config_text` 호출은 모두 지운다.
+- TUI 는 시작할 때 `[tui]` 도 서버에서 읽는다(`GET /api/v1/tui/preferences`). 쓰는 곳과 읽는 곳이 서버 하나라서, 두 프로세스가 runtime.toml 을 서로 다른 경로로 찾아도 TUI 는 서버가 쓴 값을 읽는다. 읽기 권한은 `CanReadState` 다.
+- 쓰기 권한은 `CanAdmin` 그대로다. runtime.toml 은 서버 설정 파일이라서다. 운영자가 Worker 로 좁힌 TUI 는 고른 값을 화면에는 바로 쓰고, 저장하지 못했다는 안내를 한 번 보여 준다.
+
+사용자 결정(2026-11-04): 시작할 때 `[tui]` 를 서버에서 읽는다. 쓰기 권한은 `CanAdmin` 을 유지한다.
 
 TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버가 없을 수는 없다. 서버가 쓰기를 거절하면, TUI 는 지금 `edit_config_text` 의 오류를 보여 주는 자리에 그 이유를 보여 준다.
 
@@ -101,18 +105,13 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 | 층 | 내용 | 통과 조건 |
 |---|---|---|
 | L1 | 서버: TUI 화면 설정 route 와 닫힌 변경 타입(`lib/tui_preference.ml`). `edit_config_text` 로 `tui` 이름공간만 고친다 | 변경마다 `runtime_config_changed` 가 나가는지, 모르는 키를 파싱에서 거절하는지 |
-| L2 | TUI: 1.2 의 쓰기를 L1 route 로 바꾼다. `Runtime.edit_config_text` 호출과 TUI 쪽 `text_with_*` 편집 함수를 지우고, `[tui]` 키 읽기와 언어·candle·opening 타입은 `Tui_preference` 것을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
+| L2 | 서버: `GET /api/v1/tui/preferences`. TUI: 시작할 때 `[tui]` 를 이 route 로 읽고, 1.2 의 쓰기를 L1 route 로 바꾼다. `Runtime.edit_config_text` 호출과 TUI 쪽 `text_with_*` 편집 함수를 지우고, `[tui]` 키 읽기와 언어·candle·opening 타입은 `Tui_preference` 것을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
 | L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다 | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
 | L4 | TUI Config 화면이 `runtime_config_changed` 에 읽고 실패하면 다시 읽는다. 2초 분기를 지운다 | 알림 하나에 읽기 하나, 주기에는 읽지 않는지(PTY) |
 
 L4 는 L1~L3 과 #48036 뒤에만 들어간다.
 
 ## 5. 열린 질문
-
-L2 에 앞서 정할 것:
-
-- TUI 는 시작할 때 `[tui]` 를 자기 프로세스가 찾은 runtime.toml 에서 읽는다(`bin/masc_tui_config.ml` `runtime_toml_path`). 서버는 자기 환경으로 찾은 파일에 쓴다(`Config_dir_resolver.runtime_toml_path_for_base_path`). 두 프로세스의 `MASC_CONFIG_DIR` 가 다르면, 서버는 저장했다고 답하지만 TUI 는 다음 시작 때 옛 값을 읽는다. TUI 가 시작할 때 `[tui]` 도 서버에서 읽을지, 두 경로가 같은지 확인하고 다르면 거절할지 정해야 한다.
-- route 권한은 `CanAdmin` 이다. TUI 가 토큰을 새로 받을 때는 이전 credential 의 역할을 그대로 쓴다(`bin/masc_tui_http.ml` `mint_operator_token`). 운영자가 더 좁은 역할을 준 TUI 는 L2 뒤에 화면 설정을 저장할 때마다 403 을 받는다. 이 route 에 더 좁은 권한을 둘지, 그런 TUI 는 화면 설정을 저장하지 못한다고 알릴지 정해야 한다.
 
 L3 에 앞서 정할 것:
 

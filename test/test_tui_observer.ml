@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 
 module Observer = Masc_tui_observer
 

@@ -139,12 +139,35 @@ class SchedulesSignalTest(unittest.TestCase):
             with server.condition:
                 server.failures_left = 2
                 server.read_times.clear()
+                cleared_at = time.monotonic()
             server.events.put(schedule_store_invalidated())
-            step(
-                "wait",
-                lambda: len(server.read_times) >= 3,
-                "two failed reads were not followed by a third",
-            )
+            try:
+                step(
+                    "wait",
+                    lambda: len(server.read_times) >= 3,
+                    "two failed reads were not followed by a third",
+                )
+            except AssertionError:
+                # Diagnostic only (task-3231): when the wait times out, say how
+                # many reads arrived after clear() and when, so a missing third
+                # read can be told apart from reads that never started.
+                with server.condition:
+                    times = list(server.read_times)
+                    failures_left = server.failures_left
+                offsets = [round(t - cleared_at, 3) for t in times]
+                print(
+                    "[diag task-3231] reads_after_clear=%d offsets_s=%r "
+                    "failures_left=%d elapsed_since_clear_s=%.3f"
+                    % (
+                        len(times),
+                        offsets,
+                        failures_left,
+                        time.monotonic() - cleared_at,
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+                raise
             step("drain", 6.0)
             with server.condition:
                 times = list(server.read_times)

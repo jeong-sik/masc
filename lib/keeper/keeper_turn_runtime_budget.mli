@@ -17,7 +17,13 @@ type runtime_execution = {
   temperature : float;
 }
 
-type turn_event_bus_summary = Keeper_turn_runtime_budget_event_bus.turn_event_bus_summary
+type turn_event_bus_summary = Keeper_turn_runtime_budget_event_bus.turn_event_bus_summary = {
+  correlation_id : string option;
+  run_id : string option;
+  caused_by : string option;
+  event_count : int;
+  payload_kinds : string list;
+}
 
 val empty_turn_event_bus_summary : turn_event_bus_summary
 

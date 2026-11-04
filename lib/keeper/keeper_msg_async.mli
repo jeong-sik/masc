@@ -10,7 +10,9 @@
 
 (** {1 Types} *)
 
-type persistence_target = Keeper_msg_async_types.persistence_target
+type persistence_target = Keeper_msg_async_types.persistence_target =
+  | Acceptance_callback
+  | State_transition of string
 (** The state label is diagnostic only. Admission recovery branches on the
     constructor, never on a status or reason string. *)
 
@@ -65,7 +67,11 @@ val same_entry_record : entry -> entry -> bool
     cannot be constructed). [Caller_mismatch] intentionally does not expose
     the persisted owner value. A different base path is a different store and
     therefore yields [Absent], not an ownership oracle. *)
-type access_rejection = Keeper_msg_async_types.access_rejection
+type access_rejection = Keeper_msg_async_types.access_rejection =
+  | Invalid_base_path of { reason : string }
+  | Invalid_caller
+  | Invalid_request_id
+  | Caller_mismatch
 
 (** Outcome of looking up a request record.
 

@@ -305,7 +305,12 @@ val start_held_context :
     System Goal observation is also held: a start sends it in the System
     prompt, while a later changed observation must use the Resume prompt. *)
 
-type carried_summary = Keeper_official_client_context_projection.carried_summary
+type carried_summary =
+  { label : string
+  ; bytes : int
+  ; sha256_prefix : string
+  ; resent_every_resume : bool
+  }
 (** One carried context as a log line names it: what composed it, the bytes a
     resume renders for it, the first 12 hex digits of its digest, and whether
     its block is sent on every resume. *)

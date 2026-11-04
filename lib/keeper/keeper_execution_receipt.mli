@@ -35,7 +35,10 @@ val error_kind_to_string : error_kind -> string
     [outcome] holds the receipt-side string (e.g. ["receipt_done"]);
     [turn_state] is the offending turn-state symbol the caller
     presented. *)
-type receipt_authority_violation = Keeper_execution_receipt_types.receipt_authority_violation
+type receipt_authority_violation =
+  { outcome : string
+  ; turn_state : string
+  }
 
 (** Runtime check for the TLA+ [ReceiptIsAuthoritative] invariant
     (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
@@ -62,7 +65,8 @@ val assert_receipt_authoritative
   -> turn_state:string
   -> (unit, receipt_authority_violation) result
 
-type tool_surface = Keeper_execution_receipt_types.tool_surface
+type tool_surface = Keeper_execution_receipt_types.tool_surface =
+  { turn_lane : Keeper_agent_tool_surface.turn_lane }
 
 (** Receipt-level summary of how the in-turn runtime attempt sequence
     ended. Closed set; wire form is [runtime_outcome_to_string]. *)

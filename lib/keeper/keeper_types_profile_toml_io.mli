@@ -47,7 +47,35 @@ val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
 val default_network_mode_for_profile : sandbox_profile -> network_mode
 type keeper_profile_defaults =
-  Keeper_types_profile_defaults.keeper_profile_defaults
+  Keeper_types_profile_defaults.keeper_profile_defaults = {
+  id : Ids.Keeper_id.t option;
+  manifest_path : string option;
+  instructions : string option;
+  activation_mode : Keeper_activation_mode.t option;
+  input_policy : Keeper_input_policy.t option;
+  mention_targets : string list;
+  board_interests : string list;
+  sandbox_profile :
+    Keeper_types_profile_sandbox.sandbox_profile option;
+  sandbox_image : string option;
+  network_mode : Keeper_types_profile_sandbox.network_mode option;
+  remote_endpoint : string option;
+  microvm_backend : Keeper_microvm_backend.t option;
+  microvm_memory : Keeper_microvm_guest_size.memory option;
+  microvm_cpus : Keeper_microvm_guest_size.cpus option;
+  microvm_delivery : Keeper_types_profile_sandbox.microvm_delivery option;
+  observation_run : Keeper_types_profile_sandbox.observation_run option;
+  max_context_override : int option;
+  telemetry_feedback_enabled : bool option;
+  telemetry_feedback_window_hours : int option;
+  always_allow : bool option;
+  voice_always_allow : bool option;
+  native_tool_posture : Runtime_native_tools.posture option;
+  skill_names : string list option;
+  attached_tool_allow : string list option;
+  tool_deny : string list;
+  agent_core_env : (string * string) list;
+}
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list

@@ -32,15 +32,6 @@ val finalize_trajectory_acc :
 (** Finalize a trajectory accumulator with the given outcome. Logs errors
     rather than raising (except cancellation). *)
 
-val post_assign_task : channel:string -> unit
-(** FSM guard post-action for [AssignTask]. *)
-
-val post_empty_queue_sleep : channel:string -> unit
-(** FSM guard post-action for [EmptyQueueSleep]. *)
-
-val post_turn_complete_task : cycle_completed:bool -> unit
-(** FSM guard post-action for [TurnComplete]. *)
-
 val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface
 (** Default tool surface for pre-dispatch receipts (no tools dispatched). *)
 

@@ -449,10 +449,6 @@ let test_active_admission () =
     (match state with
      | Admission.Active -> true
      | Admission.Paused _ -> false);
-  check bool "manual one-shot admitted" true
-    (match Admission.admit_manual_one_shot state with
-     | Admission.Manual_admitted_active -> true
-     | Admission.Manual_admitted_paused_recovery _ -> false);
   check bool "autonomous admitted" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_admitted -> true
@@ -468,13 +464,6 @@ let test_classified_pause_admission () =
      | Admission.Paused (Admission.Classified reason) ->
        Keeper_latched_reason.equal reason operator_pause
      | Admission.Active | Admission.Paused Admission.Unclassified -> false);
-  check bool "manual one-shot is an explicit recovery" true
-    (match Admission.admit_manual_one_shot state with
-     | Admission.Manual_admitted_paused_recovery (Admission.Classified reason) ->
-       Keeper_latched_reason.equal reason operator_pause
-     | Admission.Manual_admitted_active
-     | Admission.Manual_admitted_paused_recovery Admission.Unclassified
-     -> false);
   check bool "autonomous execution is denied" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied

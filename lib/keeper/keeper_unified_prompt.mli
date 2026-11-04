@@ -182,7 +182,6 @@ type prepared_prompt
 
 val prepare_prompt :
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
-  ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
@@ -218,7 +217,6 @@ val project_prompt :
     @param observation Current world snapshot *)
 val build_prompt :
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
-  ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
@@ -231,12 +229,7 @@ val build_prompt :
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
-(** [?previous_turn_stop]: why this keeper's last turn in this process ended
-    before completing, rendered as one line in the Autonomous Trigger layer.
-    Omitted (the turn completed, failed, or this is the first turn since the
-    process started), the layer says nothing about it.
-
-    RFC-0315 wake-turn self-description:
+(** RFC-0315 wake-turn self-description:
     - [turn_decision]: the scheduler's actual cycle decision, required so the
       rendered wake reason matches the decision that fired the turn.
     - [current_task] renders the held task or its explicit missing/unavailable

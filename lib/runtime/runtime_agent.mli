@@ -22,17 +22,6 @@ type stop_reason = Runtime_agent_context.stop_reason =
   | Completed of { provider_turn_ordinal : int }
   | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
-  | Yielded_after_repeated_tool_call of {
-      turns_used : int;
-      provider_turn_ordinal : int;
-      tool_name : string;
-      repeated_count : int;
-    }
-  | Yielded_after_repeated_assistant_text of {
-      turns_used : int;
-      provider_turn_ordinal : int;
-      repeated_count : int;
-    }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
@@ -41,11 +30,6 @@ type stop_reason = Runtime_agent_context.stop_reason =
 type cooperative_yield_reason =
   | Operation_queued
   | Durable_stimulus_waiting
-  | Repeated_tool_call of {
-      tool_name : string;
-      repeated_count : int;
-    }
-  | Repeated_assistant_text of { repeated_count : int }
   | Terminal_tool_completed
 
 val final_provider_turn_ordinal : stop_reason -> int option

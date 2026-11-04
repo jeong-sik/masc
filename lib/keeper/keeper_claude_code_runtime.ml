@@ -1447,9 +1447,9 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
             | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary ->
               settle_host_stop ~latest_request_input stop
-            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+            | ( Host.Terminal_tool_boundary _
               , Some detail ) -> Error (internal_error detail)
-            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+            | ( Host.Terminal_tool_boundary _
               , None ) -> settle_host_stop ~latest_request_input stop)
          | Error
              (( Runtime_claude_code.Invalid_config _

@@ -11,7 +11,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_keepalive_signal
-module Observations = Keeper_heartbeat_loop_observations
 
 let effective_keepalive_meta
       ~base_path

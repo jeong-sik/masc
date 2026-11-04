@@ -598,12 +598,6 @@ Do not claim that you checked board, task, file, status, or runtime state unless
 ### observation.recovered_current_task
 - The primary backlog is unavailable. Do not use this recovery observation as mutation authority.
 
-### observation.previous_turn_stop.repeated_tool_call (vars: tool_name, repeated_count)
-- Previous turn: the runtime ended it after `{{tool_name}}` was called {{repeated_count}} times with the same input and returned the same result. That result is already in your history; another identical call returns the same bytes. If you are waiting for it to change, end this turn — the scheduler wakes you again.
-
-### observation.previous_turn_stop.repeated_assistant_text (vars: repeated_count)
-- Previous turn: the runtime ended it after you wrote the same message {{repeated_count}} times without a tool call in between.
-
 ### observation.rejected_digest_heading
 Rejected already — do not repeat these calls unchanged:
 

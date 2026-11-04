@@ -8,10 +8,6 @@ type terminal_boundary_outcome =
       }
 
 type host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -20,8 +16,7 @@ type host_stop =
 let host_stop_failed = function
   | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> true
   | Terminal_tool_boundary
-      { outcome = Terminal_completed | Durable_stimulus_deferred; _ }
-  | Repeated_tool_call _ -> false
+      { outcome = Terminal_completed | Durable_stimulus_deferred; _ } -> false
 ;;
 
 type dynamic_tool_result =

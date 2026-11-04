@@ -11,7 +11,6 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_keepalive_signal
-module Observations = Keeper_heartbeat_loop_observations
 module Cycle = Keeper_heartbeat_loop_cycle
 
 (* Presence/identity sync extracted to
@@ -89,14 +88,6 @@ let should_run_turn_after_event_intake
   | Some (Stimulus_intake.Job_result_unavailable _)
   | Some (Stimulus_intake.Addon_result_unavailable _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
-;;
-
-let provider_timeout_observation_reasons =
-  Observations.provider_timeout_observation_reasons
-;;
-
-let record_provider_timeout_observation =
-  Observations.record_provider_timeout_observation
 ;;
 
 (* #10008 fm3: canonical metric name for proactive-scheduler skip
@@ -669,43 +660,24 @@ let batch_disposition_of_cycle_outcome
   : batch_disposition
   =
   match cycle_outcome with
-  | Some (Cycle.Completed completion) ->
-    (match completion.continuation_route with
-     | Keeper_unified_turn.Continuation_route_addressed ->
-       Batch_ack_completed
-     | Keeper_unified_turn.Continuation_route_mismatch
-     | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
-     | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* A completed turn projected every admitted row and chose its actions
-          with them in view; that is what the queue delivered and what the
-          ack records. Connector attention used to be held back here until an
-          exact reply/ignore receipt existed (#32114), which turned "the
-          keeper read this and did not answer" into a wake reason: the same
-          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
-          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
-          minutes on 2026-09-09, #34655), the same way refusing the board ack
-          replayed one post 297 times (#32277). Whether the keeper answered is
-          not the queue's question, and today no store answers it durably:
-          the ack receipt is [Turn_completed] for every route and the
-          reaction ledger's disposition token is "completed" for every route
-          (#34666). The message itself stays in the external-attention
-          store. *)
-       Batch_ack_completed)
+  | Some (Cycle.Completed _) ->
+    (* A completed turn projected every admitted row and chose its actions
+       with them in view; that is what the queue delivered and what the ack
+       records. Whether the keeper answered is not the queue's question. The
+       message itself stays in the external-attention store. *)
+    Batch_ack_completed
   | Some
       (Cycle.Checkpointed
          { checkpoint_reason =
              ( Keeper_unified_turn.Durable_stimulus_arrived
-             | Keeper_unified_turn.Repeated_assistant_text _
-             | Keeper_unified_turn.Repeated_tool_call _
              | Keeper_unified_turn.Operation_queued )
-         ; continuation_route = _
          ; _
          }) ->
     (* The admitted batch is an attention layer, not the continuation store.
        Every checkpoint reason is produced after at least one model round
        ran with the admitted attention projected: a newer durable source
-       arrived, the loop guard durably preserved the turn, a tool call was
-       deferred to the Gate, or a chat operation took the slot. On the
+       arrived, a tool call was deferred to the Gate, or a chat operation
+       took the slot. On the
        agent-core lane the checkpoint preserves canonical turn state, while
        provider-specific dynamic context can remain request-only (in
        particular on OpenAI-compatible requests). On an official-client lane
@@ -1404,17 +1376,6 @@ let run_keepalive_unified_turn
        | Continuation_unsettled, _
        | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
          ());
-      (match !cycle_outcome_ref with
-       | Some (Cycle.Failed _)
-       | Some
-           ( Cycle.Completed _
-           | Cycle.Checkpointed _
-           | Cycle.Input_required _
-           | Cycle.Cancelled _
-           | Cycle.Skipped _
-           )
-       | None ->
-         ());
       (* RFC-0377: every entry admitted into this turn (the primary plus any
          Connector_attention batch companions) shares the turn's outcome. A
          turn completion acks all of them; a turn failure applies the same
@@ -1646,9 +1607,6 @@ let run_heartbeat_loop
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
   let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
       (float_of_int (max 0 proactive_warmup_sec))) in
-  (* Why the last turn that ran ended before completing now lives in
-     [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
-     shares — see the note at [run_fresh_cycle]. *)
   let captured_handoff = ref None in
   let rec loop () =
     if Atomic.get stop

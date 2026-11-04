@@ -908,7 +908,6 @@ max-context = 100000
             (match selected.run_result.stop_reason with
              | Runtime_agent.Completed _ -> ()
              | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-             | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _
              | InputRequired _ -> fail "candidate did not complete its own request")
           | Error error -> fail (Agent_core.Error.to_string error)
         in

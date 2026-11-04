@@ -36,15 +36,10 @@ module In_turn_pulse = Keeper_heartbeat_loop_in_turn_pulse
 module Observations = Keeper_heartbeat_loop_observations
 
 type cycle_outcome =
-  | Completed of
-      { meta : keeper_meta
-      ; continuation_route :
-          Keeper_unified_turn.continuation_route_disposition
-      }
+  | Completed of { meta : keeper_meta }
   | Checkpointed of
       { meta : keeper_meta
       ; checkpoint_reason : Keeper_unified_turn.checkpoint_reason
-      ; continuation_route : Keeper_unified_turn.continuation_route_disposition
       }
   | Input_required of keeper_meta
   | Cancelled of keeper_meta
@@ -89,7 +84,6 @@ let run_keeper_cycle_admitted
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
-      ?previous_turn_stop
       ~ctx
       ~meta_after_triage
       ~stop
@@ -112,7 +106,6 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~turn_input
         ?hitl_resolution
-        ?previous_turn_stop
         (* RFC-0315: pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
@@ -176,14 +169,9 @@ let run_keeper_cycle_admitted
         meta_after_triage
     in
     Failed { meta; failure }
-  | Ok
-      (Keeper_unified_turn.Turn_completed
-        { meta; continuation_route }) ->
-    Completed { meta; continuation_route }
-  | Ok
-      (Keeper_unified_turn.Turn_checkpointed
-         { meta; checkpoint_reason; continuation_route }) ->
-    Checkpointed { meta; checkpoint_reason; continuation_route }
+  | Ok (Keeper_unified_turn.Turn_completed { meta }) -> Completed { meta }
+  | Ok (Keeper_unified_turn.Turn_checkpointed { meta; checkpoint_reason }) ->
+    Checkpointed { meta; checkpoint_reason }
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta
@@ -195,7 +183,6 @@ let run_keeper_cycle
       ?on_deferred_runtime_consumed
       ?event_bus
       ?hitl_resolution
-      ?previous_turn_stop
       ~ctx
       ~meta_after_triage
       ~stop
@@ -205,61 +192,25 @@ let run_keeper_cycle
       ~(turn_input : Keeper_heartbeat_source_batch.turn_input)
       ()
   =
-  (* Every lane reaches the turn through this wrapper, so the stop state
-     lives here rather than in the keepalive loop that used to own it: a
-     yield on a lane that never threaded the old ref (direct/TUI-attached
-     turns) left the next turn blind to why its predecessor was cut.
-     An explicit [~previous_turn_stop] still wins — tests use it to pin
-     the rendered line.
-
-     The read → cycle → write sequence is not one transaction, but two
-     cycles for the same keeper cannot interleave: [run_keeper_cycle_admitted]
-     runs holding the keeper's Owner slot (RFC-0225 §1), so what lands in
-     the cell is always the outcome of the keeper's most recent completed
-     cycle — an overwrite, last writer by turn order. *)
   (* One named switch per cycle: Eio writes a switch's name into the
      runtime-events ring when the switch opens, and the ring is overwritten
      within minutes, so a name opened once at lane start is invisible to a
      tracer attached later. Opened per cycle, every window sees which keeper
      a long run on the main domain belongs to. *)
   Eio.Switch.run ~name:("keeper " ^ meta_after_triage.name ^ " cycle") @@ fun _ ->
-  let previous_turn_stop =
-    match previous_turn_stop with
-    | Some _ as explicit -> explicit
-    | None ->
-      Keeper_last_turn_stop.get
-        ~base_path:ctx.config.base_path
-        ~keeper:meta_after_triage.name
-  in
-  let outcome =
-    run_keeper_cycle_admitted
-      ~before_dispatch_authority:
-        (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
-      ?deferred_runtime_lane
-      ?on_deferred_runtime_consumed
-      ?previous_turn_stop
-      ~ctx
-      ~meta_after_triage
-      ~stop
-      ~obs
-      ~turn_decision
-      ~shared_context
-      ~turn_input
-      ?event_bus
-      ?hitl_resolution
-      ()
-  in
-  (* Only a checkpoint carries a reason; a completed, failed, cancelled, or
-     skipped cycle leaves nothing to explain, and clearing here keeps a
-     stale reason from outliving the turn it described. Written only when a
-     cycle ran — a cadence that skipped the turn leaves the last real
-     turn's reason in place. *)
-  Keeper_last_turn_stop.set
-    ~base_path:ctx.config.base_path
-    ~keeper:meta_after_triage.name
-    (match outcome with
-     | Checkpointed { checkpoint_reason; _ } -> Some checkpoint_reason
-     | Completed _ | Input_required _ | Cancelled _ | Skipped _ | Failed _ ->
-       None);
-  outcome
+  run_keeper_cycle_admitted
+    ~before_dispatch_authority:
+      (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
+    ?deferred_runtime_lane
+    ?on_deferred_runtime_consumed
+    ~ctx
+    ~meta_after_triage
+    ~stop
+    ~obs
+    ~turn_decision
+    ~shared_context
+    ~turn_input
+    ?event_bus
+    ?hitl_resolution
+    ()
 ;;

@@ -1060,8 +1060,7 @@ let run_keeper_invocation_turn_admitted_inner
                   let* _ = Keeper_owner_registry.defer_direct_input_wait
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~request |> owner in
                   Ok ()
-                | Runtime_agent.Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-                | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
+                | Runtime_agent.Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _ ->
                 if checkpoint_yield then
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer

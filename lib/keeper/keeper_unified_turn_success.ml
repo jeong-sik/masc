@@ -36,15 +36,6 @@ type terminal_outcome =
 type handle_result =
   | Completed of Keeper_meta_contract.keeper_meta
 
-type cycle_post_action =
-  | Assign_task
-  | Empty_queue_sleep
-
-let post_action_of_channel = function
-  | Keeper_world_observation.Reactive -> Assign_task
-  | Keeper_world_observation.Scheduled_autonomous -> Empty_queue_sleep
-;;
-
 let acknowledge_pending_messages
       (meta : Keeper_meta_contract.keeper_meta)
       (observation : Keeper_world_observation.world_observation)
@@ -63,9 +54,7 @@ let terminal_outcome_of_result result =
   | Runtime_agent.Completed _ -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
   | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Terminal_checkpoint
 ;;
 
@@ -124,14 +113,6 @@ let append_metrics_snapshot
           ]
         ())
     (fun () ->
-       (match Keeper_execution_outcome.lane execution_outcome with
-        | Keeper_execution_outcome.Direct -> ()
-        | Keeper_execution_outcome.Autonomous _ ->
-          (match post_action_of_channel channel with
-           | Assign_task ->
-             Keeper_turn_helpers.post_assign_task ~channel:channel_tag
-           | Empty_queue_sleep ->
-             Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag));
        KUM.append_metrics_snapshot
          ~config
          ~meta:updated_meta
@@ -267,19 +248,6 @@ let emit_usage_metrics_and_log
       Printf.sprintf "yielded_to_operation_queued(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
-    | Runtime_agent.Yielded_after_repeated_tool_call
-        { turns_used; tool_name; repeated_count; _ } ->
-      Printf.sprintf
-        "yielded_after_repeated_tool_call(%d,%s,%d)"
-        turns_used
-        tool_name
-        repeated_count
-    | Runtime_agent.Yielded_after_repeated_assistant_text
-        { turns_used; repeated_count; _ } ->
-      Printf.sprintf
-        "yielded_after_repeated_assistant_text(%d,%d)"
-        turns_used
-        repeated_count
     | Runtime_agent.InputRequired { turns_used; _ } ->
       Printf.sprintf "input_required(%d)" turns_used
   in
@@ -292,10 +260,6 @@ let emit_usage_metrics_and_log
        | Runtime_agent.Yielded_to_operation_queued _ -> "yielded_to_operation_queued"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
-       | Runtime_agent.Yielded_after_repeated_tool_call _ ->
-         "yielded_after_repeated_tool_call"
-       | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
-         "yielded_after_repeated_assistant_text"
        | Runtime_agent.InputRequired _ -> "input_required"
        | Runtime_agent.Completed _ -> "success")
   in
@@ -494,26 +458,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
        checkpoint saved — will resume next cycle"
       turns_used;
     reset_failure_state ()
-  | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "yielded repeated exact tool loop after %d turn(s): tool=%s count=%d; \
-       checkpoint saved — will resume next cycle"
-      turns_used
-      tool_name
-      repeated_count;
-    (* A repeated-tool stop checkpoints progress but is not a successful turn;
-       preserve failure evidence and budgets for the next cycle. *)
-    ()
-  | Runtime_agent.Yielded_after_repeated_assistant_text
-      { turns_used; repeated_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "yielded repeated assistant text after %d turn(s): count=%d; \
-       checkpoint saved — will resume next cycle"
-      turns_used
-      repeated_count;
-    (* Repeated assistant text is likewise a non-completion stop. *)
-    ()
   | Runtime_agent.InputRequired { turns_used; request } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
@@ -541,11 +485,6 @@ module For_testing = struct
       ~updated_meta
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
-  type nonrec cycle_post_action = cycle_post_action =
-    | Assign_task
-    | Empty_queue_sleep
-
-  let post_action_of_channel = post_action_of_channel
 end
 
 let emit_terminal_fsm ~meta ~keeper_turn_id =

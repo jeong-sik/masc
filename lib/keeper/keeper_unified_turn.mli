@@ -66,43 +66,20 @@ type turn_failure =
     The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
-type continuation_route_disposition =
-  | Continuation_route_addressed
-  | Continuation_route_mismatch
-  | Continuation_no_terminal_effect_receipt
-  | Continuation_route_not_applicable
-(** Producer-owned evidence available when a completed turn is compared with
-    its continuation route. [Continuation_route_addressed] and
-    [Continuation_route_mismatch] come from a concrete surface-post receipt;
-    [Continuation_no_terminal_effect_receipt] records absence without
-    claiming the stimulus was unobserved; [Continuation_route_not_applicable]
-    means this was not a continuation wake. Policy may map these facts to queue
-    actions, but must not rename them into model intent. *)
-
-type checkpoint_reason = Keeper_turn_checkpoint_reason.t =
+type checkpoint_reason =
   | Operation_queued
+      (** A chat operation was queued for this keeper; the turn yielded the
+          slot to it. *)
   | Durable_stimulus_arrived
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
-  | Repeated_assistant_text of { repeated_count : int }
-(** Why a healthy turn checkpointed before [Completed]. The definition lives
-    in {!Keeper_turn_checkpoint_reason} so the prompt can read it without
-    depending on this module; the equation keeps the constructors usable
-    here. [Durable_stimulus_arrived] proves that a newer durable source
-    caused the yield. The two [Repeated_*] guards carry what repeated, so the
-    next turn's prompt can name it. *)
+      (** A newer durable stimulus arrived; the turn yielded so the next
+          turn carries it. *)
+(** Why a healthy turn checkpointed before [Completed]. *)
 
 type turn_success =
-  | Turn_completed of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; continuation_route : continuation_route_disposition
-      }
+  | Turn_completed of { meta : Keeper_meta_contract.keeper_meta }
   | Turn_checkpointed of
       { meta : Keeper_meta_contract.keeper_meta
       ; checkpoint_reason : checkpoint_reason
-      ; continuation_route : continuation_route_disposition
       }
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
@@ -175,7 +152,6 @@ val run_keeper_cycle
   -> observation:Keeper_world_observation.world_observation
   -> turn_input:Keeper_heartbeat_source_batch.turn_input
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
-  -> ?previous_turn_stop:Keeper_turn_checkpoint_reason.t
   -> ?shared_context:Agent_core.Context.t
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
@@ -183,11 +159,6 @@ val run_keeper_cycle
   -> (turn_success, turn_failure) result
 
 (** Run a unified keeper turn.
-
-    [?previous_turn_stop] is the checkpoint reason of this keeper's last turn
-    that ran in this process, when that turn did not complete. The prompt
-    renders it so the model knows why it stopped; the checkpoint history
-    shows the calls but not the reason the runtime ended the turn.
 
     1. Builds unified prompt from meta + observation
     2. Calls [Keeper_agent_run.run_turn] with keeper tools and hooks

@@ -190,10 +190,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -469,11 +465,6 @@ let error_to_string = function
       message
   | Turn_failed { detail; codex_error_info = _ } ->
     "Codex app-server turn failed: " ^ detail
-  | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
-    Printf.sprintf
-      "Codex app-server stopped after repeated tool call: tool=%s count=%d"
-      tool_name
-      repeated_count
   | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
     Printf.sprintf "Codex app-server stopped at terminal tool boundary: tool=%s" tool_name
   | Turn_interrupted -> "Codex app-server turn was interrupted"
@@ -1745,20 +1736,17 @@ let prefer_tool_error ~previous next =
   | Some previous_stop, Some next_stop ->
     (match previous_stop, next_stop with
      | Terminal_tool_boundary {outcome = Terminal_failed _; _},
-       (Repeated_tool_call _ | Terminal_tool_boundary _) -> previous
-     | (Repeated_tool_call _
-       | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}),
+       Terminal_tool_boundary _ -> previous
+     | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _},
        Terminal_tool_boundary {outcome = Terminal_failed _; _} -> next
      | Terminal_tool_boundary {outcome = Terminal_completed; _},
-       (Repeated_tool_call _
-       | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}) -> previous
-     | (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}),
+       Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _} -> previous
+     | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
        Terminal_tool_boundary {outcome = Terminal_completed; _} -> next
-     | (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}),
-       (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> previous)
+     | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
+       Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _} -> previous)
   | Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}), None -> previous
-  | Some (Repeated_tool_call _
-         | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}), None -> next
+  | Some (Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}), None -> next
 ;;
 
 (* Keep the RPC reader alive while tools execute. Codex's functions.exec can
@@ -1926,7 +1914,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
                !handoff = Handoff_pending || !handoff = Handoff_accepted
              | Some (Terminal_tool_boundary
                  {outcome = Durable_stimulus_deferred | Terminal_failed _; _})
-             | Some (Repeated_tool_call _) | None -> false in
+             | None -> false in
            let previous = match !stopped with
              | Some _ as stopped -> stopped
              | None -> !handoff_completion in

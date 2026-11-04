@@ -494,7 +494,8 @@ let test_scoped_boundary_preserves_terminal_priority () =
               Keeper_terminal_effect_detail.Tool_failed
                 { internal_tool_name = "effect"; message = "exact committed effect failure" } })
       ~on_tool_boundary:(fun ~tool_name:_ -> incr checks;
-        Ok (Some (Host.Repeated_tool_call { tool_name = "effect"; repeated_count = 3 })))
+        Ok (Some (Host.Terminal_tool_boundary
+          { tool_name = "effect"; outcome = Durable_stimulus_deferred })))
       (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"terminal-priority" (`Assoc []) in
@@ -505,7 +506,7 @@ let test_scoped_boundary_preserves_terminal_priority () =
           detail =
             Keeper_terminal_effect_detail.Tool_failed
               { message = "exact committed effect failure"; _ }; _ }; _ }) -> ()
-    | _ -> fail "repeat stop replaced stronger terminal evidence")
+    | _ -> fail "a deferral stop replaced stronger terminal evidence")
 ;;
 
 let test_explicit_boundary_observes_each_settled_call () =
@@ -546,46 +547,6 @@ let test_dynamic_tool_failures_do_not_invent_a_host_stop () =
     done;
     check int "all calls execute" 10 !executions;
     check (option string) "tool result does not synthesize a terminal stop" None !terminal_error)
-;;
-
-let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
-  let result =
-    match
-      Host.host_stop_result ~provider_turn_ordinal:23
-        ~runtime_id:"official-client-runtime"
-        ~model:"official-client-model"
-        ~session_id:"session-1"
-        ~turn_id:"turn-2"
-        ~turns_used:2
-        ~latency_ms:(Some 1234)
-        ~request_context:None
-        (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
-    with
-    | Ok result -> result
-    | Error error -> fail (Agent_core.Error.to_string error)
-  in
-  check string "session" "session-1" result.session_id;
-  check int "turns" 2 result.turns;
-  check bool "no synthetic Agent Core checkpoint" true
-    (Option.is_none result.checkpoint);
-  (* masc#31312: a host stop is one vendor-loop attempt; the receipt
-     classifier reads this observation, and [None] here was what made every
-     host-stopped turn surface as unmapped_runtime_state. *)
-  (match result.runtime_observation with
-   | None -> fail "host stop carried no runtime observation (masc#31312)"
-   | Some observation ->
-     check string "observation runtime" "official-client-runtime"
-       observation.Runtime_observation.runtime_id;
-     check int "observation records one attempt" 1
-       (List.length observation.attempts));
-  match result.stop_reason with
-  | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count; provider_turn_ordinal } ->
-    check int "typed turns" 2 turns_used;
-    check int "host ordinal is independent of turn count" 23 provider_turn_ordinal;
-    check string "typed tool" "masc_probe" tool_name;
-    check int "typed count" 3 repeated_count
-  | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
 ;;
 
 (* Official tools settle once before a queued input asks the host loop to
@@ -690,7 +651,7 @@ let test_settled_official_tool_keeps_turn_running () =
     check (option string) "no terminal failure" None !terminal_error;
     match result.abort_turn with
     | None -> ()
-    | Some (Repeated_tool_call _ | Terminal_tool_boundary _) ->
+    | Some (Terminal_tool_boundary _) ->
       fail "the official-client turn stopped after its tool result")
 ;;
 
@@ -739,7 +700,6 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
               (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
-    | Some (Repeated_tool_call _)
     | None ->
       fail "post-effect terminal failure did not close the official-client loop")
 ;;
@@ -958,7 +918,6 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
           }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
     | None ->
       fail "ordinary post-effect failure remained provider-retryable")
 ;;
@@ -1009,7 +968,7 @@ let test_terminal_external_deferral_keeps_the_turn_going () =
     let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
     match result.abort_turn with
     | None -> ()
-    | Some (Terminal_tool_boundary _ | Repeated_tool_call _) ->
+    | Some (Terminal_tool_boundary _) ->
       fail "a parked external effect ended the turn")
 ;;
 
@@ -1038,7 +997,6 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
           { outcome = Durable_stimulus_deferred; tool_name = "effect" }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
     | None ->
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
@@ -3600,10 +3558,6 @@ let () =
             "dynamic tool failures do not invent a host stop"
             `Quick
             test_dynamic_tool_failures_do_not_invent_a_host_stop
-        ; test_case
-            "repeated host stop is a checkpoint yield"
-            `Quick
-            test_repeated_tool_host_stop_is_a_checkpoint_yield
         ; test_case "queued input yields after official tool result handoff" `Quick
             test_queued_input_yields_after_official_tool_handoff
         ; test_case "queued input preserves explicit terminal outcomes" `Quick

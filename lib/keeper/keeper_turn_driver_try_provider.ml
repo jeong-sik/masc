@@ -638,16 +638,6 @@ let apply_accept
        would turn them into [Accept_rejected] and incorrectly rotate providers,
        discarding typed control evidence. *)
     Ok run_result
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
-    Error
-      (Keeper_internal_error.core_error_of_masc_internal_error
-         (Keeper_internal_error.Host_stopped_turn
-            { runtime_id; stop = Keeper_internal_error.Repeated_tool_call }))
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
-    Error
-      (Keeper_internal_error.core_error_of_masc_internal_error
-         (Keeper_internal_error.Host_stopped_turn
-            { runtime_id; stop = Keeper_internal_error.Repeated_assistant_text }))
   | Runtime_agent.Completed _ ->
     if accept run_result.response
     then Ok run_result
@@ -2788,7 +2778,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         && !observed_provider_turn_ordinal = Some provider_turn_ordinal
         && !saved_provider_turn_ordinal = Some provider_turn_ordinal
       | Ok {Runtime_agent.stop_reason=(Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-          | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ | InputRequired _);_}
+          | InputRequired _);_}
       | Error _ -> false in
     let execution_observation =
       match result with

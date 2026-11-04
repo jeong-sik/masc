@@ -1114,24 +1114,21 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
 let run_turn ~base_path ~tool = run_turn_with ~base_path ~tool ()
 
 (* The adapter settles the acknowledged host turn and returns its stop
-   details. The Keeper driver then turns a repetition into a typed failure,
-   so it cannot be accepted as a runnable continuation. *)
-let check_repeated_host_stop run =
+   details. A deferred terminal boundary is a durable-stimulus checkpoint. *)
+let check_deferred_host_stop run =
   (match run.adapter_result with
-   | Ok { Runtime_agent.stop_reason =
-            Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
-     check string "stopped tool" "masc_probe" tool_name;
-     check int "repetition count" 3 repeated_count
-   | Ok _ -> fail "the adapter lost the repeated-tool stop"
+   | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_durable_stimulus _; _ } -> ()
+   | Ok _ -> fail "the adapter lost the deferred host stop"
    | Error error -> fail (Agent_core.Error.to_string error));
   match run.outcome.result with
-  | Error error ->
-    (match Keeper_internal_error.carried_masc_internal_error error with
-     | Some (Keeper_internal_error.Host_stopped_turn
-         { runtime_id = stopped_runtime; stop = Repeated_tool_call }) ->
-       check string "stopped runtime" runtime_id stopped_runtime
-     | Some _ | None -> failf "the driver lost the typed host stop: %s" (Agent_core.Error.to_string error))
-  | Ok _ -> fail "the driver accepted the repeated-tool stop"
+  | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_durable_stimulus _; _ } -> ()
+  | Ok _ -> fail "the driver changed the deferred host stop"
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let deferred_host_stop ~tool_name:_ =
+  Ok (Some (Keeper_official_client_host.Terminal_tool_boundary
+    { tool_name = "masc_probe"; outcome = Durable_stimulus_deferred }))
 ;;
 
 let read_text path = In_channel.with_open_bin path In_channel.input_all
@@ -1848,22 +1845,6 @@ let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) 
     (Keeper_provider_attempt_effect.to_string outcome.effect_disposition)
 ;;
 
-let check_repeated_stop_rejected ~base_path (run : observed_run) =
-  (match run.outcome.result with
-   | Error error ->
-     (match Keeper_internal_error.classify_masc_internal_error error with
-      | Some (Keeper_internal_error.Host_stopped_turn
-          {runtime_id = observed_runtime; stop = Repeated_tool_call}) ->
-        check string "caller rejection names the runtime" runtime_id observed_runtime
-      | Some _ | None -> failf "repeated stop lost its caller rejection: %s"
-          (Agent_core.Error.to_string error))
-   | Ok _ -> fail "the caller accepted a repeated-tool stop");
-  let retained = Keeper_client_tool_outbox.load ~base_path ~keeper_name
-      |> function Ok retained -> retained | Error detail -> fail detail in
-  check int "rejected stop keeps its completed tool result" 1
-    (List.length (Keeper_client_tool_outbox.receipt_ids retained))
-;;
-
 let started_turn_id ~base_path = read_text (Filename.concat base_path "start-turn-id.txt")
 
 let test_failed_muse_turn_reads_typed_usage_without_replay () =
@@ -2029,15 +2010,12 @@ let test_a_stop_before_the_turn_start_answer_settles () =
     let run =
       run_turn_with
         ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 })))
+        ~on_official_client_tool_boundary:deferred_host_stop
         ~base_path
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
-    check_repeated_host_stop run;
-    check_repeated_stop_rejected ~base_path run;
+    check_deferred_host_stop run;
     (match List.rev run.events with
      | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
      | _ -> fail "settled adapter host stop left its SSE message open");
@@ -2972,11 +2950,8 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
      | Error error -> fail (Agent_core.Error.to_string error));
     write_fixture ~base_path (scenario "stop_before_ack");
     let stopped = run "RECALL_SENT_BY_THE_STOPPED_TURN"
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 }))) in
-    check_repeated_host_stop stopped;
-    check_repeated_stop_rejected ~base_path stopped;
+        ~on_official_client_tool_boundary:deferred_host_stop in
+    check_deferred_host_stop stopped;
     check bool "the stopped turn sent the revised recall" true
       (String_util.contains_substring (resume_prompt ()) "RECALL_SENT_BY_THE_STOPPED_TURN");
     write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt")
@@ -3104,11 +3079,8 @@ let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
     with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
       let tool = masc_probe_tool (ref `Null) in
       let stopped = run_turn_with ~base_path ~tool
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 }))) () in
-      check_repeated_host_stop stopped;
-      check_repeated_stop_rejected ~base_path stopped;
+        ~on_official_client_tool_boundary:deferred_host_stop () in
+      check_deferred_host_stop stopped;
       let _, _, local_count = settled_turn ~base_path in
       check int "host stop acknowledges one local turn" 1 local_count;
       check string "fixture emitted no native terminal" "0"

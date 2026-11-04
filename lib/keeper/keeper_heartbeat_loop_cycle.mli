@@ -1,16 +1,10 @@
 (** Keeper cycle execution with error-class handling. *)
 
 type cycle_outcome =
-  | Completed of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; continuation_route :
-          Keeper_unified_turn.continuation_route_disposition
-      }
+  | Completed of { meta : Keeper_meta_contract.keeper_meta }
   | Checkpointed of
       { meta : Keeper_meta_contract.keeper_meta
       ; checkpoint_reason : Keeper_unified_turn.checkpoint_reason
-      ; continuation_route :
-          Keeper_unified_turn.continuation_route_disposition
       }
   | Input_required of Keeper_meta_contract.keeper_meta
   | Cancelled of Keeper_meta_contract.keeper_meta
@@ -41,7 +35,6 @@ val run_keeper_cycle
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?previous_turn_stop:Keeper_turn_checkpoint_reason.t
   -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t
@@ -51,8 +44,3 @@ val run_keeper_cycle
   -> turn_input:Keeper_heartbeat_source_batch.turn_input
   -> unit
   -> cycle_outcome
-(** [?previous_turn_stop] overrides the shared stop cell for this turn —
-    tests use it to pin the rendered line. When absent, the wrapper reads
-    {!Keeper_last_turn_stop} and, after the cycle, records the outcome there
-    ([Some checkpoint_reason] for a checkpoint, [None] for every other
-    outcome) so the next turn on any lane is told why this one stopped. *)

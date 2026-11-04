@@ -1617,9 +1617,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        (match stop, !terminal_error with
         | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+        | ( Host.Terminal_tool_boundary _
           , Some detail ) -> Error (internal_error detail)
-        | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+        | ( Host.Terminal_tool_boundary _
           , None ) -> settle_host_stop stop)
      | Error (Runtime_codex_app_server.Rpc_error _ as error)
        when not !thread_request_transmitted ->

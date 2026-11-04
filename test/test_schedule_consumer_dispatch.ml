@@ -2898,10 +2898,12 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (* Withdraw the interleaved stimulus so the assertions below still measure
          what the cancelled retry produced rather than what this probe added. *)
       (match
-         Keeper_registry_event_queue.drop_by_post_id
+         Keeper_event_queue_persistence.drop_by_post_id
+           ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
            ~base_path
-           keeper_name
+           ~keeper_name
            ~post_id:interleaved_stimulus.post_id
+           ()
        with
        | Ok _ -> ()
        | Error message -> fail ("interleaved stimulus drop failed: " ^ message));
@@ -3534,10 +3536,12 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   let request = create_keeper_wake_schedule config in
   let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
   (match
-     Keeper_registry_event_queue.drop_by_post_id
+     Keeper_event_queue_persistence.drop_by_post_id
+       ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
        ~base_path
-       keeper_name
+       ~keeper_name
        ~post_id:occurrence_id
+       ()
    with
    | Error message -> fail ("drop failed: " ^ message)
    | Ok removed -> check int "removed current occurrence" 1 (List.length removed));

@@ -61,8 +61,8 @@ let enqueue_exn ~base_path keeper_name source =
    These build the minimum valid [Keeper_heartbeat_loop_cycle.cycle_outcome]
    payload for each branch under test. *)
 
-let completed_outcome ~route meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
-  Keeper_heartbeat_loop_cycle.Completed { meta; continuation_route = route }
+let completed_outcome meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
+  Keeper_heartbeat_loop_cycle.Completed { meta }
 ;;
 
 let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
@@ -446,8 +446,7 @@ let test_scheduled_checkpoint_successor_and_resume () =
       | Turn_selection_withdrawn -> fail "completion lost its exact pending source" in
     let checkpoint batch =
       let outcome = Keeper_heartbeat_loop_cycle.Checkpointed
-        { meta; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-        ; continuation_route = Keeper_unified_turn.Continuation_no_terminal_effect_receipt } in
+        { meta; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived } in
       match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome (Some outcome) with
       | Keeper_heartbeat_loop.Batch_ack_attention_only ->
         let selections = Batch.selections batch in
@@ -612,7 +611,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
              ~event_queue_intake_error:mixed.event_queue_intake_error);
         let complete batch =
           match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-            (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_not_applicable meta)) with
+            (Some (completed_outcome meta)) with
           | Keeper_heartbeat_loop.Batch_ack_completed ->
             List.iter (fun selection ->
               match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -754,7 +753,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
       Keeper_heartbeat_loop.For_testing.record_replay_owned_turn_started_reactions
         ~ctx ~keeper_name (Keeper_heartbeat_source_batch.stimuli batch);
       match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-          (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_not_applicable meta)) with
+          (Some (completed_outcome meta)) with
       | Keeper_heartbeat_loop.Batch_ack_completed ->
         List.iter (fun selection ->
           match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -918,7 +917,7 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
       | Ok queue -> Q.to_list queue |> List.map (fun (source : Q.stimulus) -> source.post_id) in
     let complete batch =
       match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-        (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_not_applicable meta)) with
+        (Some (completed_outcome meta)) with
       | Keeper_heartbeat_loop.Batch_ack_completed ->
         List.iter (fun selection ->
           match Keeper_registry_event_queue.terminalize_pending_turn_completed_result
@@ -1191,19 +1190,18 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   let meta = test_meta "batch-disposition-pure" in
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
+       (Some (completed_outcome meta))
    with
    | Keeper_heartbeat_loop.Batch_ack_completed
      -> ()
    | _ ->
-     fail "Completed + addressed route must drive Batch_ack_completed/Attention_resolved");
+     fail "Completed must drive Batch_ack_completed");
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
           (Keeper_heartbeat_loop_cycle.Checkpointed
              { meta
              ; checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
-             ; continuation_route = Keeper_unified_turn.Continuation_route_addressed
              }))
    with
    | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
@@ -1231,37 +1229,6 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
     ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
-    ]
-;;
-
-(* #34655: a completed turn acks its connector attention whether or not it
-   produced a reply/ignore receipt. Holding the rows back until an exact
-   receipt existed (#32096) made "read but not answered" a wake reason, and
-   the same Discord rows were re-promoted on every wake (17 rows for a day;
-   3,711 consumption lines on 2026-09-08, 36 turns in thirty minutes on
-   2026-09-09). The turn's disposition stays on the reaction ledger's
-   turn_finished row; the message stays in the external-attention store.
-   #32277 is the same rule for board rows. *)
-let test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt () =
-  let meta = test_meta "batch-disposition-no-receipt" in
-  List.iter
-    (fun route ->
-       match
-         Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-           (Some (completed_outcome ~route meta))
-       with
-       | Keeper_heartbeat_loop.Batch_ack_completed -> ()
-       | Keeper_heartbeat_loop.Batch_ack_attention_only ->
-         fail
-           "a completed turn without a reply receipt retained its connector \
-            attention — the rows come back on every wake (#34655)"
-       | Keeper_heartbeat_loop.Batch_no_action ->
-         fail
-           "a completed turn must consume its admitted batch — leaving it \
-            pending replays the same rows every turn (#32277)")
-    [ Keeper_unified_turn.Continuation_route_mismatch
-    ; Keeper_unified_turn.Continuation_no_terminal_effect_receipt
-    ; Keeper_unified_turn.Continuation_route_not_applicable
     ]
 ;;
 
@@ -1776,7 +1743,7 @@ let test_batch_completion_acks_every_member () =
       (List.length (Keeper_heartbeat_source_batch.selections intake.source_batch));
     (match
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-         (Some (completed_outcome ~route:Keeper_unified_turn.Continuation_route_addressed meta))
+         (Some (completed_outcome meta))
      with
      | Keeper_heartbeat_loop.Batch_ack_completed ->
        let acked =
@@ -1893,9 +1860,7 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
 ;;
 
 (* A batch wake is one conversation's backlog, so it continues on that
-   conversation. Routing a batch as "not a continuation wake" made
-   [Continuation_route_addressed] unreachable for any batched conversation,
-   and under the rule #34662 removed such rows could never settle. *)
+   conversation. *)
 let wake_channel ~channel_id ~message_id =
   match
     Keeper_continuation_channel.discord
@@ -2142,8 +2107,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
           fail "the AGENT_CORE advisory ignored the newly queued chat");
        match result.abort_turn with
        | None -> ()
-       | Some (Keeper_official_client_host.Repeated_tool_call _
-               | Keeper_official_client_host.Terminal_tool_boundary _) ->
+       | Some (Keeper_official_client_host.Terminal_tool_boundary _) ->
          fail "the official client stopped before its turn completed")
    with
    | Ok (`Ran ()) -> ()
@@ -2324,8 +2288,8 @@ let test_running_source_does_not_preempt_after_defer () =
   test_running_source_does_not_preempt_after_queue_edit
     ~case:"defer"
     ~edit:(fun ~base_path ~keeper_name ~selection ->
-      Keeper_registry_event_queue.defer_pending_result
-        ~base_path keeper_name ~selection)
+      Keeper_event_queue_persistence.defer_pending_result
+        ~base_path ~keeper_name ~selection ())
     ()
 ;;
 
@@ -2828,10 +2792,6 @@ let () =
             "pins every branch of the pure disposition function"
             `Quick
             test_batch_disposition_of_cycle_outcome_pure_branches
-        ; test_case
-            "a completed turn without a reply receipt acks its connector attention"
-            `Quick
-            test_batch_disposition_acks_a_completed_turn_without_a_reply_receipt
         ] )
     ; ( "continuation_channel_of_wake"
       , [ test_case

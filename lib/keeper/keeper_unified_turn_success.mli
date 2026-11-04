@@ -21,14 +21,6 @@ module For_testing : sig
     -> updated_meta:Keeper_meta_contract.keeper_meta
     -> Keeper_agent_run.run_result
     -> unit
-
-  type cycle_post_action =
-    | Assign_task
-    | Empty_queue_sleep
-
-  val post_action_of_channel
-    :  Keeper_world_observation.keeper_cycle_channel
-    -> cycle_post_action
 end
 
 type handle_result =

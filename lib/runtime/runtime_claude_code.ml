@@ -206,10 +206,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -441,11 +437,6 @@ let error_to_string = function
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Turn_failed_with_observation { detail; _ } ->
     "Claude Code turn failed: " ^ detail
-  | Stopped_by_host { stop = Repeated_tool_call { tool_name; repeated_count }; _ } ->
-    Printf.sprintf
-      "Claude Code stopped after repeated tool call: tool=%s count=%d"
-      tool_name
-      repeated_count
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked

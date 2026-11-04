@@ -1267,24 +1267,6 @@ let test_approval_arguments_cannot_update_a_call_of_a_superseded_attempt () =
         call.Transcript.args
   | [] | _ :: _ :: _ -> fail "expected one call from the earlier attempt"
 ;;
-let test_the_whole_reasoning_trail_is_kept () =
-  let t = fresh () in
-  feed t
-    [ Live.Run_started
-    ; Live.Thinking {text="weighing the first option\n";index=0;response=None}
-    ; Live.Thinking {text="\n\n";index=0;response=None}
-    ; Live.Thinking {text="the second one costs less\n";index=0;response=None}
-    ; Live.Thinking {text="so: the second";index=0;response=None}
-    ];
-  (* Not the last line alone. The durable transcript does not keep reasoning,
-     so a pane that shows only the conclusion loses how the keeper got there. *)
-  check (list string) "every non-blank reasoning line survives, in order"
-    [ "weighing the first option"; "the second one costs less"; "so: the second" ]
-    (Transcript.thinking_lines t);
-  let empty = fresh () in
-  check (list string) "a turn that has not reasoned yet has no lines" []
-    (Transcript.thinking_lines empty)
-
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
   | Transcript.Diagnostic -> "diagnostic"
@@ -2391,7 +2373,9 @@ let test_trail_drops_blank_stretches () =
   let t = fresh () in
   feed t [ Live.Run_started; Live.Thinking {text="\n\n";index=0;response=None}; Live.Text {text="  "; response=Unobserved_scope (None)} ];
   check (list trail_item) "blank stretches draw nothing" []
-    (Transcript.trail t)
+    (Transcript.trail t);
+  check (list trail_item) "a turn that has not reasoned yet draws nothing" []
+    (Transcript.trail (fresh ()))
 
 let test_live_skill_is_not_folded_into_generic_tools () =
   let t = fresh () in
@@ -3327,8 +3311,6 @@ let () =
             test_settled_at_keeps_a_failure_instant_too
         ; test_case "text and reasoning accumulate separately" `Quick
             test_text_and_thinking_accumulate
-        ; test_case "the whole reasoning trail is kept" `Quick
-            test_the_whole_reasoning_trail_is_kept
         ; test_case "adjacent reasoning blocks are separate stretches" `Quick
             test_adjacent_reasoning_blocks_are_separate_stretches
         ; test_case "a returning block index does not rejoin an earlier stretch" `Quick

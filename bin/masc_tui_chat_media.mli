@@ -21,10 +21,6 @@ val of_json : Yojson.Safe.t -> t list
 val append_text : text:string -> t list -> string
 (** Retain original prose and whitespace, followed by visible media metadata.
     Inline payloads are never expanded into the terminal's text stream. *)
-val newest_image : t list -> Masc_tui_image_preview.preview option
-(** The last image or Mermaid output in producer order. Unsupported sources remain an
-    explicit unavailable preview rather than exposing a local filesystem path. *)
-
 val images : t list -> Masc_tui_image_preview.preview list
 (** Every image/diagram in producer order, including explicitly unavailable
     image sources. Filenames remain labels, not local filesystem paths. *)
@@ -47,8 +43,8 @@ type playable = {
     bytes are at hand, or a [Voice] block, which is audio by definition. *)
 
 val newest_playable : t list -> playable option
-(** The last playable block in producer order — the same newest-wins rule as
-    {!newest_image}. External http(s) sources are not playable here. *)
+(** The last playable block in producer order. External http(s) sources are
+    not playable here. *)
 
 val newest_midi : t list -> playable option
 (** Last locally readable MIDI attachment in producer order. A newer voice or

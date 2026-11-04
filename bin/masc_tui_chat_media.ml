@@ -133,12 +133,6 @@ let without_drawn_generated ~covered media previews =
   List.rev kept, List.rev kept_previews, remaining
 ;;
 
-let newest_image media =
-  match List.rev (images media) with
-  | newest :: _ -> Some newest
-  | [] -> None
-;;
-
 let without_drawn_diagrams ~sources media previews =
   let rec consume source = function
     | [] -> None

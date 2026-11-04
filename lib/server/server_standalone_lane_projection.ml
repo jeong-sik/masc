@@ -673,7 +673,6 @@ let runs_without_slot_json terminal_runs =
 ;;
 
 let lane_json
-      ~now:_
       ~resolve_lane
       ~jev_readiness
       (all_runs : observed_run list)
@@ -801,8 +800,11 @@ let lane_json
      @ jev_field)
 ;;
 
-let snapshot_json_with
-      ~now
+let schema_field = "schema", `String "masc.standalone_llm_lanes.v2"
+
+(* Everything the snapshot says but the schema and the times it was taken
+   at. *)
+let drawn_fields_with
       ~resolve_lane
       ~jev_readiness
       ~exact_runs_total
@@ -817,21 +819,34 @@ let snapshot_json_with
   in
   let exact_run_projection_count = List.length exact_runs in
   let exact_run_source_total = max exact_run_projection_count exact_runs_total in
+  [ "observation_only", `Bool true
+  ; "exact_run_projection_count", `Int exact_run_projection_count
+  ; "exact_run_source_total", `Int exact_run_source_total
+  ; ( "exact_run_projection_truncated"
+    , `Bool (exact_run_projection_count < exact_run_source_total) )
+  ; ( "lanes"
+    , `List
+        (List.map
+           (lane_json ~resolve_lane ~jev_readiness all_runs)
+           lane_specs) )
+  ]
+;;
+
+let snapshot_json_with
+      ~now
+      ~resolve_lane
+      ~jev_readiness
+      ~exact_runs_total
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs
+  =
   `Assoc
-    [ "schema", `String "masc.standalone_llm_lanes.v2"
-    ; "generated_at", `String (Masc_domain.now_iso ())
-    ; "observed_at_unix", `Float now
-    ; "observation_only", `Bool true
-    ; "exact_run_projection_count", `Int exact_run_projection_count
-    ; "exact_run_source_total", `Int exact_run_source_total
-    ; ( "exact_run_projection_truncated"
-      , `Bool (exact_run_projection_count < exact_run_source_total) )
-    ; ( "lanes"
-      , `List
-          (List.map
-             (lane_json ~now ~resolve_lane ~jev_readiness all_runs)
-             lane_specs) )
-    ]
+    (schema_field
+     :: ("generated_at", `String (Masc_domain.now_iso ()))
+     :: ("observed_at_unix", `Float now)
+     :: drawn_fields_with ~resolve_lane ~jev_readiness ~exact_runs_total ~exact_runs
+          ~verification_runs ~goal_verification_runs)
 ;;
 
 let live_lane_configuration registry lane_id =
@@ -1034,6 +1049,13 @@ let observation_to_json observation =
     ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total
     ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
     ~goal_verification_runs:observation.goal_verification_runs
+let observation_drawn_json observation =
+  `Assoc
+    (schema_field
+     :: drawn_fields_with ~resolve_lane:observation.resolve_lane
+          ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total
+          ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
+          ~goal_verification_runs:observation.goal_verification_runs)
 let snapshot_json () = observation_to_json (observe ())
 
 module For_testing = struct

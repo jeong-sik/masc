@@ -53,6 +53,9 @@ type dataset =
       (** What [GET /api/v1/runtime/metrics] answers: a Keeper decision row or
           a cost ledger row was written, or a kept row or cost day file left
           its 24-hour window. *)
+  | Lanes
+      (** What [GET /api/v1/lanes] draws moved: the server compares
+          the inventory on its own clock, the times it was taken at aside. *)
 
 val event_type : string
 

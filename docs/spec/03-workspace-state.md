@@ -14,8 +14,7 @@ Gate, Fusion, and their correlations. It does not own provider/model execution;
 MASC calls agent core for that boundary and agent core does not import MASC concepts.
 
 Every path is resolved from the caller's `BasePath` into a single `<base-path>/.masc/`
-root (`Common.masc_dirname`). Multi-cluster subdirectories (`.masc/clusters/<name>/` and
-`MASC_CLUSTER_NAME`) are retired (`#43188`). A repository, connector,
+root (`Common.masc_dirname`). A repository, connector,
 credential, vendor, or command name is data supplied through a registered
 boundary, never a branch in Workspace policy.
 
@@ -125,11 +124,3 @@ scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 - `INV-WORKSPACE-006`: Gate resolution wakes only its origin lane.
 - `INV-WORKSPACE-007`: no observation automatically pauses or stops a Keeper.
 - `INV-WORKSPACE-008`: all filesystem locations derive from `BasePath`.
-
-## 8. Retired contracts
-
-The following are not part of Workspace state: multi-cluster `.masc/clusters`
-directories (`MASC_CLUSTER_NAME`), global pause/resume, claim TTL,
-stale-claim auto-release, zombie time thresholds, starvation/priority boosts,
-speculation budgets, reputation scores, risk tiers, and product-specific
-authorization tables.

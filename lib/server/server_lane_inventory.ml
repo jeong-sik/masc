@@ -141,7 +141,7 @@ let browser_state publication = function
         p.stagehand.registered) publication)
 
 (* The Lane directory and what it declares, read off the server fiber. *)
-let declarations ~config =
+let read_declarations ~config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   let directory = Config.directory ~config_root:resolution.config_root.path in
   let declarations : Config.snapshot = match resolution.status with
@@ -153,7 +153,7 @@ let declarations ~config =
   directory, declarations
 
 let browser_presence ~config ~access =
-  let _directory, declarations = declarations ~config in
+  let _directory, declarations = read_declarations ~config in
   Browser_addon_presence.lane (Browser_addon_presence.read ~config ~access ~declarations)
     Browser_lane.Lane_name.Live
 
@@ -189,7 +189,7 @@ type cached_sources = {
 let read_snapshot_parts ~config =
   let exact = Exact_projection.observe () in
   let machine_configuration = Runtime.machine_configuration () in
-  let directory, declarations = declarations ~config in
+  let directory, declarations = read_declarations ~config in
   let inventory = Addon.inventory ~config in
   let applications = Addon.configuration_applications ~config ~inventory in
   let browser_observations = Addon.browser_observations ~config
@@ -381,7 +381,7 @@ let install () =
 
 module For_testing = struct
   let runtime_snapshot ~config ~declarations ~inventory ~browser_observations =
-    let directory, _ = declarations ~config in
+    let directory, _ = read_declarations ~config in
     project ~config ~exact:(Exact_projection.observe ())
       ~machine_configuration:(Runtime.machine_configuration ())
       ~directory ~declarations ~inventory ~browser_observations

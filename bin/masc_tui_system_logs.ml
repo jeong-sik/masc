@@ -35,6 +35,7 @@ let apply source result t = update source (fun page -> match result with
   | Ok snapshot ->
     let page={page with lp_snapshot=Some snapshot;lp_error=None} in
     {page with lp_cursor=max 0 (min page.lp_cursor (List.length (visible page)-1))}) t
+let stream_connected t = update Server (fun page -> {page with lp_error=None}) t
 let clear_server t = update Server (fun page ->
   {empty_page with lp_min_level=page.lp_min_level;lp_category=page.lp_category}) t
 

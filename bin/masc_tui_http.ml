@@ -3677,7 +3677,7 @@ let system_log_stream_idle_timeout_sec =
     response that is not an event stream, a dropped or idle connection), and
     the caller reconnects. *)
 let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?since_seq
-    ~(limit : int) ~(on_chunk : string -> unit) () : string =
+    ~(limit : int) ~(on_chunk : string -> unit) ~(on_connected : unit -> unit) () : string =
   let exception Invalid_stream_response of string in
   let query =
     Printf.sprintf "limit=%d%s%s" (max 1 (min 3000 limit))
@@ -3689,7 +3689,7 @@ let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?sinc
   let on_response ~status ~headers =
     if Masc.Tui_decode.is_success_http_status status then
       match validate_sse_response ~status ~headers with
-      | Ok () -> ()
+      | Ok () -> on_connected ()
       | Error detail -> raise (Invalid_stream_response detail)
   in
   match

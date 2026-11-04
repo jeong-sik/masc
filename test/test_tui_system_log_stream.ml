@@ -76,6 +76,27 @@ let test_a_frame_that_does_not_decode_is_an_error () =
   | [ Error _ ] -> ()
   | _ -> fail "a frame with no reset flag was accepted"
 
+(* A dropped connection leaves its error on the page. A reconnect with nothing
+   new to say sends only keepalives, so the page must lose that error when the
+   server accepts the stream again, and nothing else. *)
+let test_a_reconnect_without_entries_clears_the_error () =
+  let module View = Masc_tui_system_logs in
+  let reader = Stream.create () in
+  let first =
+    match frames reader [ frame_text ~reset:true (entries [ "kept" ]) ] with
+    | [ frame ] -> frame
+    | other -> failf "expected one frame, got %d" (List.length other)
+  in
+  let view = View.apply View.Server (Ok first.Stream.snapshot) View.empty in
+  let view = View.apply View.Server (Error "log stream: connection closed") view in
+  check (option string) "the drop is on the page"
+    (Some "log stream: connection closed") (View.page View.Server view).View.lp_error;
+  let view = View.stream_connected view in
+  let page = View.page View.Server view in
+  check (option string) "the reconnect clears the error" None page.View.lp_error;
+  check (list string) "the held entries stay" [ "kept" ]
+    (match page.View.lp_snapshot with Some snapshot -> messages snapshot | None -> [])
+
 let () =
   run "tui_system_log_stream"
     [ ( "frames"
@@ -83,5 +104,7 @@ let () =
         ; test_case "frames land on the page" `Quick test_frames_land_on_the_page
         ; test_case "a frame that does not decode is an error" `Quick
             test_a_frame_that_does_not_decode_is_an_error
+        ; test_case "a reconnect without entries clears the error" `Quick
+            test_a_reconnect_without_entries_clears_the_error
         ] )
     ]

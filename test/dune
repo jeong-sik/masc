@@ -7268,3 +7268,5 @@
 (include stanzas/test_tui_machine_pty_3a.inc)
 
 (include stanzas/test_forked_map.inc)
+
+(include stanzas/test_tui_local_keeper_meta_moved.inc)

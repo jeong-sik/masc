@@ -198,7 +198,8 @@ instruction/composition/unavailable과 typed projection diagnostics를 표시한
 activation ledger 를 읽지 않는다. 사용 증거는 Keeper 마다
 `GET /api/v1/keepers/skill-usage?keeper=` 가 그 Keeper 의 지금 session activation ledger
 에서 exact activation/delivery/action 기록을 세어 돌려주고, TUI Usage 화면과 Monitor ›
-Skills 가 reference 로 이 catalog 에 붙인다(RFC-0483). 이름, tool prefix, 최근 로그 행
+Skills 가 reference 로 이 catalog 에 붙인다(RFC-0483). 두 답은 따로 읽어서, TUI 는 이
+catalog 읽기에 없는 revision 의 행을 따로 보여 준다. 이름, tool prefix, 최근 로그 행
 수로 사용 횟수를 재구성하지 않는다.
 
 같은 projection은 각 Skill의 실행 유도 방식, 실제 plan schedule의 node/batch/최대 병렬

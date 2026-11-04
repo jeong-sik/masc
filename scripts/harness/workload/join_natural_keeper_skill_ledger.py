@@ -26,7 +26,7 @@ import produce_natural_keeper_skill_proof as natural_producer
 import skill_activation_events
 
 
-JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v3"
+JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v4"
 ACTIVATIONS_BEFORE = "keeper-skill-activations-before.json"
 ACTIVATIONS_AFTER = "keeper-skill-activations-after.json"
 HISTORICAL_PROJECTION_SCHEMA = "masc.dashboard.skill-activations/v1"
@@ -439,7 +439,7 @@ def validate_projection_ledger(
         ledger.get("schema") == skill_activation_events.LEDGER_SCHEMA,
         "Skill ledger schema is unsupported",
     )
-    require(ledger == durable_ledger, "Dashboard ledger differs from durable ledger")
+    require(ledger == durable_ledger, "Keeper activations ledger differs from durable ledger")
     require(
         required_string(ledger, "revision", "Skill ledger")
         == skill_activation_events.ledger_revision(ledger),
@@ -857,7 +857,7 @@ def validate_join(
     if current_before is not None and current_after is not None:
         require(
             current_after == current_before,
-            "Dashboard ledger changed during join",
+            "Keeper activations ledger changed during join",
         )
 
     result = exact_turn_join(ledger=ledger, turn_ref=producer["turn_ref"])
@@ -866,20 +866,20 @@ def validate_join(
         projected_session = required_string(
             current_ledgers[0], "session_id", "Skill ledger projection"
         )
-        dashboard_equals_durable = projected_session == producer["trace_id"]
-        dashboard_projection_kind = (
+        projection_equals_durable = projected_session == producer["trace_id"]
+        projection_kind = (
             "exact_session"
-            if dashboard_equals_durable
+            if projection_equals_durable
             else "current_session_differs_historical_exact"
         )
     else:
-        dashboard_equals_durable = False
+        projection_equals_durable = False
         if projection_statuses[0] == projection_statuses[1]:
-            dashboard_projection_kind = (
+            projection_kind = (
                 f"current_projection_{projection_statuses[0]}_historical_exact"
             )
         else:
-            dashboard_projection_kind = "current_projection_changed_historical_exact"
+            projection_kind = "current_projection_changed_historical_exact"
     return {
         "producer": producer,
         "server": before_identity,
@@ -888,8 +888,8 @@ def validate_join(
             "workspace_key": required_string(ledger, "workspace_key", "Skill ledger"),
             "session_id": required_string(ledger, "session_id", "Skill ledger"),
             "revision": required_string(ledger, "revision", "Skill ledger"),
-            "dashboard_equals_durable": dashboard_equals_durable,
-            "dashboard_projection_kind": dashboard_projection_kind,
+            "projection_equals_durable": projection_equals_durable,
+            "projection_kind": projection_kind,
         },
         "current_surface": {
             "before": surface_before,

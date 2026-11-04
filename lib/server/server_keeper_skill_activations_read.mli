@@ -17,8 +17,8 @@ val usage_rows :
     A surface the ledger never used has no row. *)
 
 val activations_json : config:Workspace.config -> keeper_name:string -> Yojson.Safe.t
-(** The activation projection for [keeper_name], as
-    [/api/v1/dashboard/tools?keeper=] carries it. *)
+(** The activation projection for [keeper_name], the answer of
+    [GET /api/v1/keepers/skill-activations?keeper=]. *)
 
 val usage_json : config:Workspace.config -> keeper_name:string -> Yojson.Safe.t
 (** [usage.state] for [keeper_name] is one of:

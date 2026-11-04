@@ -114,22 +114,34 @@ let last_ready : ready_info option Atomic.t = Atomic.make None
 let workspace_id : string option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
 
-let record_startup_error message = Atomic.set startup_error (Some message)
-let clear_startup_error () = Atomic.set startup_error None
+let record_startup_error message =
+  Atomic.set startup_error (Some message);
+  Channel_gate_change.notify ()
+
+let clear_startup_error () =
+  Atomic.set startup_error None;
+  Channel_gate_change.notify ()
 
 let record_ready ~bot_user_id =
   Atomic.set last_ready
     (Some
        { ready_bot_user_id = bot_user_id
        ; (* NDT-OK: hello wall-clock is operator-facing telemetry only. *)
-         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) })
+         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) });
+  Channel_gate_change.notify ()
 
 let record_workspace_id value =
   let value = String.trim value in
-  if not (String.equal value "") then Atomic.set workspace_id (Some value)
+  if not (String.equal value "") then begin
+    Atomic.set workspace_id (Some value);
+    Channel_gate_change.notify ()
+  end
 
 let current_workspace_id () = Atomic.get workspace_id
-let clear_workspace_id () = Atomic.set workspace_id None
+
+let clear_workspace_id () =
+  Atomic.set workspace_id None;
+  Channel_gate_change.notify ()
 
 (* One reading of the connector, rendered by [status_json] and
    [connector_json] alike so the two views cannot disagree. Values computed

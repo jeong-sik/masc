@@ -142,6 +142,12 @@ let ensure_dir path =
 
 (** Atomic write via rename.  Errors are logged but do not propagate
     — callers should not fail just because persistence is unavailable. *)
+let change_observer : (key:string -> unit) Atomic.t = Atomic.make (fun ~key:_ -> ())
+
+let install_change_observer observer = Atomic.set change_observer observer
+
+let notify_changed ~key = (Atomic.get change_observer) ~key
+
 let persist ~base_path =
   try
     let path = params_file base_path in
@@ -238,6 +244,7 @@ let set ?base_path ?(actor = "system") (entry : 'a param) value =
   match result with
   | Error _ as e -> e
   | Ok (key, old_value, new_value) ->
+      notify_changed ~key;
       (match effective_base_path ?base_path () with
       | None -> ()
       | Some base_path ->
@@ -260,6 +267,7 @@ let set_by_key_with_change ?base_path ?(actor = "system") key json =
   match result with
   | Error _ as e -> e
   | Ok ({ old_value; new_value } as change) ->
+      notify_changed ~key;
       (match effective_base_path ?base_path () with
       | None -> ()
       | Some base_path ->
@@ -282,6 +290,7 @@ let clear ?base_path ?(actor = "system") (entry : 'a param) =
       Atomic.set entry.override None;
       (entry.key, old_value, entry.serialize (entry.default ())))
   in
+  notify_changed ~key;
   match effective_base_path ?base_path () with
   | None -> ()
   | Some base_path ->
@@ -301,6 +310,7 @@ let clear_by_key_with_change ?base_path ?(actor = "system") key =
   match result with
   | Error _ as e -> e
   | Ok ({ old_value; new_value } as change) ->
+      notify_changed ~key;
       (match effective_base_path ?base_path () with
       | None -> ()
       | Some base_path ->

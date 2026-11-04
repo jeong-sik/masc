@@ -147,7 +147,8 @@ let record_ready ~bot_user_id ~bot_user_name ~guild_ids =
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
        });
   Atomic.set last_bot_user_name bot_user_name;
-  Atomic.set current_guild_ids_ref guild_ids
+  Atomic.set current_guild_ids_ref guild_ids;
+  Channel_gate_change.notify ()
 
 let current_guild_ids () = Atomic.get current_guild_ids_ref
 
@@ -182,7 +183,8 @@ let directory_observation : directory_observation Atomic.t =
 
 let record_directory_refresh_started () =
   let previous = Atomic.get directory_observation in
-  Atomic.set directory_observation { previous with phase = Directory_refreshing }
+  Atomic.set directory_observation { previous with phase = Directory_refreshing };
+  Channel_gate_change.notify ()
 
 let record_directory_refresh_finished ~server_count ~channel_count ~person_count
     ~authentication_failed ~permission_denied ~errors =
@@ -203,7 +205,8 @@ let record_directory_refresh_finished ~server_count ~channel_count ~person_count
     ; permission_denied
     ; errors
     ; updated_at = Some (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()))
-    }
+    };
+  Channel_gate_change.notify ()
 
 let directory_phase_label = function
   | Directory_not_started -> "not_started"

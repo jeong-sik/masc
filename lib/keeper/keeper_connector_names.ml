@@ -151,7 +151,9 @@ let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
            in
            Fs_compat.append_file file_path (line ^ "\n");
            Hashtbl.replace directory id name;
-           Hashtbl.remove sorted_directories file_path
+           Hashtbl.remove sorted_directories file_path;
+           (* The connectors surface lists the learned names. *)
+           Channel_gate_change.notify ()
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->

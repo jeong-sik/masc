@@ -297,7 +297,12 @@ let append_audit_event_result store event =
   | Unix.Unix_error (code, fn, arg) ->
     Error (Audit_io_failed (unix_error_message path fn arg code))
 
+(* A mutation that reached the write may have replaced the bindings file
+   even when it then reports an error, so every such attempt is announced. *)
 let mutate_bindings store ~decide =
+  let reached_write = ref false in
+  Fun.protect ~finally:(fun () -> if !reached_write then Channel_gate_change.notify ())
+  @@ fun () ->
   Cross_context_mutex.with_durable_lock store.mutation_lock (fun () ->
     match read_bindings_result store with
     | Error error -> Error (Mutation_read_failed error)
@@ -305,6 +310,7 @@ let mutate_bindings store ~decide =
       (match decide original_bindings with
        | Error detail -> Error (Mutation_rejected detail)
        | Ok (updated_bindings, audit_event, committed_value) ->
+         reached_write := true;
          (match save_bindings_result store updated_bindings with
           | Error detail -> Error (Mutation_write_failed detail)
           | Ok () ->

@@ -109,6 +109,22 @@ let log_effect level message =
    file indirection. One gateway per process (single bot token), so a
    module-level register is unambiguous. Written only by [run]'s
    state-machine step; everyone else reads. *)
+(* Whether a status read would show a different gateway state. *)
+let published_state_changed ~(previous : Discord_gateway_state.connection_state)
+    (next : Discord_gateway_state.connection_state) =
+  match previous, next with
+  | Disconnected, Disconnected
+  | Awaiting_hello, Awaiting_hello
+  | Identifying, Identifying
+  | Resuming, Resuming
+  | Connected _, Connected _
+  | Reconnect_pending _, Reconnect_pending _ -> false
+  | Failed before, Failed after -> not (String.equal before after)
+  | ( ( Disconnected | Awaiting_hello | Identifying | Resuming | Connected _
+      | Reconnect_pending _ | Failed _ ),
+      ( Disconnected | Awaiting_hello | Identifying | Resuming | Connected _
+      | Reconnect_pending _ | Failed _ ) ) -> true
+
 let published_connection_state : Discord_gateway_state.connection_state Atomic.t
   =
   Atomic.make Discord_gateway_state.Disconnected
@@ -447,7 +463,13 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
       step_with_current_policy !state ~trigger_policy ~now_mono:now input
     in
     state := s';
-    Atomic.set published_connection_state (Discord_gateway_state.state s');
+    let published = Discord_gateway_state.state s' in
+    (* Every input steps the machine, and [Connected] carries the sequence
+       number of the last dispatch. A status read shows which state the
+       gateway is in and a failure's message, so only those are announced. *)
+    if published_state_changed
+         ~previous:(Atomic.exchange published_connection_state published) published
+    then Channel_gate_change.notify ();
     List.iter run_effect effects
   in
 

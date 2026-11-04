@@ -329,7 +329,11 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
         step_with_current_policy !state ~trigger_policy ~now_mono:now input
       in
       state := s';
-      Atomic.set published_connection_state (Slack_gateway_state.state s');
+      let published = Slack_gateway_state.state s' in
+      (* Every input steps the machine; a status read shows the published
+         connection state, so only its change is announced. *)
+      if Atomic.exchange published_connection_state published <> published then
+        Channel_gate_change.notify ();
       List.iter run_effect effects
     in
 

@@ -29,6 +29,10 @@ type dataset =
           server attempted a runtime.toml commit, or a server-run account
           login rewrote a credential file whose email it lists. A CLI or a
           hand edit is not announced. *)
+  | Connectors
+      (** What [GET /api/v1/gate/connectors] and the connector name pages
+          project: gateway and poll states, ready records, startup errors,
+          directories, bindings, learned names and trigger policies. *)
 
 val event_type : string
 

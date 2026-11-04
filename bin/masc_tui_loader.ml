@@ -602,6 +602,24 @@ let read_local_workspace ?(fresh = false) base_path =
       if fresh then archive_seen := None;
       read_local_work_unlocked ~fresh base_path)
 
+(* Whether the named Keeper's metadata file is not the one the last local read
+   decoded: written since, created, or removed. The server announces a Keeper
+   row change for a receipt, a candle or a rest move too, and those leave the
+   file as it was, so the local list has nothing new to read. A file the last
+   read could not decode is never remembered and always counts as moved. *)
+let local_keeper_meta_moved base_path keeper_name =
+  with_local_read_mutex local_keeper_read_mutex (fun () ->
+      let config = Workspace_core.default_config base_path in
+      let path =
+        Filename.concat (Keeper_types_profile.keeper_dir config)
+          (Keeper_runtime_root_entry.keeper_basename ~keeper_name
+             Keeper_runtime_root_entry.Metadata)
+      in
+      match stat_opt path, Hashtbl.find_opt keeper_meta_cache path with
+      | Some _ as stat, Some _ -> Option.is_none (cached_keeper_for path stat)
+      | None, None -> false
+      | Some _, None | None, Some _ -> true)
+
 let read_local_keepers base_path =
   with_local_read_mutex local_keeper_read_mutex (fun () ->
       let lkr_keepers, lkr_error = load_keepers base_path in

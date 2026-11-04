@@ -28,4 +28,5 @@ val usage_json : config:Workspace.config -> keeper_name:string -> Yojson.Safe.t
     - [unavailable], with [reason] and [detail], when its metadata or its
       ledger cannot be read;
     - [no_catalog] when the ledger was read but the workspace has no ready
-      skill catalog to count it against. *)
+      skill catalog to count it against, including a base path that does
+      not resolve to a workspace. *)

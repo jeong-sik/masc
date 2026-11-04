@@ -115,7 +115,7 @@ let reference_of_unused_skill =
 
 (* One workspace skill, published as the ready catalog. Answers its exact
    reference. *)
-let publish_catalog (config : Workspace.config) =
+let publish_catalog (config : Masc.Workspace.config) =
   let base_path = config.base_path in
   let package = Filename.concat (Filename.concat base_path "skills") "sample" in
   mkdir_p package;

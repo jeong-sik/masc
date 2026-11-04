@@ -49,6 +49,10 @@ type dataset =
       (** The server's runtime probe landed, [GET /api/v1/dashboard/runtime-probe]:
           a probe a forced read asked for, or a periodic one whose findings
           differ from the last probe. *)
+  | Runtime_metrics
+      (** What [GET /api/v1/runtime/metrics] answers: a Keeper decision row or
+          a cost ledger row was written, or a kept row or cost day file left
+          its 24-hour window. *)
 
 val event_type : string
 

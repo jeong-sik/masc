@@ -10768,8 +10768,8 @@ type state = {
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
   mutable runtime_surface_force_pending: bool;
-  (* The read the Runtime surface owes after a runtime_probe, provider usage,
-     standing or runtime.toml push (RFC-0480 §3.1). *)
+  (* The read the Runtime surface owes after a runtime_probe, runtime history,
+     provider usage, standing or runtime.toml push (RFC-0480 §3.1). *)
   mutable runtime_surface_owed: Masc_tui_owed_read.t;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;

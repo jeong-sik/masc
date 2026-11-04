@@ -8149,8 +8149,9 @@ let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
 (* The Runtime surface reads again when the server announces a probe landed,
-   a usage report, a standing change or a runtime.toml commit, which move its
-   probe and resolved document, and after a failed read (RFC-0480 §3.4). *)
+   a runtime history row, a usage report, a standing change or a runtime.toml
+   commit, which move its probe, history and resolved document, and after a
+   failed read (RFC-0480 §3.4). *)
 let owe_runtime_surface_read state =
   state.runtime_surface_owed <- Masc_tui_owed_read.changed state.runtime_surface_owed
 
@@ -8248,7 +8249,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
   (* Every refresh pass reads the Health line with the workspace identity. *)
   | Masc.Workspace_dataset_event.Workspace_health -> ()
-  | Masc.Workspace_dataset_event.Runtime_probe -> owe_runtime_surface_read state
+  | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
+      owe_runtime_surface_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -27701,13 +27703,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.runtime_surface_error <- Some detail;
              Masc_tui_types.runtime_lane_list_reread state
                ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));
-      (* A read that left the probe, the resolved document or their join
-         unread still owes it. *)
+      (* A read that left the probe, the resolved document, their join or
+         the history unread still owes it. *)
       if is_current then
         state.runtime_surface_owed <-
-          (match state.runtime_surface_error with
-           | None -> Masc_tui_owed_read.succeeded state.runtime_surface_owed
-           | Some _ -> failed_read state.runtime_surface_owed);
+          (match state.runtime_surface_error, state.runtime_evidence with
+           | None, Some (Ok _) -> Masc_tui_owed_read.succeeded state.runtime_surface_owed
+           | Some _, _ | None, (Some (Error _) | None) -> failed_read state.runtime_surface_owed);
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
@@ -41890,6 +41892,19 @@ Use relative paths for resources already held in the package. -->
             ([launch_owed_runtime_config]). Every writer saves through the
             server while it runs (RFC-0482); an edit made to the file by hand
             has no writer to announce it. *)
+         (* The Runtime surface re-reads on its probe, provider usage,
+            standing, runtime.toml and history pushes, and retries a failed
+            read ([launch_owed_runtime_surface]). *)
+         | Runtime -> ()
+         (* The catalog and the selected Keeper's surface re-read on the
+            Skill, row and backlog pushes ([launch_owed_tools]); an open async
+            request on its Keeper's request and journal pushes
+            ([launch_owed_tools_async_detail]); an open source Task on the
+            backlog's execution snapshot ([launch_owed_tools_async_task]).
+            Each retries a failed read. *)
+         | Tools -> ()
+         (* runtime.toml re-reads when the server commits it and retries a
+            failed read ([launch_owed_runtime_config]). *)
          | Config -> ()
          | Resources ->
              (* Loaded on arrival and on r. A tick-cadence relist would open

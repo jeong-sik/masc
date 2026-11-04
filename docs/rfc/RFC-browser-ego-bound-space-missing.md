@@ -84,9 +84,13 @@ ego 앱 안에서 연결이 묶인 Space 가 사라지면, 그 연결로 가는 
    따로 감싸요. 이 호출이 던지면 답에 `spaceOpen: "failed"` 를 실어요. 문구가 아니라
    던진 위치로 구분해요. 본문은 돌지 않아요.
 2. peer 는 이 답을 받으면 `listTaskSpaces()` 로 목록을 한 번 읽어요.
-   `space_status` 와 같은 관측이고, 결과를 연결의 Space 상태에 그대로 남겨요.
-   - `Present`·`Unknown`: 원래 오류를 돌려줘요.
-   - `Missing`: "묶인 Space 가 없어졌고 새 Space 는 열지 않았다"로 답해요.
+   `space_status` 와 같은 관측이고, 읽기 창은 `Tabs_list` 의 것을 써요.
+   - `Present`: 연결의 Space 상태를 새로 남기고, 원래 오류를 돌려줘요.
+   - `Missing`: 연결의 Space 상태를 `Missing` 으로 남기고, "묶인 Space 가 없어졌고
+     새 Space 는 열지 않았다"로 답해요.
+   - 목록이 답하지 않았거나 애매함(`Unknown`): 연결의 Space 상태는 그대로 두고, 원래
+     오류 뒤에 왜 판단하지 못했는지를 붙여요. `Unknown` 으로 덮으면 그 연결이 자동
+     선택에서 계속 빠져서, 1장과 같은 모양의 결함이 다시 생겨요.
 3. 세 경우 모두 효과 전 실패예요. `taskSpace` 가 던졌으면 본문은 돌지 않았어요.
 4. Space 는 지금처럼 번호로만 가려요. 이름은 비교하지 않아요.
 
@@ -96,6 +100,9 @@ ego 앱 안에서 연결이 묶인 Space 가 사라지면, 그 연결로 가는 
 
 1. 명령의 답을 보낸 뒤, 연결 상태가 `Missing` 이면 worker 가 연결 cycle 을 끝내요.
    `taskSpace` 실패로 알았든 `space_status` 로 알았든 같아요.
+   순서는 되찾기 hook 연결 → 기록 공개 → 연결 끊기예요. 기록을 본 쪽이 바로
+   `take_over` 를 불러도 hook 이 있고, 연결이 이유 없이 사라진 것처럼 보이는 틈이
+   없어요.
 2. worker 는 `Browser_addon_observation.unavailable` 의 새 경우
    `Ego_space_missing { space; space_id; observed_at }` 를 공개해요. `space` 는 이름이에요.
 3. 기록은 사용자 소유 거절과 같은 연결 목록(`Browser_connection_inventory` 의

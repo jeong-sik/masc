@@ -380,7 +380,7 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     | Ok _
     | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
             | Child_not_started _ | Validation_failed _ | Commit_refused _ | Verification_failed _
-            | Verification_unreadable _ | Write_failed _ | Lock_unavailable) -> false in
+            | Verification_unreadable _ | Write_failed _ | Lock_unavailable | Commit_unobserved _) -> false in
   Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
     (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
   Alcotest.check Alcotest.bool "a key the writer never writes is refused" true

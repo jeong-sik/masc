@@ -4577,7 +4577,7 @@ let runtime_setup_render_cmd =
     Term.(const (fun base_path spec_path -> Masc_cli_runtime_setup.render ~base_path ~spec_path) $ workspace $ spec)
 
 let runtime_setup_inventory_cmd =
-  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")
+  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read setup choices and their configuration revision together, from the workspace's running server while it answers.")
     Term.(const (fun base_path port agent -> Masc_cli_runtime_setup.inventory ~base_path ~port ~agent)
       $ base_path $ port $ login_agent)
 

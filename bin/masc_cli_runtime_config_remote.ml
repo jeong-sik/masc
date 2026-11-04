@@ -283,11 +283,16 @@ let commit_record_of_answer body =
   in
   Ok { Runtime_setup_batch.source_revision; order; durability; lock_warnings }
 
+(* The server validates the whole file, commits it and writes its audit before
+   it answers, so the batch waits longer than a plain read. A save that lands
+   after this is reported as unobserved, never as refused. *)
+let setup_publication_timeout_sec = 60.0
+
 (* The commit of a setup batch decided against the running server's text:
    the validated text saved over [source], the text the batch started from.
    It is saved even when it equals [source], as the local commit would be, so
    the receipt is the server's. *)
-let publish_setup_text ~clock server source ~text =
+let publish_setup_text ~clock server (source : source) ~text =
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -297,7 +302,8 @@ let publish_setup_text ~clock server source ~text =
          ])
   in
   match
-    Masc_http_client.post_sync ~clock ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
+    Masc_http_client.post_sync ~clock ~timeout_sec:setup_publication_timeout_sec
+      ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
   with
   | Error detail -> Error (Runtime_setup_batch.Commit_unobserved detail)
   | Ok (409, _) -> Error Runtime_setup_batch.Changed_configuration
@@ -306,6 +312,10 @@ let publish_setup_text ~clock server source ~text =
       (fun reason ->
         Runtime_setup_batch.Commit_unobserved ("the server answered 200 and " ^ reason))
       (commit_record_of_answer body)
+  (* The server answers its save after committing, so a server error may
+     follow a save that landed. *)
+  | Ok (status, body) when status >= 500 ->
+    Error (Runtime_setup_batch.Commit_unobserved (error_of_body ~status body))
   | Ok (status, body) -> Error (Runtime_setup_batch.Commit_refused (error_of_body ~status body))
 
 (* The running server as a table edit's store (browser-lane-setup): it reads

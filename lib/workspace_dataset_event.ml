@@ -12,6 +12,7 @@ type dataset =
   | Skill_activations of { keeper : string }
   | Skill_catalog
   | Clients
+  | Provider_usage
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -24,6 +25,7 @@ let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 let skill_activations_name = "skill_activations"
 let skill_catalog_name = "skill_catalog"
 let clients_name = "clients"
+let provider_usage_name = "provider_usage"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -37,11 +39,12 @@ let dataset_name = function
   | Skill_activations _ -> skill_activations_name
   | Skill_catalog -> skill_catalog_name
   | Clients -> clients_name
+  | Provider_usage -> provider_usage_name
 ;;
 
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
-  | Skill_catalog | Clients -> []
+  | Skill_catalog | Clients | Provider_usage -> []
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
 ;;
@@ -63,6 +66,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name connectors_name -> Ok Connectors
   | Some (`String name) when String.equal name skill_catalog_name -> Ok Skill_catalog
   | Some (`String name) when String.equal name clients_name -> Ok Clients
+  | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
   | Some (`String name) when String.equal name keeper_metrics_name ->
     Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->

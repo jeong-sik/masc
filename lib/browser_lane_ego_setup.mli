@@ -12,7 +12,9 @@
     before it is committed. *)
 
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
+        (** Where runtime.toml is read and the table committed: the file, or
+            the workspace's running server (RFC-0482 §3.2). *)
   ; command : string option
         (** An absolute path. Without one, the first [ego-browser] that
             answers [--version]

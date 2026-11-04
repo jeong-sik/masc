@@ -87,13 +87,13 @@ let extension_route ~modes ~manifest_dir ~host_name:requested =
     let* manifest_dir = manifest_directory ~manifest_dir in
     Ok (Some { Setup.manifest_dir; host_name })
 
-let bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port =
+let bidi_plan ~modes ~store ~firefox ~profile ~port =
   if not (List.mem Bidi modes)
   then Ok None
   else
     Bidi_setup.plan
       ~find_firefox:Bidi_setup.installed_firefox
-      { Bidi_setup.runtime_config_path
+      { Bidi_setup.store
       ; home = Sys.getenv_opt "HOME"
       ; firefox
       ; profile
@@ -102,23 +102,23 @@ let bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port =
     |> Result.map Option.some
     |> Result.map_error Bidi_setup.error_message
 
-let automation_plan ~modes ~runtime_config_path ~geckodriver ~browser =
+let automation_plan ~modes ~store ~geckodriver ~browser =
   if not (List.mem Automation modes)
   then Ok None
   else
     Automation_setup.plan
       ~find_geckodriver:Automation_setup.installed_geckodriver
-      { Automation_setup.runtime_config_path; geckodriver; browser }
+      { Automation_setup.store; geckodriver; browser }
     |> Result.map Option.some
     |> Result.map_error Automation_setup.error_message
 
-let ego_plan ~modes ~runtime_config_path ~ego_command ~ego_space =
+let ego_plan ~modes ~store ~ego_command ~ego_space =
   if not (List.mem Ego modes)
   then Ok None
   else
     Ego_setup.plan
       ~find_ego:Ego_setup.installed_ego
-      { Ego_setup.runtime_config_path; command = ego_command; space = ego_space }
+      { Ego_setup.store; command = ego_command; space = ego_space }
     |> Result.map Option.some
     |> Result.map_error Ego_setup.error_message
 
@@ -188,8 +188,12 @@ let print_bidi_steps plan =
      can drive that browser and read its cookies. Keep this profile to the logins the \
      Keepers need."
 
-let print_bidi_state ~base_path ~runtime_config_path =
-  let configuration = Result.to_option (Browser_configuration.of_file runtime_config_path) in
+let print_bidi_state ~base_path ~(store : Masc.Runtime_table_edit.store) =
+  let configuration =
+    match store.observe () with
+    | Ok observation -> Result.to_option (Browser_configuration.of_text observation.Runtime.source_text)
+    | Error (Masc.Runtime_table_edit.Missing _ | Masc.Runtime_table_edit.Unreadable _) -> None
+  in
   print_endline
     (Masc.Browser_bidi_host_status.message
        (Masc.Browser_bidi_host_status.observe ~access:Masc.Lane_addon_sources.Operator_configuration
@@ -375,19 +379,22 @@ let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
 
 (* No runtime.toml configures no source. Which sources one that does not
    parse runs is not known. *)
-let runtime_browser_configuration runtime_config_path =
-  if not (Sys.file_exists runtime_config_path) then Ok Browser_configuration.none
-  else
-    Browser_configuration.of_file runtime_config_path
-    |> Result.map_error (fun detail ->
-      Printf.sprintf "%s does not parse, so which browser sources it runs is not known: %s"
-        runtime_config_path detail)
+let runtime_browser_configuration (store : Masc.Runtime_table_edit.store) =
+  let unknown detail =
+    Printf.sprintf "%s does not parse, so which browser sources it runs is not known: %s"
+      store.path detail
+  in
+  match store.observe () with
+  | Error (Masc.Runtime_table_edit.Missing _) -> Ok Browser_configuration.none
+  | Error (Masc.Runtime_table_edit.Unreadable { reason; _ }) -> Error (unknown reason)
+  | Ok observation ->
+    Browser_configuration.of_text observation.Runtime.source_text |> Result.map_error unknown
 
-let plan_addon ~base_path ~runtime_config_path ~modes choice =
+let plan_addon ~base_path ~store ~modes choice =
   match choice with
   | Skip_addon -> Ok Not_run
   | Require_addon | Offer_addon ->
-    (match runtime_browser_configuration runtime_config_path with
+    (match runtime_browser_configuration store with
      | Error message -> step_refusal choice message |> Result.map_error (fun message -> 1, message)
      | Ok configuration ->
        let sources, awaiting = addon_sources ~base_path ~configuration ~modes in
@@ -412,7 +419,7 @@ let print_both_routes =
 
 let install
       ~base_path
-      ~runtime_config_path
+      ~(store : Masc.Runtime_table_edit.store)
       ~modes
       ~addon_choice
       ~binary
@@ -432,13 +439,13 @@ let install
      wrote a package ({!Addon_setup.apply}); see [addon_refusal]. *)
   let planned =
     let refused result = Result.map_error (fun message -> 1, message) result in
-    let* addon = plan_addon ~base_path ~runtime_config_path ~modes addon_choice in
+    let* addon = plan_addon ~base_path ~store ~modes addon_choice in
     let* extension = refused (extension_route ~modes ~manifest_dir ~host_name) in
-    let* bidi = refused (bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port) in
+    let* bidi = refused (bidi_plan ~modes ~store ~firefox ~profile ~port) in
     let* automation =
-      refused (automation_plan ~modes ~runtime_config_path ~geckodriver ~browser)
+      refused (automation_plan ~modes ~store ~geckodriver ~browser)
     in
-    let* ego = refused (ego_plan ~modes ~runtime_config_path ~ego_command ~ego_space) in
+    let* ego = refused (ego_plan ~modes ~store ~ego_command ~ego_space) in
     Ok (addon, extension, bidi, automation, ego)
   in
   match planned with
@@ -501,11 +508,11 @@ let install
          installed;
        Option.iter
          (fun (plan, applied) ->
-            print_table ~runtime_config_path plan applied;
+            print_table ~runtime_config_path:store.path plan applied;
             print_bidi_steps plan)
          written.bidi;
-       Option.iter (print_automation ~runtime_config_path) written.automation;
-       Option.iter (print_ego ~runtime_config_path) written.ego;
+       Option.iter (print_automation ~runtime_config_path:store.path) written.automation;
+       Option.iter (print_ego ~runtime_config_path:store.path) written.ego;
        (* A source whose table this run was to write and did not is left out.
           The others are declared even after a table refusal, since their
           workers do not start from that table. *)
@@ -559,12 +566,19 @@ let install
           if extension_written || List.mem Host modes
           then (print_endline ""; print_lane_state ~base_path);
           if Option.is_some written.bidi
-          then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
+          then (print_endline ""; print_bidi_state ~base_path ~store);
           0))
+
+(* The modes that write a table of runtime.toml. *)
+let writes_a_table = function
+  | Bidi | Automation | Ego -> true
+  | Addon | Extension | Host -> false
 
 let run
       ~base_path
       ~runtime_config_path
+      ~server_port
+      ~agent
       ~modes:requested
       ~no_addon
       ~binary
@@ -604,22 +618,55 @@ let run
      | _ :: _ when List.mem Addon modes && no_addon ->
        refuse "--no-addon contradicts --mode addon."
      | _ :: _ ->
-       install
-         ~base_path
-         ~runtime_config_path
-         ~modes
-         ~addon_choice:
-           (if List.mem Addon modes then Require_addon
-            else if no_addon then Skip_addon
-            else Offer_addon)
-         ~binary
-         ~token_file
-         ~manifest_dir
-         ~host_name
-         ~firefox
-         ~profile
-         ~port
-         ~geckodriver
-         ~browser
-         ~ego_command
-         ~ego_space)
+       let install_with store =
+         install
+           ~base_path
+           ~store
+           ~modes
+           ~addon_choice:
+             (if List.mem Addon modes then Require_addon
+              else if no_addon then Skip_addon
+              else Offer_addon)
+           ~binary
+           ~token_file
+           ~manifest_dir
+           ~host_name
+           ~firefox
+           ~profile
+           ~port
+           ~geckodriver
+           ~browser
+           ~ego_command
+           ~ego_space
+       in
+       let file = Masc.Runtime_table_edit.file_store ~runtime_config_path in
+       if not (List.exists writes_a_table modes)
+       then install_with file
+       else
+         (* RFC-0482 §3.2: while this workspace's server answers, it is the
+            writer. The tables are planned against the text it holds and
+            committed through its text route; with no server answering, the
+            command reads and writes the file itself. *)
+         (match server_port with
+          | Error message -> refuse message
+          | Ok server_port ->
+            (match Unix.realpath base_path with
+             | exception Unix.Unix_error _ -> install_with file
+             | real_base_path ->
+            let routed =
+              Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+                match
+                  Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path
+                    ~port:server_port ~agent
+                with
+                | Error message -> `Refused message
+                | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+                | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+                  (match Masc_cli_runtime_config_remote.table_store ~clock server with
+                   | Error message -> `Refused message
+                   | Ok store -> `Installed (install_with store)))
+            in
+            (match routed with
+             | `Refused message -> refuse message
+             | `Local -> install_with file
+             | `Installed code -> code))))

@@ -1,5 +1,5 @@
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; geckodriver : string option
   ; browser : string option
   }
@@ -248,7 +248,7 @@ let kept_programs ~set = function
        | None -> [])
 
 type plan =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; revision : string
   ; location : location
   ; existing : Browser_configuration.automation option
@@ -263,15 +263,15 @@ let change plan = plan.change
 let location plan = plan.location
 let notes plan = plan.notes
 
+let observed (store : Runtime_table_edit.store) =
+  store.observe ()
+  |> Result.map_error (function
+    | Runtime_table_edit.Missing path -> Configuration_missing path
+    | Runtime_table_edit.Unreadable { path; reason } -> Configuration_unreadable { path; reason })
+
 let plan ~find_geckodriver (request : request) =
-  let path = request.runtime_config_path in
-  if not (Sys.file_exists path)
-  then Error (Configuration_missing path)
-  else
-    let* observation =
-      Runtime.load_config_observation ~runtime_config_path:path ()
-      |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
-    in
+  let path = request.store.path in
+  let* observation = observed request.store in
     let text = observation.source_text in
     let* configuration =
       configuration_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
@@ -296,7 +296,7 @@ let plan ~find_geckodriver (request : request) =
       named @ kept_programs ~set configuration.Browser_configuration.automation
     in
     Ok
-      { runtime_config_path = path
+      { store = request.store
       ; revision = Runtime_table_edit.revision_of_observation observation
       ; location
       ; existing = configuration.Browser_configuration.automation
@@ -307,11 +307,8 @@ let plan ~find_geckodriver (request : request) =
       }
 
 let replan previous =
-  let path = previous.runtime_config_path in
-  let* observation =
-    Runtime.load_config_observation ~runtime_config_path:path ()
-    |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
-  in
+  let path = previous.store.path in
+  let* observation = observed previous.store in
   let text = observation.source_text in
   let* configuration =
     configuration_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
@@ -345,8 +342,7 @@ let apply plan =
   | [] -> Ok ()
   | set ->
     (match
-       Runtime_table_edit.commit
-         ~runtime_config_path:plan.runtime_config_path
+       plan.store.commit
          ~revision:plan.revision
          ~edit:(edited ~location:plan.location ~table:plan.table ~set)
      with

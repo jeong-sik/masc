@@ -1,5 +1,5 @@
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; command : string option
   ; space : string option
   }
@@ -238,7 +238,7 @@ let decide ~find_ego request = function
     Ok ({ Browser_configuration.command; space }, set, change, versions)
 
 type plan =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; revision : string
   ; existing : Browser_configuration.live_ego option
   ; table : Browser_configuration.live_ego
@@ -251,10 +251,12 @@ let table plan = plan.table
 let change plan = plan.change
 let versions plan = plan.versions
 
-let observe path =
+let observe (store : Runtime_table_edit.store) =
   let* observation =
-    Runtime.load_config_observation ~runtime_config_path:path ()
-    |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
+    store.observe ()
+    |> Result.map_error (function
+      | Runtime_table_edit.Missing path -> Configuration_missing path
+      | Runtime_table_edit.Unreadable { path; reason } -> Configuration_unreadable { path; reason })
   in
   let* configuration =
     configuration_of_text observation.source_text
@@ -271,17 +273,14 @@ let validated ~path ~existing ~table ~set text =
     |> Result.map_error (fun reason -> Configuration_refused reason)
 
 let plan ~find_ego (request : request) =
-  let path = request.runtime_config_path in
-  if not (Sys.file_exists path)
-  then Error (Configuration_missing path)
-  else
-    let* observation, configuration = observe path in
+  let path = request.store.path in
+  let* observation, configuration = observe request.store in
     let existing = configuration.Browser_configuration.live_ego in
     let* table, set, change, versions = decide ~find_ego request existing in
     let* () = validated ~path ~existing ~table ~set observation.source_text in
     let* () = space_is_free ~table in
     Ok
-      { runtime_config_path = path
+      { store = request.store
       ; revision = Runtime_table_edit.revision_of_observation observation
       ; existing
       ; table
@@ -291,8 +290,8 @@ let plan ~find_ego (request : request) =
       }
 
 let replan previous =
-  let path = previous.runtime_config_path in
-  let* observation, configuration = observe path in
+  let path = previous.store.path in
+  let* observation, configuration = observe previous.store in
   let existing = configuration.Browser_configuration.live_ego in
   let* () = validated ~path ~existing ~table:previous.table ~set:previous.set observation.source_text in
   (* Another table of this run may have been written since the plan, not this
@@ -309,16 +308,15 @@ let replan previous =
     ; existing
     }
 
-(* Under the configuration lock the text is the one on disk now: the revision
-   the plan was made from is compared again, and what the edit produces is read
-   back before it is committed. *)
+(* The store commits the text as it is at that moment: the revision the plan
+   was made from is compared again, and what the edit produces is read back
+   before it is committed. *)
 let apply plan =
   match plan.set with
   | [] -> Ok ()
   | _ :: _ ->
     (match
-       Runtime_table_edit.commit
-         ~runtime_config_path:plan.runtime_config_path
+       plan.store.commit
          ~revision:plan.revision
          ~edit:(edited ~existing:plan.existing ~table:plan.table ~set:plan.set)
      with

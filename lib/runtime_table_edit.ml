@@ -78,3 +78,26 @@ let commit ~runtime_config_path ~revision ~edit =
     (match !refusal with
      | Some error -> Error (Edit_refused error)
      | None -> Error (Not_written "the edit was refused without a reason"))
+
+type observe_error =
+  | Missing of string
+  | Unreadable of { path : string; reason : string }
+
+type store =
+  { path : string
+  ; observe : unit -> (Runtime.config_observation, observe_error) result
+  ; commit :
+      'e. revision:string -> edit:(string -> (string, 'e) result) -> (unit, 'e commit_error) result
+  }
+
+let file_store ~runtime_config_path =
+  { path = runtime_config_path
+  ; observe =
+      (fun () ->
+        if not (Sys.file_exists runtime_config_path)
+        then Error (Missing runtime_config_path)
+        else
+          Runtime.load_config_observation ~runtime_config_path ()
+          |> Result.map_error (fun reason -> Unreadable { path = runtime_config_path; reason }))
+  ; commit = (fun ~revision ~edit -> commit ~runtime_config_path ~revision ~edit)
+  }

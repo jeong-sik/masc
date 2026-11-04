@@ -111,7 +111,8 @@ let with_fixture ?(with_table = false) ?(spaces = []) ?config f =
     write runtime config;
     f { root; runtime; ego; started })
 
-let request ?command ?space fixture = { E.runtime_config_path = fixture.runtime; command; space }
+let request ?command ?space fixture =
+  { E.store = Masc.Runtime_table_edit.file_store ~runtime_config_path:fixture.runtime; command; space }
 
 let found fixture () = R.probe_program R.Ego_browser fixture.ego
 
@@ -355,7 +356,7 @@ let test_a_space_the_loader_refuses_is_not_written () =
 let test_a_missing_runtime_toml_is_refused () =
   with_fixture (fun fixture ->
     let path = Filename.concat fixture.root "absent.toml" in
-    match E.plan ~find_ego:never_asked { E.runtime_config_path = path; command = None; space = None } with
+    match E.plan ~find_ego:never_asked { E.store = Masc.Runtime_table_edit.file_store ~runtime_config_path:path; command = None; space = None } with
     | Error (E.Configuration_missing named) -> check string "names the file" path named
     | Error error -> fail (E.error_message error)
     | Ok _ -> fail "a missing runtime.toml was planned")

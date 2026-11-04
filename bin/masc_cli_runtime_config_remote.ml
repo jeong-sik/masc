@@ -89,10 +89,19 @@ let fetch ~clock server =
   let* path = string_field json "path" in
   Ok { text; revision; path }
 
+type store_error =
+  | Changed_on_server
+  | Not_stored of string
+
+let store_error_message = function
+  | Changed_on_server ->
+    "runtime.toml changed on the server while this command ran. Nothing was saved; run it again."
+  | Not_stored message -> message
+
 (* Save [edited] over [source] with the revision and path it was read at. A
    save that finds the file changed since is refused by the server (409); the
    command says so rather than retrying a stale edit. *)
-let store ~clock server source ~edited =
+let store_source ~clock server source ~edited =
   if String.equal edited source.text then Ok Unchanged
   else
     let request =
@@ -107,10 +116,15 @@ let store ~clock server source ~edited =
       Masc_http_client.post_sync ~clock ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
     with
     | Error detail ->
-      Error ("The server's answer to the save did not arrive, so whether it was stored is unknown: " ^ detail)
+      Error
+        (Not_stored
+           ("The server's answer to the save did not arrive, so whether it was stored is unknown: " ^ detail))
     | Ok (200, _) -> Ok (Saved { path = source.path })
-    | Ok (409, _) -> Error "runtime.toml changed on the server while this command ran. Nothing was saved; run it again."
-    | Ok (status, body) -> Error (error_of_body ~status body)
+    | Ok (409, _) -> Error Changed_on_server
+    | Ok (status, body) -> Error (Not_stored (error_of_body ~status body))
+
+let store ~clock server source ~edited =
+  Result.map_error store_error_message (store_source ~clock server source ~edited)
 
 let save ~clock server ~edit =
   let open Result.Syntax in
@@ -214,6 +228,38 @@ let apply_voice_setup ~clock server ~revision changes =
     Error ("The server's answer to the setup did not arrive, so whether it was stored is unknown: " ^ detail)
   | Ok (200, _) -> Ok ()
   | Ok (status, body) -> Error (error_of_body ~status body)
+
+(* The running server as a table edit's store (browser-lane-setup): it reads
+   the text the server holds and commits through the text route. The path is
+   the one the server read when the store was made; it names the file in
+   messages. *)
+let table_store ~clock server =
+  let open Result.Syntax in
+  let* first = fetch ~clock server in
+  let observation_of (source : source) = Runtime.config_observation ~path:source.path source.text in
+  Ok
+    { Masc.Runtime_table_edit.path = first.path
+    ; observe =
+        (fun () ->
+          fetch ~clock server
+          |> Result.map observation_of
+          |> Result.map_error (fun reason -> Masc.Runtime_table_edit.Unreadable { path = first.path; reason }))
+    ; commit =
+        (fun ~revision ~edit ->
+          match fetch ~clock server with
+          | Error reason -> Error (Masc.Runtime_table_edit.Not_written reason)
+          | Ok source ->
+            if not (String.equal (Masc.Runtime_table_edit.revision_of_observation (observation_of source)) revision)
+            then Error Masc.Runtime_table_edit.Changed_meanwhile
+            else (
+              match edit source.text with
+              | Error error -> Error (Masc.Runtime_table_edit.Edit_refused error)
+              | Ok edited ->
+                (match store_source ~clock server source ~edited with
+                 | Ok (Saved _ | Unchanged) -> Ok ()
+                 | Error Changed_on_server -> Error Masc.Runtime_table_edit.Changed_meanwhile
+                 | Error (Not_stored message) -> Error (Masc.Runtime_table_edit.Not_written message))))
+    }
 
 (* The Eio context the HTTP client needs, for a command that otherwise runs
    without one. *)

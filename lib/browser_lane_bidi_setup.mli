@@ -6,12 +6,14 @@
     The table belongs to the operator. A table that is there keeps its values:
     the profile it names holds the logins Keepers use, and replacing it would
     log them out. A value changes only when the operator names it. The table
-    is written through {!Runtime.edit_config_text}, so comments and every
+    is written as a text edit ({!Runtime_table_edit.store}), so comments and every
     other table stay as they were, and what is written is read back the way
     the server reads it before it is committed. *)
 
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
+        (** Where runtime.toml is read and the table committed: the file, or
+            the workspace's running server (RFC-0482 §3.2). *)
   ; home : string option
         (** Where the default profile goes. Without one the profile must be
             named. *)

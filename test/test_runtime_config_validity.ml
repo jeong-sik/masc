@@ -3939,7 +3939,8 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
              msg
        | Ok () ->
          check (option bool) "provider-qualified preserve policy" None
-           (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
+           (Runtime_inference.for_runtime ~name:"ollama_cloud.shared")
+             .Runtime_thinking_seed.preserve_thinking))
 
 (* Proves F048: a Gemini-format provider resolves capabilities under its own
    [providers.<id>] label, the same way every other api_format does.

@@ -436,8 +436,7 @@ view-side-repair violation of §2.3.
   `Some max_context`.
 - The two prices come from `Runtime.pricing_of_runtime_id`
   (`lib/runtime/runtime.ml:386`): a sibling of the existing
-  `max_context_of_runtime_id` / `thinking_support_of_runtime_id`
-  projections, projecting `rt.binding.price_input` / `price_output` off the
+  `max_context_of_runtime_id` projection, projecting `rt.binding.price_input` / `price_output` off the
   retained singleton via `get_runtime_by_id`. No new holder, no threading,
   no re-parse.
 - All three are `option`: `None` when the runtime is unknown or the operator

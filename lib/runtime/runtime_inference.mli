@@ -23,23 +23,8 @@ val resolve_temperature :
 (** Use the runtime.toml model override when present; evaluate [fallback] only
     when that runtime has no temperature override. *)
 
-type seed = {
-  thinking_enabled : bool option;
-  preserve_thinking : bool option;
-}
-
-val seed_of_thinking_support
-  :  ?preserve_thinking:bool option
-  -> bool option
-  -> seed
-(** Pure: map a model's [thinking-support] capability to the keeper thinking
-    seed.  [Some false] is a force-thinking-off signal;
-    [Some true] actively enables thinking for that model binding. *)
-
-val for_runtime : name:string -> seed
-(** Per-model thinking seed for runtime [name]. [Masc_agent_core] executions resolve
-    runtime.toml [thinking-support] ({!Runtime_schema.thinking_request}: none on a
-    [reasoning-uncontrolled] row) and explicit [preserve-thinking].
-    [Official_client] executions return an empty seed because their typed
-    effort is owned by the client boundary, not the AGENT_CORE boolean controls.
-    Unknown runtimes preserve the existing all-absent result. *)
+val for_runtime : name:string -> Runtime_thinking_seed.t
+(** The thinking seed of runtime [name]: {!Runtime_thinking_seed.of_model} for a
+    [Masc_agent_core] execution, and {!Runtime_thinking_seed.absent} for an
+    [Official_client] execution, whose client owns the reasoning control, or an
+    id that names no loaded runtime. *)

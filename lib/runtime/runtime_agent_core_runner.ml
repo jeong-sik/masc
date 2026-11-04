@@ -118,37 +118,6 @@ let resolve_runtime_providers ~runtime_id () =
             (no silent fallback to default — RFC-0206 §2.1)"
            runtime_id)
 
-let apply_inference_seed
-      ~(seed : Runtime_inference.seed)
-      (config : Llm_provider.Provider_config.t)
-  : Llm_provider.Provider_config.t
-  =
-  (* Mirrors [Keeper_turn_driver.attempt_inference_policy] field by field, and
-     the two are not the same shape:
-
-     - [enable_thinking]: a declared seed wins, an absent one falls back. The
-       turn path's fallback is its caller's value; here the resolved binding
-       plays that role.
-     - [preserve_thinking]: the seed is the sole authority. The turn path writes
-       [runtime_seed.preserve_thinking] straight into the agent config
-       (keeper_turn_driver.ml:1176) with no fallback, so an undeclared axis
-       reaches the wire as [None].
-
-     Keeping the binding's value on the second field is what a symmetric
-     implementation does, and it made the probe send a request the turn would
-     not: binding [Some true] plus an undeclared seed gave the probe
-     [Some true] and the turn [None]. That is this PR's own defect class in the
-     field this PR added, which is why the agreement is pinned by a test over
-     every declaration combination rather than by this comment. *)
-  { config with
-    enable_thinking =
-      (match seed.thinking_enabled with
-       | Some _ as declared -> declared
-       | None -> config.enable_thinking)
-  ; preserve_thinking = seed.preserve_thinking
-  }
-;;
-
 let resolve_runtime_providers_for_turn ~runtime_id () =
   (* The empty id documents "the default runtime", and the resolver honours that
      by going through [Runtime.get_default_runtime]. The seed lookup is keyed by
@@ -167,7 +136,7 @@ let resolve_runtime_providers_for_turn ~runtime_id () =
   in
   Result.map
     (List.map
-       (apply_inference_seed ~seed:(Runtime_inference.for_runtime ~name:seed_runtime_id)))
+       (Runtime_thinking_seed.apply (Runtime_inference.for_runtime ~name:seed_runtime_id)))
     (resolve_runtime_providers ~runtime_id ())
 ;;
 

@@ -123,10 +123,8 @@ let native_attempt ~sw ~net ~(runtime : Runtime_instance.t) ~provider (params : 
   let* () = Runtime_instance.validate_dispatch_credential ~provider_config:provider runtime
     |> Result.map_error (fun error -> Runtime_unavailable
       (Runtime_instance.dispatch_credential_error_to_string error)) in
-  let seed = Runtime_inference.seed_of_thinking_support
-      ~preserve_thinking:runtime.model.preserve_thinking
-      (Runtime_schema.thinking_request runtime.model) in
-  let provider = Runtime_agent_core_runner.apply_inference_seed ~seed provider in
+  let provider =
+    Runtime_thinking_seed.apply (Runtime_thinking_seed.of_model runtime.model) provider in
   let has_image = List.exists (fun (message : S.sampling_message) ->
     match message.content with S.Image _ -> true | S.Text _ -> false) params.messages in
   let capabilities = Llm_provider.Backend_openai_request.capabilities_of_config provider in

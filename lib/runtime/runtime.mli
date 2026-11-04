@@ -750,11 +750,6 @@ val max_context_of_runtime_id : string -> int option
     is clamped to [min runtime.toml max-context provider cap] so MASC cannot
     admit a prompt larger than the provider-owned window. *)
 
-val thinking_support_of_runtime_id : string -> bool option
-(** Explicit [thinking-support] policy for the runtime's model. [None] means
-    the field is absent or the runtime is not configured. Consumed by
-    {!Runtime_inference.for_runtime}; absence must not become a disable request. *)
-
 val temperature_of_runtime_id : string -> float option
 (** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)
     for the model bound to runtime [id], or [None] when the id is not configured
@@ -793,15 +788,6 @@ val top_p_of_runtime_id : string -> float option
 
 (** Request [min_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when absent. *)
-
-val preserve_thinking_of_runtime_id : string -> bool option
-(** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
-    uninitialized cache, or no explicit TOML field.
-
-    AGENT_CORE owns provider/model capability truth and applies provider-required
-    reasoning replay internally. MASC does not promote a request-side preserve
-    capability into default keeper policy. Consumed by
-    {!Runtime_inference.for_runtime} without provider/model string matching. *)
 
 val pricing_of_runtime_id : string -> float option * float option
 (** [(price_input, price_output)] per-million-token USD rates declared on the

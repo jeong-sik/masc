@@ -23,6 +23,12 @@ module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let submitter = "alpha"
 let request_id = "kmsg-0001"
 let composition_tool = "keeper_compose_memory-background"
@@ -710,7 +716,7 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
         check string "recovery delivers the original request" accepted.request_id completion.cc_request_id;
         source
       | _ -> fail "recovery lost or duplicated completion" in
-    let selection = match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name:submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
+    let selection = match select_queue_entry ~base_path ~keeper_name:submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
       | Ok (Some selection) -> selection
       | _ -> fail "recovered completion was not admitted" in
     Masc.Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name:submitter source;

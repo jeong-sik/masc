@@ -1397,8 +1397,8 @@ let test_stale_connector_member_preserves_fifo_and_independent_progress () =
       Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
       Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name |> require in
     let admitted = pending () in
-    Keeper_event_queue_persistence.note_checkpoint_retention_result
-      ~base_path ~keeper_name ~selection:(List.hd admitted) () |> require |> ignore;
+    Keeper_event_queue_persistence.retain_checkpoint_batch_result
+      ~base_path ~keeper_name ~selections:[ List.hd admitted ] () |> require |> ignore;
     let stale_current = List.hd (pending ()) in
     let c1 = make "conversation-C" "c1" 4. in
     enqueue_exn ~base_path keeper_name c1;
@@ -1522,7 +1522,7 @@ let test_checkpoint_stale_source_does_not_discard_healthy_sibling () =
       Persistence.pending_selections_result ~base_path ~keeper_name |> require in
     let admitted = pending () in
     let first = List.hd admitted in
-    Persistence.note_checkpoint_retention_result ~base_path ~keeper_name ~selection:first ()
+    Persistence.retain_checkpoint_batch_result ~base_path ~keeper_name ~selections:[ first ] ()
       |> require |> ignore;
     enqueue_exn ~base_path keeper_name (make "independent");
     (match Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations

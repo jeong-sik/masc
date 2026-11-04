@@ -13,6 +13,12 @@
 open Masc
 open Alcotest
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let choice ~id ~label =
   match Keeper_ask.choice ~choice_id:id ~label () with
   | Ok c -> c
@@ -452,7 +458,7 @@ let reconcile_or_fail ~base_path =
 ;;
 
 let terminalize_answer ~base_path ~keeper_name source =
-  let selection = match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
+  let selection = match select_queue_entry ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
     | Ok (Some selection) -> selection
     | Ok None -> fail "answer source was not admitted"
     | Error error -> fail error in
@@ -1185,7 +1191,7 @@ let test_followup_queue_settlement_does_not_invent_a_turn () =
     | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
   (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
    | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
-  let selection = match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
+  let selection = match select_queue_entry ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
     | Ok (Some selection) -> selection
     | Ok None -> fail "original wake not selected" | Error detail -> fail detail in
   (match Queue.terminalize_pending_turn_completed_result ~base_path keeper_name ~applied_at:301. ~selection with

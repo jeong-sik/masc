@@ -123,12 +123,10 @@ let test_admission_clock_survives_retention_and_reload () =
   Persistence.enqueue_stimulus_if_absent_result ~base_path ~keeper_name source |> unwrap |> ignore;
   Alcotest.(check bool) "duplicate admission retains original clock" true
     ((selection ()).first_admitted_at = Some admission);
-  Persistence.note_checkpoint_retention_result ~base_path ~keeper_name
-    ~selection:(selection ()) () |> unwrap |> ignore;
+  Persistence.retain_checkpoint_batch_result ~base_path ~keeper_name
+    ~selections:[ selection () ] () |> unwrap |> ignore;
   Persistence.reprioritize_pending_result ~base_path ~keeper_name
     ~selection:(selection ()) ~urgency:Queue.Low () |> unwrap |> ignore;
-  Persistence.defer_pending_result ~base_path ~keeper_name
-    ~selection:(selection ()) () |> unwrap |> ignore;
   let receipt_path = Filename.concat base_path "fresh-reader.json" in
   let error_path = Filename.concat base_path "fresh-reader.stderr" in
   let receipt = Unix.openfile receipt_path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600 in

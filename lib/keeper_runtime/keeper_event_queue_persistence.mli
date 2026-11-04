@@ -151,25 +151,6 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
-val select_when_result :
-  base_path:string ->
-  keeper_name:string ->
-  now:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  (Keeper_event_queue_state.pending_selection option, string) result
-
-val pending_frontier_result :
-  base_path:string ->
-  keeper_name:string ->
-  ( Keeper_event_queue_state.frontier
-    * Keeper_event_queue_state.pending_selection list
-  , string )
-  result
-(** {!pending_selections_result} together with the frontier of the very state
-    it was read from. A later arrival is told apart from an entry in the list
-    by {!Keeper_event_queue_state.arrived_since} on this frontier, so no second
-    read can race with the first. *)
-
 val pending_selections_result :
   base_path:string ->
   keeper_name:string ->
@@ -177,12 +158,6 @@ val pending_selections_result :
 (** Read every pending entry with its exact immutable selection authority, in
     queue order. This is the durable admission snapshot used when one Keeper
     turn admits every ready source; it performs no mutation. *)
-
-val validate_pending_selection_result :
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  (unit, string) result
 
 val admitted_selection_standing_result :
   base_path:string ->
@@ -215,16 +190,6 @@ val bind_pending_repetition_scope_result :
     confirmed writes nothing and does not run [after_commit] again (see
     {!enqueue_stimulus_once_result}). This is not a complete continuation
     contract. *)
-
-val note_checkpoint_retention_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection * int, string) result
-(** Durably count one checkpoint-yield retention of the selection and return
-    the updated selection with its new count. *)
 
 
 type snapshot_read_error_kind =
@@ -620,16 +585,6 @@ val reprioritize_pending_result :
 (** Source-incarnation-fenced priority change. Unrelated queue mutations do
     not invalidate the selected source. *)
 
-val defer_pending_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  unit ->
-  (int64, string) result
-(** Durably rotate one exact transiently blocked source to the tail of its
-    current urgency lane. *)
-
 val retain_checkpoint_batch_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string -> keeper_name:string ->
@@ -697,14 +652,6 @@ val ack_consumed :
   keeper_name:string ->
   Keeper_event_queue.stimulus list ->
   (unit, string) result
-
-val drop_by_post_id :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  post_id:string ->
-  unit ->
-  (Keeper_event_queue.stimulus list, string) result
 
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded

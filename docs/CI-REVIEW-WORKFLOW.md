@@ -231,6 +231,14 @@ block that failed at `test_mcp_server_eio.ml:3045` was read as
 with its suite by the sandbox path (`_build/.sandbox/<hash>/...`) or by a name
 inside the result block, never by adjacency.
 
+A Python traceback lists the outermost caller first, so the frame to cite is the
+last one, not the test function's own line. A failing
+`test_failed_schedule_reads_are_read_again_with_growing_waits` showed
+`line 143, in test_...` (the line that calls `run_schedules`) above
+`line 131, in scenario`, where the `step(...)` wait actually timed out; citing
+`:143` names the caller and the same number in a sibling file can mean something
+else entirely. Cite the innermost frame with its file name.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

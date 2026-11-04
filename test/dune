@@ -2265,7 +2265,7 @@
 (test
  (name test_server_health_rollup)
  (modules test_server_health_rollup)
- (libraries alcotest masc_server yojson))
+ (libraries alcotest masc masc_server yojson))
 
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.

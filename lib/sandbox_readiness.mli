@@ -44,6 +44,11 @@ val apple_container_needs_default_kernel : run:runner -> bool
 val kernel_missing_reason : string
 (** The missing-prerequisite reason [probe] reports for that state; published
     so the readiness answer and the offered action name the same piece. *)
+val apple_container_service : host:host -> run:runner -> state
+(** Whether Apple Container answers commands on this host: the host is Apple
+    Silicon with macOS 26 or newer, and the service answers its inventory
+    ([container list -a]). [probe] asks this first and then asks about the
+    image builder; a command that builds nothing needs only this answer. *)
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t

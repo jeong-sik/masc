@@ -144,6 +144,7 @@ let summary = function
   | Observer.Event (Observer.Dataset_changed dataset) ->
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -161,6 +162,8 @@ let summary = function
              "installation_asks:" ^ declaration_id)
   | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
       "async_requests:" ^ keeper
+  | Observer.Event (Observer.Keeper_skill_activations_changed { keeper }) ->
+      "skill_activations:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
       "roster_row:" ^ keeper
   | Observer.Event (Observer.Keeper_roster_change Observer.Every_row_changed) -> "roster_all"

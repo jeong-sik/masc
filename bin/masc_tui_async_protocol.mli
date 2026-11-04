@@ -73,7 +73,6 @@ type http_dataset =
   | Dataset_board_posts of board_posts_receipt
   | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
-  | Dataset_system_logs of (system_log_snapshot, string) result
   | Dataset_runtime_quota of
       (Masc.Tui_decode.runtime_option list, string) result
       * (Masc.Tui_decode_usage.provider_usage_windows, string) result
@@ -113,7 +112,6 @@ type 'identity http_scoped_surface_readings = {
      available while its fresh reader is pending or failed. *)
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
-  http_system_logs: (system_log_snapshot, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster: keeper_roster_observation option;
@@ -644,7 +642,7 @@ type async_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
-  | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
+  | System_log_streamed of system_log_follow * system_log_follow_event
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result

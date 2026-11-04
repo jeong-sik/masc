@@ -15552,9 +15552,6 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
    without holding the whole ring in memory. *)
 let system_log_page = 300
 
-let apply_system_logs_load state result =
-  state.system_logs <- System_logs_view.apply System_logs_view.Server result state.system_logs
-
 let refresh_client_system_logs state =
   match System_logs_view.source state.system_logs with
   | Server -> ()
@@ -15563,28 +15560,128 @@ let refresh_client_system_logs state =
     let result=System_logs_view.client_snapshot ~limit:system_log_page ~min_level:page.lp_min_level in
     state.system_logs <- System_logs_view.apply This_tui result state.system_logs
 
-(* Refresh the selected source. The server keeps its existing scoped request
-   and server-owned floor; the local page samples only this process's ring. *)
-let launch_system_logs_load state ~mailbox =
+(* The server's logs arrive over [GET /api/v1/dashboard/logs/stream] while the
+   System logs view shows them (RFC-0480 §3.1): the first frame is the page,
+   later ones the entries pushed since. A dropped connection reconnects after
+   the newest entry the job has seen, backing off while connections stay
+   short. A new floor closes the stream; the next loop iteration opens one with
+   it. An ended job stays registered until the view is left, so a bug does not
+   turn into a reconnect loop. *)
+let system_log_stream_level state =
+  Option.map Masc.Tui_decode.system_log_level_query
+    (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level
+
+(* A connection that lasted this long resets the backoff. *)
+let system_log_stream_stable_s = 3.0 *. Server_mcp_transport_http_headers.sse_ping_interval_s
+
+let stop_system_log_stream state =
+  match state.system_log_stream with
+  | None -> ()
+  | Some (_, stop) ->
+    state.system_log_stream <- None;
+    stop ()
+
+let launch_system_log_stream state ~mailbox ~level =
+  let stream =
+    { slf_level = level; slf_reading = state.workspace_read_authority; slf_owner = ref () } in
+  let stopped, stop = Eio.Promise.create () in
+  state.system_log_stream <- Some (stream, fun () -> ignore (Eio.Promise.try_resolve stop ()));
+  let enqueue_async = workspace_enqueue state in
+  let deliver event = enqueue_async mailbox (System_log_streamed (stream, event)) in
+  let host = server_peer_host and port = state.port in
+  let run clock =
+    let since = ref None in
+    let rec connect delay =
+      let reader = Masc_tui_system_log_stream.create () in
+      let opened_at = Eio.Time.now clock in
+      let ended =
+        Masc_tui_http.observe_system_log_stream ~clock ~host ~port ?level ?since_seq:!since
+          ~limit:system_log_page
+          ~on_chunk:(fun chunk ->
+            List.iter
+              (function
+                | Ok (frame : Masc_tui_system_log_stream.frame) ->
+                  (match frame.snapshot.sys_latest_seq with
+                   | Some _ as newest -> since := newest
+                   | None -> ());
+                  deliver (System_log_frame frame)
+                | Error detail -> deliver (System_log_frame_unread detail))
+              (Masc_tui_system_log_stream.feed reader chunk))
+          ()
+      in
+      deliver (System_log_stream_down ended);
+      let delay =
+        if Eio.Time.now clock -. opened_at >= system_log_stream_stable_s
+        then keeper_execute_stream_reconnect_s
+        else delay
+      in
+      Eio.Time.sleep clock delay;
+      connect (Float.min keeper_execute_stream_max_reconnect_s (delay *. 2.0))
+    in
+    connect keeper_execute_stream_reconnect_s
+  in
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+    (match
+       fork_workspace_job ~observation:true state ~sw (fun () ->
+         try Eio.Fiber.first (fun () -> run clock) (fun () -> Eio.Promise.await stopped) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> deliver (System_log_stream_down (Printexc.to_string exn)))
+     with
+     | () -> ()
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       state.system_logs <-
+         System_logs_view.apply System_logs_view.Server (Error (Printexc.to_string exn))
+           state.system_logs)
+  | None, _ | _, None ->
+    state.system_logs <-
+      System_logs_view.apply System_logs_view.Server (Error "Eio switch or clock is unavailable")
+        state.system_logs
+
+(* Runs on every loop iteration: one stream while the view shows the server's
+   logs and this TUI may read the workspace, none otherwise. *)
+let reconcile_system_log_stream state ~mailbox =
+  let wanted =
+    if state.view = System_logs
+       && System_logs_view.source state.system_logs = System_logs_view.Server
+       && server_authority_ready state
+    then Some (system_log_stream_level state)
+    else None
+  in
+  match wanted, state.system_log_stream with
+  | None, None -> ()
+  | None, Some _ -> stop_system_log_stream state
+  | Some level, Some (stream, _)
+    when Option.equal String.equal stream.slf_level level
+         && stream.slf_reading == state.workspace_read_authority -> ()
+  | Some level, (Some _ | None) ->
+    stop_system_log_stream state;
+    launch_system_log_stream state ~mailbox ~level
+
+(* A frame or an ending of the job that is current lands on the server page; a
+   message from a job since replaced is dropped. *)
+let take_system_log_stream state (stream : system_log_follow) event =
+  match state.system_log_stream with
+  | Some (current, _)
+    when current.slf_owner == stream.slf_owner
+         && stream.slf_reading == state.workspace_read_authority ->
+    let result =
+      match event with
+      | System_log_frame frame ->
+        Ok (Masc_tui_system_log_stream.apply ~limit:system_log_page frame
+              (System_logs_view.page System_logs_view.Server state.system_logs).lp_snapshot)
+      | System_log_frame_unread detail | System_log_stream_down detail -> Error detail
+    in
+    state.system_logs <- System_logs_view.apply System_logs_view.Server result state.system_logs
+  | Some _ | None -> ()
+
+(* A new floor or source: the server page reopens its stream with it on the
+   next loop iteration; the local page reads this process's ring now. *)
+let refresh_system_logs_source state =
   match System_logs_view.source state.system_logs with
   | This_tui -> refresh_client_system_logs state
-  | Server -> if server_authority_ready state then begin
-  let host = server_peer_host in
-  let port = state.port in
-  let level =
-    Option.map Masc.Tui_decode.system_log_level_query
-      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level
-  in
-  let reads, request = Surface_read_order.dispatch ~kind:Surface_read_order.Independent
-    ~needs:(surface_needs_of_surface System_logs) ~started_ns:(Mtime_clock.elapsed_ns ())
-    state.http_surface_reads in
-  state.http_surface_reads <- reads;
-  Log.Transport.info "tui_system_logs_read_started request=%d started_ns=%Ld"
-    (Surface_read_order.request_id request) (Surface_read_order.started_ns request);
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> System_logs_loaded (request, result))
-    (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
-  end
+  | Server -> stop_system_log_stream state
 
 (* A failed read replaces the last good one: a window drawn after the reading
    that said so stopped arriving would name a report nobody heard again. *)
@@ -15988,7 +16085,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
              observation)) roster_request)
 
 let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
-    ~system_log_level ~provider_history_days
+    ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let publish_bound ~dataset load =
     match server_identity, Fs_compat.execution_context () with
@@ -16042,13 +16139,6 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
     when_needed ~source:Surface_read_order.Planning ~outcome:Http_refresh_progress.of_result
       ~dataset:(fun result -> Dataset_planning result)
       needs.needs_planning (fun () -> load_planning ~host ~port)
-  in
-  let read_system_logs () =
-    when_needed ~source:Surface_read_order.System_logs ~outcome:Http_refresh_progress.of_result
-      ~dataset:(fun result -> Dataset_system_logs result)
-      needs.needs_system_logs (fun () ->
-        load_system_logs ~host ~port ?level:system_log_level
-          ~limit:system_log_page ())
   in
   let read_keeper_surfaces () =
     load_http_keeper_surfaces ~on_progress:None ~on_asks:None ~on_roster:None
@@ -16117,7 +16207,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
      With no Eio switch, [read_pair] runs the same readers synchronously. *)
   let (http_transport,
        ((http_approvals, (http_board, http_board_hearths)),
-        (http_planning, http_system_logs))),
+        http_planning)),
       (((http_asks, http_keeper_roster), http_overview_goals),
        ((http_runtime_quota, http_keeper_usage),
         (http_provider_history, http_account_emails))) =
@@ -16129,7 +16219,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
             Masc_tui_loader.read_pair
               (fun () ->
                 Masc_tui_loader.read_pair read_approvals read_board)
-              (fun () -> Masc_tui_loader.read_pair read_planning read_system_logs)))
+              read_planning))
       (fun () ->
         Masc_tui_loader.read_pair
           (fun () -> Masc_tui_loader.read_pair read_keeper_surfaces read_overview_goals)
@@ -16147,7 +16237,6 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   ; http_board
   ; http_board_hearths
   ; http_planning
-  ; http_system_logs
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_keeper_usage
@@ -16157,7 +16246,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   }
 
 let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
-    ~system_log_level ~provider_history_days
+    ~provider_history_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
@@ -16232,7 +16321,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                 load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
-                  ~board_query ~system_log_level ~provider_history_days
+                  ~board_query ~provider_history_days
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
     let identity_after = observe_http_reader ~on_progress
@@ -16289,7 +16378,6 @@ let apply_http_scoped_data state ~datasets results =
   end;
   let roster_refreshed = Option.fold ~none:false
     ~some:(apply_keeper_roster_observation state) results.http_keeper_roster in
-  apply Surface_read_order.System_logs_data ~received:Result.is_ok (apply_system_logs_load state) results.http_system_logs;
   apply Surface_read_order.Runtime_quota_data
     ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota) (apply_runtime_quota_load state) results.http_runtime_quota;
   apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
@@ -16309,7 +16397,6 @@ let apply_http_dataset state = function
   | Dataset_board_posts board -> Some (apply_board_list_load state board)
   | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
   | Dataset_planning result -> apply_planning_load state result; None
-  | Dataset_system_logs result -> apply_system_logs_load state result; None
   | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
   | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
   | Dataset_provider_history reading -> apply_provider_history_load state reading; None
@@ -17782,11 +17869,8 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
 ;;
 
 let current_surface_needs state =
-  let needs=Masc_tui_types.surface_needs ~about_open:state.about_open
-    ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view in
-  match System_logs_view.source state.system_logs with
-  | Server -> needs
-  | This_tui -> {needs with needs_system_logs=false}
+  Masc_tui_types.surface_needs ~about_open:state.about_open
+    ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view
 
 (* The reads a full refresh tick sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
@@ -18853,8 +18937,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
-    let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
-      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
     (* The side reads -- the ask follow-up and the identity logins this TUI
        is waiting on -- start after workspace admission, either the cold
@@ -18929,7 +19011,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                 ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_query
                 ~provider_history_days
-                ~system_log_level
                 ~needs)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -18955,7 +19036,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                   ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_query
                 ~provider_history_days
-                ~system_log_level
                 ~needs));
         log_http_surface_read_finished state surface_context
   end
@@ -19424,8 +19504,6 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
-    let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
-      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level in
     log_http_surface_read_started state ~full_refresh_running:!full_refresh_inflight surface_context;
     let approval_ticket =
       if not needs.needs_operator_approvals then None
@@ -19471,7 +19549,6 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_query
               ~provider_history_days
-              ~system_log_level
               ~needs in
         let* confirmed_identity = probe () in
         Ok { readings with http_scoped_server_identity = Ok confirmed_identity }
@@ -22046,7 +22123,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | (Board_publication_done _ | Board_comment_done _) | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
-        | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
+        | System_log_streamed _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
         | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
         | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
         | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
@@ -25089,15 +25166,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Masc_tui_github_ui.token_saved state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | System_logs_loaded (request, result) ->
-      let reads, datasets = Surface_read_order.take state.http_surface_reads request in
-      state.http_surface_reads <- reads;
-      if List.mem Surface_read_order.System_logs_data datasets then begin
-        apply_system_logs_load state result;
-        Log.Transport.info "tui_system_logs_read_applied request=%d started_ns=%Ld applied_ns=%Ld received=%b"
-          (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
-          (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
-      end
+  | System_log_streamed (stream, event) -> take_system_log_stream state stream event
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
@@ -32626,6 +32695,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_tools_async_detail state ~mailbox:async_messages;
       launch_owed_tools_async_task state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
+      reconcile_system_log_stream state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40381,12 +40451,12 @@ Use relative paths for resources already held in the package. -->
            edit_system_logs_page state (fun page -> {page with
              lp_min_level=Masc.Tui_decode.next_system_log_min_level page.lp_min_level;
              lp_scroll=0;lp_cursor=0});
-           launch_system_logs_load state ~mailbox:async_messages
+           refresh_system_logs_source state
        | Some ("v" | "V") when state.view = System_logs ->
            edit_system_logs_page state (fun page -> {page with
              lp_min_level=Masc.Tui_decode.toggle_system_log_verbose page.lp_min_level;
              lp_scroll=0;lp_cursor=0});
-           launch_system_logs_load state ~mailbox:async_messages
+           refresh_system_logs_source state
        | Some ("c" | "C") when state.view = System_logs ->
            edit_system_logs_page state (fun page ->
              let entries=match page.lp_snapshot with None -> [] | Some snapshot -> snapshot.sys_entries in

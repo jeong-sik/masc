@@ -116,7 +116,6 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_keeper_roster
       ; delta.needs_board
       ; delta.needs_planning
-      ; delta.needs_system_logs
       ; delta.needs_keeper_chat
       ; delta.needs_operator_approvals
       ; delta.needs_asks
@@ -170,7 +169,7 @@ let test_keeper_detail_drops_only_list_attention_reads () =
   check bool "returning adds questions" true added.Types.needs_asks;
   check int "returning adds only attention reads" 2
     ([ added.Types.needs_transport; added.needs_keeper_roster
-     ; added.needs_board; added.needs_planning; added.needs_system_logs; added.needs_keeper_chat
+     ; added.needs_board; added.needs_planning; added.needs_keeper_chat
      ; added.needs_operator_approvals; added.needs_asks; added.needs_runtime_quota
      ; added.needs_keeper_usage; added.needs_provider_history; added.needs_overview_goals
      ; added.needs_account_emails ]

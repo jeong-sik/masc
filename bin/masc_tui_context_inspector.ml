@@ -55,6 +55,13 @@ type input_trend =
   ; bounds : (int * int) option
   }
 
+(* A refreshed reading can bring a list shorter than the one the cursor was
+   last set against. Selection, the rendered detail and Enter read one
+   cursor through this, or the last row can show its detail while Enter
+   opens nothing. *)
+let normalized_cursor ~count cursor =
+  min (max 0 (count - 1)) (max 0 cursor)
+
 let recent_input_trend recent =
   let samples = List.rev_map (fun (turn : recent_turn) ->
     match turn.input_tokens with

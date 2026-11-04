@@ -31517,29 +31517,35 @@ Use relative paths for resources already held in the package. -->
                   state.context_inspector_tab
                   = Masc_tui_context_inspector.Exact_input
                 then begin
-                  match
-                    List.nth_opt (exact_input_items ())
+                  let items = exact_input_items () in
+                  let cursor =
+                    Masc_tui_context_inspector.normalized_cursor
+                      ~count:(List.length items)
                       state.context_inspector_cursor
-                  with
-                  | Some _ ->
-                      state.context_inspector_exact <-
-                        Some state.context_inspector_cursor;
-                      state.context_inspector_scroll <- 0
-                  | None -> ()
+                  in
+                  (match List.nth_opt items cursor with
+                   | Some _ ->
+                       state.context_inspector_cursor <- cursor;
+                       state.context_inspector_exact <- Some cursor;
+                       state.context_inspector_scroll <- 0
+                   | None -> ())
                 end
                 else if
                   state.context_inspector_tab
                   = Masc_tui_context_inspector.Input_map
                 then begin
-                  match
-                    List.nth_opt (input_map_rows ())
+                  let rows = input_map_rows () in
+                  let cursor =
+                    Masc_tui_context_inspector.normalized_cursor
+                      ~count:(List.length rows)
                       state.context_inspector_cursor
-                  with
-                  | Some { Masc_tui_context_inspector.verified_item = Some _; _ } ->
-                      state.context_inspector_exact <-
-                        Some state.context_inspector_cursor;
-                      state.context_inspector_scroll <- 0
-                  | Some _ | None -> ()
+                  in
+                  (match List.nth_opt rows cursor with
+                   | Some { Masc_tui_context_inspector.verified_item = Some _; _ } ->
+                       state.context_inspector_cursor <- cursor;
+                       state.context_inspector_exact <- Some cursor;
+                       state.context_inspector_scroll <- 0
+                   | Some _ | None -> ())
                 end
             | _ -> ())
        (* /about is modal for the help sheet's reason: Esc closes it, c turns

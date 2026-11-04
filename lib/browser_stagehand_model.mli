@@ -109,11 +109,6 @@ type lane_unavailable =
   | Registry_unavailable of Runtime_exact_output_registry.publication_error
   | Lane_unresolved of Runtime_exact_output_registry.lane_resolution_error
 
-val published_lane
-  :  unit
-  -> (Runtime_exact_output_registry.resolved_lane, lane_unavailable) result
-(** [browser_stagehand_exact] as the published registry resolves it now. *)
-
 type no_callback_error = |
 
 type flow_not_started =
@@ -201,9 +196,8 @@ val create
 (** A model for {!Browser_stagehand_session.create}. Each [llm.generate] is
     parsed, checked for what this step serves, then sent through the lane
     [resolve_lane] answers at that moment, so a reloaded registry applies to
-    the next request. Production passes {!published_lane}. [base_path] is
-    where an official client runs; [cli_runner] replaces the official-client
-    edge in tests. An answer from a CLI slot carries no [usage]. The model
+    the next request. [base_path] is where an official client runs;
+    [cli_runner] replaces the official-client edge in tests. An answer from a CLI slot carries no [usage]. The model
     renders every typed refusal as an rpc error. [on_refusal], when provided,
     observes that same refusal once before rendering; it is not called for an
     accepted answer and cannot change lane selection. Like [resolve_lane], it

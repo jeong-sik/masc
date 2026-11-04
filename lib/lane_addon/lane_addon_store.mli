@@ -216,9 +216,14 @@ val fold_tool_request_owner_inventory_all :
   f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
   ('a, string) result
 (** Read-only observational fold across all published scopes, passing one
-    scope-directory name, filename and parsed record JSON at a time to [f]
-    under the same descriptor/no-follow/durability checks and per-scope
-    publication serializer as {!tool_request_owner_inventory_all}. *)
+    scope-directory name, filename and parsed record JSON at a time to [f].
+    The names are the actual ones on disk, for the Owner's strict key check.
+    Reads use the same descriptor/no-follow/durability checks and per-scope
+    publication serializer as {!tool_request_owner_inventory}. Malformed
+    names, vanished listed entries or any unreadable scope fail the whole
+    fold. Scope membership is checked again before return; individual scope
+    reads are serialized, not one cross-scope atomic snapshot. No Keeper
+    metadata/profile list is needed and no state is created. *)
 val fold_startup_tool_request_owners :
   t -> init:'a ->
   f:('a -> directory_name:string -> file_name:string -> Yojson.Safe.t -> ('a, string) result) ->
@@ -227,14 +232,6 @@ val fold_startup_tool_request_owners :
     excludes all original writers. Avoids the per-scope serializer at this
     quiescent boundary. Staged entries must be owned regular single-link files,
     although their incomplete contents are not parsed. *)
-val tool_request_owner_inventory_all : t -> ((string * string * Yojson.Safe.t) list, string) result
-(** Read-only observational sweep of all published scopes. Each row retains its
-    actual scope-directory name and filename for the Owner's strict key check.
-    The same descriptor/no-follow/durability checks and per-scope publication
-    serializer apply. Malformed names, vanished listed entries or any unreadable
-    scope fail the whole sweep. Scope membership is checked again before return;
-    individual scope reads are serialized, not one cross-scope atomic snapshot.
-    No Keeper metadata/profile list is needed and no state is created. *)
 
 type tool_request_body_entry = private {
   scope_directory : string;

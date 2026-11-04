@@ -238,14 +238,6 @@ type lane_unavailable =
   | Registry_unavailable of Registry.publication_error
   | Lane_unresolved of Registry.lane_resolution_error
 
-let published_lane () =
-  match Registry.current () with
-  | Error error -> Error (Registry_unavailable error)
-  | Ok registry ->
-    Registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Standalone_lane.Browser_stagehand)
-    |> Result.map_error (fun error -> Lane_unresolved error)
-;;
-
 (* ---- Refusals ------------------------------------------------------------- *)
 
 type no_callback_error = |

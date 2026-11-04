@@ -18,6 +18,7 @@
   connector_trigger_params
   discord_api_version
   discord_observability
+  gate_connector_announce
   gate_connector_observability
   discord_gateway_client
   discord_gateway_state

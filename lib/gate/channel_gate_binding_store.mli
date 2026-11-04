@@ -59,12 +59,15 @@ type mutation_error =
     }
 
 val create :
+  connector_id:string ->
   binding_store_path:(unit -> string) ->
   binding_store_read_path:(unit -> string) ->
   binding_audit_path:(unit -> string) ->
   binding_audit_read_path:(unit -> string) ->
   guild_id_field:guild_id_field ->
   t
+(** Every committed binding change, and a failed audit whose rollback also
+    failed, calls [Gate_connector_announce.changed ~connector_id]. *)
 
 val read_json_file_opt : string -> Yojson.Safe.t option
 val normalize_bindings_json :

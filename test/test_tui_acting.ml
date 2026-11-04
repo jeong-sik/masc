@@ -675,6 +675,7 @@ let test_lane_dataset_rows_are_server_activity () =
       check bool "a committed dataset does not need operator attention" true
         (row.Acting.glyph = Acting.Quiet))
     [ Masc.Workspace_dataset_event.Lanes
+    ; Masc.Workspace_dataset_event.Machine_live { machine = Masc.Machine_lane.Msx }
     ; Masc.Workspace_dataset_event.Lane_addons { instance_id = "quiz-1" }
     ]
 

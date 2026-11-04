@@ -2,9 +2,10 @@
 
     The event is
     [{"type":"workspace_dataset_changed","dataset":<name>,"ts_unix":...}],
-    with ["keeper"] for a dataset that belongs to one Keeper. It goes to the
-    observers of [base_path]'s runtime only and carries no data: a reader that
-    shows the named dataset reads it again from its own path.
+    with the ["keeper"], ["machine"] or ["instance_id"] scope of a dataset that
+    belongs to one such resource. It goes to the observers of [base_path]'s
+    runtime only and carries no dataset rows: a reader that shows the named
+    dataset reads it again from its own path.
 
     The server announces and the TUI decodes through this one type, so a
     dataset added here is a match arm both sides must handle. *)
@@ -79,6 +80,9 @@ type dataset =
       (** The operator Lane inventory, [GET /api/v1/lanes]: the displayed
           instance phase, presence, revision, application, or browser/machine
           summary changed. *)
+  | Machine_live of { machine : Machine_lane.t }
+      (** A machine worker committed a new frame observation. No frame bytes
+          travel in this event. *)
   | Memory_health of { keeper : string }
       (** The Memory health projection of [keeper] changed after a durable
           memory, continuity or progress write. *)
@@ -92,8 +96,8 @@ val dataset_name : dataset -> string
 (** The ["dataset"] value the event carries. *)
 
 val of_fields : (string * Yojson.Safe.t) list -> (dataset, string) result
-(** Read the dataset an event's members name. A missing or unknown name, and
-    a Keeper dataset without a non-empty ["keeper"], are errors. *)
+(** Read the dataset an event's members name. A missing or unknown name is an
+    error, as are a missing or empty resource scope and an unknown machine. *)
 
 val announce : base_path:string -> dataset -> unit
 (** Broadcast the event to [base_path]'s runtime observers. A store calls this

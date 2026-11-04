@@ -8,6 +8,7 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
   | Addons (Some open_id), Masc.Workspace_dataset_event.Lane_addons { instance_id }
     when String.equal open_id instance_id -> Read_addon instance_id
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Lanes
+    | Masc.Workspace_dataset_event.Machine_live _
     | Masc.Workspace_dataset_event.Memory_health _
     | Masc.Workspace_dataset_event.Lane_addons _) -> Ignore
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Repositories

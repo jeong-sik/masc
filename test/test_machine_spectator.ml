@@ -8,7 +8,8 @@ let test_ticker_stops_with_the_observer_stream () = with_env (fun env sw ->
     (fun ~config:_ ~machine:_ -> incr calls; Ok ())
     (fun () ->
       let stop_promise, stop = Eio.Promise.create () in
-      Machine_spectator.start ~sw ~stop_promise ~machine:Masc.Machine_lane.Msx
+      Machine_spectator.start ~sw ~clock:(Eio.Stdenv.clock env) ~stop_promise
+        ~machine:Masc.Machine_lane.Msx
         ~config:(Masc.Workspace.default_config "/fixture");
       Eio.Time.sleep (Eio.Stdenv.clock env) 0.45;
       check bool "the active spectator advanced the machine" true (!calls > 0);

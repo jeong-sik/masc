@@ -147,6 +147,7 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
          | Masc.Workspace_dataset_event.Skill_activations { keeper }
          | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Machine_live { machine } -> ":" ^ Masc.Machine_lane.to_wire machine
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -886,6 +887,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -968,6 +970,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -998,6 +1001,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
           | None -> true)
      | _ -> false);
@@ -1526,17 +1530,25 @@ let test_memory_health_pushes_require_their_keeper () =
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n" ]
 
 let test_machine_live_pushes_scope_the_machine () =
-  let fields = [ "type", `String "workspace_dataset_changed"
-               ; "dataset", `String "machine_live"; "machine", `String "msx" ] in
-  (match Masc.Workspace_dataset_event.of_fields fields with
-   | Ok (Masc.Workspace_dataset_event.Machine_live { machine }) ->
-       check string "only the selected machine is named" "msx"
-         (Masc.Machine_lane.to_wire machine)
-   | Ok _ | Error _ -> fail "a machine push was not decoded");
-  match decode_all [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\"}\n\n" ] with
-  | [ Observer.Undecodable _ ] -> ()
-  | decoded -> failf "a machine push without a machine was read: %s"
-      (String.concat ", " (List.map summary decoded))
+  List.iter
+    (fun expected ->
+      let fields = [ "type", `String "workspace_dataset_changed"
+                   ; "dataset", `String "machine_live"; "machine", `String expected ] in
+      match Masc.Workspace_dataset_event.of_fields fields with
+      | Ok (Masc.Workspace_dataset_event.Machine_live { machine }) ->
+          check string "only the selected machine is named" expected
+            (Masc.Machine_lane.to_wire machine)
+      | Ok _ | Error _ -> fail "a machine push was not decoded")
+    [ "msx"; "dos" ];
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "a machine push without a valid machine was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"other\"}\n\n" ]
 
 let () =
   run "tui observer"
@@ -1593,6 +1605,8 @@ let () =
             test_lane_inventory_pushes_decode_with_their_scope
         ; test_case "Memory health pushes require their Keeper" `Quick
             test_memory_health_pushes_require_their_keeper
+        ; test_case "Machine live pushes name their machine" `Quick
+            test_machine_live_pushes_scope_the_machine
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
         ; test_case "only a confirmation change reads the confirmations" `Quick

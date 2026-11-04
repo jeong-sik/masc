@@ -742,6 +742,12 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    change made while the write was in flight is not overwritten. *)
 let notify_commit m e =
   notify_inventory m Observation_commit;
+  if List.mem "masc_msx_screen" e.package.exported_tools then
+    Workspace_dataset_event.announce ~base_path:m.base_path
+      (Workspace_dataset_event.Machine_live { machine = Machine_lane.Msx });
+  if List.mem "masc_dos_screen" e.package.exported_tools then
+    Workspace_dataset_event.announce ~base_path:m.base_path
+      (Workspace_dataset_event.Machine_live { machine = Machine_lane.Dos });
   Workspace_dataset_event.announce ~base_path:m.base_path
     (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
 

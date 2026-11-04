@@ -19,6 +19,7 @@ type dataset =
   | Runtime_probe
   | Runtime_metrics
   | Lanes
+  | Machine_live of { machine : Machine_lane.t }
   | Memory_health of { keeper : string }
   | Lane_addons of { instance_id : string }
 
@@ -40,6 +41,7 @@ let workspace_health_name = "workspace_health"
 let runtime_probe_name = "runtime_probe"
 let runtime_metrics_name = "runtime_metrics"
 let lanes_name = "lanes"
+let machine_live_name = "machine_live"
 let memory_health_name = "memory_health"
 let lane_addons_name = "lane_addons"
 
@@ -62,6 +64,7 @@ let dataset_name = function
   | Runtime_probe -> runtime_probe_name
   | Runtime_metrics -> runtime_metrics_name
   | Lanes -> lanes_name
+  | Machine_live _ -> machine_live_name
   | Memory_health _ -> memory_health_name
   | Lane_addons _ -> lane_addons_name
 ;;
@@ -70,6 +73,7 @@ let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Provider_usage | Provider_standing | Keeper_costs
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
+  | Machine_live { machine } -> [ "machine", `String (Machine_lane.to_wire machine) ]
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
   | Memory_health { keeper }
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
@@ -86,6 +90,13 @@ let instance_of_fields fields =
   match List.assoc_opt "instance_id" fields with
   | Some (`String instance_id) when not (String.equal instance_id "") -> Ok instance_id
   | Some _ | None -> Error (event_type ^ " lane_addons names no instance")
+;;
+
+let machine_of_fields fields =
+  match List.assoc_opt "machine" fields with
+  | Some (`String "msx") -> Ok Machine_lane.Msx
+  | Some (`String "dos") -> Ok Machine_lane.Dos
+  | Some _ | None -> Error (event_type ^ " machine_live names no known machine")
 ;;
 
 let of_fields fields =
@@ -106,6 +117,8 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_probe_name -> Ok Runtime_probe
   | Some (`String name) when String.equal name runtime_metrics_name -> Ok Runtime_metrics
   | Some (`String name) when String.equal name lanes_name -> Ok Lanes
+  | Some (`String name) when String.equal name machine_live_name ->
+    Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
   | Some (`String name) when String.equal name lane_addons_name ->
     Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
   | Some (`String name) when String.equal name memory_health_name ->

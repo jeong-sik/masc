@@ -1,7 +1,7 @@
 ---
 rfc: "0484"
 title: "운영자가 손써야 하는 일은 TUI 꼬리말과 대시보드에 뜬다"
-status: Draft
+status: Accepted
 created: 2026-11-04
 updated: 2026-11-04
 author: vincent + claude
@@ -13,6 +13,8 @@ related: ["0480", "0482", "provider-path-rest", "librarian-absorb-gate"]
 # RFC-0484 — 운영자가 손써야 하는 일은 TUI 꼬리말과 대시보드에 뜬다
 
 ## 0. 요약
+
+- 2026-11-04 vincent 가 이 방향으로 바로 시작하자고 정했다. §5 의 열린 질문은 해당 층에서 정한다.
 
 - 11-04 에 운영자만 풀 수 있는 문제가 두 번 생겼고, 둘 다 로그에만 남았다.
   - TypeSafe 크레딧이 06:45:51Z 에 떨어졌다. HTTP 402 가 6시간 3분 이어졌고, 충전한 12:48:55Z 에야 풀렸다.

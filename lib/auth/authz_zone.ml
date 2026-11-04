@@ -37,12 +37,34 @@ type t =
   ; mutable probe : H.Probe.t
   }
 
-let create ~log ~store (replay : Replay.t) =
-  { log
-  ; store
-  ; current = Atomic.make { state = replay.Replay.state; head = replay.Replay.head }
-  ; probe = replay.Replay.probe
-  }
+type open_error =
+  | Store_not_opened of S.violation S.open_error
+  | Log_not_opened of Authz_state.refusal L.open_error
+  | Not_bootstrapped of { path : string }
+
+let open_error_to_string = function
+  | Store_not_opened error -> S.open_error_to_string S.violation_to_string error
+  | Log_not_opened error -> L.open_error_to_string Authz_state.refusal_to_string error
+  | Not_bootstrapped { path } ->
+    Printf.sprintf "the authorization log %s holds no Fresh_bootstrap" path
+;;
+
+let open_at_start ~log_path ~store_path =
+  match S.open_at_start ~path:store_path ~init:S.State.empty ~step:S.apply with
+  | Error error -> Error (Store_not_opened error)
+  | Ok (store, store_state, (_ : S.recovered)) ->
+    (match L.open_at_start ~path:log_path ~init:(Replay.init store_state) ~step:Replay.step with
+     | Error error -> Error (Log_not_opened error)
+     | Ok (log, (replay : Replay.t), (_ : L.recovered)) ->
+       (match replay.state.Authz_state.mode with
+        | Authz_mode_state.Not_bootstrapped -> Error (Not_bootstrapped { path = log_path })
+        | Authz_mode_state.Multi_account _ | Authz_mode_state.Off _ ->
+          Ok
+            { log
+            ; store
+            ; current = Atomic.make { state = replay.state; head = replay.head }
+            ; probe = replay.probe
+            }))
 ;;
 
 let snapshot t = Atomic.get t.current
@@ -63,21 +85,17 @@ type committed =
 type error =
   | Store_stopped of S.stop
   | Log_stopped of L.stop
-  | Log_moved of
-      { published : R.Hash.t
-      ; found : R.Hash.t
-      }
   | Uncertain of
       { first : H.reason
       ; rest : H.reason list
       }
+  | Record_not_built of R.make_error
+  | Refused of Authz_state.refusal
   | Store_entry_refused of
       { entry : S.entry
       ; violation : S.violation
       }
   | Settlement_not_written of S.append_error
-  | Record_not_built of R.make_error
-  | Refused of Authz_state.refusal
   | Intent_not_written of S.append_error
   | Record_not_appended of L.append_error
   | Answer_not_written of
@@ -95,14 +113,12 @@ let error_to_string = function
   | Store_stopped { S.path; reason } -> Printf.sprintf "the external store %s is stopped: %s" path reason
   | Log_stopped { L.path; reason } ->
     Printf.sprintf "the authorization log %s is stopped: %s" path reason
-  | Log_moved { published; found } ->
-    Printf.sprintf
-      "the log ends at %s and the zone published %s: a record was appended outside the zone"
-      (R.Hash.to_hex found)
-      (R.Hash.to_hex published)
   | Uncertain { first; rest } ->
     "the external store and the log do not agree: "
     ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
+  | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
+    Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
+  | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
   | Store_entry_refused { entry; violation } ->
     Printf.sprintf
       "%s was not written to the external store: %s"
@@ -110,11 +126,10 @@ let error_to_string = function
       (S.violation_to_string violation)
   | Settlement_not_written error ->
     "the intent that an earlier commit left was not closed: " ^ S.append_error_to_string error
-  | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
-    Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
-  | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
   | Intent_not_written error -> "the intent was not written: " ^ S.append_error_to_string error
-  | Record_not_appended error -> "the record was not appended: " ^ L.append_error_to_string error
+  | Record_not_appended error ->
+    "the record was not appended and its intent is in the external store: "
+    ^ L.append_error_to_string error
   | Answer_not_written { record_hash; error } ->
     Printf.sprintf
       "the record %s is in the log and its answer was not written: %s"
@@ -135,68 +150,48 @@ let write_entry t store_writer entry ~not_written =
        Ok ())
 ;;
 
-(* Design 8.2-1: what an earlier entry left is judged before anything is
-   written. *)
-let settle t store_writer =
-  match H.judge t.probe with
-  | H.Mismatch (first, rest) -> Error (Uncertain { first; rest })
-  | H.Absent | H.Matches ->
-    (match H.settle t.probe with
-     | Error first -> Error (Uncertain { first; rest = [] })
-     | Ok settlement ->
-       (match H.settlement_entry settlement with
-        | None -> Ok settlement
-        | Some entry ->
-          let* () =
-            write_entry t store_writer entry ~not_written:(fun error -> Settlement_not_written error)
-          in
-          Ok settlement))
+let write_settlement t store_writer settlement =
+  match H.settlement_entry settlement with
+  | None -> Ok ()
+  | Some entry ->
+    write_entry t store_writer entry ~not_written:(fun error -> Settlement_not_written error)
 ;;
 
-let append t log_writer (record : R.t) state =
-  let* head =
-    Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
-  in
-  t.probe <- H.Probe.add t.probe record;
-  let snapshot = { state; head } in
-  Atomic.set t.current snapshot;
-  Ok snapshot
-;;
-
+(* Only the zone writes through [t.log], so [head] is the head of the published
+   snapshot. *)
 let in_zone t draft store_writer log_writer head =
   let published = Atomic.get t.current in
-  let found = R.head_hash head in
-  if not (R.Hash.equal found (R.head_hash published.head))
-  then Error (Log_moved { published = R.head_hash published.head; found })
-  else
-    let* settled = settle t store_writer in
+  match H.settle_on_entry t.probe with
+  | Error (first, rest) -> Error (Uncertain { first; rest })
+  | Ok settled ->
     let* record =
       Result.map_error
         (fun error -> Record_not_built error)
         (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
     in
-    let* { Authz_state.state; high_water } =
+    let* { Authz_state.state; high_water = change } =
       Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
     in
+    let* () = write_settlement t store_writer settled in
     let record_hash = record.R.hash in
-    match high_water with
-    | None ->
-      let* snapshot = append t log_writer record state in
-      Ok { snapshot; record_hash; settled }
-    | Some change ->
-      let intent =
-        { S.previous_record_hash = found; intended_next_record_digest = record_hash; change }
-      in
-      let* () =
-        write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
-          Intent_not_written error)
-      in
-      let* snapshot = append t log_writer record state in
-      let* () =
-        write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
-          Answer_not_written { record_hash; error })
-      in
-      Ok { snapshot; record_hash; settled }
+    let intent =
+      { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }
+    in
+    let* () =
+      write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
+        Intent_not_written error)
+    in
+    let* head =
+      Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
+    in
+    t.probe <- H.Probe.add t.probe record;
+    let snapshot = { state; head } in
+    Atomic.set t.current snapshot;
+    let* () =
+      write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
+        Answer_not_written { record_hash; error })
+    in
+    Ok { snapshot; record_hash; settled }
 ;;
 
 let commit t draft =

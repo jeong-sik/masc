@@ -165,9 +165,9 @@ let test_mode_events_are_intents () =
          match S.apply state (mode_record event workspace) with
          | Error refusal -> Alcotest.failf "%s refused: %s" (M.event_label event) (S.refusal_to_string refusal)
          | Ok { S.state = next; high_water } ->
-           Alcotest.(check (option change))
+           Alcotest.check change
              (M.event_label event)
-             (Some (Authz_external_store.Change.Mode { event; workspace_id = workspace }))
+             (Authz_external_store.Change.Mode { event; workspace_id = workspace })
              high_water;
            next)
        S.empty

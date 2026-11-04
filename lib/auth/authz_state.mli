@@ -46,11 +46,13 @@ type refusal =
 val refusal_to_string : refusal -> string
 
 (** What one record does to the state. [high_water] is the change that the
-    external store takes as [Intent_pending] before the record is appended, and
-    [None] for a record that is appended without an intent. *)
+    external store takes as [Intent_pending] before the record is appended.
+    Every record that this module accepts has one, because a mode event is the
+    only kind it reads. A layer that reads a kind without one changes this
+    type. *)
 type applied =
   { state : t
-  ; high_water : Authz_external_store.Change.t option
+  ; high_water : Authz_external_store.Change.t
   }
 
 val apply : t -> Authz_record.t -> (applied, refusal) result

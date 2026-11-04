@@ -112,11 +112,17 @@ let check_commit (probe : Probe.t) =
   | Some _ | None -> Ok ()
 ;;
 
-let judge (probe : Probe.t) =
+let settle_on_entry (probe : Probe.t) =
   match check_commit probe, settle probe with
-  | Error first, Error second -> Mismatch (first, [ second ])
-  | Error reason, Ok _ | Ok (), Error reason -> Mismatch (reason, [])
-  | Ok (), Ok settlement ->
+  | Error first, Error second -> Error (first, [ second ])
+  | Error reason, Ok _ | Ok (), Error reason -> Error (reason, [])
+  | Ok (), Ok settlement -> Ok settlement
+;;
+
+let judge (probe : Probe.t) =
+  match settle_on_entry probe with
+  | Error (first, rest) -> Mismatch (first, rest)
+  | Ok settlement ->
     (* The rules of the store let an intent come before the first [Committed]
        only if it is a [Fresh_bootstrap], so with no [Committed] there is no
        event that was answered, and an intent that the log never got is the

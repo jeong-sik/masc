@@ -24,7 +24,7 @@ let refusal_to_string = function
 
 type applied =
   { state : t
-  ; high_water : Authz_external_store.Change.t option
+  ; high_water : Authz_external_store.Change.t
   }
 
 (* A mode event is an intent of the external store (design 8.2). *)
@@ -36,7 +36,7 @@ let mode_event state (record : R.t) =
      | Ok mode ->
        Ok
          { state = { mode }
-         ; high_water = Some (Authz_external_store.Change.Mode { event; workspace_id })
+         ; high_water = Authz_external_store.Change.Mode { event; workspace_id }
          }
      | Error refusal -> Error (Mode refusal))
 ;;

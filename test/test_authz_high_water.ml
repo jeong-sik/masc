@@ -180,7 +180,15 @@ let check_probe label expected probe =
   Alcotest.(check string)
     (label ^ ": what closes the intent")
     expected.settle
-    (settle_name (H.settle probe))
+    (settle_name (H.settle probe));
+  (* A writer that enters its zone gets the reasons of a mismatch, and the
+     settlement otherwise. *)
+  Alcotest.(check string)
+    (label ^ ": on entry to a zone")
+    (if String.starts_with ~prefix:"mismatch" expected.value then expected.value else expected.settle)
+    (match H.settle_on_entry probe with
+     | Error (first, rest) -> value_name (H.Mismatch (first, rest))
+     | Ok settlement -> settlement_name settlement)
 ;;
 
 (* Each case: what the store holds, what the log holds, the value, and what

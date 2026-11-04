@@ -171,17 +171,20 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 - 층은 넷이다(2026-11-05).
   - B3a: 접힌 상태 `Authz_state`(지금은 `mode` 필드 하나)와 mode event 순서 `Authz_mode_state`(상태 3개 × 사건 3개, 9쌍을 모두 적는다). 외부 저장소도 mode 변경을 같은 순서로 받는다. 부팅 판정이 이 `step`으로 로그를 읽는다.
-  - B3b: 쓰기 구역. 구역에 들어갈 때 남은 intent를 판정하고(§8.2 규칙 1~5), append 전에 `step`을 돌리고, `Intent_pending` → append → `Committed` 순서로 쓰고, 새 상태를 불변 값으로 발행한다. `Authz_bootstrap`도 이 구역으로 쓴다.
+  - B3b: 쓰기 구역. 구역에 들어갈 때 남은 intent를 판정하고(§8.2 규칙 1~5), append 전에 `step`을 돌리고, `Intent_pending` → append → `Committed` 순서로 쓰고, 새 상태를 불변 값으로 발행한다. `Authz_bootstrap`과 구역을 어떻게 합칠지는 B3b의 둘째 층이 정한다.
   - B3c: principal과 `External_identity`, CSPRNG `user_id`, Admin_assignment, WorkspaceMembership, 초대, 마지막 Admin 보호, 삭제 사건, 외부 고수위의 epoch 항목. 저마다 `Authz_state` 필드 하나와 `step` 갈래 하나로 들어온다.
   - B3d: CLI bootstrap 하위 명령, 한 번 쓰는 Admin 초대 링크, `Multi_account_not_activatable` 거부를 거두는 일.
 - B3b 쓰기 구역 `Authz_zone`.
   - 구역은 외부 저장소의 구역 안에 로그의 구역을 둔다. `Authz_bootstrap`과 같은 순서다.
-  - 구역에 들어올 때마다 `Authz_high_water.judge`와 `settle`로 남은 intent를 판정한다(§8.2-1). 재기동 때 쓰는 판정과 같은 함수다. `Promote`·`Abort`이면 그 항목을 저장소에 먼저 쓰고, `Mismatch`나 `Error`이면 아무것도 쓰지 않고 거절한다. 판정이 바뀌지 않는 한 다음 진입도 거절한다.
+  - 열기: 구역이 두 파일을 직접 열고, 로그를 `Authz_zone.Replay.step`(`Authz_state.step`과 `Probe.add`)으로 접는다. 손잡이는 구역 밖으로 내놓지 않는다. 그래서 이 프로세스에서는 두 파일에 쓰는 일이 모두 구역을 거친다. 다른 손잡이나 다른 프로세스가 쓰면 파일 끝이 움직이고, 구역이 다음에 그 파일에 쓸 때 `Diverged`로 그 파일을 멈춘다. `Fresh_bootstrap`이 없는 로그는 열지 않는다. 구역이 `Fresh_bootstrap`을 받으면 설치 기록이 가리키지 않는 저장소를 만들 수 있어서다(§8.4).
+  - 구역에 들어올 때마다 `Authz_high_water.settle_on_entry`로 남은 intent를 판정한다(§8.2-1). 재기동 때 쓰는 판정과 같다. 맞지 않으면 아무것도 쓰지 않고 거절한다. 판정이 바뀌지 않는 한 다음 진입도 거절한다.
+  - 다음으로 레코드를 만들고 `Authz_state.apply`를 돌린다. 둘 중 하나가 거절하면 아무것도 쓰지 않는다. 판정이 `Promote`·`Abort`이면 그 항목은 새 `Intent_pending` 바로 앞에 쓴다(§8.2-1은 새 intent를 쓰기 전에 판정하라고 한다).
+  - `apply`는 새 상태와 함께 고수위에 쓸 변경을 돌려준다. 지금 받는 레코드는 mode 사건뿐이라 모두 변경이 있고, 구역은 늘 `Intent_pending` → append → `Committed`로 쓴다. 변경 없는 종류는 그 종류를 읽는 층이 타입을 바꿔 더한다.
   - 판정에 쓰는 `Probe`는 구역이 들고 있다. 로그에 붙인 레코드는 `Probe.add`로, 저장소에 쓴 항목은 새 함수 `Probe.store_moved`로 넣는다. 구역은 intent를 언제나 로그 head에서 쓰고, 저장소는 `Committed`가 intent의 digest(그 append의 첫 레코드)와 같아야 받는다. 그래서 로그를 다시 읽지 않고도 probe가 저장소와 로그를 함께 따라간다.
-  - 레코드 하나를 붙이기 전에 `Authz_state.apply`를 돌린다. `apply`는 새 상태와 함께 고수위에 쓸 변경(mode 사건이면 `Mode`, 아니면 없음)을 돌려준다. 변경이 있으면 `Intent_pending` → append → `Committed`, 없으면 append만 한다.
-  - 상태는 `Atomic`에 든 불변 값 `{ state; head }` 하나로 발행한다. 읽는 쪽은 잠금 없이 읽는다. append가 성공하면 `Committed`를 쓰지 못해도 그 레코드를 넣은 상태를 발행한다. 로그에 있는 레코드를 빼면 다음 `apply`가 틀린 상태 위에서 돈다. 이때 부른 쪽은 실패를 받고, 다음 진입의 `Promote`가 `Committed`를 채운다.
+  - 상태는 `Atomic`에 든 불변 값 `{ state; head }` 하나로 발행한다. 읽는 쪽은 잠금 없이 읽는다. append가 성공하면 `Committed`를 쓰지 못해도 그 레코드를 넣은 상태를 발행한다. 로그에 있는 레코드를 빼면 다음 `apply`가 틀린 상태 위에서 돈다. 이때 부른 쪽은 실패를 받고, 다음 진입의 `Promote`가 `Committed`를 채운다. 그 실패로 저장소가 멈췄으면 다음 기동이 채운다.
+  - 발행한 상태는 파일이 멈췄다는 것을 담지 않는다. `/health`의 `Recovery_store_unavailable`(§8.4)과, 권한 축소 사건의 intent가 남았을 때 바로 세우는 §8.3 차단은 그것을 읽는 층이 구역에서 꺼내 간다.
   - 이 층의 append는 레코드 하나다. 한 레코드에 사건 여럿을 담을지, 여러 레코드를 한 intent로 묶을지는 처음 필요한 층(B3c의 초대 소비)이 정한다. `Authz_log.append`는 중간에 끊기면 앞 레코드만 남을 수 있다.
-  - 열기: 부팅 판정(`Authz_boot_mode_read`)이 로그를 `Authz_zone.Replay.step`(`Authz_state.step`과 `Probe.add`)으로 접으며 연다. 구역은 그 손잡이와 접은 값을 받아 만든다. 로그는 프로세스에서 한 번만 연다. 부팅 판정이 손잡이를 넘기는 일과 `Authz_bootstrap`이 이 구역으로 쓰는 일은 B3b의 둘째 층이다(#48222 병합 뒤).
+  - B3b의 둘째 층(#48222 병합 뒤): 부팅 판정이 구역의 열기를 쓰게 하고, `Authz_bootstrap`과 구역이 같은 쓰기 순서를 나누어 쓰게 한다.
 - 첫 Admin(2026-11-05 사용자 결정): bootstrap 명령이 한 번 쓰는 Admin 초대 링크를 찍는다. 그 링크로 로그인한 사람의 초대 소비, User 생성, Admin 지정은 append 한 번이다. Principal 레코드는 인증된 author만 쓴다(설계 §6.3). `Local_operator`는 초대 기록만 쓴다. 그래서 초대는 Principal과 다른 Kind다.
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.
 - 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, 활성화 전 요청일 때 호스트 로컬 bootstrap만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 호스트 로컬 bootstrap은 서버를 멈추고 돌리는 CLI 하위 명령이고 BasePath lease를 쥔다(2026-11-05 사용자 결정). 그래서 서버와도, 다른 bootstrap과도 동시에 돌지 않는다(B2d의 한계 참고). loopback 엔드포인트는 쓰지 않는다. 터널이 localhost로 들어와서 원격 요청과 구분할 수 없다.

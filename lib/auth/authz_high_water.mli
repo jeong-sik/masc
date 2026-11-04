@@ -170,7 +170,14 @@ val settle : Probe.t -> (settlement, reason) result
     and after a promoted [Fresh_bootstrap] that state holds the workspace. *)
 val settlement_entry : settlement -> Authz_external_store.entry option
 
-(** The value for the store the probe was built from, and the log it was fed. *)
+(** Items 2 to 5, as a writer reads them each time it enters its zone (design
+    8.2, item 1): the settlement when every judgment passes, and otherwise
+    every reason, in the order of {!Mismatch}. *)
+val settle_on_entry : Probe.t -> (settlement, reason * reason list) result
+
+(** The value for the store the probe was built from, and the log it was fed.
+    It is [Mismatch] exactly when {!settle_on_entry} is [Error], with the same
+    reasons. *)
 val judge : Probe.t -> t
 
 val reason_to_string : reason -> string

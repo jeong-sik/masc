@@ -168,10 +168,20 @@ let open_files dirs =
     Alcotest.failf "log not opened: %s" (L.open_error_to_string Authz_state.refusal_to_string error)
 ;;
 
-let zone_of opened = Z.create ~log:opened.log ~store:opened.store opened.replay
-let open_zone dirs = zone_of (open_files dirs)
+let open_error_name : Z.open_error -> string = function
+  | Z.Store_not_opened _ -> "Store_not_opened"
+  | Z.Log_not_opened _ -> "Log_not_opened"
+  | Z.Not_bootstrapped _ -> "Not_bootstrapped"
+;;
 
-(* Writes that a process made outside the zone, or before this one started. *)
+let open_zone dirs =
+  match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+  | Ok zone -> zone
+  | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
+;;
+
+(* Writes through a handle that is not the zone's: another part of this
+   process, or a process that ran before this one. *)
 let write_store_outside opened entries =
   match S.with_writer opened.store (fun writer _state -> S.append writer entries) with
   | Ok (Ok (_ : S.State.t)) -> ()
@@ -280,7 +290,6 @@ let refusal_name : Authz_state.refusal -> string = function
 let error_name : Z.error -> string = function
   | Z.Store_stopped _ -> "Store_stopped"
   | Z.Log_stopped _ -> "Log_stopped"
-  | Z.Log_moved _ -> "Log_moved"
   | Z.Uncertain { first; rest } -> "Uncertain " ^ reasons_name first rest
   | Z.Store_entry_refused _ -> "Store_entry_refused"
   | Z.Settlement_not_written error -> "Settlement_not_written " ^ store_append_error_name error
@@ -333,6 +342,11 @@ let check_snapshot label ~mode ~head (snapshot : Z.snapshot) =
     (label ^ ": head")
     (R.Hash.to_hex head)
     (R.Hash.to_hex (R.head_hash snapshot.Z.head))
+;;
+
+let check_judgment label dirs expected =
+  let opened = open_files dirs in
+  Alcotest.(check string) label expected (judgment_name (H.judge opened.replay.Z.Replay.probe))
 ;;
 
 (* What a restart reads from both files: the mode, the head, and the judgment
@@ -416,18 +430,16 @@ let refused_records_write_nothing () =
     ignore (check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash : opened))
 ;;
 
-(* The zone of the log is in this process, so only a write through the same
-   handle outside the zone moves the head it sees. *)
-let a_record_past_the_published_head_is_refused () =
+(* A zone over a log without a bootstrap would take a [Fresh_bootstrap] and
+   create a store that no install record names. *)
+let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
-    ignore (bootstrap dirs : B.completed);
-    let opened = open_files dirs in
-    let zone = zone_of opened in
-    let head = opened.replay.Z.Replay.head in
-    append_log_outside opened [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
-    let before = files dirs in
-    check_error "a commit after the handle moved" "Log_moved" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
-    check_files "nothing more was written" before dirs)
+    Unix.mkdir (Filename.dirname dirs.store_file) 0o700;
+    (match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+     | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened over no log"
+     | Error error -> Alcotest.(check string) "the refusal" "Not_bootstrapped" (open_error_name error));
+    Alcotest.(check bool) "no store file" false (Sys.file_exists dirs.store_file);
+    Alcotest.(check bool) "no log file" false (Sys.file_exists (log_file dirs)))
 ;;
 
 (* ---- failures ---- *)
@@ -473,7 +485,23 @@ let a_locked_log_leaves_an_intent_that_the_next_commit_aborts () =
       ~pending:(Some left)
       ~last_committed:completed.B.record_hash
       ~aborted:[];
-    let next = commit_ok zone (mode_draft ~at_ms:(at_ms + 2) M.Off) in
+    let after_failure = files dirs in
+    (* The intent stays until a commit writes an intent after it. *)
+    check_error
+      "a refused commit with an intent left"
+      "Refused Mode"
+      zone
+      (mode_draft ~at_ms:(at_ms + 2) M.Reactivate);
+    check_files "the refused commit wrote nothing" after_failure dirs;
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path dirs.store_file) (fun release ->
+      check_error
+        "a commit while another process holds the store"
+        "Settlement_not_written Write_locked"
+        zone
+        (mode_draft ~at_ms:(at_ms + 3) M.Off);
+      release ());
+    check_files "the settlement that failed wrote nothing" after_failure dirs;
+    let next = commit_ok zone (mode_draft ~at_ms:(at_ms + 4) M.Off) in
     check_settled "the next commit gives the intent up first" ("Abort " ^ intent_name left) next;
     let opened = check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash in
     check_store "a restart" opened ~pending:None ~last_committed:next.Z.record_hash ~aborted:[ left ])
@@ -500,6 +528,62 @@ let a_failed_store_write_stops_every_commit () =
     check_error "the next commit" "Store_stopped" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
     check_files "the next commit wrote nothing" before dirs;
     ignore (check_restart "a restart" dirs ~mode:on ~head:completed.B.record_hash : opened))
+;;
+
+(* The cases below write through a handle of their own, which moves the end of
+   the file under the handle of the zone. *)
+let another_handle_on_the_log_stops_the_log () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    let draft = mode_draft ~at_ms:(at_ms + 2) M.Off in
+    let left = intent_of ~head draft S.Change.Off in
+    check_error "a commit after the end of the log moved" "Record_not_appended Diverged" zone draft;
+    check_snapshot "the published state" ~mode:on ~head:(R.head_hash head) (Z.snapshot zone);
+    let before = files dirs in
+    check_error "the next commit" "Log_stopped" zone (mode_draft ~at_ms:(at_ms + 3) M.Off);
+    check_files "the next commit wrote nothing" before dirs;
+    let opened = open_files dirs in
+    Alcotest.(check (option string))
+      "the store keeps the intent"
+      (Some (intent_name left))
+      (Option.map intent_name (S.State.pending opened.store_state));
+    check_judgment "a restart" dirs "Mismatch Digest_differs")
+;;
+
+(* Answers for two records that the log does not hold, which the store takes
+   because they follow its own rules. *)
+let another_handle_on_the_store_stops_the_store () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    let off_draft = mode_draft ~at_ms:(at_ms + 1) M.Off in
+    let off_intent = intent_of ~head off_draft S.Change.Off in
+    let after_off = R.head_after (record_at ~head off_draft) in
+    let on_intent = intent_of ~head:after_off (mode_draft ~at_ms:(at_ms + 2) M.Reactivate) S.Change.Reactivate in
+    write_store_outside
+      other
+      [ S.Intent_pending off_intent
+      ; S.Committed { record_hash = off_intent.S.intended_next_record_digest }
+      ; S.Intent_pending on_intent
+      ; S.Committed { record_hash = on_intent.S.intended_next_record_digest }
+      ];
+    check_judgment "what the files say" dirs "Mismatch Commit_not_in_log";
+    let before = files dirs in
+    check_error
+      "a commit after the end of the store moved"
+      "Intent_not_written Diverged"
+      zone
+      (mode_draft ~at_ms:(at_ms + 3) M.Off);
+    check_files "nothing was written" before dirs;
+    check_error "the next commit" "Store_stopped" zone (mode_draft ~at_ms:(at_ms + 4) M.Off);
+    check_files "the next commit wrote nothing" before dirs;
+    check_judgment "a restart" dirs "Mismatch Commit_not_in_log")
 ;;
 
 (* ---- what an earlier process left ---- *)
@@ -568,9 +652,9 @@ let () =
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing
         ; Alcotest.test_case
-            "a record past the published head is refused"
+            "the zone opens only a bootstrapped log"
             `Quick
-            a_record_past_the_published_head_is_refused
+            the_zone_opens_only_a_bootstrapped_log
         ] )
     ; ( "failures"
       , [ Alcotest.test_case
@@ -585,6 +669,14 @@ let () =
             "a failed store write stops every commit"
             `Quick
             a_failed_store_write_stops_every_commit
+        ; Alcotest.test_case
+            "another handle on the log stops the log"
+            `Quick
+            another_handle_on_the_log_stops_the_log
+        ; Alcotest.test_case
+            "another handle on the store stops the store"
+            `Quick
+            another_handle_on_the_store_stops_the_store
         ] )
     ; ( "earlier process"
       , [ Alcotest.test_case

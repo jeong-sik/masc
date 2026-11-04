@@ -36,7 +36,7 @@ let stopped label expected = function
 let refused label decoded = check bool label true (Result.is_error decoded)
 let not_released index answer = `Unconfirmed (Rel.Step_not_released {index;answer})
 (* [None] is the one answer that releases. *)
-let kind_of = function Rel.Receipt_without_dialog|Rel.Native_window_tail _ -> None | Rel.Unreleased kind -> Some kind
+let kind_of = function Rel.Receipt_without_dialog|Rel.Native_window_tail _|Rel.Refused_before_press _ -> None | Rel.Unreleased kind -> Some kind
 (* The only way to get a releasing answer is to read a receipt the SDK declares. *)
 let clean = Rel.answer_of_json (obj [])
 (* Receipts that release nothing, with the kind the decoder must name for each. *)
@@ -623,6 +623,35 @@ let release_is_judged_from_declared_answers () =
     check bool "one unreleased answer withholds the release" true
       (seen_input (Rel.judge [0,answer])=not_released 0 kind))
     [Rel.Receipt_with_dialog;Rel.Void_answer;Rel.Undeclared_answer;Rel.Never_returned]
+(* An SDK error is a refusal before the press only when its declared name and kind say so. *)
+let a_refusal_before_the_press_holds_nothing () =
+  let refusal kind = obj ["name",str "ElementResolutionError";"kind",str kind] in
+  let refused gesture value = match Rel.answer_of_refusal gesture value with
+    | Rel.Refused_before_press resolution -> Some resolution
+    | Rel.Receipt_without_dialog | Rel.Native_window_tail _ | Rel.Unreleased _ -> None in
+  List.iter (fun gesture ->
+    check bool "a permanent target refusal is read" true (refused gesture (refusal "permanent")=Some Rel.Permanent);
+    check bool "a transient target refusal is read" true (refused gesture (refusal "transient")=Some Rel.Transient))
+    [Rel.Click;Rel.Double_click;Rel.Drag_and_drop];
+  List.iter (fun (label,value) ->
+    check bool (label ^ " is no answer") true
+      (Rel.answer_of_refusal Rel.Click value=Rel.of_unreleased Rel.Never_returned))
+    ["another error name",obj ["name",str "TimeoutError";"kind",str "transient"];
+     "an undeclared kind",obj ["name",str "ElementResolutionError";"kind",str "fatal"];
+     "a missing kind",obj ["name",str "ElementResolutionError";"kind",`Null];
+     "an extra member",obj ["name",str "ElementResolutionError";"kind",str "permanent";"message",str "x"];
+     "a repeated member",`Assoc ["name",str "ElementResolutionError";"name",str "ElementResolutionError"];
+     "no error object",`Null];
+  let permanent=Rel.answer_of_refusal Rel.Click (refusal "permanent") in
+  check bool "a lone refusal leaves nothing to release" true (seen_input (Rel.judge [0,permanent])=`No_hold);
+  check bool "a refusal adds no evidence beside released steps" true
+    (seen_input (Rel.judge [0,clean;1,permanent])=`Released [0]);
+  check bool "a refusal does not hide a later unreleased step" true
+    (seen_input (Rel.judge [0,permanent;1,Rel.of_unreleased Rel.Void_answer])=not_released 1 Rel.Void_answer);
+  check bool "a refusal beside a receipt for the same step is contradictory" true
+    (seen_input (Rel.judge [0,permanent;0,clean])=not_released 0 Rel.Conflicting_evidence);
+  check bool "a receipt beside a refusal for the same step is contradictory" true
+    (seen_input (Rel.judge [0,clean;0,permanent])=not_released 0 Rel.Conflicting_evidence)
 (* A failed step can be reported twice: by its receipt and by the failure label that names a dialog. *)
 let a_step_answered_twice_counts_once () =
   let dialog=Rel.of_unreleased Rel.Receipt_with_dialog in
@@ -857,6 +886,7 @@ let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
   test_case "an initial URL failure holds nothing" `Quick an_initial_url_failure_holds_nothing;
   test_case "a workflow that never held input has nothing to release" `Quick a_workflow_that_never_held_input_has_nothing_to_release;
   test_case "release is judged from the answers the SDK declared" `Quick release_is_judged_from_declared_answers;
+  test_case "a refusal before the press holds nothing" `Quick a_refusal_before_the_press_holds_nothing;
   test_case "a step answered twice counts once" `Quick a_step_answered_twice_counts_once;
   test_case "a failure label must match its position" `Quick a_failure_label_must_match_its_position;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

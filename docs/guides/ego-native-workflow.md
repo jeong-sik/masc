@@ -640,6 +640,36 @@ view unreadable while the original row remains available. Component and normal
 panel integration checks cover this display; real browser rendering remains
 unverified.
 
+## A click the SDK refused before its press
+
+**What.** `click`, `double_click` and selector `drag_to` resolve their target
+before the first press. When the SDK cannot resolve it (several matches, no
+match, hidden, disabled, covered by another element, a stale ref), it throws
+`ElementResolutionError` with a declared `kind`, `transient` or `permanent`.
+The peer reads that name and kind as data and judges them in
+`Browser_ego_release`; the message text is not read. Such a gesture holds no
+key or button, so the input keeps the readiness it had and the Space is not
+locked.
+
+**What the caller sees.** The command still fails, with the SDK's message, an
+uncertain effect (the SDK may have scrolled the target, and a double click may
+have finished its first click) and two fields in the receipt:
+`refusedBeforePress: {"kind": "permanent"}` (or `"transient"`) and
+`inputReadiness`. A `permanent` refusal does not change by waiting; read the
+page again and pick a narrower target, such as a snapshot ref. A `transient`
+one may resolve once the page settles.
+
+**What still locks.** Any other error, a missing or malformed name or kind, and
+`press` (its key goes out outside the SDK input tracking) keep the earlier rule:
+the input stays `release_uncertain` until it is released.
+
+**Evidence.** The error class is `src/element-resolver.ts` lines 28-35 at
+`citrolabs/ego-lite@12407167f84a`. On ego-browser 0.6.2.5 (Chromium 156,
+2026-11-04) eleven refusals of these gestures each threw that error with a
+`kind`, the page received no pointer or mouse event, and the next click worked.
+The same probe saw `page.press` throw the same error, which is why `press`
+stays out: the error alone cannot show its key was never sent.
+
 ## Releasing a pending input lock as the owning agent (experimental)
 
 **What.** When an Ego command might have left a native key or button down, the

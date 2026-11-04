@@ -239,6 +239,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     check/reset assertion for this pending input generation and resume the
     same peer. This remains [operator_asserted], not native release proof.
     Answering a dialog, handing off or taking over alone does not reset it.
+    A click, double click or selector drag whose SDK error declares that its
+    target was not resolved ([Browser_ego_release.Refused_before_press]) holds
+    nothing: the input keeps its readiness and the failure, still of uncertain
+    effect, carries [refusedBeforePress] with the SDK's [kind].
     Every result that is a JSON object, and every partial-failure receipt that
     is one, carries [inputReadiness]: [command_settled], [operator_asserted], [keeper_asserted] or
     [release_uncertain]. The tab list is a JSON array when every tab was read,

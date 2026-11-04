@@ -120,6 +120,12 @@ login completion, takeover permission or a model-callable reset action. Every
 Ego result object carries `inputReadiness`: `command_settled`,
 `operator_asserted` after that confirmation, or `release_uncertain` while input
 is still refused. A tab list that comes back as a plain array carries nothing.
+A click, double click or drag whose target the SDK could not resolve fails with
+`refusedBeforePress: {"kind": ...}` and keeps `inputReadiness` as it was: no
+key or button is left down and the next input is admitted. A double click may
+have finished its first click before the refusal. `permanent` means the
+target as written will not resolve; `transient` means it may once the page
+settles.
 After a lost confirmation reply, inspect the original installation and read its
 form if the same worker is still available. Never apply its old confirmation to
 a replacement connection or replay browser input.

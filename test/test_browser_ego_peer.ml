@@ -1165,6 +1165,64 @@ let test_keeper_release_input_unblocks_owned_space () =
   check string "the same peer admits the next gesture" "served" (failure_kind (dispatch peer Live.Page_interact gesture));
   check bool "the clean receipt then settles input" true (Peer.input_status peer=Input.Ready Input.Command_settled)
 
+(* 2026-11-03: a click on text="dev-frontend" matched 8 elements; the SDK threw
+   ElementResolutionError before any press and the Space stayed locked. *)
+let test_a_gesture_refused_before_its_press_keeps_input () =
+  let module Input=Masc.Browser_ego_input in
+  let refusal name kind = answered (obj ["urlBefore",str observed_url;"receipt",`Null;
+    "error",str "Locator text=\"dev-frontend\" matched 8 elements";"thrown",obj ["name",name;"kind",kind]]) in
+  let reply=ref (refusal (str "ElementResolutionError") (str "permanent")) and asked=ref [] in
+  let peer=opened (fun sent ->
+    asked:=sent.step :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> !reply
+    | "space.release_input" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | other -> failf "unexpected refused-gesture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  List.iter (fun (name, kind, action) ->
+    reply := refusal (str "ElementResolutionError") (str kind);
+    (match dispatch peer Live.Page_interact (interact_args action) with
+     | Error (Live.Observed_failure {disposition=Live.Uncertain;receipt;_}) ->
+       check string (name ^ ": the SDK kind is reported") kind (text (field "kind" (field "refusedBeforePress" receipt)));
+       check string (name ^ ": the answer says the input is free") "command_settled" (text (field "inputReadiness" receipt))
+     | Ok _ | Error _ -> fail (name ^ ": a refused gesture must be an observed failure with an uncertain effect"));
+    check bool (name ^ ": nothing is pending") true (Peer.input_status peer=Input.Ready Input.Command_settled))
+    ["click","permanent",Lane.Click "#channel";
+     "double click","transient",Lane.Double_click (Lane.Selector "#channel");
+     "drag","permanent",drag];
+  reply := refusal (str "TimeoutError") (str "transient");
+  check string "another SDK error stays unknown" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel"))));
+  check bool "and keeps the input pending" true
+    (match Peer.input_status peer with Input.Uncertain _ -> true | Input.Ready _ -> false);
+  let release_pending label =
+    match Peer.input_status peer with
+    | Input.Ready _ -> fail (label ^ ": no input was pending")
+    | Input.Uncertain pending ->
+      (match dispatch peer Live.Page_act (obj ["action",str "release_input";
+          "generation",str pending.generation;"confirmation",str "checked_and_released"]) with
+       | Ok _ -> pending
+       | Error _ -> fail (label ^ ": the owning agent could not release its lock")) in
+  let released=release_pending "after the unknown error" in
+  reply := refusal (str "ElementResolutionError") (str "permanent");
+  ignore (dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel")));
+  check bool "a refusal keeps the earlier Keeper release and its generation" true
+    (match Peer.input_status peer with
+     | Input.Ready (Input.Keeper_released {pending=kept;_}) -> kept.generation=released.generation
+     | Input.Ready (Input.Command_settled | Input.Operator_reset_asserted _) | Input.Uncertain _ -> false);
+  List.iter (fun (label, frame) ->
+    reply := answered (obj frame);
+    check string (label ^ " stays unknown") "unknown"
+      (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel"))));
+    ignore (release_pending label))
+    ["a frame without the thrown error",
+       ["urlBefore",str observed_url;"receipt",`Null;"error",str "native click failed"];
+     "a refusal beside a receipt",
+       ["urlBefore",str observed_url;"receipt",obj [];"error",str "native click failed";
+        "thrown",obj ["name",str "ElementResolutionError";"kind",str "permanent"]]]
+
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "owned-upload.txt" in
@@ -3929,6 +3987,7 @@ let () =
       test_case "target gestures settle only from their declared receipt" `Quick test_a_target_gesture_settles_only_from_the_receipt_it_returns;
       test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;
       test_case "keeper release unblocks an owned Space" `Quick test_keeper_release_input_unblocks_owned_space;
+      test_case "a gesture refused before its press keeps input" `Quick test_a_gesture_refused_before_its_press_keeps_input;
       test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

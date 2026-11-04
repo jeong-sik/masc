@@ -132,6 +132,10 @@ native 타이핑 완료 근거를 사용하며, `receipt: null`과 별도 `nativ
 `operator_asserted`는 운영자가 확인했을 뿐 SDK가 확인한 것은 아니라는 뜻이다.
 `release_uncertain`은 해제가 확인되지 않아 추가 입력이 거절되는 중이라는 뜻이다.
 탭 목록이 배열로 오면 이 필드가 없다.
+클릭·더블클릭·드래그의 대상을 SDK가 찾지 못하면 명령은 실패하지만
+`refusedBeforePress: {"kind": ...}`가 붙고 `inputReadiness`는 그대로다.
+눌린 채 남은 키·버튼이 없으니 다음 입력은 받아들여진다. 더블클릭은 거절 전에 첫 번째 클릭을 마쳤을 수 있다.
+`permanent`는 지금 쓴 대상으로는 계속 못 찾는다는 뜻이고, `transient`는 페이지가 안정되면 찾을 수도 있다는 뜻이다.
 
 ## scene/regions의 범위와 변경된 페이지
 

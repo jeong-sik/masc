@@ -36,6 +36,25 @@ let unreadable_values_are_rejected () =
     [ "abc"; ""; "0"; "-1"; "3.5"; "0x10"; "1_000"; " 50 " ]
 ;;
 
+(* A viewer west of Greenwich sends a negative offset; every other number the
+   parser rejects must stay rejected, or a typo would read as a different
+   offset. *)
+let signed_int_reads_both_signs_and_rejects_the_rest () =
+  let read raw = A.signed_int_param ~name:"utc_offset_min" ~default:0 raw in
+  check int_result "absent" (Ok 0) (read None);
+  check int_result "east" (Ok 540) (read (Some "540"));
+  check int_result "west" (Ok (-300)) (read (Some "-300"));
+  check int_result "zero" (Ok 0) (read (Some "0"));
+  List.iter
+    (fun raw ->
+       match read (Some raw) with
+       | Ok v -> failf "utc_offset_min=%S must not read as %d" raw v
+       | Error msg ->
+         check bool ("names the parameter: " ^ msg) true
+           (String.length msg > 0))
+    [ "abc"; ""; "-"; "--3"; "+5"; "3.5"; "0x10"; "1_000"; " 5 "; "99999999999999999999" ]
+;;
+
 let () =
   run
     "agent_api_query_params"
@@ -43,6 +62,10 @@ let () =
       , [ test_case "absent uses the default" `Quick absent_uses_the_default
         ; test_case "readable values pass" `Quick readable_values_pass
         ; test_case "unreadable values are rejected" `Quick unreadable_values_are_rejected
+        ; test_case
+            "signed integers read both signs and reject the rest"
+            `Quick
+            signed_int_reads_both_signs_and_rejects_the_rest
         ] )
     ]
 ;;

@@ -1,0 +1,357 @@
+type disposition =
+  | Completed
+  | Deferred
+  | Failed
+
+let disposition_of_string = function
+  | "completed" -> Ok Completed
+  | "deferred" -> Ok Deferred
+  | "failed" -> Ok Failed
+  | other -> Error ("unknown tool metric disposition: " ^ other)
+;;
+
+type width =
+  | Hour
+  | Day
+
+let width_of_string = function
+  | "hour" -> Ok Hour
+  | "day" -> Ok Day
+  | other -> Error (Printf.sprintf "bucket must be hour or day, got %s" other)
+;;
+
+let string_of_width = function
+  | Hour -> "hour"
+  | Day -> "day"
+;;
+
+let seconds_per_minute = Float.to_int Masc_time_constants.minute
+
+let seconds_of_width = function
+  | Hour -> Float.to_int Masc_time_constants.hour
+  | Day -> Float.to_int Masc_time_constants.day
+;;
+
+let minutes_per_hour = 60
+let max_window_days = 31
+let max_window_s = Float.of_int max_window_days *. Masc_time_constants.day
+let max_utc_offset_hours = 14
+let max_utc_offset_min = max_utc_offset_hours * minutes_per_hour
+
+(* Timestamps are turned into whole seconds with [Float.to_int]. Past this
+   bound the conversion stops being exact, so no window may reach it. *)
+let max_timestamp_s = 1e12
+let top_tool_limit = 20
+let median = 0.50
+let tail = 0.95
+
+type window =
+  { since : float
+  ; until : float
+  ; width : width
+  ; utc_offset_s : int
+  ; first_index : int
+  ; bucket_count : int
+  }
+
+(* [numerator / denominator] rounded toward negative infinity. [denominator] is
+   positive. *)
+let floor_div numerator denominator =
+  let quotient = numerator / denominator in
+  if numerator mod denominator < 0 then quotient - 1 else quotient
+;;
+
+(* The number of the bucket that holds [ts] when every bucket is
+   [width_s] seconds wide and the clock runs [utc_offset_s] ahead of UTC. *)
+let bucket_index ~width_s ~utc_offset_s ts =
+  floor_div (Float.to_int (Float.floor ts) + utc_offset_s) width_s
+;;
+
+let window ~since ~until ~width ~utc_offset_min =
+  if not (Float.is_finite since && Float.is_finite until)
+  then Error "window bounds must be finite numbers"
+  else if since < 0.0 || until > max_timestamp_s
+  then Error "window bounds are outside the supported timestamp range"
+  else if until <= since
+  then Error "window must end after it starts"
+  else if until -. since > max_window_s
+  then Error (Printf.sprintf "window is longer than %d days" max_window_days)
+  else if abs utc_offset_min > max_utc_offset_min
+  then Error (Printf.sprintf "utc offset is beyond %d hours" max_utc_offset_hours)
+  else (
+    let width_s = seconds_of_width width in
+    let utc_offset_s = utc_offset_min * seconds_per_minute in
+    let first_index = bucket_index ~width_s ~utc_offset_s since in
+    (* [until] is excluded, so the last bucket is the one of the float just
+       below it. *)
+    let last_index = bucket_index ~width_s ~utc_offset_s (Float.pred until) in
+    Ok
+      { since
+      ; until
+      ; width
+      ; utc_offset_s
+      ; first_index
+      ; bucket_count = last_index - first_index + 1
+      })
+;;
+
+let window_bounds window = window.since, window.until
+
+type sample =
+  { ts : float
+  ; tool_name : string
+  ; disposition : disposition
+  ; duration_ms : float
+  }
+
+(* Durations of one set of calls, kept in a flat float array that doubles when
+   it is full. *)
+module Durations = struct
+  type t =
+    { mutable data : Float.Array.t
+    ; mutable length : int
+    }
+
+  let initial_capacity = 16
+  let create () = { data = Float.Array.make initial_capacity 0.0; length = 0 }
+
+  let add durations value =
+    if durations.length = Float.Array.length durations.data
+    then (
+      let grown = Float.Array.make (2 * durations.length) 0.0 in
+      Float.Array.blit durations.data 0 grown 0 durations.length;
+      durations.data <- grown);
+    Float.Array.set durations.data durations.length value;
+    durations.length <- durations.length + 1
+  ;;
+
+  let sorted durations =
+    let copy = Float.Array.sub durations.data 0 durations.length in
+    Float.Array.sort Float.compare copy;
+    copy
+  ;;
+end
+
+(* The sample at rank [round ((n - 1) * p)], the rule of [Tool_metrics]. *)
+let percentile sorted p =
+  let count = Float.Array.length sorted in
+  if count = 0
+  then None
+  else (
+    let rank = Float.to_int (Float.round (Float.of_int (count - 1) *. p)) in
+    Some (Float.Array.get sorted (max 0 (min (count - 1) rank))))
+;;
+
+type stat =
+  { call_count : int
+  ; failure_count : int
+  ; deferred_count : int
+  ; total_ms : float
+  ; p50_ms : float option
+  ; p95_ms : float option
+  ; max_ms : float option
+  }
+
+type accumulator =
+  { mutable calls : int
+  ; mutable failed : int
+  ; mutable deferred : int
+  ; mutable sum_ms : float
+  ; mutable peak_ms : float
+  ; durations : Durations.t
+  }
+
+let new_accumulator () =
+  { calls = 0
+  ; failed = 0
+  ; deferred = 0
+  ; sum_ms = 0.0
+  ; peak_ms = 0.0
+  ; durations = Durations.create ()
+  }
+;;
+
+let record accumulator (sample : sample) =
+  accumulator.calls <- accumulator.calls + 1;
+  (match sample.disposition with
+   | Completed -> ()
+   | Deferred -> accumulator.deferred <- accumulator.deferred + 1
+   | Failed -> accumulator.failed <- accumulator.failed + 1);
+  accumulator.sum_ms <- accumulator.sum_ms +. sample.duration_ms;
+  if sample.duration_ms > accumulator.peak_ms
+  then accumulator.peak_ms <- sample.duration_ms;
+  Durations.add accumulator.durations sample.duration_ms
+;;
+
+let empty_stat =
+  { call_count = 0
+  ; failure_count = 0
+  ; deferred_count = 0
+  ; total_ms = 0.0
+  ; p50_ms = None
+  ; p95_ms = None
+  ; max_ms = None
+  }
+;;
+
+let stat_of_accumulator accumulator =
+  if accumulator.calls = 0
+  then empty_stat
+  else (
+    let sorted = Durations.sorted accumulator.durations in
+    { call_count = accumulator.calls
+    ; failure_count = accumulator.failed
+    ; deferred_count = accumulator.deferred
+    ; total_ms = accumulator.sum_ms
+    ; p50_ms = percentile sorted median
+    ; p95_ms = percentile sorted tail
+    ; max_ms = Some accumulator.peak_ms
+    })
+;;
+
+type builder =
+  { shape : window
+  ; slots : accumulator array
+  ; per_tool : (string, accumulator) Hashtbl.t
+  ; overall : accumulator
+  }
+
+let builder shape =
+  { shape
+  ; slots = Array.init shape.bucket_count (fun _ -> new_accumulator ())
+  ; per_tool = Hashtbl.create 64
+  ; overall = new_accumulator ()
+  }
+;;
+
+let tool_accumulator builder name =
+  match Hashtbl.find_opt builder.per_tool name with
+  | Some accumulator -> accumulator
+  | None ->
+    let accumulator = new_accumulator () in
+    Hashtbl.replace builder.per_tool name accumulator;
+    accumulator
+;;
+
+let add builder (sample : sample) =
+  let shape = builder.shape in
+  if not (Float.is_finite sample.duration_ms) || sample.duration_ms < 0.0
+  then
+    Error
+      (Printf.sprintf
+         "tool %s has an invalid duration of %g ms"
+         sample.tool_name
+         sample.duration_ms)
+  else if (not (Float.is_finite sample.ts))
+          || sample.ts < shape.since
+          || sample.ts >= shape.until
+  then
+    Error
+      (Printf.sprintf
+         "tool %s has a timestamp of %g, outside the window"
+         sample.tool_name
+         sample.ts)
+  else (
+    let slot =
+      bucket_index
+        ~width_s:(seconds_of_width shape.width)
+        ~utc_offset_s:shape.utc_offset_s
+        sample.ts
+      - shape.first_index
+    in
+    record builder.slots.(slot) sample;
+    record builder.overall sample;
+    record (tool_accumulator builder sample.tool_name) sample;
+    Ok ())
+;;
+
+type bucket =
+  { start : float
+  ; summary : stat
+  }
+
+type tool_usage =
+  { name : string
+  ; usage : stat
+  }
+
+type t =
+  { buckets : bucket list
+  ; total : stat
+  ; top_by_time : tool_usage list
+  }
+
+let finish builder =
+  let shape = builder.shape in
+  let width_s = seconds_of_width shape.width in
+  let buckets =
+    List.init shape.bucket_count (fun slot ->
+      { start = Float.of_int (((shape.first_index + slot) * width_s) - shape.utc_offset_s)
+      ; summary = stat_of_accumulator builder.slots.(slot)
+      })
+  in
+  let longest_first (name_a, (a : accumulator)) (name_b, (b : accumulator)) =
+    match Float.compare b.sum_ms a.sum_ms with
+    | 0 -> String.compare name_a name_b
+    | order -> order
+  in
+  let top_by_time =
+    Hashtbl.fold (fun name accumulator rows -> (name, accumulator) :: rows) builder.per_tool []
+    |> List.sort longest_first
+    |> List.take top_tool_limit
+    |> List.map (fun (name, accumulator) ->
+      { name; usage = stat_of_accumulator accumulator })
+  in
+  { buckets; total = stat_of_accumulator builder.overall; top_by_time }
+;;
+
+let float_or_null = function
+  | None -> `Null
+  | Some value -> `Float value
+;;
+
+let stat_fields stat : (string * Yojson.Safe.t) list =
+  [ "call_count", `Int stat.call_count
+  ; "failure_count", `Int stat.failure_count
+  ; "deferred_count", `Int stat.deferred_count
+  ; "total_ms", `Float stat.total_ms
+  ; "p50_ms", float_or_null stat.p50_ms
+  ; "p95_ms", float_or_null stat.p95_ms
+  ; "max_ms", float_or_null stat.max_ms
+  ]
+;;
+
+let to_json ~window ~generated_at ?tool_name ?(public_names = fun _ -> []) series
+  : Yojson.Safe.t
+  =
+  let bucket_json (bucket : bucket) =
+    `Assoc (("start", `Float bucket.start) :: stat_fields bucket.summary)
+  in
+  let tool_json (tool : tool_usage) =
+    `Assoc
+      (("name", `String tool.name)
+       :: ( "public_names"
+          , `List (List.map (fun name -> `String name) (public_names tool.name)) )
+       :: stat_fields tool.usage)
+  in
+  `Assoc
+    [ "generated_at", `Float generated_at
+    ; ( "source"
+      , `Assoc [ "kind", `String "tool_metrics"; "persistence", `String "sqlite" ] )
+    ; ( "window"
+      , `Assoc
+          [ "since", `Float window.since
+          ; "until", `Float window.until
+          ; "bucket", `String (string_of_width window.width)
+          ; "bucket_seconds", `Int (seconds_of_width window.width)
+          ; "utc_offset_min", `Int (window.utc_offset_s / seconds_per_minute)
+          ] )
+    ; ( "tool"
+      , match tool_name with
+        | None -> `Null
+        | Some name -> `String name )
+    ; "total", `Assoc (stat_fields series.total)
+    ; "buckets", `List (List.map bucket_json series.buckets)
+    ; "top_by_time", `List (List.map tool_json series.top_by_time)
+    ]
+;;

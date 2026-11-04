@@ -85,6 +85,9 @@
   ;; dep, so masc_server lists masc.fusion_core explicitly.
   masc.fusion_core
   masc.run_registry_core
+;; GET /api/v1/tool-metrics/series reads the series from the store directly;
+  ;; dune does not re-export it through the masc dep.
+  masc.tool_metrics_store
   masc.masc_tool_surface
   masc.operator
   masc.voice_bridge_core

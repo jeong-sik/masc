@@ -5,6 +5,7 @@
 
     - [GET /api/v1/agent-activity] — per-agent tool call stats from telemetry
     - [GET /api/v1/tool-metrics] — aggregate tool metrics
+    - [GET /api/v1/tool-metrics/series] — hourly or daily totals of tool calls
     - [GET /api/v1/agent-timeline] — per-agent timeline view
     - [GET /api/v1/agent-relations] — agent-relation graph
 
@@ -26,6 +27,14 @@ val positive_int_param
   -> (int, string) Result.t
 (** Read an absent value as [default], otherwise require positive decimal
     digits. *)
+
+val signed_int_param
+  :  name:string
+  -> default:int
+  -> string option
+  -> (int, string) Result.t
+(** Read an absent value as [default], otherwise require decimal digits with
+    an optional leading [-]. *)
 
 val agent_activity_http_json :
   config:Masc.Workspace.config -> hours:float -> Yojson.Safe.t

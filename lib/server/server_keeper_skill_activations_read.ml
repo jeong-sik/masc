@@ -16,8 +16,18 @@ let usage_rows catalog ledger =
     catalog
 ;;
 
-let usage_json ~(config : Workspace.config) = function
-  | Keeper_skill_activation_projection.Available { ledger; _ } ->
+let activations_json ~config ~keeper_name =
+  `Assoc
+    [ "schema", `String "masc.keeper-skill-activations/v1"
+    ; "keeper", `String keeper_name
+    ; ( "skill_activations"
+      , Keeper_skill_activation_projection.to_yojson
+          (Keeper_skill_activation_projection.resolve ~config ~keeper_name) )
+    ]
+;;
+
+let usage_of_outcome ~(config : Workspace.config) = function
+  | Keeper_skill_activation_projection.Available { ledger; keeper_name = _ } ->
     (match Server_skill_snapshot_runtime.lookup ~base_path:config.base_path with
      | Ok (Server_skill_snapshot_runtime.Ready { snapshot; config_path = _ }) ->
        let catalog, _diagnostics = Keeper_skill_catalog.all_entries_of_snapshot snapshot in
@@ -25,16 +35,23 @@ let usage_json ~(config : Workspace.config) = function
      | Ok (Server_skill_snapshot_runtime.Not_registered | Server_skill_snapshot_runtime.Uninitialized)
      | Error (Server_skill_snapshot_runtime.Invalid_workspace _) ->
        `Assoc [ "state", `String "no_catalog" ])
-  | Keeper_skill_activation_projection.No_session _ | Keeper_skill_activation_projection.Unavailable _ ->
-    `Assoc [ "state", `String "no_ledger" ]
+  | Keeper_skill_activation_projection.No_session { keeper_name = _ } ->
+    `Assoc [ "state", `String "no_session" ]
+  | Keeper_skill_activation_projection.Unavailable { reason; detail; keeper_name = _ } ->
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "reason", `String reason
+      ; "detail", `String detail
+      ]
 ;;
 
-let json ~config ~keeper_name =
-  let outcome = Keeper_skill_activation_projection.resolve ~config ~keeper_name in
+let usage_json ~config ~keeper_name =
   `Assoc
-    [ "schema", `String "masc.keeper-skill-activations/v1"
+    [ "schema", `String "masc.keeper-skill-usage/v1"
     ; "keeper", `String keeper_name
-    ; "skill_activations", Keeper_skill_activation_projection.to_yojson outcome
-    ; "usage", usage_json ~config outcome
+    ; ( "usage"
+      , usage_of_outcome
+          ~config
+          (Keeper_skill_activation_projection.resolve ~config ~keeper_name) )
     ]
 ;;

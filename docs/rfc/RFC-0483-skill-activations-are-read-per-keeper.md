@@ -101,10 +101,10 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 
 ### 4.1 서버: 읽기를 나눈다
 
-- **Keeper 별 활성화 읽기**를 새로 둔다. 이름은 L2 에서 정한다. 예를 들면 `GET /api/v1/keepers/{name}/skill-activations` 다. 그 Keeper 의 지금 trace 장부에서 두 가지를 돌려준다.
-  - 지금 `skill_activations` 의 내용.
-  - 그 Keeper 의 skill 별 사용량 행. 지금 `/api/v1/skills` 의 `usage[]` 에서 그 Keeper 몫이다.
-  - 장부를 못 읽으면 그 이유를 닫힌 상태로 돌려준다. 지금 `usage_coverage.unavailable` 에 모으던 것이 Keeper 별 응답으로 옮겨 간다.
+- **Keeper 별 읽기** 둘을 새로 둔다. 둘 다 그 Keeper 의 지금 trace 장부 하나만 읽는다.
+  - `GET /api/v1/keepers/skill-activations?keeper=<name>`: 지금 `skill_activations` 의 내용.
+  - `GET /api/v1/keepers/skill-usage?keeper=<name>`: 그 Keeper 의 skill 별 사용량 행. 지금 `/api/v1/skills` 의 `usage[]` 에서 그 Keeper 몫이다. `usage.state` 는 `ready`(행), `no_session`(지금 세션 없음), `unavailable`(메타데이터나 장부를 못 읽음, `reason`·`detail`), `no_catalog`(준비된 catalog 없음) 중 하나다. 지금 `usage_coverage.unavailable` 에 모으던 이유가 여기로 옮겨 간다.
+  - 둘을 나눈 이유: Usage pane 은 모든 Keeper 의 사용량을 읽는다. 한 응답에 장부까지 실으면 Keeper 수만큼 장부 전체를 받는다(가장 큰 것이 1,440KB, 1.2). 사용량 행만 받으면 Keeper 하나에 surface 수만큼의 짧은 행이다.
 - `/api/v1/skills` 는 본문만 돌려준다. `usage[]` 와 `usage_coverage` 를 뺀다. 그러면 이 응답은 장부를 읽지 않는다.
 - `/api/v1/dashboard/tools` 는 `skill_activations` 를 뺀다.
 
@@ -122,8 +122,8 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 | pane | 읽기 | 읽는 때 |
 |---|---|---|
 | Usage | `/api/v1/skills` 본문 | 본문 알림(skill catalog 발행 #48059 등). 본문 필드마다 원천은 L3 에서 확인한다 |
-| Usage | Keeper 별 활성화 읽기, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만 |
-| Activations | 고른 Keeper 의 활성화 읽기 | 고른 Keeper 가 바뀔 때, 그 Keeper 의 알림마다 |
+| Usage | `skill-usage`, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만 |
+| Activations | 고른 Keeper 의 `skill-activations` | 고른 Keeper 가 바뀔 때, 그 Keeper 의 알림마다 |
 | Surface, Catalog | `/api/v1/dashboard/tools` | skill catalog 발행, lane add-on export 변경(#48060), runtime config 변경(#48036) |
 
 - Keeper 마다 `Masc_tui_owed_read` 하나를 둔다. 읽는 동안 온 알림은 다음 읽기 한 번으로 합쳐진다. 그래서 Keeper 하나당 진행 중인 읽기 하나와 밀린 읽기 하나를 넘지 않는다. 이건 횟수 제한이 아니라 읽기 빚 모델이 원래 하는 일이다.
@@ -148,7 +148,8 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 |---|---|---|
 | L1 | 장부 쓰기 잠금과 commit observer. 서버가 registry 로 이름을 찾아 `keeper_skill_activations_changed` | 기록한 쓰기마다 observer 가 한 번 불리는지, 쓰지 않은 관찰은 부르지 않는지, trace 가 registry 의 Keeper 이름으로 바뀌는지 |
 | L2 | Keeper 별 활성화 읽기 route | 한 Keeper 장부만 읽는지, 못 읽은 장부를 닫힌 상태로 돌려주는지 |
-| L3 | 소비자를 L2 로 옮기고 옛 필드를 지운다. TUI decoder, 웹 대시보드, harness 스크립트, `/api/v1/skills` 의 `usage[]`·`usage_coverage`, `/api/v1/dashboard/tools` 의 `skill_activations` | 옛 필드 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
+| L3a | Keeper 별 읽기를 `skill-activations` 와 `skill-usage` 로 나눈다 | 사용량 답에 장부가 실리지 않는지, 네 상태를 구분하는지, catalog skill 을 쓴 만큼 행이 나오는지 |
+| L3b~L3f | 소비자를 옮기고 옛 필드를 지운다. TUI Activations(b), TUI Usage(c), 웹 대시보드(d), harness 스크립트(e), `/api/v1/skills` 의 `usage[]`·`usage_coverage` 와 `/api/v1/dashboard/tools` 의 `skill_activations`(f) | 옛 필드 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
 | L4 | TUI 가 4.3 표대로 읽고 Tools 화면의 `launch_tools_load` 2초 분기를 지운다 | 알림 하나에 그 Keeper 읽기 하나, 주기에는 읽지 않는지(PTY) |
 | L5 | Keeper 채팅 기록이 그 Keeper 의 알림에 다시 읽는다 | 채팅을 연 Keeper 의 장부가 바뀌면 채팅 기록 읽기가 한 번 나가는지(PTY) |
 

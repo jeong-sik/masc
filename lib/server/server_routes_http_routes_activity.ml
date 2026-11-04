@@ -408,6 +408,18 @@ let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
   else mutate_and_apply_effects ()
 ;;
 
+(* RFC-0483: a read of one Keeper's skill activation ledger, named by the
+   [keeper] query parameter. *)
+let keeper_ledger_read answer state request reqd =
+  match Server_utils.query_param request "keeper" with
+  | Some keeper_name when not (String.equal (String.trim keeper_name) "") ->
+    let config = Mcp_server.workspace_config state in
+    Http.Response.json_value (answer ~config ~keeper_name:(String.trim keeper_name)) reqd
+  | Some _ | None ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (`Assoc [ "error", `String "keeper is required" ])
+;;
+
 let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
@@ -1597,18 +1609,13 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        )
 
-  (* RFC-0483 L2: one Keeper's activations and usage, from its ledger alone. *)
-  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-activations" (fun state request reqd ->
-         match Server_utils.query_param request "keeper" with
-         | Some keeper_name when not (String.equal (String.trim keeper_name) "") ->
-           let config = Mcp_server.workspace_config state in
-           Http.Response.json_value
-             (Server_keeper_skill_activations_read.json ~config ~keeper_name:(String.trim keeper_name))
-             reqd
-         | Some _ | None ->
-           respond_json_value_with_cors ~status:`Bad_request request reqd
-             (`Assoc [ "error", `String "keeper is required" ])
-       )
+  (* RFC-0483: one Keeper's ledger, read on its own. The activations answer
+     carries the projection; the usage answer carries only the per-surface
+     counts, so a reader of every Keeper does not receive every ledger. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-activations"
+       (keeper_ledger_read Server_keeper_skill_activations_read.activations_json)
+  |> Server_route.get Server_route.Public_read "/api/v1/keepers/skill-usage"
+       (keeper_ledger_read Server_keeper_skill_activations_read.usage_json)
 
   |> Server_route.post (Server_route.Tool { tool_name = "masc_prompt_override" }) "/api/v1/prompts" (fun state request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

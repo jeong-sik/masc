@@ -161,6 +161,12 @@ class AsyncDetailSignalTest(unittest.TestCase):
             step("drain", 1.5)
             self.assertEqual(server.count("away", STATUS_PATH), 0)
             server.set_phase("back")
+            # The Keeper message view holds message_mode, where printable
+            # keys go to the chat composer: ":" alone never opens the
+            # palette there. Escape leaves the message view first while the
+            # detail stays open, then the palette returns to Tools.
+            step("sequence", "\x1b")
+            step("drain", 0.5)
             step("keys", ":")
             step("drain", 0.3)
             step("keys", "go Tools")

@@ -31,7 +31,7 @@ let step outcome = function
 ;;
 
 let fold path ~cursor ~init =
-  Dated_jsonl.fold_file_appended_entries_result path ~cursor ~init ~f:step
+  Dated_jsonl.fold_file_appended_complete_entries_result path ~cursor ~init ~f:step
 ;;
 
 let read ~keepers_dir ~keeper_id =

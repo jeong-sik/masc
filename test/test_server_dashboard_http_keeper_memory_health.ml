@@ -429,6 +429,39 @@ let test_journal_outcome_reads_appended_lines () =
     (Option.is_none removed.last_success_at && Option.is_none removed.last_failure)
 ;;
 
+(* A line still being written, or left by a writer that stopped mid-line, is
+   not read yet. The answer stays what the complete lines say, and the next
+   append, which cuts the fragment first, is read. *)
+let test_journal_outcome_waits_for_a_torn_line () =
+  let base = fresh_dir "masc-memory-health-journal-torn" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "torn-" ^ Filename.basename base in
+  let read () = Masc.Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
+  let failure_kind (outcome : Masc.Keeper_memory_journal_outcome.t) =
+    Option.map Masc.Keeper_memory_os_journal_codec.librarian_failure_kind_to_string outcome.last_failure in
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
+  Current.append_librarian_failure ~keepers_dir ~keeper_id ~now:(test_now +. 60.)
+    ~trace_id:"torn-test" ~kind:Current.Exact_execution_failure ~detail:"refused"
+    ~snapshot_present:true;
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path (fun channel ->
+    Out_channel.output_string channel "{\"kind\":");
+  let check_complete_lines label (outcome : Masc.Keeper_memory_journal_outcome.t) =
+    Alcotest.(check (option (float 0.))) (label ^ ": the commit") (Some test_now)
+      outcome.last_success_at;
+    Alcotest.(check (option string)) (label ^ ": the failure after it")
+      (Some "exact_execution_failure") (failure_kind outcome)
+  in
+  check_complete_lines "first read" (read ());
+  check_complete_lines "read again" (read ());
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact"; fact "another fact" ]);
+  let after_commit = read () in
+  Alcotest.(check (option string)) "the commit after the cut clears the failure" None
+    (failure_kind after_commit);
+  Alcotest.(check bool) "the commit after the cut is read" true
+    (Option.is_some after_commit.last_success_at)
+;;
+
 (* A keeper's own [keeper_memory_write] journals a committed line too. It is
    not a Librarian pass, so it must neither hide the Librarian failure before
    it nor wipe the Librarian success before that. *)
@@ -1266,6 +1299,8 @@ let () =
             test_reports_the_librarian_position_without_a_loop
         ; Alcotest.test_case "journal outcome reads appended lines" `Quick
             test_journal_outcome_reads_appended_lines
+        ; Alcotest.test_case "journal outcome waits for a torn line" `Quick
+            test_journal_outcome_waits_for_a_torn_line
         ; Alcotest.test_case "librarian failure then explicit write" `Quick
             test_librarian_failure_then_explicit_write_keeps_both
         ; Alcotest.test_case "corrupt snapshot visible" `Quick

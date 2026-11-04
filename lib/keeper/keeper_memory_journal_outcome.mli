@@ -8,8 +8,10 @@
     the newest failure.
 
     The answer is folded oldest first, so a read takes only the lines appended
-    since the last read of the same file. A journal that was replaced or shrank
-    is folded again from its start. *)
+    since the last read of the same file. A line still being written, or left
+    unfinished by a writer that stopped, is read once it is complete or once
+    the next append cuts it. A journal that was replaced or shrank is folded
+    again from its start. *)
 
 type t =
   { last_success_at : float option

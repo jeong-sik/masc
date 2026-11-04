@@ -657,7 +657,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml was committed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime.toml commit was attempted" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

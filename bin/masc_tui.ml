@@ -8695,8 +8695,31 @@ let set_pushed_read state source read =
 let owe_pushed_read state source =
   set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
 
-(* Every answer for a pushed source settles its owed read, whichever bundle
-   asked: a failed one waits and reads again. *)
+(* Any surface bundle that reads a pushed source, full or scoped, is the read
+   its owed change waits on. *)
+let note_pushed_reads_started state (needs : Masc_tui_types.surface_needs) =
+  let wanted = Surface_read_order.sources needs in
+  List.iter
+    (fun source ->
+      if List.mem source wanted then
+        set_pushed_read state source (Masc_tui_owed_read.started (pushed_read state source)))
+    Masc_tui_types.pushed_sources
+
+(* The cadence leaves a pushed source out only while it owes nothing. A full
+   bundle supersedes the answers of a scoped read already out, so a source
+   with a read in flight or due rides the cadence's bundle instead of being
+   dropped by it; that bundle then holds the read. *)
+let pushed_read_rides_cadence state source =
+  let read = pushed_read state source in
+  match read with
+  | Masc_tui_owed_read.Reading _ -> true
+  | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ | Masc_tui_owed_read.Settled ->
+      Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+
+(* An answer for a pushed source, whichever bundle asked, moves its owed
+   read: a failure waits and reads again, and a success settles a read that
+   was in flight. A success that lands while a change is still owed leaves it
+   owed, so one more read follows. *)
 let settle_pushed_dataset state dataset ~received =
   let source = Surface_read_order.dataset_source dataset in
   if List.mem source Masc_tui_types.pushed_sources then
@@ -18548,7 +18571,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       | Revalidate -> current
       | Cadence ->
           List.fold_left
-            (fun needs source -> Masc_tui_types.with_source needs source false)
+            (fun needs source ->
+              if pushed_read_rides_cadence state source then needs
+              else Masc_tui_types.with_source needs source false)
             { current with
               needs_board = false; needs_keeper_roster = false
             ; needs_planning = false; needs_overview_goals = false }
@@ -18561,6 +18586,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Full ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
+    note_pushed_reads_started state needs;
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
@@ -19133,6 +19159,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let reads, surface_request = Surface_read_order.dispatch ~kind:Surface_read_order.Navigation ~needs
       ~started_ns:(Mtime_clock.elapsed_ns ()) state.http_surface_reads in
     state.http_surface_reads <- reads;
+    note_pushed_reads_started state needs;
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
@@ -19255,18 +19282,13 @@ let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
         end)
       Masc_tui_types.pushed_sources
   in
-  if due <> [] && server_authority_ready state then begin
-    List.iter
-      (fun source ->
-        set_pushed_read state source (Masc_tui_owed_read.started (pushed_read state source)))
-      due;
+  if due <> [] && server_authority_ready state then
     start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
       ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
       ~needs:
         (List.fold_left
            (fun needs source -> Masc_tui_types.with_source needs source true)
            Masc_tui_types.nothing due)
-  end
 
 (* Runs on every loop iteration. A Board read already in flight is let finish
    first; one that ended unanswered waits and reads again

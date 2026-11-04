@@ -40,9 +40,11 @@ class TransportHandler(owed.ChatHandler):
                 if fail:
                     server.failures_left -= 1
             if fail:
-                sent = self.respond(503, {"error": "transport health unavailable"})
+                sent = self.respond(
+                    503, {"error": "transport health unavailable"}, workspace_receipt=True
+                )
             else:
-                sent = self.respond(200, transport_health())
+                sent = self.respond(200, transport_health(), workspace_receipt=True)
             if sent:
                 server.responded(phase, request.path)
         else:

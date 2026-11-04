@@ -31,7 +31,10 @@ val run_failure_message : run_failure -> string
 (** Runs one script and answers within [window_s] seconds, stopping the run
     when it would not, with everything it wrote, stdout and stderr together,
     once it exited with code 0. The peer gives each command the window the
-    server waits for its answer, less the time to deliver the answer. *)
+    server waits for its answer, less the time to deliver the answer. The
+    script reads [runStopsAt], the epoch millisecond at which the run is
+    stopped (null for a run without a window), so a step can end its own
+    waits first and still answer. *)
 type runner = window_s:float -> string -> (string, run_failure) result
 
 (** A read-only check of an exact configured name. Explicit current user

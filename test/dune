@@ -3037,6 +3037,7 @@
 (include stanzas/test_tui_async_requests_signal.inc)
 (include stanzas/test_tui_pending_confirms_signal.inc)
 (include stanzas/test_tui_workspace_dataset_signal.inc)
+(include stanzas/test_tui_memory_health_signal.inc)
 (include stanzas/test_tui_transport_signal.inc)
 (include stanzas/test_tui_schedules_signal.inc)
 (include stanzas/test_tui_keeper_schedules_signal.inc)

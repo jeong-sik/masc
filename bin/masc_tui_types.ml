@@ -1143,14 +1143,6 @@ let keeper_chat_mode_labels ~yolo
   chat_mode, Option.map gate_mode_reading_word gate_mode
 ;;
 
-(* Usage coverage can be warming independently of the catalog. Missing time
-   therefore means unavailable, not "never used" -- the latter would claim a
-   lifetime fact from a bounded retained ledger. *)
-let skill_last_used_label = function
-  | Some value when String.trim value <> "" -> value
-  | Some _ | None -> "time unavailable"
-;;
-
 type chat_turn_phase =
   | Turn_input
   | Turn_progress
@@ -5754,6 +5746,7 @@ type tools_read_part =
   | Tools_inventory_read
   | Tools_catalog_read
   | Tools_activations_read
+  | Tools_usage_read of string  (** One Keeper's usage, named. *)
   | Tools_async_read
 
 (* What the Activations pane has for the Keeper the Tools screen follows.
@@ -10606,6 +10599,10 @@ type state = {
   mutable tools_error: string option;
   mutable tools_activations: tools_activations option;
   mutable tools_activations_error: string option;
+  (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
+     Keeper that left the roster leaves this list at the next read. *)
+  mutable tools_keeper_usage:
+    (string * (Masc.Tui_decode_tools.keeper_skill_usage, string) result) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -19952,6 +19949,7 @@ let create_state
   tools_error = None;
   tools_activations = None;
   tools_activations_error = None;
+  tools_keeper_usage = [];
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;

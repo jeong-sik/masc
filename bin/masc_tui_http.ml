@@ -3799,6 +3799,12 @@ let fetch_keeper_skill_activations ~(host : string) ~(port : int) ~(keeper : str
   get_json ~host ~port
     ~path:("/api/v1/keepers/skill-activations?keeper=" ^ percent_encode_query_value keeper)
 
+(** Fetch one Keeper's usage of the skill catalog (RFC-0483). *)
+let fetch_keeper_skill_usage ~(host : string) ~(port : int) ~(keeper : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/keepers/skill-usage?keeper=" ^ percent_encode_query_value keeper)
+
 (** Fetch /api/v1/gate/connectors. *)
 let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

@@ -4006,17 +4006,38 @@ let launch_tools_load ?(force = true) state ~mailbox =
   if force || not already_reading then begin
     state.tools_request_generation <- state.tools_request_generation + 1;
     let generation = state.tools_request_generation in
+    (* The Usage pane counts every Keeper's use of the catalog, one Keeper's
+       ledger per read (RFC-0483), so it reads only while it is on screen. *)
+    let usage_keepers =
+      match state.tools_pane with
+      | Tools_usage -> List.map (fun (row : keeper) -> row.k_name) state.keepers
+      | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> []
+    in
     state.tools_read_inflight <- Some
       { tri_generation = generation
       ; tri_keeper = keeper
       ; tri_pending =
-          Tools_inventory_read :: Tools_catalog_read
-          :: (match keeper with
-              | Some _ -> [ Tools_activations_read ]
-              | None -> [])
+          (Tools_inventory_read :: Tools_catalog_read
+           :: (match keeper with
+               | Some _ -> [ Tools_activations_read ]
+               | None -> []))
+          @ List.map (fun name -> Tools_usage_read name) usage_keepers
       };
     let host = server_peer_host in
     let port = state.port in
+    (match usage_keepers with
+     | [] -> ()
+     | _ :: _ ->
+         (* A Keeper that left the roster leaves the readings with it. *)
+         state.tools_keeper_usage <-
+           List.filter (fun (name, _) -> List.mem name usage_keepers) state.tools_keeper_usage;
+         List.iter
+           (fun keeper ->
+              launch_workspace_json_read state ~mailbox
+                ~deliver:(fun result ->
+                  Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }))
+                (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper))
+           usage_keepers);
     launch_workspace_json_read state ~mailbox
       ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation;
         result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result }))
@@ -16456,6 +16477,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_error <- None;
   state.tools_activations <- None;
   state.tools_activations_error <- None;
+  state.tools_keeper_usage <- [];
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
   state.tools_skill_source_picker <- None;
@@ -26667,6 +26689,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_activations <- Some (Activations_read projection);
           state.tools_activations_error <- None
       | Error detail -> state.tools_activations_error <- Some detail)
+  | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
+      settle_tools_read state ~generation (Tools_usage_read keeper);
+      if generation = state.tools_request_generation then
+        state.tools_keeper_usage <-
+          List.sort
+            (fun (left, _) (right, _) -> String.compare left right)
+            ((keeper, result) :: List.remove_assoc keeper state.tools_keeper_usage)
   | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (

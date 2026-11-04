@@ -87,11 +87,72 @@ let test_wire_name_preserved () =
      | [] -> Alcotest.fail "expected one activation")
   | _ -> Alcotest.fail "the Activations pane should hold the ledger"
 
+let usage_reference =
+  match
+    Skill_reference.of_yojson
+      (`Assoc
+         [ "identity", `Assoc [ "source_id", `String "project-masc"; "package_id", `String "masc-capture"; "name", `String "capture-skill" ]
+         ; "content_revision", `String hex64 ])
+  with
+  | Ok reference -> reference
+  | Error _ -> failwith "reference fixture"
+
+let usage_row invocations =
+  { Masc.Tui_decode_tools.ksu_reference = usage_reference
+  ; ksu_invocations = invocations
+  ; ksu_deliveries = invocations
+  ; ksu_actions = 1
+  ; ksu_last_used_at = "2026-11-04T00:00:00Z"
+  }
+
+(* The Usage pane joins each Keeper's own usage answer to the catalog by
+   exact reference (RFC-0483) and counts the ledgers it read. *)
+let test_usage_pane_joins_each_keepers_answer () =
+  let state = tools_state () in
+  state.tools_pane <- Tools_usage;
+  state.skills_catalog <-
+    Some
+      { Masc.Tui_decode_tools.sc_state = Masc.Tui_decode_tools.Skills_ready
+      ; sc_config = None
+      ; sc_sources = []
+      ; sc_surfaces =
+          [ { Masc.Tui_decode_tools.scs_reference = usage_reference
+            ; scs_name = "capture-skill"
+            ; scs_kind = "instruction"
+            ; scs_flow = None
+            } ]
+      ; sc_rejections = []
+      ; sc_shadows = []
+      };
+  state.tools_keeper_usage <-
+    [ "alpha", Ok (Masc.Tui_decode_tools.Keeper_usage_ready [ usage_row 2 ])
+    ; "bravo", Ok (Masc.Tui_decode_tools.Keeper_usage_ready [ usage_row 3 ])
+    ; ( "carol"
+      , Ok
+          (Masc.Tui_decode_tools.Keeper_usage_unavailable
+             { kua_reason = "activation_ledger_unreadable"; kua_detail = "decode failed" }) )
+    ; "idle", Ok Masc.Tui_decode_tools.Keeper_usage_no_session
+    ];
+  let text =
+    Masc_tui_render_tools.tools_display_lines ~cols:160 state
+    |> List.map snd |> String.concat "\n"
+  in
+  let contains needle = String_util.contains_substring text needle in
+  Alcotest.(check bool) "both Keepers' uses are summed" true
+    (contains "Keepers 2 · TRIGGERED 5 · DELIVERED 5 · ACTIONS 2");
+  Alcotest.(check bool) "read ledgers are counted" true
+    (contains "Activation ledgers loaded: 2; unavailable: 1");
+  Alcotest.(check bool) "the unreadable ledger is named" true
+    (contains "Unavailable: carol: activation_ledger_unreadable (decode failed)");
+  Alcotest.(check bool) "each Keeper has a row" true (contains "alpha" && contains "bravo")
+
 let () =
   let open Alcotest in
   run "TUI tools pane labels"
     [ ( "labels"
       , [ test_case "stored action keeps the wire name" `Quick
             test_wire_name_preserved
+        ; test_case "the Usage pane joins each Keeper's answer" `Quick
+            test_usage_pane_joins_each_keepers_answer
         ] )
     ]

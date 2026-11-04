@@ -1749,54 +1749,93 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         ; sc_shadows
         ; sc_sources
         ; sc_config
-        ; sc_usage_coverage
         ; _
         }
       ->
+        (* One surface's usage: a row for each Keeper whose ledger used its
+           exact revision, in Keeper name order. Each Keeper's answer is its
+           own read (RFC-0483). *)
+        let usage_of (surface : Masc.Tui_decode_tools.skills_catalog_surface) =
+          List.filter_map
+            (fun (keeper, reading) ->
+               match reading with
+               | Ok (Masc.Tui_decode_tools.Keeper_usage_ready rows) ->
+                 List.find_opt
+                   (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) ->
+                      Skill_reference.equal row.ksu_reference surface.scs_reference)
+                   rows
+                 |> Option.map (fun row -> keeper, row)
+               | Ok
+                   ( Masc.Tui_decode_tools.Keeper_usage_no_session
+                   | Masc.Tui_decode_tools.Keeper_usage_unavailable _
+                   | Masc.Tui_decode_tools.Keeper_usage_no_catalog )
+               | Error _ -> None)
+            state.tools_keeper_usage
+        in
         let used =
-          List.filter
-            (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
-               surface.scs_usage <> [])
+          List.filter_map
+            (fun surface ->
+               match usage_of surface with
+               | [] -> None
+               | usage -> Some (surface, usage))
             sc_surfaces
         in
-        let total field rows =
-          List.fold_left (fun sum (row : Masc.Tui_decode_tools.skill_usage_row) ->
-            sum + field row) 0 rows
+        let total field usage =
+          List.fold_left
+            (fun sum (_, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) -> sum + field row)
+            0 usage
         in
-        let invocations rows =
-          total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_invocations) rows
+        let invocations usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_invocations) usage
         in
-        let compare_surface (a : Masc.Tui_decode_tools.skills_catalog_surface)
-            (b : Masc.Tui_decode_tools.skills_catalog_surface) =
-          let count = Int.compare (invocations b.scs_usage) (invocations a.scs_usage) in
+        let deliveries usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_deliveries) usage
+        in
+        let actions usage =
+          total (fun (row : Masc.Tui_decode_tools.keeper_skill_usage_row) -> row.ksu_actions) usage
+        in
+        let compare_surface ((a : Masc.Tui_decode_tools.skills_catalog_surface), a_usage)
+            ((b : Masc.Tui_decode_tools.skills_catalog_surface), b_usage) =
+          let count = Int.compare (invocations b_usage) (invocations a_usage) in
           if count <> 0 then count else
           let name = String.compare a.scs_name b.scs_name in
           if name <> 0 then name else String.compare a.scs_kind b.scs_kind
         in
         let used = List.stable_sort compare_surface used in
-        let all_rows = List.concat_map
-          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) -> surface.scs_usage) used in
-        let keepers = all_rows |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_keeper)
-          |> List.sort_uniq String.compare |> List.length in
+        let all_usage = List.concat_map snd used in
+        let keepers = all_usage |> List.map fst |> List.sort_uniq String.compare |> List.length in
+        let ledgers_read, unavailable =
+          List.fold_left
+            (fun (read, unavailable) (keeper, reading) ->
+               match reading with
+               | Ok
+                   ( Masc.Tui_decode_tools.Keeper_usage_ready _
+                   | Masc.Tui_decode_tools.Keeper_usage_no_catalog ) ->
+                 read + 1, unavailable
+               | Ok Masc.Tui_decode_tools.Keeper_usage_no_session -> read, unavailable
+               | Ok (Masc.Tui_decode_tools.Keeper_usage_unavailable { kua_reason; kua_detail }) ->
+                 read, Printf.sprintf "%s: %s (%s)" keeper kua_reason kua_detail :: unavailable
+               | Error detail -> read, Printf.sprintf "%s: %s" keeper detail :: unavailable)
+            (0, []) state.tools_keeper_usage
+        in
+        let unavailable = List.rev unavailable in
         let coverage_lines =
-          match sc_usage_coverage with
-          | None -> [ Theme.warn (), "Activation ledger coverage: unavailable; totals may be partial." ]
-          | Some coverage ->
+          match state.tools_keeper_usage with
+          | [] -> [ Theme.warn (), "Activation ledger coverage: not read yet; totals may be partial." ]
+          | _ :: _ ->
               ( Ansi.dim,
                 Printf.sprintf "Activation ledgers loaded: %d; unavailable: %d"
-                  coverage.suc_ledgers_loaded (List.length coverage.suc_unavailable) )
-              :: (match coverage.suc_unavailable with
+                  ledgers_read (List.length unavailable) )
+              :: (match unavailable with
                   | [] -> []
-                  | _ -> [Theme.warn (), "Partial totals: unavailable ledgers are excluded."])
+                  | _ :: _ -> [Theme.warn (), "Partial totals: unavailable ledgers are excluded."])
         in
         let heading = skill_usage_box ~cols
           ([ Ansi.bold,
              Printf.sprintf "Skill Usage — %d of %d catalog Skills observed"
                (List.length used) (List.length sc_surfaces)
            ; Theme.info (), Printf.sprintf "Keepers %d · TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-               keepers (invocations all_rows)
-               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) all_rows)
-               (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) all_rows)
+               keepers (invocations all_usage) (deliveries all_usage) (actions all_usage)
            ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
            ; Ansi.dim, "ACTIONS: counted per Skill invocation; several invocations may share one tool call"
            ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
@@ -1804,32 +1843,26 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
            ] @ coverage_lines)
         in
         let rows = List.concat_map
-          (fun (surface : Masc.Tui_decode_tools.skills_catalog_surface) ->
-            let keeper_readings = surface.scs_usage
-              |> List.stable_sort
-                   (fun (a : Masc.Tui_decode_tools.skill_usage_row)
-                        (b : Masc.Tui_decode_tools.skill_usage_row) ->
-                      String.compare a.su_keeper b.su_keeper)
-              |> List.map (fun (row : Masc.Tui_decode_tools.skill_usage_row) ->
-                  let last_used = match row.su_last_used_at with
-                    | Some at when String.trim at <> "" -> Terminal_text.single_line at
-                    | Some _ | None -> skill_last_used_label None in
+          (fun ((surface : Masc.Tui_decode_tools.skills_catalog_surface), usage) ->
+            let keeper_readings = usage
+              |> List.map (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
+                  let last_used = Terminal_text.single_line row.ksu_last_used_at in
                   let line = Tool_table.skill_usage_keeper_line
-                    ~keeper:(Terminal_text.single_line row.su_keeper)
-                    ~invocations:row.su_invocations ~deliveries:row.su_deliveries
-                    ~actions:row.su_actions ~last_used in
-                  row, last_used, line)
+                    ~keeper:(Terminal_text.single_line keeper)
+                    ~invocations:row.ksu_invocations ~deliveries:row.ksu_deliveries
+                    ~actions:row.ksu_actions ~last_used in
+                  (keeper, row), last_used, line)
             in
             let fits line = Masc_tui_message_layout.display_width line
               <= Masc_tui_frame.inner_width ~cols - 4 in
             let table_mode = fits Tool_table.skill_usage_keeper_header
               && List.for_all (fun (_, _, line) -> fits line) keeper_readings in
             let keeper_rows = List.concat_map
-              (fun ((row : Masc.Tui_decode_tools.skill_usage_row), last_used, line) ->
+              (fun ((keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)), last_used, line) ->
                   if table_mode then [Ansi.dim, line]
-                  else [ Ansi.bold, Terminal_text.single_line row.su_keeper
+                  else [ Ansi.bold, Terminal_text.single_line keeper
                        ; Ansi.dim, Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-                           row.su_invocations row.su_deliveries row.su_actions
+                           row.ksu_invocations row.ksu_deliveries row.ksu_actions
                        ; Ansi.dim, "LAST USED " ^ last_used ]) keeper_readings
             in
             let flow_rows = match surface.scs_flow with
@@ -1842,19 +1875,16 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
               ([ Ansi.bold, Terminal_text.single_line surface.scs_name ^ "  "
                    ^ Terminal_text.single_line surface.scs_kind
                ; Theme.info (), Printf.sprintf "TRIGGERED %d · DELIVERED %d · ACTIONS %d"
-                   (invocations surface.scs_usage)
-                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) surface.scs_usage)
-                   (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) surface.scs_usage)
+                   (invocations usage) (deliveries usage) (actions usage)
                ]
                @ (if table_mode
                   then [Ansi.dim, Tool_table.skill_usage_keeper_header] else [])
                @ keeper_rows @ flow_rows)) used
         in
-        let unavailable_rows = match sc_usage_coverage with
-          | None -> []
-          | Some coverage -> List.map (fun detail ->
-              Theme.warn (), " Unavailable: " ^ Terminal_text.single_line detail)
-              coverage.suc_unavailable
+        let unavailable_rows =
+          List.map
+            (fun detail -> Theme.warn (), " Unavailable: " ^ Terminal_text.single_line detail)
+            unavailable
         in
         let rejection_rows =
           match sc_rejections with
@@ -1999,12 +2029,21 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         Tools_async_read, "async broker", Option.is_some state.tools_async_observation,
         state.tools_async_observation_error
   in
+  (* The Usage pane draws the catalog and every Keeper's usage read. *)
+  let reads_this_pane pending =
+    match state.tools_pane with
+    | Tools_usage ->
+        (match pending with
+         | Tools_catalog_read | Tools_usage_read _ -> true
+         | Tools_inventory_read | Tools_activations_read | Tools_async_read -> false)
+    | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> pending = part
+  in
   let pending =
     if state.tools_pane = Tools_async then state.tools_async_observation_inflight
     else
       match state.tools_read_inflight with
       | Some request when request.tri_generation = state.tools_request_generation ->
-          List.mem part request.tri_pending
+          List.exists reads_this_pane request.tri_pending
       | Some _ | None -> false
   in
   let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with

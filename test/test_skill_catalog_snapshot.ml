@@ -221,7 +221,6 @@ let test_the_tui_reads_the_shadows_this_snapshot_writes () =
       ; "state", `String "ready"
       ; "snapshot", Snapshot.to_public_yojson snapshot
       ; "surfaces", `List []
-      ; "usage_coverage", `Assoc [ "ledgers_loaded", `Int 0; "unavailable", `List [] ]
       ]
   in
   let sides winner shadowed =

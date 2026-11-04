@@ -139,8 +139,8 @@ let summary = function
       "internal_runs(" ^ Masc.Internal_agent_runs_event.registry_to_wire registry ^ ")"
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
-  | Observer.Event Observer.Verification_requests_changed -> "verification_requests"
-  | Observer.Event Observer.Repositories_changed -> "repositories"
+  | Observer.Event (Observer.Dataset_changed dataset) ->
+      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -798,7 +798,7 @@ let test_a_turns_push_names_its_keeper () =
      | _ -> false)
 
 let verification_frames =
-  [ {|data: {"type":"verification_requests_changed","ts_unix":100.0}
+  [ {|data: {"type":"workspace_dataset_changed","dataset":"verification_requests","ts_unix":100.0}
 
 |}
   ; {|data: {"type":"internal_agent_runs_changed","registry":"verification","ts_unix":100.0}
@@ -817,7 +817,7 @@ let other_run_registry_frames =
 
 let test_a_verification_or_run_push_reads_the_requests () =
   check (list string) "both decode with what changed"
-    [ "verification_requests"; "internal_runs(verification)" ]
+    [ "dataset(verification_requests)"; "internal_runs(verification)" ]
     (List.map summary (decode_all verification_frames));
   let count frames =
     decode_all frames
@@ -868,22 +868,36 @@ let test_a_queue_push_names_its_keeper () =
          ^ String.concat ", " (List.map summary decoded))
 
 let repositories_frame =
-  {|data: {"type":"repositories_changed","ts_unix":100.0}
+  {|data: {"type":"workspace_dataset_changed","dataset":"repositories","ts_unix":100.0}
 
 |}
 
 let test_a_repository_push_reads_the_list () =
-  check (list string) "it decodes without a payload" [ "repositories" ]
+  check (list string) "it decodes with the dataset it names" [ "dataset(repositories)" ]
     (List.map summary (decode_all [ repositories_frame ]));
   let count frames =
     decode_all frames
     |> List.filter (function
-         | Observer.Event event -> Observer.repositories_changed event
+         | Observer.Event event ->
+             (match Observer.dataset_changed event with
+              | Some Masc.Workspace_dataset_event.Repositories -> true
+              | Some Masc.Workspace_dataset_event.Verification_requests | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
   check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
-  check int "a verification or run push does not" 0 (count verification_frames)
+  check int "a verification or run push does not" 0 (count verification_frames);
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a dataset push without a known dataset was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
+    ]
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

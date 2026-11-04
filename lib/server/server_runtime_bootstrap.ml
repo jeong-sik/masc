@@ -566,7 +566,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let config = Mcp_server.workspace_config state in
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
-  Repository_catalog_broadcast.install ();
+  Workspace_dataset_event.install_store_observers ();
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path

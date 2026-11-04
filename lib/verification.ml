@@ -211,7 +211,7 @@ let save_request base_path req =
       forgetting_after path (fun () ->
         Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json))
     in
-    Verification_request_broadcast.changed ~base_path;
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Verification_requests;
     Ok req.id
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -233,7 +233,7 @@ let delete_request base_path req_id =
       forgetting_after path (fun () ->
         Sys.file_exists path && (Sys.remove path; true))
     in
-    if removed then Verification_request_broadcast.changed ~base_path;
+    if removed then Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Verification_requests;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

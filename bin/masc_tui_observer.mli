@@ -277,12 +277,10 @@ type event =
           list or its status passed the staleness deadline. *)
   | Pending_confirm_invalidated
       (** Pending confirmations may have changed in the subscribed workspace. *)
-  | Verification_requests_changed
-      (** The workspace's verification request store was written. A server
-          push with no payload, named by {!Masc.Verification_request_broadcast}. *)
-  | Repositories_changed
-      (** The workspace's repository catalog was written. A server push with
-          no payload, named by {!Masc.Repository_catalog_broadcast}. *)
+  | Dataset_changed of Masc.Workspace_dataset_event.dataset
+      (** One of the workspace's datasets was written. A server push named by
+          {!Masc.Workspace_dataset_event}; it carries the dataset's name and
+          none of its data. *)
   | Keeper_event_queue_changed of { keeper : string }
       (** [keeper]'s event queue, or the reaction record beside it, was
           written. A server push named by
@@ -358,8 +356,8 @@ val tool_modes_changed : event -> bool
 val async_requests_changed : event -> bool
 (** The durable async message requests changed. *)
 
-val repositories_changed : event -> bool
-(** The repository catalog changed. *)
+val dataset_changed : event -> Masc.Workspace_dataset_event.dataset option
+(** The workspace dataset a push names as written. *)
 
 val verification_requests_changed : event -> bool
 (** The verification request store, or the verification run registry a

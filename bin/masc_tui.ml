@@ -7942,6 +7942,12 @@ let owe_verification_read state =
 let owe_repositories_read state =
   state.repositories_owed <- Masc_tui_owed_read.changed state.repositories_owed
 
+(* A dataset push owes a read to the surface that shows that dataset. *)
+let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
+  match dataset with
+  | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
+  | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
+
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
 let owe_async_requests_read state =
@@ -22380,7 +22386,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
       let verification_changed = ref false in
-      let repositories_changed = ref false in
+      let datasets_changed = ref [] in
       let previews_changed = ref [] in
       (* Same shape again for the pane's Changes tab: a tool call the
          selected keeper completed may have written a file, so the tab
@@ -22445,7 +22451,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.async_requests_changed event then async_requests_changed := true;
               if Masc_tui_observer.verification_requests_changed event then
                 verification_changed := true;
-              if Masc_tui_observer.repositories_changed event then repositories_changed := true;
+              (match Masc_tui_observer.dataset_changed event with
+               | Some dataset -> datasets_changed := dataset :: !datasets_changed
+               | None -> ());
               (match Masc_tui_observer.turn_change event with
                | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
@@ -22478,7 +22486,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
                | Masc_tui_observer.Fusion_run_status _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ ->
                    ());
@@ -22531,7 +22539,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_turn_stream_frame _
                | Masc_tui_observer.Keeper_async_requests_changed _ | Masc_tui_observer.Keeper_turn_changed _
-               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
+               | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _
                | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
@@ -22638,7 +22646,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if (!verification_changed || !execution_snapshot_seen) && not !observer_source_loss_seen then
          owe_verification_read state);
-      (if !repositories_changed && not !observer_source_loss_seen then owe_repositories_read state);
+      (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_changed);
       state.keeper_previews_unread <-
         List.sort_uniq String.compare (!previews_changed @ state.keeper_previews_unread);
       (* The pane otherwise reloads only on open and on its own sends — a
@@ -29856,7 +29864,7 @@ Use relative paths for resources already held in the package. -->
           with
           | Ok _ ->
             report_action state "system" (name ^ ": repository added");
-            (* The server announces [repositories_changed] for this write
+            (* The server announces the repositories dataset for this write
                too; owing the read lets that announcement fold into the one
                read the loop launches instead of starting a second. *)
             owe_repositories_read state
@@ -40588,7 +40596,7 @@ Use relative paths for resources already held in the package. -->
          (* The open post re-reads on [notifications/board] and retries a
             failed read ([launch_owed_board_post]). *)
          | Board -> ()
-         (* Verification re-reads on [verification_requests_changed], a run
+         (* Verification re-reads on its dataset push, a run
             registry change and the backlog's execution snapshot, and retries
             a failed read ([launch_owed_verification]). *)
          | Verification -> ()
@@ -40602,7 +40610,7 @@ Use relative paths for resources already held in the package. -->
              (* Fleet memory health is a reading, so the tick refreshes it
                 like the listings above. *)
              launch_memory_health_load state ~mailbox:async_messages
-         (* The repository list re-reads on [repositories_changed] and
+         (* The repository list re-reads on its dataset push and
             retries a failed read ([launch_owed_repositories]). *)
          | Repositories -> ()
          | Connectors ->

@@ -501,8 +501,7 @@ describe('ConnectorStatusPanel', () => {
 
     // Directory-error panel uses informational amber + left stripe so
     // operators don't read the accent-gradient-tinted neutral
-    // background as success. Mirrors the "Sidecar not started" panel
-    // treatment from #8038 for cross-panel consistency.
+    // background as success.
     const dirPanel = container.querySelector('[data-keeper-directory-error-panel]') as HTMLElement | null
     expect(dirPanel).toBeTruthy()
     expect(dirPanel!.className).toContain('bg-[var(--warn-10)]')
@@ -823,9 +822,8 @@ describe('ConnectorStatusPanel', () => {
 
   // RFC-0203 §Phase 3 — Discord runs in-process. When the gateway
   // hasn't connected (e.g. DISCORD_BOT_TOKEN unset), the operator
-  // sees the in-process hint panel instead of the sidecar-off panel,
-  // and there are no Start/Stop buttons or run.sh hints anywhere.
-  it('shows in-process unavailable hint for Discord (no sidecar Start panel, no run.sh)', async () => {
+  // sees the in-process hint panel.
+  it('shows in-process unavailable hint for Discord', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
       connectors: [{
@@ -850,20 +848,10 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    // The new in-process hint replaces the sidecar Start panel.
     expect(text).toContain('서버 내장 게이트웨이')
     expect(text).toContain('DISCORD_BOT_TOKEN')
     expect(text).toContain('재기동')
-    // None of the sidecar-only affordances should appear for discord.
-    expect(text).not.toContain('사이드카 미시작')
-    expect(text).not.toContain('cd sidecars/discord-bot && ./run.sh')
 
-    // The in-process panel uses the same amber tone for visual
-    // consistency with the sidecar-off panel, but it's a different
-    // data attribute so existing sidecar-targeted CSS / hooks don't
-    // accidentally apply.
-    const sidecarPanel = container.querySelector('[data-sidecar-not-started-panel]')
-    expect(sidecarPanel).toBeNull()
     const inProcessPanel = container.querySelector('[data-in-process-not-running-panel]') as HTMLElement | null
     expect(inProcessPanel).toBeTruthy()
     expect(inProcessPanel!.className).toContain('bg-[var(--warn-10)]')
@@ -872,11 +860,6 @@ describe('ConnectorStatusPanel', () => {
     const chip = inProcessPanel!.querySelector('[data-in-process-status-chip]')
     expect(chip).toBeTruthy()
     expect(chip!.textContent).toContain('연결되지 않음')
-
-    // No Start/Stop button, no copyable run.sh command.
-    expect(inProcessPanel!.querySelector('button[aria-label*="start"]')).toBeNull()
-    expect(inProcessPanel!.querySelector('[data-copy-button]')).toBeNull()
-    expect(container.querySelector('[aria-controls="sidecar-log-discord"]')).toBeNull()
   })
 
   it('shows no-keepers empty state when keeper directory is empty', async () => {
@@ -909,8 +892,7 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('설정된 키퍼 없음')
 
-    // Sibling of the "Sidecar not started" panel (#8038). Same fix:
-    // explicit amber override so the parent accent gradient (iMessage
+    // Explicit amber override so the parent accent gradient (iMessage
     // green) doesn't paint a "no keepers" panel as success.
     const emptyPanel = container.querySelector('[data-no-keepers-empty-panel]') as HTMLElement | null
     expect(emptyPanel).toBeTruthy()

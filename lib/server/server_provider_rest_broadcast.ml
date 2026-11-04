@@ -56,16 +56,37 @@ let moved ~before ~after =
 
 (* What the runtime document shows of every runtime's standing, and the
    earliest time it changes with no write. *)
+type standing =
+  | Standing of Yojson.Safe.t
+  | Standing_unbuilt
+
 let read_standing ~config ~now =
   match
     ( Server_dashboard_runtime_resolved_json.standing ~now ~config
     , Server_dashboard_runtime_resolved_json.next_standing_change_at ~now )
   with
-  | standing, next_change -> Some standing, next_change
+  | standing, next_change -> Ok (standing, next_change)
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Log.Server.warn "provider rest broadcast: runtime standing failed: %s" (Printexc.to_string exn);
-    None, None
+    Error ()
+;;
+
+(* A standing that cannot be built is announced once, when it stops building,
+   so a reader looks and draws the failure; while it keeps failing the reader
+   retries on its own backoff. The time the last built standing said it would
+   change still wakes the loop, once, unless it has passed. *)
+let next_standing ~config ~now ~next_change_before =
+  match read_standing ~config ~now with
+  | Ok (document, next_change) -> Standing document, next_change
+  | Error () -> Standing_unbuilt, Option.filter (fun at -> at > now) next_change_before
+;;
+
+let standing_moved ~before ~after =
+  match before, after with
+  | Standing previous, Standing current -> not (Yojson.Safe.equal previous current)
+  | Standing_unbuilt, Standing_unbuilt -> false
+  | Standing _, Standing_unbuilt | Standing_unbuilt, Standing _ -> true
 ;;
 
 let install ~sw ~clock ~(config : Workspace.config) =
@@ -83,29 +104,31 @@ let install ~sw ~clock ~(config : Workspace.config) =
       before, None
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec watch before standing_before =
+    let rec watch before standing_before next_change_before =
       let after, next_release = read ~before in
       List.iter
         (fun keeper_name -> Keeper_row_broadcast.changed ~base_path:config.base_path ~keeper_name)
         (moved ~before ~after);
-      let standing, next_change = read_standing ~config ~now:(Eio.Time.now clock) in
+      let standing, next_change =
+        next_standing ~config ~now:(Eio.Time.now clock) ~next_change_before
+      in
       (* A runtime's quota or rate-limit standing, a reset passing included,
-         changes the runtime document the Usage view reads. A standing that
-         could not be computed is announced too, so a reader looks. *)
-      (match standing, standing_before with
-       | Some standing, Some previous when Yojson.Safe.equal standing previous -> ()
-       | (Some _ | None), (Some _ | None) ->
-         Workspace_dataset_event.announce ~base_path:config.base_path
-           Workspace_dataset_event.Provider_usage);
+         changes the runtime document the Usage view reads. The history does
+         not move with it, so this is announced apart from a usage report. *)
+      if standing_moved ~before:standing_before ~after:standing then
+        Workspace_dataset_event.announce ~base_path:config.base_path
+          Workspace_dataset_event.Provider_standing;
       (match earliest (Option.to_list next_release @ Option.to_list next_change) with
        | None -> Eio.Stream.take wake
        | Some at ->
          Eio.Fiber.first
            (fun () -> Eio.Stream.take wake)
            (fun () -> Eio.Time.sleep_until clock at));
-      watch after standing
+      watch after standing next_change
     in
     let initial, _ = read ~before:[] in
-    let initial_standing, _ = read_standing ~config ~now:(Eio.Time.now clock) in
-    watch initial initial_standing)
+    let initial_standing, initial_next_change =
+      next_standing ~config ~now:(Eio.Time.now clock) ~next_change_before:None
+    in
+    watch initial initial_standing initial_next_change)
 ;;

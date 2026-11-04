@@ -16,7 +16,7 @@ related:
 
 ## 0. 한 줄 요약
 
-Tool 결과는 생성 시점에 64 KB 를 넘을 때만 blob 으로 나간다. 라이브 체크포인트 5,540 개 중 그 임계를 넘는 것은 1 개다. 나머지는 히스토리에 인라인으로 영구히 남아 매 요청마다 재전송된다. 최근 구간 밖의 tool 결과를 전송 사본에서만 기존 blob 마커로 강등해, 같은 바이트 예산으로 더 깊은 히스토리를 보낸다.
+Tool 결과는 생성 시점에 64 KB 를 넘을 때만 blob 으로 나간다. 라이브 체크포인트 5,540 개 중 그 임계를 넘는 것은 1 개다. 나머지는 히스토리에 인라인으로 영구히 남아 매 요청마다 재전송된다. provider 가 요청을 크기로 거절하면, 그 시도의 재전송에서 tool 결과와 완료된 tool 인자를 전송 사본에서만 기존 blob 마커로 강등한다. 그 밖에서는 이미 보낸 메시지를 다시 쓰지 않는다(§3.4.1).
 
 ## 1. 문제 — 실측 (2026-08-05, `trace-1785189111927-00005`)
 
@@ -82,7 +82,7 @@ RFC-0351 §4 타입 수명이 이미 이 줄을 적어놓았다:
 
 ```
 raw = project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages
-demote ~demote_before:(* §3.4.1: 현재 턴의 첫 원자 *) messages
+demote ~demote_before:(* §3.4.1: 크기 거절 뒤에만 거절된 요청의 원자 수, 그 밖에는 0 *) messages
   |> project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes
 ```
 
@@ -94,7 +94,7 @@ demote ~demote_before:(* §3.4.1: 현재 턴의 첫 원자 *) messages
    `api_common.ml:304-321` — `content_blocks = Some blocks` 이면 `content` 는 **직렬화되지 않는다**. 그런 메시지의 `content` 를 마커로 바꾸면 크기가 전혀 줄지 않는데 추정기는 감소를 계상한다. 즉 추정이 **하한**이 되어, window 가 과소평가로 cut 하고 물질화된 요청이 예산을 넘는다. `Some` 은 이미지·문서를 담으며 마커로 표현할 수도 없다.
 2. `Tool_output.decode_from_oas content = Not_marker`
    `Decoded` 는 이미 강등된 것이고, **`Invalid_marker` 는 강등하지 않는다** — 마커 모양인데 파싱에 실패한 payload 를 blob 으로 다시 저장하면 손상을 고착시킨다. 세 경우를 exhaustive match 로 다룬다.
-3. 원자 인덱스 < `demote_before` 경계 (§3.4.1: 현재 턴의 첫 원자. 최후예외 시에는 최신 원자 너머)
+3. 원자 인덱스 < `demote_before` 경계 (§3.4.1: 크기 거절 뒤의 재전송에서만 거절된 요청의 원자 수)
 4. `upper_bound_demoted_bytes msg < measure_message_bytes msg`
 
 판단은 (a) 타입, (b) 정수 비교, (c) 바이트 비교뿐이다. 중요도 점수·문자열 분류·휴리스틱 임계값 없음 (RFC-0351 §2 원칙 2).
@@ -144,11 +144,38 @@ where saturating_ref = make_artifact_ref
 
 따라서 demotion 경계는 원문 cut이 움직일 때만 움직인다. 양자화 cut이 60으로 유지되는 동안 새 turn을 붙여도 같은 60개만 마커이고, 60 → 120으로 뛰는 순간 새 60개가 바뀌지만 그 원자들은 원문 요청에서도 바로 그 jump에 탈락한다. demotion이 prompt-cache 변경 빈도를 늘리지 않는다. exact cut fallback에서도 동일하다. raw cut이 매 turn 움직이는 상황에서는 demotion도 움직이지만, 원문 prefix가 이미 같은 빈도로 움직인다.
 
-### 3.4.1 개정 — 경계는 현재 턴이다 (#28739), 최후예외 하나 (#28845)
+### 3.4.1 개정 — 이미 보낸 메시지는 크기 거절 뒤에만 강등한다
 
-구현은 위 원문-cut 고정에서 **현재 턴의 첫 원자** 경계(RFC-0351 §4 사이클 스코프)로 옮겨졌다 (#28739). 이전 턴의 결과는 이미 receipt/보드 포스트로 보고됐으므로, 원문 cut 이 유지한 이전-턴 원자도 강등 대상이다 — 이것이 §1.1 "예산당 원자 수" 이득의 실제 원천이다. 경계는 턴당 한 번만 움직이므로 위 prompt-cache 논증은 그대로 성립한다.
+agent_core 조립(`Keeper_turn_driver_try_provider`)은 전송 범위 안에서 이미 보낸 메시지를 다시 쓰지 않는다. tool 결과와 완료된 tool 인자(#43873)는 처음 보낸 모양 그대로 다음 요청에도 나간다. official client host 의 인자 투영(`Keeper_official_client_host.plan_arguments`)은 아직 턴 경계(`completed_before`)로 인자를 강등하며, 그 경로의 캐시 영향은 재지 않았다. 전송 사본이 줄어드는 곳은 둘이다.
 
-**최후예외 (#28845)**: 원문 cut 이 `Newest_atom_exceeds_available` 로 거부되는 경우 — 최신 원자가 분할 불가능한 채 히스토리 예산 전체보다 큰 경우 — 에는 고정할 원문 cut 이 존재하지 않는다. 이때 조립은 경계를 최신 원자 너머(`demote_before = atom_count`)로 옮겨 **딱 한 번** 재시도한다. 현재 턴 제외는 이 시도에서만 해제되고, 현재 턴의 tool 결과도 마커로 강등되어 나간다. 강등할 것이 없거나 강등 후에도 초과면 typed 거부가 그대로다 — 재시도 루프가 아니다.
+1. **범위의 앞이 움직일 때.** Librarian 이 완료된 턴을 요약에 넣으면 그 원자는 범위에서 빠진다. 줄어드는 자리와 prefix 가 끊기는 자리가 같다.
+2. **provider 가 요청을 크기로 거절했을 때 (#28845).** 그 시도의 재전송은 거절된 요청 끝까지의 원자 전부를 강등 범위로 잡는다(`demote_before` = 거절된 요청의 원자 수). 완료된 인자도 함께 강등한다. 같은 시도의 뒤 요청은 같은 강등을 유지하므로, 그 시도 안에서 prefix 는 다시 바뀌지 않는다. 강등할 것이 없거나 강등 뒤에도 거절되면 typed 거부가 그대로다. 재시도 루프가 아니다.
+
+강등 경계를 현재 턴의 첫 원자로 두면 경계가 턴마다 움직인다. 직전 턴의 결과와 인자가 다음 턴 첫 요청에서 마커로 바뀌고, 공통 prefix 는 그 자리에서 끊긴다. 턴마다 한 번 움직이는 경계는 턴마다 한 번 캐시를 버린다. 2026-11-03~04 GLM lane 실측(비용 원장 `usage_scope = per_request` 행, `keepers/<name>/provider-inputs` 의 메시지별 sha256):
+
+| 측정 | glm-5.3 | glm-5.3-flash |
+|---|---|---|
+| 같은 `routing_run_id` 안 요청의 캐시 적중 중앙값 | 99.5% (1,525건) | 96.4% (865건) |
+| `routing_run_id` 첫 요청의 캐시 적중 중앙값 | 13~40% (145건) | 0% (200건) |
+| run 첫 요청이 차지한 미적중 입력 토큰 | 86% (37.0M) | 77% (43.1M) |
+
+만료 때문이 아니다. 턴 첫 요청이 직전 요청 끝에서 2분 안에 와도 glm-5.3 중앙값은 14.7%(65건)이고, 같은 run 안에서는 5~10분 간격도 99.6%다. 11-03 04:30Z 이후 턴 전환 186건에서 prefix 가 처음 바뀐 자리:
+
+| 처음 바뀐 자리 | 건수 |
+|---|---|
+| Librarian working state (범위 앞이 움직임) | 57 |
+| System | 41 |
+| 직전 턴 assistant 메시지의 reasoning 제거 | 32 |
+| 도구 정의 (대부분 배포로 설명이 바뀐 1회) | 24 |
+| 직전 턴 tool 결과 강등 | 12 |
+| 직전 턴 완료 인자 강등 | 7 |
+| 그 밖 | 13 |
+
+reasoning 제거 32건 중 25건은 바로 다음 메시지가 tool 결과 강등이다. 하나만 멈추면 prefix 는 한 메시지 뒤에서 끊긴다. 이전 요청 전체를 다시 쓸 수 있었던 것은 5건뿐이다.
+
+비용: 강등하지 않은 이전 턴 결과가 범위에 남아 요청이 커진다. 11-04 Keeper 13명의 마지막 요청에서 16,384 B 이하 마커를 원문 크기로 되돌려 세면 메시지 바이트가 0~153% 늘어난다. 늘어난 부분은 직전 요청과 같은 prefix 라 캐시된다. 범위가 provider 한도에 닿으면 1번이나 2번이 답한다.
+
+reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정한다. GLM 모델 선언이 `preserve-thinking = false` 면 `clear_thinking: true` 가 나가고, replay 정책이 최신 user 턴의 reasoning 만 남긴다(`Reasoning_dialect.apply_clear_thinking_replay_gate`). z.ai 는 Coding Plan endpoint 에서 reasoning 보존을 기본값으로 두고, 그 블록을 고치거나 순서를 바꾸면 캐시 적중이 떨어진다고 적는다(https://docs.z.ai/guides/capabilities/thinking-mode, 2026-11-04 확인). 이 개정의 이득은 선언이 reasoning 을 보존할 때 나온다.
 
 ### 3.5 물질화와 실패
 
@@ -199,7 +226,7 @@ where saturating_ref = make_artifact_ref
 
 필수 회귀 테스트:
 
-1. **prefix 불변식** — 원자를 1 개씩 늘리며 전송 리스트의 *머리*가 `drop` 이 바뀔 때만 바뀌는지. 초안의 "60 원자 경계에서만 바뀌는지"는 **잘못된 불변식**이었다: 오늘 그 경계에서는 prefix 가 아예 안 바뀌므로 버그가 있어도 통과한다.
+1. **prefix 불변식** — 원자를 1 개씩 늘리며 전송 리스트의 *머리*가 `drop` 이 바뀔 때만 바뀌는지. 턴 경계가 움직여도 이미 보낸 tool 결과와 완료 인자가 그대로인지. 초안의 "60 원자 경계에서만 바뀌는지"는 **잘못된 불변식**이었다: 오늘 그 경계에서는 prefix 가 아예 안 바뀌므로 버그가 있어도 통과한다.
 2. **상한 건전성** — 임의 payload(ASCII / 한국어 / 0x00–0xFF 전 범위)에 대해 `upper_bound_demoted_bytes ≥ measure_message_bytes (물질화된 마커 메시지)`.
 3. **`content_blocks = Some` 제외** — 그런 메시지는 강등되지 않고 크기가 변하지 않는다.
 4. **`Invalid_marker` 제외** — 손상된 마커 모양 payload 는 그대로 둔다.
@@ -211,7 +238,7 @@ where saturating_ref = make_artifact_ref
 |---|---|
 | 상한이 하한이 되어 요청 초과 | §3.2 포화 후보를 실제 측정기로 통과. §6 테스트 2 |
 | `content_blocks = Some` 오계상 | §3.1 조건 1. §6 테스트 3 |
-| prompt-cache 회귀 | §3.4 원문 cut anchor. §6 테스트 1. 실패 시 머지 금지 |
+| prompt-cache 회귀 | §3.4.1 크기 거절 뒤에만 강등. §6 테스트 1. 실패 시 머지 금지 |
 | `preview_max` 변경이 상한을 깸 | §3.3 export 후 단일 참조 |
 | `put` 실패 후 조용한 초과 | §3.5 재측정 필수. §6 테스트 5 |
 | 강등 blob GC 후 not-found | §3.6 — 파생 데이터, 다음 강등이 복원. typed not-found 필요 |

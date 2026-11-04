@@ -25,7 +25,8 @@ main and on the stack (#48260). The artifacts were uploaded after that failure.
 ## Environment
 
 - macOS arm64 machine, one terminal per capture, driven through tmux at a fixed
-  size. Sizes: 200x55, 120x35, 80x24, and 320x50 for the footer comparison.
+  size. Sizes: 200x55, 120x35, 80x24, and 320x50 and 400x50 for the footer
+  comparisons.
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -89,10 +90,16 @@ before  … Left / Esc:back  /:find  n / N:next / previous match  q:quit  1-16/1
 after   … Left / Esc:back  r:refresh  Tab:next  q:quit  ?:help  1-16/16
 ```
 
-The Verification (Task Review) list and detail footers are the same before and
-after at 320x50, and its detail footer did not list `/:find` before either.
-The cause was not examined. Layer 4 changes the key table for that surface
-without a visible change in this capture.
+Work, `v` for Task Review, `Enter` for a detail. The footer fitter drops items
+from the back, and at 320x50 it had already cut the Task Review detail footer
+before `/:find` on both sides, so nothing differs there. At 400x50 it does:
+
+```
+before  … a / x:approve / reject  /:find  q:quit  …?
+after   … a / x:approve / reject  r:refresh  q:quit  …?
+```
+
+The Task Review list footer is the same before and after at 320x50 and 400x50.
 
 ### Layer 5: Task history keeps its indentation (#48254)
 

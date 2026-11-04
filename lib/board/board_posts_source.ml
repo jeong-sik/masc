@@ -206,17 +206,19 @@ let read store = match store.posts_source with
           unavailable (Posts_transaction_failed error)
         | Ok receipt ->
           Option.iter (fun error -> add (File_diagnostic { file = Posts_file; error })) receipt.settlement_error;
+          let missing = Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor in
           match reserved_diagnostics !diagnostics with
           | Some (exception_, backtrace) ->
             (* Required post-read physical checks have not happened: stop
-               before any further workspace IO. *)
-            unavailable (Posts_raised { exception_; backtrace })
+               before any further workspace IO. Whether an absence is allowed
+               depends only on this store's history. *)
+            unavailable (if missing && not (missing_allowed store) then Posts_missing
+              else Posts_raised { exception_; backtrace })
           | None ->
             match finish_workspace store before with
             | Error rejection -> add (Workspace_diagnostic rejection);
               unavailable (Posts_workspace_binding_refused rejection)
             | Ok workspace_observation ->
-              let missing = Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor in
               if missing && not (missing_allowed store) then unavailable Posts_missing
               else
                 let () = stage := Decode_posts in

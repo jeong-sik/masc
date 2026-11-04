@@ -35,7 +35,7 @@ let heartbeat config ~agent_name =
       match read_agent config agent_file with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
-          write_json config agent_file (agent_to_yojson updated);
+          Workspace_agent_record.write config agent_file ~previous:(Some agent) updated;
           Heartbeat_updated actual_name
       | Error e ->
           Log.Workspace.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;

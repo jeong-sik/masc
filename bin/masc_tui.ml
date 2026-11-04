@@ -7158,6 +7158,7 @@ let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
   else begin
     state.clients_surface_inflight <- true;
+    state.clients_owed <- Masc_tui_owed_read.started state.clients_owed;
     let host = server_peer_host in
     let port = state.port in
     state.clients_surface_generation <- state.clients_surface_generation + 1;
@@ -8050,6 +8051,13 @@ let owe_tools_read_for_keeper state keeper =
   | Tools_usage -> owe_tools_catalog_read state
   | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ()
 
+(* The Clients roster reads again when a workspace client row changes, when
+   a Keeper registry row or every row changes, on a revalidation, and after a
+   failed read (RFC-0480 §3.4). A heartbeat that only moves a row's
+   [last_seen] is not announced. *)
+let owe_clients_read state =
+  state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -8064,6 +8072,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       Masc_tui_types.owe_identity_login_read state keeper
   | Masc.Workspace_dataset_event.Skill_activations { keeper } -> owe_tools_read_for_keeper state keeper
   | Masc.Workspace_dataset_event.Skill_catalog -> owe_tools_read state
+  | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -17849,6 +17858,23 @@ let launch_owed_tools_async_detail state ~mailbox =
       launch_tools_async_detail state ~mailbox
   end
 
+(* Runs on every loop iteration. Off the Clients surface nothing is owed:
+   arriving reads it. A read in flight is let finish first. *)
+let launch_owed_clients state ~mailbox =
+  match state.view with
+  | Clients ->
+      let reading = state.clients_surface_inflight in
+      let read =
+        if reading then state.clients_owed else Masc_tui_owed_read.abandoned state.clients_owed
+      in
+      state.clients_owed <- read;
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+        launch_clients_load state ~mailbox
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Tools | Board | Planning
+  | Schedules | Verification | Harness | Repositories | Fusion | Code | Changes | Runtime
+  | Config | Resources | Connectors | System_logs | Keepers _ ->
+      state.clients_owed <- Masc_tui_owed_read.settled
+
 let launch_owed_tools state ~mailbox =
   match state.view with
   | Tools ->
@@ -18555,10 +18581,13 @@ let owe_keeper_roster_change state = function
   | Masc_tui_observer.Keeper_row_changed { keeper } ->
       state.keeper_roster_owed <-
         Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed;
+      (* The Clients roster lists the registry's Keepers by phase. *)
+      owe_clients_read state;
       if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
       then owe_tools_surface_read state
   | Masc_tui_observer.Every_row_changed ->
       owe_whole_keeper_roster_read state;
+      owe_clients_read state;
       owe_tools_surface_read state
 
 let fail_keeper_roster_read state read =
@@ -18675,6 +18704,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_tools_read state;
+       owe_clients_read state;
        Option.iter (fun (target : Masc.Tui_decode_async_request.target) ->
            owe_tools_async_detail_read state target.keeper_name)
          state.tools_async_selection;
@@ -27295,6 +27325,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
       if generation = state.clients_surface_generation then (
+        state.clients_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.clients_owed
+           | Error _ -> failed_read state.clients_owed);
         match result with
         | Ok snapshot ->
             state.clients_surface <- Some snapshot;
@@ -32486,6 +32520,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_tools state ~mailbox:async_messages;
       launch_owed_tools_async_detail state ~mailbox:async_messages;
+      launch_owed_clients state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -41118,7 +41153,10 @@ Use relative paths for resources already held in the package. -->
             a failed read ([launch_owed_verification]). *)
          | Verification -> ()
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
-             | Clients -> launch_clients_load state ~mailbox:async_messages
+         (* The roster re-reads when a workspace client row or a Keeper
+            registry row changes and retries a failed read
+            ([launch_owed_clients]). *)
+         | Clients -> ()
          (* Harness re-reads when a verdict or a label is recorded and
             retries a failed read ([launch_owed_harness]). *)
          | Harness -> ()

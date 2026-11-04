@@ -3290,6 +3290,7 @@
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_metrics_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
+(include stanzas/test_workspace_agent_record.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_runtime_config_commit_announce.inc)
 (include stanzas/test_gate_change_notify.inc)

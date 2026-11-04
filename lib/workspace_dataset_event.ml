@@ -11,6 +11,7 @@ type dataset =
   | Keeper_oauth_attempts of { keeper : string }
   | Skill_activations of { keeper : string }
   | Skill_catalog
+  | Clients
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -22,6 +23,7 @@ let connectors_name = "connectors"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
 let skill_activations_name = "skill_activations"
 let skill_catalog_name = "skill_catalog"
+let clients_name = "clients"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -34,11 +36,12 @@ let dataset_name = function
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
   | Skill_activations _ -> skill_activations_name
   | Skill_catalog -> skill_catalog_name
+  | Clients -> clients_name
 ;;
 
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
-  | Skill_catalog -> []
+  | Skill_catalog | Clients -> []
   | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
     [ "keeper", `String keeper ]
 ;;
@@ -59,6 +62,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
   | Some (`String name) when String.equal name connectors_name -> Ok Connectors
   | Some (`String name) when String.equal name skill_catalog_name -> Ok Skill_catalog
+  | Some (`String name) when String.equal name clients_name -> Ok Clients
   | Some (`String name) when String.equal name keeper_metrics_name ->
     Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
@@ -92,5 +96,7 @@ let announce ~base_path dataset =
 let install_store_observers () =
   Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);
   Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
-    announce ~base_path (Keeper_oauth_attempts { keeper }))
+    announce ~base_path (Keeper_oauth_attempts { keeper }));
+  Workspace_agent_record.install_rows_changed_observer (fun config ->
+    announce ~base_path:config.Workspace_utils_backend_setup.base_path Clients)
 ;;

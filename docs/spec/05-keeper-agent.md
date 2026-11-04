@@ -347,7 +347,7 @@ dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반
 
 #### 8.x HITL 판정 맥락에서 thinking 을 뺀다
 
-Auto Judge 와 HITL 이 읽는 맥락 묶음(`Hitl_summary_worker.build_context_bundle`)
+Auto Judge 와 HITL 이 읽는 맥락 묶음(`Hitl_summary_request.capture_context_bundle`)
 에서 Keeper 의 `thinking` 블록을 제거한다. `text`·`tool_use`·`tool_result` 는
 그대로 남는다 — 판정자는 Keeper 가 **무엇을 했는지**를 보고, 그렇게 하기로
 스스로를 설득한 과정은 보지 않는다.

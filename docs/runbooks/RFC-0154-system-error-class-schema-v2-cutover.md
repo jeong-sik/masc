@@ -4,7 +4,7 @@
 
 ## 1. 개요
 
-`masc.telemetry_coverage_gap.v1` 은 `error: string` 단일 필드로 OS-level 실패 (FD storm, disk pressure 등) 의 원본 메시지를 wire 에 실어 보냈다. backend 가 이미 `Keeper_fd_pressure.is_fd_exhaustion_exn` 등으로 분류했음에도 그 결과가 boolean 으로 축약되고, dashboard 가 다시 `classifyCoverageError` 의 substring matcher 로 *재분류* 했다 (RFC-0154 §1.5 정보 손실 cycle). schema v2 는 backend 분류 결과를 `error_class` typed tag 로 wire 에 보존하여 dashboard 가 lookup-only 가 되도록 한다.
+`masc.telemetry_coverage_gap.v1` 은 `error: string` 단일 필드로 OS-level 실패 (FD storm, disk pressure 등) 의 원본 메시지를 wire 에 실어 보냈다. backend 가 이미 분류했음에도 그 결과가 boolean 으로 축약되고, dashboard 가 다시 `classifyCoverageError` 의 substring matcher 로 *재분류* 했다 (RFC-0154 §1.5 정보 손실 cycle). schema v2 는 backend 분류 결과를 `error_class` typed tag 로 wire 에 보존하여 dashboard 가 lookup-only 가 되도록 한다.
 
 cutover 의 목표는 두 가지다.
 

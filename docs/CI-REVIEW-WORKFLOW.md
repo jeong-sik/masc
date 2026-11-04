@@ -248,6 +248,15 @@ run described as four. Count the per-suite summary line of each framework
 suites, cases or lines. `[FAIL]` lines also repeat when the row is wrapped, so
 deduplicate on `(suite, index)` before quoting cases.
 
+A single run's failure count does not say whether the failures belong to that
+head. Compare the failing suite names across two heads before calling any of them
+a regression: two whole-regression runs held 50 and 49 failing suites with 48 in
+common, so 48 were independent of the head and only three differed — two that
+passed on the later head and one that failed only there. The 48 common failures
+are an environment layer, not a code regression, and the head-dependent set was
+small enough to name. Without that comparison, "N suites fail" reads as a
+statement about the branch when it is mostly a statement about the runner.
+
 Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
 is not the line that follows its own invocation. Taking the next result line
 attributes another suite's summary to the one being read: a `test_mcp_server_eio`

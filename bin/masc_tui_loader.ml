@@ -1384,6 +1384,17 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
       decode_offloaded memo_tools_inventory ~name:"tools.inventory.decode_wait"
         Masc.Tui_decode_tools.decode_tool_snapshot json
 
+let memo_keeper_skill_activations = json_memo ()
+
+(** Load the selected Keeper's skill activations for the Activations pane. *)
+let load_keeper_skill_activations ~(host : string) ~(port : int) ~(keeper : string) :
+    (Masc.Tui_decode_tools.skill_activation_projection, string) result =
+  match fetch_keeper_skill_activations ~host ~port ~keeper with
+  | Error err -> Error ("skill activations load failed: " ^ err)
+  | Ok json ->
+      decode_offloaded memo_keeper_skill_activations ~name:"tools.activations.decode_wait"
+        (Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper) json
+
 let memo_skills_catalog = json_memo ()
 
 (** Load the workspace skills catalog for the Tools screen tracking views. *)

@@ -3117,7 +3117,7 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json ?effective ?activations tools =
+let tool_snapshot_json ?effective tools =
   `Assoc
     [ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
@@ -3131,8 +3131,6 @@ let tool_snapshot_json ?effective ?activations tools =
     ; ("tool_usage", `Assoc [])
     ; ( "effective_keeper_surface"
       , Option.value ~default:`Null effective )
-    ; ( "skill_activations"
-      , Option.value ~default:`Null activations )
     ]
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
@@ -4228,6 +4226,16 @@ let skill_activation_projection_json activations =
           ] )
     ]
 
+(* The [GET /api/v1/keepers/skill-activations?keeper=] answer around one
+   projection, decoded for the Keeper it names. *)
+let decode_keeper_activations ~keeper projection =
+  Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper
+    (`Assoc
+       [ "schema", `String "masc.keeper-skill-activations/v1"
+       ; "keeper", `String keeper
+       ; "skill_activations", projection
+       ])
+
 let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
   let task_invocation =
     `Assoc
@@ -4284,20 +4292,14 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
           ()
       ]
   in
-  match
-    Masc.Tui_decode_tools.decode_tool_snapshot
-      (tool_snapshot_json ~activations [])
-  with
+  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some
-            (Masc.Tui_decode_tools.Skill_activations_available
-               { sap_keeper_name
-               ; sap_ledger
-               ; _
-               });
-        _ } ->
+      (Masc.Tui_decode_tools.Skill_activations_available
+         { sap_keeper_name
+         ; sap_ledger
+         ; _
+         }) ->
       let activations =
         Keeper_skill_activation_ledger.activations sap_ledger
       in
@@ -4369,11 +4371,8 @@ let test_decode_skill_activations_keeps_no_session_distinct () =
       ; "keeper_name", `String "idle-keeper"
       ]
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
-  | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name });
-        _ } ->
+  match decode_keeper_activations ~keeper:"idle-keeper" activations with
+  | Ok (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name }) ->
       Alcotest.(check string) "Keeper" "idle-keeper" sap_keeper_name
   | Ok _ -> Alcotest.fail "no_session was not kept distinct"
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4387,13 +4386,10 @@ let test_decode_skill_activations_does_not_hide_unavailable () =
       ; "detail", `String "decode failed"
       ]
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match decode_keeper_activations ~keeper:"broken-keeper" activations with
   | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some
-            (Masc.Tui_decode_tools.Skill_activations_unavailable
-               { sap_reason; sap_detail; _ });
-        _ } ->
+      (Masc.Tui_decode_tools.Skill_activations_unavailable
+         { sap_reason; sap_detail; _ }) ->
       Alcotest.(check string) "reason" "activation_ledger_unreadable" sap_reason;
       Alcotest.(check string) "detail" "decode failed" sap_detail
   | Ok _ -> Alcotest.fail "unavailable activation ledger was hidden"
@@ -4409,25 +4405,49 @@ let test_decode_skill_activations_rejects_cross_session_turn () =
     | other -> other
   in
   let activations = skill_activation_projection_json [ activation ] in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
 
-let test_decode_tool_snapshot_requires_both_keeper_projection_fields () =
-  let missing_activations =
+let test_decode_tool_snapshot_requires_the_keeper_surface_field () =
+  let missing_surface =
     match tool_snapshot_json [] with
-    | `Assoc fields -> `Assoc (List.remove_assoc "skill_activations" fields)
+    | `Assoc fields -> `Assoc (List.remove_assoc "effective_keeper_surface" fields)
     | other -> other
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot missing_activations with
+  match Masc.Tui_decode_tools.decode_tool_snapshot missing_surface with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "missing skill_activations field was accepted"
+  | Ok _ -> Alcotest.fail "missing effective_keeper_surface field was accepted"
+
+(* An answer is for the Keeper the pane asked about, under its own schema. *)
+let test_decode_keeper_activations_refuses_another_keeper_or_schema () =
+  let projection = `Assoc [ "status", `String "no_session"; "keeper_name", `String "imp" ] in
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-activations/v1"
+          ; "keeper", `String "other"
+          ; "skill_activations", projection
+          ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an answer for another Keeper was accepted");
+  match
+    Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+      (`Assoc
+         [ "schema", `String "masc.keeper-skill-usage/v1"
+         ; "keeper", `String "imp"
+         ; "skill_activations", projection
+         ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an answer under another schema was accepted"
 
 let test_decode_async_actions_keeps_original_scope () =
   let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
   let activations = `Assoc ["status",`String "available";"keeper_name",`String "fixture";"ledger",ledger] in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
-  | Ok {Masc.Tui_decode_tools.ts_skill_activations=Some (Skill_activations_available {sap_ledger;_});_} ->
+  match decode_keeper_activations ~keeper:"fixture" activations with
+  | Ok (Masc.Tui_decode_tools.Skill_activations_available {sap_ledger;_}) ->
     Alcotest.(check int) "typed action facts survive the TUI data boundary" 3
       (List.length (Keeper_skill_activation_ledger.async_actions sap_ledger));
     Alcotest.(check int) "the original child activation remains distinct" 1
@@ -4465,10 +4485,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
   in
   List.iter
     (fun projection ->
-       match
-         Masc.Tui_decode_tools.decode_tool_snapshot
-           (tool_snapshot_json ~activations:projection [])
-       with
+       match decode_keeper_activations ~keeper:"codex-mcp-client" projection with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "canonical activation invariant was bypassed")
     [ invalid_time; duplicate; invalid_revision ]
@@ -14177,8 +14194,10 @@ let () =
           test_decode_skill_activations_does_not_hide_unavailable;
         Alcotest.test_case "Skill activation rejects cross-session turn" `Quick
           test_decode_skill_activations_rejects_cross_session_turn;
-        Alcotest.test_case "tool snapshot requires Keeper projection fields" `Quick
-          test_decode_tool_snapshot_requires_both_keeper_projection_fields;
+        Alcotest.test_case "tool snapshot requires the Keeper surface field" `Quick
+          test_decode_tool_snapshot_requires_the_keeper_surface_field;
+        Alcotest.test_case "Keeper activations refuse another Keeper or schema" `Quick
+          test_decode_keeper_activations_refuses_another_keeper_or_schema;
         Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
           test_decode_skill_activations_reuses_canonical_ledger_decoder;
         Alcotest.test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;

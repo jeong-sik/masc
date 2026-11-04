@@ -150,7 +150,6 @@ type tool_snapshot = {
   ts_count : int;
   ts_freshness : inventory_freshness;
   ts_effective : effective_tool_surface option;
-  ts_skill_activations : skill_activation_projection option;
 }
 
 let decode_tool_entry json =
@@ -1165,21 +1164,26 @@ let decode_tool_snapshot json =
         Result.map Option.some (decode_effective_tool_surface value)
     | bad -> field_type_error "effective_keeper_surface" "an object or null" bad
   in
-  let* skill_activations_json = required_member json "skill_activations" in
-  let* ts_skill_activations =
-    match skill_activations_json with
-    | `Null -> Ok None
-    | `Assoc _ as value ->
-        Result.map Option.some (decode_skill_activation_projection value)
-    | bad -> field_type_error "skill_activations" "an object or null" bad
-  in
   Ok
     { ts_tools
     ; ts_count
     ; ts_freshness
     ; ts_effective
-    ; ts_skill_activations
     }
+
+let keeper_skill_activations_schema = "masc.keeper-skill-activations/v1"
+
+let decode_keeper_skill_activations ~keeper json =
+  let* schema = required_string_field json "schema" in
+  let* answered = required_string_field json "keeper" in
+  if not (String.equal schema keeper_skill_activations_schema) then
+    Error (Printf.sprintf "skill activations schema %S is not %S" schema
+             keeper_skill_activations_schema)
+  else if not (String.equal answered keeper) then
+    Error (Printf.sprintf "skill activations answered for %S, not %S" answered keeper)
+  else
+    let* projection = required_object_field json "skill_activations" in
+    decode_skill_activation_projection projection
 
 let skill_flow_mermaid flow =
   let module Nodes = Map.Make (String) in

@@ -1335,38 +1335,32 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   in
   let activation_lines =
     lazy begin
-    match state.tools_inventory with
+    match state.tools_activations with
     | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
-    | Some { Masc.Tui_decode_tools.ts_skill_activations = None; _ } ->
+    | Some Masc_tui_types.Activations_no_keeper ->
         [ Theme.warn (), " Skill Activations — no Keeper selected" ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_no_session
-                 { sap_keeper_name });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_no_session
+              { sap_keeper_name })) ->
         [ Theme.warn (),
           Printf.sprintf " Skill Activations — %s — no session"
             (Terminal_text.single_line sap_keeper_name) ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_unavailable
-                 { sap_keeper_name; sap_reason; sap_detail });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_unavailable
+              { sap_keeper_name; sap_reason; sap_detail })) ->
         [ Theme.bad (),
           Printf.sprintf " Skill Activations — %s — unavailable (%s)"
             (Terminal_text.single_line sap_keeper_name)
             (Terminal_text.single_line sap_reason);
           Theme.bad (), "   " ^ Terminal_text.single_line sap_detail ]
     | Some
-        { Masc.Tui_decode_tools.ts_skill_activations =
-            Some
-              (Masc.Tui_decode_tools.Skill_activations_available
-                 { sap_keeper_name
-                 ; sap_ledger
-                 });
-          _ } ->
+        (Masc_tui_types.Activations_read
+           (Masc.Tui_decode_tools.Skill_activations_available
+              { sap_keeper_name
+              ; sap_ledger
+              })) ->
         let sap_activations =
           Masc.Keeper_skill_activation_ledger.activations sap_ledger
         in
@@ -1978,9 +1972,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   (* Each pane follows its own independent read. Retained rows are still
      useful during refresh; neither unread nor failed means a successful zero. *)
   let part, source, observed, error = match state.tools_pane with
-    | Tools_surface | Tools_activations | Tools_catalog ->
+    | Tools_surface | Tools_catalog ->
         Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
         state.tools_error
+    | Tools_activations ->
+        Tools_activations_read, "Skill activations", Option.is_some state.tools_activations,
+        state.tools_activations_error
     | Tools_usage ->
         Tools_catalog_read, "Skills catalog", Option.is_some state.skills_catalog,
         state.skills_catalog_error

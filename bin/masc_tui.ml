@@ -4009,17 +4009,32 @@ let launch_tools_load ?(force = true) state ~mailbox =
     state.tools_read_inflight <- Some
       { tri_generation = generation
       ; tri_keeper = keeper
-      ; tri_pending = [ Tools_inventory_read; Tools_catalog_read ]
+      ; tri_pending =
+          Tools_inventory_read :: Tools_catalog_read
+          :: (match keeper with
+              | Some _ -> [ Tools_activations_read ]
+              | None -> [])
       };
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Skills_catalog_loaded (generation,
-        Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result))
+      ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation;
+        result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result }))
       (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port);
     launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Tools_loaded (generation, keeper, result))
-      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+      ~deliver:(fun result -> Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result }))
+      (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ());
+    (* The Activations pane draws the selected Keeper's ledger, which its own
+       route answers (RFC-0483). *)
+    match keeper with
+    | None ->
+        state.tools_activations <- Some Activations_no_keeper;
+        state.tools_activations_error <- None
+    | Some keeper ->
+        launch_workspace_json_read state ~mailbox
+          ~deliver:(fun result ->
+            Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }))
+          (fun () -> Masc_tui_loader.load_keeper_skill_activations ~host ~port ~keeper)
   end
   end
 
@@ -4056,6 +4071,8 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.keeper_cursor <- next;
     state.tools_inventory <- None;
     state.tools_error <- None;
+    state.tools_activations <- None;
+    state.tools_activations_error <- None;
     tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
@@ -16428,6 +16445,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_read_inflight <- None;
   state.tools_inventory <- None;
   state.tools_error <- None;
+  state.tools_activations <- None;
+  state.tools_activations_error <- None;
   state.skills_catalog <- None;
   state.skills_catalog_error <- None;
   state.tools_skill_source_picker <- None;
@@ -21866,7 +21885,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
         | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _
         | Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-        | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _) | Skill_evidence_loaded (_, _, _)
+        | Tools_read_loaded _ | Skill_evidence_loaded (_, _, _)
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
         | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
@@ -26603,7 +26622,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.compact_request_id journal_id)
                (Keeper_chat.terminal_safe_text detail)));
       read_again ())
-  | Tools_loaded (generation, keeper_name, result) ->
+  | Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result }) ->
       settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
@@ -26629,7 +26648,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         match result with
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
-  | Skills_catalog_loaded (generation, result) ->
+  | Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }) ->
+      settle_tools_read state ~generation Tools_activations_read;
+      let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
+      if generation = state.tools_request_generation
+         && Option.equal String.equal (Some keeper) selected_name then (
+      match result with
+      | Ok projection ->
+          state.tools_activations <- Some (Activations_read projection);
+          state.tools_activations_error <- None
+      | Error detail -> state.tools_activations_error <- Some detail)
+  | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
       settle_tools_read state ~generation Tools_catalog_read;
       if generation = state.tools_request_generation then (
       match result with

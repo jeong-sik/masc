@@ -119,6 +119,110 @@ let test_alternatives_never_dangling () =
       (List.length dangling)
       (String.concat ", " (List.map render dangling))
 
+(* An example is [key=value] pairs separated by spaces. A value is quoted
+   (['...']), a list ([[...]]), a placeholder ([<...>]) or a bare word. Any other
+   shape is refused rather than skipped, so a new example shape has to teach this
+   reader before it can ship unchecked. *)
+let example_keys example =
+  let n = String.length example in
+  let rec skip_spaces i =
+    if i < n && Char.equal example.[i] ' ' then skip_spaces (i + 1) else i
+  in
+  let rec bare_end i =
+    if i < n && not (Char.equal example.[i] ' ') then bare_end (i + 1) else i
+  in
+  let value_end i =
+    let closing =
+      match example.[i] with
+      | '\'' -> Some '\''
+      | '[' -> Some ']'
+      | '<' -> Some '>'
+      | _ -> None
+    in
+    match closing with
+    | None -> Ok (bare_end i)
+    | Some close ->
+      (match String.index_from_opt example (i + 1) close with
+       | Some j -> Ok (j + 1)
+       | None -> Error (Printf.sprintf "%c at offset %d is never closed" example.[i] i))
+  in
+  let is_key_char c = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || Char.equal c '_' in
+  let rec pairs i keys =
+    let i = skip_spaces i in
+    if i >= n
+    then Ok (List.rev keys)
+    else (
+      match String.index_from_opt example i '=' with
+      | None -> Error (Printf.sprintf "no '=' after offset %d" i)
+      | Some eq ->
+        let key = String.sub example i (eq - i) in
+        if String.equal key "" || not (String.for_all is_key_char key)
+        then Error (Printf.sprintf "%S at offset %d is not an argument name" key i)
+        else if eq + 1 >= n
+        then Error (Printf.sprintf "%s has no value" key)
+        else (
+          match value_end (eq + 1) with
+          | Error _ as e -> e
+          | Ok next -> pairs next (key :: keys)))
+  in
+  pairs 0 []
+
+let schema_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let declared_arguments (schema : Masc_domain.tool_schema) =
+  match schema_field "properties" schema.input_schema with
+  | Some (`Assoc props) -> List.map fst props
+  | _ -> []
+
+let required_arguments (schema : Masc_domain.tool_schema) =
+  match schema_field "required" schema.input_schema with
+  | Some (`List items) ->
+    List.filter_map (function `String s -> Some s | _ -> None) items
+  | _ -> []
+
+(* An example is the call a reader copies. [masc_tool_help] listed
+   [name='keeper_task_done'] while its argument is [tool_name], and the plan
+   tool's example passed a [plan] argument it never had; both were refused when
+   run as written. Reading each example against the schema it sits beside
+   catches the next one. *)
+let test_examples_are_calls_the_schema_accepts () =
+  let problems =
+    List.concat_map
+      (fun (schema : Masc_domain.tool_schema) ->
+        match Registry.find_entry Config.raw_all_tool_schemas schema.name with
+        | None -> []
+        | Some entry ->
+          let declared = declared_arguments schema in
+          let required = required_arguments schema in
+          List.concat_map
+            (fun example ->
+              match example_keys example with
+              | Error why ->
+                [ Printf.sprintf "%s: cannot read example %s (%s)" schema.name example why ]
+              | Ok keys ->
+                let unknown = List.filter (fun k -> not (List.mem k declared)) keys in
+                let missing = List.filter (fun r -> not (List.mem r keys)) required in
+                List.map
+                  (fun k ->
+                    Printf.sprintf "%s: example %s names %s, which the tool does not declare"
+                      schema.name example k)
+                  unknown
+                @ List.map
+                    (fun r ->
+                      Printf.sprintf "%s: example %s omits required argument %s"
+                        schema.name example r)
+                    missing)
+            entry.examples)
+      Config.raw_all_tool_schemas
+  in
+  match problems with
+  | [] -> ()
+  | _ ->
+    Alcotest.failf "%d help example problem(s):\n%s" (List.length problems)
+      (String.concat "\n" problems)
+
 let test_entry_json_omits_empty_fields () =
   (* keeper_lane_status has no curated examples/alternatives; the JSON wire shape
      must omit both keys so existing consumers see no field they did not see
@@ -216,7 +320,9 @@ let () =
       ( "registry_invariants",
         [
           Alcotest.test_case "alternatives names resolve through find_entry"
-            `Quick test_alternatives_never_dangling; Alcotest.test_case "the short description is the entry's own"
+            `Quick test_alternatives_never_dangling;
+          Alcotest.test_case "examples are calls the schema accepts"
+            `Quick test_examples_are_calls_the_schema_accepts; Alcotest.test_case "the short description is the entry's own"
             `Quick test_the_short_description_is_the_entrys_own; Alcotest.test_case "canonicalising carries that description"
             `Quick test_canonicalising_carries_that_description;
 

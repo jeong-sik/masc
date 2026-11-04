@@ -74,7 +74,8 @@ val choose_lsp_location : Masc_tui_types.state ->
   Masc_tui_types.code_location_offer -> Masc.Tui_decode.lsp_location -> followup
 (** Follow only an actual member of the current owned offer. Selection closes
     the picker; unsuccessful navigation still preserves the source/history. *)
-val apply_diff : Masc_tui_types.state -> string Masc_tui_fetched.request ->
+val apply_diff : Masc_tui_types.state ->
+  Masc_tui_types.code_diff_target Masc_tui_fetched.request ->
   (Masc.Tui_decode.git_diff, string) result -> unit
 val apply_history : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->

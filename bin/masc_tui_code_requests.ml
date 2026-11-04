@@ -256,9 +256,21 @@ let launch_history_load state ~host ~deliver ~path =
 
 ;;
 
-let launch_diff_load state ~host ~deliver ~base_ref ~path =
+(* The target a refresh asks for. A commit diff already on screen for this file
+   stays a commit diff; anything else is the working tree against [base_ref], so
+   a refresh never swaps one comparison for another. *)
+let diff_target_for_refresh state ~base_ref ~path =
+  match Masc_tui_fetched.current_key state.code_diff with
+  | Some (Diff_commit { path = shown; _ } as target) when String.equal shown path ->
+    target
+  | Some (Diff_commit _ | Diff_worktree _) | None -> Diff_worktree { path; base_ref }
+;;
+
+let launch_diff_load state ~host ~deliver ~target =
   if server_authority_ready state then begin
-  match Masc_tui_fetched.start ~equal:String.equal state.code_diff ~key:path with
+  match
+    Masc_tui_fetched.start ~equal:code_diff_target_equal state.code_diff ~key:target
+  with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
     state.code_diff <- next;
@@ -267,7 +279,13 @@ let launch_diff_load state ~host ~deliver ~base_ref ~path =
       ~deliver:(fun result -> deliver (Code_diff_loaded (request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes state in
-         Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path ~base_ref ())
+         let path, against =
+           match target with
+           | Diff_worktree { path; base_ref } ->
+             path, Masc_tui_http.Working_tree_against base_ref
+           | Diff_commit { path; commit } -> path, Masc_tui_http.Commit_changes commit
+         in
+         Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path ~against ())
   end
 
 ;;

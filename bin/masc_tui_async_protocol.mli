@@ -758,7 +758,8 @@ type async_msg =
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
-      string Masc_tui_fetched.request * (Masc.Tui_decode.git_diff, string) result
+      Masc_tui_types.code_diff_target Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_diff, string) result
   (* The Activity pane's Changes tab: the selected keeper's recorded file
      changes, stamped with the request so an answer for a keeper the
      cursor has left is dropped. *)

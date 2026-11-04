@@ -6,6 +6,8 @@ open Masc_tui_types
 
 let check_string = Alcotest.(check string)
 
+let worktree_diff path = Diff_worktree { path; base_ref = "HEAD" }
+
 module Decode = Masc.Tui_decode
 module Fetched = Masc_tui_fetched
 module Code_results = Masc_tui_code_results
@@ -88,7 +90,7 @@ let test_activity_file_starts_without_old_overlays () =
     start_read ~equal:( = ) state.code_history (Code_scope_keeper "beta", "old.ml")
   in
   state.code_history <- history;
-  let diff, old_diff = start_read ~equal:String.equal state.code_diff "old.ml" in
+  let diff, old_diff = start_read ~equal:code_diff_target_equal state.code_diff (worktree_diff "old.ml") in
   state.code_diff <- diff;
   let blame, old_blame = start_read ~equal:String.equal state.code_blame "old.ml" in
   state.code_blame <- blame;
@@ -265,7 +267,7 @@ let test_file_recovery_preserves_nested_readers () =
         state.code_history (state.code_scope, "source.ml") in
     state.code_history <- history;
     state.code_history_open <- true;
-    let diff, diff_request = start_read ~equal:String.equal state.code_diff "source.ml" in
+    let diff, diff_request = start_read ~equal:code_diff_target_equal state.code_diff (worktree_diff "source.ml") in
     state.code_diff <- diff;
     state.code_diff_open <- true;
     let blame, blame_request = start_read ~equal:String.equal state.code_blame "source.ml" in
@@ -450,7 +452,7 @@ let test_interrupted_new_file_open_resets_old_readers () =
       (state.code_scope, "old.ml") in
   state.code_history <- history;
   state.code_history_open <- true;
-  let diff, _ = start_read ~equal:String.equal state.code_diff "old.ml" in
+  let diff, _ = start_read ~equal:code_diff_target_equal state.code_diff (worktree_diff "old.ml") in
   state.code_diff <- diff;
   state.code_diff_open <- true;
   state.code_file_cursor <- 5;
@@ -1576,6 +1578,50 @@ let test_workspace_source_decoder_requires_revision () =
     [`Assoc ["ok",`Bool true;"content",`String content];
      `Assoc ["ok",`Bool true;"content",`String content;"revision",`String "unknown"]]
 
+(* The overlay's key is the whole comparison, not the path: a reply for the
+   working-tree diff of a file must not land as the commit diff of that file,
+   and a refresh keeps the comparison on screen. *)
+let commit_diff path = Diff_commit { path; commit = "abc1234" }
+
+let test_a_diff_reply_must_match_its_comparison () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let worktree, worktree_request =
+    start_read ~equal:code_diff_target_equal state.code_diff (worktree_diff "a.ml")
+  in
+  state.code_diff <- worktree;
+  (* The operator opens the commit diff of the same file before the first
+     read answers. *)
+  let commit, _ =
+    match
+      Fetched.start ~equal:code_diff_target_equal state.code_diff
+        ~key:(commit_diff "a.ml")
+    with
+    | Fetched.Started (next, request) -> next, request
+    | Fetched.Already_loading -> Alcotest.fail "a new comparison must start a read"
+  in
+  state.code_diff <- commit;
+  Code_results.apply_diff state worktree_request (Error "late working-tree diff");
+  Alcotest.(check bool) "the late working-tree reply is dropped" true
+    (match Fetched.current state.code_diff with
+     | Some (key, Fetched.Loading) -> code_diff_target_equal key (commit_diff "a.ml")
+     | Some _ | None -> false)
+
+let test_a_refresh_keeps_the_comparison_on_screen () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let target path =
+    Masc_tui_code_requests.diff_target_for_refresh state ~base_ref:"HEAD" ~path
+  in
+  Alcotest.(check bool) "nothing shown asks for the working tree" true
+    (code_diff_target_equal (target "a.ml") (worktree_diff "a.ml"));
+  let shown, _ =
+    start_read ~equal:code_diff_target_equal state.code_diff (commit_diff "a.ml")
+  in
+  state.code_diff <- shown;
+  Alcotest.(check bool) "a commit diff of this file stays a commit diff" true
+    (code_diff_target_equal (target "a.ml") (commit_diff "a.ml"));
+  Alcotest.(check bool) "another file asks for its working tree" true
+    (code_diff_target_equal (target "b.ml") (worktree_diff "b.ml"))
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -1680,6 +1726,12 @@ let () =
             test_file_recovery_preserves_nested_readers
         ; Alcotest.test_case "LSP replies belong to their source reading" `Quick
             test_lsp_replies_belong_to_their_source_reading ] )
+    ; ( "diff comparison"
+      , [ Alcotest.test_case "a reply must match its comparison" `Quick
+            test_a_diff_reply_must_match_its_comparison
+        ; Alcotest.test_case "a refresh keeps the comparison on screen" `Quick
+            test_a_refresh_keeps_the_comparison_on_screen
+        ] )
     ; ( "scope"
       , [ Alcotest.test_case "a shared path is not a shared request" `Quick
             test_a_shared_path_is_not_a_shared_request

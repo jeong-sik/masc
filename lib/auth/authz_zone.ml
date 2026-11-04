@@ -2,6 +2,7 @@
 
 module H = Authz_high_water
 module L = Authz_log
+module P = Authz_presence
 module R = Authz_record
 module S = Authz_external_store
 
@@ -41,15 +42,21 @@ type open_error =
   | Store_not_opened of S.violation S.open_error
   | Log_not_opened of Authz_state.refusal L.open_error
   | Not_bootstrapped of { path : string }
+  | Log_not_checked of
+      { path : string
+      ; detail : string
+      }
 
 let open_error_to_string = function
   | Store_not_opened error -> S.open_error_to_string S.violation_to_string error
   | Log_not_opened error -> L.open_error_to_string Authz_state.refusal_to_string error
   | Not_bootstrapped { path } ->
-    Printf.sprintf "the authorization log %s holds no Fresh_bootstrap" path
+    Printf.sprintf "the authorization log %s is not there or holds no Fresh_bootstrap" path
+  | Log_not_checked { path; detail } ->
+    Printf.sprintf "whether the authorization log %s is there cannot be told: %s" path detail
 ;;
 
-let open_at_start ~log_path ~store_path =
+let open_files ~log_path ~store_path =
   match S.open_at_start ~path:store_path ~init:S.State.empty ~step:S.apply with
   | Error error -> Error (Store_not_opened error)
   | Ok (store, store_state, (_ : S.recovered)) ->
@@ -65,6 +72,15 @@ let open_at_start ~log_path ~store_path =
             ; current = Atomic.make { state = replay.state; head = replay.head }
             ; probe = replay.probe
             }))
+;;
+
+(* Opening a file makes its directory and its lock file, so a log that is not
+   there is refused before either file is opened. *)
+let open_at_start ~log_path ~store_path =
+  match P.of_path log_path with
+  | P.Not_there -> Error (Not_bootstrapped { path = log_path })
+  | P.Cannot_check detail -> Error (Log_not_checked { path = log_path; detail })
+  | P.There -> open_files ~log_path ~store_path
 ;;
 
 let snapshot t = Atomic.get t.current
@@ -89,12 +105,14 @@ type error =
       { first : H.reason
       ; rest : H.reason list
       }
+  | Store_holds_no_answer
   | Record_not_built of R.make_error
   | Refused of Authz_state.refusal
   | Store_entry_refused of
       { entry : S.entry
       ; violation : S.violation
       }
+  | Abort_not_confirmed of L.end_error
   | Settlement_not_written of S.append_error
   | Intent_not_written of S.append_error
   | Record_not_appended of L.append_error
@@ -116,6 +134,8 @@ let error_to_string = function
   | Uncertain { first; rest } ->
     "the external store and the log do not agree: "
     ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
+  | Store_holds_no_answer ->
+    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
   | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
     Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
   | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
@@ -124,6 +144,10 @@ let error_to_string = function
       "%s was not written to the external store: %s"
       (entry_label entry)
       (S.violation_to_string violation)
+  | Abort_not_confirmed error ->
+    "the intent that an earlier commit left was not aborted, because the end of the log was not \
+     confirmed: "
+    ^ L.end_error_to_string error
   | Settlement_not_written error ->
     "the intent that an earlier commit left was not closed: " ^ S.append_error_to_string error
   | Intent_not_written error -> "the intent was not written: " ^ S.append_error_to_string error
@@ -150,7 +174,16 @@ let write_entry t store_writer entry ~not_written =
        Ok ())
 ;;
 
-let write_settlement t store_writer settlement =
+(* An abort says that the log ends where the intent began. The probe says so
+   from what this process saw, and the append that the intent was for failed,
+   which is when another process may have held the log, so the file is asked. *)
+let write_settlement t store_writer log_writer settlement =
+  let* () =
+    match settlement with
+    | H.Nothing_to_settle | H.Promote _ -> Ok ()
+    | H.Abort _ ->
+      Result.map_error (fun error -> Abort_not_confirmed error) (L.confirm_end log_writer)
+  in
   match H.settlement_entry settlement with
   | None -> Ok ()
   | Some entry ->
@@ -163,7 +196,8 @@ let in_zone t draft store_writer log_writer head =
   let published = Atomic.get t.current in
   match H.settle_on_entry t.probe with
   | Error (first, rest) -> Error (Uncertain { first; rest })
-  | Ok settled ->
+  | Ok (H.Nothing_answered, (_ : H.settlement)) -> Error Store_holds_no_answer
+  | Ok (H.Answered, settled) ->
     let* record =
       Result.map_error
         (fun error -> Record_not_built error)
@@ -172,7 +206,7 @@ let in_zone t draft store_writer log_writer head =
     let* { Authz_state.state; high_water = change } =
       Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
     in
-    let* () = write_settlement t store_writer settled in
+    let* () = write_settlement t store_writer log_writer settled in
     let record_hash = record.R.hash in
     let intent =
       { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }

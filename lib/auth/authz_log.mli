@@ -196,3 +196,21 @@ val append_error_to_string : append_error -> string
     caller must not append the same records again: the next start shows what
     the file holds. *)
 val append : writer -> Authz_record.t list -> (Authz_record.head, append_error) result
+
+(** Why {!confirm_end} could not confirm the end. The constructors are those of
+    {!Authz_jsonl_file.Make}. *)
+type end_error =
+  | End_writer_expired
+  | End_stopped of stop
+  | End_locked of { path : string }
+  | End_moved of { path : string }
+  | End_unknown of
+      { path : string
+      ; detail : string
+      }
+
+val end_error_to_string : end_error -> string
+
+(** Says whether the log still ends where this process left it, and writes
+    nothing. See {!Authz_jsonl_file.Make.confirm_end}. *)
+val confirm_end : writer -> (unit, end_error) result

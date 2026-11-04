@@ -170,14 +170,21 @@ val settle : Probe.t -> (settlement, reason) result
     and after a promoted [Fresh_bootstrap] that state holds the workspace. *)
 val settlement_entry : settlement -> Authz_external_store.entry option
 
-(** Items 2 to 5, as a writer reads them each time it enters its zone (design
-    8.2, item 1): the settlement when every judgment passes, and otherwise
-    every reason, in the order of {!Mismatch}. *)
-val settle_on_entry : Probe.t -> (settlement, reason * reason list) result
+(** Whether a store and a log that agree hold an answer. *)
+type agreement =
+  | Nothing_answered  (** The value is {!Absent}. *)
+  | Answered  (** The value is {!Matches}. *)
 
-(** The value for the store the probe was built from, and the log it was fed.
-    It is [Mismatch] exactly when {!settle_on_entry} is [Error], with the same
-    reasons. *)
+(** Items 2 to 5, as a writer reads them each time it enters its zone (design
+    8.2, item 1). When every judgment passes, whether the store holds an answer,
+    and the settlement. Otherwise every reason, in the order of {!Mismatch}.
+    A writer that installs a log wants {!Nothing_answered}, and a writer that
+    adds to an installed log wants {!Answered}. *)
+val settle_on_entry : Probe.t -> (agreement * settlement, reason * reason list) result
+
+(** The value for the store the probe was built from, and the log it was fed:
+    [Mismatch] with the reasons of {!settle_on_entry} when it is [Error],
+    [Absent] for {!Nothing_answered}, and [Matches] for {!Answered}. *)
 val judge : Probe.t -> t
 
 val reason_to_string : reason -> string

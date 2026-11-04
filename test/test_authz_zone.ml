@@ -131,6 +131,27 @@ let check_files label before dirs =
 
 let skip_for_superuser () = if Unix.geteuid () = 0 then Alcotest.skip ()
 
+let rec make_dirs path =
+  if not (Sys.file_exists path)
+  then (
+    make_dirs (Filename.dirname path);
+    Unix.mkdir path 0o700)
+;;
+
+(* Cuts the last line of a file, as a process that stopped before it wrote
+   that line. *)
+let drop_last_line path =
+  let text = read_file path in
+  let body = String.sub text 0 (String.length text - 1) in
+  Unix.truncate
+    path
+    (match String.rindex_opt body '\n' with
+     | Some index -> index + 1
+     | None -> 0)
+;;
+
+let count_lines text = List.length (String.split_on_char '\n' text) - 1
+
 let bootstrap dirs =
   match
     B.fresh_bootstrap
@@ -172,6 +193,7 @@ let open_error_name : Z.open_error -> string = function
   | Z.Store_not_opened _ -> "Store_not_opened"
   | Z.Log_not_opened _ -> "Log_not_opened"
   | Z.Not_bootstrapped _ -> "Not_bootstrapped"
+  | Z.Log_not_checked _ -> "Log_not_checked"
 ;;
 
 let open_zone dirs =
@@ -255,6 +277,14 @@ let log_append_error_name : L.append_error -> string = function
   | L.Write_failed _ -> "Write_failed"
 ;;
 
+let end_error_name : L.end_error -> string = function
+  | L.End_writer_expired -> "End_writer_expired"
+  | L.End_stopped _ -> "End_stopped"
+  | L.End_locked _ -> "End_locked"
+  | L.End_moved _ -> "End_moved"
+  | L.End_unknown _ -> "End_unknown"
+;;
+
 let store_append_error_name : S.append_error -> string = function
   | S.Writer_expired -> "Writer_expired"
   | S.Stopped _ -> "Stopped"
@@ -291,6 +321,8 @@ let error_name : Z.error -> string = function
   | Z.Store_stopped _ -> "Store_stopped"
   | Z.Log_stopped _ -> "Log_stopped"
   | Z.Uncertain { first; rest } -> "Uncertain " ^ reasons_name first rest
+  | Z.Store_holds_no_answer -> "Store_holds_no_answer"
+  | Z.Abort_not_confirmed error -> "Abort_not_confirmed " ^ end_error_name error
   | Z.Store_entry_refused _ -> "Store_entry_refused"
   | Z.Settlement_not_written error -> "Settlement_not_written " ^ store_append_error_name error
   | Z.Record_not_built (R.Author_not_admitted _) -> "Record_not_built"
@@ -405,6 +437,46 @@ let commits_follow_one_another () =
     check_store "a restart" opened ~pending:None ~last_committed:second.Z.record_hash ~aborted:[])
 ;;
 
+(* Commits from fibers that run at once take turns in the zone. In whatever
+   order they run, each mode event either goes in or is refused by the state
+   it meets, every one that goes in appends one record, and a restart reads the
+   state that was published last. *)
+let commits_from_fibers_take_turns () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let lines_before = count_lines (read_file (log_file dirs)) in
+    let events = [ M.Off; M.Reactivate; M.Off; M.Reactivate; M.Off; M.Reactivate ] in
+    let results =
+      Eio.Fiber.List.map
+        ~max_fibers:(List.length events)
+        (fun (index, event) -> Z.commit zone (mode_draft ~at_ms:(at_ms + 1 + index) event))
+        (List.mapi (fun index event -> index, event) events)
+    in
+    let committed =
+      List.filter_map
+        (function
+          | Ok committed -> Some committed
+          | Error error ->
+            Alcotest.(check string) "a commit that did not go in" "Refused Mode" (error_name error);
+            None)
+        results
+    in
+    Alcotest.(check bool) "a commit went in" true (committed <> []);
+    Alcotest.(check int)
+      "one record for each commit that went in"
+      (lines_before + List.length committed)
+      (count_lines (read_file (log_file dirs)));
+    let published = Z.snapshot zone in
+    ignore
+      (check_restart
+         "a restart"
+         dirs
+         ~mode:published.Z.state.Authz_state.mode
+         ~head:(R.head_hash published.Z.head)
+       : opened))
+;;
+
 (* ---- refusals ---- *)
 
 let refused_records_write_nothing () =
@@ -434,12 +506,55 @@ let refused_records_write_nothing () =
    create a store that no install record names. *)
 let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
-    Unix.mkdir (Filename.dirname dirs.store_file) 0o700;
-    (match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
-     | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened over no log"
-     | Error error -> Alcotest.(check string) "the refusal" "Not_bootstrapped" (open_error_name error));
-    Alcotest.(check bool) "no store file" false (Sys.file_exists dirs.store_file);
-    Alcotest.(check bool) "no log file" false (Sys.file_exists (log_file dirs)))
+    let check_refused label =
+      match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+      | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
+      | Error error ->
+        Alcotest.(check string) (label ^ ": the refusal") "Not_bootstrapped" (open_error_name error)
+    in
+    check_refused "no log";
+    Alcotest.(check bool)
+      "no log: no store directory"
+      false
+      (Sys.file_exists (Filename.dirname dirs.store_file));
+    Alcotest.(check bool)
+      "no log: no log directory"
+      false
+      (Sys.file_exists (Filename.dirname (log_file dirs)));
+    make_dirs (Filename.dirname (log_file dirs));
+    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 (log_file dirs) ignore;
+    check_refused "an empty log";
+    Alcotest.(check bool) "an empty log: no store file" false (Sys.file_exists dirs.store_file);
+    Alcotest.(check string) "an empty log: the log" "" (read_file (log_file dirs)))
+;;
+
+(* A bootstrapped log reads [Matches] with its store. A store that holds no
+   answer for it reads [Absent], which design 5.1 does not let a writer go on
+   from. *)
+let a_store_with_no_answer_refuses_every_commit () =
+  List.iter
+    (fun (label, empty_the_store, store_after) ->
+      with_dirs (fun dirs ->
+        ignore (bootstrap dirs : B.completed);
+        empty_the_store dirs.store_file;
+        check_judgment (label ^ ": what the files say") dirs "Absent";
+        let zone = open_zone dirs in
+        let log_before = read_file (log_file dirs) in
+        check_error label "Store_holds_no_answer" zone (mode_draft M.Off);
+        check_error
+          (label ^ ", again")
+          "Store_holds_no_answer"
+          zone
+          (mode_draft ~at_ms:(at_ms + 2) M.Off);
+        Alcotest.(check string) (label ^ ": the log") log_before (read_file (log_file dirs));
+        Alcotest.(check (option string))
+          (label ^ ": the store")
+          store_after
+          (if Sys.file_exists dirs.store_file then Some (read_file dirs.store_file) else None);
+        check_judgment (label ^ ": a restart") dirs "Absent"))
+    [ "an emptied store", (fun path -> Unix.truncate path 0), Some ""
+    ; "a store that is not there", Sys.remove, None
+    ]
 ;;
 
 (* ---- failures ---- *)
@@ -493,15 +608,23 @@ let a_locked_log_leaves_an_intent_that_the_next_commit_aborts () =
       zone
       (mode_draft ~at_ms:(at_ms + 2) M.Reactivate);
     check_files "the refused commit wrote nothing" after_failure dirs;
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_error
+        "a commit while another process holds the log again"
+        "Abort_not_confirmed End_locked"
+        zone
+        (mode_draft ~at_ms:(at_ms + 3) M.Off);
+      release ());
+    check_files "the abort that was not confirmed wrote nothing" after_failure dirs;
     with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path dirs.store_file) (fun release ->
       check_error
         "a commit while another process holds the store"
         "Settlement_not_written Write_locked"
         zone
-        (mode_draft ~at_ms:(at_ms + 3) M.Off);
+        (mode_draft ~at_ms:(at_ms + 4) M.Off);
       release ());
     check_files "the settlement that failed wrote nothing" after_failure dirs;
-    let next = commit_ok zone (mode_draft ~at_ms:(at_ms + 4) M.Off) in
+    let next = commit_ok zone (mode_draft ~at_ms:(at_ms + 5) M.Off) in
     check_settled "the next commit gives the intent up first" ("Abort " ^ intent_name left) next;
     let opened = check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash in
     check_store "a restart" opened ~pending:None ~last_committed:next.Z.record_hash ~aborted:[ left ])
@@ -528,6 +651,84 @@ let a_failed_store_write_stops_every_commit () =
     check_error "the next commit" "Store_stopped" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
     check_files "the next commit wrote nothing" before dirs;
     ignore (check_restart "a restart" dirs ~mode:on ~head:completed.B.record_hash : opened))
+;;
+
+(* The process that held the log while the append of the zone waited, and
+   appended a record of its own. The intent that the zone left is then not one
+   to abort. *)
+let a_record_appended_while_the_log_was_held_keeps_the_intent () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let head = (Z.snapshot zone).Z.head in
+    let first = mode_draft ~at_ms:(at_ms + 1) M.Off in
+    let left = intent_of ~head first S.Change.Off in
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_error
+        "a commit while another process holds the log"
+        "Record_not_appended Write_locked"
+        zone
+        first;
+      release ());
+    append_log_outside (open_files dirs) [ record_at ~head (mode_draft ~at_ms:(at_ms + 2) M.Off) ];
+    let before = files dirs in
+    check_error
+      "the next commit"
+      "Abort_not_confirmed End_moved"
+      zone
+      (mode_draft ~at_ms:(at_ms + 3) M.Off);
+    check_files "the next commit wrote nothing" before dirs;
+    check_error "the commit after it" "Log_stopped" zone (mode_draft ~at_ms:(at_ms + 4) M.Off);
+    check_files "the commit after it wrote nothing" before dirs;
+    Alcotest.(check (option string))
+      "the store keeps the intent"
+      (Some (intent_name left))
+      (Option.map intent_name (S.State.pending (open_files dirs).store_state));
+    check_judgment "a restart" dirs "Mismatch Digest_differs")
+;;
+
+let a_failed_log_write_stops_every_commit () =
+  (* The superuser writes to a file of mode 0400. *)
+  skip_for_superuser ();
+  with_dirs (fun dirs ->
+    let completed = bootstrap dirs in
+    let zone = open_zone dirs in
+    let first = mode_draft ~at_ms:(at_ms + 1) M.Off in
+    let left = intent_of ~head:(Z.snapshot zone).Z.head first S.Change.Off in
+    let log_before = read_file (log_file dirs) in
+    Unix.chmod (log_file dirs) 0o400;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod (log_file dirs) 0o600)
+      (fun () ->
+        check_error
+          "a commit to a log that cannot be written"
+          "Record_not_appended Write_failed"
+          zone
+          first);
+    Alcotest.(check string) "the log is as it was" log_before (read_file (log_file dirs));
+    check_snapshot "the published state" ~mode:on ~head:completed.B.record_hash (Z.snapshot zone);
+    let before = files dirs in
+    check_error "the next commit" "Log_stopped" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
+    check_files "the next commit wrote nothing" before dirs;
+    let next = commit_ok (open_zone dirs) (mode_draft ~at_ms:(at_ms + 3) M.Off) in
+    check_settled "after a restart the intent is given up first" ("Abort " ^ intent_name left) next;
+    let opened = check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash in
+    check_store "a restart" opened ~pending:None ~last_committed:next.Z.record_hash ~aborted:[ left ])
+;;
+
+let a_locked_file_is_not_opened () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    List.iter
+      (fun (label, lock_path, expected) ->
+        with_foreign_lock ~lock_path (fun release ->
+          (match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+           | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
+           | Error error -> Alcotest.(check string) label expected (open_error_name error));
+          release ()))
+      [ "a locked store", Fs_compat.private_jsonl_lock_path dirs.store_file, "Store_not_opened"
+      ; "a locked log", Fs_compat.private_jsonl_lock_path (log_file dirs), "Log_not_opened"
+      ])
 ;;
 
 (* The cases below write through a handle of their own, which moves the end of
@@ -610,6 +811,30 @@ let an_intent_with_its_record_is_promoted () =
     check_store "a restart" opened ~pending:None ~last_committed:next.Z.record_hash ~aborted:[])
 ;;
 
+(* A bootstrap that stopped between its append and its answer. A promoted
+   [Fresh_bootstrap] is an answer (design 5.1). *)
+let a_bootstrap_with_its_record_is_promoted () =
+  with_dirs (fun dirs ->
+    let completed = bootstrap dirs in
+    drop_last_line dirs.store_file;
+    let left =
+      match S.State.pending (open_files dirs).store_state with
+      | Some intent -> intent
+      | None -> Alcotest.fail "the store holds no intent once its last line is cut"
+    in
+    Alcotest.(check string)
+      "the intent names the bootstrap"
+      (R.Hash.to_hex completed.B.record_hash)
+      (R.Hash.to_hex left.S.intended_next_record_digest);
+    check_judgment "what the files say" dirs "Matches";
+    let zone = open_zone dirs in
+    check_snapshot "the start reads the bootstrap" ~mode:on ~head:completed.B.record_hash (Z.snapshot zone);
+    let next = commit_ok zone (mode_draft M.Off) in
+    check_settled "the commit answers the bootstrap first" ("Promote " ^ intent_name left) next;
+    let opened = check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash in
+    check_store "a restart" opened ~pending:None ~last_committed:next.Z.record_hash ~aborted:[])
+;;
+
 (* An answer for a record that the log does not hold has no intent to settle,
    so only the judgment refuses it. *)
 let disagreements_refuse_every_commit () =
@@ -648,13 +873,22 @@ let () =
   Alcotest.run
     "authz_zone"
     [ ( "commit"
-      , [ Alcotest.test_case "commits follow one another" `Quick commits_follow_one_another ] )
+      , [ Alcotest.test_case "commits follow one another" `Quick commits_follow_one_another
+        ; Alcotest.test_case
+            "commits from fibers take turns"
+            `Quick
+            commits_from_fibers_take_turns
+        ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing
         ; Alcotest.test_case
             "the zone opens only a bootstrapped log"
             `Quick
             the_zone_opens_only_a_bootstrapped_log
+        ; Alcotest.test_case
+            "a store with no answer refuses every commit"
+            `Quick
+            a_store_with_no_answer_refuses_every_commit
         ] )
     ; ( "failures"
       , [ Alcotest.test_case
@@ -666,9 +900,18 @@ let () =
             `Quick
             a_locked_log_leaves_an_intent_that_the_next_commit_aborts
         ; Alcotest.test_case
+            "a record appended while the log was held keeps the intent"
+            `Quick
+            a_record_appended_while_the_log_was_held_keeps_the_intent
+        ; Alcotest.test_case
             "a failed store write stops every commit"
             `Quick
             a_failed_store_write_stops_every_commit
+        ; Alcotest.test_case
+            "a failed log write stops every commit"
+            `Quick
+            a_failed_log_write_stops_every_commit
+        ; Alcotest.test_case "a locked file is not opened" `Quick a_locked_file_is_not_opened
         ; Alcotest.test_case
             "another handle on the log stops the log"
             `Quick
@@ -683,6 +926,10 @@ let () =
             "an intent with its record is promoted"
             `Quick
             an_intent_with_its_record_is_promoted
+        ; Alcotest.test_case
+            "a bootstrap with its record is promoted"
+            `Quick
+            a_bootstrap_with_its_record_is_promoted
         ; Alcotest.test_case
             "disagreements refuse every commit"
             `Quick

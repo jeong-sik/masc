@@ -258,4 +258,36 @@ module Make (F : Line_format) : sig
       file. The caller must not append the same records again: the next start
       shows what the file holds. *)
   val append : writer -> F.record list -> (F.state, append_error) result
+
+  type end_error =
+    | End_writer_expired  (** The zone of this writer has ended. Nothing was read. *)
+    | End_stopped of stop
+        (** An earlier failure stopped the file. Nothing was read. *)
+    | End_locked of { path : string }
+        (** Another process holds the lock. Nothing was read and the file is not
+            stopped. *)
+    | End_moved of { path : string }
+        (** The file holds bytes after the end that this process left, or is not
+            the file it left: another writer appended, or the file was cut or
+            replaced. The file is stopped, as for [Diverged]. *)
+    | End_unknown of
+        { path : string
+        ; detail : string
+        }
+        (** The read failed in another way, so where the file ends is not known.
+            The file is stopped, as for [Write_failed]. *)
+
+  val end_error_to_string : end_error -> string
+
+  (** Says whether the file still ends where this process left it, and writes
+      nothing. It reads, under the lock of [Fs_compat], whatever follows that
+      end, and that end is the identity and size that {!append} checks, so a
+      file that [append] would find [Diverged] is [End_moved] here.
+
+      It is for a caller about to write elsewhere something that holds only
+      while nothing follows the end. The answer holds when the lock is let go:
+      a process that appends after that is found by the next {!append}. An
+      exception from the read goes on to the caller and does not stop the
+      file. *)
+  val confirm_end : writer -> (unit, end_error) result
 end

@@ -181,6 +181,21 @@ let lossy_append_error_name : Lossy_numbers.append_error -> string = function
   | Lossy_numbers.Write_failed _ -> "Write_failed"
 ;;
 
+let numbers_end_error_name : Numbers.end_error -> string = function
+  | Numbers.End_writer_expired -> "End_writer_expired"
+  | Numbers.End_stopped _ -> "End_stopped"
+  | Numbers.End_locked _ -> "End_locked"
+  | Numbers.End_moved _ -> "End_moved"
+  | Numbers.End_unknown _ -> "End_unknown"
+;;
+
+let confirm_end_name file =
+  in_zone file (fun writer _state ->
+    match Numbers.confirm_end writer with
+    | Ok () -> "Ok"
+    | Error error -> numbers_end_error_name error)
+;;
+
 let contains ~sub text =
   let sub_length = String.length sub
   and length = String.length text in
@@ -402,6 +417,71 @@ let cut_tail_is_reported () =
       Alcotest.failf "expected one warning that names the file, found %d" (List.length other))
 ;;
 
+(* ---- the end of the file ---- *)
+
+let an_end_that_did_not_move_is_confirmed () =
+  with_path (fun path ->
+    let file, _, _ = open_ok ~path in
+    Alcotest.(check string) "a file that is not there yet" "Ok" (confirm_end_name file);
+    ignore (append_ok file [ 1; 2 ] : int);
+    Alcotest.(check string) "after an append" "Ok" (confirm_end_name file);
+    Alcotest.(check string) "nothing was written" "1\n2\n" (read_file path);
+    Alcotest.(check int) "the next append goes on" 3 (append_ok file [ 3 ]))
+;;
+
+(* Another handle on the same path stands for another writer. *)
+let a_moved_end_stops_the_file () =
+  List.iter
+    (fun (label, move) ->
+      with_path (fun path ->
+        let file, _, _ = open_ok ~path in
+        ignore (append_ok file [ 1; 2 ] : int);
+        move path;
+        let bytes = read_file path in
+        Alcotest.(check string) label "End_moved" (confirm_end_name file);
+        Alcotest.(check string) (label ^ ": nothing was written") bytes (read_file path);
+        (match Numbers.stopped file with
+         | Some (_ : J.stop) -> ()
+         | None -> Alcotest.failf "%s: the file is not stopped" label);
+        match Numbers.with_writer file (fun _writer _state -> ()) with
+        | Ok () -> Alcotest.failf "%s: a stopped file was entered" label
+        | Error (_ : J.stop) -> ()))
+    [ ( "another writer appended"
+      , fun path ->
+          let other, _, _ = open_ok ~path in
+          ignore (append_ok other [ 3 ] : int) )
+    ; "the file was cut", fun path -> Unix.truncate path 2
+    ]
+;;
+
+let an_unreadable_end_stops_the_file () =
+  (* The superuser reads a file of mode 0000. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_path (fun path ->
+    let file, _, _ = open_ok ~path in
+    ignore (append_ok file [ 1 ] : int);
+    Unix.chmod path 0o000;
+    let name =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod path 0o600)
+        (fun () -> confirm_end_name file)
+    in
+    Alcotest.(check string) "a file that cannot be read" "End_unknown" name;
+    Alcotest.(check bool) "the file is stopped" true (Option.is_some (Numbers.stopped file)))
+;;
+
+let a_writer_outside_its_zone_reads_nothing () =
+  with_path (fun path ->
+    let file, _, _ = open_ok ~path in
+    let kept = in_zone file (fun writer _state -> writer) in
+    Alcotest.(check string)
+      "a writer kept after its zone"
+      "End_writer_expired"
+      (match Numbers.confirm_end kept with
+       | Ok () -> "Ok"
+       | Error error -> numbers_end_error_name error))
+;;
+
 (* ---- the texts of the errors ---- *)
 
 let texts_name_the_file_the_line_and_the_format () =
@@ -435,6 +515,14 @@ let texts_name_the_file_the_line_and_the_format () =
       , [ "3"; "different record" ] )
     ; "Stopped", Numbers.append_error_to_string (Numbers.Stopped { path; reason = "why" }), [ "counter file"; path; "why" ]
     ; "Diverged", Numbers.append_error_to_string (Numbers.Diverged { path }), [ "counter file"; path ]
+    ; ( "End_stopped"
+      , Numbers.end_error_to_string (Numbers.End_stopped { path; reason = "why" })
+      , [ "counter file"; path; "why" ] )
+    ; "End_locked", Numbers.end_error_to_string (Numbers.End_locked { path }), [ "counter file"; path ]
+    ; "End_moved", Numbers.end_error_to_string (Numbers.End_moved { path }), [ "counter file"; path ]
+    ; ( "End_unknown"
+      , Numbers.end_error_to_string (Numbers.End_unknown { path; detail = "boom" })
+      , [ "counter file"; path; "boom" ] )
     ]
 ;;
 
@@ -466,6 +554,21 @@ let () =
     ; ( "last line"
       , [ Alcotest.test_case "torn last line is cut" `Quick torn_last_line_is_cut
         ; Alcotest.test_case "the cut is reported" `Quick cut_tail_is_reported
+        ] )
+    ; ( "end of the file"
+      , [ Alcotest.test_case
+            "an end that did not move is confirmed"
+            `Quick
+            an_end_that_did_not_move_is_confirmed
+        ; Alcotest.test_case "a moved end stops the file" `Quick a_moved_end_stops_the_file
+        ; Alcotest.test_case
+            "an unreadable end stops the file"
+            `Quick
+            an_unreadable_end_stops_the_file
+        ; Alcotest.test_case
+            "a writer outside its zone reads nothing"
+            `Quick
+            a_writer_outside_its_zone_reads_nothing
         ] )
     ; ( "texts"
       , [ Alcotest.test_case

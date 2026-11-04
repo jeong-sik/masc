@@ -377,6 +377,63 @@ module Make (F : Line_format) = struct
             write log ~head (String.concat "" (List.map (fun line -> line ^ "\n") lines))))
   ;;
 
+  type end_error =
+    | End_writer_expired
+    | End_stopped of stop
+    | End_locked of { path : string }
+    | End_moved of { path : string }
+    | End_unknown of
+        { path : string
+        ; detail : string
+        }
+
+  let end_error_to_string = function
+    | End_writer_expired -> "the zone of this writer has ended"
+    | End_stopped { path; reason } ->
+      Printf.sprintf "%s %s is stopped: %s" F.description path reason
+    | End_locked { path } ->
+      Printf.sprintf "%s %s is locked by another process" F.description path
+    | End_moved { path } ->
+      Printf.sprintf "%s %s does not end where this process left it" F.description path
+    | End_unknown { path; detail } ->
+      Printf.sprintf "where %s %s ends cannot be read: %s" F.description path detail
+  ;;
+
+  (* The thread gets the path and the cursor as values, as in [write_on_thread]. *)
+  let read_after_end (log : t) =
+    let path = log.path
+    and expected = log.cursor in
+    Systhread_host.run ~label:(F.thread_label ^ "-confirm-end") (fun () ->
+      Fs_compat.read_private_jsonl_durable_locked_result path ~after:(Some expected))
+  ;;
+
+  let confirm_end writer =
+    let log = writer.log in
+    let moved () =
+      log.stopped <- Some end_moved;
+      Error (End_moved { path = log.path })
+    in
+    if not writer.live
+    then Error End_writer_expired
+    else (
+      match log.stopped with
+      | Some reason -> Error (End_stopped { path = log.path; reason })
+      | None ->
+        (match read_after_end log with
+         | Ok { Fs_compat.bytes; cursor } ->
+           if String.equal bytes "" && Fs_compat.Private_jsonl_cursor.equal cursor log.cursor
+           then Ok ()
+           else moved ()
+         | Error error ->
+           (match failure_kind error with
+            | Lock_held_by_another_process -> Error (End_locked { path = log.path })
+            | End_moved -> moved ()
+            | Outcome_unknown ->
+              let detail = store_error error in
+              log.stopped <- Some detail;
+              Error (End_unknown { path = log.path; detail }))))
+  ;;
+
   (* [Eio.Mutex.use_rw] disables the mutex for good when its function raises.
      That would turn any exception of the caller's, even one that never touched
      the file, into a file that cannot be entered again. What the file holds is

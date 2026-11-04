@@ -135,3 +135,16 @@ let open_at_start = File.open_at_start
 let with_writer = File.with_writer
 let append_error_to_string = File.append_error_to_string
 let append = File.append
+
+type end_error = File.end_error =
+  | End_writer_expired
+  | End_stopped of stop
+  | End_locked of { path : string }
+  | End_moved of { path : string }
+  | End_unknown of
+      { path : string
+      ; detail : string
+      }
+
+let end_error_to_string = File.end_error_to_string
+let confirm_end = File.confirm_end

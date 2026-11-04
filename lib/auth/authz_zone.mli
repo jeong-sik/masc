@@ -5,20 +5,23 @@
 
 (** The writer zone of the authorization log (design 8.1, 8.2, plan B3b).
 
-    {!open_at_start} opens both files and keeps their handles, so in this
-    process every write to them goes through the zone. One zone covers both
-    files: the zone of the external store, and inside it the zone of the log,
-    the order of {!Authz_bootstrap}. A {!commit} does this in it, in order:
+    {!open_at_start} opens both files and keeps their handles to itself, so
+    nothing else writes through them. One zone covers both files: the zone of
+    the external store, and inside it the zone of the log, the order of
+    {!Authz_bootstrap}. A {!commit} does this in it, in order:
     + It judges what an earlier entry left with
       {!Authz_high_water.settle_on_entry}, the judgments a start makes. It does
       this on every entry, because an append that failed leaves the process
       running (design 8.2, item 1). A mismatch refuses the commit
-      ({!Uncertain}). Nothing in the zone changes that, so every later commit is
-      refused as well, until a restart reads the files again.
+      ({!Uncertain}), and so does a store that holds no answer
+      ({!Store_holds_no_answer}). Nothing in the zone changes either, so every
+      later commit is refused as well, until a restart reads the files again.
     + It builds the record at the head of the log and runs
       {!Authz_state.apply} on it.
     + It writes the settlement of the first step: [Committed] for a promoted
-      intent, [Aborted_intent] for an aborted one.
+      intent, [Aborted_intent] for an aborted one. Before an abort it asks
+      {!Authz_log.confirm_end} whether the log still ends where the intent
+      began.
     + It writes [Intent_pending] to the store, appends the record to the log,
       publishes the state with the record, and writes [Committed].
 
@@ -39,10 +42,17 @@
     both files without reading the log again: it feeds
     {!Authz_high_water.Probe.add} each record it appends, and
     {!Authz_high_water.Probe.store_moved} each entry it writes to the store,
-    before the entry is written. This holds because nothing else in the process
-    writes through the handles of the zone. A write through another handle, or
-    by another process, moves the end of the file, and the next write of the
-    zone to that file fails with [Diverged] and stops it.
+    before the entry is written. This holds because nothing else writes through
+    the handles of the zone. A write through another handle, or by another
+    process, moves the end of the file, and the next write of the zone to that
+    file fails with [Diverged] and stops it. A write that leaves the file on the
+    same inode at the same size is not noticed ({!Authz_jsonl_file.Make}).
+
+    An abort is the one write that the zone makes to the store from what the
+    log says, and not after a write of its own to the log. The append that the
+    intent was for did not happen, and another process may have held the log
+    then, so the zone asks the file before it writes one. A record that another
+    process appends after that is found by the next append, as [Diverged].
 
     {b One record.} A commit appends one record. A list of records can land in
     part ({!Authz_log.append}), and which record the intent of a list names is
@@ -84,14 +94,25 @@ type open_error =
   | Store_not_opened of Authz_external_store.violation Authz_external_store.open_error
   | Log_not_opened of Authz_state.refusal Authz_log.open_error
   | Not_bootstrapped of { path : string }
-      (** The log holds no [Fresh_bootstrap]. {!Authz_bootstrap} writes the
-          first record of a log and the zone does not, so the zone never
-          creates a store that no install record names (design 8.4). *)
+      (** The log is not there, or holds no [Fresh_bootstrap].
+          {!Authz_bootstrap} writes the first record of a log and the zone does
+          not, so the zone never creates a store that no install record names
+          (design 8.4). A log that is not there is refused before either file
+          is opened, so the refusal leaves nothing on disk. *)
+  | Log_not_checked of
+      { path : string
+      ; detail : string
+      }
+      (** {!Authz_presence} cannot tell whether the log is there. Neither file
+          was opened. *)
 
 val open_error_to_string : open_error -> string
 
-(** Opens the external store at [store_path], then the log at [log_path],
-    folded with {!Replay} from the state of the store. *)
+(** Asks {!Authz_presence} whether the log at [log_path] is there. If it is,
+    opens the external store at [store_path], then the log, folded with
+    {!Replay} from the state of the store. Opening a file makes its directory
+    and its lock file, so a store that is not there gets both, and not the
+    store file. *)
 val open_at_start : log_path:string -> store_path:string -> (t, open_error) result
 
 val snapshot : t -> snapshot
@@ -120,14 +141,26 @@ type error =
       }
       (** The store and the log do not agree (design 8.2, items 2 to 5). Nothing
           was written. *)
+  | Store_holds_no_answer
+      (** The store and the log agree, and the store holds no answer
+          ({!Authz_high_water.Nothing_answered}), while the log holds a
+          [Fresh_bootstrap]: the store was emptied, or is not the store of this
+          log (design 5.1, 8.4). Nothing was written. *)
   | Record_not_built of Authz_record.make_error  (** Nothing was written. *)
   | Refused of Authz_state.refusal  (** Nothing was written. *)
   | Store_entry_refused of
       { entry : Authz_external_store.entry
       ; violation : Authz_external_store.violation
       }
-      (** The probe refused the entry, so it was not written. A settlement
-          before it is in the store. *)
+      (** The probe refused [entry], so it was not written. This means a bug in
+          the zone. When [entry] is the settlement, nothing was written. When it
+          is the intent, the settlement was. When it is the [Committed], the
+          record is in the log and in the snapshot as well. *)
+  | Abort_not_confirmed of Authz_log.end_error
+      (** An earlier commit left an intent to abort, and the end of the log was
+          not confirmed. Nothing was written. [End_moved] and [End_unknown]
+          stop the log, and the next start judges the intent from the file.
+          After [End_locked] the next commit asks again. *)
   | Settlement_not_written of Authz_external_store.append_error
       (** The commit stopped at the settlement, and nothing of the record was
           written. *)

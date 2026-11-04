@@ -10608,6 +10608,11 @@ type state = {
      other surfaces read. *)
   mutable tools_inventory: Masc.Tui_decode_tools.tool_snapshot option;
   mutable tools_request_generation: int;
+  (* The skills catalog and the Usage answers do not depend on the selected
+     Keeper, so they keep their own generation, which only a new workspace
+     reading moves, and their own reads in flight. *)
+  mutable tools_skill_generation: int;
+  mutable tools_skill_pending: tools_read_part list;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable tools_activations: tools_activations option;
@@ -14816,6 +14821,8 @@ let suspend_workspace_readings state =
   state.repositories_inflight <- false;
   state.repositories_owed <- Masc_tui_owed_read.settled;
   state.tools_read_inflight <- None;
+  state.tools_skill_generation <- state.tools_skill_generation + 1;
+  state.tools_skill_pending <- [];
   state.harness_inflight <- false;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
@@ -20048,6 +20055,8 @@ let create_state
   system_logs = System_logs_view.empty;
   tools_inventory = None;
   tools_request_generation = 0;
+  tools_skill_generation = 0;
+  tools_skill_pending = [];
   tools_read_inflight = None;
   tools_error = None;
   tools_activations = None;

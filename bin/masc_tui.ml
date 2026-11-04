@@ -3998,15 +3998,17 @@ let launch_tools_async_observation_load state ~mailbox =
           ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
           (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
 
-(* Starts the named Tools parts for the selected Keeper under the current
-   generation, beside the parts already in flight, and marks each part's owed
-   read started. The async broker part has its own read and in-flight flag. *)
+(* Starts the named Tools parts, beside the parts already in flight, and marks
+   each part's owed read started. The inventory and the activations read for
+   the selected Keeper under its generation; parts in flight for another
+   Keeper are dropped. The skills catalog and the Usage answers read under
+   their own generation. The async broker part has its own read and in-flight
+   flag. *)
 let launch_tools_parts state ~mailbox parts =
   if server_authority_ready state then begin
   let keeper =
     Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
   in
-  let generation = state.tools_request_generation in
   (* The Activations pane draws no ledger without a selected Keeper. *)
   let parts =
     match keeper with
@@ -4019,19 +4021,43 @@ let launch_tools_parts state ~mailbox parts =
         end;
         List.filter (fun part -> part <> Tools_activations_read) parts
   in
-  let tracked = List.filter (fun part -> part <> Tools_async_read) parts in
-  (match tracked with
+  let keeper_parts, skill_parts =
+    List.partition
+      (function
+        | Tools_inventory_read | Tools_activations_read -> true
+        | Tools_catalog_read | Tools_usage_read _ | Tools_async_read -> false)
+      parts
+  in
+  (match keeper_parts with
    | [] -> ()
    | _ :: _ ->
        state.tools_read_inflight <- Some
          (match state.tools_read_inflight with
-          | Some request when request.tri_generation = generation ->
+          | Some request
+            when request.tri_generation = state.tools_request_generation
+                 && Option.equal String.equal request.tri_keeper keeper ->
               { request with
                 tri_pending =
                   request.tri_pending
-                  @ List.filter (fun part -> not (List.mem part request.tri_pending)) tracked }
-          | Some _ | None ->
-              { tri_generation = generation; tri_keeper = keeper; tri_pending = tracked }));
+                  @ List.filter (fun part -> not (List.mem part request.tri_pending)) keeper_parts }
+          | Some _ ->
+              (* Read for a Keeper no longer selected: its answers are not
+                 this Keeper's. *)
+              state.tools_request_generation <- state.tools_request_generation + 1;
+              { tri_generation = state.tools_request_generation; tri_keeper = keeper; tri_pending = keeper_parts }
+          | None ->
+              { tri_generation = state.tools_request_generation; tri_keeper = keeper; tri_pending = keeper_parts }));
+  let generation = state.tools_request_generation in
+  let skill_generation = state.tools_skill_generation in
+  state.tools_skill_pending <-
+    state.tools_skill_pending
+    @ List.filter
+        (fun part ->
+           (match part with
+            | Tools_catalog_read | Tools_usage_read _ -> true
+            | Tools_inventory_read | Tools_activations_read | Tools_async_read -> false)
+           && not (List.mem part state.tools_skill_pending))
+        skill_parts;
   let host = server_peer_host in
   let port = state.port in
   List.iter
@@ -4043,7 +4069,7 @@ let launch_tools_parts state ~mailbox parts =
       | Tools_catalog_read ->
           state.tools_catalog_owed <- Masc_tui_owed_read.started state.tools_catalog_owed;
           launch_workspace_json_read state ~mailbox
-            ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation;
+            ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation = skill_generation;
               result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result }))
             (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port)
       | Tools_activations_read ->
@@ -4073,7 +4099,7 @@ let launch_tools_parts state ~mailbox parts =
             (Masc_tui_owed_read.started (keeper_skill_usage_owed state keeper));
           launch_workspace_json_read state ~mailbox
             ~deliver:(fun result ->
-              Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }))
+              Tools_read_loaded (Tools_usage_loaded { generation = skill_generation; keeper; result }))
             (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper)
       | Tools_async_read -> launch_tools_async_observation_load state ~mailbox)
     parts
@@ -4099,6 +4125,10 @@ let launch_tools_load ?(force = true) state ~mailbox =
     launch_tools_parts state ~mailbox [ Tools_inventory_read; Tools_activations_read ]
   end
   end
+
+let settle_tools_skill_read state ~generation part =
+  if generation = state.tools_skill_generation then
+    state.tools_skill_pending <- List.filter (fun pending -> pending <> part) state.tools_skill_pending
 
 let settle_tools_read state ~generation part =
   match state.tools_read_inflight with
@@ -9180,6 +9210,15 @@ let launch_owed_tools_async_task state ~mailbox =
       launch_tools_async_task state ~mailbox
   end
 
+(* Whether the Activations reading on screen belongs to a Keeper other than
+   [selected], or to none while one is selected. *)
+let activations_held_for_another state selected =
+  match selected, state.tools_activations with
+  | Some keeper, Some (Activations_read projection) ->
+      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
+  | Some _, Some Activations_no_keeper | None, Some (Activations_read _) -> true
+  | Some _, None | None, (Some Activations_no_keeper | None) -> false
+
 (* Runs on every loop iteration. The skills catalog and each roster Keeper's
    Usage answer read while the Usage pane is on screen, the selected
    Keeper's activations while the Activations pane is, each when a push, an
@@ -9192,16 +9231,23 @@ let launch_owed_tools state ~mailbox =
     || (state.tools_pane = Tools_async && state.tools_async_detail_open)
   in
   if state.view = Tools && not async_open then begin
-    let pending =
-      match state.tools_read_inflight with
-      | Some request -> request.tri_pending
-      | None -> []
+    let selected = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
+    (* A part in flight for a Keeper no longer selected is not this
+       Keeper's read. *)
+    let pending part =
+      match part with
+      | Tools_catalog_read | Tools_usage_read _ -> List.mem part state.tools_skill_pending
+      | Tools_inventory_read | Tools_activations_read | Tools_async_read ->
+          (match state.tools_read_inflight with
+           | Some request when Option.equal String.equal request.tri_keeper selected ->
+               List.mem part request.tri_pending
+           | Some _ | None -> false)
     in
     let now = monotonic_now_s () in
     let due part owed set =
-      let reading = List.mem part pending in
+      let reading = pending part in
       let read = if reading then owed else Masc_tui_owed_read.abandoned owed in
-      set read;
+      if read != owed then set read;
       Masc_tui_owed_read.due ~now read && not reading
     in
     let parts =
@@ -9222,6 +9268,12 @@ let launch_owed_tools state ~mailbox =
                  else None)
               state.keepers
       | Tools_activations ->
+          (* The pane follows the selected Keeper however the selection
+             moved: the roster loading, a Keeper leaving it, or a key. *)
+          (match state.tools_activations_owed with
+           | Masc_tui_owed_read.Settled when activations_held_for_another state selected ->
+               owe_tools_activations_read state
+           | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
           if due Tools_activations_read state.tools_activations_owed
                (fun owed -> state.tools_activations_owed <- owed)
           then [ Tools_activations_read ]
@@ -16611,6 +16663,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      Retire that owner before any same-named Keeper can appear on another root. *)
   state.tools_request_generation <- state.tools_request_generation + 1;
   state.tools_read_inflight <- None;
+  state.tools_skill_generation <- state.tools_skill_generation + 1;
+  state.tools_skill_pending <- [];
   state.tools_inventory <- None;
   state.tools_error <- None;
   state.tools_activations <- None;
@@ -26871,8 +26925,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.tools_activations_error <- Some detail;
           state.tools_activations_owed <- failed_read state.tools_activations_owed)
   | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
-      settle_tools_read state ~generation (Tools_usage_read keeper);
-      if generation = state.tools_request_generation then begin
+      settle_tools_skill_read state ~generation (Tools_usage_read keeper);
+      if generation = state.tools_skill_generation then begin
         record_keeper_skill_usage state ~keeper result;
         set_keeper_skill_usage_owed state keeper
           (match result with
@@ -26880,8 +26934,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read (keeper_skill_usage_owed state keeper))
       end
   | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
-      settle_tools_read state ~generation Tools_catalog_read;
-      if generation = state.tools_request_generation then (
+      settle_tools_skill_read state ~generation Tools_catalog_read;
+      if generation = state.tools_skill_generation then (
       match result with
       | Ok catalog ->
           state.skills_catalog <- Some catalog;

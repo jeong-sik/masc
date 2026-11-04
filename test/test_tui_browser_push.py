@@ -161,7 +161,9 @@ class BrowserPushTest(unittest.TestCase):
         def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
             browser = cast(BrowserServer, server)
             browser.set_phase("open")
-            step("keys", ":go Browser Lane\n")
+            step("keys", ":go Browser Lane")
+            step("drain", 0.3)
+            step("keys", "\r")
             step("wait", lambda: browser.response_count("open", f"read:{CLIENT_A}:2") == 1,
                  "the selected Browser did not complete its initial read")
             step("wait", lambda: browser.count("open", f"observer:live:{CLIENT_A}:2:read") >= 1,

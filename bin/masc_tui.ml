@@ -8056,6 +8056,12 @@ let owe_tools_read_for_keeper state keeper =
 let owe_clients_read state =
   state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
 
+let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
+
+let observer_browser_scope state =
+  if Option.is_some !browser_pointer_press then None
+  else Masc_tui_types.observer_browser_scope_of_state state
+
 let owe_machine_live_read state machine =
   let visible = match machine with
     | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
@@ -9103,8 +9109,6 @@ let launch_owed_machine_live state ~mailbox =
     (fun owed -> state.msx_live_owed <- owed) launch_msx_live_read;
   launch Masc.Machine_lane.Dos state.msx_open state.dos_live_owed state.dos_live_in_flight
     (fun owed -> state.dos_live_owed <- owed) launch_dos_live_poll
-
-let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
@@ -18631,7 +18635,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
   in
   let owner = ref () in
   let machine = Masc_tui_types.observer_machine_of_state state in
-  let browser = Masc_tui_types.observer_browser_scope_of_state state in
+  let browser = observer_browser_scope state in
   state.observer_stream_owner <- Some owner;
   state.observer_machine <- machine;
   state.observer_browser <- browser;
@@ -18708,7 +18712,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
 
 let reconcile_observer_machine state ~host ~port ~mailbox =
   let machine = Masc_tui_types.observer_machine_of_state state in
-  let browser = Masc_tui_types.observer_browser_scope_of_state state in
+  let browser = observer_browser_scope state in
   if machine <> state.observer_machine || browser <> state.observer_browser then begin
     Option.iter (fun owner -> Masc_tui_workspace_job.cancel_observation state ~key:owner)
       state.observer_stream_owner;

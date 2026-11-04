@@ -113,7 +113,7 @@ Never repeat an uncertain answer or infer a clean key/button state from it.
 Every result object and failure the Ego connection answers carries
 `inputReadiness`: `command_settled`, or `release_uncertain` when the last
 input-holding command ended without the SDK declaring its release (a dialog cut
-it, or its answer was lost). The next input is admitted either way. After a
+it, or its answer was lost). The next input runs either way. After a
 `release_uncertain` typing, the next press of the interrupted key on that Page
 may arrive marked as a key repeat; the text it types is unchanged. The original
 command's effect is unknown, so running it again can repeat it; reading the
@@ -123,13 +123,9 @@ failure the server reports on its own (for example when it stopped waiting for
 the connection).
 A click, double click or drag whose target the SDK could not resolve fails with
 `refusedBeforePress: {"kind": ...}` and keeps `inputReadiness` as it was: no
-key or button is left down and the next input is admitted. A double click may
-have finished its first click before the refusal. `permanent` means the
-target as written will not resolve; `transient` means it may once the page
-settles.
-After a lost confirmation reply, inspect the original installation and read its
-form if the same worker is still available. Never apply its old confirmation to
-a replacement connection or replay browser input.
+key or button is left down. A double click may have finished its first click
+before the refusal. `permanent` means the target as written will not resolve;
+`transient` means it may once the page settles.
 
 When Ego reports `EGO_PAGE_UNRESPONSIVE` because navigation has not committed,
 use `BrowserAct` `action = "stop_loading"` on the same observed live client and

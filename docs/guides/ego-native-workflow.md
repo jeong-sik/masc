@@ -200,7 +200,7 @@ steps. A malformed optional cleanup diagnostic is omitted only when the Host
 has validated that exact cleanup-only failure after the final verified raw
 tail, with no later pending action or Page transition. A lost or malformed
 overall reply, ambiguous progress, or an unconfirmed later holding step still
-leaves input pending. Never replay typing because cleanup or its reply failed.
+leaves the release unconfirmed. Never replay typing because cleanup or its reply failed.
 
 A pre-effect refusal preserves previous input readiness. Already dispatched
 receipt-less holding input stays unconfirmed: inspect the page rather than
@@ -258,15 +258,13 @@ A failed reply that reports a held input is `Stopped` with that step, or with
 `Held_by_script_report` when every answer is clean. A successful reply cannot
 report a held input.
 
-The peer settles its input from `Released`, and restores its previous readiness,
-including operator provenance, for whole-command `No_hold`.
+The peer settles its input from `Released`, and restores its previous readiness
+for whole-command `No_hold`.
 [`Browser_ego_input.command_settled`](../../lib/browser_ego_input.mli) accepts
 only the judge's proof. Native-window bindings must additionally match the
-actual pending command/generation, source Page label and retained numeric
-Space; Page-scoped input requires the same source/current Page. The existing
-full-record CAS and active writer checks prevent stale or replaced workers
-from settling another command. Volatile, unbound state cannot settle a native
-window. Receipt-backed answers retain their call-site responsibility: the
+actual pending command/generation, source Page label and the connection's
+numeric Space; Page-scoped input requires the same source/current Page.
+Receipt-backed answers retain their call-site responsibility: the
 types alone cannot establish that JSON is the actual SDK answer. A selector
 `drag_to` still settles from the one declared `dragAndDrop` receipt through
 `answer_of_json` and `judge`; a missing, `null` or non-object receipt establishes
@@ -355,8 +353,8 @@ These names follow the [SDK error](https://github.com/citrolabs/ego-lite/blob/12
 Missing optional observations stay absent. This preserves an interrupted first
 evaluation's diagnostics even when no effect completed. Its outcome remains
 unknown; initial reads that failed before input retain their not-started phase.
-The dialog observation neither completes the interrupted operation nor clears
-pending input. Answer the dialog on the same managed Page, observe its state,
+The dialog observation neither completes the interrupted operation nor settles
+its release. Answer the dialog on the same managed Page, observe its state,
 and decide a distinct next action without replaying the stopped workflow.
 
 After successful work, `BrowserAct action=finish_space` completes that native
@@ -526,13 +524,12 @@ trigger success and failure; no host timeout, Promise.race or cancellation API i
 invented. SDK round disposal still owns interruption of an unfinished wait.
 
 Input uncertainty remains connection-wide. Because a lost reply can follow
-input on a different Page, the private reset view marks popup workflows as
-Space-scoped and retains the original source identity; it does not guess which
+input on a different Page, a popup workflow's pending input is Space-scoped
+and keeps the original source identity; it does not guess which
 Page holds input. A raw typing window after a selected popup binds both the
 original source and that step's current canonical Page. The Host reconstructs
 the current Page from validated selected transitions; arbitrary Page identities
-do not authorize continuation. SDK void ambiguity and operator reset authority
-remain unchanged. Receipt-backed input uses the shared receipt-field contract
+do not authorize continuation. SDK void ambiguity remains unchanged. Receipt-backed input uses the shared receipt-field contract
 in the Host parser and SDK-side continuation check. Any
 undeclared action receipt, including an unknown field or `dialog: null`, stops
 before later input; a declared optional popup list without a dialog stays valid.
@@ -589,7 +586,7 @@ This is an in-place SDK availability observation. It does not complete a login
 handoff, reclaim a user-held Space, or clear uncertain input release. A handed-off
 Space is refused before the wait; the existing explicit operator-confirmation
 and same-Space `take_over` flow still applies. Subsequent commands recheck normal
-ownership and input state. Keeper activity names the Space wait separately.
+ownership. Keeper activity names the Space wait separately.
 
 ## Dated Space metadata in MASC
 

@@ -314,5 +314,5 @@ and [issue #44150](https://github.com/jeong-sik/masc/issues/44150).
 
 An Ego answer reports `inputReadiness: release_uncertain` when an
 input-holding command ended without the SDK declaring its release. Later input
-on the same connection is admitted; the value is an observation. Original
+on the same connection runs; the value is an observation. Original
 gesture cleanup, visible UI and login completion are separate observations.

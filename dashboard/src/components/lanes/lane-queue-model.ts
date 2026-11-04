@@ -270,6 +270,7 @@ const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
   schedule_waiting: { label: '예약 실행', tone: 'warn', stage: 'schedule' },
   owner_shutdown: { label: '종료 정리', tone: 'dim', stage: 'keeper' },
   operator_pending_confirm: { label: '운영자 확인', tone: 'warn', stage: 'operator' },
+  runtime_quota_spent: { label: '한도 소진', tone: 'bad', stage: 'keeper' },
   read_error: { label: '읽기 오류', tone: 'bad', stage: 'queue' },
   observation_unavailable: { label: '관측 불가', tone: 'bad', stage: 'operator' },
 }

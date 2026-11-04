@@ -380,6 +380,7 @@ export type DashboardKeeperWaitingSource =
   | 'schedule_waiting'
   | 'owner_shutdown'
   | 'operator_pending_confirm'
+  | 'runtime_quota_spent'
   | 'read_error'
   | 'observation_unavailable'
 
@@ -392,6 +393,7 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'schedule_waiting',
   'owner_shutdown',
   'operator_pending_confirm',
+  'runtime_quota_spent',
   'read_error',
   'observation_unavailable',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>

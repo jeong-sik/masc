@@ -1475,18 +1475,19 @@ let test_lane_inventory_pushes_decode_with_their_scope () =
       | decoded -> failf "a Lane push was not read: %s"
           (String.concat ", " (List.map summary decoded)))
     [ lanes, "lanes"; addon, "lane_addons" ];
-  match Yojson.Safe.from_string
+  let fields = match Yojson.Safe.from_string
     "{\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"inst-7\"}" with
-  | `Assoc fields ->
-      (match Masc.Workspace_dataset_event.of_fields fields with
-       | Ok dataset ->
-           check string "the Add-on dataset name" "lane_addons"
-             (Masc.Workspace_dataset_event.dataset_name dataset);
-           check (option string) "the open instance is preserved" (Some "inst-7")
-             (Option.bind (List.assoc_opt "instance_id" fields)
-               Yojson.Safe.Util.to_string_option)
-       | Error detail -> fail detail)
-  | _ -> fail "the Add-on fixture is not an object";
+    | `Assoc fields -> fields
+    | _ -> fail "the Add-on fixture is not an object"
+  in
+  (match Masc.Workspace_dataset_event.of_fields fields with
+   | Ok dataset ->
+       check string "the Add-on dataset name" "lane_addons"
+         (Masc.Workspace_dataset_event.dataset_name dataset);
+       check (option string) "the open instance is preserved" (Some "inst-7")
+         (Option.bind (List.assoc_opt "instance_id" fields)
+           Yojson.Safe.Util.to_string_option)
+   | Error detail -> fail detail);
   List.iter
     (fun frame ->
       match decode_all [ frame ] with

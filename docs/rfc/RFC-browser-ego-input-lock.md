@@ -48,19 +48,21 @@ Space #1 에도 11-03 17:15 에 마지막으로 기록된 잠금이 남아 있�
 | 10-27 | ego lite 0.6.1.11, Chromium 156 | `confirm()` 이 click·type·Control+a 를 끊음 | 끊긴 쪽은 mouseup·keyup 이 안 옴. 다음 클릭은 `buttons: 0`, ctrl 없음, `modifierMask()` 0. 같은 키를 다시 누를 때만 `repeat: true` |
 | 10-27 | 같음 | 보통 타이핑 30회(Shift 문자 포함) | keydown 201 = keyup 201, 남은 키 없음 |
 | 11-04 | ego-browser 0.6.2.5, Chromium 156 | 대상 못 찾음 11가지(클릭·더블클릭·드래그) | 모두 `ElementResolutionError`, 페이지 이벤트 0건, 다음 클릭 정상 |
+| 11-04 | 같음 | M1~M3 (6절) | keyboard.type 이 끊긴 Page 에서만 다음 같은 키에 `repeat: true`. 그 밖에는 남은 것 없음 |
+
+기록과 스크립트: `docs/evidence/2026-11-04-ego-input-residue/`.
 
 잰 적 없는 것:
 
-- `alert`, `prompt`, `beforeunload`, mouseup 에서 여는 대화상자
-- 한 Page 에서 끊긴 입력이 같은 Space 의 다른 Page 입력에 주는 영향
-- 0.6.2.5 에서 대화상자로 끊긴 입력(10-27 은 0.6.1.11)
-- 좌표 드래그(`mouse.down/move/up`)가 끊긴 경우
+- http(s) 페이지와 교차 출처 iframe 에서 여는 대화상자
+- 실제 사용자 활성화가 있는 beforeunload (스크립트 입력으로는 대화상자가 뜨지 않았다)
+- 0.6.2.5 이외 버전
 
 ## 4. 비용과 이득
 
 | | 잠금이 있을 때 | 잠금이 없을 때 |
 |---|---|---|
-| 남은 키가 다음 입력에 섞임 | 막는다 | 잰 범위에서는 일어나지 않았다. 안 잰 경우는 모른다 |
+| 남은 키가 다음 입력에 섞임 | 막지 못한다. 잠금도 리셋도 keyup·mouseup 을 보내지 않아, 풀린 뒤에도 같은 `repeat` 이 남는다 | keyboard.type 이 끊긴 Page 에서 그 키를 다음에 한 번 누를 때 `repeat: true`. 그 키를 누르고 떼면 사라진다 |
 | 한 Keeper 의 실패가 다른 Keeper 를 멈춤 | 생긴다(Space 전체) | 없다 |
 | 사람이 개입해야 풀림 | 대부분 그렇다(16시간 사례) | 없다 |
 | 기록·코드 | `Pending` 저장소, 두 해제 경로, 해제 보고서, 거절 문장 | 관측값(`inputReadiness`)만 남김 |
@@ -83,25 +85,47 @@ Space #1 에도 11-03 17:15 에 마지막으로 기록된 잠금이 남아 있�
 **C. Gate 를 없애고 관측값으로만 보여 준다.** 입력은 받아들인다.
 답에는 `inputReadiness: release_uncertain` 과 어떤 입력이 언제 끊겼는지 실어,
 Keeper 가 보고 판단한다. 함께 지울 것: `Pending` 저장소(`lane-addons/ego-input/`),
-`assert_input_reset`, `release_input`, `releasePath`. 지금 있는 저장소 파일은 지우고 설치한다.
+`assert_input_reset`, `release_input`, `inputLock`(#48042)·`releasePath`. 지금 있는 저장소 파일은 지우고 설치한다.
 
 **D. SDK 의 해제 확인 신호를 기다린다**(MASC task-2742). SDK 에 그런 API 는 아직 없다.
 생기기 전까지는 A 와 같다.
 
-## 6. 결정 전에 잴 것
+**E. 남은 것을 SDK 공개 호출로 뗀다.** `page.keyboard.up(key)` 는 `#pressedCodes` 에서 키를 지우고
+페이지에 keyup 을 보낸다. `page.mouse.up()` 은 `PageMouse.#buttons` 를 지우고 mouseReleased 를 보낸다.
+실측에서 둘 다 남은 것을 없앴다. 다만 keyboard.type 이 어느 글자에서 끊겼는지 masc 는 모르므로,
+타이핑한 글자마다 keyup 을 보내면 누르지 않은 키의 keyup 이 페이지에 간다.
+raw `mouse.down` 은 masc 가 지금 쓰지 않는다(좌표 드래그는 거절된다).
 
-설치된 버전(지금 0.6.2.5)에서, 각 조건 뒤에 같은 Page 와 다른 Page 에서 클릭·타이핑을 한 번씩 하고
-페이지가 받은 `buttons`, 수정 키, `repeat` 를 기록한다.
+## 6. 잰 것 (2026-11-04, ego-browser 0.6.2.5)
 
-- M1. `alert`·`confirm`·`prompt` 가 mousedown·keydown 에서 click·dblclick·dragAndDrop·press·keyboard.type 을 끊음
-- M2. M1 직후 같은 Space 의 다른 Page 입력
-- M3. `beforeunload`, mouseup 에서 여는 대화상자, 좌표 드래그 중단
+각 조건 뒤에 같은 Page 와 같은 Space 의 다른 Page 에서 클릭 한 번, `ab` 타이핑 한 번을 하고
+페이지가 받은 `buttons`, 수정 키, `repeat`, 입력값, `modifierMask()` 를 봤다.
+
+| | 조건 | 같은 Page | 다른 Page |
+|---|---|---|---|
+| M1/M2 | click · dblclick · dragAndDrop 을 mousedown 의 alert·confirm·prompt 가 끊음 (9) | 없음 | 없음 |
+| M1/M2 | press · keyboard.press `Shift+a` 를 keydown 의 alert·confirm·prompt 가 끊음 (6) | 없음 | 없음 |
+| M1/M2 | keyboard.type 을 첫 keydown 의 alert·confirm·prompt 가 끊음 (3) | 다음 같은 키에 `repeat: true`, 입력값 정상 | 없음 |
+| M3 | click 을 mouseup 의 confirm 이 끊음 | 없음 | 없음 |
+| M3 | beforeunload (속성·리스너, 링크 클릭·goto) | 대화상자 없이 이동, 끊기지 않음 | 없음 |
+| M3 | raw `mouse.down` 을 alert 가 끊음 | 셀렉터 클릭은 깨끗, 좌표 클릭은 버튼 누른 채 이동으로 시작 | 없음 |
+
+SDK 소스(`citrolabs/ego-lite@12407167f84a`)와도 맞는다. `pressInSession` 은 실패해도 키를 역순으로 떼고,
+`#up` 은 디스패치 전에 상태를 지운다. `type` 은 `#down` 이 끊기면 `#up` 을 못 해 `#pressedCodes` 에 남는다.
+키보드·마우스 상태는 Page 마다 따로다.
 
 ## 7. 제안
 
-M1~M3 에서 남은 키·버튼이 없으면 C 로 간다.
-남은 상태가 Page 안에서만 보이면 B 로 간다.
-다른 Page 까지 번지면 A 를 유지하고 D 를 기다린다.
+측정 전에 적은 규칙은 "남은 상태가 Page 안에서만 보이면 B" 였다. 결과는 그 경우에 해당한다.
+그런데 B 가 기대던 전제, 즉 잠금이 남은 상태를 막아 준다는 것이 성립하지 않았다.
+
+- 남은 것은 keyboard.type 이 끊긴 Page 의 `repeat` 표시 하나다. 입력값은 맞고, 그 키를 한 번 누르고 떼면 사라진다.
+- 잠금은 그 표시를 지우지 못한다. 리셋 뒤에도 같은 표시가 남는다. 잠금이 하는 일은 그동안 입력을 멈추는 것뿐이다.
+- 그러니 B 는 보호 없이 Page 하나를 멈추고, A 는 Space 전체를 멈춘다.
+
+그래서 C 를 제안한다. Gate 와 `Pending` 저장소, 두 해제 경로를 지우고,
+끊긴 입력은 답의 관측값으로만 보여 준다. E 는 지금 필요 없다.
+masc 가 raw `mouse.down` 을 쓰게 되면 그때 끊긴 경우의 `mouse.up` 을 함께 둔다.
 
 결정은 운영자가 한다.
 

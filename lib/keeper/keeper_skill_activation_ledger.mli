@@ -355,6 +355,14 @@ val of_projection_yojson : Yojson.Safe.t -> (t, decode_error) result
     derived ledger revision. It does not assert which workspace requested the
     projection. *)
 
+val install_commit_observer :
+  (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit) -> unit
+(** Replace the observer that hears about committed writes. Each write
+    function below that appends at least one event to [trace_id]'s ledger
+    calls it once, after the session lock is released. A write that only
+    re-observes stored facts appends nothing and does not call it. The server
+    installs one at boot; before that it does nothing. *)
+
 val load :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->

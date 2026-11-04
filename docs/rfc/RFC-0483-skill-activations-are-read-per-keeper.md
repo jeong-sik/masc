@@ -89,11 +89,7 @@ trace 는 Keeper 를 만들 때 한 번 정해진다. trace id 를 만드는 곳
 
 2026-11-04 운영 workspace 에서 비어 있지 않은 장부는 34개였고, 모두 지금 Keeper 의 trace 였다. 가장 큰 장부는 948KB(1,875줄, ocaml-agent-ic)였고, 10개가 327KB 를 넘었다.
 
-Keeper 이름은 쓰는 쪽에 있다.
-
-- recorder 는 `keeper_run_tools_setup.ml:447` 에서 만든다. 그 자리에 `meta.name` 이 있다.
-- async action observer 는 recorder 의 context 를 들고 있다.
-- composition 전달은 `binding.source.keeper_name` 을 들고 있다.
+Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 그 Keeper 의 지금 trace 가 `meta.runtime.trace_id` 로 들어 있다. recorder 의 context 는 JSON 으로 저장됐다가 tool execution journal 과 composition draft 에서 복원되므로, 쓰는 쪽에 이름을 들려 보내면 그 복원 경로까지 이름을 받아야 한다.
 
 ## 3. 문제
 
@@ -114,9 +110,10 @@ Keeper 이름은 쓰는 쪽에 있다.
 
 ### 4.2 서버: Keeper 이름을 붙여 알린다
 
-- 장부 공개 함수가 `~keeper_name` 을 받는다. 2장 표의 부르는 곳이 그 값을 넘긴다. recorder 는 `make` 에서 이름을 받아 context 에 둔다. 장부 파일에는 쓰지 않는다. 저장 형식은 그대로다.
-- `commit_event_locked` 가 성공한 뒤 `keeper_skill_activations_changed` 를 알린다. 본문은 `{name, trace_id}` 다. 알리는 곳은 이 한 곳이라, 새 기록 종류가 생겨도 빠지지 않는다(RFC-0480 §3.4).
-- 세션 잠금 안에서 알리므로 기다리지 않는 `Sse.broadcast_to_sse_runtime_observers` 를 쓴다. #48060 의 `lane_addon_exports_changed` 와 같은 방식이다. 알림이 실패해도 기록은 이미 디스크에 있다. 실패는 `keeper_sse_broadcast_failures` 에 센다.
+- 장부의 쓰기는 모두 쓰기 잠금(`with_write_lock`)을 지난다. `commit_event_locked` 는 그 잠금이 만든 writer 를 받아야 부를 수 있고, 기록하면 writer 에 표시한다. 그래서 새 기록 종류가 생겨도 표시에서 빠지지 않는다(RFC-0480 §3.4).
+- 기록이 하나라도 있었으면 쓰기 잠금은 세션 잠금을 푼 뒤 commit observer 를 한 번 부른다. 장부는 trace 만 넘긴다. 장부 함수의 시그니처와 저장 형식은 그대로다.
+- 서버는 시작할 때 observer 를 설치한다. observer 는 바뀐 trace 를 기록하고 fiber 를 깨운다. fiber 는 registry 에서 그 trace 의 Keeper 를 찾아 `keeper_skill_activations_changed {name, trace_id}` 를 보낸다. 기다리는 동안 들어온 기록은 Keeper 마다 한 번으로 묶인다.
+- registry 에 없는 trace(턴 도중에 지워진 Keeper)는 보여 줄 곳이 없어 알리지 않고, `keeper_sse_broadcast_failures` 에 `unnamed_trace` 로 센다.
 - 쓰지 않은 관찰(새로 볼 것이 없음)은 알리지 않는다.
 
 ### 4.3 TUI: pane 이 보이는 동안 그 pane 의 원천만 읽는다
@@ -139,7 +136,8 @@ Keeper 이름은 쓰는 쪽에 있다.
 |---|---|
 | Tools 2초 읽기 유지 | 바뀐 게 없어도 2초마다 모든 Keeper 장부와 최대 2MB 를 읽는다 |
 | 쓸 때마다 알리고 두 응답을 통째로 다시 읽음 | 3장 문제 1 그대로다 |
-| trace_id 만 알리고 TUI 가 trace 에서 Keeper 를 찾음 | TUI 에도 서버에도 그 표가 없다. Keeper 가 새 trace 로 가면 TUI 는 처음 보는 trace 를 받는다 |
+| trace_id 만 알리고 TUI 가 trace 에서 Keeper 를 찾음 | TUI 에는 trace 에서 Keeper 로 가는 표가 없다. Keeper 가 새 trace 로 가면 TUI 는 처음 보는 trace 를 받는다. 서버는 registry 로 찾을 수 있어서 서버가 이름을 붙인다 |
+| 장부 공개 함수에 `~keeper_name` 을 넘김 | recorder context 가 JSON 으로 저장됐다 복원되는 4곳까지 이름을 받아야 하고, 장부를 쓰는 시험 약 65곳과 `Recorder.make` 17곳이 바뀐다 |
 | Keeper 이름을 장부 header 에 저장 | 알림에만 필요한 값인데 저장 형식이 바뀐다 |
 | 턴이 끝날 때(`keeper_turn_complete`) 한 번 다시 읽음 | async 기록은 턴 뒤에 들어올 수 있다. 쓰는 곳 일부를 놓친다(RFC-0480 §3.4 조건 1) |
 
@@ -147,7 +145,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 
 | 층 | 내용 | 통과 조건 |
 |---|---|---|
-| L1 | 장부 공개 함수에 `~keeper_name`. `commit_event_locked` 성공 뒤 `keeper_skill_activations_changed` | 2장 표의 기록 종류마다 알림이 한 번 나가는지, 쓰지 않은 관찰은 알리지 않는지 |
+| L1 | 장부 쓰기 잠금과 commit observer. 서버가 registry 로 이름을 찾아 `keeper_skill_activations_changed` | 기록한 쓰기마다 observer 가 한 번 불리는지, 쓰지 않은 관찰은 부르지 않는지, trace 가 registry 의 Keeper 이름으로 바뀌는지 |
 | L2 | Keeper 별 활성화 읽기 route | 한 Keeper 장부만 읽는지, 못 읽은 장부를 닫힌 상태로 돌려주는지 |
 | L3 | 소비자를 L2 로 옮기고 옛 필드를 지운다. TUI decoder, 웹 대시보드, harness 스크립트, `/api/v1/skills` 의 `usage[]`·`usage_coverage`, `/api/v1/dashboard/tools` 의 `skill_activations` | 옛 필드 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
 | L4 | TUI 가 4.3 표대로 읽고 Tools 화면의 `launch_tools_load` 2초 분기를 지운다 | 알림 하나에 그 Keeper 읽기 하나, 주기에는 읽지 않는지(PTY) |

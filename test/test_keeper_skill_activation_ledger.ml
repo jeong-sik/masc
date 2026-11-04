@@ -376,6 +376,25 @@ let activation_row value =
         ])
 ;;
 
+(* Each write that appends tells the commit observer once; a write that only
+   re-observes what is stored tells nothing (RFC-0483 §4.2). *)
+let test_each_appending_write_announces_once () =
+  with_session @@ fun config trace_id _session_dir ->
+  let heard = ref [] in
+  Ledger.install_commit_observer (fun ~config:_ ~trace_id:changed ->
+    heard := Keeper_id.Trace_id.to_string changed :: !heard);
+  Fun.protect ~finally:(fun () -> Ledger.install_commit_observer (fun ~config:_ ~trace_id:_ -> ()))
+  @@ fun () ->
+  let times n = List.init n (fun _ -> Keeper_id.Trace_id.to_string trace_id) in
+  let _ = ok "first record" (Ledger.record ~config ~trace_id (activation ())) in
+  check (list string) "an activation announces" (times 1) !heard;
+  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  check (list string) "an identical activation announces nothing" (times 1) !heard;
+  let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
+  check (list string) "a delivery announces" (times 2) !heard;
+  let _ = ok "action" (act config trace_id ~call:"call-action" [ "call-workspace-a" ]) in
+  check (list string) "an action announces" (times 3) !heard
+
 let test_legacy_composition_reports_exact_row_without_appending () =
   with_session @@ fun config trace_id session_dir ->
   let original = activation ~skill_tool_use_id:"legacy-composition"
@@ -1598,6 +1617,8 @@ let () =
             test_the_held_ledger_is_the_one_the_file_replays
         ; test_case "each mutation appends one row" `Quick
             test_each_mutation_appends_one_row
+        ; test_case "each appending write announces once" `Quick
+            test_each_appending_write_announces_once
         ; test_case "a torn last row is cut on the first read" `Quick
             test_a_torn_last_row_is_cut_on_first_read
         ; test_case "an event for an unrecorded activation is typed" `Quick

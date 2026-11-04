@@ -4897,7 +4897,7 @@ let inspect_reading ~config = Eio_context.run_on_owner_domain (fun () ->
   | None -> Ok None
   | Some m ->
       let* json = snapshot m ~access:Lane_addon_sources.Operator_configuration () in
-      let actions = entries m |> List.map (fun e ->
+      let actions = entries m |> List.map (fun (e : entry) ->
         e.instance_id, `Assoc [
           "current", Option.fold ~none:`Null ~some:Lane_addon_action.to_json e.current_action;
           "queued", `List (List.of_seq (Seq.map Lane_addon_action.to_json (Queue.to_seq e.action_queue)))]) in

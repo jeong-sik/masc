@@ -52,12 +52,6 @@ type 'a tally =
 let empty_tally zero =
   { reported = zero; reported_samples = 0; unreported_samples = 0; unread_samples = 0 }
 
-let reset_tally tally zero =
-  tally.reported <- zero;
-  tally.reported_samples <- 0;
-  tally.unreported_samples <- 0;
-  tally.unread_samples <- 0
-
 let add_reading tally ~add reading =
   match reading with
   | Reported value ->
@@ -99,15 +93,234 @@ let keeper_costs_window_of_query = function
             (Printf.sprintf "window must be a whole number of minutes from 1 to %d, got %S"
                keeper_costs_max_window_minutes raw))
 
+(* What one metrics row the window may hold says, placed in time where the
+   row allows it. *)
+type timed_row =
+  | Turn_sample of
+      { ts : float
+      ; latency_ms : float
+      ; cost : float reading
+      ; tokens : token_counts reading
+      }
+  | Unread_turn of { ts : float }
+      (** A row that may have been a turn, at a readable time, whose kind or
+          latency this build cannot read. *)
+
+(* One day file's rows. A malformed row and a row with no readable time have
+   nothing to place them by, so they count while their file's day is in the
+   window: the count is rows that may be in the window, not rows known to
+   be. *)
+type file_rows =
+  { timed : timed_row list
+  ; untimed_unread : int
+  ; malformed : int
+  }
+
+let no_rows = { timed = []; untimed_unread = 0; malformed = 0 }
+
+let finite_ts json =
+  match Json_util.assoc_member_opt "ts_unix" json with
+  | Some (`Float value) when Float.is_finite value -> Some value
+  | Some _ | None -> None
+
+(* Each row is read once, when its file is first read up to it. A heartbeat
+   never counts. A row of a kind this build cannot read (another schema, or
+   no [record_kind]) may have been a turn, and so may a turn whose latency
+   has a shape the writer never produces. *)
+let add_file_row rows = function
+  | Dated_jsonl.Malformed_json _ -> { rows with malformed = rows.malformed + 1 }
+  | Dated_jsonl.Parsed json ->
+      (match Keeper_metrics_record.kind_of_json json, finite_ts json with
+       | Some Keeper_metrics_record.Heartbeat, _ -> rows
+       | (None | Some Keeper_metrics_record.Turn), None ->
+           { rows with untimed_unread = rows.untimed_unread + 1 }
+       | None, Some ts -> { rows with timed = Unread_turn { ts } :: rows.timed }
+       | Some Keeper_metrics_record.Turn, Some ts ->
+           (match Json_util.assoc_member_opt "latency_ms" json with
+            | Some (`Int latency_ms) when latency_ms >= 0 ->
+                let sample =
+                  Turn_sample
+                    { ts
+                    ; latency_ms = float_of_int latency_ms
+                    ; cost = cost_reading_of_row json
+                    ; tokens = token_reading_of_row json
+                    }
+                in
+                { rows with timed = sample :: rows.timed }
+            | Some _ | None -> { rows with timed = Unread_turn { ts } :: rows.timed }))
+
+let window_seconds window_minutes = float_of_int window_minutes *. 60.0
+
+(* A timed row counts while [ts + window >= now], so the first float after
+   [ts + window] is the instant it stops counting. *)
+let timed_in_window ~window_sec ~now ts = ts +. window_sec >= now
+
+(* A day file counts while its day is on or after the day the window starts
+   in, which it leaves [window_sec] after its own day ends. *)
+let file_in_window ~window_sec ~now (day : Dated_jsonl_kept_days.day) =
+  day.starts_at >= (Dated_jsonl_kept_days.day_of (now -. window_sec)).starts_at
+
+let timed_ts = function
+  | Turn_sample { ts; _ } | Unread_turn { ts } -> ts
+
+module Kept = Dated_jsonl_kept_days
+module Keeper_map = Map.Make (String)
+
+(* Every listed Keeper's metrics day files of the widest window, per
+   workspace, kept between reads (RFC-0480 §8 decision 2). A read folds only
+   what each file gained since the last one. *)
+let kept : (string, file_rows Kept.t Keeper_map.t) Hashtbl.t = Hashtbl.create 1
+let kept_mu = Stdlib.Mutex.create ()
+
+let kept_changed : (base_path:string -> unit) Atomic.t = Atomic.make (fun ~base_path:_ -> ())
+
+let install_keeper_costs_kept_observer observer = Atomic.set kept_changed observer
+
+let kept_for ~base_path =
+  Stdlib.Mutex.protect kept_mu (fun () ->
+    Option.value ~default:Keeper_map.empty (Hashtbl.find_opt kept base_path))
+
+let refresh_keeper ~(config : Workspace.config) ~keeper_name ~now =
+  let previous =
+    Option.value ~default:Kept.empty
+      (Keeper_map.find_opt keeper_name (kept_for ~base_path:config.base_path))
+  in
+  let days =
+    Kept.days_between
+      ~since:(now -. window_seconds keeper_costs_max_window_minutes)
+      ~until:now
+  in
+  match
+    Kept.refresh (Keeper_types_support.keeper_metrics_store config keeper_name)
+      ~days ~init:no_rows ~f:add_file_row previous
+  with
+  | Error error -> Error (Dated_jsonl.read_error_to_string error)
+  | Ok files ->
+      Stdlib.Mutex.protect kept_mu (fun () ->
+        let keepers =
+          Option.value ~default:Keeper_map.empty (Hashtbl.find_opt kept config.base_path)
+        in
+        Hashtbl.replace kept config.base_path (Keeper_map.add keeper_name files keepers));
+      Ok files
+
+(* A Keeper the request did not list (removed, or its meta unread) is
+   dropped; listed again, its files are read whole. *)
+let keep_only ~base_path ~names =
+  Stdlib.Mutex.protect kept_mu (fun () ->
+    match Hashtbl.find_opt kept base_path with
+    | None -> ()
+    | Some keepers ->
+        Hashtbl.replace kept base_path
+          (Keeper_map.filter (fun name _ -> List.mem name names) keepers))
+
+let earliest_of earliest at =
+  Some (Option.fold earliest ~none:at ~some:(Float.min at))
+
+let keeper_costs_next_change ~base_path ~now =
+  let window_sec = window_seconds keeper_costs_default_window_minutes in
+  Keeper_map.fold
+    (fun _ files earliest ->
+      Kept.fold files ~init:earliest ~f:(fun earliest day rows ->
+        if not (file_in_window ~window_sec ~now day)
+        then earliest
+        else
+          let holds_rows =
+            (match rows.timed with
+             | [] -> false
+             | _ :: _ -> true)
+            || rows.untimed_unread > 0
+            || rows.malformed > 0
+          in
+          let earliest =
+            if holds_rows
+            then earliest_of earliest (day.starts_at +. Kept.seconds_per_day +. window_sec)
+            else earliest
+          in
+          List.fold_left
+            (fun earliest row ->
+              let ts = timed_ts row in
+              if timed_in_window ~window_sec ~now ts
+              then earliest_of earliest (Float.succ (ts +. window_sec))
+              else earliest)
+            earliest rows.timed))
+    (kept_for ~base_path) None
+
+let keeper_cost_row ~window_minutes ~now ~keeper_name reading =
+  let window_sec = window_seconds window_minutes in
+  let cost = empty_tally 0.0 in
+  let tokens = empty_tally { input = 0; output = 0; total = 0 } in
+  let sample_count = ref 0 in
+  let latencies_rev = ref [] in
+  let metrics_read =
+    match reading with
+    | Error reason -> `Assoc [ "state", `String "failed"; "reason", `String reason ]
+    | Ok files ->
+        let malformed_rows = ref 0 in
+        let unread_turn_rows = ref 0 in
+        Kept.fold files ~init:() ~f:(fun () day rows ->
+          if file_in_window ~window_sec ~now day then begin
+            malformed_rows := !malformed_rows + rows.malformed;
+            unread_turn_rows := !unread_turn_rows + rows.untimed_unread;
+            List.iter
+              (fun row ->
+                if timed_in_window ~window_sec ~now (timed_ts row) then
+                  match row with
+                  | Unread_turn _ -> incr unread_turn_rows
+                  | Turn_sample sample ->
+                      incr sample_count;
+                      latencies_rev := sample.latency_ms :: !latencies_rev;
+                      add_reading cost ~add:( +. ) sample.cost;
+                      add_reading tokens
+                        ~add:(fun sum counts ->
+                          { input = sum.input + counts.input
+                          ; output = sum.output + counts.output
+                          ; total = sum.total + counts.total
+                          })
+                        sample.tokens)
+              rows.timed
+          end);
+        `Assoc
+          [ "state", `String "read"
+          ; "malformed_rows", `Int !malformed_rows
+          ; "unread_turn_rows", `Int !unread_turn_rows
+          ]
+  in
+  let latency_arr =
+    let arr = Array.of_list !latencies_rev in
+    Array.sort Float.compare arr;
+    arr
+  in
+  let percentile p =
+    if Array.length latency_arr = 0 then None
+    else Some (percentile_sorted_float latency_arr p)
+  in
+  `Assoc
+    ([ "keeper_name", `String keeper_name
+     ; "total_cost_usd", reported_sum_json cost (fun sum -> `Float sum)
+     ]
+     @ tally_count_fields "cost" cost
+     @ [ "total_input_tokens", reported_sum_json tokens (fun sum -> `Int sum.input)
+       ; "total_output_tokens", reported_sum_json tokens (fun sum -> `Int sum.output)
+       ; "total_tokens", reported_sum_json tokens (fun sum -> `Int sum.total)
+       ]
+     @ tally_count_fields "tokens" tokens
+     @ [ "p50_latency_ms", Json_util.float_opt_to_json (percentile 50.0)
+       ; "p95_latency_ms", Json_util.float_opt_to_json (percentile 95.0)
+       ; "sample_count", `Int !sample_count
+       ; "metrics_read", metrics_read
+       ])
+
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
-    Reads every day file of each keeper's metrics store that the window
-    touches (UTC days from the window start to now) and aggregates the turn
-    rows at or after the window start: p50/p95 latency and the cost and
-    token sums. Cost and tokens are summed only over samples that reported
-    them; [cost_*_samples] and [tokens_*_samples] say how many samples
-    reported the value, gave [null], or could not be read. A sum is [null]
-    when no sample in the window reported it.
+    Each Keeper's metrics day files of the widest window are kept between
+    reads ({!Dated_jsonl_kept_days}): the first read of a file reads it
+    whole, later reads fold only the rows it gained. The window counts the
+    turn rows at or after its start in the day files from the day it starts
+    in to today: p50/p95 latency and the cost and token sums. Cost and
+    tokens are summed only over samples that reported them;
+    [cost_*_samples] and [tokens_*_samples] say how many samples reported
+    the value, gave [null], or could not be read. A sum is [null] when no
+    sample in the window reported it.
 
     [metrics_read] says whether the whole window was read (#38364). It was
     once the last 500 lines, which a busy day outgrows: turns older than
@@ -123,117 +336,31 @@ let keeper_costs_window_of_query = function
     count is a floor. A row whose kind this build cannot read (another
     schema, or no [record_kind]) is counted there too: it may have been a
     turn. A row whose time places it before the window start is outside it
-    and counts nowhere. The window's first day file is read whole, so an
-    unreadable row from earlier that day counts as well: the count is rows
-    that may be in the window, not rows known to be. *)
+    and counts nowhere. A row with no readable time counts while its day
+    file is in the window: the count is rows that may be in the window, not
+    rows known to be. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
     ~(now_ts : float)
   : Yojson.Safe.t =
-  let window_sec = float_of_int window_minutes *. 60.0 in
-  let start_ts = now_ts -. window_sec in
-  let keeper_items =
+  let readings =
     List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
-        let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-        let cost = empty_tally 0.0 in
-        let tokens = empty_tally { input = 0; output = 0; total = 0 } in
-        let sample_count = ref 0 in
-        let latencies_rev = ref [] in
-        let malformed_rows = ref 0 in
-        let unread_turn_rows = ref 0 in
-        let add_row j =
-          let ts = Json_util.assoc_member_opt "ts_unix" j in
-          (* The first day file is read whole. Even an unknown-kind row is
-             outside this window when its readable time precedes the start. *)
-          match ts with
-          | Some (`Float value) when Float.is_finite value && value < start_ts -> ()
-          | Some _ | None ->
-            (match Keeper_metrics_record.kind_of_json j with
-             | Some Keeper_metrics_record.Heartbeat -> ()
-             | None -> incr unread_turn_rows
-             | Some Keeper_metrics_record.Turn ->
-               match ts, Json_util.assoc_member_opt "latency_ms" j with
-               | Some (`Float ts_unix), latency when Float.is_finite ts_unix ->
-                 (match latency with
-                  | Some (`Int latency_ms) when latency_ms >= 0 ->
-                    incr sample_count;
-                    latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                    add_reading cost ~add:( +. ) (cost_reading_of_row j);
-                    add_reading tokens
-                      ~add:(fun sum counts ->
-                        { input = sum.input + counts.input
-                        ; output = sum.output + counts.output
-                        ; total = sum.total + counts.total
-                        })
-                      (token_reading_of_row j)
-                  | Some _ | None -> incr unread_turn_rows)
-               | Some _, _ | None, _ -> incr unread_turn_rows)
-        in
-        let read =
-          Dated_jsonl.iter_range_entries_result metrics_store
-            ~since:(Log.format_utc_date_of start_ts)
-            ~until:(Log.format_utc_date_of now_ts)
-            (function
-              | Dated_jsonl.Parsed j -> add_row j
-              | Dated_jsonl.Malformed_json _ -> incr malformed_rows)
-        in
-        let metrics_read =
-          match read with
-          | Ok () ->
-              `Assoc
-                [ "state", `String "read"
-                ; "malformed_rows", `Int !malformed_rows
-                ; "unread_turn_rows", `Int !unread_turn_rows
-                ]
-          | Error error ->
-              (* The rows seen before the failure are a fragment of the
-                 window; drawing them would pass a part for the whole. *)
-              reset_tally cost 0.0;
-              reset_tally tokens { input = 0; output = 0; total = 0 };
-              sample_count := 0;
-              latencies_rev := [];
-              `Assoc
-                [ "state", `String "failed"
-                ; "reason", `String (Dated_jsonl.read_error_to_string error)
-                ]
-        in
-        let latency_arr =
-          let arr = Array.of_list !latencies_rev in
-          Array.sort Float.compare arr;
-          arr
-        in
-        let p50_latency =
-          if Array.length latency_arr = 0
-          then None
-          else Some (percentile_sorted_float latency_arr 50.0)
-        in
-        let p95_latency =
-          if Array.length latency_arr = 0
-          then None
-          else Some (percentile_sorted_float latency_arr 95.0)
-        in
-        `Assoc
-          ([ "keeper_name", `String m.name
-           ; "total_cost_usd", reported_sum_json cost (fun sum -> `Float sum)
-           ]
-           @ tally_count_fields "cost" cost
-           @ [ "total_input_tokens", reported_sum_json tokens (fun sum -> `Int sum.input)
-             ; "total_output_tokens", reported_sum_json tokens (fun sum -> `Int sum.output)
-             ; "total_tokens", reported_sum_json tokens (fun sum -> `Int sum.total)
-             ]
-           @ tally_count_fields "tokens" tokens
-           @ [ "p50_latency_ms", Json_util.float_opt_to_json p50_latency
-             ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
-             ; "sample_count", `Int !sample_count
-             ; "metrics_read", metrics_read
-             ]))
+        m.name, refresh_keeper ~config ~keeper_name:m.name ~now:now_ts)
       keepers
   in
+  keep_only ~base_path:config.base_path
+    ~names:(List.map (fun (m : Keeper_meta_contract.keeper_meta) -> m.name) keepers);
+  (Atomic.get kept_changed) ~base_path:config.base_path;
   `Assoc
-    [ "keepers", `List keeper_items
+    [ ( "keepers"
+      , `List
+          (List.map
+             (fun (keeper_name, reading) ->
+               keeper_cost_row ~window_minutes ~now:now_ts ~keeper_name reading)
+             readings) )
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float now_ts
     ]

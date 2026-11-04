@@ -36,6 +36,10 @@ type dataset =
           [GET /api/v1/runtime/resolved] changed, a reset passing included,
           or the standing stopped or started building. The history does not
           move with it. *)
+  | Keeper_costs
+      (** What [GET /api/v1/dashboard/keeper-costs] answers for its default
+          window: a Keeper metrics row other than a heartbeat was written, or
+          a kept row or day file left the window. *)
 
 val event_type : string
 

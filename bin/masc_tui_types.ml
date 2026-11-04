@@ -4684,6 +4684,9 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
 let pushed_sources : Surface_read_source.t list =
   [ Surface_read_source.Transport; Surface_read_source.Account_emails
   ; Surface_read_source.Runtime_quota; Surface_read_source.Provider_history ]
+  [ Surface_read_source.Transport; Surface_read_source.Planning; Surface_read_source.Overview_goals
+  ; Surface_read_source.Account_emails; Surface_read_source.Runtime_quota
+  ; Surface_read_source.Provider_history; Surface_read_source.Keeper_usage ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.

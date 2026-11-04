@@ -157,7 +157,8 @@ let summary = function
   | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
          | Masc.Workspace_dataset_event.Provider_usage
-         | Masc.Workspace_dataset_event.Provider_standing -> "")
+         | Masc.Workspace_dataset_event.Provider_standing
+         | Masc.Workspace_dataset_event.Keeper_costs -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -950,6 +951,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1018,6 +1020,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1037,6 +1040,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
+              | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
           | None -> true)
@@ -1098,6 +1102,24 @@ let test_a_connector_push_names_its_connector () =
         ("a connector push without a connector was read: "
          ^ String.concat ", " (List.map summary decoded))
           ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
+          ]));
+  check (list string) "A Keeper costs push decodes by name"
+    [ "dataset(keeper_costs)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]));
+  check (list string) "Skill pushes decode with the Keeper a ledger row names"
+    (List.map summary
+       (decode_all
+          ]));
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a Skill ledger push without its Keeper was read: "
+              ^ String.concat ", " (List.map summary decoded)))
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

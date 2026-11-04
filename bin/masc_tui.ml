@@ -15966,6 +15966,8 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
+                if not needs.needs_overview_briefing then None else
+                Option.some @@
                 observe_http_reader ~on_progress Http_refresh_progress.Overview
                   ~outcome:Http_refresh_progress.of_result (fun () ->
                 let overview = load_overview ~host ~port in
@@ -16027,7 +16029,9 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
         { refresh_ticket; latest_identity = identity_after;
           detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
           unreachable = Result.is_error http_server_identity && Result.is_error identity_after
-            && Result.is_error http_overview;
+            && (match http_overview with
+                | Some overview -> Result.is_error overview
+                | None -> true);
           approval_ticket }
   end
 
@@ -17192,7 +17196,7 @@ let apply_http_surfaces state ~mailbox results =
   let datasets = take_http_surface_datasets state results.http_scoped.http_surface_request in
   apply_server_identity_reading state ~mailbox results.http_server_identity;
   let roster_refreshed = if Result.is_ok results.http_server_identity then begin
-    apply_overview_load state results.http_overview;
+    Option.iter (apply_overview_load state) results.http_overview;
     if state.workspace_identity = Workspace_identity_match then
       Option.iter (apply_approval_observation state) results.http_approvals;
     apply_http_scoped_data state ~datasets results.http_scoped
@@ -17209,7 +17213,7 @@ let apply_http_surfaces state ~mailbox results =
   state.connection_status <-
     Masc_tui_types.connection_status_of_refresh
       ~identity:(reached results.http_server_identity)
-      ~surfaces:([ reached results.http_overview ]
+      ~surfaces:(reached_if_asked results.http_overview
        @ reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
        @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
@@ -19067,7 +19071,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
      bundle's answers, and with no cadence roster read nothing else would
      free the roster's read slot. *)
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
-  let needs = { needs with needs_keeper_roster = false } in
+  (* The briefing rides the full refresh only; a scoped read has no reader
+     for it, and Home's next cadence pass reads it. *)
+  let needs = { needs with needs_keeper_roster = false; needs_overview_briefing = false } in
   let authority = state.workspace_authority in
   if Masc_tui_types.surface_needs_any needs then begin
     let collection_inflight = !full_refresh_inflight

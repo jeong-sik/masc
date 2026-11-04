@@ -401,7 +401,8 @@ type outcome =
   | Completed of { reply : Yojson.Safe.t; input : Release.settled; pages : pages option }
   | Stopped of { receipt : Yojson.Safe.t; message : string;
       effect_started : bool; completed_effect : bool; input : Release.t;
-      native_error : native_error option; pages : pages option }
+      native_error : native_error option; pages : pages option;
+      refused_before_press : Release.resolution option }
 open Result.Syntax
 let object_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields
@@ -773,10 +774,12 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
          | Some (_,Release.Refused_before_press _) -> Ok judged
          | Some (_,(Release.Receipt_without_dialog | Release.Native_window_tail _ | Release.Unreleased _)) | None ->
            Ok (Release.Unconfirmed Release.Held_by_script_report)) in
-    let public_failed=public_failed @ (match entered with
-      | Some (_,Release.Refused_before_press resolution) ->
-        ["refusedBeforePress",`Assoc ["kind",`String (Release.resolution_to_wire resolution)]]
-      | Some (_,(Release.Receipt_without_dialog | Release.Native_window_tail _ | Release.Unreleased _)) | None -> []) in
+    let refused_before_press=match entered with
+      | Some (_,Release.Refused_before_press resolution) -> Some resolution
+      | Some (_,(Release.Receipt_without_dialog | Release.Native_window_tail _ | Release.Unreleased _)) | None -> None in
+    let public_failed=public_failed @ (match refused_before_press with
+      | Some resolution -> ["refusedBeforePress",`Assoc ["kind",`String (Release.resolution_to_wire resolution)]]
+      | None -> []) in
     let public_failure,message=match native_failure with
       | Some (_,reason) ->
         let message="native typing completion is unconfirmed; never replay this step" in
@@ -787,5 +790,6 @@ let decode ~windows (request : Browser_lane.Native_workflow.t) receipt =
         let message="native workflow stopped; inspect progress before continuing; never replay uncertain input" in
         `Assoc (("message",`String message)::List.remove_assoc "message" public_failed),message
       | None -> `Assoc public_failed,message in
-    Ok (Stopped {receipt=public_receipt public_failure;message;effect_started=started;completed_effect;input;native_error;pages})
+    Ok (Stopped {receipt=public_receipt public_failure;message;effect_started=started;completed_effect;input;native_error;pages;
+      refused_before_press})
   | _ -> Error "workflow failure must be null or an object"

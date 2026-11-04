@@ -663,8 +663,9 @@ let a_workflow_step_refused_before_its_press_holds_nothing () =
   List.iter (fun (method_,args) ->
     let alone=request [step method_ args] in
     (match R.decode ~windows:None alone (stopped_alone method_ (thrown "ElementResolutionError" "permanent")) with
-     | Ok (R.Stopped {input;receipt;_}) ->
+     | Ok (R.Stopped {input;receipt;refused_before_press;_}) ->
        check bool (method_ ^ ": a refused step leaves nothing to release") true (seen_input input=`No_hold);
+       check bool (method_ ^ ": the refusal is typed on the outcome") true (refused_before_press=Some Rel.Permanent);
        let failure=U.member "failure" receipt in
        check string (method_ ^ ": the SDK kind is public") "permanent"
          (U.to_string (U.member "kind" (U.member "refusedBeforePress" failure)));
@@ -679,6 +680,17 @@ let a_workflow_step_refused_before_its_press_holds_nothing () =
       (R.decode ~windows:None alone (stopped_alone method_ (thrown "TimeoutError" "transient"))))
     ["click",["selector",str "#source"];"dblclick",["selector",str "#source"];
      "dragAndDrop",["selector",str "#source";"destination",str "#target"]];
+  let identity=obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";"openedBy",str "agent"] in
+  let popup=step "clickAndWaitForPopup" ["selector",str "a[target=_blank]";"popupOptions",obj ["timeout",`Int 0]] in
+  (match R.decode ~windows:None (request [popup;step "fill" ["selector",str "input";"text",str "child"]])
+      (obj (("pages",obj ["source",identity;"current",identity;"transitions",`List []])
+        ::unreleased (result ~started:true ~completed_effect:false ~completed:[]
+          ~failure:(failed 0 "clickAndWaitForPopup" (thrown "ElementResolutionError" "transient"))))) with
+   | Ok (R.Stopped {input;refused_before_press;_}) ->
+     check bool "a refused popup trigger leaves nothing to release" true (seen_input input=`No_hold);
+     check bool "a refused popup trigger is typed on the outcome" true (refused_before_press=Some Rel.Transient)
+   | Ok (R.Completed _) -> fail "a refused popup trigger was called complete"
+   | Error message -> fail ("refused popup trigger: " ^ message));
   List.iter (fun (method_,args) ->
     stopped (method_ ^ ": the same SDK error does not release this step") (not_released 0 Rel.Never_returned)
       (R.decode ~windows:None (request [step method_ args])

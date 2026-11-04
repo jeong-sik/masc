@@ -1966,7 +1966,8 @@ let workflow ?actor t args =
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed {reply=value;input=_;pages=_} -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error;pages=_} ->
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error;pages=_;
+        refused_before_press} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=current_tab;receipt;message})
@@ -1975,7 +1976,8 @@ let workflow ?actor t args =
           let* receipt=receipt_of value in
           let disposition=if effect_started then Live.Uncertain else Live.Not_started in
           Error (Live.Observed_failure {disposition;message;receipt})
-        | None -> if effect_started && Option.is_some pages then
+        | None -> if effect_started && (Option.is_some pages || Option.is_some refused_before_press) then
+            (* A refused step's receipt carries the SDK kind the caller needs to pick a narrower target. *)
             let* receipt=receipt_of value in Error (Live.Observed_failure {disposition=Live.Uncertain;message;receipt})
           else if effect_started then Error (Live.Outcome_unknown message)
           else Error (Live.Before_effect message)

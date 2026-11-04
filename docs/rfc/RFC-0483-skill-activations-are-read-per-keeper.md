@@ -153,10 +153,10 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 | L3c | 웹 대시보드의 Tools 가 `skill-activations` 를, Skills 가 Keeper 마다 `skill-usage` 를 읽는다 | Tools 가 두 답이 같은 Keeper 인지 확인하는지, Skills 가 Keeper 별 행을 surface 에 붙이는지 |
 | L3d | TUI Usage pane 이 Keeper 마다 `skill-usage` 를 읽고, 서버 `/api/v1/skills` 가 `usage[]`·`usage_coverage` 를 지운다 | `/api/v1/skills` 가 장부를 읽지 않는지, 이름이 lib/, bin/, dashboard/ 에 남지 않는지 |
 | L3e | harness 스크립트가 `skill-activations` 를 읽고, 서버 `/api/v1/dashboard/tools` 가 `skill_activations` 를 지운다 | 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
-
-서버 필드는 그 필드를 읽는 마지막 소비자와 같은 층에서 지운다. TUI 의 `/api/v1/skills` decoder 는 최상위 키를 닫혀 있게 읽어서, 필드를 먼저 지우면 TUI 가 읽지 못하고 나중에 지우면 TUI 가 모르는 키를 거절한다.
 | L4 | TUI 가 4.3 표대로 읽고 Tools 화면의 `launch_tools_load` 2초 분기를 지운다 | 알림 하나에 그 Keeper 읽기 하나, 주기에는 읽지 않는지(PTY) |
 | L5 | Keeper 채팅 기록이 그 Keeper 의 알림에 다시 읽는다 | 채팅을 연 Keeper 의 장부가 바뀌면 채팅 기록 읽기가 한 번 나가는지(PTY) |
+
+서버 필드는 그 필드를 읽는 마지막 소비자와 같은 층에서 지운다. TUI 의 `/api/v1/skills` decoder 는 최상위 키를 닫혀 있게 읽어서, 필드를 먼저 지우면 TUI 가 읽지 못하고 나중에 지우면 TUI 가 모르는 키를 거절한다.
 
 L4 는 L1~L3 과 #48059·#48060·#48036 뒤에만 들어간다. Tools 화면의 async task 와 async detail 읽기(`launch_tools_async_task`, `launch_tools_async_detail`)는 원천이 다르다. 이 RFC 에 들지 않는다.
 

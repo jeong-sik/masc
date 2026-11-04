@@ -21,11 +21,10 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
-import { SkillActivationPanel } from './skill-activation-panel'
+import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
 import {
   fetchDashboardTools,
   fetchKeeperSkillActivations,
-  type DashboardEffectiveKeeperSurface,
   type DashboardSkillActivationProjection,
   type DashboardToolsResponse,
 } from '../../api'
@@ -47,11 +46,6 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
 
 // The selected Keeper's surface comes from the tools answer and its
 // activations from their own route (RFC-0483); both must name that Keeper.
-interface KeeperSkillReceipt {
-  effectiveSurface: DashboardEffectiveKeeperSurface
-  activations: DashboardSkillActivationProjection
-}
-
 function keeperSkillReceipt(
   response: DashboardToolsResponse,
   activations: DashboardSkillActivationProjection,
@@ -212,8 +206,7 @@ export function Tools() {
         <${SkillActivationPanel}
           keeperNames=${keeperNames}
           selectedKeeper=${selectedKeeper}
-          effectiveSurface=${keeperReceipt?.effectiveSurface}
-          activations=${keeperReceipt?.activations}
+          receipt=${keeperReceipt}
           loading=${keeperReceiptLoading}
           error=${keeperReceiptError}
           onSelectKeeper=${setSelectedKeeper}

@@ -774,6 +774,32 @@ let parse_terminal stage fields =
   | other, _ -> Ok (Unrecognized_terminal other)
 ;;
 
+type last_turn =
+  { turn_id : string
+  ; terminal : terminal
+  }
+
+type resumed_session =
+  { session : session
+  ; last_turn : last_turn option
+  }
+
+let parse_session_resume_result json =
+  let stage = "session/resume" in
+  let* session = parse_session_result ~stage json in
+  let* fields = assoc_at stage json in
+  let* last_turn = optional_assoc stage "lastTurn" fields in
+  let* last_turn =
+    match last_turn with
+    | None -> Ok None
+    | Some fields ->
+      let* turn_id = required_string stage "turnId" fields in
+      let* terminal = parse_terminal stage fields in
+      Ok (Some { turn_id; terminal })
+  in
+  Ok { session; last_turn }
+;;
+
 type item_kind =
   | User_message
   | Agent_message

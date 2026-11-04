@@ -65,20 +65,46 @@ val login_environment : account_home:string -> string array
 val login_argv : cli_path:string -> string list
 (** The official client's sign-in command, run with {!login_environment}. *)
 
-(** The completed-turn counts a resumed session may report. *)
-type resume_turns =
-  | Exactly of int  (** The host must report this count. *)
-  | Reported_or_one_more of int
-      (** A turn was dispatched after the host reported this count and its
-          ending was not observed: the host counts it only if it completed,
-          so it reports this count or the next one. *)
+(** How the host ended a turn, as far as a resume depends on it: a completed
+    turn ran its work; a failed, cancelled or host-died one did not finish
+    it. *)
+type turn_ending =
+  | Ended_completed
+  | Ended_uncompleted
+
+(** A turn the host ended, named by its id. *)
+type ended_turn =
+  { turn_id : string
+  ; ending : turn_ending
+  }
+
+(** The last ended turns a resumed session may report ([lastTurn] of
+    [session/resume]). [None] is a host that reported no ended turn: a
+    started session, or a resume without [lastTurn]. The host's
+    completed-turn count is not compared: it counts again from each
+    compaction boundary, while turn ids stay stable. *)
+type resume_last_turn =
+  | Exactly of ended_turn option
+      (** The last turn MASC knows of: the one the host reported when the
+          session opened, or a turn whose ending MASC saw. *)
+  | Last_or_dispatched of { last : ended_turn option; dispatched : string option }
+      (** A turn was dispatched after [last] and MASC did not see how it
+          ended: the host reports [last], or the dispatched turn however it
+          ended. While MASC does not know that turn's id ([dispatched =
+          None]), any turn the host reports may be it. *)
+  | Last_or_uncompleted of { last : ended_turn option; failed : string option }
+      (** A retry re-sends [failed]'s work: the host reports [last], or
+          [failed] ended without completing ([None]: any turn that ended
+          without completing). A host that completed it already ran that
+          work, and a host that reports no last turn shows nothing about it,
+          so both are refused. *)
 
 type session_mode =
   | Start
-  | Resume of { session_id : string; expected_turns : resume_turns }
-      (** Resume only when the host reports a count [expected_turns] admits,
-          before changing approval mode, persisting admission or dispatching
-          a turn. *)
+  | Resume of { session_id : string; expected_last_turn : resume_last_turn }
+      (** Resume only when the host reports a last turn [expected_last_turn]
+          admits, before selecting the model or approval mode, persisting
+          admission or dispatching a turn. *)
 
 type mcp_server =
   { name : string
@@ -315,7 +341,7 @@ val run_turn
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
-  -> ?on_session_ready:(session_id:string -> reported_turns:int -> (unit, string) result)
+  -> ?on_session_ready:(session_id:string -> last_turn:ended_turn option -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
   -> ?on_context_submission:(context_submission -> unit)
   -> ?on_stream_event:(stream_event -> unit)
@@ -346,14 +372,15 @@ val run_turn
     and is admitted when the host accepts it; a refused or failed selection
     fails the turn. Mismatches refuse admission before
     callbacks. A started session must
-    hold no turns; a resumed one must report a count its [expected_turns]
-    admits. Start must report the requested approval mode. Resume reapplies that mode after the
+    hold no turns; a resumed one must report a last turn its
+    [expected_last_turn] admits. Start must report the requested approval mode. Resume reapplies that mode after the
     model selection and verifies the returned effective mode before admitting
     the session.
     [on_session_ready] runs once the host has returned the session id, before
     the turn is written, so the caller can persist the id first. It receives
-    the completed-turn count the host reported for the session, which the
-    caller stores to build the next resume's [expected_turns]. Its failure
+    the last turn the host reported for the session, [None] for a started
+    one, which the caller stores to build the next resume's
+    [expected_last_turn]. Its failure
     fails the turn. [on_prompt_sent] runs after the complete [turn/start]
     line is written. [on_context_submission] receives that line's receipt
     just before it; its non-reserved exceptions are logged as unavailable

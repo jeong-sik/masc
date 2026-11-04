@@ -499,6 +499,28 @@ type observed_turn =
   ; model : string option
   }
 
+(* The session store keeps the host's last ended turn in its own terms; the
+   serve client compares the one [session/resume] reports. *)
+let serve_ended_turn : Session_store.host_ended_turn option -> Serve.ended_turn option =
+  Option.map (fun ({ turn_id; ending } : Session_store.host_ended_turn) ->
+    ({ turn_id
+     ; ending =
+         (match ending with
+          | Session_store.Host_completed -> Serve.Ended_completed
+          | Session_store.Host_uncompleted -> Serve.Ended_uncompleted)
+     } : Serve.ended_turn))
+;;
+
+let store_ended_turn : Serve.ended_turn option -> Session_store.host_ended_turn option =
+  Option.map (fun ({ turn_id; ending } : Serve.ended_turn) ->
+    ({ turn_id
+     ; ending =
+         (match ending with
+          | Serve.Ended_completed -> Session_store.Host_completed
+          | Serve.Ended_uncompleted -> Session_store.Host_uncompleted)
+     } : Session_store.host_ended_turn))
+;;
+
 let compaction_observation_to_json ~runtime_id (compaction : Msp.compaction) =
   let trigger = function
     | Msp.Compaction_manual -> `Assoc ["kind", `String "manual"]
@@ -970,25 +992,33 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
          session_id
      | Some _, Some _ | None, (Some _ | None) -> ());
     let claim_plan = reconciled_plan in
-    (* The resume is checked against the count the host itself last
-       reported for the session, not against MASC's claim ordinal: the host
-       does not count a failed turn, and a turn MASC stopped watching may
-       have completed or not. *)
+    (* The resume is checked against the last turn the host itself reported
+       for the session, by the id the host gave it, not against MASC's claim
+       ordinal or the host's completed-turn count: the host counts again from
+       each compaction boundary, and a turn MASC stopped watching may have
+       ended either way. *)
     let* session_mode =
       match claim_plan.previous_settlement with
       | None -> Ok Serve.Start
       | Some { session_id; _ } ->
-        (match Session_store.resume_host_turns claim_plan ~expected:stored_session with
-         | Session_store.Reported turns ->
-           Ok (Serve.Resume { session_id; expected_turns = Serve.Exactly turns })
-         | Session_store.Unobserved_after turns ->
-           Ok (Serve.Resume { session_id; expected_turns = Serve.Reported_or_one_more turns })
-         | Session_store.Not_reported ->
-           Error
-             (internal_error
-                (Printf.sprintf
-                   "Muse Code session %s is resumable but records no host turn count"
-                   session_id)))
+        let expected_last_turn =
+          match Session_store.resume_host_last_turn claim_plan ~expected:stored_session with
+          | Session_store.Reported reported ->
+            Ok (Serve.Exactly (serve_ended_turn reported))
+          | Session_store.Unobserved_after { reported; dispatched } ->
+            Ok (Serve.Last_or_dispatched { last = serve_ended_turn reported; dispatched })
+          | Session_store.Retry_after { reported; failed } ->
+            Ok (Serve.Last_or_uncompleted { last = serve_ended_turn reported; failed })
+          | Session_store.Not_reported ->
+            Error
+              (internal_error
+                 (Printf.sprintf
+                    "Muse Code session %s is resumable but records no host last turn"
+                    session_id))
+        in
+        Result.map
+          (fun expected_last_turn -> Serve.Resume { session_id; expected_last_turn })
+          expected_last_turn
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
@@ -1383,15 +1413,15 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             result.response
       in
       recovery_failure := Session_store.State_persistence_failed;
-      (* The stop ends the turn before the host reports its terminal, so the
-         host's count stays unobserved: live resumes after a host stop have
-         found the turn counted and found it not counted. What the turn
+      (* The stop ends the turn before the host reports its terminal, so how
+         the host ended it stays unobserved: live resumes after a host stop
+         have found the turn completed and found it not. What the turn
          delivered is held either way. The host took the submission in
          durably before it acknowledged the turn, MASC never asks it to
-         retract one, and an uncounted turn's submission stays in the
+         retract one, and an uncompleted turn's submission stays in the
          history the next request sends: on Muse 1.4.11 a turn that failed
-         before any answer resumed with [turnCount] 0, and the next turn's
-         request carried its user message as history. *)
+         before any answer was not among the host's completed turns, and the
+         next turn's request carried its user message as history. *)
       let* settled =
         Session_store.settle_holding
           ~held_context:[]
@@ -1473,7 +1503,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                     ~session_mode
                     ~mcp_servers
                     ?reasoning_effort
-                    ~on_session_ready:(fun ~session_id ~reported_turns ->
+                    ~on_session_ready:(fun ~session_id ~last_turn ->
                       let* () =
                         update_session "active transition" (fun expected ->
                           Session_store.mark_active_reported
@@ -1481,7 +1511,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                             ~keeper_name
                             ~expected
                             ~session_id
-                            ~reported_turns
+                            ~last_turn:(store_ended_turn last_turn)
                             ~updated_at:(Time_compat.now ()))
                       in
                       update_session "turn-starting transition" (fun expected ->

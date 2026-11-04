@@ -73,6 +73,9 @@ val agent_tool :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
+  inline_ceiling_bytes:(unit -> int) ->
+      (** The inline ceiling of the lane that runs the call, asked per call
+          because a lane fallback can change it between attempts. *)
   Keeper_identity_tools.offered_tool ->
   Agent_core.Tool.t
 (** One offered tool, made placeable in a Keeper turn.
@@ -82,7 +85,10 @@ val agent_tool :
     the built-in tools use — the call did not run, the Keeper keeps living,
     and the host replays the exact call once it is approved. [gate_grant] is
     the cycle's one-shot resolution, threaded so a byte-identical re-emission
-    inside the woken cycle can also spend it. *)
+    inside the woken cycle can also spend it.
+
+    The service's answer is held to [inline_ceiling_bytes] by
+    {!Keeper_identity_tools.tool_result_of_call}. *)
 
 val replay_call_with_outcome :
   ?transports:Keeper_identity_tools.transports ->

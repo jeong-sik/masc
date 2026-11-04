@@ -2532,8 +2532,7 @@ let test_loading_plan_names_the_on_demand_tools () =
 ;;
 
 (* A result bound is declared only for a tool the bundle bounded, with that
-   bound. Everything else -- an attached-service tool above all, whose result
-   reaches the wire as the service returned it -- declares nothing, so the
+   bound. A tool the bundle named no bound for declares nothing, so the
    client keeps its own threshold. *)
 let test_result_bound_follows_the_bundle_bounds () =
   let bound plan name =
@@ -2543,7 +2542,7 @@ let test_result_bound_follows_the_bundle_bounds () =
   in
   let declared =
     Host.Declared
-      { on_demand = [ "attached__search" ]
+      { on_demand = [ "unbounded__search" ]
       ; result_bounds = [ "keeper_task_done", 16384 ]
       }
   in
@@ -2551,8 +2550,8 @@ let test_result_bound_follows_the_bundle_bounds () =
     (bound Host.All_on_demand "keeper_task_done");
   check (option int) "a bounded tool declares its bound" (Some 16384)
     (bound declared "keeper_task_done");
-  check (option int) "an attached-service tool declares no bound" None
-    (bound declared "attached__search")
+  check (option int) "a tool with no bound in the plan declares none" None
+    (bound declared "unbounded__search")
 ;;
 
 let carrier_message text : Agent_core.Types.message =

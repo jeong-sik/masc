@@ -50,7 +50,7 @@ let test_every_branch_state_decodes_in_every_scope () =
             Alcotest.(check bool)
               (scope_name ^ "/" ^ label) true
               (snapshot.Masc.Tui_decode.rcs_branch = expected
-               && snapshot.rcs_total = 1)
+               && snapshot.Masc.Tui_decode.rcs_total = 1)
       in
       check "detached" Repo_git.Detached Masc.Tui_decode.Repository_detached;
       check "no upstream"

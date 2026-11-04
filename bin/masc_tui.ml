@@ -7011,10 +7011,13 @@ let launch_harness_load state ~mailbox =
   if state.harness_inflight then ()
   else begin
     state.harness_inflight <- true;
+    state.harness_owed <- Masc_tui_owed_read.started state.harness_owed;
     let host = server_peer_host in
     let port = state.port in
     Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.harness_inflight <- false)
+      ~on_not_run:(fun () ->
+        state.harness_inflight <- false;
+        state.harness_owed <- Masc_tui_owed_read.abandoned state.harness_owed)
       ~deliver:(fun result ->
         enqueue_async mailbox (Harness_loaded result))
       (fun () -> Masc_tui_loader.load_harness ~host ~port)
@@ -8137,11 +8140,18 @@ let runtime_config_on_screen state =
 let owe_connectors_read state =
   state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
 
+(* Harness reads when the server says a verdict or a label was recorded, on a
+   revalidation and on arrival, and again after a failed read (RFC-0480
+   §3.4). *)
+let owe_harness_read state =
+  state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
+  | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8172,7 +8182,6 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       owe_verification_read state;
       launch_verification_load state ~mailbox
   | Planning -> launch_verification_load state ~mailbox
-  | Harness -> launch_harness_load state ~mailbox
   | Fusion ->
       let demand = Masc_tui_fusion_updates.After_change in
       launch_fusion_runs_load ~demand state ~mailbox;
@@ -8186,6 +8195,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Repositories ->
       owe_repositories_read state;
       launch_repositories_load state ~mailbox
+  | Harness ->
+      owe_harness_read state;
+      launch_harness_load state ~mailbox
   | Changes -> (
       match state.changes_keeper with
       | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
@@ -9104,6 +9116,29 @@ let launch_owed_repositories state ~mailbox =
     state.repositories_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_repositories_load state ~mailbox
+  end
+
+let harness_on_screen state =
+  match state.view with
+  | Harness -> true
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Repositories | Fusion | Code | Changes | Connectors | Runtime
+  | Config | Resources | Tools | System_logs | Keepers _ ->
+      false
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
+   surface reads it. A read already in flight is let finish first. *)
+let launch_owed_harness state ~mailbox =
+  if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.harness_inflight in
+    let read =
+      if reading then state.harness_owed
+      else Masc_tui_owed_read.abandoned state.harness_owed
+    in
+    state.harness_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_harness_load state ~mailbox
   end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
@@ -18867,6 +18902,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_repositories_read state;
        owe_connectors_read state;
        owe_runtime_config_read state;
+       owe_harness_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
        owe_tools_async_task_read state;
@@ -25435,7 +25471,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.verification_verdict_error <- Some err)
   | Harness_label_done result -> (
       match result with
-      | Ok message -> report_action state "system" ("Harness: " ^ message)
+      | Ok message ->
+          report_action state "system" ("Harness: " ^ message);
+          (* The server announces the label too; owing the read folds that
+             announcement into one read instead of a second. *)
+          owe_harness_read state
       | Error err -> report_action state "error" ("Harness label: " ^ err))
   | Approval_decision_done (approval, decision, result, generation, approvals) ->
       apply_approval_decision_completion state generation approval decision
@@ -27744,6 +27784,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.harness_inflight <- false;
       (match result with
       | Ok snapshot ->
+          state.harness_owed <- Masc_tui_owed_read.succeeded state.harness_owed;
           state.harness <- Some snapshot;
           state.harness_error <- None;
           (match state.harness_detail with
@@ -27759,7 +27800,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  state.harness_detail <- None;
                  state.harness_detail_scroll <- 0
                end)
-      | Error detail -> state.harness_error <- Some detail)
+      | Error detail ->
+          state.harness_owed <- failed_read state.harness_owed;
+          state.harness_error <- Some detail)
   | Fusion_runs_loaded (request, result) ->
       (match Masc_tui_fusion_updates.runs_loaded state request result with
        | Reread when state.view = Fusion
@@ -32855,6 +32898,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
+      launch_owed_harness state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -41513,7 +41557,9 @@ Use relative paths for resources already held in the package. -->
          | Verification -> ()
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
              | Clients -> launch_clients_load state ~mailbox:async_messages
-         | Harness -> launch_harness_load state ~mailbox:async_messages
+         (* Harness re-reads when a verdict or a label is recorded and
+            retries a failed read ([launch_owed_harness]). *)
+         | Harness -> ()
          (* Fusion re-reads on [fusion_run_status] and retries a failed read
             ([launch_owed_fusion]). *)
          | Fusion -> ()

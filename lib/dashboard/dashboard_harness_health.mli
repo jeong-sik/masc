@@ -143,6 +143,10 @@ val set_wake_payload_store_for_testing : base_path:string -> unit
     eval-calibration stats, recent verdicts, and
     wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
+val cache_key_prefix : string
+(** Every dashboard cache key the harness health read is kept under starts
+    with this, whatever its workspace and query window. *)
+
 val json : ?since:string -> ?until:string -> unit -> Yojson.Safe.t
 
 (** {1 Operator labels} *)

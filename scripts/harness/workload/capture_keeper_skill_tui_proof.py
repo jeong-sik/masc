@@ -17,16 +17,19 @@ import stat
 import subprocess
 import time
 from typing import Any, Callable, Iterator
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request
 
+import keeper_skill_use_proof as proof_collector
 import proof_http
 import skill_activation_events
 
 
+TUI_SCHEMA = "masc.keeper-skill-tui-proof.v6"
 REQUIRED_PRODUCER_ARTIFACTS = {
     "health.json",
     "dashboard-tools.json",
+    proof_collector.KEEPER_SKILL_ACTIVATIONS_ARTIFACT,
     skill_activation_events.EVENTS_FILENAME,
     "tui-build-evidence.json",
     "masc_tui.exe",
@@ -202,12 +205,14 @@ def validate_bundle(
     evidence: dict[str, Any],
     dashboard_payload: bytes,
     dashboard: dict[str, Any],
+    activations_payload: bytes,
+    activations: dict[str, Any],
     source_head: str,
     source_tree: str,
     tracked_checkout_clean: bool,
 ) -> dict[str, Any]:
     require(
-        evidence.get("schema") == "masc.keeper-skill-use-proof.v2",
+        evidence.get("schema") == proof_collector.PROOF_SCHEMA,
         "input is not a Keeper Skill-use proof bundle",
     )
     source = object_field(evidence, "source", "evidence")
@@ -235,6 +240,16 @@ def validate_bundle(
         dashboard_artifact.get("sha256") == digest_bytes(dashboard_payload),
         "dashboard-tools.json SHA differs from proof manifest",
     )
+    activations_name = proof_collector.KEEPER_SKILL_ACTIVATIONS_ARTIFACT
+    activations_artifact = object_field(artifacts, activations_name, "evidence.artifacts")
+    require(
+        activations_artifact.get("bytes") == len(activations_payload),
+        f"{activations_name} byte count differs from proof manifest",
+    )
+    require(
+        activations_artifact.get("sha256") == digest_bytes(activations_payload),
+        f"{activations_name} SHA differs from proof manifest",
+    )
 
     proof = object_field(evidence, "proof", "evidence")
     keeper = string_field(proof, "keeper", "evidence.proof")
@@ -248,19 +263,21 @@ def validate_bundle(
     ]
     require(len(action_markers) == len(actions), "proof contains a non-object action")
 
-    projection = object_field(dashboard, "skill_activations", "dashboard tools")
-    ledger = object_field(projection, "ledger", "dashboard tools Skill projection")
+    projection = proof_collector.keeper_skill_projection(
+        activations, keeper=keeper, context="producer skill activations"
+    )
+    ledger = object_field(projection, "ledger", "producer Skill projection")
     require(
         projection.get("keeper_name") == keeper,
-        "dashboard tools belongs to another Keeper",
+        "producer Skill projection belongs to another Keeper",
     )
     require(
         ledger.get("session_id") == session_id,
-        "dashboard tools session differs from proof",
+        "producer Skill projection session differs from proof",
     )
     require(
         ledger.get("revision") == ledger_revision,
-        "dashboard tools ledger differs from proof",
+        "producer Skill projection ledger differs from proof",
     )
     exact = [
         activation
@@ -268,10 +285,10 @@ def validate_bundle(
         if isinstance(activation, dict)
         and activation.get("skill_tool_use_id") == skill_tool_use_id
     ]
-    require(len(exact) == 1, f"dashboard tools has {len(exact)} exact activation rows")
+    require(len(exact) == 1, f"producer Skill projection has {len(exact)} exact activation rows")
     require(
         exact[0].get("actions") == actions,
-        "proof action identities differ from the exact Dashboard activation",
+        "proof action identities differ from the exact projected activation",
     )
     surface = object_field(dashboard, "effective_keeper_surface", "dashboard tools")
     require(
@@ -354,9 +371,9 @@ def verify_producer_artifacts(
     }
     health = decode_object((root / "health.json").read_bytes(), "producer health.json")
     validate_live_server(evidence, health)
-    dashboard = decode_object(
-        (root / "dashboard-tools.json").read_bytes(),
-        "producer dashboard-tools.json",
+    activations_name = proof_collector.KEEPER_SKILL_ACTIVATIONS_ARTIFACT
+    activations = decode_object(
+        (root / activations_name).read_bytes(), f"producer {activations_name}"
     )
     events_name = skill_activation_events.EVENTS_FILENAME
     try:
@@ -367,10 +384,15 @@ def verify_producer_artifacts(
         raise CaptureError(f"producer {events_name}: {error}") from error
     if ledger is None:
         raise CaptureError(f"producer {events_name} has recorded nothing")
-    projection = object_field(dashboard, "skill_activations", "producer dashboard")
+    proof = object_field(evidence, "proof", "evidence")
+    projection = proof_collector.keeper_skill_projection(
+        activations,
+        keeper=string_field(proof, "keeper", "evidence.proof"),
+        context=f"producer {activations_name}",
+    )
     require(
         projection.get("ledger") == ledger,
-        "producer Dashboard ledger differs from durable ledger artifact",
+        "producer Skill projection ledger differs from durable ledger artifact",
     )
     return verified
 
@@ -526,22 +548,24 @@ def validate_live_server(
     }
 
 
-def validate_live_dashboard(
-    selected: dict[str, Any], dashboard: dict[str, Any]
+def validate_live_activations(
+    selected: dict[str, Any], activations: dict[str, Any]
 ) -> None:
-    projection = object_field(dashboard, "skill_activations", "live dashboard")
-    ledger = object_field(projection, "ledger", "live dashboard Skill projection")
+    projection = proof_collector.keeper_skill_projection(
+        activations, keeper=selected["keeper"], context="live skill activations"
+    )
+    ledger = object_field(projection, "ledger", "live Skill projection")
     require(
         projection.get("keeper_name") == selected["keeper"],
-        "live dashboard Keeper changed",
+        "live Skill projection Keeper changed",
     )
     require(
         ledger.get("session_id") == selected["session_id"],
-        "live dashboard session changed",
+        "live Skill projection session changed",
     )
     require(
         ledger.get("revision") == selected["ledger_revision"],
-        "live dashboard ledger changed",
+        "live Skill projection ledger changed",
     )
     exact = [
         activation
@@ -549,10 +573,10 @@ def validate_live_dashboard(
         if isinstance(activation, dict)
         and activation.get("skill_tool_use_id") == selected["skill_tool_use_id"]
     ]
-    require(len(exact) == 1, f"live dashboard has {len(exact)} exact activation rows")
+    require(len(exact) == 1, f"live Skill projection has {len(exact)} exact activation rows")
     require(
         exact[0].get("actions") == selected["actions"],
-        "live dashboard actions changed after proof",
+        "live Skill projection actions changed after proof",
     )
 
 
@@ -1122,10 +1146,17 @@ def main() -> int:
     dashboard_path = args.proof.parent / "dashboard-tools.json"
     dashboard_payload = dashboard_path.read_bytes()
     dashboard = decode_object(dashboard_payload, f"dashboard artifact {dashboard_path}")
+    activations_path = args.proof.parent / proof_collector.KEEPER_SKILL_ACTIVATIONS_ARTIFACT
+    activations_payload = activations_path.read_bytes()
+    activations = decode_object(
+        activations_payload, f"skill activations artifact {activations_path}"
+    )
     selected = validate_bundle(
         evidence=evidence,
         dashboard_payload=dashboard_payload,
         dashboard=dashboard,
+        activations_payload=activations_payload,
+        activations=activations,
         source_head=source_before["head"],
         source_tree=source_before["tree"],
         tracked_checkout_clean=source_before["tracked_changes"] == [],
@@ -1141,12 +1172,11 @@ def main() -> int:
         f"{selected['base_url']}/health?full=1", args.timeout, token
     )
     server_identity = validate_live_server(evidence, health_before)
-    live_dashboard_url = (
-        f"{selected['base_url']}/api/v1/dashboard/tools?keeper="
-        f"{quote(selected['keeper'], safe='')}"
+    live_activations_url = proof_collector.keeper_skill_activations_url(
+        selected["base_url"], selected["keeper"]
     )
-    live_dashboard_before = read_json_url(live_dashboard_url, args.timeout, token)
-    validate_live_dashboard(selected, live_dashboard_before)
+    live_activations_before = read_json_url(live_activations_url, args.timeout, token)
+    validate_live_activations(selected, live_activations_before)
 
     ttyd_value = args.ttyd
     if ttyd_value is None:
@@ -1231,8 +1261,8 @@ def main() -> int:
         validate_live_server(evidence, health_after) == server_identity,
         "live server identity changed after TUI capture",
     )
-    live_dashboard_after = read_json_url(live_dashboard_url, args.timeout, token)
-    validate_live_dashboard(selected, live_dashboard_after)
+    live_activations_after = read_json_url(live_activations_url, args.timeout, token)
+    validate_live_activations(selected, live_activations_after)
     source_after = source_snapshot(repo)
     require(
         source_after == source_before,
@@ -1254,7 +1284,7 @@ def main() -> int:
             }
         )
     result = {
-        "schema": "masc.keeper-skill-tui-proof.v5",
+        "schema": TUI_SCHEMA,
         "captured_at": utc_now(),
         "source": {
             "expected_sha": selected["expected_sha"],

@@ -26,6 +26,11 @@ import skill_activation_events
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+PROOF_SCHEMA = "masc.keeper-skill-use-proof.v3"
+# One Keeper's activation ledger is its own read (RFC-0483); the tools answer
+# carries the Keeper's effective surface only.
+KEEPER_SKILL_ACTIVATIONS_SCHEMA = "masc.keeper-skill-activations/v1"
+KEEPER_SKILL_ACTIVATIONS_ARTIFACT = "keeper-skill-activations.json"
 DASHBOARD_SKILL_RECEIPTS_ROUTE = "#lab?section=tools"
 
 
@@ -161,6 +166,22 @@ def object_field(value: Any, field: str, context: str) -> dict[str, Any]:
     child = value.get(field)
     require(isinstance(child, dict), f"{context}.{field} is not an object")
     return child
+
+
+def keeper_skill_activations_url(base_url: str, keeper: str) -> str:
+    return f"{base_url}/api/v1/keepers/skill-activations?keeper={quote(keeper, safe='')}"
+
+
+def keeper_skill_projection(
+    answer: dict[str, Any], *, keeper: str, context: str
+) -> dict[str, Any]:
+    """The projection a `skill-activations` answer carries for `keeper`."""
+    require(
+        answer.get("schema") == KEEPER_SKILL_ACTIVATIONS_SCHEMA,
+        f"{context} schema is not {KEEPER_SKILL_ACTIVATIONS_SCHEMA}",
+    )
+    require(answer.get("keeper") == keeper, f"{context} answers for another Keeper")
+    return object_field(answer, "skill_activations", context)
 
 
 def list_field(value: Any, field: str, context: str) -> list[Any]:
@@ -439,6 +460,7 @@ def validate_proof(
     *,
     health: dict[str, Any],
     dashboard: dict[str, Any],
+    activations: dict[str, Any],
     durable_ledger: dict[str, Any],
     keeper: str,
     expected_source_sha: str,
@@ -495,7 +517,9 @@ def validate_proof(
         "effective Keeper surface belongs to another Keeper",
     )
 
-    projection = object_field(dashboard, "skill_activations", "dashboard")
+    projection = keeper_skill_projection(
+        activations, keeper=keeper, context="skill activations"
+    )
     require(
         projection.get("status") == "available",
         "Skill activation projection is not available",
@@ -900,7 +924,12 @@ def main() -> int:
         f"{base_url}/api/v1/dashboard/tools?keeper={quote(args.keeper, safe='')}"
     )
     dashboard, dashboard_raw = read_json(dashboard_url, args.timeout, token)
-    projection = object_field(dashboard, "skill_activations", "dashboard")
+    activations, activations_raw = read_json(
+        keeper_skill_activations_url(base_url, args.keeper), args.timeout, token
+    )
+    projection = keeper_skill_projection(
+        activations, keeper=args.keeper, context="skill activations"
+    )
     ledger = object_field(projection, "ledger", "skill_activations")
     session_id = string_field(ledger, "session_id", "skill ledger")
     require(Path(session_id).name == session_id, "session id is not one path component")
@@ -916,6 +945,7 @@ def main() -> int:
     proof = validate_proof(
         health=health,
         dashboard=dashboard,
+        activations=activations,
         durable_ledger=durable_ledger,
         keeper=args.keeper,
         expected_source_sha=args.expected_source_sha,
@@ -931,6 +961,9 @@ def main() -> int:
     health_file = write_json(args.out / "health.json", health)
     dashboard_file = write_json(
         args.out / "dashboard-tools.json", dashboard, sort_keys=False
+    )
+    activations_file = write_json(
+        args.out / KEEPER_SKILL_ACTIVATIONS_ARTIFACT, activations, sort_keys=False
     )
     (args.out / skill_activation_events.EVENTS_FILENAME).write_bytes(durable_raw)
     (args.out / "tui-build-evidence.json").write_bytes(tui_build_raw)
@@ -957,7 +990,7 @@ def main() -> int:
         "collector source checkout changed during proof capture",
     )
     evidence = {
-        "schema": "masc.keeper-skill-use-proof.v2",
+        "schema": PROOF_SCHEMA,
         "generated_at": utc_now(),
         "source": {
             "expected_sha": args.expected_source_sha,
@@ -1015,6 +1048,10 @@ def main() -> int:
                 "bytes": len(dashboard_file),
                 "sha256": digest_bytes(dashboard_file),
             },
+            KEEPER_SKILL_ACTIVATIONS_ARTIFACT: {
+                "bytes": len(activations_file),
+                "sha256": digest_bytes(activations_file),
+            },
             skill_activation_events.EVENTS_FILENAME: {
                 "bytes": len(durable_raw),
                 "sha256": digest_bytes(durable_raw),
@@ -1031,6 +1068,7 @@ def main() -> int:
         "responses": {
             "health_sha256": digest_bytes(health_raw),
             "dashboard_tools_sha256": digest_bytes(dashboard_raw),
+            "keeper_skill_activations_sha256": digest_bytes(activations_raw),
         },
         "boundary": {
             "tui_capture": "required separately from the same server, Keeper session, and invocation id",

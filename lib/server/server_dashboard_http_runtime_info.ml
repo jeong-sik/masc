@@ -2333,21 +2333,12 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
           Keeper_effective_tool_surface.resolve ~config ~keeper_name
           |> Keeper_effective_tool_surface.to_yojson)
     in
-    let skill_activations =
-      match keeper with
-      | None -> `Null
-      | Some keeper_name ->
-        run Tools_compute (fun () ->
-          Keeper_skill_activation_projection.resolve ~config ~keeper_name
-          |> Keeper_skill_activation_projection.to_yojson)
-    in
     match json with
     | `Assoc fields ->
       `Assoc
         (fields
          @ [ "effective_keeper_surface", effective_keeper_surface
            ; "keeper_waiting_inventory", keeper_waiting_inventory
-           ; "skill_activations", skill_activations
            ])
     | other -> other
   in

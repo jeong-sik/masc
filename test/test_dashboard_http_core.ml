@@ -5237,8 +5237,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       [ "tool_inventory", `List (List.init 200 (fun i -> `Assoc
           [ "name", `String ("tool-" ^ string_of_int i); "description", `String "full final snapshot tool description" ]))
       ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
-      ; "effective_keeper_surface", `Null
-      ; "skill_activations", `Null ] in
+      ; "effective_keeper_surface", `Null ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
       ~namespace_truth:`Null ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;

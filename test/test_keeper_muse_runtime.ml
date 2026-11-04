@@ -434,9 +434,10 @@ let test_error_projection () =
 ;;
 
 (* A non-retryable modelError without quota names its cause only in prose.
-   The account's own model/list says whether the configured model is in the
-   catalog; when it is not, the reported error names that, and the variant
-   (and so retry and effect handling) stays the modelError one. *)
+   The account's own model/list says whether the configured model is listed.
+   An omission from the provider's catalog is the reported type; an omission
+   from any other list is detail only. The variant (and so retry and effect
+   handling) stays the modelError one. *)
 let test_model_error_names_a_missing_catalog_model () =
   let entry model_id : Msp.model_catalog_entry =
     { model_id; display_label = model_id; provider_id = "meta"; profile_id = None;
@@ -479,12 +480,24 @@ let test_model_error_names_a_missing_catalog_model () =
         (Llm_provider.Error.ProviderReportedError { provider = "muse_serve"; error_type; detail }) ->
       error_type, detail
     | other -> failf "expected a reported provider error: %s" (Agent_core.Error.to_string other) in
-  let error_type, detail = reported ~catalog:empty final in
-  check (option string) "the missing model is named as the cause"
+  let provider_omits = Adapter.catalog_reading ~model
+      (catalog Msp.Provider_catalog [entry "muse-spark-1.4"]) in
+  let error_type, detail = reported ~catalog:provider_omits final in
+  check (option string) "the provider's catalog omitting the model is the reported type"
     (Some "model_not_in_account_catalog") error_type;
-  check bool "the detail keeps the host's words and names the catalog" true
+  check bool "the detail keeps the host's words and names the provider catalog" true
     (String.ends_with ~suffix:
-       "; the account's model catalog (bundledCatalog, 0 models) does not list muse-spark-1.3"
+       "; the account's provider catalog (model count 1) does not list muse-spark-1.3"
+       detail
+     && String.starts_with ~prefix:(Serve.error_to_string final) detail);
+  (* A bundled list is the host's own, not the account's: the omission is a
+     fact for the detail, never the reported type. *)
+  let error_type, detail = reported ~catalog:empty final in
+  check (option string) "another list's omission keeps the host's kind"
+    (Some "modelError") error_type;
+  check bool "and adds the list's source and size to the detail" true
+    (String.ends_with ~suffix:
+       "; the host's model list (bundledCatalog, model count 0) does not list muse-spark-1.3"
        detail
      && String.starts_with ~prefix:(Serve.error_to_string final) detail);
   check (option string) "a listed model keeps the host's kind"

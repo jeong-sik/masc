@@ -138,9 +138,10 @@ type catalog_reading =
       ; listed : int
       }
 (** What the account's [model/list] says about the configured model after a
-    non-retryable [modelError] without quota. [Catalog_omits_model] turns the
-    reported [error_type] into [model_not_in_account_catalog] and names the
-    catalog source and size; retry and effect handling stay those of
+    non-retryable [modelError] without quota. An omission from the provider's
+    own catalog makes the reported [error_type] [model_not_in_account_catalog];
+    an omission from any other list keeps [modelError] and adds the list's
+    source and size to the detail. Retry and effect handling stay those of
     [modelError]. *)
 
 module For_testing : sig

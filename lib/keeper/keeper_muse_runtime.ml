@@ -189,13 +189,25 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
         (Llm_provider.Error.ProviderUnavailable
            { provider = provider_name; detail = Serve.error_to_string error })
     else
-      (* The account's catalog names the cause the error prose does not; the
-         error stays a reported [modelError] for retry and effect handling. *)
+      (* Only the provider's own catalog speaks for the account, so only its
+         omission is the reported type; any other list adds the fact to the
+         detail. The error stays a reported [modelError] for retry and effect
+         handling. *)
       let error_type, detail =
         match kind, catalog with
-        | Msp.Model_error, Some (Catalog_omits_model { model; source; listed }) ->
+        | Msp.Model_error, Some (Catalog_omits_model { model; source = Msp.Provider_catalog; listed }) ->
           ( model_not_in_account_catalog
-          , Printf.sprintf "%s; the account's model catalog (%s, %d models) does not list %s"
+          , Printf.sprintf "%s; the account's provider catalog (model count %d) does not list %s"
+              (Serve.error_to_string error) listed model )
+        | Msp.Model_error,
+          Some (Catalog_omits_model
+                  { model
+                  ; source =
+                      ( Msp.Bundled_catalog | Msp.Unresolved_catalog | Msp.Fake_catalog
+                      | Msp.Config_catalog | Msp.Unknown_catalog_source _ ) as source
+                  ; listed }) ->
+          ( Msp.turn_error_kind_to_string kind
+          , Printf.sprintf "%s; the host's model list (%s, model count %d) does not list %s"
               (Serve.error_to_string error) (Msp.model_catalog_source_to_string source) listed model )
         | Msp.Model_error, (None | Some Catalog_lists_model)
         (* [Auth_required] is matched above as an auth error; the alias keeps
@@ -1658,13 +1670,17 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
                 ~current:!recovery_failure ~admission:!admission error;
-            (* The handshake bound also bounds this metadata exchange. *)
+            (* The same bound as the account's usage read; a spent window
+               already explains the failure, as it does for that read. *)
+            let catalog_read_s =
+              Float.min Runtime_provider_usage_read.read_timeout_s client_config.admission_timeout_s in
             let catalog =
               match catalog_checked_model ~configured_model:client_config.model error with
+              | Some _ when Runtime_quota_window.is_exhausted ~scope:quota_scope ~now:(Time_compat.now ()) -> None
               | None -> None
               | Some model ->
                 (match
-                   Eio.Time.with_timeout_exn clock client_config.admission_timeout_s (fun () ->
+                   Eio.Time.with_timeout_exn clock catalog_read_s (fun () ->
                      Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd client_config)
                  with
                  | Ok listed -> Some (catalog_reading ~model listed)
@@ -1675,7 +1691,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                  | exception Eio.Time.Timeout ->
                    Log.Keeper.warn ~keeper_name
                      "Muse model catalog not read after model error: no answer within %.0fs"
-                     client_config.admission_timeout_s;
+                     catalog_read_s;
                    None)
             in
             runtime_error_to_core_error ?catalog error)

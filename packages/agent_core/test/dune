@@ -626,11 +626,6 @@
  (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main unix yojson))
 
 (test
- (name test_guardrails_async)
- (modules test_guardrails_async)
- (libraries agent_core_test_deps agent_core alcotest eio eio_main))
-
-(test
  (name test_agent_cancellation_tla_parity)
  (modules test_agent_cancellation_tla_parity)
  (libraries agent_core_test_deps agent_core alcotest))

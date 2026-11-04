@@ -122,7 +122,6 @@ module Trajectory = Trajectory
 module Metrics = Metrics
 module Async_agent = Async_agent
 module Consumer = Consumer
-module Guardrails_async = Guardrails_async
 module Eval_stats = Eval_stats
 module Runtime_store = Runtime_store
 module Plan = Plan

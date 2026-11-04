@@ -811,81 +811,60 @@ let run_new_turn
   in
   let* () = Pipeline_execution_scope.record_turn_ready execution
     ~tool_names:prep.Agent_turn.visible_tool_names in
-  (* Stage 2.5: Async input validation *)
-  let async_guard = agent.options.guardrails_async in
-  match
-    Guardrails_async.run_input
-      async_guard.input_validators
-      prep.Agent_turn.effective_messages
-  with
-  | Guardrails_async.Fail { validator_name; reason } ->
-    Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
-  | Guardrails_async.Pass ->
-    (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
-       error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
-    let api_outcome =
-      stage_route
-        ~sw
-        ?clock
-        ~turn
-        ~api_strategy
-        ?raw_trace_run
-        ?on_provider_failure
-        ~before_provider_attempt:
-          (Pipeline_execution_scope.before_provider_attempt execution)
-        ~turn_config
-        agent
-        prep
-      |> Llm_provider.Completion_outcome.map_result (tag_error "route")
-    in
-    let* () = Pipeline_execution_scope.record_provider_request_provenance
-      execution api_outcome.Llm_provider.Completion_outcome.request_provenance in
-    let api_result = api_outcome.Llm_provider.Completion_outcome.result in
-    (* Stage 4+5+6: Collect, Execute/Output *)
-    let outcome =
-      match api_result with
-      | Error e -> Error e
-      | Ok (provider_config, response) ->
-        (* Agent Core contract Option A: forced-tool-use enforcement removed.
-          [tool_choice] is enforced server-side by the provider, so agent core no
-          longer validates the response against a completion contract nor retries
-          to coerce a tool call (the former
-          [handle_missing_required_tool_use]/[validate_completion_contract]
-          pass). *)
-        (* Stage 3.5: Async output validation *)
-        (match Guardrails_async.run_output async_guard.output_validators response with
-         | Guardrails_async.Fail { validator_name; reason } ->
-           Error (Error.Agent (GuardrailViolation { validator = validator_name; reason }))
-         | Guardrails_async.Pass ->
-           let* response, rejected_tool_calls =
-             stage_collect ?raw_trace_run ?clock ~turn ~provider_config
-               ~context_message:prep.Agent_turn.context_message ~execution agent response
-             |> tag_error "collect"
-           in
-           (match Pipeline_execution_scope.provider execution with
-            | None ->
-              stage_output
-                ?raw_trace_run
-                ?before_tool_execution
-                ~turn
-                ~rejected_tool_calls
-                agent
-                response
-            | Some provider ->
-              Execution_context.with_provider_attempt provider (fun () ->
-                stage_output
-                  ?raw_trace_run
-                  ?before_tool_execution
-                  ~turn
-                  ~rejected_tool_calls
-                  agent
-                  response))
-           |> tag_error "output")
-    in
-    (match outcome with
-     | Error _ as error -> error
-     | Ok value ->
-       Pipeline_execution_scope.close_success execution |> Result.map (fun () -> value))
+  (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
+     error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
+  let api_outcome =
+    stage_route
+      ~sw
+      ?clock
+      ~turn
+      ~api_strategy
+      ?raw_trace_run
+      ?on_provider_failure
+      ~before_provider_attempt:
+        (Pipeline_execution_scope.before_provider_attempt execution)
+      ~turn_config
+      agent
+      prep
+    |> Llm_provider.Completion_outcome.map_result (tag_error "route")
+  in
+  let* () = Pipeline_execution_scope.record_provider_request_provenance
+    execution api_outcome.Llm_provider.Completion_outcome.request_provenance in
+  let api_result = api_outcome.Llm_provider.Completion_outcome.result in
+  (* Stage 4+5+6: Collect, Execute/Output *)
+  let outcome =
+    match api_result with
+    | Error e -> Error e
+    | Ok (provider_config, response) ->
+      let* response, rejected_tool_calls =
+        stage_collect ?raw_trace_run ?clock ~turn ~provider_config
+          ~context_message:prep.Agent_turn.context_message ~execution agent response
+        |> tag_error "collect"
+      in
+      (match Pipeline_execution_scope.provider execution with
+       | None ->
+         stage_output
+           ?raw_trace_run
+           ?before_tool_execution
+           ~turn
+           ~rejected_tool_calls
+           agent
+           response
+       | Some provider ->
+         Execution_context.with_provider_attempt provider (fun () ->
+           stage_output
+             ?raw_trace_run
+             ?before_tool_execution
+             ~turn
+             ~rejected_tool_calls
+             agent
+             response))
+      |> tag_error "output"
+  in
+  (match outcome with
+   | Error _ as error -> error
+   | Ok value ->
+     Pipeline_execution_scope.close_success execution |> Result.map (fun () -> value))
 ;;
 
 type turn_frontier = Pipeline_execution_resume.frontier

@@ -242,7 +242,6 @@ let build b =
     ; admission_timeout_s = b.admission_timeout_s
     ; permit_wait = b.permit_wait
     ; hooks = b.hooks
-    ; guardrails_async = Guardrails_async.empty
     ; tracer = b.tracer
     ; trace_link = None
     ; raw_trace = b.raw_trace

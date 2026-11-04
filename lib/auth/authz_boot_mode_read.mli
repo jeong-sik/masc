@@ -12,11 +12,13 @@
     boot, so a base path that was restored to before its bootstrap is noticed
     even when the config no longer asks for [Multi_account] (design 5.1, row 2).
 
-    The log and the store are opened only when their file is there. Opening one
-    ({!Authz_log.open_at_start}, {!Authz_external_store.open_at_start}) cuts a
-    last line that never ended and keeps a lock file next to it; a base path
-    that has neither file gets no directory and no lock file. A missing store
-    is absent (design 8.4). A pending intent of the store is judged, not
+    The log and the store are opened only when their file is there
+    ({!Authz_presence}). Opening one ({!Authz_log.open_at_start},
+    {!Authz_external_store.open_at_start}) cuts a last line that never ended
+    and keeps a lock file next to it; a base path that has neither file gets no
+    directory and no lock file. A missing store is absent (design 8.4), and so
+    is a store whose directory is missing. A dangling symbolic link on the way
+    to either file is not: it makes the file unreadable. A pending intent of the store is judged, not
     settled: {!Authz_high_water.judge} reads a promotion and an abort the same
     way whether their entries were written or not (design 8.2-2, 8.2-3).
 
@@ -55,28 +57,31 @@ val input
   -> anonymous_mutations:bool
   -> Authz_boot_mode.input
 
-(** What the boot does. Only a single user boots. [Multi_account] before
-    activation needs the host-local bootstrap, which this server does not have
-    yet. [Multi_account] after activation needs the account layers that serve
-    it; booting it without them would serve multi-owned records with the
-    behavior of a single user. *)
-type decision =
-  | Boot_single_user
+(** Why a boot does not go on. [Multi_account] before activation needs the
+    host-local bootstrap, which this server does not have yet. [Multi_account]
+    after activation needs the account layers that serve it; booting it without
+    them would serve multi-owned records with the behavior of a single user. *)
+type stop =
   | Refuse of Authz_boot_mode.refusal * Authz_boot_mode.refusal list
   | Multi_account_not_activatable
   | Multi_account_not_served of Authz_boot_mode.mode
 
+(** What the boot does. Only a single user boots. *)
+type decision =
+  | Boot_single_user
+  | Stop of stop
+
 val decide : Authz_boot_mode.input -> decision
 
-(** One line per reason, for a refusal; none for {!Boot_single_user}. A
-    {!Multi_account_not_served} boot also says what the high-water mark found
+(** One line per reason, the first apart, so a stop always has a reason. A
+    {!Multi_account_not_served} stop also says what the high-water mark found
     when it is not a match. *)
-val messages : Authz_boot_mode.input -> decision -> string list
+val messages : Authz_boot_mode.input -> stop -> string * string list
 
 (** {!input}, {!decide} and {!messages} in one call: [Ok ()] for a single-user
-    boot, and the messages of the refusal otherwise. *)
+    boot, and the messages of the stop otherwise. *)
 val boot
   :  base_path:string
   -> config_dir:string option
   -> anonymous_mutations:bool
-  -> (unit, string list) result
+  -> (unit, string * string list) result

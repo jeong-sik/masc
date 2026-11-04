@@ -101,7 +101,7 @@ let error_to_string = function
       (path_problem_to_string problem)
       path
   | No_config_dir ->
-    "no config directory is known (neither XDG_CONFIG_HOME nor HOME), so no install record \
+    "no config directory is known (no absolute XDG_CONFIG_HOME and no HOME), so no install record \
      can be written"
   | Install_record_not_located error -> Install_record.locate_error_to_string error
   | Install_record_unreadable error -> Install_record.read_error_to_string error

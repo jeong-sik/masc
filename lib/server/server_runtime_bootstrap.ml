@@ -1668,8 +1668,8 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
        ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
    with
    | Ok () -> ()
-   | Error messages ->
-     let message = "the account mode refuses this boot: " ^ String.concat "; " messages in
+   | Error (first, rest) ->
+     let message = "the account mode refuses this boot: " ^ String.concat "; " (first :: rest) in
      Log.Server.error "[FATAL] %s" message;
      raise (Env_config_core.Config_error message));
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =

@@ -688,7 +688,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
         | Env_config.Recorded _ -> ()
         | Env_config.No_record_location ->
           Log.Server.warn
-            "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; pass --base-path to later commands"
+            "default workspace not recorded: no absolute XDG_CONFIG_HOME and no HOME are set; pass --base-path to later commands"
         | Env_config.Refused_under_test ->
           Log.Server.warn
             "default workspace not recorded: a test executable does not write the operator's default"
@@ -1811,7 +1811,7 @@ let init_cmd_exit_with ~report base_path force scope record_default =
       Printf.printf "default workspace recorded: %s\n" path
     | Env_config.No_record_location ->
       Printf.printf
-        "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; \
+        "default workspace not recorded: no absolute XDG_CONFIG_HOME and no HOME are set; \
          pass --base-path to later commands\n"
     | Env_config.Record_failed { record; reason } ->
       Printf.printf

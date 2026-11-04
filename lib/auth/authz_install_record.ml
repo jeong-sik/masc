@@ -168,28 +168,6 @@ let check_config_dir dir =
     -> Error "it is not a directory"
 ;;
 
-(* [Unix.realpath] fails with ENOENT when nothing is there, and also when a
-   symbolic link on the way is dangling. Only the first is an absent record.
-   A dangling link may hide the record, for instance when the config directory
-   lives on a volume that is not mounted. The walk goes up to the nearest
-   component that [lstat] finds and demands that a link there is not
-   dangling. *)
-let rec absent_config_dir dir =
-  match Unix.lstat dir with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then Ok () else absent_config_dir parent
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-    (match Unix.stat dir with
-     | _ -> Ok ()
-     | exception Unix.Unix_error (error, _, _) ->
-       Error
-         (Printf.sprintf "the symbolic link %s is dangling: %s" dir (Unix.error_message error)))
-  | { Unix.st_kind = Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ }
-    -> Ok ()
-;;
-
 let read_file t dir =
   let path = Filename.concat dir (Filename.basename t.file) in
   match
@@ -213,7 +191,9 @@ let read = function
     let unreadable detail = Error (Unreadable { path = t.file; detail }) in
     (match Unix.realpath t.config_dir with
      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-       (match absent_config_dir t.config_dir with
+       (* ENOENT also comes from a dangling link on the way, which may hide the
+          record: a config directory on a volume that is not mounted. *)
+       (match Authz_presence.confirm_absent t.config_dir with
         | Ok () -> Ok None
         | Error detail -> unreadable detail)
      | exception Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
@@ -242,7 +222,7 @@ type write_error =
 
 let write_error_to_string = function
   | No_config_dir_to_write ->
-    "there is no config directory for the install record (neither XDG_CONFIG_HOME nor HOME is set)"
+    "there is no config directory for the install record (no absolute XDG_CONFIG_HOME and no HOME are set)"
   | Store_path_invalid { external_store } ->
     Printf.sprintf
       "the path of the external store %S is not an absolute path in valid UTF-8"

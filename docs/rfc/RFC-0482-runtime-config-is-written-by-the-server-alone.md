@@ -77,8 +77,11 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 
 `masc config set`, `masc web-search setup`, voice setup 은 이렇게 쓴다.
 
-- 그 워크스페이스의 서버가 답하면: 로컬에서 고친 원문을 TUI Config 편집기와 같은 길로 보낸다. preview 를 받고, `expected_source_revision` 과 함께 `POST /api/v1/runtime/config/raw` 를 보낸다. 서버가 저장하고 발행하고 알린다.
-- 서버가 답하지 않으면: 지금처럼 직접 쓴다. 이때는 알림을 받을 reader 가 없다. TUI 는 서버 없이 돌지 않는다.
+- 서버 찾기: port 는 다른 CLI 명령과 같은 순서로 정한다(`--port`, `MASC_HTTP_PORT`, 워크스페이스에 저장된 port, 기본값). 그 port 의 `/health` 가 이 워크스페이스를 가리키고 준비됐으면, `masc login` 이 저장한 토큰(`Auth_login.read_persisted_http_token`)으로 서버에 보낸다. `masc runtime-resume` 이 이미 이렇게 한다(`bin/masc_cli_model_resume.ml`).
+- 그 워크스페이스의 서버가 답하면: `GET /api/v1/runtime/config/raw` 로 서버가 읽는 원문과 revision·경로를 받고, 같은 편집을 그 원문에 한다. `expected_source_revision`·`expected_source_path` 와 함께 `POST /api/v1/runtime/config/raw` 를 보낸다. 서버가 저장하고 발행하고 알린다. 저장 route 가 preview 와 같은 검사를 하고 거절 이유를 돌려주므로 preview 는 따로 부르지 않는다. 그사이 파일이 바뀌었으면(409) 저장하지 않고 다시 실행하라고 알린다.
+- 서버가 아직 준비 중이거나, 답하는데 sign-in 토큰이 없으면: 쓰지 않고 멈춘다. 서버 몰래 파일을 쓰게 되기 때문이다.
+- 서버가 답하지 않거나, 그 port 가 다른 워크스페이스나 masc 가 아닌 것이면: 이 워크스페이스의 서버는 없다. 지금처럼 직접 쓴다. 이때는 알림을 받을 reader 가 없다. TUI 는 서버 없이 돌지 않는다.
+- voice setup 은 runtime.toml 말고 `voice_config.json` 도 쓴다. 그래서 원문 route 가 아니라 서버의 voice setup route(`/api/v1/voice/setup`)로 보낸다.
 
 이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
@@ -101,7 +104,7 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 | L2b | TUI: 시작할 때 L2a 로 읽는다. 토큰 준비와 읽기의 순서, 서버가 아직 없는 첫 설치, 읽기가 실패했을 때 기본값으로 여는 규칙을 둔다 | 서버가 쓴 값으로 열리는지, 서버가 없으면 기본값으로 열리고 그 사실을 알리는지(PTY) |
 | L2c | TUI: 1.2 의 쓰기를 순서를 지키는 writer 하나로 L1 route 에 보낸다(`Masc_tui_preference_writer`). Worker TUI 는 저장하지 못했다고 한 번 알린다 | 빠르게 두 번 고른 값이 고른 순서대로 저장되는지 |
 | L2d | TUI: `[tui]` 는 L2a·L1 로만 읽고 쓴다. 언어·candle·opening 은 `Tui_preference` 타입을 쓴다 | bin/ 에 `Runtime.edit_config_text` 가 남지 않는지 |
-| L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다 | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
+| L3 | CLI: 3.2 의 세 명령이 서버가 답하면 서버로 쓴다. L3a 는 서버 찾기와 원문 저장 client, `masc config set`. L3b 는 `masc web-search setup`, L3c 는 voice setup | 서버가 떠 있을 때 쓰면 알림이 나가고 서버 설정이 바로 바뀌는지, 서버가 없을 때는 지금처럼 쓰는지 |
 | L4 | TUI Config 화면이 `runtime_config_changed` 에 읽고 실패하면 다시 읽는다. 2초 분기를 지운다 | 알림 하나에 읽기 하나, 주기에는 읽지 않는지(PTY) |
 
 L2b·L2c·L2d 는 PR 하나로 들어간다. 읽기만 서버로 옮기면, 쓰기를 옮길 때까지 TUI 는 서버 파일을 읽고 자기 파일에 쓴다. 두 프로세스가 runtime.toml 을 서로 다른 경로로 찾는 경우 바로 그 기간에 설정을 잃는다. 쓰기만 먼저 옮겨도 같다.
@@ -112,9 +115,3 @@ L2b·L2c·L2d 는 PR 하나로 들어간다. 읽기만 서버로 옮기면, 쓰�
 - 쓰기는 writer 하나가 고른 순서대로 한 번에 하나씩 보낸다. 결과는 writer 의 완료를 처리하는 곳에서 한 번에 알린다. 권한이 없다는 답(401·403)은 세션에 한 번만 알린다.
 
 L4 는 L1~L3 과 #48036 뒤에만 들어간다.
-
-## 5. 열린 질문
-
-L3 에 앞서 정할 것:
-
-- CLI 가 그 워크스페이스의 서버를 찾는 방법. TUI 는 `--port` 로 서버를 정하고, `Masc_tui_http.install_operator_token` 이 `.masc/auth/masc-tui.token` 을 읽거나 잠금을 잡고 새로 받는다. CLI 가 이 모듈을 같이 쓸지, 다른 운영자 토큰을 쓸지 정해야 한다. 이 모듈은 지금 `bin/` 의 TUI 쪽에 있다.

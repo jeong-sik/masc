@@ -2891,16 +2891,23 @@ let config_set_cmd =
               does not name, or a value that is not the kind the key holds, is \
               refused and nothing is written."
          ; `P
+             "When the workspace's server answers on the port, the keys are saved \
+              through it: it is the one writer of runtime.toml while it runs, and it \
+              tells its readers. This needs the sign-in masc login keeps. With no \
+              server answering, the file is written here."
+         ; `P
              "A workspace with no runtime.toml is seeded the way server start seeds \
               it, so a script can set a key before the first start. What a value \
               means (a blank wake prompt, an address a guest cannot use) is checked \
               when the server starts, not here."
          ])
     Term.(
-      const (fun base_path assignments ->
+      const (fun base_path port agent assignments ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
-        Masc_cli_config_set.run ~base_path ~assignments)
+        Masc_cli_config_set.run ~base_path ~port ~agent ~assignments)
       $ base_path
+      $ port
+      $ login_agent
       $ assignments)
 
 let config_cmd =

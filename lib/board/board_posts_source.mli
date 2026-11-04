@@ -2,11 +2,6 @@
     owned by the caller; this module never recursively acquires them. *)
 open Board_types
 
-val live_guard_enforced : bool
-(** Built-in live admission policy, reported by offline tooling. Live posts
-    loads and writes do not read the offline initialization guard, so this is
-    [false]; it is not a switch. *)
-
 type reserved_settlement = {
   result : (unit, board_error) result;
   exception_ : exn;

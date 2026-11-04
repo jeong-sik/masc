@@ -2,7 +2,6 @@
    Also hosts tiny test helpers that need a single SSOT across files. *)
 
 module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
-module Board_test_preparation = Board_test_preparation
 
 (** Pure fixture construction. Both inputs are explicit; publication and
     restoration use the ordinary complete-snapshot API in each scenario. *)

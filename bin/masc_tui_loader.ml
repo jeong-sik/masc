@@ -1597,31 +1597,15 @@ let load_connectors ~(host : string) ~(port : int) ~on_status :
            in
            Ok { snapshot with cs_connectors = connectors })
 
-let memo_keeper_lanes = json_memo ()
-
-(** Load the light Lanes projection from /api/v1/keepers/composite, together
-    with the secret projection the same body carries.
-
-    One fetch, two readings. The endpoint serves several screens and the
-    Secrets tab reads a different part of the same snapshots than the Lanes
-    table does; asking twice would double the request for one body. *)
-let load_keeper_lanes ~(host : string) ~(port : int) :
-    ( Tui_decode.keeper_lanes_snapshot
-      * Tui_decode.keeper_secret_projection list,
-      string )
+(** Load one Keeper's execution row and secret projection from
+    /api/v1/keepers/<name>/composite. Info and Secrets read different parts
+    of the same body. *)
+let load_keeper_composite ~(host : string) ~(port : int) ~(keeper_name : string) :
+    (Tui_decode.keeper_lane * Tui_decode.keeper_secret_projection option, string)
     result =
-  match fetch_keeper_lanes ~host ~port with
-  | Error err -> Error ("keeper lanes load failed: " ^ err)
-  | Ok json ->
-      decode_offloaded memo_keeper_lanes ~name:"keeper.lanes.decode_wait"
-        (fun json ->
-          match Tui_decode.decode_keeper_lanes_snapshot json with
-          | Error err -> Error err
-          | Ok lanes -> (
-              match Tui_decode.decode_keeper_secret_projections json with
-              | Error err -> Error err
-              | Ok projections -> Ok (lanes, projections)))
-        json
+  match fetch_keeper_composite ~host ~port ~keeper_name with
+  | Error err -> Error ("keeper composite load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_composite json
 
 let memo_lane_inventory = json_memo ()
 

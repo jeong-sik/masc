@@ -66,6 +66,14 @@ let test_a_replacing_read_covers_the_changes_before_it () =
   let t = O.succeeded (O.started t) in
   check bool "the read that replaced it began after the change" false (O.due ~now:0.0 t)
 
+let test_a_read_that_never_ran_is_owed_again () =
+  let reading = O.started (O.changed O.settled) in
+  check bool "a read in flight is not due" false (O.due ~now:0.0 reading);
+  check bool "the read that never ran leaves it owed" true (O.due ~now:0.0 (O.abandoned reading));
+  let after_failure = O.started (failed ~now:0.0 reading) in
+  check bool "the failures in a row survive" true
+    (match O.abandoned after_failure with O.Owed { failures = 1 } -> true | _ -> false)
+
 let () =
   run "tui_owed_read"
     [ ( "owed_read"
@@ -80,6 +88,8 @@ let () =
             test_a_change_during_a_failure_wait_is_read_now_and_keeps_the_backoff
         ; test_case "an answer without a read in flight keeps what is owed" `Quick
             test_an_answer_without_a_read_in_flight_keeps_what_is_owed
+        ; test_case "a read that never ran is owed again" `Quick
+            test_a_read_that_never_ran_is_owed_again
         ; test_case "a replacing read covers the changes before it" `Quick
             test_a_replacing_read_covers_the_changes_before_it
         ] )

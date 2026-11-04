@@ -30,6 +30,10 @@ let failed ~retry_s ~max_retry_s ~now = function
       Waiting { failures; retry_at = now +. wait }
   | (Settled | Owed _ | Waiting _) as unchanged -> unchanged
 
+let abandoned = function
+  | Reading { failures; _ } -> Owed { failures }
+  | (Settled | Owed _ | Waiting _) as unchanged -> unchanged
+
 let due ~now = function
   | Owed _ -> true
   | Waiting { retry_at; _ } -> now >= retry_at

@@ -3714,10 +3714,13 @@ let fetch_skills_catalog ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/skills"
 
-(** Fetch the current composite lane snapshot for every registered Keeper. *)
-let fetch_keeper_lanes ~(host : string) ~(port : int) :
+(** Fetch one Keeper's composite snapshot. *)
+let fetch_keeper_composite ~(host : string) ~(port : int) ~(keeper_name : string) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/keepers/composite"
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/composite"
+         (percent_encode_path_segment keeper_name))
 
 (** Fetch all Lane families from their read-only operator inventory. *)
 let fetch_lane_inventory ~(host : string) ~(port : int) :

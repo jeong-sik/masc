@@ -845,31 +845,23 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
     (state.keeper_deletions = Some (Ok refreshed));
   Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
 
-(* An Info refresh queued behind an in-flight Keeper lanes read belongs to
-   that read's authority. Suspension retires the read; the replacement read
-   launched after reconfirmation leaves later than the queued request, so it
-   satisfies it. A flag left behind would start a second, redundant read
-   when the replacement answers, and that read's failure would overwrite the
-   recovered reading with a stale error. *)
-let test_suspension_folds_queued_lanes_reread_into_resume () =
+(* The composite read in flight and the read the detail owes belong to the
+   detail reading that suspension retires. The visible tab reads again when
+   the detail is recovered, so neither may survive into the new reading: an
+   answer of the retired read would overwrite the recovered one. *)
+let test_suspension_retires_the_keeper_composite_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
-  state.keeper_lanes_inflight <- true;
-  state.keeper_lanes_reread_pending <- true;
+  state.keeper_composite_inflight <- Some "alpha";
+  state.keeper_composite_owed <-
+    Some { kco_keeper = "alpha"; kco_reading = state.detail_read_authority
+         ; kco_read = Masc_tui_owed_read.changed Masc_tui_owed_read.settled };
   suspend_workspace_readings state;
-  Alcotest.(check bool) "in-flight read released" false state.keeper_lanes_inflight;
-  Alcotest.(check bool) "queued reread retired with its authority" false
-    state.keeper_lanes_reread_pending;
-  Alcotest.(check bool) "replacement read still requested" true state.keeper_lanes_resume;
-  (* A queued reread whose read was already released (not run) still asks
-     for a replacement after reconfirmation. *)
-  state.keeper_lanes_resume <- false;
-  state.keeper_lanes_reread_pending <- true;
-  suspend_workspace_readings state;
-  Alcotest.(check bool) "queued reread retired without an in-flight read" false
-    state.keeper_lanes_reread_pending;
-  Alcotest.(check bool) "its demand carried into resume" true state.keeper_lanes_resume
+  Alcotest.(check bool) "in-flight read released" true
+    (Option.is_none state.keeper_composite_inflight);
+  Alcotest.(check bool) "owed read retired with its reading" true
+    (Option.is_none state.keeper_composite_owed)
 
 let test_uncertain_identity_retires_reads_not_admitted_operations () =
   let open Masc_tui_types in
@@ -6905,8 +6897,8 @@ let () =
             test_keeper_purge_header_and_body_share_workspace
         ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
             test_uncertain_identity_retires_reads_not_admitted_operations
-        ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick
-            test_suspension_folds_queued_lanes_reread_into_resume
+        ; Alcotest.test_case "suspension retires the keeper composite read" `Quick
+            test_suspension_retires_the_keeper_composite_read
         ; Alcotest.test_case "async observation owns an independent generation" `Quick
             test_async_observation_has_an_independent_generation
         ; Alcotest.test_case "turn observations replace and refuse atomically" `Quick

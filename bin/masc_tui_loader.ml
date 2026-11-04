@@ -1323,6 +1323,28 @@ let load_overview_goals ~(host : string) ~(port : int) :
             (Tui_decode.decode_overview_goals json))
         json
 
+(** The operator quiz's scorecard windows and open wrong-answer notes, the
+    read behind the Home quiz line. One inventory request carries every live
+    installation's current rows; the two lanes are picked out by their
+    namespaced suffix, so the read stays one request whatever the
+    installation's instance id is. An installation that is not live simply
+    has no rows here. *)
+let load_quiz_rows ~(host : string) ~(port : int) :
+    (quiz_scorecard_snapshot, string) result =
+  match fetch_lane_addons_inventory_json ~host ~port () with
+  | Error detail -> Error ("quiz rows load failed: " ^ detail)
+  | Ok json ->
+      let open Result.Syntax in
+      let* rows = Masc.Tui_decode_fields.required_list_field json "rows" in
+      let* coverage = Masc.Tui_decode_fields.optional_list_field json "coverage" in
+      let* output =
+        Masc.Lane_addon_types.output_of_json (`Assoc ["rows", `List rows; "coverage", `List coverage]) in
+      let of_lane suffix (row : Masc.Lane_addon_types.row) =
+        String.ends_with row.lane_id ~suffix in
+      let ends_with suffix = List.filter (of_lane suffix) output.Masc.Lane_addon_types.rows in
+      Ok { quiz_scorecards = ends_with "/quiz/scorecard";
+           quiz_reviews = ends_with "/quiz/review" }
+
 let memo_overview = json_memo ()
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)

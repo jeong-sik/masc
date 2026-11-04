@@ -192,6 +192,11 @@ let render_overview (state : state) home =
                | 0 -> ""
                | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in
+  let quiz =
+    match Masc_tui_types.quiz_scorecard_reading state with
+    | Some line -> line
+    | None -> ""
+  in
   let work =
     match state.task_flow, state.tasks_error with
     | _, Some _ -> " Work: reading unavailable · open Work for the source"
@@ -284,6 +289,7 @@ let render_overview (state : state) home =
           | None -> health
           | Some status -> " " ^ status ^ " ·" ^ health in
         let readings = [None, health; Some (Theme.recede ()), work]
+          @ (if quiz = "" then [] else [Some (Theme.recede ()), quiz])
           @ (if candle_fits then candle else []) in
         let shown_readings = List.take spare readings in
         let draw_context = List.iter (function

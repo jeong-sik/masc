@@ -14,7 +14,7 @@ related: ["0480", "0481"]
 
 ## 0. 요약
 
-TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에서 `/api/v1/skills` 는 115KB 에 545ms 걸렸고, `/dashboard/tools?keeper=` 는 761KB 였다. 어느 pane 을 열었든 둘 다 읽는다.
+TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에서 `/api/v1/skills` 는 115KB 였고 237~545ms 걸렸다. Keeper 를 고른 `/api/v1/dashboard/tools?keeper=` 는 가장 큰 Keeper 에서 1,962KB 였고, 그중 1,440KB 가 활성화 기록(`skill_activations`)이었다. 어느 pane 을 열었든 둘 다 읽는다.
 
 두 응답에는 skill 활성화 장부(ledger)에서 나온 값이 들어 있다. 이 장부는 skill 을 한 번 부를 때마다 2+k 번 쓰인다. 쓸 때마다 알리고 TUI 가 두 응답을 통째로 다시 읽으면, Keeper 가 바쁠 때는 지금 2초 주기보다 더 자주 읽게 된다.
 
@@ -33,9 +33,19 @@ TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에
 
 사용량을 만들려고 요청마다 모든 Keeper 의 장부를 하나씩 차례로 읽는다(:1455-1482). Keeper 마다 `Keeper_meta_store.read_meta` 로 지금 trace 를 찾고, `Keeper_skill_activation_ledger.load` 로 그 trace 의 장부를 읽는다. `load` 는 checkpoint 저장과 같은 세션 잠금(`Keeper_checkpoint_store.with_session_lock`)을 잡는다. 응답 캐시는 없다.
 
-### 1.2 `/dashboard/tools?keeper=`
+### 1.2 `/api/v1/dashboard/tools?keeper=`
 
 `lib/server/server_dashboard_http_runtime_info.ml` 이 답한다.
+
+2026-11-04 운영 서버에서 Keeper 다섯을 세 번씩 읽었다.
+
+| Keeper | 응답 | `skill_activations` | 시간(중앙값) |
+|---|---|---|---|
+| ocaml-agent-ic | 1,962KB | 1,440KB | 112ms |
+| code-reviewer-brother | 1,678KB | 1,156KB | 122ms |
+| msx-retro-mania | 1,614KB | 1,093KB | 124ms |
+| pr-updater | 1,051KB | 529KB | 43ms |
+| build-maniac | 587KB | 65KB | 112ms |
 
 - 도구 목록과 `effective_keeper_surface`: 30초 `Dashboard_cache` 를 지난다.
 - `skill_activations`: 캐시 밖에서 요청마다 계산한다(:2336-2343). `Keeper_skill_activation_projection.resolve` 가 그 Keeper 의 지금 trace 장부 전체를 돌려준다. 활성화, 거절, async 기록, `summary`, `scoped_summaries` 가 모두 들어 있다.
@@ -47,15 +57,15 @@ TUI Tools 화면은 2초마다 두 곳을 읽는다. 2026-11-04 운영 서버에
 | pane | 그리는 값 | 읽기 |
 |---|---|---|
 | Usage | skill 별 Keeper 사용량, coverage, 못 읽은 장부 | `/api/v1/skills` |
-| Activations | 고른 Keeper 의 요약, 세션 id, 장부 revision, 전달·행동 timeline, 활성화별 receipt | `/dashboard/tools` 의 `skill_activations` |
-| Surface, Catalog | 도구 목록, Keeper 의 유효 surface | `/dashboard/tools` |
+| Activations | 고른 Keeper 의 요약, 세션 id, 장부 revision, 전달·행동 timeline, 활성화별 receipt | `/api/v1/dashboard/tools` 의 `skill_activations` |
+| Surface, Catalog | 도구 목록, Keeper 의 유효 surface | `/api/v1/dashboard/tools` |
 
 `launch_tools_load`(`bin/masc_tui.ml:3933`)가 두 읽기를 같이 띄운다. Tools 화면에서는 2초 tick 마다 부른다(:40713).
 
 ### 1.4 같은 장부를 읽는 다른 곳
 
 - 웹 대시보드: `dashboard/src/components/skills-panel.ts`(`usage_coverage`), `dashboard/src/components/tools/skill-activation-panel.ts`·`tools-main.ts`·`dashboard/src/api/dashboard-tools-prompts.ts`(`skill_activations`).
-- harness: `scripts/harness/workload/capture_keeper_skill_tui_proof.py` 가 `/dashboard/tools` 의 `skill_activations` 를 읽는다.
+- harness: `scripts/harness/workload/capture_keeper_skill_tui_proof.py` 가 `/api/v1/dashboard/tools` 의 `skill_activations` 를 읽는다.
 - Keeper 채팅 기록: `attach_keeper_chat_skill_activations`(`lib/server/server_dashboard_http_keeper_api.ml:603`)가 채팅 행마다 그 Keeper 의 장부를 붙인다.
 
 ## 2. 장부를 쓰는 곳
@@ -87,7 +97,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 
 ## 3. 문제
 
-1. 쓸 때마다 알리고 두 응답을 통째로 다시 읽으면, Keeper 하나의 기록 한 줄 때문에 모든 Keeper 의 장부와 761KB 응답을 다시 읽는다. 바쁠 때는 2초 주기보다 더 자주 읽는다.
+1. 쓸 때마다 알리고 두 응답을 통째로 다시 읽으면, Keeper 하나의 기록 한 줄 때문에 모든 Keeper 의 장부와 최대 2MB 응답을 다시 읽는다. 바쁠 때는 2초 주기보다 더 자주 읽는다.
 2. 사용량은 모든 Keeper 의 장부를 한 응답에 모은다. 그래서 어느 Keeper 가 바뀌었는지 알아도 그 Keeper 것만 다시 읽을 수가 없다.
 3. 활성화 기록이 도구 목록 응답 안에 있다. 장부가 바뀌면 바뀌지 않은 도구 목록까지 다시 받는다. 거꾸로 도구 목록이 바뀌어도 장부 전체를 다시 계산한다.
 
@@ -100,7 +110,7 @@ Keeper 이름은 쓰는 쪽에 있다.
   - 그 Keeper 의 skill 별 사용량 행. 지금 `/api/v1/skills` 의 `usage[]` 에서 그 Keeper 몫이다.
   - 장부를 못 읽으면 그 이유를 닫힌 상태로 돌려준다. 지금 `usage_coverage.unavailable` 에 모으던 것이 Keeper 별 응답으로 옮겨 간다.
 - `/api/v1/skills` 는 본문만 돌려준다. `usage[]` 와 `usage_coverage` 를 뺀다. 그러면 이 응답은 장부를 읽지 않는다.
-- `/dashboard/tools` 는 `skill_activations` 를 뺀다.
+- `/api/v1/dashboard/tools` 는 `skill_activations` 를 뺀다.
 
 ### 4.2 서버: Keeper 이름을 붙여 알린다
 
@@ -116,7 +126,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 | Usage | `/api/v1/skills` 본문 | 본문 알림(skill catalog 발행 #48059 등). 본문 필드마다 원천은 L3 에서 확인한다 |
 | Usage | Keeper 별 활성화 읽기, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만 |
 | Activations | 고른 Keeper 의 활성화 읽기 | 고른 Keeper 가 바뀔 때, 그 Keeper 의 알림마다 |
-| Surface, Catalog | `/dashboard/tools` | skill catalog 발행, lane add-on export 변경(#48060), runtime config 변경(#48036) |
+| Surface, Catalog | `/api/v1/dashboard/tools` | skill catalog 발행, lane add-on export 변경(#48060), runtime config 변경(#48036) |
 
 - Keeper 마다 `Masc_tui_owed_read` 하나를 둔다. 읽는 동안 온 알림은 다음 읽기 한 번으로 합쳐진다. 그래서 Keeper 하나당 진행 중인 읽기 하나와 밀린 읽기 하나를 넘지 않는다. 이건 횟수 제한이 아니라 읽기 빚 모델이 원래 하는 일이다.
 - 바쁜 Keeper 가 계속 쓰면 그 Keeper 를 연달아 읽을 수 있다. 하지만 한 번 읽을 때 장부 하나만 읽고, 다른 Keeper 와 도구 목록은 읽지 않는다.
@@ -127,7 +137,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 
 | 길 | 고르지 않은 이유 |
 |---|---|
-| Tools 2초 읽기 유지 | 바뀐 게 없어도 2초마다 모든 Keeper 장부와 761KB 를 읽는다 |
+| Tools 2초 읽기 유지 | 바뀐 게 없어도 2초마다 모든 Keeper 장부와 최대 2MB 를 읽는다 |
 | 쓸 때마다 알리고 두 응답을 통째로 다시 읽음 | 3장 문제 1 그대로다 |
 | trace_id 만 알리고 TUI 가 trace 에서 Keeper 를 찾음 | TUI 에도 서버에도 그 표가 없다. Keeper 가 새 trace 로 가면 TUI 는 처음 보는 trace 를 받는다 |
 | Keeper 이름을 장부 header 에 저장 | 알림에만 필요한 값인데 저장 형식이 바뀐다 |
@@ -139,7 +149,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 |---|---|---|
 | L1 | 장부 공개 함수에 `~keeper_name`. `commit_event_locked` 성공 뒤 `keeper_skill_activations_changed` | 2장 표의 기록 종류마다 알림이 한 번 나가는지, 쓰지 않은 관찰은 알리지 않는지 |
 | L2 | Keeper 별 활성화 읽기 route | 한 Keeper 장부만 읽는지, 못 읽은 장부를 닫힌 상태로 돌려주는지 |
-| L3 | 소비자를 L2 로 옮기고 옛 필드를 지운다. TUI decoder, 웹 대시보드, harness 스크립트, `/api/v1/skills` 의 `usage[]`·`usage_coverage`, `/dashboard/tools` 의 `skill_activations` | 옛 필드 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
+| L3 | 소비자를 L2 로 옮기고 옛 필드를 지운다. TUI decoder, 웹 대시보드, harness 스크립트, `/api/v1/skills` 의 `usage[]`·`usage_coverage`, `/api/v1/dashboard/tools` 의 `skill_activations` | 옛 필드 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
 | L4 | TUI 가 4.3 표대로 읽고 Tools 화면의 `launch_tools_load` 2초 분기를 지운다 | 알림 하나에 그 Keeper 읽기 하나, 주기에는 읽지 않는지(PTY) |
 | L5 | Keeper 채팅 기록이 그 Keeper 의 알림에 다시 읽는다 | 채팅을 연 Keeper 의 장부가 바뀌면 채팅 기록 읽기가 한 번 나가는지(PTY) |
 
@@ -147,5 +157,5 @@ L4 는 L1~L3 과 #48059·#48060·#48036 뒤에만 들어간다. Tools 화면의 
 
 ## 6. 열린 질문
 
-1. 활성화 읽기는 그 Keeper 장부 전체를 돌려준다. 장부는 Keeper 가 사는 동안 계속 자라고, 지금 가장 큰 것이 948KB 다(2장). 바쁜 Keeper 를 기록마다 다시 읽으면 매번 이 크기를 받는다. 알림에 새 revision 을 싣고 그 뒤 기록만 받을지 정해야 한다. 서버 응답(`skill_activations`) 크기는 서버가 꺼져 있어 아직 재지 않았다.
+1. 활성화 읽기는 그 Keeper 장부 전체를 돌려준다. 장부는 Keeper 가 사는 동안 계속 자라고, 지금 가장 큰 것이 948KB 다(2장). 서버 응답으로는 1,440KB 다(1.2). 바쁜 Keeper 를 기록마다 다시 읽으면 매번 이 크기를 받는다. 장부 revision 은 장부 전체의 SHA-256 이라 순서가 없다. 그래서 "이 뒤의 기록만"을 받으려면 기록 순번 같은 순서 있는 값이 따로 필요하다. 활성화 하나에 나중 기록(전달, 행동)이 붙으므로, 돌려줄 단위가 줄인지 활성화인지도 정해야 한다.
 2. `/api/v1/skills` 본문(config, sources, rejections, shadows, profile)이 skill catalog 발행 말고 다른 원천에서도 바뀌는지 L3 에서 필드마다 확인해야 한다.

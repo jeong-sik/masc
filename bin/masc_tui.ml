@@ -8268,9 +8268,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
-   a load the other performs. Surfaces not listed refresh on the periodic
-   cadence ([surface_needs]); the ones here are snapshots that would
-   otherwise read as empty until the next tick. *)
+   a load the other performs. A surface not listed reads the bundle sources
+   it newly needs ([surface_needs]) when the main loop sees them change; the
+   ones here read their own snapshots on arrival. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;

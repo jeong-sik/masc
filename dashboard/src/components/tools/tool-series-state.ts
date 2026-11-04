@@ -97,10 +97,28 @@ export function subscribeToolSeriesRefresh(): () => void {
   }, TOOL_SERIES_REFRESH_MS)
 }
 
-/** One value per bucket. A bucket in which no call ran gives null, a gap in the chart. */
+/**
+ * Whether the window covers the bucket from its first second to its last.
+ * The buckets at either end are usually cut short by the window. A cut-short
+ * bucket holds fewer calls than a whole one, so drawn in a chart it reads as a
+ * drop that did not happen.
+ */
+export function isWholeBucket(series: ToolMetricsSeriesResponse, bucket: ToolMetricsSeriesBucket): boolean {
+  const { since, until, bucket_seconds } = series.window
+  return bucket.start >= since && bucket.start + bucket_seconds <= until
+}
+
+/** How many buckets the charts leave out because the window cuts them short. */
+export function cutShortBucketCount(series: ToolMetricsSeriesResponse): number {
+  return series.buckets.filter(bucket => !isWholeBucket(series, bucket)).length
+}
+
+/** One value per whole bucket. A bucket in which no call ran gives null, a gap in the chart. */
 export function bucketReadings(
   series: ToolMetricsSeriesResponse,
   pick: (bucket: ToolMetricsSeriesBucket) => number | null,
 ): MetricReading[] {
-  return series.buckets.map(bucket => ({ ts: bucket.start, value: pick(bucket) }))
+  return series.buckets
+    .filter(bucket => isWholeBucket(series, bucket))
+    .map(bucket => ({ ts: bucket.start, value: pick(bucket) }))
 }

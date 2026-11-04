@@ -96,6 +96,30 @@ describe('bucketReadings', () => {
       { ts: 3600, value: 150 },
     ])
   })
+
+  // A bucket the window cuts short holds fewer calls than a whole one, so a
+  // chart that drew it would show a drop that never happened.
+  const cutAtBothEnds = series({
+    window: { since: 1800, until: 9000, bucket: 'hour', bucket_seconds: 3600, utc_offset_min: 0 },
+    buckets: [
+      { start: 0, ...busy },
+      { start: 3600, ...busy, p95_ms: 10 },
+      { start: 7200, ...busy },
+    ],
+  })
+
+  it('leaves out the buckets the window cuts short at either end', () => {
+    expect(state.bucketReadings(cutAtBothEnds, bucket => bucket.p95_ms)).toEqual([{ ts: 3600, value: 10 }])
+  })
+
+  it('counts the buckets it left out', () => {
+    expect(state.cutShortBucketCount(cutAtBothEnds)).toBe(2)
+  })
+
+  it('keeps every bucket of a window that lines up with its buckets', () => {
+    expect(state.cutShortBucketCount(series())).toBe(0)
+    expect(state.bucketReadings(series(), bucket => bucket.call_count)).toHaveLength(2)
+  })
 })
 
 describe('loading the picked window', () => {

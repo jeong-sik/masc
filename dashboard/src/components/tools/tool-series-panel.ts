@@ -13,6 +13,7 @@ import {
   SERIES_WINDOWS,
   SERIES_WINDOW_ORDER,
   bucketReadings,
+  cutShortBucketCount,
   selectTool,
   selectWindow,
   selectedTool,
@@ -90,12 +91,15 @@ export interface ToolSeriesViewProps {
 
 function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
   const total = series.total
+  const cutShort = cutShortBucketCount(series)
   return html`
-    <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
+    <div class="grid grid-cols-[repeat(6,minmax(0,1fr))] gap-3 max-[1100px]:grid-cols-[repeat(3,minmax(0,1fr))] max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
       <${StatTile} label="호출" value=${formatCount(total.call_count)} status="brass" />
-      <${StatTile} label="실패" value=${`${formatCount(total.failure_count)} · ${formatFailureRate(total.call_count, total.failure_count)}`} status="brass" />
+      <${StatTile} label="실패" value=${formatCount(total.failure_count)} status="brass" />
+      <${StatTile} label="실패율" value=${formatFailureRate(total.call_count, total.failure_count)} status="brass" />
       <${StatTile} label="실행 시간 합계" value=${formatTotalTime(total.total_ms)} status="brass" />
-      <${StatTile} label="지연 p50 / p95" value=${`${formatMsCompact(total.p50_ms, '-')} / ${formatMsCompact(total.p95_ms, '-')}`} status="brass" />
+      <${StatTile} label="지연 p50" value=${formatMsCompact(total.p50_ms, '-')} status="brass" />
+      <${StatTile} label="지연 p95" value=${formatMsCompact(total.p95_ms, '-')} status="brass" />
     </div>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
       <${DetailCard}>
@@ -108,6 +112,9 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
         <${ObservedMetricChart} label="구간별 지연 p50 / p95" unit="ms" formatValue=${(ms: number) => formatMsCompact(ms)} series=${latencySeries(series)} />
       <//>
     </div>
+    ${cutShort > 0
+      ? html`<p class="text-2xs text-[var(--color-fg-muted)]">처음과 끝의 덜 찬 구간은 그래프에서 뺐어요. 위 합계와 아래 표에는 들어 있어요.</p>`
+      : null}
   `
 }
 

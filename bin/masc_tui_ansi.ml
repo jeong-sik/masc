@@ -839,9 +839,10 @@ let framed_divider buf cols =
 let border_padding = String.make Masc_tui_frame.border_padding_cells ' '
 let frame_margin = String.make Masc_tui_frame.margin_cells ' '
 
-(* A row is a few fixed pieces around its content. Every surface draws each
-   of its rows through the writers below, so the pieces go straight into the
-   frame's buffer instead of into a formatted copy that is then copied. *)
+(* A body row is a few fixed pieces around its content. The body-row writers
+   below put the pieces straight into the frame's buffer instead of into a
+   formatted copy that is then copied; the once-per-frame borders and rules
+   still format theirs. *)
 let add_row buf pieces =
   List.iter (Buffer.add_string buf) pieces;
   Buffer.add_char buf '\n'

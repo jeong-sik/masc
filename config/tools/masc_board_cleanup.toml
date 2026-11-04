@@ -1,6 +1,6 @@
 name = "masc_board_cleanup"
 description = """
-Scan board posts matching filter criteria and delete or report them.
+Scan the newest 500 board posts for those matching the filter criteria and delete or report them. Older posts are never examined, so with more than 500 newer posts the oldest are out of reach.
 
 \
 Defaults to dry_run=true (report only). Set dry_run=false to delete. Safety: \

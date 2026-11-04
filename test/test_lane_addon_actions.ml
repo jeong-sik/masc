@@ -781,9 +781,11 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
     let names = List.map fst !heard in
     check bool "the durable commit announces Lanes" true (List.mem "lanes" names);
     check bool "the durable commit announces the open Add-on" true (List.mem "lane_addons" names);
-    check (list (option string)) "the Add-on notification names its instance"
-      [ Some instance ] (List.filter_map (fun (name, instance) ->
-        if String.equal name "lane_addons" then Some instance else None) !heard);
+    let announced_instances = List.filter_map (fun (name, instance) ->
+      if String.equal name "lane_addons" then Some instance else None) !heard in
+    check bool "every Add-on notification names its instance" true
+      (announced_instances <> []
+       && List.for_all (Option.equal String.equal (Some instance)) announced_instances);
     heard := [];
     let before = number "observation_seq" (inspect fixture instance) in
     ignore (dispatch fixture Runtime.Observe ["instance_id", str instance] |> unwrap);

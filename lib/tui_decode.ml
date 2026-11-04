@@ -4638,6 +4638,7 @@ type waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -4719,6 +4720,7 @@ let waiting_source_of_string raw =
     ; "schedule_waiting", Waiting_source_schedule_waiting
     ; "owner_shutdown", Waiting_source_owner_shutdown
     ; "operator_pending_confirm", Waiting_source_operator_pending_confirm
+    ; "runtime_quota_spent", Waiting_source_runtime_quota_spent
     ; "read_error", Waiting_source_read_error
     ; "observation_unavailable", Waiting_source_observation_unavailable
     ]

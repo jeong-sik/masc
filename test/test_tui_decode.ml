@@ -8741,6 +8741,63 @@ let keeper_turns_waiting_json =
         ]
     ]
 
+let keeper_turns_quota_spent_json =
+  `Assoc
+    [ "schema", `String "masc.keeper_turns.v1"
+    ; "waiting_errors", `List []
+    ; "keepers", `List
+        [ `Assoc
+            [ "keeper_name", `String "echo"
+            ; "status", `String "ok"
+            ; "turn", `Null
+            ; "waiting", `Assoc
+                [ "keeper_name", `String "echo"
+                ; "paused", `Bool false
+                ; "state", `String "waiting"
+                ; "waiting_count", `Int 1
+                ; "since", `Null
+                ; "since_iso", `Null
+                ; "due_at", `Float 1794182400.
+                ; "due_at_iso", `String "2026-11-09T00:00:00Z"
+                ; "sources", `Assoc [ "runtime_quota_spent", `Int 1 ]
+                ; "source_next_actions", `Assoc
+                    [ "runtime_quota_spent", `List [ `String "assign_a_route_with_open_quota" ] ]
+                ; "current_execution", `Null
+                ; "waiting_on", `List
+                    [ `Assoc
+                        [ "source", `String "runtime_quota_spent"
+                        ; "waiting_on", `String "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+                        ; "what", `String "한도 소진 · ollama_cloud"
+                        ; "wake_producer", `String "keeper_supervisor"
+                        ; "since", `Null
+                        ; "since_iso", `Null
+                        ; "due_at", `Float 1794182400.
+                        ; "due_at_iso", `String "2026-11-09T00:00:00Z"
+                        ; "next_action", `String "assign_a_route_with_open_quota"
+                        ; "detail", `Assoc []
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+
+let test_decode_keeper_turns_projection_reads_quota_spent_waiting () =
+  match Tui_decode.decode_keeper_turns_projection keeper_turns_quota_spent_json with
+  | Error detail -> Alcotest.fail detail
+  | Ok { waiting = Tui_decode.Keeper_waiting_observed [ waiting ]; _ } ->
+    (match waiting.Tui_decode.kwr_waiting_on with
+     | [ item ] ->
+       Alcotest.(check bool) "quota spent source" true
+         (item.Tui_decode.kwi_source = Tui_decode.Waiting_source_runtime_quota_spent);
+       Alcotest.(check (float 0.001)) "the earliest reset is the due time" 1794182400.
+         (Option.get item.kwi_due_at)
+     | items -> Alcotest.failf "expected one waiting item, got %d" (List.length items))
+  | Ok { waiting = Tui_decode.Keeper_waiting_observed _; _ }
+  | Ok { waiting = Tui_decode.Keeper_waiting_fleet_unreported _; _ }
+  | Ok { waiting = Tui_decode.Keeper_waiting_unavailable _; _ } ->
+    Alcotest.fail "expected one observed waiting row"
+
 let test_decode_keeper_turns_projection_reads_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with
   | Error detail -> Alcotest.fail detail
@@ -14077,6 +14134,8 @@ let () =
           test_decode_keeper_turns_rejects_unknown_schema
       ; Alcotest.test_case "projection reads canonical waiting" `Quick
           test_decode_keeper_turns_projection_reads_waiting
+      ; Alcotest.test_case "projection reads a quota spent wait" `Quick
+          test_decode_keeper_turns_projection_reads_quota_spent_waiting
       ; Alcotest.test_case "projection keeps waiting unobserved" `Quick
           test_decode_keeper_turns_projection_keeps_waiting_unobserved
       ; Alcotest.test_case "projection accepts an older server" `Quick

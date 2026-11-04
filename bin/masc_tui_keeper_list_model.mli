@@ -19,6 +19,7 @@ type waiting_source = Masc.Tui_decode.waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -74,6 +75,7 @@ type badge =
   | Badge_delegate
   | Badge_verification
   | Badge_schedule
+  | Badge_quota_spent
 
 type waiting_reading =
   | Waiting_observed of Masc.Tui_decode.keeper_waiting_row

@@ -727,15 +727,20 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
         }) -> ()
 ;;
 
-(* The client reaches MASC tools through this handler, so entering it is the
-   observed fact that an effect was attempted. Record it before the call: the
-   handler may commit and then raise or be cancelled, and observing only its
-   return would reopen a duplicate-effect window. *)
+(* The client reaches MASC tools through this handler, so entering it for an
+   input its producer declares [Effect_possible] is the observed fact that an
+   effect was attempted. A [Read_only] input cannot mutate the work, so it
+   leaves the disposition alone, as the Codex and Muse lanes do. Record it
+   before the call: the handler may commit and then raise or be cancelled, and
+   observing only its return would reopen a duplicate-effect window. *)
 let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
   { tool with
     Host.call =
       (fun ~call_id input ->
-        Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted;
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible ->
+           Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted);
         tool.call ~call_id input)
   }
 ;;
@@ -746,6 +751,53 @@ let note_transport_uncertainty effect_disposition =
     Keeper_provider_attempt_effect.No_effect_observed
     Keeper_provider_attempt_effect.Observation_unavailable
   |> ignore
+;;
+
+(* RFC-0390 under [none] and [read]: the CLI may run only the built-ins its
+   [--tools] list grants, and none of them changes the work, so every effect
+   of the turn passes through a MASC handler that [recording_effect_attempt]
+   sees. A sent prompt, a write whose delivery is unknown, or a client that
+   exits or goes silent afterwards therefore leaves no effect MASC could have
+   missed. Under [full] the client's own built-ins act out of MASC's sight
+   from the moment the prompt is sent. *)
+let note_uncertainty_beyond_masc_tools ~built_ins effect_disposition =
+  match built_ins with
+  | Runtime_native_tools.Granted _ -> ()
+  | Runtime_native_tools.Client_default -> note_transport_uncertainty effect_disposition
+;;
+
+(* What the stream itself shows. Response text has already reached the
+   operator, so another candidate would answer a second time. A built-in the
+   grant does not name means the client did not run under the posture MASC
+   asked for. A tool call wrapping a MASC tool is judged by its handler. *)
+let observe_stream_effect ~built_ins ~effect_disposition
+    (event : Runtime_claude_code.stream_event) =
+  match event with
+  | Runtime_claude_code.Text_delta _ -> note_transport_uncertainty effect_disposition
+  | Runtime_claude_code.Native_tool_started
+      { Runtime_native_tools.origin = Runtime_native_tools.Mcp_wrapper; _ } -> ()
+  | Runtime_claude_code.Native_tool_started
+      { Runtime_native_tools.origin = Runtime_native_tools.Built_in; tool_name; _ } ->
+    (match built_ins, tool_name with
+     | Runtime_native_tools.Granted names, Some name ->
+       if not (List.mem name names) then note_transport_uncertainty effect_disposition
+     | Runtime_native_tools.Granted _, None
+     | Runtime_native_tools.Client_default, (Some _ | None) ->
+       note_transport_uncertainty effect_disposition)
+  | Runtime_claude_code.Turn_started _
+  | Runtime_claude_code.Thinking_delta _
+  | Runtime_claude_code.Child_content_observed _
+  | Runtime_claude_code.Content_block_stopped _
+  | Runtime_claude_code.Dynamic_tool_started _
+  | Runtime_claude_code.Dynamic_tool_finished _
+  | Runtime_claude_code.Native_tool_finished _
+  | Runtime_claude_code.Native_tool_progress _
+  | Runtime_claude_code.Native_task_observed _
+  | Runtime_claude_code.Usage_windows_reported _
+  | Runtime_claude_code.Provider_retry_observed _
+  | Runtime_claude_code.Conversation_compacted
+  | Runtime_claude_code.Usage_reported _
+  | Runtime_claude_code.Turn_finished _ -> ()
 ;;
 
 let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
@@ -1350,14 +1402,16 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       let task_binding = match on_native_task_observation, on_child_content_observation with
         | None, None -> None
         | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
+      let built_ins = Runtime_native_tools.claude_code_built_ins native_posture in
       let on_input_observation
           (observation : Runtime_claude_input_attribution.observation) =
         (* An interrupted user-message write has unknown delivery even when
-           its timeout escapes before [on_prompt_sent]. This safety evidence
-           is needed even when no native task/child observer is installed. *)
+           its timeout escapes before [on_prompt_sent]. Under a posture whose
+           effects can bypass MASC that delivery is safety evidence, needed
+           even when no native task/child observer is installed. *)
         (match observation.phase with
          | Runtime_claude_input_attribution.Write_unknown ->
-           note_transport_uncertainty effect_disposition
+           note_uncertainty_beyond_masc_tools ~built_ins effect_disposition
          | Runtime_claude_input_attribution.Prepared
          | Runtime_claude_input_attribution.Written
          | Runtime_claude_input_attribution.Consumed
@@ -1391,6 +1445,12 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
           ~on_compacted:(fun () -> compacted := true)
           on_event
       in
+      let on_stream_event =
+        Some
+          (fun event ->
+            observe_stream_effect ~built_ins ~effect_disposition event;
+            Option.iter (fun forward -> forward event) on_stream_event)
+      in
       try
         let client_result =
            Runtime_claude_code.run_turn
@@ -1410,7 +1470,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
              ~on_prompt_sent:(fun () ->
-               note_transport_uncertainty effect_disposition;
+               note_uncertainty_beyond_masc_tools ~built_ins effect_disposition;
                report_transmitted_input ())
              ~on_context_submission:(fun submission ->
                Host.record_context_submission ~keeper_name ~raw_trace_run
@@ -1492,7 +1552,8 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
               walk finds no view that fits, the lane moves to its next runtime
               instead of fencing the turn as if the client might have acted.
               An incomplete user-message write or post-admission exit marks
-              transport uncertainty without downgrading an observed effect. *)
+              transport uncertainty without downgrading an observed effect,
+              under a posture whose effects can bypass MASC. *)
            (match error with
             | Runtime_claude_code.Turn_failed_with_observation
                 { tool_effect_attempted = false; response_emitted = false; _ }
@@ -1505,7 +1566,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                 Keeper_provider_attempt_effect.No_effect_observed
             | Runtime_claude_code.Turn_transport_interrupted _
             | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
-              note_transport_uncertainty effect_disposition
+              note_uncertainty_beyond_masc_tools ~built_ins effect_disposition
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _

@@ -666,8 +666,8 @@ let response_observed = function
      | Tool_correction_lost Fenced_observation_unavailable ->
        (* the adapter could not say whether a tool effect was attempted,
           and it says so before any answer: the claude-code lane marks it
-          when the process is spawned ([Keeper_claude_code_runtime]
-          on_spawned), the codex lane when the turn input could not be
+          once the prompt is sent ([Keeper_claude_code_runtime]
+          on_prompt_sent), the codex lane when the turn input could not be
           written ([Keeper_codex_runtime] Turn_input_write_failed). The
           request may never have reached the provider, so the evidence
           keeps its wake. *)

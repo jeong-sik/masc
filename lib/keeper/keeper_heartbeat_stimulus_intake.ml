@@ -68,8 +68,6 @@ let event_queue_intake_error_to_string = function
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
-  | Board_unavailable { error = Board.Read_audience_not_pinned _; _ } ->
-    "event_queue_board_audience_unavailable"
   | Board_unavailable { error = Board.Read_source_unavailable _; _ } ->
     "event_queue_board_source_unavailable"
   | Board_unavailable { error = (Board.Read_invalid_id _ | Board.Read_post_not_found _
@@ -95,8 +93,7 @@ let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
     (match unavailable.error with
-     | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ ->
-       Stimulus_board_unavailable unavailable
+     | Board.Read_source_unavailable _ -> Stimulus_board_unavailable unavailable
      | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
        Stimulus_consumed [])
 ;;
@@ -156,7 +153,7 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
       ();
     let disposition =
       match unavailable.error with
-      | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ -> "retaining"
+      | Board.Read_source_unavailable _ -> "retaining"
       | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
         "consuming"
     in

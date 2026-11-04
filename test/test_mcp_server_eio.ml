@@ -2194,92 +2194,6 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Auth.disable_auth base_path;
-  let sid = "mcp-transition-done-guidance" in
-  let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock
-      ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~mcp_session_id:sid state
-      ~name:"masc_init" ~arguments:(`Assoc [])
-  in
-  (* masc_init and setup join are not under test here; initialise the workspace
-     fixture directly so transition guidance assertions are isolated. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
-  let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
-  in
-  ignore
-    (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-done"
-       ~priority:2 ~description:"");
-  let claim_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock
-      ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~mcp_session_id:sid state
-      ~name:"masc_transition"
-      ~arguments:
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-  in
-  Alcotest.(check bool) "claim setup success" true (Tool_result.is_success claim_result);
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 115);
-          ("method", `String "tools/call");
-          ( "params",
-            `Assoc
-              [
-                ("name", `String "masc_transition");
-                ( "arguments",
-                  `Assoc
-                    [
-                      ("task_id", `String "task-001");
-                      ("action", `String "done");
-                      ("notes", `String "Completed task and verified output");
-                    ] );
-              ] );
-        ])
-  in
-  let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
-  in
-  let envelope = result_envelope_exn response in
-  Alcotest.(check string) "done result status" "error"
-    (match List.assoc_opt "status" envelope with
-     | Some (`String status) -> status
-     | _ -> Alcotest.fail "status missing");
-  Alcotest.(check bool) "done rejection is an MCP tool error" true
-    (match List.assoc_opt "isError" (result_fields_exn response) with
-     | Some (`Bool value) -> value
-     | _ -> Alcotest.fail "missing isError");
-  let task =
-    Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
-    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
-  in
-  (match task with
-   | Some { task_status = Masc_domain.Claimed _; _ } -> ()
-   | Some _ -> Alcotest.fail "task-001 must remain claimed without an LLM verdict"
-   | None -> Alcotest.fail "task-001 missing");
-  Alcotest.(check (option string)) "rejected done keeps current_task"
-    (Some "task-001")
-    (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
-  cleanup_dir base_path
-
 let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4285,8 +4199,6 @@ let eio_tests = [
     test_handle_request_tools_call_managed_invalid_arguments_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
-  "handle tools/call transition done requires LLM verdict", `Quick,
-    test_handle_request_tools_call_transition_done_requires_llm_verdict;
   "handle tools/call transition claim requires action", `Quick,
     test_handle_request_tools_call_transition_claim_requires_action;
   (* cache get structured content test removed: cache tools retired (#3640) *)

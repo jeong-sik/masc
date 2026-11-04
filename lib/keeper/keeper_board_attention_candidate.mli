@@ -69,8 +69,9 @@ type delivery =
   | Not_relevant
 
 type pending_state = { last_delivery_failure : delivery_failure option }
-(** v7 persists the current typed signal, not a historical Board thread
-    snapshot. The optional failure is delivery evidence, not judgment input. *)
+(** A pending candidate persists the current typed signal, not a historical
+    Board thread snapshot. The optional failure is delivery evidence, not
+    judgment input. *)
 
 type judged_state =
   { judgment : judgment
@@ -166,7 +167,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; audience : Board.audience option
+  ; audience : Board.audience
   ; keeper_context : Yojson.Safe.t
         (** Partition identity ([Context_key]), read for candidates in every
             status, so it does not ride on the pending state. *)
@@ -178,7 +179,7 @@ type candidate =
     state must be finite. [Judged] and
     [Consumed] states additionally require a nonblank verdict rationale and
     nonblank judgment provenance. The [audience] is the event-time audience
-    pinned at record; [None] is a legacy row without pinning. *)
+    pinned at record. *)
 
 module Context_key : sig
   type t
@@ -270,7 +271,7 @@ val of_board_signal :
   recorded_at:float ->
   Board_dispatch.addressed_board_signal ->
   candidate
-(** Constructs a v7 candidate from the producer-owned current typed signal
+(** Constructs a candidate from the producer-owned current typed signal
     and its event-time audience. It does not re-read or retain mutable Board
     thread history. *)
 

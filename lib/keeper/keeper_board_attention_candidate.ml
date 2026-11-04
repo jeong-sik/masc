@@ -37,7 +37,7 @@ type delivery = Keeper_board_attention_candidate_wire.delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-(* v7 persists the current typed Board signal only. Historical post/comment
+(* A candidate persists the current typed Board signal only. Historical post/comment
    snapshots are neither identity nor judgment input, so retaining them would
    make stale context look authoritative. RFC-0424. *)
 type pending_state = Keeper_board_attention_candidate_wire.pending_state = { last_delivery_failure : delivery_failure option }
@@ -126,7 +126,7 @@ type candidate = Keeper_board_attention_candidate_wire.candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; audience : Board.audience option
+  ; audience : Board.audience
   ; keeper_context : Yojson.Safe.t
         (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
            소속을 확인하므로 상태와 함께 사라지지 않는다. *)
@@ -1060,7 +1060,7 @@ let candidate_parent_visibility_filter (candidate : candidate) =
        match Board_dispatch.read_post_for_evidence ~post_id:candidate.signal.post_id with
        | Ok post -> Ok (filter_comment_parent_visibility post.visibility)
        | Error (Board.Read_post_not_found _ | Board.Read_invalid_id _
-               | Board.Read_comment_not_found _ | Board.Read_audience_not_pinned _) ->
+               | Board.Read_comment_not_found _) ->
          Ok Skip_non_discoverable_comment
        | Error (Board.Read_source_unavailable error) ->
          Error (Board.show_board_error error))

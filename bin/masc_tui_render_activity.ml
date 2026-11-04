@@ -651,7 +651,7 @@ let render_acting_evidence (state : state) entry =
         @ preview "Output preview" call.kt_tool_output_preview
     | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Schedule_store_invalidated | Masc_tui_observer.Pending_confirm_invalidated | Masc_tui_observer.Verification_requests_changed | Masc_tui_observer.Repositories_changed | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
     | Masc_tui_observer.Keeper_heartbeat _ | Masc_tui_observer.Keeper_turn_complete _
-    | Masc_tui_observer.Keeper_turn_observation _ | Masc_tui_observer.Keeper_composite_changed _
+    | Masc_tui_observer.Keeper_turn_observation _ | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
     | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
     | Masc_tui_observer.Keeper_chat_stream_frame _
     | Masc_tui_observer.Keeper_turn_stream_frame _
@@ -741,7 +741,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
       | Masc_tui_observer.Keeper_turn_observation _
-      | Masc_tui_observer.Keeper_composite_changed _
+      | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
       | Masc_tui_observer.Keeper_chat_appended _
       | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
       | Masc_tui_observer.Keeper_chat_stream_frame _

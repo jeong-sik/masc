@@ -1236,7 +1236,7 @@ let test_submitted_task_heading_does_not_claim_a_hold () =
     (contains ~needle:"Current Task (held by you)" user);
   check bool "the heading states what it is instead" true
     (contains
-       ~needle:"### Current Task (submitted for verification; it does not hold your claim)"
+       ~needle:"### Current Task (submitted for verification)"
        user);
   check bool "the row still carries the task" true
     (contains ~needle:"- task-42 — Wire the wake-turn context" user);

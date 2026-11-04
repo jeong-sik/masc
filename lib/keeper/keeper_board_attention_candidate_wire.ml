@@ -38,7 +38,7 @@ type delivery =
   | Not_relevant
 [@@deriving enumerate]
 
-(* v7 persists the current typed Board signal only. Historical post/comment
+(* A candidate persists the current typed Board signal only. Historical post/comment
    snapshots are neither identity nor judgment input, so retaining them would
    make stale context look authoritative. RFC-0424. *)
 type pending_state = { last_delivery_failure : delivery_failure option }
@@ -128,7 +128,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; audience : Board.audience option
+  ; audience : Board.audience
   ; keeper_context : Yojson.Safe.t
         (* 후보가 속한 파티션의 정체성이다 ([Context_key]). 소비된 뒤에도
            소속을 확인하므로 상태와 함께 사라지지 않는다. *)
@@ -136,12 +136,12 @@ type candidate =
   ; status : status
   }
 
-(* v7 is a hard cut: pending rows no longer retain Board thread snapshots,
-   [keeper_context] contains only lane identity and normalized interests, and
-   comment identity is the producer-supplied comment id. The deployment
-   preflight rejects a ledger that holds any non-v7 row, so older rows are
-   never decoded as v7. *)
-let schema_version = 7
+(* v8 is a hard cut: pending rows do not retain Board thread snapshots,
+   [keeper_context] contains only lane identity and normalized interests,
+   comment identity is the producer-supplied comment id, and every row carries
+   the event-time [audience]. The deployment preflight rejects a ledger that
+   holds any non-v8 row, so older rows are never decoded as v8. *)
+let schema_version = 8
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -367,7 +367,7 @@ let of_board_signal
   { candidate_id
   ; keeper_name = meta.name
   ; signal = addressed.signal
-  ; audience = Some addressed.audience
+  ; audience = addressed.audience
   ; keeper_context
   ; recorded_at
   ; status = Pending { last_delivery_failure = None }
@@ -501,10 +501,7 @@ let candidate_to_json candidate =
     ; "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
-    ; ( "audience"
-      , match candidate.audience with
-        | Some audience -> Board.to_yojson audience
-        | None -> `Null )
+    ; "audience", Board.to_yojson candidate.audience
     ; "keeper_context", candidate.keeper_context
     ; "recorded_at", `Float candidate.recorded_at
     ; "status", status_to_yojson candidate.status
@@ -1412,20 +1409,18 @@ let validate_candidate_for_persistence candidate =
 let candidate_of_json json =
   let context = "board attention candidate" in
   let* fields = assoc ~context json in
-  let has_audience = List.mem_assoc "audience" fields in
   let* () =
     exact_fields
       ~context
-      ([ "schema_version"
-       ; "candidate_id"
-       ; "keeper_name"
-       ; "signal"
-       ]
-       @ (if has_audience then [ "audience" ] else [])
-       @ [ "keeper_context"
-         ; "recorded_at"
-         ; "status"
-         ])
+      [ "schema_version"
+      ; "candidate_id"
+      ; "keeper_name"
+      ; "signal"
+      ; "audience"
+      ; "keeper_context"
+      ; "recorded_at"
+      ; "status"
+      ]
       fields
   in
   let* version_json = field ~context "schema_version" fields in
@@ -1445,13 +1440,11 @@ let candidate_of_json json =
   let* keeper_name = string_json ~context:(context ^ ".keeper_name") keeper_name_json in
   let* signal_json = field ~context "signal" fields in
   let* signal = signal_of_yojson signal_json in
+  let* audience_json = field ~context "audience" fields in
   let* audience =
-    match List.assoc_opt "audience" fields with
-    | None | Some `Null -> Ok None
-    | Some audience_json ->
-      (match Board.of_yojson audience_json with
-       | Some audience -> Ok (Some audience)
-       | None -> Error (context ^ ".audience has unknown shape"))
+    match Board.of_yojson audience_json with
+    | Some audience -> Ok audience
+    | None -> Error (context ^ ".audience has unknown shape")
   in
   let expected_id = candidate_id_of_signal ~keeper_name signal in
   let* () =

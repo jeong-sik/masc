@@ -17182,11 +17182,40 @@ let log_keeper_log_read ~phase request ~outcome =
     "observed_ns", `Intlit (Int64.to_string (Mtime_clock.elapsed_ns ()));
     "outcome", `String outcome ]))
 
+(* The logs view and the Info tab read the selected Keeper's metrics when they
+   open or [r] asks, when [keeper_metrics_appended] names the Keeper, on a
+   revalidation, and again after a failed read (RFC-0480 §3.1). *)
+let current_logs_owed state ~keeper_name =
+  match state.keeper_logs_owed with
+  | Some owed
+    when String.equal owed.klgo_keeper keeper_name
+         && owed.klgo_reading == state.workspace_read_authority ->
+      Some owed
+  | Some _ | None -> None
+
+let update_logs_owed state ~keeper_name transition =
+  let owed =
+    match current_logs_owed state ~keeper_name with
+    | Some owed -> owed
+    | None ->
+        { klgo_keeper = keeper_name
+        ; klgo_reading = state.workspace_read_authority
+        ; klgo_read = Masc_tui_owed_read.settled }
+  in
+  state.keeper_logs_owed <- Some { owed with klgo_read = transition owed.klgo_read }
+
+let settle_logs_owed state ~keeper_name transition =
+  match current_logs_owed state ~keeper_name with
+  | Some owed ->
+      state.keeper_logs_owed <- Some { owed with klgo_read = transition owed.klgo_read }
+  | None -> ()
+
 let launch_keeper_log_read state ~mailbox ~intent keeper =
   match begin_keeper_log_read state ~intent ~limit:keeper_log_window
       ~started_ns:(Mtime_clock.elapsed_ns ()) keeper with
   | None -> false
   | Some request ->
+      update_logs_owed state ~keeper_name:keeper.k_name Masc_tui_owed_read.started;
       let key = Masc_tui_fetched.request_key request.klr_request in
       let superseded, supersede = Eio.Promise.create () in
       supersede_keeper_log_read state
@@ -17329,6 +17358,31 @@ let launch_current_keeper_logs state ~mailbox ~intent =
   match keeper_log_target state with
   | Some keeper -> launch_keeper_log_read state ~mailbox ~intent keeper
   | None -> false
+
+(* Runs on every loop iteration; it reads only the Keeper on screen whose
+   read is due, once no metrics read is in flight. *)
+let launch_owed_keeper_logs state ~mailbox =
+  match state.keeper_logs_owed with
+  | None -> ()
+  | Some owed ->
+      if owed.klgo_reading != state.workspace_read_authority
+      then state.keeper_logs_owed <- None
+      else if
+        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.klgo_read
+        && Option.is_none state.keeper_log_cancel
+        && (match state.workspace_identity with
+            | Workspace_identity_match -> true
+            | Workspace_identity_unread | Workspace_identity_mismatch _
+            | Workspace_identity_match_unconfirmed _ -> false)
+      then
+        match keeper_log_target state with
+        | Some keeper when String.equal keeper.k_name owed.klgo_keeper ->
+            ignore (launch_keeper_log_read state ~mailbox ~intent:Snapshot_read.Poll keeper)
+        | Some _ | None -> ()
+
+let owe_keeper_logs_read state ~mailbox ~keeper_name =
+  update_logs_owed state ~keeper_name Masc_tui_owed_read.changed;
+  launch_owed_keeper_logs state ~mailbox
 
 let reconcile_keeper_logs state ~mailbox =
   (* Leaving the Terminal tab, or moving to another Keeper, ends what it held
@@ -18285,6 +18339,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
            owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name;
            owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
          (selected_keeper state);
+       Option.iter
+         (fun (keeper : keeper) -> owe_keeper_logs_read state ~mailbox ~keeper_name:keeper.k_name)
+         (keeper_log_target state);
        Option.iter
          (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
          (board_post_on_screen state);
@@ -22340,6 +22397,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let open_chat_gained_turn = ref false in
       let open_chat_memory_grew = ref false in
       let selected_composite_changed = ref false in
+      let shown_metrics_appended = ref false in
       let selected_tool_called = ref false in
       let open_board_post_changed = ref false in
       let board_changed = ref false in
@@ -22431,6 +22489,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
                    selected_composite_changed := true
                | Some _, (Some _ | None) | None, _ -> ());
+              (match Masc_tui_observer.metrics_appended_keeper event, keeper_log_target state with
+               | Some keeper, Some (shown : keeper) when String.equal keeper shown.k_name ->
+                   shown_metrics_appended := true
+               | Some _, (Some _ | None) | None, _ -> ());
               (match Masc_tui_observer.tool_call_keeper event, selected_keeper state with
                | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
                    selected_tool_called := true
@@ -22473,7 +22535,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Keeper_turn_complete _
                | Masc_tui_observer.Keeper_turn_observation _
-               | Masc_tui_observer.Keeper_composite_changed _
+               | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Keeper_roster_change _ | Masc_tui_observer.Keeper_turn_changed _ | Masc_tui_observer.Keeper_async_requests_changed _
@@ -22525,7 +22587,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Keeper_tool_call _
                | Masc_tui_observer.Keeper_turn_complete _
                | Masc_tui_observer.Keeper_turn_observation _
-               | Masc_tui_observer.Keeper_composite_changed _
+               | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_memory_journal_appended _ | Masc_tui_observer.Keeper_runtime_journal_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
@@ -22649,6 +22711,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          it can (RFC-0480 §3.1). *)
       (* A loss in this batch already owes the chat an audited read that
          starts after these turns were appended. *)
+      (if !shown_metrics_appended && not !observer_source_loss_seen then
+         Option.iter
+           (fun (keeper : keeper) -> owe_keeper_logs_read state ~mailbox ~keeper_name:keeper.k_name)
+           (keeper_log_target state));
       (if !selected_composite_changed && not !observer_source_loss_seen then
          Option.iter
            (fun (keeper : keeper) ->
@@ -26980,13 +27046,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            launch_local_source_followup state ~mailbox Local_keepers)
   | Keeper_logs_loaded (request, result) ->
       let admission = take_keeper_log_read state request result in
+      let keeper_name = (Masc_tui_fetched.request_key request.klr_request).klk_keeper in
+      (match admission, result with
+       | Some _, Ok _ -> settle_logs_owed state ~keeper_name Masc_tui_owed_read.succeeded
+       | Some _, Error _ ->
+           settle_logs_owed state ~keeper_name
+             (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+                ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()))
+       | None, (Ok _ | Error _) ->
+           (* A newer read owns the slot and settles the debt itself. When the
+              view dropped this one and none replaced it, what it was to read
+              is owed again. *)
+           if Option.is_none state.keeper_log_read then
+             settle_logs_owed state ~keeper_name Masc_tui_owed_read.abandoned);
       log_keeper_log_read ~phase:"observed" request
         ~outcome:(if Option.is_none admission then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed");
       Option.iter (fun admitted ->
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
-        if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission
+        if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission;
+      launch_owed_keeper_logs state ~mailbox
   | Keeper_execute_streamed (stream, event) ->
       ignore (take_keeper_execute_stream state stream event)
   | Live_context_loaded (request, started_ns, result) ->
@@ -31957,6 +32037,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_history state ~mailbox:async_messages;
       launch_owed_fusion state ~mailbox:async_messages;
       launch_owed_keeper_composite state ~mailbox:async_messages;
+      launch_owed_keeper_logs state ~mailbox:async_messages;
       launch_owed_keeper_calls state ~mailbox:async_messages;
       launch_owed_board_post state ~mailbox:async_messages;
       launch_owed_gate_snapshot state ~mailbox:async_messages;
@@ -40577,11 +40658,11 @@ Use relative paths for resources already held in the package. -->
             [keeper_async_requests_changed] and retry a failed read
             ([launch_owed_async_requests]). *)
          | Keepers Keeper_list -> ()
-         | Keepers (Keeper_logs | Keeper_detail) ->
-             (* Info's execution facts and Secrets re-read on
-                [keeper_composite_changed] and retry a failed read
-                ([launch_owed_keeper_composite]). *)
-             ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
+         (* The metrics re-read on [keeper_metrics_appended] and retry a
+            failed read ([launch_owed_keeper_logs]). Info's execution facts
+            and Secrets re-read on [keeper_composite_changed]
+            ([launch_owed_keeper_composite]). *)
+         | Keepers (Keeper_logs | Keeper_detail) -> ()
          (* Calls re-read on [keeper_tool_call] and retry a failed read
             ([launch_owed_keeper_calls]). *)
          | Keepers Keeper_calls -> ()

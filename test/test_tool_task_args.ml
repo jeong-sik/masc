@@ -71,7 +71,10 @@ let test_public_contract_rejects_duplicate_field () =
     T.parse_task_contract
       (`Assoc
         [ ( "contract"
-          , `Assoc [ "strict", `Bool true; "strict", `Bool false ] )
+          , `Assoc
+              [ "completion_contract", `List []
+              ; "completion_contract", `List []
+              ] )
         ])
   with
   | Error _ -> ()
@@ -83,8 +86,7 @@ let test_current_contract_shape_decodes () =
       (`Assoc
         [ ( "contract"
           , `Assoc
-              [ "strict", `Bool true
-              ; "completion_contract", `List [ `String "done" ]
+              [ "completion_contract", `List [ `String "done" ]
               ; "required_evidence", `List [ `String "test" ]
               ; "inspect_gate_evidence", `List [ `String "review" ]
               ; "verify_gate_evidence", `List [ `String "ci" ]
@@ -92,7 +94,6 @@ let test_current_contract_shape_decodes () =
         ])
   with
   | Ok (Some contract) ->
-    check bool "strict" true contract.strict;
     check (list string) "completion contract" [ "done" ] contract.completion_contract
   | Ok None -> fail "current contract object must decode to Some"
   | Error detail -> fail (Printf.sprintf "current contract must decode: %s" detail)

@@ -99,7 +99,7 @@ let candidate ?(context = keeper_context ()) signal :
   { candidate_id
   ; keeper_name
   ; signal
-  ; audience = Some Masc.Board.Discoverable
+  ; audience = Masc.Board.Discoverable
   ; keeper_context = context
   ; recorded_at = 1.0
   ; status = A.Pending { last_delivery_failure = None }
@@ -241,7 +241,7 @@ let load_one ~base_path =
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
 
-(* A vote signal round-trips through the v7 candidate codec with its payload
+(* A vote signal round-trips through the candidate codec with its payload
    under the [vote] key that only vote rows carry. *)
 let test_vote_signal_codec_round_trips_without_widening_other_rows () =
   let vote_signal : Masc.Board_dispatch.board_signal =
@@ -282,7 +282,7 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
     ]
     (signal_keys (A.signal_to_yojson vote_signal));
   Alcotest.(check (list string))
-    "post row keeps the v7 non-vote shape"
+    "post row keeps the non-vote shape"
     [ "author"
     ; "comment_id"
     ; "content"
@@ -329,6 +329,27 @@ let test_codec_and_context_identity_are_strict () =
   (match A.candidate_of_json old_schema with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "candidate schema v6 was accepted");
+  (* The audience is the event-time audience pinned at record. A row that
+     omits it or carries null is not a candidate. *)
+  let with_audience_rewritten rewrite =
+    match encoded with
+    | `Assoc fields -> `Assoc (rewrite fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
+  in
+  (match
+     A.candidate_of_json
+       (with_audience_rewritten (List.remove_assoc "audience"))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a candidate row without an audience was accepted");
+  (match
+     A.candidate_of_json
+       (with_audience_rewritten
+          (List.map (fun (name, value) ->
+             if String.equal name "audience" then name, `Null else name, value)))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a candidate row with a null audience was accepted");
   let left = ok "left context" (A.Context_key.of_candidate original) in
   let reordered =
     candidate
@@ -664,7 +685,7 @@ let test_pending_row_has_no_board_thread_history () =
     | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
   Alcotest.(check bool)
-    "pending v7 row has no post or comments snapshot"
+    "pending row has no post or comments snapshot"
     true
     (status
      = `Assoc

@@ -347,7 +347,7 @@ offline
 Current Task (held by you)
 
 ### world.current_task.heading.submitted
-Current Task (submitted for verification; it does not hold your claim)
+Current Task (submitted for verification)
 
 ### world.current_task.heading.recovery
 Current Task (recovery observation; non-authoritative)

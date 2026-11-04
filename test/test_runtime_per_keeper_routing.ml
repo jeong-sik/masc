@@ -1040,6 +1040,43 @@ let test_first_run_runtime_binds_supporting_lanes () =
     Alcotest.(check string) "failed setup does not change any lane" before (read_file path))
 ;;
 
+(* A command saving through the running server applies the text edit to the
+   server's text (RFC-0482 §3.2); it has to be the edit the local write
+   commits, or the two writers disagree. *)
+let test_text_edits_are_what_the_writers_commit () =
+  with_runtime_file (fun path ->
+    let edited label = function
+      | Ok text -> text
+      | Error detail -> Alcotest.failf "%s: %s" label detail
+    in
+    let original = read_file path in
+    let expected_default =
+      edited "default" (Runtime.runtime_default_text ~runtime_id:"openai.gpt" original)
+    in
+    Alcotest.(check bool) "the default edit changes the text" false
+      (String.equal expected_default original);
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    Alcotest.(check string) "default" expected_default (read_file path);
+    let current = read_file path in
+    let expected_first_run =
+      edited "first run" (Runtime.first_run_runtime_text ~runtime_id:"openai.gpt" current)
+    in
+    Alcotest.(check bool) "the first-run edit changes the text" false
+      (String.equal expected_first_run current);
+    (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    Alcotest.(check string) "first run" expected_first_run (read_file path);
+    (match Runtime.first_run_runtime_text ~runtime_id:"missing.runtime" current with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "an unknown runtime is refused by the text edit too");
+    match Runtime.runtime_default_text ~runtime_id:" " current with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "a blank runtime id is refused")
+;;
+
 (* A connection an older setup wrote declares no [exact-body-timeout-s], and
    rendering it again yields the same id, so the setup batch keeps its table
    as it is. Selecting it again points the exact lanes at it; setup writes the
@@ -4195,6 +4232,8 @@ let () =
             test_runtime_route_writer_updates_default
         ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
             test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "text edits are what the writers commit" `Quick
+            test_text_edits_are_what_the_writers_commit
         ; Alcotest.test_case "first run writes the exact deadline on a provider without one" `Quick
             test_first_run_writes_the_exact_deadline_on_a_provider_without_one
         ; Alcotest.test_case "first-run fallback ordering and atomic preservation" `Quick

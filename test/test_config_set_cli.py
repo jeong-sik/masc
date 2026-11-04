@@ -7,8 +7,8 @@ that is not seeded fails here. Every case works in a scratch workspace under a
 scratch HOME.
 
 RFC-0482 §3.2: while the workspace's server answers on the port, the keys go
-through it, and so do web-search-setup's section and voice-local-setup's
-changes. A stand-in server answers health and runtime.toml the way the
+through it, and so do web-search-setup's section, voice-local-setup's changes
+and runtime-default-set's edit. A stand-in server answers health and runtime.toml the way the
 real one does, so the command's side of that exchange is checked here; the
 server's side is test_dashboard_http_core's.
 """
@@ -339,6 +339,23 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("HTTP 409", result.stderr)
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # runtime-default-set makes the edit its local write commits, to the text
+    # the server holds, and saves it through the text route.
+    def test_runtime_default_set_saves_through_a_running_server(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(base)
+        result = masc_command(root, "runtime-default-set", "--base-path", str(base),
+                              "--port", str(server.port), "other.chat")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("through the running server", result.stdout)
+        self.assertEqual(server.save_paths, ["/api/v1/runtime/config/raw"])
+        self.assertIn('default = "other.chat"', server.saves[0]["source_text"])
+        self.assertEqual(server.saves[0]["expected_source_revision"], REVISION)
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML,
+                         "the command wrote the file under a running server")
 
     def test_a_file_changed_on_the_server_is_not_overwritten(self):
         root = self.scratch()

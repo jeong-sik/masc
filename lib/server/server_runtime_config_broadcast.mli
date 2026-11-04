@@ -7,10 +7,10 @@
     startup journal rollback and config-root seeding write it before this
     fiber is installed and before the listener starts, so no reader misses
     them. The TUI saves through this server's routes and has no writer of its
-    own. [masc config set], [masc web-search-setup] and
-    [masc voice-local-setup] save through them while this server runs, and
-    write the file in their own process only when no server of this workspace
-    answers. [masc runtime-default-set], [masc runtime-setup-batch] and
+    own. [masc config set], [masc web-search-setup], [masc voice-local-setup]
+    and [masc runtime-default-set] save through them while this server runs,
+    and write the file in their own process only when no server of this
+    workspace answers. [masc runtime-setup-batch] and
     [masc browser-lane-setup] write it in their own process either way
     (RFC-0482 L3d); this process does not see those writes.
     [install ~sw ~base_path] forks a fiber on [sw] that waits for each move

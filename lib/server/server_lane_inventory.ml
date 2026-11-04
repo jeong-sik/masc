@@ -347,7 +347,7 @@ let refresh_live ~base_path ~announce cache ~config =
   match cache.sources with
   | None -> refresh_full ~base_path ~announce cache ~config
   | Some sources ->
-      let retained = { sources.inventory with instances =
+      let retained = { (sources.inventory) with instances =
         List.filter (fun (item : Addon.inventory_instance) ->
           item.presence = Addon.Retained) sources.inventory.instances } in
       let live = Addon.inventory_live ~config in

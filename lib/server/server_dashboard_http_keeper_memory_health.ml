@@ -586,19 +586,20 @@ let refresh_after_write ~keepers_dir ~keeper_id =
         (Workspace_dataset_event.Memory_health { keeper = keeper_id })
 
 let install () =
-  let _ = Keeper_memory_os_current.install_commit_observer refresh_after_write in
-  let _ = Keeper_memory_source_current.install_commit_observer refresh_after_write in
-  let _ = Keeper_librarian_progress.install_commit_observer refresh_after_write in
+  let retained = ref [] in
+  let register restore = retained := restore :: !retained in
+  register (Keeper_memory_os_current.install_commit_observer refresh_after_write);
+  register (Keeper_memory_source_current.install_commit_observer refresh_after_write);
+  register (Keeper_librarian_progress.install_commit_observer refresh_after_write);
   let refresh ~config ~keeper_name =
     refresh_after_write
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path)
       ~keeper_id:keeper_name
   in
-  let _ = Keeper_librarian_continuity.install_commit_observer refresh in
-  let _ = Keeper_continuity_observation.install_change_observer refresh in
-  let _ = Keeper_librarian_queue_refresh.install_change_observer refresh in
-  ()
+  register (Keeper_librarian_continuity.install_commit_observer refresh);
+  register (Keeper_continuity_observation.install_change_observer refresh);
+  register (Keeper_librarian_queue_refresh.install_change_observer refresh)
 
 let alert_json ~code ~severity ~target ~label ~message =
   `Assoc

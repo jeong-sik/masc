@@ -2413,14 +2413,14 @@ let commit_event_locked ~changed session_dir (log : session_log) event =
     Error (Event_log_failed error)
   | Ok cursor ->
     remember_session_log path { ledger; cursor; header_written = true };
-    !commit_observer ~config ~keeper_name ~trace_id ledger;
-    changed ();
+    changed log.ledger.session_id ledger;
     Ok ledger
 ;;
 
 (* A committed row changes what the Skill record and usage views read for
    the Keeper whose turn wrote it. *)
-let activations_changed ~(config : Workspace.config) ~keeper_name () =
+let activations_changed ~(config : Workspace.config) ~keeper_name trace_id ledger =
+  !commit_observer ~config ~keeper_name ~trace_id ledger;
   Workspace_dataset_event.announce ~base_path:config.base_path
     (Workspace_dataset_event.Skill_activations { keeper = keeper_name })
 ;;

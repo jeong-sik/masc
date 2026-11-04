@@ -22902,7 +22902,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* Dataset admission and collector completion have different lifetimes.
          A duplicate cannot reapply an identity observation or free another read. *)
       let active = match Surface_read_order.request_kind request with
-        | Surface_read_order.Full | Surface_read_order.Independent -> true
+        | Surface_read_order.Full -> true
         | Surface_read_order.Navigation ->
             Surface_read_order.navigation_active state.http_surface_reads request in
       if active then begin
@@ -22928,8 +22928,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~identity:early.ed_identity ~request:early.ed_request ~dataset then begin
         let kind, full_started_ns = match Surface_read_order.request_kind early.ed_request with
           | Surface_read_order.Full -> "full", state.http_refresh_started_ns
-          | Navigation -> "navigation", None
-          | Independent -> "independent", None in
+          | Navigation -> "navigation", None in
         let board_posts_log=match apply_http_dataset state early.ed_dataset with
           | None -> ""
           | Some application -> " board_posts="

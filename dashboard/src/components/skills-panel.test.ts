@@ -24,7 +24,7 @@ const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<Executi
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
   workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
-  return { executionWorkspaceAuthority: workspace.current, keepers: signal([]) }
+  return { executionWorkspaceAuthority: workspace.current, keepers: signal([]), executionLoaded: signal(false) }
 })
 
 vi.mock('../api/dashboard-skills', async importOriginal => ({
@@ -45,7 +45,6 @@ import {
   keeperUsageReading,
   kindLabel,
   mergeSkillRows,
-  referenceKey,
   rejectionDiagnostics,
   resourceReadBoundLabel,
   skillRowKey,
@@ -53,6 +52,7 @@ import {
   SkillsPanel,
   sortSkillRows,
   stateMessage,
+  usageFor,
   usageLabel,
 } from './skills-panel'
 
@@ -547,16 +547,17 @@ describe('labels', () => {
       { keeper: 'zeta', result: { status: 'fulfilled', value: { state: 'ready', rows: [row] } } },
       { keeper: 'alpha', result: { status: 'fulfilled', value: { state: 'ready', rows: [{ ...row, invocations: 5 }] } } },
       { keeper: 'idle', result: { status: 'fulfilled', value: { state: 'no_session' } } },
+      { keeper: 'uncatalogued', result: { status: 'fulfilled', value: { state: 'no_catalog' } } },
       { keeper: 'broken', result: { status: 'fulfilled', value: {
         state: 'unavailable', reason: 'activation_ledger_unreadable', detail: 'decode failed' } } },
       { keeper: 'gone', result: { status: 'rejected', reason: new Error('HTTP 503') } },
     ])
-    expect(reading.ledgersRead).toBe(2)
+    expect(reading.ledgersRead).toBe(3)
     expect(reading.unavailable).toEqual([
       'broken: activation_ledger_unreadable (decode failed)',
       'gone: HTTP 503',
     ])
-    expect(reading.byReference.get(referenceKey(used))?.map(usage => [usage.keeper, usage.invocations]))
+    expect(usageFor(reading, used).map(usage => [usage.keeper, usage.invocations]))
       .toEqual([['alpha', 5], ['zeta', 2]])
     expect(reading.byReference.size).toBe(1)
   })

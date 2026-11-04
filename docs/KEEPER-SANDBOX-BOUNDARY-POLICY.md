@@ -1,6 +1,6 @@
 # Keeper Sandbox Boundary Policy
 
-Last updated: 2026-07-13
+Last updated: 2026-11-05
 
 ## Goal
 
@@ -16,16 +16,6 @@ failure just because a keeper uses the Docker backend.
 | --- | --- | --- |
 | `Keeper_sandbox_config` | Structured keeper TOML parsing, canonical sandbox profile validation, backend storage-root projection, sandbox-visible path projection | Tool execution, shell command dispatch, Docker process lifecycle |
 | `Keeper_sandbox` | Keeper-facing sandbox contract used by tools and status surfaces | Manual TOML parsing, Docker launch policy |
-| `Workspace_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
-| `Retired_file_tool` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
-| `Keeper_workspace_op` | Structured `tool_search_files` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
-| `Agent_tool_execute_timeout` | Execute timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
-| `Agent_tool_execute_runtime_paths` | Runtime path rewrites between container-visible and host-visible paths | Cwd/path validation, command execution, Docker lifecycle |
-| `Keeper_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
-| `Agent_tool_execute_path` | `tool_search_files` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
-| `Agent_tool_execute_command_parse` | Raw shell command parsing into Shell IR | Command-shape policy, Docker process execution |
-| `Agent_tool_execute_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
-| `Agent_tool_execute_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
 | `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `tool_execute` policy |
 | `Keeper_sandbox_runner` | Effective sandbox profile and the backend name a write reports (`sandbox_backend_via`) | Git/remote workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
@@ -43,19 +33,6 @@ failure just because a keeper uses the Docker backend.
   Unix I/O errors are handled only at the process boundary.
 - Per-command `git`/`gh` behavior is command semantics, not a sandbox
   profile.
-- Raw command parsing is centralized in `Agent_tool_execute_command_parse`.
-  Docker, GitHub, and command-word callers must not call
-  `Exec_policy.parse_string_to_ir` directly.
-- Raw command word extraction is centralized in `Agent_tool_execute_command_words`.
-  Other keeper modules must not call `Exec_policy_mutation_classifier`
-  directly.
-- Execute cwd/path resolution and PATH executable probes are centralized
-  in `Agent_tool_execute_path`.
-- SearchFiles op vocabulary, Execute timeout policy, and runtime path rewrites are
-  centralized in `Keeper_workspace_op`, `Agent_tool_execute_timeout`, and
-  `Agent_tool_execute_runtime_paths`.
-- `shared shell compatibility facade` is retired; do not reintroduce it as a compatibility
-  facade or implementation owner.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
   `Keeper_sandbox_docker` directly. They read the profile through
   `Keeper_sandbox_runner.effective_sandbox_profile` and dispatch through
@@ -98,42 +75,3 @@ Focused behavioral tests verify path and command behavior:
 - `test_telemetry_unified` recovered coverage-gap summary test
 - `test_keeper_tool_call_log` recovered tool-call coverage-gap aggregate test
 - `test_keeper_sandbox_docker_route`
-
-Source-level boundary tests prevent regressions in layer ownership:
-
-- `test_keeper_sandbox_boundary_policy`
-
-The boundary test intentionally fails if:
-
-- tool code reintroduces Docker path literals or profile detection;
-- status/sandbox-status surfaces bypass TOML-overlaid effective keeper meta;
-- workspace repo-path helpers reintroduce Docker container-root construction
-  or sandbox-profile parsing;
-- Docker shell code re-exports generic command classification or parses
-  raw shell commands directly;
-- typed Execute or SearchFiles ops construct Shell IR outside
-  `Keeper_tool_execute_shell_ir`;
-- `shared shell compatibility facade` source files return;
-- SearchFiles ops or GitHub `Execute` routes cwd/path resolution outside
-  `Agent_tool_execute_path`;
-- production shell modules bypass the dedicated op, timeout, runtime-path, or
-  path owner modules;
-- keeper modules outside `Agent_tool_execute_command_parse` call
-  `Exec_policy.parse_string_to_ir`;
-- keeper modules outside `Agent_tool_execute_command_words` call
-  `Exec_policy_mutation_classifier`;
-- PR/GitHub tool code calls `Keeper_sandbox_docker` or selects Docker via
-  `meta.sandbox_profile = Docker`;
-- typed Shell IR backend target helpers are coupled to a `tool_execute`
-  module name;
-- sandbox backend failure recording is coupled to a `shell_docker`
-  module name;
-- legacy sandbox aliases return to runtime parsing;
-- keeper TOML parsing stops using the structured parser;
-- command semantics reintroduces word extraction or string-split fallback
-  parsing.
-- completed or partial-completed runtime turns stop producing terminal runtime
-  observation for receipts, or runtime-trust status stops surfacing receipt
-  `runtime.selected_model` when decision telemetry is absent.
-- recovered historical telemetry coverage gaps force source health to remain
-  `coverage_gap` after a newer durable row exists for that source.

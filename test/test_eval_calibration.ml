@@ -84,96 +84,100 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
-  Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
-    Cal.record_verdict ~task_id:"cap-seed" ~req:(make_req ()) ~result:(make_result ()) ();
+    Cal.record_verdict ~base_path:dir ~task_id:"cap-seed" ~req:(make_req ()) ~result:(make_result ()) ();
     (* Replicate the row the public API just wrote rather than hand-writing the
        record schema, so this test survives changes to that shape. *)
     let template =
-      match Dated_jsonl.read_recent (Cal.get_store ()) 1 with
+      match Dated_jsonl.read_recent (Cal.store ~base_path:dir) 1 with
       | [ row ] -> Yojson.Safe.to_string row
       | _ -> fail "expected exactly one seeded record"
     in
     let seeded = 6000 in
-    let store = Cal.get_store () in
+    let store = Cal.store ~base_path:dir in
     for _ = 1 to seeded do
       Dated_jsonl.append store (Yojson.Safe.from_string template)
     done;
     let total stats = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
-    let unfiltered = total (Cal.calibration_stats ()) in
-    let filtered = total (Cal.calibration_stats ~since:"2020-01-01" ()) in
+    let unfiltered = total (Cal.calibration_stats ~base_path:dir ()) in
+    let filtered = total (Cal.calibration_stats ~base_path:dir ~since:"2020-01-01" ()) in
     check bool "the unfiltered read is capped below what was seeded" true
       (unfiltered <= seeded);
     check int "a date filter reads no more than an unfiltered read" unfiltered
-      filtered)
+      filtered
 
-(* A store nobody bound by hand opens where the workspace keeps its state.
-   It used to open in the workspace's own [data/] folder, beside [.masc]. *)
+(* The store opens where the workspace keeps its state, under [.masc]. *)
 let test_verdicts_live_under_the_masc_directory () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
-  Unix.putenv "MASC_BASE_PATH" dir;
-  Cal.For_testing.reset_store ();
-  Fun.protect
-    ~finally:(fun () ->
-      Cal.For_testing.reset_store ();
-      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:""))
-    (fun () ->
-      Cal.record_verdict ~task_id:"home" ~req:(make_req ()) ~result:(make_result ()) ();
-      check int "the verdict is read back" 1
-        (List.length (Dated_jsonl.read_recent (Cal.get_store ()) 10));
-      check bool "the store is under .masc" true
-        (Sys.is_directory (Filename.concat dir ".masc/verdicts"));
-      check bool "nothing is written beside .masc" false
-        (Sys.file_exists (Filename.concat dir "data")))
+  Cal.record_verdict ~base_path:dir ~task_id:"home" ~req:(make_req ()) ~result:(make_result ()) ();
+  check int "the verdict is read back" 1
+    (List.length (Dated_jsonl.read_recent (Cal.store ~base_path:dir) 10));
+  check bool "the store is under .masc" true
+    (Sys.is_directory (Filename.concat dir ".masc/verdicts"));
+  check bool "nothing is written beside .masc" false
+    (Sys.file_exists (Filename.concat dir "data"))
+
+(* Two workspaces in one process keep their own ledgers: a verdict and a
+   label written for one are invisible to the other. *)
+let test_two_workspaces_keep_separate_ledgers () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let first = tmpdir () in
+  let second = tmpdir () in
+  let req = make_req ~title:"Shared task" ~notes:"same notes" () in
+  Cal.record_verdict ~base_path:first ~task_id:"first" ~req ~result:(make_result ()) ();
+  Cal.record_human_label ~base_path:second
+    ~notes_hash:(Cal.notes_hash ~task_title:"Shared task" ~notes:"same notes")
+    ~human_verdict:Cal.Reject_label ~labeler:"operator" ~reason:"other workspace";
+  let total base_path =
+    Yojson.Safe.Util.(Cal.calibration_stats ~base_path () |> member "total_verdicts" |> to_int)
+  in
+  check int "the first workspace holds its verdict" 1 (total first);
+  check int "the second workspace holds no verdict" 0 (total second);
+  check int "a label in the second workspace makes no divergence in the first" 0
+    (List.length (Cal.find_divergences ~base_path:first ()))
 
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"task-1" ~req ~result ();
-  let store = Cal.get_store () in
+  Cal.record_verdict ~base_path:dir ~task_id:"task-1" ~req ~result ();
+  let store = Cal.store ~base_path:dir in
   let records = Dated_jsonl.read_recent store 10 in
   check bool "at least 1 record written" true (List.length records >= 1);
   let first = List.hd records in
   let rt = Yojson.Safe.Util.(first |> member "record_type" |> to_string) in
-  check string "record_type = verdict" "verdict" rt;
-  Cal.For_testing.reset_store ()
+  check string "record_type = verdict" "verdict" rt
 
 let test_record_verdict_reject () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Reject "vague notes") ~gate:AR.Structured_tool ()
   in
-  Cal.record_verdict ~task_id:"task-2" ~req ~result ();
-  let store = Cal.get_store () in
+  Cal.record_verdict ~base_path:dir ~task_id:"task-2" ~req ~result ();
+  let store = Cal.store ~base_path:dir in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
   let v = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
-  check string "verdict = reject:vague notes" "reject:vague notes" v;
-  Cal.For_testing.reset_store ()
+  check string "verdict = reject:vague notes" "reject:vague notes" v
 
 let test_record_verdict_approve_with_reason () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Approve "verified artifact and board comment")
       ~gate:AR.Structured_tool ()
   in
-  Cal.record_verdict ~task_id:"task-approve-reason" ~req ~result ();
-  let store = Cal.get_store () in
+  Cal.record_verdict ~base_path:dir ~task_id:"task-approve-reason" ~req ~result ();
+  let store = Cal.store ~base_path:dir in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
   let v = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
@@ -181,24 +185,21 @@ let test_record_verdict_approve_with_reason () =
     "approve:verified artifact and board comment" v;
   (match Cal.verdict_of_string v with
    | Some (AR.Approve "verified artifact and board comment") -> ()
-   | _ -> Alcotest.fail "expected roundtrip to parse approve reason");
-  Cal.For_testing.reset_store ()
+   | _ -> Alcotest.fail "expected roundtrip to parse approve reason")
 
 let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"task-3" ~req ~result ();
-  let store = Cal.get_store () in
+  Cal.record_verdict ~base_path:dir ~task_id:"task-3" ~req ~result ();
+  let store = Cal.store ~base_path:dir in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
   let stored_hash = Yojson.Safe.Util.(first |> member "notes_hash" |> to_string) in
   check string "record stores the independently pinned hash"
-    expected_default_notes_hash stored_hash;
-  Cal.For_testing.reset_store ()
+    expected_default_notes_hash stored_hash
 
 (* ================================================================ *)
 (* Human label tests                                                 *)
@@ -208,18 +209,16 @@ let test_record_human_label () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
-  Cal.record_human_label
+  Cal.record_human_label ~base_path:dir
     ~notes_hash:"abc123" ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"work was incomplete";
-  let store = Cal.get_store () in
+  let store = Cal.store ~base_path:dir in
   let records = Dated_jsonl.read_recent store 10 in
   let first = List.hd records in
   let rt = Yojson.Safe.Util.(first |> member "record_type" |> to_string) in
   let hv = Yojson.Safe.Util.(first |> member "human_verdict" |> to_string) in
   check string "record_type = label" "label" rt;
-  check string "human_verdict = reject" "reject" hv;
-  Cal.For_testing.reset_store ()
+  check string "human_verdict = reject" "reject" hv
 
 (* ================================================================ *)
 (* Divergence analysis tests                                         *)
@@ -229,71 +228,63 @@ let test_find_divergences_false_positive () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
   let result = make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool () in
-  Cal.record_verdict ~task_id:"t1" ~req ~result ();
+  Cal.record_verdict ~base_path:dir ~task_id:"t1" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FP task" ~notes:"looks ok but not" in
-  Cal.record_human_label
+  Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"did not address the task";
-  let divs = Cal.find_divergences () in
+  let divs = Cal.find_divergences ~base_path:dir () in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
   check string "evaluator approved" "approve"
     (Cal.verdict_to_string d.evaluator_verdict);
   check string "human rejected" "reject"
-    (Cal.label_verdict_to_string d.human_verdict);
-  Cal.For_testing.reset_store ()
+    (Cal.label_verdict_to_string d.human_verdict)
 
 let test_find_divergences_false_negative () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
   let result =
     make_result ~verdict:(AR.Reject "unclear") ~gate:AR.Structured_tool ()
   in
-  Cal.record_verdict ~task_id:"t2" ~req ~result ();
+  Cal.record_verdict ~base_path:dir ~task_id:"t2" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FN task" ~notes:"actually good work" in
-  Cal.record_human_label
+  Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
-  let divs = Cal.find_divergences () in
+  let divs = Cal.find_divergences ~base_path:dir () in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
   check string "human approved" "approve"
-    (Cal.label_verdict_to_string d.human_verdict);
-  Cal.For_testing.reset_store ()
+    (Cal.label_verdict_to_string d.human_verdict)
 
 let test_find_divergences_agreement () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
   let result = make_result ~verdict:(AR.Approve "") () in
-  Cal.record_verdict ~task_id:"t3" ~req ~result ();
+  Cal.record_verdict ~base_path:dir ~task_id:"t3" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"OK task" ~notes:"done correctly" in
-  Cal.record_human_label
+  Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
-  let divs = Cal.find_divergences () in
-  check int "no divergences when agreement" 0 (List.length divs);
-  Cal.For_testing.reset_store ()
+  let divs = Cal.find_divergences ~base_path:dir () in
+  check int "no divergences when agreement" 0 (List.length divs)
 
 let test_find_divergences_no_labels () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   let req = make_req () in
   let result = make_result () in
-  Cal.record_verdict ~task_id:"t4" ~req ~result ();
-  let divs = Cal.find_divergences () in
-  check int "no divergences without labels" 0 (List.length divs);
-  Cal.For_testing.reset_store ()
+  Cal.record_verdict ~base_path:dir ~task_id:"t4" ~req ~result ();
+  let divs = Cal.find_divergences ~base_path:dir () in
+  check int "no divergences without labels" 0 (List.length divs)
 
 (* ================================================================ *)
 (* Few-shot example tests                                            *)
@@ -303,31 +294,27 @@ let test_select_examples_max () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   (* Create 3 false positives *)
   for i = 1 to 3 do
     let title = Printf.sprintf "task-%d" i in
     let notes = Printf.sprintf "notes-%d" i in
     let req = make_req ~title ~notes () in
     let result = make_result ~verdict:(AR.Approve "") () in
-    Cal.record_verdict ~task_id:(Printf.sprintf "t%d" i) ~req ~result ();
+    Cal.record_verdict ~base_path:dir ~task_id:(Printf.sprintf "t%d" i) ~req ~result ();
     let hash = Cal.notes_hash ~task_title:title ~notes in
-    Cal.record_human_label
+    Cal.record_human_label ~base_path:dir
       ~notes_hash:hash ~human_verdict:Cal.Reject_label
       ~labeler:"vincent" ~reason:"bad";
   done;
-  let examples = Cal.select_examples ~max_examples:2 in
-  check int "capped at max_examples" 2 (List.length examples);
-  Cal.For_testing.reset_store ()
+  let examples = Cal.select_examples ~base_path:dir ~max_examples:2 in
+  check int "capped at max_examples" 2 (List.length examples)
 
 let test_select_examples_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
-  let examples = Cal.select_examples ~max_examples:5 in
-  check int "empty when no data" 0 (List.length examples);
-  Cal.For_testing.reset_store ()
+  let examples = Cal.select_examples ~base_path:dir ~max_examples:5 in
+  check int "empty when no data" 0 (List.length examples)
 
 let test_format_few_shot_block_empty () =
   let block = Cal.format_few_shot_block [] in
@@ -369,18 +356,17 @@ let test_calibration_stats () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
-  Cal.record_verdict ~task_id:"id1" ~req:req1
+  Cal.record_verdict ~base_path:dir ~task_id:"id1" ~req:req1
     ~result:(make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool ()) ();
   let req2 = make_req ~title:"t2" ~notes:"n2" () in
-  Cal.record_verdict ~task_id:"id2" ~req:req2
+  Cal.record_verdict ~base_path:dir ~task_id:"id2" ~req:req2
     ~result:(make_result ~verdict:(AR.Approve "") ~gate:AR.Structured_tool ()) ();
   let req3 = make_req ~title:"t3" ~notes:"n3" () in
-  Cal.record_verdict ~task_id:"id3" ~req:req3
+  Cal.record_verdict ~base_path:dir ~task_id:"id3" ~req:req3
     ~result:(make_result ~verdict:(AR.Reject "bad") ~gate:AR.Structured_tool ()) ();
-  let stats = Cal.calibration_stats () in
+  let stats = Cal.calibration_stats ~base_path:dir () in
   let total = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
   let approves = Yojson.Safe.Util.(stats |> member "approve_count" |> to_int) in
   let rejects = Yojson.Safe.Util.(stats |> member "reject_count" |> to_int) in
@@ -403,15 +389,12 @@ let test_calibration_stats () =
   check int "all verdicts lack bound model identities" 3
     Yojson.Safe.Util.(observation |> member "unobserved_verdict_count" |> to_int);
   check bool "the misleading model-rate field is absent" false
-    (List.mem_assoc "cross_model_rate" (Yojson.Safe.Util.to_assoc stats));
-  Cal.For_testing.reset_store ()
+    (List.mem_assoc "cross_model_rate" (Yojson.Safe.Util.to_assoc stats))
 
 let test_calibration_stats_runtime_aliases_do_not_establish_model_independence () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
-  Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
   (* Four verdicts:
      - same runtime (generator = evaluator)
      - distinct runtime (generator ≠ evaluator)
@@ -427,14 +410,14 @@ let test_calibration_stats_runtime_aliases_do_not_establish_model_independence (
     make_result ~runtime:"evaluator_runtime" ~gen_runtime:"local_only" () in
   let no_generator = make_result ~runtime:"verifier" () in
   let req = make_req () in
-  Cal.record_verdict ~task_id:"cm1"
+  Cal.record_verdict ~base_path:dir ~task_id:"cm1"
     ~req:(make_req ~title:"a" ~notes:"na" ()) ~result:same_runtime ();
-  Cal.record_verdict ~task_id:"cm2"
+  Cal.record_verdict ~base_path:dir ~task_id:"cm2"
     ~req:(make_req ~title:"b" ~notes:"nb" ()) ~result:cross_a ();
-  Cal.record_verdict ~task_id:"cm3"
+  Cal.record_verdict ~base_path:dir ~task_id:"cm3"
     ~req:(make_req ~title:"c" ~notes:"nc" ()) ~result:cross_b ();
-  Cal.record_verdict ~task_id:"cm4" ~req ~result:no_generator ();
-  let stats = Cal.calibration_stats () in
+  Cal.record_verdict ~base_path:dir ~task_id:"cm4" ~req ~result:no_generator ();
+  let stats = Cal.calibration_stats ~base_path:dir () in
   let with_gen =
     Yojson.Safe.Util.(stats |> member "verdicts_with_generator_runtime" |> to_int) in
   let distinct_count =
@@ -454,8 +437,6 @@ let test_actual_response_pairs_and_unknown_coverage () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.For_testing.set_store ~base_path:dir;
-  Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
   let identity ~actor ~runtime_id ~model_id suffix =
     match Runtime_response_identity.make ~execution_id:("execution-" ^ suffix)
       ~actor ~runtime_id ~response_id:("response-" ^ suffix) ~provider_id:"provider"
@@ -467,7 +448,7 @@ let test_actual_response_pairs_and_unknown_coverage () =
   let changed = identity ~actor:"judge" ~runtime_id:"producer-alias" ~model_id:"model-b" "changed" in
   let fallback = identity ~actor:"judge" ~runtime_id:"fallback-winner" ~model_id:"model-b" "fallback" in
   let record id ?producer_execution ?evaluator_execution runtime =
-    Cal.record_verdict ?producer_execution ~task_id:id
+    Cal.record_verdict ~base_path:dir ?producer_execution ~task_id:id
       ~req:(make_req ~title:id ())
       ~result:(make_result ~runtime ?evaluator_execution ()) () in
   record "same-model-two-aliases" ~producer_execution:producer ~evaluator_execution:same "other-alias";
@@ -476,7 +457,7 @@ let test_actual_response_pairs_and_unknown_coverage () =
   record "producer-missing" ~evaluator_execution:same "other-alias";
   record "judge-missing" ~producer_execution:producer "other-alias";
   record "both-missing" "other-alias";
-  let observation = Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ()) in
+  let observation = Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ~base_path:dir ()) in
   let number name = Yojson.Safe.Util.(observation |> member name |> to_int) in
   check int "three pairs have actual response identities" 3 (number "observed_verdict_count");
   check int "each unproven pair remains unknown" 3 (number "unobserved_verdict_count");
@@ -487,7 +468,7 @@ let test_actual_response_pairs_and_unknown_coverage () =
   let causes = Yojson.Safe.Util.member "unobserved_causes" observation in
   List.iter (fun name -> check int (name ^ " capture gap") 1
     Yojson.Safe.Util.(causes |> member name |> to_int)) ["producer"; "evaluator"; "both"];
-  let rows = Dated_jsonl.read_recent (Cal.get_store ()) 20 in
+  let rows = Dated_jsonl.read_recent (Cal.store ~base_path:dir) 20 in
   let original = List.find (fun row -> Yojson.Safe.Util.(row |> member "task_id" |> to_string) = "same-alias-changed-model") rows in
   match Runtime_response_identity.of_yojson (Yojson.Safe.Util.member "producer_execution" original) with
   | Ok identity -> check string "the ledger retains the original producer model" "model-a" identity.model_id
@@ -515,6 +496,8 @@ let () =
       test_case "writes to store" `Quick test_record_verdict_writes;
       test_case "verdicts live under .masc" `Quick
         test_verdicts_live_under_the_masc_directory;
+      test_case "two workspaces keep separate ledgers" `Quick
+        test_two_workspaces_keep_separate_ledgers;
       test_case "a date filter does not remove the row cap" `Quick
         test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;

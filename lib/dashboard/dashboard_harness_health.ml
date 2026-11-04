@@ -365,12 +365,12 @@ let wake_payload_record_identity json =
   | _ -> "<missing>", "<missing>"
 ;;
 
-let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
+let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ~base_path ()
   : harness_verdict_item list
   =
   let verdicts : harness_verdict_item list =
     read_store_records
-      (Eval_calibration.get_store ())
+      (Eval_calibration.store ~base_path)
       ?since
       ?until
       ~f:verdict_item_of_json
@@ -389,6 +389,7 @@ let read_recent_verdicts_for_agents
       ?since
       ?until
       ?(limit = max_recent_verdicts)
+      ~base_path
       ~agent_names
       ()
   : harness_verdict_item list
@@ -402,7 +403,7 @@ let read_recent_verdicts_for_agents
     let is_wanted name = List.exists (String.equal name) wanted in
     let verdicts : harness_verdict_item list =
       read_store_records
-        (Eval_calibration.get_store ())
+        (Eval_calibration.store ~base_path)
         ?since
         ?until
         ~f:verdict_item_of_json
@@ -565,9 +566,9 @@ let reset_runtime_stores_for_testing () =
   Atomic.set wake_payload_store_ref None
 ;;
 
-let json ?since ?until () =
-  let calibration = Eval_calibration.calibration_stats ?since ?until () in
-  let recent_verdicts = read_recent_verdicts ?since ?until () in
+let json ?since ?until ~base_path () =
+  let calibration = Eval_calibration.calibration_stats ?since ?until ~base_path () in
+  let recent_verdicts = read_recent_verdicts ?since ?until ~base_path () in
   `Assoc
     [ "generated_at", `Float (Time_compat.now ())
     ; ( "scope_note"
@@ -645,8 +646,8 @@ let parse_label_body body =
   | _ -> Error "body must be a JSON object"
 ;;
 
-let record_operator_label ~labeler
+let record_operator_label ~base_path ~labeler
     { label_notes_hash; label_verdict; label_reason } =
-  Eval_calibration.record_human_label ~notes_hash:label_notes_hash
+  Eval_calibration.record_human_label ~base_path ~notes_hash:label_notes_hash
     ~human_verdict:label_verdict ~labeler ~reason:label_reason
 ;;

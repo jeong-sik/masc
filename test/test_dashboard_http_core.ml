@@ -6936,8 +6936,6 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   Lib.Board.reset_global_for_test ();
   Lib.Board_dispatch.reset_for_test ();
-  Masc_test_deps.Board_test_preparation.prepare ~base_path:config.base_path
-    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Lib.Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
@@ -7344,6 +7342,59 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
   let fresh_raw, _ = post (body loser (current |> member "source_revision" |> to_string)) in
   expect_http_status "editor can save after reading current revision" 200 fresh_raw;
   check string "fresh editor source is committed" loser (read_file runtime_path)
+
+(* RFC-0482 §3.1: a terminal reader's pick reaches runtime.toml through the
+   server, which takes one change in a shape it can write and refuses any
+   other at the door, before the file or the audit log is touched. *)
+let test_tui_preference_route_writes_one_parsed_change () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post body =
+    post_to_handler ~target:"/api/v1/tui/preferences"
+      (fun request reqd body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_tui_preference_post
+          state "tui-preference-test" request reqd body)
+      body
+  in
+  let stored_theme () =
+    match Keeper_toml_loader.parse_toml (read_file runtime_path) with
+    | Error detail -> fail ("runtime.toml: " ^ detail)
+    | Ok doc ->
+      Keeper_toml_loader.toml_string_opt doc
+        Lib.Tui_preference.(Key.doc_path Key.Theme)
+  in
+  let raw, json = post {|{"change":"theme","theme":"ayu-dark"}|} in
+  expect_http_status "a theme pick commits" 200 raw;
+  let open Yojson.Safe.Util in
+  check string "the answer names the change" "theme"
+    (json |> member "change" |> member "change" |> to_string);
+  check bool "the answer carries the commit" true
+    (String.length (json |> member "commit" |> member "source_revision" |> to_string) > 0);
+  check (option string) "the pick is stored" (Some "ayu-dark") (stored_theme ());
+  let audit_before = Lib.Audit_log.read_entries config in
+  List.iter
+    (fun (label, body) ->
+       let refused, _ = post body in
+       expect_http_status label 400 refused;
+       check (option string) (label ^ " leaves the file") (Some "ayu-dark") (stored_theme ()))
+    [ "an unknown change", {|{"change":"font","font":"mono"}|}
+    ; "an extra field", {|{"change":"theme","theme":"x","candle":"dotted"}|}
+    ; "a body that is not JSON", "theme=x"
+    ];
+  check bool "a refusal at the door adds no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before)
 
 (* The routing handler's create, remove and append branches. A created lane
    lands in runtime.toml; a lane under a runtime id, and a lane the default
@@ -9084,6 +9135,8 @@ let () =
             test_runtime_raw_save_rejects_changed_path_with_identical_source;
           test_case "raw editors require a revision and stale source loses without a write" `Quick
             test_runtime_raw_save_rejects_stale_source_without_write;
+          test_case "the TUI preference route writes one parsed change" `Quick
+            test_tui_preference_route_writes_one_parsed_change;
           test_case "direct assignment fences stale Keeper config POST" `Quick
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick

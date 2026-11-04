@@ -376,10 +376,12 @@ let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
 
-let retirement_settlement t = match t.finish_state with
-  | Active -> Error "ego Space retained; connection retirement is not task completion"
-  | Finish_uncertain -> Error "ego Space completion is unconfirmed; preserve files and never replay finish"
-  | Finished {settlement;_} -> settlement
+let retirement_settlement t = match t.finish_state, t.space_presence.state with
+  | Active, Browser_ego_space_observation.Missing ->
+    Error (Printf.sprintf "ego task space %d was gone from ego before its connection ended; its completion is unconfirmed, so its files are kept" t.space.id)
+  | Active, (Present | Unknown _) -> Error "ego Space retained; connection retirement is not task completion"
+  | Finish_uncertain, _ -> Error "ego Space completion is unconfirmed; preserve files and never replay finish"
+  | Finished {settlement;_}, _ -> settlement
 
 (* A page blocked on a JavaScript dialog runs no page script until the
    dialog is answered: ego 0.6.0.16 refuses page.evaluate then, and a move

@@ -74,8 +74,6 @@ let with_fixture run =
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
-      Masc_test_deps.Board_test_preparation.prepare ~base_path
-        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       let server = Masc.Mcp_server.For_testing.create_state ~base_path in
       let config = Masc.Mcp_server.workspace_config server in
       ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));

@@ -13,8 +13,6 @@
 
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 module Event_queue_persistence_source = Keeper_event_queue_persistence
 module Keeper_event_queue_persistence = struct
   include Event_queue_persistence_source
@@ -463,7 +461,6 @@ let test_projection_metrics_preserve_judge_result () =
       ~labels:["topology", "simple"; "outcome", outcome; "judge_result", judge_result] () in
   List.iter (fun (expected, judge, judges) ->
     with_isolated_base_path "fusion-projection-metrics" (fun base_dir registry ->
-      Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
       let keeper = "metric-keeper" in
       let run_id = Printf.sprintf "metric-%d" (Random.bits ()) in
       let request : Fusion_types.fusion_request =
@@ -521,7 +518,6 @@ let test_policy_denial_metrics_do_not_invent_judge_execution () =
 
 let test_emit_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir registry ->
-    Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
     let question = "Which implementation should ship?" in
@@ -1089,7 +1085,6 @@ let test_completion_stimulus_persists_without_live_registry () =
 let test_tool_handle_async_success_projects_running_then_completed ?(with_context=false) () =
   with_isolated_eio_base_path "fusion-tool-async-success"
     (fun env sw base_dir registry ->
-    Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
     let keeper = "fusion-tool-keeper" in
     let question = "Which async fusion path should ship?" in
     let config = Workspace.default_config base_dir in

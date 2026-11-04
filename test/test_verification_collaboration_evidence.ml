@@ -1,6 +1,5 @@
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
 module VAT = Verification_authority_tools
 let () = Mirage_crypto_rng_unix.use_default ()
 (* These tests pin what the verification evidence reads from a post, not who is
@@ -31,7 +30,6 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "producer"));
-      Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());

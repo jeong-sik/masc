@@ -7,8 +7,6 @@ let () =
 module Lib = Masc
 
 open Alcotest
-module Preparation = Masc_test_deps.Board_test_preparation
-
 (* Bypass the proactive execution cache warm-up guard so tests get the full
    namespace-truth response instead of the "initializing" short-circuit. *)
 let () = Server_dashboard_http.seed_execution_cache_for_test ()
@@ -370,7 +368,6 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
         Auth.disable_auth dir;
         Lib.Board.reset_global_for_test ();
         Lib.Board_dispatch.reset_for_test ();
-        Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw
@@ -428,7 +425,6 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
         Auth.disable_auth dir;
         Lib.Board.reset_global_for_test ();
         Lib.Board_dispatch.reset_for_test ();
-        Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
         let state =
           Lib.Mcp_server_eio.create_state_eio
             ~sw

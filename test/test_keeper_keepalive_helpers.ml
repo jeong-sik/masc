@@ -43,9 +43,6 @@ let with_temp_workspace f =
    backend gets its recipient lookup before the first write. *)
 let with_board_workspace ?(recipient_lookup = every_name_declared) f =
   with_temp_workspace (fun config ->
-    Masc_test_deps.Board_test_preparation.prepare
-      ~base_path:config.Workspace.base_path
-      ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
     Result.get_ok (Board_dispatch.init_jsonl
       ~base_path:config.Workspace.base_path
       ~recipient_lookup ());

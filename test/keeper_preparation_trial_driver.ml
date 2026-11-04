@@ -302,8 +302,6 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   let config = Workspace.default_config base in
   ignore (stage Initialize_workspace (fun () ->
     Workspace.init config ~agent_name:(Some "preparation-operator")) : string);
-  Masc_test_deps.Board_test_preparation.prepare ~base_path:base
-    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base ["base","masc-sandbox-base:fixture-owned-job"];
   write (config_path base) skills_config;
   let skill_path = Filename.concat base ".agents/skills/preparation-stdout/SKILL.md" in

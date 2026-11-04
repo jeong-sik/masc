@@ -271,6 +271,12 @@ let code_history_selected_occurrence (state : state) =
 let code_history_selected state =
   Option.map snd (code_history_selected_occurrence state)
 
+let history_commit_diff_target ~file_path entry =
+  match entry, file_path with
+  | Some (Hist_commit row), Some path ->
+      Some (Diff_commit { path; commit = row.Masc.Tui_decode.gl_hash })
+  | Some (Hist_commit _), None | Some (Hist_keeper_change _), _ | None, _ -> None
+
 let toggle_history_change state =
   match code_history_selected_occurrence state with
   | Some (index, Hist_keeper_change _) ->
@@ -479,8 +485,16 @@ let render_code (state : state) =
             else if draft_showing then "draft: " ^ path
             else if notes_showing then "notes: " ^ path
             else if diff_showing then
-              Printf.sprintf "diff col %d vs HEAD: %s"
-                (state.code_diff_hscroll + 1) path
+              let basis =
+                match Masc_tui_fetched.current_key state.code_diff with
+                | Some (Diff_commit { commit; _ }) ->
+                    "commit " ^ Terminal_text.single_line commit
+                | Some (Diff_worktree { base_ref; _ }) ->
+                    "vs " ^ Terminal_text.single_line base_ref
+                | None -> "vs HEAD"
+              in
+              Printf.sprintf "diff col %d %s: %s"
+                (state.code_diff_hscroll + 1) basis path
             else if history_showing then "history: " ^ path
             else path ^ (if Option.is_some (current_code_draft state) then " · draft retained (V)" else "")
           in
@@ -633,9 +647,15 @@ let render_code (state : state) =
            | [] ->
                box_line pane_buf pane_cols
                  (Ansi.dim
-                 ^ (if diff.Masc.Tui_decode.gd_has_changes then
-                      "  (the tree reports a change and sent no lines)"
-                    else "  (this file matches its last commit)")
+                 ^ (match Masc_tui_fetched.current_key state.code_diff with
+                    | Some (Diff_commit _) ->
+                        if diff.Masc.Tui_decode.gd_has_changes then
+                          "  (the commit reports a change and sent no lines)"
+                        else "  (this commit changed nothing in this file)"
+                    | Some (Diff_worktree _) | None ->
+                        if diff.Masc.Tui_decode.gd_has_changes then
+                          "  (the tree reports a change and sent no lines)"
+                        else "  (this file matches its last commit)")
                  ^ Ansi.reset);
                for _ = 2 to content_height do
                  box_empty pane_buf pane_cols

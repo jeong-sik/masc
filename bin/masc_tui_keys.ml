@@ -1144,7 +1144,8 @@ let for_surface = function
                  again closes the list"
       ; b Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
-                 open file, show that file's diff against HEAD"
+                 open file, show that file's diff against HEAD; in the file's \
+                 history, on a commit row, show what that commit changed"
       ; b Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
                  the repository's remote"
@@ -1601,7 +1602,7 @@ let code_notes_bindings =
 
 let code_history_bindings =
   [ b Act "t" "Task" ~help:"inspect the Task named by the selected Keeper record; Esc returns to this history position"
-  ; b Act "d" "recorded diff" ~help:"expand or collapse the selected Keeper call's recorded text; failed calls show attempted text"
+  ; b Act "d" "diff" ~help:"on a commit row, show what that commit changed in this file; on a Keeper record, expand or collapse its recorded text (failed calls show attempted text)"
   ; b Meta "r" "refresh"
   ; b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"

@@ -1622,6 +1622,22 @@ let test_a_refresh_keeps_the_comparison_on_screen () =
   Alcotest.(check bool) "another file asks for its working tree" true
     (code_diff_target_equal (target "b.ml") (worktree_diff "b.ml"))
 
+let test_d_in_history_opens_only_a_commits_diff () =
+  let commit : Decode.git_log_row =
+    { gl_hash = "abc1234"; gl_at_ms = 0.; gl_author = "alpha"; gl_subject = "fix" }
+  in
+  let target ?(file_path = Some "a.ml") entry =
+    Masc_tui_render_code.history_commit_diff_target ~file_path entry
+  in
+  Alcotest.(check bool) "a commit row names that commit in the open file" true
+    (match target (Some (Hist_commit commit)) with
+     | Some t -> code_diff_target_equal t (commit_diff "a.ml")
+     | None -> false);
+  Alcotest.(check bool) "no open file has no path to ask about" true
+    (Option.is_none (target ~file_path:None (Some (Hist_commit commit))));
+  Alcotest.(check bool) "no selection opens nothing" true
+    (Option.is_none (target None))
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -1731,6 +1747,8 @@ let () =
             test_a_diff_reply_must_match_its_comparison
         ; Alcotest.test_case "a refresh keeps the comparison on screen" `Quick
             test_a_refresh_keeps_the_comparison_on_screen
+        ; Alcotest.test_case "d in history opens only a commit's diff" `Quick
+            test_d_in_history_opens_only_a_commits_diff
         ] )
     ; ( "scope"
       , [ Alcotest.test_case "a shared path is not a shared request" `Quick

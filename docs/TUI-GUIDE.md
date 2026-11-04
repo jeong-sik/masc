@@ -2533,6 +2533,11 @@ they are not recovered after the TUI process exits.
   labelled as attempts. Writes have no recorded previous contents, and blob
   materialization has no text diff. This reads the captured call, without
   asking for the current working tree's Git diff.
+  On a commit, `d` opens what that commit changed in this file, against its
+  first parent, over the same diff overlay (`GET /api/v1/git/diff?commit=`).
+  The title names the commit instead of `vs HEAD`, `r` keeps that commit
+  on screen, and `Esc` returns to the file; `H` reopens the history. A merge
+  commit that left this file as it was in its first parent shows no rows.
   `t` opens the selected Keeper record's Task detail, including its recorded
   status, handoff, completion/evidence contract and transition history. `Esc`
   returns to the same file-history position and expanded record. A missing Task

@@ -37892,8 +37892,28 @@ Use relative paths for resources already held in the package. -->
            end
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && state.code_history_open ->
-           if not (Masc_tui_render_code.toggle_history_change state) then
-             report_action state "error" "Select a Keeper record to expand its recorded change"
+           (* A commit row opens what that commit changed in this file, over
+              the same overlay the working-tree diff uses; a Keeper record
+              expands its recorded text in place. *)
+           (match
+              Masc_tui_render_code.history_commit_diff_target
+                ~file_path:(Masc_tui_fetched.current_key state.code_file)
+                (Masc_tui_render_code.code_history_selected state)
+            with
+            | Some target ->
+                state.code_diff_open <- true;
+                state.code_history_open <- false;
+                state.code_notes_open <- false;
+                (match Masc_tui_fetched.current state.code_diff with
+                 | Some (loaded, _) when code_diff_target_equal loaded target -> ()
+                 | Some _ | None ->
+                     Masc_tui_code_requests.launch_diff_load state
+                       ~host:server_peer_host
+                       ~deliver:(workspace_enqueue state async_messages) ~target)
+            | None ->
+                if not (Masc_tui_render_code.toggle_history_change state) then
+                  report_action state "error"
+                    "Select a commit or a Keeper record to see its change")
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay

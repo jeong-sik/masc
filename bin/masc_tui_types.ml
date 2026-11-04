@@ -11256,6 +11256,17 @@ type state = {
   refresh_interval: float;
 }
 
+(* The target a refresh of the open diff asks for. A commit diff already on
+   screen for this file stays a commit diff; anything else is the working tree
+   against [base_ref], so a refresh never swaps one comparison for another.
+   Here, not in the request module, because the tests link only this one. *)
+let diff_target_for_refresh state ~base_ref ~path =
+  match Masc_tui_fetched.current_key state.code_diff with
+  | Some (Diff_commit { path = shown; _ } as target) when String.equal shown path ->
+    target
+  | Some (Diff_commit _ | Diff_worktree _) | None -> Diff_worktree { path; base_ref }
+;;
+
 let clear_goal_action_error state ~goal_id =
   state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
 

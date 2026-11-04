@@ -19378,7 +19378,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
            selected_file;
          if state.code_diff_open then Option.iter (fun path ->
            Masc_tui_code_requests.launch_diff_load state ~host ~deliver
-             ~target:(Masc_tui_code_requests.diff_target_for_refresh state
+             ~target:(diff_target_for_refresh state
                         ~base_ref:tree_diff_base_ref ~path))
            selected_file;
          Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)

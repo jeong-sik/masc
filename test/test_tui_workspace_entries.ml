@@ -1609,7 +1609,7 @@ let test_a_diff_reply_must_match_its_comparison () =
 let test_a_refresh_keeps_the_comparison_on_screen () =
   let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   let target path =
-    Masc_tui_code_requests.diff_target_for_refresh state ~base_ref:"HEAD" ~path
+    diff_target_for_refresh state ~base_ref:"HEAD" ~path
   in
   Alcotest.(check bool) "nothing shown asks for the working tree" true
     (code_diff_target_equal (target "a.ml") (worktree_diff "a.ml"));

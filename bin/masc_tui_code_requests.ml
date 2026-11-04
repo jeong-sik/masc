@@ -256,16 +256,6 @@ let launch_history_load state ~host ~deliver ~path =
 
 ;;
 
-(* The target a refresh asks for. A commit diff already on screen for this file
-   stays a commit diff; anything else is the working tree against [base_ref], so
-   a refresh never swaps one comparison for another. *)
-let diff_target_for_refresh state ~base_ref ~path =
-  match Masc_tui_fetched.current_key state.code_diff with
-  | Some (Diff_commit { path = shown; _ } as target) when String.equal shown path ->
-    target
-  | Some (Diff_commit _ | Diff_worktree _) | None -> Diff_worktree { path; base_ref }
-;;
-
 let launch_diff_load state ~host ~deliver ~target =
   if server_authority_ready state then begin
   match

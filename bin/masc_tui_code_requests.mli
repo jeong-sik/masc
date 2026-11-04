@@ -51,14 +51,6 @@ val launch_history_load
   -> path:string
   -> unit
 
-(** The comparison a refresh of the open diff asks for: the commit diff already
-    shown for [path], otherwise the working tree against [base_ref]. *)
-val diff_target_for_refresh
-  :  Masc_tui_types.state
-  -> base_ref:string
-  -> path:string
-  -> Masc_tui_types.code_diff_target
-
 (** Read one diff target. The target is the fetched state's key, so an answer
     for any other target is dropped. *)
 val launch_diff_load

@@ -691,10 +691,8 @@ let read_subscription ~mgr ~cwd config =
      writes the result to a file instead of passing it inline. It is written
      only for a tool whose result MASC bounds ([Bounded_bytes]), with that
      bound: UTF-8 characters never outnumber their bytes, so the byte
-     ceiling is a safe character count. An attached-service
-     result reaches the wire as the service returned it
-     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
-     keeps the client's own threshold.
+     ceiling is a safe character count. A tool declared [Unbounded] keeps
+     the client's own threshold.
 
    A tool with neither is sent as it was before, with no [_meta]. *)
 let dynamic_tool_meta (tool : dynamic_tool) =

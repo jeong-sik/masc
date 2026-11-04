@@ -9952,14 +9952,12 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
 
 (* Ask the server to run this queued message next. Run-next only reorders
    the queue: it carries no interrupt token, so the turn the Keeper is on --
-   its own autonomous turn or another operator's message -- finishes its
-   tool work and yields at the next boundary. Until 2026-09-22 a promoted
-   line (a queued line sent again, /run-next, or Enter while the Keeper's
-   chat control token had not arrived) derived the observed autonomous turn
-   as the token, so the server cancelled that turn; the plain Enter path had
-   stopped doing so on 2026-09-14 and the footer promised the same for all
-   of them. Stopping a turn is an explicit act: Esc, or /steer, which
-   interrupts before it queues. *)
+   its own autonomous turn or another operator's message -- runs to its end
+   and the promoted message takes the slot after it. A promoted line (a
+   queued line sent again, /run-next, or Enter while the Keeper's chat
+   control token had not arrived) never cancels the running turn. Stopping a
+   turn is an explicit act: Esc, or /steer, which interrupts before it
+   queues. *)
 let run_next_busy_for state keeper_name =
   let same_keeper (request : Keeper_chat.request) =
     String.equal request.keeper_name keeper_name in

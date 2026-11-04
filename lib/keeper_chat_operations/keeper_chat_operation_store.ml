@@ -1723,43 +1723,6 @@ let has_claimable_queued store ~now =
   let* () = ensure_open store in
   claimable_queued_with_db store.db ~now |> Result.map Option.is_some
 
-(* A scheduling notice promises that the next slot can deliver new input.
-   A fresh original behind a continuation cannot accept that slot under FIFO;
-   resuming and yielding each continuation only burns provider turns. Use the
-   claim selector itself, without changing queue order or reserving a claim. *)
-let has_queued_handoff_recipient store ~now ~operation_id =
-  let* () = ensure_open store in
-  let* () = Operation.validate_timestamp ~field:"now" now
-    |> Result.map_error (fun detail -> Invalid_input detail) in
-  let* running = operation_or_unknown store.db operation_id in
-  match running.Operation.state with
-  | Operation.Queued | Operation.Succeeded _ | Operation.Failed _
-  | Operation.Cancelled _ -> Error (Not_running operation_id)
-  | Operation.Running _ ->
-    let* head = claimable_queued_with_db store.db ~now in
-    match head with
-    | None -> Ok false
-    | Some head ->
-      let* binding = batch_execution_with_db store.db head.operation_id in
-      let* execution = semantic_get_with_db store.db
-        (Keeper_execution_scope_id.direct_operation head.operation_id) in
-      match binding, execution with
-      | Some _, _ | None, Some _ -> Ok false
-      | None, None ->
-        (* Admission order survives queue moves and repeated/rewound clocks. *)
-        with_statement store.db ~operation:"read queued handoff recipient"
-          "SELECT 1 FROM operations WHERE operation_id = ? AND state = 'queued' AND rowid > (SELECT rowid FROM operations WHERE operation_id = ?)"
-          (fun statement ->
-            let* () = bind_text store.db statement ~operation:"bind handoff recipient"
-              1 (Id.to_string head.operation_id) in
-            let* () = bind_text store.db statement ~operation:"bind running admission"
-              2 (Id.to_string operation_id) in
-            let rc = Sqlite3.step statement in
-            if rc = Sqlite3.Rc.ROW then Ok true
-            else if rc = Sqlite3.Rc.DONE then Ok false
-            else Error (Store_unavailable (sqlite_error store.db "read queued handoff recipient" rc)))
-;;
-
 (* The wake scheduled at defer time rides the process's pool switch and dies
    with it, and the Owner never polls: after a restart, a persisted future
    [not_before] would sit until an unrelated mailbox event unless the owner

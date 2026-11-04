@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let init_result =
   {|{"id":1,"result":{"userAgent":"fixture/0.147.0","codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux"}}|}
 ;;
@@ -387,7 +393,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
+    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
     ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
   let observer_failure = ref None in
   let on_stream_event = Option.map (fun callback event ->
@@ -451,7 +457,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
         Option.iter (Eio.Time.sleep clock) on_context_submission_delay_s;
         Option.iter (fun callback -> callback event) on_context_submission)
       ?on_reasoning_effort_resolved
-      ?await_handoff
       config
       ~prompt
       ~images)) in
@@ -516,11 +521,10 @@ let test_concurrent_tool_does_not_block_status () =
           (List.rev !order))
 ;;
 
-let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff = false) ~first ~second
+let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
     ~(expected : Runtime_codex_app_server.host_stop option) () =
   let second_started, signal_second_started = Eio.Promise.create () in
   let first_written, signal_first_written = Eio.Promise.create () in
-  let handoff_ready, signal_handoff_ready = Eio.Promise.create () in
   let effects = ref [] and responses = ref [] in
   let tool = dispatch_tool
     ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
@@ -529,7 +533,6 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
       let stop =
         if call_id = "call-1" then begin
           Eio.Promise.await second_started;
-          if scheduling_handoff then Eio.Promise.await handoff_ready;
           first
         end else begin
           Eio.Promise.resolve signal_second_started ();
@@ -548,12 +551,8 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
     [init_result; account_chatgpt; thread_result; turn_result;
      dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
     (fun path ->
-      before_fixture_terminal path (if scheduling_handoff then 3 else 2);
-      let await_handoff = if not scheduling_handoff then None else Some (fun () ->
-        Eio.Promise.await second_started;
-        Eio.Promise.resolve signal_handoff_ready ();
-        true) in
-      let actual = run_fixture ?await_handoff ~dynamic_tools:[tool] path in
+      before_fixture_terminal path 2;
+      let actual = run_fixture ~dynamic_tools:[tool] path in
       check (list string) "both admitted tool handlers run once" ["call-1"; "call-2"]
         (List.rev !effects);
       check (list string) "both original responses are written once" ["call-1"; "call-2"]
@@ -600,32 +599,6 @@ let test_concurrent_tool_stop_orderings () =
       ~first:(Some first) ~second:(Some second) ~expected:(Some expected) ())
     [deferred,completed,completed; completed,deferred,completed; deferred,deferred,deferred];
   test_concurrent_tool_stops_keep_authoritative_outcome ~first:None ~second:None ~expected:None ()
-;;
-
-let concurrent_handoff_stop_scenarios () =
-  let deferred : Runtime_codex_app_server.host_stop =
-    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
-  let completed : Runtime_codex_app_server.host_stop =
-    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
-  let scenario first second expected = Some first, Some second, Some expected in
-  [ scenario deferred completed completed; scenario completed deferred completed
-  ; scenario deferred deferred deferred
-  ; None, Some completed, None ]
-  @ List.concat_map (fun effect_disposition ->
-      let failed : Runtime_codex_app_server.host_stop =
-        Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
-          {failure_class=Tool_result.Runtime_failure;effect_disposition;
-           detail=Keeper_terminal_effect_detail.Tool_failed
-             {internal_tool_name="masc_probe";message="original handoff peer failure"}}} in
-      [scenario completed failed failed; scenario failed completed failed])
-      [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown]
-;;
-
-let test_concurrent_handoff_stops_keep_authoritative_outcome () =
-  List.iter (fun (first, second, expected) ->
-    test_concurrent_tool_stops_keep_authoritative_outcome
-      ~scheduling_handoff:true ~first ~second ~expected ())
-    (concurrent_handoff_stop_scenarios ())
 ;;
 
 let outer_protocol_drain_scenarios () =
@@ -1124,7 +1097,7 @@ let check_context_fragments raw event =
     | `String "thread/inject_items" ->
       member "items" params |> to_list
       |> List.mapi (fun index value -> "injected_item",`Int index,value)
-    | `String "turn/start" | `String "turn/steer" ->
+    | `String "turn/start" ->
       member "input" params |> to_list
       |> List.mapi (fun index value -> index,value)
       |> List.filter_map (fun (index,value) ->
@@ -1189,173 +1162,6 @@ let captured_frame submission lines =
     let json = Yojson.Safe.from_string line in
     member "id" json = member "request_id" submission
     && (member "method" json <> `Null) = wants_request) lines
-;;
-
-let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false) () =
-  List.iter (fun acceptance ->
-    let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
-    Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-      let calls = ref 0 in
-      let observed = ref [] in
-      let ready, signal = Eio.Promise.create () in
-      let tool : Runtime_codex_app_server.dynamic_tool =
-        { name = "masc_probe"; description = "Observe an effect exactly once"
-        ; input_schema = `Assoc ["type", `String "object"]
-        ; loading = Runtime_official_client_tool.On_demand
-        ; result_bound = Runtime_official_client_tool.Unbounded
-        ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
-        ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
-        ; call = (fun ~call_id:_ _ -> incr calls;
-            if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
-            { success = true; content = "effect persisted";
-              content_blocks = None;
-              on_response_sent = None; abort_turn = if terminal_second && !calls = 2 then
-                Some (Runtime_codex_app_server.Terminal_tool_boundary
-                  { tool_name = "masc_probe"; outcome = Terminal_completed })
-                else None }) } in
-      let second_tool =
-        {|{"id":"tool-request-2","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-2","tool":"masc_probe","arguments":{}}}|} in
-      let third_tool =
-        {|{"id":"tool-request-3","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-3","tool":"masc_probe","arguments":{}}}|} in
-      let reply = match acceptance with
-        | Some true -> Some {|{"id":6,"result":{"turnId":"turn-1"}}|}
-        | Some false -> Some {|{"id":6,"error":{"code":-32600,"message":"turn no longer steerable"}}|}
-        | None -> None in
-      with_fixture ~await_dynamic_tools:false ([init_result; account_chatgpt; thread_result; turn_result;
-        tool_call_request; second_tool]
-        @ (if terminal_second then [third_tool] else [])
-        @ [agent_message_delta] @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
-          let original = In_channel.with_open_bin path In_channel.input_all in
-          let reply_line = "printf '%s\\n' " ^ shell_quote (Option.value reply ~default:item_completed) in
-          let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
-            ^ shell_quote capture_path ^ "\n" in
-          let instrumented = original |> String.split_on_char '\n'
-            |> List.concat_map (fun line -> if line = reply_line
-              then [capture ^ capture ^ capture ^ (if terminal_second then capture else ""); line] else [line])
-            |> String.concat "\n" in
-          Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true)
-              ~on_context_submission:(fun event -> observed := event :: !observed) path with
-          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-          | Ok result ->
-            let expected_handoff = match acceptance with
-              | Some true -> Runtime_codex_app_server.Handoff_accepted
-              | Some false -> Runtime_codex_app_server.Handoff_rejected
-              | None -> Runtime_codex_app_server.Handoff_pending in
-            check bool "terminal carries scheduling disposition" true
-              (result.scheduling_handoff = expected_handoff);
-            check int "concurrent tool frames survive steer response" 2 !calls;
-            check string "natural terminal survives handoff" "MASC_SUBSCRIPTION_OK" result.text);
-      let rows = In_channel.with_open_bin capture_path In_channel.input_lines
-        |> List.map Yojson.Safe.from_string in
-      let open Yojson.Safe.Util in
-      (match rows with
-      | first_result :: steer :: second_result :: rest ->
-        check string "first effect returned before steering" "tool-request-1"
-          (first_result |> member "id" |> to_string);
-        check string "uses active-turn steering" "turn/steer"
-          (steer |> member "method" |> to_string);
-        check string "pins exact active turn" "turn-1"
-          (steer |> member "params" |> member "expectedTurnId" |> to_string);
-        check string "second effect returned while steering pending" "tool-request-2"
-          (second_result |> member "id" |> to_string);
-        (match terminal_second, rest with
-         | false, [] -> ()
-         | true, [denied] ->
-           check string "post-terminal request receives its own rejection" "tool-request-3"
-             (denied |> member "id" |> to_string);
-           check bool "post-terminal effect is refused while vendor settles" false
-             (denied |> member "result" |> member "success" |> to_bool)
-         | _ -> fail "unexpected protocol writes after terminal effect")
-      | _ -> fail "expected tool result, scheduling steer, and second tool result");
-      (* Tool results and the steer carry model context written after
-         turn/start. Each is recorded from its send site with the id as written:
-         MASC's own number for the steer, the app-server's JSON id for a result. *)
-      let lines = In_channel.with_open_bin capture_path In_channel.input_lines in
-      let late = List.rev !observed |> List.filter (fun (event : Runtime_codex_app_server.context_submission) ->
-        match event.method_ with
-        | Turn_steer | Dynamic_tool_response -> true
-        | Thread_start | Thread_resume | Thread_inject_items | Turn_start -> false) in
-      check (list string) "every tool result and the steer is a recorded context frame"
-        (List.map (fun line -> match member "method" (Yojson.Safe.from_string line) with
-           | `String method_ -> method_ | _ -> "item/tool/call") lines)
-        (List.map (fun (event : Runtime_codex_app_server.context_submission) ->
-           Runtime_codex_app_server.context_submission_method_label event.method_) late);
-      List.iter2 (fun (event : Runtime_codex_app_server.context_submission) line ->
-        let json = Runtime_codex_app_server.context_submission_to_json event in
-        let written = Yojson.Safe.from_string line in
-        check string "recorded frame is the captured line" line (captured_frame json lines);
-        check bool "recorded id is the written JSON-RPC id as is" true
-          (member "request_id" json = member "id" written);
-        check string "frame kind follows the written shape"
-          (if member "method" written = `Null then "response" else "request")
-          (member "frame" json |> to_string);
-        check (option string) "late frames name the active thread" (Some "thread-1") event.thread_id;
-        check int "byte count is the written line" (String.length line) event.write.bytes;
-        check string "SHA binds the written line"
-          Agent_core_sha256.(digest_string line |> to_hex) event.write.sha256;
-        check_context_fragments line json) late lines))
-    (if terminal_second then [Some true; None] else [Some true; Some false; None])
-;;
-
-let test_scheduling_handoff_wakes_idle_before_first_tool () =
-  let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
-  let progress, signal_progress = Eio.Promise.create () in
-  let progress_signaled = ref false in
-  Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
-      agent_message_delta; item_completed; turn_completed] (fun path ->
-      let original = In_channel.with_open_bin path In_channel.input_all in
-      let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
-      let wait_for_steer =
-        "IFS= read -r steer\nprintf '%s\\n' \"$steer\" > " ^ shell_quote capture_path
-        ^ "\nprintf '%s\\n' "
-        ^ shell_quote {|{"id":6,"result":{"turnId":"turn-1"}}|} in
-      let instrumented = original |> String.split_on_char '\n'
-        |> List.concat_map (fun line ->
-          if line = terminal then [wait_for_steer; line] else [line])
-        |> String.concat "\n" in
-      Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-      let on_stream_event = function
-        | Runtime_codex_app_server.Text_delta _ when not !progress_signaled ->
-          progress_signaled := true;
-          Eio.Promise.resolve signal_progress ()
-        | _ -> ()
-      in
-      let await_handoff () =
-        Eio.Promise.await progress;
-        (* Let the consumer enter its next receive. The fixture emits no more
-           provider frames until it receives the scheduling notice, so a
-           progress-boundary-only queue check cannot complete this turn. *)
-        Eio.Fiber.yield ();
-        true
-      in
-      match run_fixture ~on_stream_event ~await_handoff path with
-      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result ->
-        check int "no tool required to wake idle turn" 0 result.dynamic_tool_calls;
-        let request = In_channel.with_open_bin capture_path In_channel.input_all
-          |> Yojson.Safe.from_string in
-        check string "idle transport receives scheduling steer" "turn/steer"
-          Yojson.Safe.Util.(request |> member "method" |> to_string)))
-;;
-
-let test_scheduling_handoff_waiter_released_at_terminal () =
-  let waiting, _resolve_waiting = Eio.Promise.create () in
-  let subscribed = ref false in
-  let released = ref false in
-  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
-    item_completed; turn_completed] (fun path ->
-    let await_handoff () =
-      subscribed := true;
-      Fun.protect ~finally:(fun () -> released := true)
-        (fun () -> Eio.Promise.await waiting)
-    in
-    match run_fixture ~await_handoff path with
-    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok _ ->
-      check bool "waiter subscribed" true !subscribed;
-      check bool "terminal unregisters waiter" true !released)
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -7757,7 +7563,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
         | Error detail -> fail detail);
        let selection =
          match
-           Keeper_event_queue_persistence.select_when_result
+           select_queue_entry
              ~base_path
              ~keeper_name
              ~now:(Unix.gettimeofday ())
@@ -7779,10 +7585,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
             | Error _ -> ()
             | Ok _ -> fail "provider-rejected official-client turn completed");
        (match
-          Keeper_event_queue_persistence.validate_pending_selection_result
-            ~base_path
-            ~keeper_name
-            ~selection
+          Result.bind
+            (Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name)
+            (Keeper_event_queue_state.validate_pending_selection ~selection)
         with
         | Ok () -> ()
         | Error detail -> fail detail);
@@ -7932,7 +7737,7 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           |> to_string);
        let selected_after_resolution =
          match
-           Keeper_event_queue_persistence.select_when_result
+           select_queue_entry
              ~base_path
              ~keeper_name
              ~now:(Unix.gettimeofday ())
@@ -8138,7 +7943,7 @@ let fixture_rpc_refusal id =
     id
 ;;
 
-let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail () =
+let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~error_type ~detail () =
   let module Store = Keeper_official_client_session_store in
   with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
     let capture = Filename.concat base_path "setup-refusal.jsonl" in
@@ -8150,7 +7955,7 @@ let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail 
       | Error error ->
         let expected = Agent_core.Error.Provider
           (Llm_provider.Error.ProviderReportedError
-            { provider = "codex_app_server"; error_type = Some "rpc_error"; detail }) in
+            { provider = "codex_app_server"; error_type = Some error_type; detail }) in
         check string "original RPC error remains visible"
           (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
       | Ok _ -> fail "setup RPC refusal completed a Keeper turn");
@@ -8164,8 +7969,8 @@ let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~detail 
     check int "setup refusal consumes no provider ordinal" before.turn_count after.turn_count;
     check bool "unsent changed System context cannot replace acknowledged context" true
       (after.context_frontier = before.context_frontier);
-    check bool "setup refusal preserves the host's observed turn count" true
-      (after.host_turns = before.host_turns);
+    check bool "setup refusal preserves the host's last turn" true
+      (after.host_last_turn = before.host_last_turn);
     check bool "the original exact-session continuation remains admissible" true
       (Store.validate_continuation ~checkpoint ~expected:(Some after)
         ~client_kind:Codex ~runtime_id:before.runtime_id
@@ -10294,22 +10099,12 @@ let () =
             test_dispatch_validation_is_process_free
         ; test_case "invalid context window is refused before dispatch" `Quick
             test_invalid_context_window_is_process_free
-        ; test_case "scheduling handoff preserves active protocol" `Quick
-            (fun () -> test_scheduling_handoff_preserves_active_protocol ())
-        ; test_case "handoff settles terminal effect without admitting more tools" `Quick
-            (fun () -> test_scheduling_handoff_preserves_active_protocol ~terminal_second:true ())
-        ; test_case "scheduling handoff wakes idle turn before any tool" `Quick
-            test_scheduling_handoff_wakes_idle_before_first_tool
-        ; test_case "scheduling handoff waiter released at terminal" `Quick
-            test_scheduling_handoff_waiter_released_at_terminal
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "concurrent status releases a pending read" `Quick
             test_concurrent_tool_does_not_block_status
         ; test_case "concurrent peer stops preserve authoritative Keeper outcomes" `Quick
             test_concurrent_tool_stop_orderings
-        ; test_case "handoff preserves completed peers in either settlement order" `Quick
-            test_concurrent_handoff_stops_keep_authoritative_outcome
         ; test_case "outer protocol failure survives pending tool drain" `Quick
             test_outer_protocol_error_survives_tool_drain
         ; test_case "serial tool fences concurrent calls" `Quick
@@ -10487,6 +10282,7 @@ let () =
             (test_keeper_setup_rpc_refusal_preserves_session
               ~responses:[fixture_rpc_refusal 1; account_chatgpt; thread_result]
               ~methods:["initialize"]
+              ~error_type:"rpc_error"
               ~detail:"initialize (code -32603): opaque fixture refusal")
         ; test_case
             "Keeper account RPC refusal preserves the native session"
@@ -10494,7 +10290,8 @@ let () =
             (test_keeper_setup_rpc_refusal_preserves_session
               ~responses:[init_result; fixture_rpc_refusal 2; thread_result]
               ~methods:["initialize"; "initialized"; "account/read"]
-              ~detail:"account/read (code -32603): opaque fixture refusal")
+              ~error_type:"account_read_failed"
+              ~detail:"Codex app-server RPC account/read failed (code -32603): opaque fixture refusal")
         ; test_case
             "Keeper resume RPC refusal keeps fresh recovery"
             `Quick

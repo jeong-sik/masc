@@ -26,6 +26,12 @@ module Keeper_event_queue_persistence = struct
   ;;
 end
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 (* The keeper.world event-row prose this suite asserts (the fusion
    cancellation preview) moved out of the .ml sources into
    config/prompts/keeper.md as world.* keys, rendered through the prompt
@@ -1305,7 +1311,7 @@ let test_completion_is_selected_before_ambient_backlog () =
              (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
          | _ -> fail "durable queue lost the answer or ambient work");
         let ready (source : Keeper_event_queue.stimulus) = source.post_id<>prior.post_id in
-        match Keeper_event_queue_persistence.select_when_result ~base_path:base_dir ~keeper_name:keeper
+        match select_queue_entry ~base_path:base_dir ~keeper_name:keeper
             ~now:(Unix.gettimeofday ()) ~ready with
         | Ok (Some selection) ->
           (match selection.Keeper_event_queue_state.source.payload with

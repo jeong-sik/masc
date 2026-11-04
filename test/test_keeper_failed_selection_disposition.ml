@@ -398,9 +398,7 @@ let test_recorded_settlement_follows_the_batch_disposition () =
        | Loop.Continuation_settled_recorded -> ()
        | Loop.Continuation_settled_failed _ | Loop.Continuation_unsettled ->
          failf "%s: a checkpoint did not record its continuation" label)
-    [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
-    ; "operation queued", Turn.Operation_queued
-    ];
+    [ "durable stimulus arrived", Turn.Durable_stimulus_arrived ];
   List.iter
     (fun outcome ->
        match Loop.continuation_settlement_of_cycle_outcome outcome with
@@ -428,9 +426,7 @@ let test_nonterminal_outcomes_preserve_batch () =
    resolutions queued behind it never reached the model (edgar.a.poe,
    2026-09-02: eight turns on one Execute over ten minutes). *)
 let every_checkpoint_reason =
-  [ "durable stimulus arrived", Turn.Durable_stimulus_arrived
-  ; "operation queued", Turn.Operation_queued
-  ]
+  [ "durable stimulus arrived", Turn.Durable_stimulus_arrived ]
 ;;
 
 let test_every_checkpoint_reason_acks_admitted_attention () =

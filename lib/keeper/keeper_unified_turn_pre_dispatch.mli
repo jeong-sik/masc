@@ -50,8 +50,9 @@ val build_runtime_execution
     The context window is the smallest window among every candidate that can
     serve the turn's prompt. For a lane that is the lane's candidates. When
     [deferred_runtime_lane] is the hint the turn resumes from (its
-    [next_runtime_id] is [runtime_id]), it is [Keeper_turn_driver.deferred_runtime_ids]
-    of that hint, the candidates the walk still rotates through.
+    [Keeper_turn_driver.resumed_head] is [runtime_id]), it is
+    [Keeper_turn_driver.resumed_walk_ids] of that hint, the candidates the
+    walk rotates through.
 
     Failure modes (returned as [Error]):
     - [deferred_runtime_lane] resumes at a runtime other than [runtime_id].

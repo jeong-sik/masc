@@ -1470,8 +1470,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
         | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
       (match result.stop_reason with
        | Yielded_to_durable_stimulus _ -> ()
-       | Completed _ | Yielded_to_operation_queued _
-       | InputRequired _ -> fail "the production adapter must project the checkpoint");
+       | Completed _ | InputRequired _ -> fail "the production adapter must project the checkpoint");
       check int "the independent tool ran once" 1 !calls;
       Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
         ~base_path ~keeper_name admitted |> require;

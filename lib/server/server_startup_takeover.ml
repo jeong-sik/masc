@@ -1120,9 +1120,53 @@ let open_waiter_file prepared =
     else Ok (waiter_path, fd)
 ;;
 
+(* A waiter that won the slot, committed the lease, and exec'd (as [masc
+   start] does between acquiring the lease and serving) re-enters this same
+   acquisition post-exec with the lease file already naming it: the PID
+   persists across exec. It must not re-contend the single waiter slot: a
+   contender that grabbed the slot in the exec gap would otherwise kill the
+   legitimate winner with Another_replacement_waits after it already won
+   (2026-11-04 live incident). The lease record, not the process image, is
+   what this keys on.
+
+   Read-only and side-effect free: it never creates the lease file, never
+   locks, and every unreadable or unparsable outcome falls through to the
+   waiter path below. The bypass only skips the waiter slot (a
+   liveness/queueing mechanism); the kernel lock in the inner acquire
+   remains the real mutex, and that acquire re-validates everything before
+   committing, so a TOCTOU'd read degrades to the pre-fix behavior rather
+   than to a wrong owner. *)
+let lease_file_names_self prepared =
+  match observe_lease_path prepared.path with
+  | Ok (Lease_path_regular _) ->
+    (match
+       try Ok (Unix.openfile prepared.path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0)
+       with Unix.Unix_error _ -> Error ()
+     with
+     | Error () -> false
+     | Ok fd ->
+       Fun.protect
+         ~finally:(fun () ->
+           try Unix.close fd with Unix.Unix_error _ -> ())
+         (fun () ->
+           match parsed_pid_fd fd with
+           | Some pid -> pid = Unix.getpid ()
+           | None -> false))
+  | Ok (Lease_path_missing | Lease_path_other _) | Error _ -> false
+;;
+
 let acquire_base_path_lock_after_owner_exits ~run_dir ~on_wait base_path =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Ok (Base_path_rejected rejection)
+  | Ok prepared when lease_file_names_self prepared ->
+    Ok
+      (acquire_base_path_lock_with
+         ~contention:Refuse_when_owned
+         ~before_lease_open:(fun () -> ())
+         ~before_commit_identity_check:(fun () -> ())
+         ~before_runtime_identity_check:(fun () -> ())
+         ~run_dir
+         base_path)
   | Ok prepared ->
     (match open_waiter_file prepared with
      | Error rejection -> Ok (Base_path_rejected rejection)

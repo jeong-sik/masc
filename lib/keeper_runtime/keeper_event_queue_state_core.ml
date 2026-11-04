@@ -216,19 +216,6 @@ let derived_last_non_immediate_served
          projected_dispositions)
 ;;
 
-(* Each admitted entry takes the next number of a counter the state carries, and
-   keeps it until it leaves the queue. A reader that loaded the state when the
-   counter stood at [f] therefore saw exactly the entries numbered below [f].
-   The counter would need 2^63 admissions to wrap. *)
-type frontier = int64
-
-let frontier state = state.next_arrival
-let unobserved_frontier = 0L
-
-let arrived_since frontier (entry : pending_selection) =
-  Int64.compare entry.arrival frontier >= 0
-;;
-
 let same_entry (left : pending_selection) (right : pending_selection) =
   Int64.equal left.arrival right.arrival
 ;;

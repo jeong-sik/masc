@@ -253,8 +253,6 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
-  | Has_queued_handoff_recipient :
-      Operation_id.t -> (bool, error) result command
   | Enter_direct_preparation : {operation_id:Operation_id.t;execution_digest:string;child:Keeper_interrupt_token.t} ->
       (unit,error) result command
   | Direct_preparation_wait : Operation_id.t ->
@@ -456,7 +454,6 @@ type t =
   ; projection : Keeper_owner_reducer.projection Atomic.t
   ; chat_control_token : string Atomic.t
   ; operation_projection : operation_projection Atomic.t
-  ; operation_changed : Eio.Condition.t
   ; turn_in_flight : turn_in_flight option Atomic.t
         (* The Owner's slot stays occupied through child settlement. The
            drain and external observers read this same publication. *)
@@ -522,15 +519,6 @@ let projection t = Atomic.get t.projection
 let chat_control_token t = Atomic.get t.chat_control_token
 let operation_projection t = Atomic.get t.operation_projection
 
-let await_claimable_operation t =
-  Eio.Condition.loop_no_mutex t.operation_changed (fun () ->
-    if Atomic.get t.closed then Some false
-    else
-      let projection = Atomic.get t.operation_projection in
-      if not projection.store_unavailable && projection.has_claimable_queued
-      then Some true else None)
-;;
-
 let turn_in_flight t = Atomic.get t.turn_in_flight
 let shutdown_operation_id t = Atomic.get t.shutdown_operation_id
 
@@ -566,11 +554,7 @@ let publish_operation_projection t next =
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
-    notify_state_change_observer ~keeper_name:t.keeper_name);
-  (* Direct readiness depends on identities and continuation state, not just
-     the aggregate counts above. Every committed publication wakes its exact
-     predicate even when the display projection is unchanged. *)
-  Eio.Condition.broadcast t.operation_changed
+    notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
 let publish_turn_in_flight t next =
@@ -695,7 +679,6 @@ let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
-  | Has_queued_handoff_recipient _ -> In_its_drain_step
   | Enter_direct_preparation _ | Direct_preparation_wait _ | Wait_direct_preparation _ | Retry_direct_preparation _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
@@ -1373,7 +1356,6 @@ let start
     ; chat_control_token = Atomic.make (Random_id.uuid_v7 ())
     ; operation_projection =
         Atomic.make initial_operation_projection
-    ; operation_changed = Eio.Condition.create ()
     ; turn_in_flight = Atomic.make None
     ; shutdown_operation_id = Atomic.make None
     ; operation_store
@@ -1405,8 +1387,7 @@ let start
      whichever order the teardown takes. *)
   let mark_no_longer_answering () =
     if not (Atomic.exchange t.closed true)
-    then (Eio.Promise.resolve resolve_closed ();
-          Eio.Condition.broadcast t.operation_changed)
+    then Eio.Promise.resolve resolve_closed ()
   in
   (* Live witnesses are owned by this actor and tied to the exact durable
      retry. Restart loses the witness, never treating lost provider evidence
@@ -1999,14 +1980,6 @@ let start
           let response =
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
-          in
-          Eio.Promise.resolve resolve response;
-          loop state
-        | Command (Has_queued_handoff_recipient operation_id, resolve) ->
-          let response =
-            run_operation_read t ~label:"read next Keeper handoff recipient" (fun () ->
-              Chat_operation_store.has_queued_handoff_recipient
-                t.operation_store ~now:(t.now ()) ~operation_id)
           in
           Eio.Promise.resolve resolve response;
           loop state
@@ -3041,20 +3014,6 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
   request t (Resume_direct_runtime_retry {operation_id; observed})
 
 let exact_operation t operation_id = request t (Exact_operation operation_id)
-let has_queued_handoff_recipient t ~operation_id =
-  request t (Has_queued_handoff_recipient operation_id)
-let await_queued_handoff_recipient t ~operation_id =
-  Eio.Condition.loop_no_mutex t.operation_changed (fun () ->
-    if Atomic.get t.closed || (Atomic.get t.operation_projection).store_unavailable
-    then Some false
-    else
-      (* The mailbox owns the durable predicate. loop_no_mutex also observes
-         broadcasts during this yielding read, closing the check/wait race. *)
-      match has_queued_handoff_recipient t ~operation_id with
-      | Ok true -> Some true
-      | Ok false -> None
-      | Error _ -> Some false)
-;;
 
 let failed_operations_at_start t = t.failed_at_start
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})

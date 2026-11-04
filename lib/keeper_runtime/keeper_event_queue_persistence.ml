@@ -102,7 +102,7 @@ type transfer_projection_result = State.transfer_projection_result =
 
 (* v19 adds [checkpoint_retentions] to every pending entry: a checkpoint-yield
    turn's retention of a Connector_attention wake is durable delivery bookkeeping
-   (see [note_checkpoint_retention_result]), so a restart must not reset it and
+   (see [retain_checkpoint_batch_result]), so a restart must not reset it and
    v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
    so both files hard-cut together; there is no compatibility decoder. *)
 let snapshot_filename = Keeper_event_queue_schema.snapshot_filename
@@ -1359,17 +1359,6 @@ let reprioritize_pending_result
     State.reprioritize_pending ~selection ~urgency state)
 ;;
 
-let defer_pending_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~selection
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    State.defer_pending ~selection state)
-;;
-
 let retain_checkpoint_batch_result
       ?(after_commit = fun _ -> ())
       ~base_path ~keeper_name ~selections () =
@@ -1515,26 +1504,10 @@ let peek_when_result ~base_path ~keeper_name ~now ~ready =
   | Ok state -> Ok (State.peek_when ~now ~ready state)
 ;;
 
-let select_when_result ~base_path ~keeper_name ~now ~ready =
-  match load_state_result ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok state -> Ok (State.select_when ~now ~ready state)
-;;
-
-let pending_frontier_result ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok state -> Ok (State.frontier state, State.pending_selections state)
-;;
-
 let pending_selections_result ~base_path ~keeper_name =
-  Result.map snd (pending_frontier_result ~base_path ~keeper_name)
-;;
-
-let validate_pending_selection_result ~base_path ~keeper_name ~selection =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state -> State.validate_pending_selection ~selection state
+  | Ok state -> Ok (State.pending_selections state)
 ;;
 
 let admitted_selection_standing_result ~base_path ~keeper_name ~selection =
@@ -1557,19 +1530,6 @@ let ack_pending_with ~before_write
 ;;
 
 let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
-;;
-
-let note_checkpoint_retention_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~selection
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.note_checkpoint_retention ~selection state with
-    | Error _ as error -> error
-    | Ok (state, payload) -> Ok (state, payload))
 ;;
 
 let bind_pending_repetition_scope_result
@@ -1967,22 +1927,6 @@ let ack_consumed ~base_path ~keeper_name stimuli =
     (fun state ->
        let _removed, state = remove_post_ids stimuli state in
        Ok (state, ()))
-;;
-
-let drop_by_post_id
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~post_id
-      ()
-  =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit
-    (fun state ->
-       let removed, state = State.remove_by_post_id post_id state in
-       Ok (state, removed))
 ;;
 
 type queue_residence_unknown_reason =

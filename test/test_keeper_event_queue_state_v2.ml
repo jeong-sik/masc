@@ -4,6 +4,12 @@ module Persistence = Keeper_event_queue_persistence
 module Keeper_reaction_ledger = Masc.Keeper_reaction_ledger
 module Registry_event_queue = Masc.Keeper_registry_event_queue
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 (* Prompts moved from code into config/prompts; load them so keeper world event
    rows render a non-empty title and preview. Matches the other
    prompt-rendering tests. *)
@@ -1045,20 +1051,12 @@ let test_arrival_follows_the_entry_through_edits () =
   let state =
     State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ]) State.empty
   in
-  let frontier = State.frontier state in
   Alcotest.(check (list int64))
     "each admitted entry takes the next number"
     [ 0L; 1L ]
     (List.map (fun (entry : State.pending_selection) -> entry.arrival)
        (State.pending_selections state));
   let seen = select state in
-  List.iter
-    (fun (entry : State.pending_selection) ->
-       Alcotest.(check bool)
-         ("entry the reader loaded did not arrive after it: " ^ entry.source.post_id)
-         false
-         (State.arrived_since frontier entry))
-    (State.pending_selections state);
   let reprioritized, _ =
     State.reprioritize_pending ~selection:seen ~urgency:Queue.Low state
     |> require_ok "reprioritize"
@@ -1069,8 +1067,8 @@ let test_arrival_follows_the_entry_through_edits () =
        let after = entry_named edited "first" in
        Alcotest.(check bool) (label ^ " keeps the same entry") true
          (State.same_entry seen after);
-       Alcotest.(check bool) (label ^ " does not make it arrive later") false
-         (State.arrived_since frontier after);
+       Alcotest.(check int64) (label ^ " keeps its arrival number") seen.arrival
+         after.arrival;
        Alcotest.(check bool) (label ^ " changes the selection fence") true
          (Int64.compare after.admitted_revision seen.admitted_revision > 0))
     [ "reprioritize", reprioritized; "defer", deferred ];
@@ -1079,10 +1077,10 @@ let test_arrival_follows_the_entry_through_edits () =
       (queue [ stimulus "first" 1.0; stimulus "second" 2.0; stimulus "third" 3.0 ])
       state
   in
-  Alcotest.(check bool) "a source admitted after the read arrived later" true
-    (State.arrived_since frontier (entry_named later "third"));
-  Alcotest.(check bool) "the earlier sources still did not" false
-    (State.arrived_since frontier (entry_named later "first"));
+  Alcotest.(check int64) "a source admitted later takes the next number" 2L
+    (entry_named later "third").arrival;
+  Alcotest.(check int64) "the earlier sources keep their numbers" 0L
+    (entry_named later "first").arrival;
   let acked = State.ack_pending ~selection:seen state |> require_ok "ack" in
   let reinserted =
     State.with_pending (queue [ stimulus "first" 1.0; stimulus "second" 2.0 ]) acked
@@ -1090,8 +1088,8 @@ let test_arrival_follows_the_entry_through_edits () =
   let again = entry_named reinserted "first" in
   Alcotest.(check bool) "ACK then reinsertion is another entry" false
     (State.same_entry seen again);
-  Alcotest.(check bool) "and it arrived after the read" true
-    (State.arrived_since frontier again)
+  Alcotest.(check bool) "and it takes a later number" true
+    (Int64.compare again.arrival seen.arrival > 0)
 ;;
 
 let test_arrival_counter_must_cover_every_entry () =
@@ -1323,7 +1321,7 @@ let test_transition_wal_commit_observer_exactly_once () =
     |> require_ok "seed WAL observer source"
     |> ignore;
     let selection =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -1646,7 +1644,7 @@ let test_undecodable_primary_retains_wal_and_absence_recovers () =
       |> require_ok "WAL pending selections" in
     Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
       ~selections ~scope () |> require_ok "WAL bind" |> ignore;
-    let selection = Persistence.select_when_result ~base_path ~keeper_name
+    let selection = select_queue_entry ~base_path ~keeper_name
       ~now:3.0 ~ready:(fun _ -> true)
       |> require_ok "select" |> require_some "selection" in
     Persistence.terminalize_pending_turn_completed_result
@@ -1710,7 +1708,7 @@ let test_durable_peek_ack_restart () =
       Queue.enqueue pending (stimulus "two" 2.0))
     |> require_ok "seed durable pending";
     let selected =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -1732,58 +1730,6 @@ let test_durable_peek_ack_restart () =
     Alcotest.(check (list string)) "restart sees only unacked source" [ "two" ] (post_ids restarted))
 ;;
 
-let test_durable_checkpoint_retention_counts_and_acks_with_updated () =
-  with_temp_dir "keeper-retention-v19" (fun base_path ->
-    let keeper_name = "retention-keeper" in
-    Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending (stimulus "discord-ambient" 1.0))
-    |> require_ok "seed durable pending";
-    let pending_selection () =
-      Persistence.select_when_result
-        ~base_path
-        ~keeper_name
-        ~now:(Unix.gettimeofday ())
-        ~ready:(fun _ -> true)
-      |> require_ok "durable peek"
-      |> require_some "durable selection"
-    in
-    let first = pending_selection () in
-    let updated, retentions =
-      Persistence.note_checkpoint_retention_result
-        ~base_path
-        ~keeper_name
-        ~selection:first
-        ()
-      |> require_ok "first retention"
-    in
-    Alcotest.(check int) "first retention counts" 1 retentions;
-    (match
-       Persistence.note_checkpoint_retention_result
-         ~base_path
-         ~keeper_name
-         ~selection:first
-         ()
-     with
-     | Error _ -> ()
-     | Ok _ -> Alcotest.fail "spent snapshot accepted by the durable store");
-    let updated2, retentions2 =
-      Persistence.note_checkpoint_retention_result
-        ~base_path
-        ~keeper_name
-        ~selection:updated
-        ()
-      |> require_ok "second retention"
-    in
-    Alcotest.(check int) "second retention counts from durable state" 2 retentions2;
-    Persistence.ack_pending_result ~base_path ~keeper_name ~selection:updated2 ()
-    |> require_ok "retire with the updated selection";
-    let remaining =
-      Persistence.load_pending_result ~base_path ~keeper_name
-      |> require_ok "load after retirement"
-    in
-    Alcotest.(check (list string)) "retired entry left the durable queue" []
-      (post_ids remaining))
-;;
 (* Observed 2026-08-22: two Immediate completion_authority_rejected
    stimuli sat at queue_index 41 and 48 behind forty Normal entries because
    enqueue only appended. Urgency is a property of the pending list. *)
@@ -1807,7 +1753,7 @@ let test_immediate_arrival_precedes_pending_normal_entries () =
       [ "urgent"; "first"; "second" ]
       (post_ids restarted);
     let selected =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -1910,7 +1856,7 @@ let test_durable_turn_attempt_terminal_restart () =
       Queue.enqueue pending (stimulus "unrelated" 2.0))
     |> require_ok "seed failed turn pending";
     let selection =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -2000,7 +1946,7 @@ let test_durable_turn_attempt_terminal_restart () =
      | Ok Persistence.Turn_selection_withdrawn ->
        Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     let later_selection =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -2043,7 +1989,7 @@ let test_durable_inflight_selection_rejects_reinserted_source () =
       Queue.enqueue pending source)
     |> require_ok "seed in-flight source";
     let stale_selection =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -2102,7 +2048,7 @@ let test_durable_completed_turn_projects_reaction_ack () =
       Queue.enqueue pending source)
     |> require_ok "seed completed turn pending";
     let selection =
-      Persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -2181,7 +2127,7 @@ let test_owner_terminalizes_consecutive_turns_without_projection_gap () =
     |> require_ok "seed consecutive turn sources";
     let terminalize applied_at =
       let selection =
-        Persistence.select_when_result
+        select_queue_entry
           ~base_path
           ~keeper_name
           ~now:(Unix.gettimeofday ())
@@ -2533,7 +2479,7 @@ let test_scope_replay_crosses_the_barrier_again_after_a_transition () =
       |> require_ok label |> ignore
     in
     let complete_next applied_at =
-      let selection = Persistence.select_when_result ~base_path ~keeper_name
+      let selection = select_queue_entry ~base_path ~keeper_name
         ~now:applied_at ~ready:(fun _ -> true)
         |> require_ok "select" |> require_some "selection" in
       Persistence.terminalize_pending_turn_completed_result
@@ -2921,10 +2867,6 @@ let () =
             "checkpoint retention spends the caller snapshot"
             `Quick
             test_checkpoint_retention_spends_the_caller_snapshot
-        ; Alcotest.test_case
-            "durable checkpoint retention counts and acks with updated"
-            `Quick
-            test_durable_checkpoint_retention_counts_and_acks_with_updated
         ; Alcotest.test_case
             "Immediate arrival precedes pending Normal entries"
             `Quick

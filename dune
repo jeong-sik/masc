@@ -76,3 +76,17 @@
  (files
   (scripts/check-runtime-deployment-preflight.sh as
    masc-check-runtime-deployment-preflight)))
+
+; task-3189: test/stanzas/*.inc files are included by hand in test/dune; a
+; forgotten line silently drops the test instead of failing it. This
+; standalone alias compares the two sets in both directions. It is
+; intentionally not wired into @runtest or @check, and must not become a
+; required merge check: run it on demand with
+; `dune build @test-stanzas-include`.
+(rule
+ (alias test-stanzas-include)
+ (deps test/test_stanzas_include.py test/dune (source_tree test/stanzas))
+ (action
+  (run python3 %{dep:test/test_stanzas_include.py}
+    --dune %{dep:test/dune}
+    --stanzas-dir test/stanzas)))

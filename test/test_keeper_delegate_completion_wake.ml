@@ -21,6 +21,12 @@ module Queue_registry = Masc.Keeper_registry_event_queue
 module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let asker = "alpha"
 let delegate = "beta"
 let operation_id = "kmsg-0001"
@@ -571,7 +577,7 @@ let answer_is_selected_before_ambient_backlog () =
              (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
          | _ -> fail "durable queue lost the answer or ambient work");
         let ready (source : Event_queue.stimulus) = source.post_id<>prior.post_id in
-        match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name:asker
+        match select_queue_entry ~base_path ~keeper_name:asker
             ~now:(Unix.gettimeofday ()) ~ready with
         | Ok (Some selection) ->
           (match selection.Keeper_event_queue_state.source.payload with

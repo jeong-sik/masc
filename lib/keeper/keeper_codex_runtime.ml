@@ -5,10 +5,6 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 
-type scheduling_turn =
-  | Autonomous_schedule
-  | Direct_schedule of Keeper_chat_operation.Operation_id.t
-
 type successful_tool_completion =
   | No_successful_tool_completion
   | Successful_tool_completion
@@ -1516,27 +1512,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
         in
-        let scheduling_turn =
-           match Keeper_owner_registry.get ~base_path ~keeper_name with
-           | Error _ -> None
-           | Ok owner ->
-             (match Keeper_owner.turn_in_flight owner with
-              | Some { lane = Keeper_owner.Autonomous; _ } ->
-                Some (owner, Autonomous_schedule)
-              | Some { lane = Keeper_owner.Chat_operation; _ } ->
-                Option.map (fun operation_id -> owner, Direct_schedule operation_id)
-                  (Keeper_owner.operation_projection owner).running_operation_id
-              | Some { lane = Keeper_owner.Maintenance; _ } | None -> None)
-        in
-        let await_handoff = Option.map (fun (owner, turn) ->
-          match turn with
-          | Autonomous_schedule ->
-            (fun () -> Keeper_owner.await_claimable_operation owner)
-          | Direct_schedule operation_id ->
-            (fun () -> Keeper_owner.await_queued_handoff_recipient owner ~operation_id)) scheduling_turn in
         (match
        Runtime_codex_app_server.run_turn
-         ?await_handoff
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
@@ -1594,7 +1571,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          ~on_context_submission:(fun observation ->
            (match observation.Runtime_codex_app_server.method_ with
             | Thread_start | Thread_resume -> thread_request_transmitted := true
-            | Thread_inject_items | Turn_start | Turn_steer | Dynamic_tool_response -> ());
+            | Thread_inject_items | Turn_start | Dynamic_tool_response -> ());
            let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
              match observation.Runtime_codex_app_server.method_ with
              | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
@@ -1602,7 +1579,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
              | Turn_start -> Keeper_context_submission_link.binding_to_json
                  ~slot:(Turn_text (List.length images)) prompt_projection observation.write
              | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_injected_context"]
-             | Turn_steer -> `Assoc ["status", `String "out_of_scope_host_notice"]
              | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
            Host.record_context_submission ~keeper_name ~raw_trace_run
              ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
@@ -1640,12 +1616,21 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           , Some detail ) -> Error (internal_error detail)
         | ( Host.Terminal_tool_boundary _
           , None ) -> settle_host_stop stop)
-     | Error (Runtime_codex_app_server.Rpc_error _ as error)
+     | Error
+           ( ( Runtime_codex_app_server.Rpc_error _
+             | Runtime_codex_app_server.Account_read_failed _ )
+             as error )
        when not !thread_request_transmitted ->
        (* Setup-stage refusal (initialize, account/read): no thread request
           reached the vendor, so the settled session, ordinal and frontier
           stay exactly as claimed-over. [release_transient] cannot restore
-          the claim frontier, hence the byte-exact revert instead. *)
+          the claim frontier, hence the byte-exact revert instead.
+          [Account_read_failed] joined [Rpc_error] here after #47921 split
+          it into its own variant: the account/read handshake refusal is
+          still a setup-stage refusal (#47715). The arm's reach is the
+          [thread_request_transmitted] flag: an RPC stage added between
+          account/read and the first thread request will be reverted here
+          too, so a PR adding one must read this arm alongside it. *)
        observe_failed_dispatch ~observe_transport_uncertain error;
        if Runtime_codex_app_server.refused_for_spent_usage error
        then
@@ -1794,16 +1779,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          | Error detail ->
            Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
-       (* Natural vendor completion may only settle a scheduling handoff.
-          Preserve the original receipts until the consumer itself completes. *)
        let stop_reason : Runtime_agent.stop_reason =
-         match scheduling_turn, turn.scheduling_handoff with
-         | Some (_, Direct_schedule _),
-             (Runtime_codex_app_server.Handoff_pending | Handoff_accepted) ->
-           Yielded_to_operation_queued { turns_used = turn_count; provider_turn_ordinal = turn_count }
-         | (Some (_, Autonomous_schedule) | None), _
-         | Some (_, Direct_schedule _),
-             (Handoff_unrequested | Handoff_rejected) -> Completed { provider_turn_ordinal = turn_count }
+         Completed { provider_turn_ordinal = turn_count }
        in
        on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption
          (tool_outbox :: Option.to_list !produced_results)));

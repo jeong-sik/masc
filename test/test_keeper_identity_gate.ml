@@ -83,7 +83,8 @@ let offered ?read_only remote_name =
 
 (* A transport that records what it was asked and answers whatever the test
    set. Nothing here reaches a network. *)
-let recording_transport ?(modern = false) ?(get_read_only_hint = true) () =
+let recording_transport ?(modern = false) ?(get_read_only_hint = true)
+    ?(call_text = "PK-1") ?(call_is_error = false) () =
   let sent = ref [] in
   let post ~url ~headers ~body =
     sent := (url, headers, body) :: !sent;
@@ -105,7 +106,8 @@ let recording_transport ?(modern = false) ?(get_read_only_hint = true) () =
           ; "annotations", `Assoc [ "readOnlyHint", `Bool hint ] ] in
         `Assoc [ "tools", `List [ tool "getJiraIssue" get_read_only_hint; tool "editJiraIssue" false ] ]
       | `String "tools/call" -> `Assoc
-          [ "content", `List [ `Assoc [ "type", `String "text"; "text", `String "PK-1" ] ] ]
+          [ "content", `List [ `Assoc [ "type", `String "text"; "text", `String call_text ] ]
+          ; "isError", `Bool call_is_error ]
       | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> `Null
     in
     let result = match modern, result with
@@ -172,11 +174,12 @@ let transports_of_post send =
   let post : Mcp_client.post = { deadline_s = 60.; send = (fun ~deadline:_ -> send) } in
   { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
 
-let execute ?post ~base_path tool_fixture arguments =
+let execute ?post ?(inline_ceiling_bytes = Common.max_tool_result_wire_bytes)
+    ~base_path tool_fixture arguments =
   let config = Masc.Workspace.default_config base_path in
   let tool =
     Gate.agent_tool ?transports:(Option.map transports_of_post post) ~config
-      ~meta:(meta ()) tool_fixture
+      ~meta:(meta ()) ~inline_ceiling_bytes:(fun () -> inline_ceiling_bytes) tool_fixture
   in
   Agent_core.Base.Tool.execute tool arguments
 
@@ -185,7 +188,11 @@ let test_without_a_clock_the_call_is_refused_not_unbounded () =
   let base_path = temp_base () in
   allow_external ~base_path;
   let config = Masc.Workspace.default_config base_path in
-  let tool = Gate.agent_tool ~config ~meta:(meta ()) (offered ~read_only:true "getJiraIssue") in
+  let tool =
+    Gate.agent_tool ~config ~meta:(meta ())
+      ~inline_ceiling_bytes:(fun () -> Common.max_tool_result_wire_bytes)
+      (offered ~read_only:true "getJiraIssue")
+  in
   match Agent_core.Base.Tool.execute tool (`Assoc [ ("key", `String "PK-1") ]) with
   | Ok output ->
       Alcotest.failf "a call with no clock ran: %s" output.Agent_core.Types.content
@@ -321,6 +328,104 @@ let test_changed_modern_catalog_does_not_send_the_tool_call () =
   check Alcotest.int "modern discovery was reached" 1 !discoveries;
   check Alcotest.int "the live catalog was read" 1 !listings;
   check Alcotest.int "no tool request was sent" 0 !calls
+
+(* ── the answer: what the model receives from an allowed call ──────── *)
+
+(* On 2026-11-04 one Confluence page came back at 52,480 characters. A
+   Claude Code Keeper got it whole, the CLI spilled it to a file under its own
+   configuration directory, and the Keeper's Read refused that path as outside
+   its sandbox. *)
+let oversized_answer () =
+  String.concat "\n"
+    (List.init 2_000 (fun line -> Printf.sprintf "%04d 페이지 본문 한 줄" line))
+
+let retry_warning = "The service may have applied an effect; check its state before retrying."
+
+let stored_body ~base_path marker =
+  match Tool_output.decode_from_agent_core marker with
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+      Alcotest.failf "the model received %d bytes inline, not a reference"
+        (String.length marker)
+  | Tool_output.Decoded reference -> (
+      match
+        Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+          ~sha256:reference.Tool_output.sha256
+      with
+      | Ok (Some bytes) -> bytes
+      | Ok None -> Alcotest.fail "the reference names no stored body"
+      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+
+let allowed_call ?(before_call = fun ~base_path:_ -> ()) ~call_text ~call_is_error () =
+  let base_path = temp_base () in
+  allow_external ~base_path;
+  project_token ~base_path;
+  before_call ~base_path;
+  let post, _sent = recording_transport ~call_text ~call_is_error () in
+  ( base_path,
+    execute ~post ~base_path
+      (offered ~read_only:true "getJiraIssue")
+      (`Assoc [ ("key", `String "PK-1") ]) )
+
+let test_a_large_answer_reaches_the_model_as_a_reference () =
+  let answer = oversized_answer () in
+  check Alcotest.bool "the fixture is over the ceiling" true
+    (String.length answer > Common.max_tool_result_wire_bytes);
+  match allowed_call ~call_text:answer ~call_is_error:false () with
+  | base_path, Ok output ->
+      check str "the stored body is the service's answer" answer
+        (stored_body ~base_path output.Agent_core.Types.content)
+  | _, Error error ->
+      Alcotest.failf "an allowed read failed: %s" error.Agent_core.Types.message
+
+(* MASC's sentence about a failed call is what the model acts on next, so it
+   stays inline; only the service's text goes behind the reference. *)
+let test_a_large_failure_keeps_the_warning_inline () =
+  let answer = oversized_answer () in
+  match allowed_call ~call_text:answer ~call_is_error:true () with
+  | _, Ok output ->
+      Alcotest.failf "a reported failure became a success: %s"
+        output.Agent_core.Types.content
+  | base_path, Error error ->
+      let message = error.Agent_core.Types.message in
+      check Alcotest.bool "the message is within the ceiling" true
+        (String.length message <= Common.max_tool_result_wire_bytes);
+      check Alcotest.bool "the retry warning is inline" true
+        (contains ~needle:retry_warning message);
+      check Alcotest.bool "the model is not told to retry" false
+        error.Agent_core.Types.recoverable;
+      let marker =
+        match String.index_opt message '\n' with
+        | Some cut -> String.sub message 0 cut
+        | None -> message
+      in
+      check str "the stored body is the service's text" answer
+        (stored_body ~base_path marker)
+
+(* A store that cannot keep the answer must not make a completed call look
+   like one that can simply be sent again. *)
+let test_an_unstorable_answer_reports_the_call_as_completed () =
+  let answer = oversized_answer () in
+  let block_the_store ~base_path =
+    let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path) in
+    Fs_compat.mkdir_p (Filename.dirname root);
+    Out_channel.with_open_bin root (fun channel ->
+      Out_channel.output_string channel "a file where the store's directory goes")
+  in
+  match allowed_call ~before_call:block_the_store ~call_text:answer ~call_is_error:false () with
+  | _, Ok output ->
+      Alcotest.failf "an unstored answer reached the model as %d bytes"
+        (String.length output.Agent_core.Types.content)
+  | _, Error error ->
+      check Alcotest.bool "the model is told the call completed" true
+        (contains ~needle:"the service completed the call" error.Agent_core.Types.message);
+      check Alcotest.bool "the model is not told to retry" false
+        error.Agent_core.Types.recoverable
+
+let test_a_small_answer_stays_inline () =
+  match allowed_call ~call_text:"PK-1" ~call_is_error:false () with
+  | _, Ok output -> check str "the answer is inline" "PK-1" output.Agent_core.Types.content
+  | _, Error error ->
+      Alcotest.failf "an allowed read failed: %s" error.Agent_core.Types.message
 
 (* Real queue, grant, Gate and client wiring, with only the remote HTTP
    answers stubbed. This intentionally exercises the direct identity replay
@@ -653,6 +758,16 @@ let () =
             `Quick test_opening_the_external_lane_is_its_own_gesture;
           Alcotest.test_case "the external lane defaults to manual" `Quick
             test_the_external_lane_defaults_to_manual;
+        ] );
+      ( "the answer",
+        [ Alcotest.test_case "a large answer reaches the model as a reference"
+            `Quick test_a_large_answer_reaches_the_model_as_a_reference;
+          Alcotest.test_case "a large failure keeps the warning inline"
+            `Quick test_a_large_failure_keeps_the_warning_inline;
+          Alcotest.test_case "an unstorable answer reports the call as completed"
+            `Quick test_an_unstorable_answer_reports_the_call_as_completed;
+          Alcotest.test_case "a small answer stays inline" `Quick
+            test_a_small_answer_stays_inline;
         ] );
       ( "the inversion",
         [ Alcotest.test_case "the gate input inverts" `Quick

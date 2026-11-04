@@ -1062,14 +1062,19 @@ let test_settle_absent_retry_stays_fenced base_path _workspace =
   let post = require_post (create store "before unknown rewrite") in
   let path = Board.persist_path store in
   let original = read_bytes path in
-  armed := true;
-  require_io_refusal (edit store post "published but durability unknown");
-  require_unknown_parent_sync store;
-  (* An external actor restores the original content under a fresh identity:
-     bytes match the pre-write snapshot, but the cursor moved. *)
-  let restored_path = path ^ ".externally-restored" in
-  write_bytes restored_path original;
-  Unix.rename restored_path path;
+  (* The edit below renames over the pre-write file, which frees its inode,
+     and ext4 gives a freed inode number to the next file it creates. This
+     descriptor keeps the number in use until the restored copy has its own. *)
+  let pre_write_file = Unix.openfile path [Unix.O_RDONLY] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close pre_write_file) (fun () ->
+    armed := true;
+    require_io_refusal (edit store post "published but durability unknown");
+    require_unknown_parent_sync store;
+    (* An external actor restores the original content under a fresh identity:
+       bytes match the pre-write snapshot, but the cursor moved. *)
+    let restored_path = path ^ ".externally-restored" in
+    write_bytes restored_path original;
+    Unix.rename restored_path path);
   let restored = match settle store with
     | Board.Posts_settled_not_written { observation; _ } -> observation
     | Board.Posts_settled_written _ | Board.Posts_settle_superseded _

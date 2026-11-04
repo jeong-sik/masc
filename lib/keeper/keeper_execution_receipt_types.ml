@@ -149,8 +149,6 @@ type t =
 
 let stop_reason_to_string = function
   | Runtime_agent.Completed _ -> "completed"
-  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-    Printf.sprintf "yielded_to_operation_queued:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
   | Runtime_agent.InputRequired _ ->
@@ -162,7 +160,6 @@ let stop_reason_to_string = function
 let disposition_of_stop_reason = function
   | Runtime_agent.Completed _ -> Keeper_turn_disposition.Success
   | Runtime_agent.InputRequired _ -> Keeper_turn_disposition.Input_required
-  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Keeper_turn_disposition.Checkpoint
 ;;

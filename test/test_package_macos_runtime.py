@@ -15,6 +15,7 @@ import unittest
 import ssl
 import urllib.error
 import urllib.request
+import zipfile
 from email.message import Message
 from unittest.mock import patch
 
@@ -25,11 +26,27 @@ spec.loader.exec_module(package)
 
 
 class PythonHttpsProbe(unittest.TestCase):
+    def run_probe(self):
+        shipped = os.path.join(sys.base_prefix, 'ssl', 'cacert.pem')
+        with patch.dict(os.environ, {'SSL_CERT_FILE': shipped}):
+            exec(package.PYTHON_HTTPS_PROBE, {})
+
+    def test_probe_requires_the_shipped_bundle(self):
+        for cafile in (None, '/private/etc/ssl/cert.pem'):
+            environ = {name: value for name, value in os.environ.items() if name != 'SSL_CERT_FILE'}
+            if cafile is not None:
+                environ['SSL_CERT_FILE'] = cafile
+            with self.subTest(cafile=cafile), patch.dict(os.environ, environ, clear=True), \
+                    patch.object(urllib.request, 'urlopen') as request:
+                with self.assertRaisesRegex(ValueError, 'shipped CA bundle'):
+                    exec(package.PYTHON_HTTPS_PROBE, {})
+                request.assert_not_called()
+
     def test_https_rejection_is_a_validated_response(self):
         body = io.BytesIO(b'forbidden')
         response = urllib.error.HTTPError('https://example.com', 403, 'Forbidden', Message(), body)
         with patch.object(urllib.request, 'urlopen', side_effect=response) as request:
-            exec(package.PYTHON_HTTPS_PROBE, {})
+            self.run_probe()
         request.assert_called_once_with('https://example.com', timeout=30)
         self.assertTrue(body.closed)
 
@@ -39,7 +56,7 @@ class PythonHttpsProbe(unittest.TestCase):
             error = urllib.error.URLError(cause)
             with self.subTest(cause=cause), patch.object(urllib.request, 'urlopen', side_effect=error):
                 with self.assertRaises(urllib.error.URLError) as raised:
-                    exec(package.PYTHON_HTTPS_PROBE, {})
+                    self.run_probe()
                 self.assertIs(raised.exception, error)
 
     def test_http_downgrade_is_rejected_even_on_http_error(self):
@@ -50,14 +67,14 @@ class PythonHttpsProbe(unittest.TestCase):
             with self.subTest(code=code), patch.object(
                     urllib.request, 'urlopen', return_value=response, side_effect=effect):
                 with self.assertRaisesRegex(ValueError, 'non-HTTPS'):
-                    exec(package.PYTHON_HTTPS_PROBE, {})
+                    self.run_probe()
             self.assertTrue(body.closed)
 
     def test_https_success_is_retained(self):
         body = io.BytesIO(b'ok')
         response = urllib.error.HTTPError('https://example.com', 200, 'OK', Message(), body)
         with patch.object(urllib.request, 'urlopen', return_value=response):
-            exec(package.PYTHON_HTTPS_PROBE, {})
+            self.run_probe()
         self.assertTrue(body.closed)
 
 
@@ -131,6 +148,78 @@ class PinnedDownload(unittest.TestCase):
 
     def test_truncated_payload_is_rejected_before_extraction(self):
         self.exercise(b'reviewed Python', False)
+
+
+class CaBundle(unittest.TestCase):
+    URL = 'https://files.pythonhosted.org/packages/pinned/certifi.whl'
+
+    def wheel(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            archive.writestr('certifi/cacert.pem', b'pinned certificates')
+            archive.writestr('certifi-0.dist-info/licenses/LICENSE', b'MPL-2.0 notice')
+        return buffer.getvalue()
+
+    def pin(self, data):
+        return {'browser_download_url': self.URL, 'size': len(data),
+                'digest': 'sha256:' + hashlib.sha256(data).hexdigest(),
+                'member': 'certifi/cacert.pem',
+                'license_member': 'certifi-0.dist-info/licenses/LICENSE'}
+
+    def stage(self, root, sites=('python3.13',)):
+        stage = root / 'stage'
+        stage.mkdir()
+        for site in sites:
+            (stage / 'python/lib' / site / 'site-packages').mkdir(parents=True)
+        return stage
+
+    def test_verified_bundle_becomes_the_runtime_default(self):
+        data = self.wheel()
+        with tempfile.TemporaryDirectory() as directory:
+            stage = self.stage(Path(directory))
+            with patch.object(package, 'fetch', return_value=data) as fetch:
+                package.stage_ca_bundle(stage, self.pin(data))
+            fetch.assert_called_once_with(self.URL)
+            bundle = stage / 'python/ssl/cacert.pem'
+            self.assertEqual(bundle.read_bytes(), b'pinned certificates')
+            self.assertEqual(bundle.stat().st_mode & 0o777, 0o644)
+            self.assertEqual((stage / 'licenses/certifi/LICENSE').read_bytes(), b'MPL-2.0 notice')
+            hook = stage / 'python/lib/python3.13/site-packages/sitecustomize.py'
+            self.assertEqual(hook.read_text(), package.SITECUSTOMIZE)
+
+    def test_tampered_or_truncated_wheel_is_rejected_before_staging(self):
+        data = self.wheel()
+        for payload in (data[:-1], bytes([data[0] ^ 1]) + data[1:]):
+            with self.subTest(size=len(payload)), tempfile.TemporaryDirectory() as directory:
+                stage = self.stage(Path(directory))
+                with patch.object(package, 'fetch', return_value=payload):
+                    with self.assertRaisesRegex(ValueError, 'checksum differs from pin'):
+                        package.stage_ca_bundle(stage, self.pin(data))
+                self.assertFalse((stage / 'python/ssl').exists())
+
+    def test_staging_needs_exactly_one_site_packages(self):
+        data = self.wheel()
+        for sites in ((), ('python3.12', 'python3.13')):
+            with self.subTest(sites=sites), tempfile.TemporaryDirectory() as directory:
+                stage = self.stage(Path(directory), sites)
+                with patch.object(package, 'fetch', return_value=data):
+                    with self.assertRaisesRegex(ValueError, 'exactly one site-packages'):
+                        package.stage_ca_bundle(stage, self.pin(data))
+                self.assertFalse((stage / 'python/ssl').exists())
+
+    def run_hook(self, environ):
+        with patch.dict(os.environ, environ, clear=True):
+            exec(package.SITECUSTOMIZE, {})
+            return dict(os.environ)
+
+    def test_hook_defaults_to_the_shipped_bundle(self):
+        self.assertEqual(self.run_hook({}),
+                         {'SSL_CERT_FILE': os.path.join(sys.base_prefix, 'ssl', 'cacert.pem')})
+
+    def test_hook_keeps_user_certificate_settings(self):
+        for environ in ({'SSL_CERT_FILE': '/custom/roots.pem'}, {'SSL_CERT_DIR': '/custom/roots'}):
+            with self.subTest(environ=environ):
+                self.assertEqual(self.run_hook(environ), environ)
 
 
 class BinaryPublication(unittest.TestCase):

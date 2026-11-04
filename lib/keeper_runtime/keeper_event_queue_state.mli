@@ -141,8 +141,7 @@ type pending_selection =
     retention, deferral and reprioritization preserve it, while an ACK followed
     by reinsertion creates a new entry with a later number. It names the entry,
     not its content or its position, so it is not an exact selection fence; use
-    [admitted_revision] for that. Read it through {!same_entry} and
-    {!arrived_since}. *)
+    [admitted_revision] for that. Read it through {!same_entry}. *)
 (** [repetition_scope = None] means no durable binding has been recorded. It
     does not assert that the source has never been observed by a model. A
     binding identifies work; it does not by itself authorize Fresh or Resume. *)
@@ -180,23 +179,6 @@ val last_non_immediate_served : t -> Keeper_event_queue.urgency option
     used by {!peek_when} and {!select_when} for lane preference. On snapshot
     load it is derived from retained transition evidence, which may not
     include every acknowledgement. *)
-
-type frontier
-(** The point in queue history at which one reader loaded the state. *)
-
-val frontier : t -> frontier
-(** The frontier of this loaded state: every entry it holds has a lower
-    [arrival] number than any admitted later. *)
-
-val unobserved_frontier : frontier
-(** A reader that loaded no state: every pending entry arrived after it. *)
-
-val arrived_since : frontier -> pending_selection -> bool
-(** [arrived_since frontier entry] is true when the queue admitted [entry]
-    after the state [frontier] was taken from, so a reader holding [frontier]
-    had not seen it. Reprioritization, deferral and retention of an entry the
-    reader already saw leave this false; an ACK followed by reinsertion makes
-    it true. *)
 
 val same_entry : pending_selection -> pending_selection -> bool
 (** The two values describe the same queue entry, whatever edits happened

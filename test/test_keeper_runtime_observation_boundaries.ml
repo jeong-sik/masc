@@ -458,14 +458,16 @@ let test_transient_network_failure_advances_crash_streak () =
        ignore (R.For_testing.register ~base_path meta.name meta);
        KUF.record_failure_observation ~config ~meta ~err
          ~terminal_reason:(Keeper_turn_terminal.of_failure ~raw_error:"TLS handshake" err)
-         ~error_text:"TLS handshake";
+         ~error_text:"TLS handshake"
+         ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
        Alcotest.(check int)
          "first network failure counts toward the streak"
          1
          (R.get_turn_failures ~base_path meta.name);
        KUF.record_failure_observation ~config ~meta ~err
          ~terminal_reason:(Keeper_turn_terminal.of_failure ~raw_error:"TLS handshake" err)
-         ~error_text:"TLS handshake";
+         ~error_text:"TLS handshake"
+         ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
        let count = R.get_turn_failures ~base_path meta.name in
        Alcotest.(check int) "second network failure compounds the streak" 2 count;
        let event = KHL.turn_status_event ~turn_fail_count:count in
@@ -489,6 +491,7 @@ let record_failed_turn ~config ~meta err =
   let error_text = Agent_core.Error.to_string err in
   let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error:error_text err in
   KUF.record_failure_observation ~config ~meta ~terminal_reason ~err ~error_text
+    ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
 
 let refresh_failure_reason ~base_path ~keeper_name =
   let registry_entry =

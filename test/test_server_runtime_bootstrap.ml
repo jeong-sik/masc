@@ -3243,7 +3243,8 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
       let raw_error = Agent_core.Error.to_string error in
       let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error error in
       Keeper_unified_turn_failure.record_failure_observation
-        ~config ~meta ~terminal_reason ~err:error ~error_text:raw_error;
+        ~config ~meta ~terminal_reason ~err:error ~error_text:raw_error
+        ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
       mark_keeper_failing config meta;
       let health () =
         let snapshot =

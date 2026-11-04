@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   CONNECTOR_DISPLAY_NAMES,
-  IN_PROCESS_CONNECTOR_ACTIVATION,
-  IN_PROCESS_CONNECTOR_IDS,
   KNOWN_CONNECTOR_IDS,
   channelIcon,
   connectorAccentStyle,
-  isInProcessConnector,
+  connectorActivation,
 } from './connector-constants'
 
 describe('connector vocabulary constants', () => {
@@ -20,22 +18,15 @@ describe('connector vocabulary constants', () => {
     }
   })
 
-  it('in-process connectors are a subset of known connectors with an activation requirement', () => {
-    for (const id of IN_PROCESS_CONNECTOR_IDS) {
-      expect((KNOWN_CONNECTOR_IDS as readonly string[]).includes(id)).toBe(true)
-      expect(IN_PROCESS_CONNECTOR_ACTIVATION[id]).toBeTruthy()
-      expect(isInProcessConnector(id)).toBe(true)
+  it('every known connector has an activation requirement', () => {
+    for (const id of KNOWN_CONNECTOR_IDS) {
+      expect(connectorActivation(id)).toBeTruthy()
     }
   })
-})
 
-describe('isInProcessConnector', () => {
-  it('discord, imessage and slack are in-process, external sidecars are not', () => {
-    expect(isInProcessConnector('discord')).toBe(true)
-    expect(isInProcessConnector('slack')).toBe(true)
-    expect(isInProcessConnector('imessage')).toBe(true)
-    expect(isInProcessConnector('telegram')).toBe(true)
-    expect(isInProcessConnector('unknown')).toBe(false)
+  it('an id outside the known set has no activation requirement', () => {
+    expect(connectorActivation('unknown')).toBeNull()
+    expect(connectorActivation('')).toBeNull()
   })
 })
 

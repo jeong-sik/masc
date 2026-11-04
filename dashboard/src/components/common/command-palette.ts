@@ -33,7 +33,7 @@ import { V2_PRIMARY_SURFACE_IDS } from '../../config/navigation'
 import { toggleCopilotDock } from '../copilot-dock'
 import { globalShortcutManager } from '../../lib/global-shortcut-manager'
 import { isImeComposing } from '../../lib/keyboard'
-import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS } from '../connector-status'
+import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS } from '../connector-constants'
 import type { GoalTreeNode, GoalTreeTask, TabId } from '../../types'
 
 interface PaletteEntry {

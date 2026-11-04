@@ -3,8 +3,8 @@ import { describe, it, expect } from 'vitest'
 import {
   connectorCardBorderClass,
   connectorStateLabel,
-} from './connector-status'
-import type { ConnectorStateLabel } from './connector-status'
+} from './connector-state'
+import type { ConnectorStateLabel } from './connector-state'
 
 describe('connectorCardBorderClass (pure)', () => {
   it('connected → emerald 4px left border (Portainer "running" tone)', () => {

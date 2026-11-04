@@ -28,25 +28,13 @@ import {
 import { dashboardRuntime } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
-  IN_PROCESS_CONNECTOR_ACTIVATION,
-  isInProcessConnector,
+  connectorActivation,
   CONNECTOR_DISPLAY_NAMES,
   connectorAccentStyle,
   channelIcon,
   type KnownConnectorId,
-  type InProcessConnectorId,
 } from './connector-constants'
-// Back-compat re-export: connector vocabulary now lives in ./connector-constants.
-export {
-  KNOWN_CONNECTOR_IDS,
-  IN_PROCESS_CONNECTOR_IDS,
-  IN_PROCESS_CONNECTOR_ACTIVATION,
-  isInProcessConnector,
-  CONNECTOR_DISPLAY_NAMES,
-  connectorAccentStyle,
-  channelIcon,
-} from './connector-constants'
-export type { KnownConnectorId, InProcessConnectorId } from './connector-constants'
+import { isKnownConnectorId } from '../config/connector-ids'
 import {
   connectorStateLabel,
   connectorCardBorderClass,
@@ -56,9 +44,6 @@ import {
   connectorStatusPillClass,
   connectorStatusPillLabel,
 } from './connector-state'
-// Back-compat re-export: connector state mapping now lives in ./connector-state.
-export { connectorStateLabel, connectorCardBorderClass } from './connector-state'
-export type { ConnectorStateLabel } from './connector-state'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
@@ -100,7 +85,7 @@ function BoldLabel({ children }: { children: unknown }) {
 function activeConnectorFilter(): string | null {
   const connector = route.value.params.connector
   if (!connector) return null
-  return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
+  return isKnownConnectorId(connector) ? connector : null
 }
 
 
@@ -549,7 +534,7 @@ function connectorWarningNextHint(
   if (connectorError) {
     return html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
   }
-  return html`check the server log for the ${connectorName} gateway and <${Tk}>${IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId] ?? 'connector configuration'}<//>.`
+  return html`check the server log for the ${connectorName} gateway and <${Tk}>${connectorActivation(connectorId) ?? 'connector configuration'}<//>.`
 }
 
 function ConnectorLivePanel({
@@ -656,7 +641,7 @@ function ConnectorLivePanel({
   const showInProcessUnavailableHint =
     !showNoKeeperEmpty
     && !connector?.available
-    && isInProcessConnector(connectorId)
+    && isKnownConnectorId(connectorId)
 
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
@@ -822,7 +807,7 @@ function ConnectorLivePanel({
 
       ${showInProcessUnavailableHint
         ? (() => {
-            const activation = IN_PROCESS_CONNECTOR_ACTIVATION[connectorId as InProcessConnectorId]
+            const activation = connectorActivation(connectorId)
             return html`
               <${SurfaceCard}
                 class="mt-3 !border-dashed !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-3 text-xs"

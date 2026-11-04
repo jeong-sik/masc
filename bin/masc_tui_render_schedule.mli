@@ -55,6 +55,14 @@ end
 val keeper_marker_width : int
 val keeper_status_width : int
 val keeper_flags_width : int
+
+val keeper_flags_header : string
+(** The header words of the flag cell. The activation letter sits under the
+    first word and the sandbox letter under the last. *)
+
+val keeper_flags_gap : int
+(** Cells between the activation letter and the sandbox letter. *)
+
 val keeper_last_turn_width : int
 
 val keeper_flags_minimum_inner_width : int

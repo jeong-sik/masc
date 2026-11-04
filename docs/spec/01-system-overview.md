@@ -200,4 +200,4 @@ MASC의 현재 canonical front door는 3가지다.
 | OQ-SYS-001 | Sub-library 경계를 어디까지 세분화할 것인가? | `lib/keeper/`, `lib/server/` | Open |
 | OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? Cloudflare Tunnel이 cleartext h2를 지원하지 않는 제약. | `bin/main_eio.ml` | Open |
 | OQ-SYS-003 | MASC와 `packages/agent_core` 사이의 장기 경계는 어떻게 유지할 것인가? | `packages/agent_core/`, `lib/keeper/` | Open |
-| OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket) 중 어디를 canonical으로 수렴할 것인가? | `lib/grpc/`, `lib/server/` | Open |
+| OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket) 중 어디를 canonical으로 수렴할 것인가? | `lib/server/masc_grpc_server.ml`, `lib/config/masc_grpc_transport.ml` | Open |

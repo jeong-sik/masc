@@ -402,35 +402,8 @@ HTTP/1.1 입구와 HTTP/2 gateway 는 rate limit 과 MCP origin 검사 다음, �
 
 ### 6.2 REST API 라우트 (server_routes_http 조립)
 
-`make_routes`가 HTTP Router를 조립한다:
-
-```ocaml
-let make_routes ~port ~host:_ ~sw ~clock =
-  Http.Router.create ()
-  |> Server_routes_http_routes_frontend.add_routes ~port ~sw ~clock
-  |> Server_oauth_http.add_routes
-  |> Server_keeper_oauth_http.add_routes
-  |> Server_routes_http_routes_workspace.add_routes
-  |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
-  |> Server_routes_http_routes_provider_runs.add_routes ~sw
-  |> Server_routes_http_routes_verification.add_routes
-  |> Server_routes_http_routes_attribution.add_routes
-  |> Server_routes_http_routes_activity.add_routes ~sw ~clock
-  |> Server_routes_http_routes_presets.add_routes
-  |> Server_routes_http_routes_browser_lane.add_routes
-  |> Server_routes_http_routes_lane_addons.add_routes ~sw ~clock
-  |> Server_routes_http_routes_msx.add_routes
-  |> Server_routes_http_routes_artifacts.add_routes
-  |> Server_routes_http_routes_voice.add_routes
-  |> Server_routes_http_routes_multimodal.add_routes
-  |> Server_routes_http_routes_autonomous.add_routes
-  |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
-  |> Server_routes_http_routes_sidecar.add_routes ~sw ~clock
-  |> Server_routes_http_routes_repositories.add_routes
-  |> Server_routes_http_routes_workspace.add_routes
-  |> Server_ide_http.add_routes
-  |> Server_ide_lsp_proxy.add_routes ~sw ~clock
-```
+`lib/server/server_routes_http.ml` 의 `make_routes` 가 `Server_routes_http_routes_<이름>.add_routes` 를
+차례로 이어 붙여 HTTP Router 를 만든다. 라우트 모듈의 목록과 순서는 그 파일이 기준이다.
 
 주요 REST 라우트 그룹:
 
@@ -439,7 +412,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
 | Frontend | `/`, `/health` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
 | Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
-| Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
+| Provider Runs | `/api/v1/providers`, `/api/v1/models/*` | `_provider_runs` | `GET /api/v1/providers` |
 | Runtime | `/api/v1/runtime/*` | `_dashboard` / `_activity` | `GET /api/v1/runtime/resolved` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |

@@ -77,8 +77,7 @@ let () =
       (Receipt.receipt_terminal_reason_code_of_stop_reason stop = "checkpoint");
     check "original detailed stop reason remains independent"
       (Receipt.stop_reason_to_string stop <> "checkpoint"))
-    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 53 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }
+    [ Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }
     ];
   check "real input retains attention"
     (D.requires_attention (Receipt.disposition_of_stop_reason input_required_stop));

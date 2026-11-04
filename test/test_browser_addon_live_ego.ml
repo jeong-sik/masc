@@ -136,6 +136,8 @@ stream=connection.makefile('rw')
 count=0
 for raw in stream:
     command=json.loads(raw);script=command['script'];count+=1
+    if script=='left':
+        stream.write(json.dumps({'id':command['id'],'lines':[json.dumps(command['leftMs'])]})+'\n');stream.flush();continue
     if script=='sleep':time.sleep(30)
     if script=='exit':print('leaving');sys.stdout.flush();sys.exit(4)
     lines=['x'*int(script[4:])] if script.startswith('big ') else ['%d %d'%(os.getpid(),count)]
@@ -229,6 +231,13 @@ let test_one_process_runs_the_connections_commands () =
       let again, two = held "count" in
       check string "one process runs both scripts" first again;
       check (pair int int) "and keeps what it holds between them" (1, 2) (one, two);
+      (match run ~window_s:5. "left" with
+       | Ok output ->
+         let left = int_of_string (String.trim output) in
+         check bool "a script learns the time left before its run is stopped" true (left > 0 && left < 5000)
+       | Error failure -> failf "left: %s" (failure_name failure));
+      check (result string string) "a run without a window has no stop time" (Ok "null")
+        (Result.map String.trim (Ego.native_runner session "left") |> Result.map_error failure_name);
       check bool "the socket is gone once the process connected" false (Sys.file_exists (Filename.concat root "s"));
       let started = Eio.Time.now clock in
       check string "a script past its window" "timed out" (kind ~window_s:3. "sleep");

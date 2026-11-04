@@ -3288,6 +3288,7 @@
 (include stanzas/test_verification_request_announce.inc)
 (include stanzas/test_skill_catalog_announce.inc)
 (include stanzas/test_lane_addon_exports_announce.inc)
+(include stanzas/test_goal_projection_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
 (include stanzas/test_keeper_metrics_appended_announce.inc)

@@ -95,9 +95,10 @@ let session_loop ~socket = String.concat "\n" [
   "  while (received.length === 0 && !closed) await new Promise(resolve => { wake = resolve; });";
   "  if (closed) break;";
   "  const command = JSON.parse(received.shift());";
+  "  const runStopsAt = typeof command.leftMs === \"number\" ? Date.now() + command.leftMs : null;";
   "  const lines = [];";
   "  const log = (...parts) => { lines.push(parts.map(String).join(\" \")); };";
-  "  try { await new AsyncFunction(\"console\", command.script)({log}); }";
+  "  try { await new AsyncFunction(\"console\", \"runStopsAt\", command.script)({log}, runStopsAt); }";
   "  catch (error) { lines.push(\"the script threw outside its frame: \" + String(error && error.message || error)); }";
   "  socket.write(JSON.stringify({id: command.id, lines}) + \"\\n\");";
   "}";
@@ -209,7 +210,10 @@ let start_session t ~timeout_s =
               let ask ~timeout_s ~id script =
                 let failed failure = Eio.Cancel.protect stop; Error failure in
                 let exchange () =
-                  Eio.Flow.copy_string (Yojson.Safe.to_string (`Assoc ["id",`Int id;"script",`String script]) ^ "\n") flow;
+                  let left_ms = match timeout_s with
+                    | Some seconds -> `Int (Float.to_int (seconds *. 1000.))
+                    | None -> `Null in
+                  Eio.Flow.copy_string (Yojson.Safe.to_string (`Assoc ["id",`Int id;"script",`String script;"leftMs",left_ms]) ^ "\n") flow;
                   Ok (Eio.Buf_read.line reader) in
                 match (match timeout_s with None -> exchange ()
                   | Some seconds -> Eio.Time.with_timeout clock seconds exchange) with

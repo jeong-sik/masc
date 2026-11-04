@@ -35,23 +35,87 @@ let default_config () =
   }
 ;;
 
-type resume_turns =
-  | Exactly of int
-  | Reported_or_one_more of int
+type turn_ending =
+  | Ended_completed
+  | Ended_uncompleted
+
+type ended_turn =
+  { turn_id : string
+  ; ending : turn_ending
+  }
+
+type resume_last_turn =
+  | Exactly of ended_turn option
+  | Last_or_dispatched of { last : ended_turn option; dispatched : string option }
+  | Last_or_uncompleted of { last : ended_turn option; failed : string option }
 
 type session_mode =
   | Start
-  | Resume of { session_id : string; expected_turns : resume_turns }
+  | Resume of { session_id : string; expected_last_turn : resume_last_turn }
 
-let resume_turns_admit expected reported =
-  match expected with
-  | Exactly turns -> reported = turns
-  | Reported_or_one_more turns -> reported = turns || reported - 1 = turns
+let same_turn_ending left right =
+  match left, right with
+  | Ended_completed, Ended_completed | Ended_uncompleted, Ended_uncompleted -> true
+  | Ended_completed, Ended_uncompleted | Ended_uncompleted, Ended_completed -> false
 ;;
 
-let resume_turns_to_string = function
-  | Exactly turns -> string_of_int turns
-  | Reported_or_one_more turns -> Printf.sprintf "%d or %d" turns (turns + 1)
+let same_ended_turn left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right ->
+    String.equal left.turn_id right.turn_id && same_turn_ending left.ending right.ending
+  | None, Some _ | Some _, None -> false
+;;
+
+let resume_last_turn_admit expected reported =
+  match expected, reported with
+  | Exactly last, reported -> same_ended_turn last reported
+  | Last_or_dispatched { last; dispatched }, reported ->
+    same_ended_turn last reported
+    || (match dispatched, reported with
+        | Some dispatched, Some { turn_id; ending = _ } -> String.equal turn_id dispatched
+        (* MASC wrote the turn but never learned its id, so any turn the host
+           ended may be it. *)
+        | None, Some _ -> true
+        | (Some _ | None), None -> false)
+  (* A retry re-sends the failed turn's work, so it needs the host to show the
+     turn did not complete. The host saying nothing about its last turn shows
+     nothing: the schema makes [lastTurn] additive-optional and its absence a
+     non-assertion. *)
+  | Last_or_uncompleted _, None -> false
+  | Last_or_uncompleted { last; failed }, (Some reported as named) ->
+    same_ended_turn last named
+    || (match failed, reported with
+        | Some failed, { turn_id; ending = Ended_uncompleted } -> String.equal turn_id failed
+        | None, { ending = Ended_uncompleted; _ } -> true
+        | (Some _ | None), { ending = Ended_completed; _ } -> false)
+;;
+
+let ended_turn_to_string = function
+  | None -> "no ended turn"
+  | Some { turn_id; ending = Ended_completed } -> Printf.sprintf "turn %s completed" turn_id
+  | Some { turn_id; ending = Ended_uncompleted } ->
+    Printf.sprintf "turn %s ended uncompleted" turn_id
+;;
+
+let resume_last_turn_to_string = function
+  | Exactly last -> ended_turn_to_string last
+  | Last_or_dispatched { last; dispatched = None } ->
+    Printf.sprintf "%s, or a turn MASC wrote without learning its id"
+      (ended_turn_to_string last)
+  | Last_or_dispatched { last; dispatched = Some turn_id } ->
+    Printf.sprintf "%s, or turn %s however it ended" (ended_turn_to_string last) turn_id
+  | Last_or_uncompleted { last; failed = None } ->
+    Printf.sprintf "%s, or an unnamed failed turn that ended uncompleted"
+      (ended_turn_to_string last)
+  | Last_or_uncompleted { last; failed = Some turn_id } ->
+    Printf.sprintf "%s, or turn %s ended uncompleted" (ended_turn_to_string last) turn_id
+;;
+
+let resume_last_turn_ids = function
+  | Exactly last -> Option.to_list (Option.map (fun turn -> turn.turn_id) last)
+  | Last_or_dispatched { last; dispatched = extra } | Last_or_uncompleted { last; failed = extra } ->
+    Option.to_list (Option.map (fun turn -> turn.turn_id) last) @ Option.to_list extra
 ;;
 
 type mcp_server =
@@ -428,10 +492,18 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
   match session_mode with
   | Resume { session_id; _ } when String.trim session_id = "" ->
     Error (Invalid_config "resumed session id is empty")
-  | Resume { expected_turns = Exactly turns | Reported_or_one_more turns; _ } when turns < 0 ->
-    Error (Invalid_config "resumed completed-turn count is negative")
-  | Resume { session_id; expected_turns = Exactly _ | Reported_or_one_more _ } ->
-    valid_utf8 "resumed session id" session_id
+  | Resume { expected_last_turn; _ }
+    when List.exists (fun turn_id -> String.trim turn_id = "")
+           (resume_last_turn_ids expected_last_turn) ->
+    Error (Invalid_config "resumed session expects an empty turn id")
+  | Resume { session_id; expected_last_turn } ->
+    let* () = valid_utf8 "resumed session id" session_id in
+    List.fold_left
+      (fun checked turn_id ->
+         let* () = checked in
+         valid_utf8 "resumed session turn id" turn_id)
+      (Ok ())
+      (resume_last_turn_ids expected_last_turn)
   | Start -> Ok ()
 ;;
 
@@ -1471,8 +1543,8 @@ let open_session ?(on_view_gap = fun ~session_id:_ _ -> ()) io (config : config)
              session.Msp.turn_count)
     in
     let* () = validate_session_approval_mode ~requested:approval_mode session.approval_mode in
-    Ok (session, false)
-  | Resume { session_id; expected_turns } ->
+    Ok (session, None, false)
+  | Resume { session_id; expected_last_turn } ->
     let on_view_gap = on_view_gap ~session_id in
     let* result =
       request ~on_view_gap io ~method_:"session/resume" (fun ~id ->
@@ -1482,7 +1554,8 @@ let open_session ?(on_view_gap = fun ~session_id:_ _ -> ()) io (config : config)
           ~session_id
           ~config:session_config)
     in
-    let* session = lift (Msp.parse_session_result ~stage:"session/resume" result) in
+    let* resumed = lift (Msp.parse_session_resume_result result) in
+    let session = resumed.Msp.session in
     let* () =
       if String.equal session.Msp.session_id session_id
       then Ok ()
@@ -1495,15 +1568,31 @@ let open_session ?(on_view_gap = fun ~session_id:_ _ -> ()) io (config : config)
              session.Msp.session_id)
     in
     let* () = validate_session_workspace ~workspace_root session in
-    (* The host is the authority on its own completed turns. The expected
-       count is the one it last reported, moved only by turn endings MASC
-       observed; a count the host could not have reached is refused. *)
+    (* The host is the authority on its own turns and names them by id. The
+       expected last turn is the one it last reported, moved only by turn
+       endings MASC observed; a turn MASC never dispatched, or one it saw end
+       otherwise, is refused. The completed-turn count is not compared: the
+       host counts again from each compaction boundary. *)
+    let* last_turn =
+      match resumed.Msp.last_turn with
+      | None -> Ok None
+      | Some { Msp.turn_id; terminal = Msp.Terminal_completed } ->
+        Ok (Some ({ turn_id; ending = Ended_completed } : ended_turn))
+      | Some
+          { Msp.turn_id
+          ; terminal = Msp.Terminal_failed _ | Msp.Terminal_host_died _ | Msp.Terminal_cancelled
+          } -> Ok (Some ({ turn_id; ending = Ended_uncompleted } : ended_turn))
+      | Some { Msp.turn_id; terminal = Msp.Unrecognized_terminal terminal } ->
+        protocol_error "session/resume"
+          (Printf.sprintf "retained session last turn %s ended with unrecognized terminal %S"
+             turn_id terminal)
+    in
     let* () =
-      if resume_turns_admit expected_turns session.Msp.turn_count
+      if resume_last_turn_admit expected_last_turn last_turn
       then Ok ()
       else protocol_error "session/resume"
-          (Printf.sprintf "retained session completed-turn count changed: expected %s, reported %d"
-             (resume_turns_to_string expected_turns) session.Msp.turn_count)
+          (Printf.sprintf "retained session last turn changed: expected %s, reported %s"
+             (resume_last_turn_to_string expected_last_turn) (ended_turn_to_string last_turn))
     in
     (* The model first: the approval mode set after it is the session state
        the host confirms last, so no other session command follows its check. *)
@@ -1518,7 +1607,7 @@ let open_session ?(on_view_gap = fun ~session_id:_ _ -> ()) io (config : config)
     in
     let* effective = lift (Msp.parse_set_approval_mode_result result) in
     let* () = validate_session_approval_mode ~requested:approval_mode (Some effective) in
-    Ok ({session with approval_mode=Some effective}, true)
+    Ok ({session with approval_mode=Some effective}, last_turn, true)
 ;;
 
 let run_protocol
@@ -1543,7 +1632,7 @@ let run_protocol
     | _ :: _ -> [ Msp.Session_mcp ]
   in
   let* init = handshake io ~requested_capabilities ~requires_durable_session:true in
-  let* session, resumed =
+  let* session, last_turn, resumed =
     open_session
       ~on_view_gap:(fun ~session_id sid ->
         if gap_applies ~session_id sid
@@ -1559,7 +1648,7 @@ let run_protocol
   let* () =
     admission (fun () ->
       invoke_state_callback ~stage:"session ready callback" (fun () ->
-        on_session_ready ~session_id ~reported_turns:session.Msp.turn_count))
+        on_session_ready ~session_id ~last_turn))
   in
   let input =
     List.map
@@ -1719,7 +1808,7 @@ let run_turn
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
-      ?(on_session_ready = fun ~session_id:_ ~reported_turns:_ -> Ok ())
+      ?(on_session_ready = fun ~session_id:_ ~last_turn:_ -> Ok ())
       ?(on_prompt_sent = fun () -> ())
       ?(on_context_submission = fun _ -> ())
       ?on_stream_event

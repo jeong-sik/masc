@@ -1293,7 +1293,7 @@ max-concurrent = 1
              (member "code" fallback_reason = `String expected_code);
            check (name ^ " trust receipt fallback preserves human-action distinction")
              (member "next_action" fallback_reason = expected_action))
-        [ "queue-checkpoint", Runtime_agent.Yielded_to_operation_queued { turns_used = 53 ; provider_turn_ordinal = 17 },
+        [ "queue-checkpoint", Runtime_agent.Yielded_to_durable_stimulus { turns_used = 53 ; provider_turn_ordinal = 17 },
             "checkpoint", `Null
         ; "actual-input", Runtime_agent.InputRequired
             { turns_used = 2; request =

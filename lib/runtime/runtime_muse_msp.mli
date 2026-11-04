@@ -293,7 +293,12 @@ val corpus_schema_fingerprint : string
 
 type session =
   { session_id : string
-  ; turn_count : int (** The host's nonnegative completed-turn count. *)
+  ; turn_count : int
+    (** The host's nonnegative completed-turn count from its session view
+        fold. It counts again from a compaction boundary: on host 1.4.14 a
+        compacted session in which MASC had seen six turns complete reported
+        1, and another reported 0 after its last turn completed. A resume
+        names the host's turns by {!last_turn} instead. *)
   ; model_id : string option
   ; workspace_root : string option
   ; approval_mode : approval_mode option
@@ -377,6 +382,27 @@ type terminal =
           wrote it and is for diagnostics only. *)
   | Terminal_cancelled
   | Unrecognized_terminal of string
+
+(** The last turn the host's session view folded ([LastTurn]): restated on
+    [session/resume], so a reopened session names how its last turn ended.
+    Turn ids stay stable across compaction while counts do not
+    ([ForkCutPoint]). *)
+type last_turn =
+  { turn_id : string
+  ; terminal : terminal
+  }
+
+type resumed_session =
+  { session : session
+  ; last_turn : last_turn option
+    (** [None] when the member is absent. The schema makes it
+        additive-optional and its absence a non-assertion, so [None] never
+        stands for a turn the caller expects. *)
+  }
+
+val parse_session_resume_result : Yojson.Safe.t -> (resumed_session, error) result
+(** The [session] and [lastTurn] members of a [session/resume] result.
+    [lastTurn] is read as [turn/completed] terminals are. *)
 
 type item_kind =
   | User_message

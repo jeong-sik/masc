@@ -631,7 +631,6 @@ let apply_accept
   =
   match run_result.stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
@@ -2777,7 +2776,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         !retained_results_projected
         && !observed_provider_turn_ordinal = Some provider_turn_ordinal
         && !saved_provider_turn_ordinal = Some provider_turn_ordinal
-      | Ok {Runtime_agent.stop_reason=(Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+      | Ok {Runtime_agent.stop_reason=(Yielded_to_durable_stimulus _
           | InputRequired _);_}
       | Error _ -> false in
     let execution_observation =

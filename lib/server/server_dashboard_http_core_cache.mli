@@ -10,6 +10,12 @@ val live_cache_ttl_s : float
 val realtime_cache_ttl_s : float
 val dashboard_projection_cache_ttl_s : float
 
+val planning_cache_prefix : string
+(** Every workspace's planning projection key starts with this. A task write
+    drops them all: the task mutation hook does not name its workspace. *)
+
+val planning_cache_key : base_path:string -> string
+
 val invalidate_board_projections : unit -> unit
 (** Drop every cached board projection. Called on each board write so the
     next read, including the one the [notifications/board] SSE event

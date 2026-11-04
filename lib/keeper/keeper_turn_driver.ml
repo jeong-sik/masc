@@ -120,7 +120,6 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime_insta
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed _
-  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _ -> true
   | Runtime_agent.InputRequired _ -> false
 ;;
@@ -153,7 +152,7 @@ let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
     , Keeper_tools_agent_core.Terminal_effect_completed _ ) ->
     Ok run_result
   | (Runtime_agent.Completed _, (Keeper_tools_agent_core.Terminal_effect_open | (Keeper_tools_agent_core.Deferred_tool_result | (Keeper_tools_agent_core.External_effect_deferred | Keeper_tools_agent_core.Terminal_effect_failed _))))
-  | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _)), _) -> Keeper_turn_driver_try_provider.apply_accept
+  | ((Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _), _) -> Keeper_turn_driver_try_provider.apply_accept
       ~runtime_id
       ~accept
       run_result
@@ -169,16 +168,46 @@ let settle_accepted_official_client_results ~pending_result_receipts result =
     Result.map (fun () -> accepted) settled)
 ;;
 
+(* The order [resumed_runtime_lane] fixed for the walk that resumes a hint,
+   read before pre-dispatch shaping so the request is shaped for the runtime
+   the walk dispatches first. A hint a walk recorded, or one restored from
+   disk, is [Not_resumed]. *)
+type resumed_order =
+  | Not_resumed
+  | Resumed of
+      { head : string
+      ; rest : string list
+      }
+
 type deferred_runtime_lane =
   { assignment_id : string
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
   ; failure : Agent_core.Error.t
+  ; resumed : resumed_order
   }
 
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
+
+(* What a candidate of the walk that resumes a hint is to the chain of turns
+   that hint belongs to. [Untried]: the hint names it, so no turn of the chain
+   has attempted it (for a chat operation resumed on the path it failed on,
+   the hint names that path). [Retry_of_tried]: a candidate of the lane the
+   hint does not name. [Failed_last]: the runtime whose failure recorded the
+   hint. A walk that did not resume a hint has only [Untried] candidates. *)
+type resumed_member =
+  | Untried
+  | Retry_of_tried
+  | Failed_last
+
+let resumed_member hint runtime_id =
+  if List.exists (String.equal runtime_id) (deferred_runtime_ids hint)
+  then Untried
+  else if String.equal runtime_id hint.failed_runtime_id
+  then Failed_last
+  else Retry_of_tried
 
 type failure_continuation =
   | Resume_operation_checkpoint of { operation_id : Keeper_operation_id.t }
@@ -247,11 +276,59 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   List.map fst (ordered @ unresolvable)
 ;;
 
-let quota_ordered_deferred_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (deferred_runtime_ids hint) with
-  | next_runtime_id :: later_runtime_ids ->
-    { hint with next_runtime_id; later_runtime_ids }
+(* The candidates a turn resuming [hint] walks, before ordering. The hint only
+   says where the walk starts, so its [Untried] candidates come first, in the
+   hint's order. The other candidates the assignment's current lane declares
+   follow in declared order, and the runtime that failed goes after all of
+   them: the input is not handed straight back to it, and the walk still
+   reaches it. An assignment that resolves to no lane adds nothing to the
+   hint. *)
+let resumed_walk_order hint =
+  let lane =
+    match Runtime.resolve_assignment hint.assignment_id with
+    | `Lane lane -> Runtime_lane.ordered_candidates lane
+    | `Missing | `Unavailable _ -> []
+  in
+  let named =
+    List.fold_left
+      (fun named id -> if List.exists (String.equal id) named then named else id :: named)
+      []
+      (deferred_runtime_ids hint @ lane)
+    |> List.rev
+  in
+  let placed wanted =
+    List.filter
+      (fun id ->
+         match wanted, resumed_member hint id with
+         | Untried, Untried | Retry_of_tried, Retry_of_tried | Failed_last, Failed_last -> true
+         | Untried, (Retry_of_tried | Failed_last)
+         | Retry_of_tried, (Untried | Failed_last)
+         | Failed_last, (Untried | Retry_of_tried) -> false)
+      named
+  in
+  placed Untried @ placed Retry_of_tried @ placed Failed_last
+;;
+
+(* The resumed walk in the order the next turn dispatches it:
+   [resumed_walk_order] under the quota and backpressure demotion that orders
+   the rest of every walk. The hint itself is kept, so a lane already resumed
+   is resumed again from its hint. *)
+let resumed_runtime_lane ~now hint =
+  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (resumed_walk_order hint) with
+  | head :: rest -> { hint with resumed = Resumed { head; rest } }
   | [] -> hint
+;;
+
+let resumed_walk_ids lane =
+  match lane.resumed with
+  | Resumed { head; rest } -> head :: rest
+  | Not_resumed -> resumed_walk_order lane
+;;
+
+let resumed_head lane =
+  match lane.resumed with
+  | Resumed { head; rest = _ } -> head
+  | Not_resumed -> lane.next_runtime_id
 ;;
 
 type path_rest =
@@ -401,11 +478,13 @@ let walk_rest ~now ~head ~later =
     Walk_waits_until { release_at; resting_runtime_id }
 ;;
 
-(* The deferred suffix in the order the next turn walks it
-   ([quota_ordered_deferred_runtime_lane]). *)
+(* The walk a turn resuming the deferred suffix dispatches
+   ([resumed_runtime_lane]), so a resting suffix path does not hold the turn
+   while a lane candidate that was not told to rest can take it. *)
 let deferred_lane_rest ~now hint =
-  let ordered = quota_ordered_deferred_runtime_lane ~now hint in
-  walk_rest ~now ~head:ordered.next_runtime_id ~later:ordered.later_runtime_ids
+  match resumed_walk_ids (resumed_runtime_lane ~now hint) with
+  | head :: later -> walk_rest ~now ~head ~later
+  | [] -> walk_rest ~now ~head:hint.next_runtime_id ~later:hint.later_runtime_ids
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
@@ -475,12 +554,13 @@ let assignment_next_dated_release ~now assignment_id =
    the chat lane's deferred retry so both answer one failure the same way
    (RFC-provider-path-rest §3.1).
 
-   A deferred suffix names where the input goes next, and its walk decides.
-   Without a suffix a multi-candidate assignment follows its fresh walk's
-   rest. A final candidate's quota does not rest siblings that failed for
-   unrelated reasons; a serving head returns to ordinary cadence, not an
-   immediate replay. A single/unresolved assignment also retains the failed
-   response's rest. Other failures without a suffix have no provider wait. *)
+   A deferred suffix names where the resumed walk starts, and that walk
+   ([deferred_lane_rest]) decides. Without a suffix a multi-candidate
+   assignment follows its fresh walk's rest. A final candidate's quota does
+   not rest siblings that failed for unrelated reasons; a serving head returns
+   to ordinary cadence, not an immediate replay. A single/unresolved
+   assignment also retains the failed response's rest. Other failures without
+   a suffix have no provider wait. *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
@@ -541,6 +621,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     None
 ;;
 
+(* Two lanes name the same hint. The order a resumed lane fixed is not part of
+   the hint. *)
 let equal_deferred_runtime_lane left right =
   String.equal left.assignment_id right.assignment_id
   && String.equal left.failed_runtime_id right.failed_runtime_id
@@ -554,6 +636,7 @@ let restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
   ; next_runtime_id
   ; later_runtime_ids
   ; failure
+  ; resumed = Not_resumed
   }
 ;;
 
@@ -604,6 +687,12 @@ let lane_should_retry
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
     | None -> false
 
+(* Whether a walk has attempted a candidate its hint left untried. A walk
+   that resumes no hint has: every candidate of it is [Untried]. *)
+type untried_progress =
+  | No_untried_attempted
+  | Untried_attempted
+
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
@@ -619,6 +708,7 @@ let attempt_runtime_candidates
     ?candidate_backpressure_of
     ?candidate_dispatchable
     ?read_usage_after_account_refusal
+    ?(member_of = fun _ -> Untried)
     ~walk_owner
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
@@ -707,6 +797,7 @@ let attempt_runtime_candidates
   in
   let rec loop
       ~(observed_overflow : lane_terminal_error option)
+      ~(untried : untried_progress)
       idx
     = function
     | [] ->
@@ -718,9 +809,15 @@ let attempt_runtime_candidates
               (Printf.sprintf
                  "runtime lane %S exhausted all candidates"
                  runtime_id)))
-    | candidate :: rest -> attempt ~observed_overflow idx candidate rest
-  and attempt ~observed_overflow idx candidate rest =
+    | candidate :: rest -> attempt ~observed_overflow ~untried idx candidate rest
+  and attempt ~observed_overflow ~untried idx candidate rest =
     let is_last = rest = [] in
+    let untried =
+      match untried, member_of candidate with
+      | Untried_attempted, (Untried | Retry_of_tried | Failed_last)
+      | No_untried_attempted, Untried -> Untried_attempted
+      | No_untried_attempted, (Retry_of_tried | Failed_last) -> No_untried_attempted
+    in
     let attempt_runtime_id = runtime_id_of candidate in
     (* Bind quota ownership to the exact candidate that will be dispatched.
        [run_attempt] may span a runtime.toml reload; resolving the id after
@@ -1016,12 +1113,67 @@ let attempt_runtime_candidates
          ; checkpoint_after
          }
        in
+       (* RFC last-path-resumes-after-progress §3.1: a chat operation that
+          saved tool results before a failure that passes with time, and has
+          no untried candidate left to hand its input to, continues on the
+          candidate it failed on from its latest checkpoint. Each such resume
+          needs tool results saved after the previous one, so resumes cannot
+          outnumber the tool rounds the operation ran. A cycle-restarting lane
+          starts a new turn that regains progress with its first tool, so it
+          never resumes here. *)
+       let defer_to_the_failed_path () =
+         match retry_deferral with
+         | Some
+             { continuation = Resume_operation_checkpoint { operation_id }
+             ; on_deferred
+             }
+           when tool_results_saved ()
+                && Keeper_runtime_failure_route.route_resumes_on_same_path route ->
+           Log.Keeper.info
+             "deferred operation %s to the path it failed on \
+              (runtime_id=%s assignment=%s route=%s:%s)"
+             (Keeper_operation_id.to_string operation_id)
+             attempt_runtime_id
+             runtime_id
+             (Keeper_runtime_failure_route.route_kind_label route)
+             (Keeper_runtime_failure_route.route_class_label route);
+           (* The row a reader counts this decision by. Only a lane that
+              named an operation reaches it, so a lane that must not resume
+              is the lane whose walks never carry this status. *)
+           emit_runtime_manifest
+             ~status:"deferred_same_path"
+             ~decision:
+               (`Assoc
+                 [ "idx", `Int idx
+                 ; "runtime_id", `String attempt_runtime_id
+                 ; "operation_id", `String (Keeper_operation_id.to_string operation_id)
+                 ; ( "route"
+                   , `String
+                       (Keeper_runtime_failure_route.route_kind_label route
+                        ^ ":"
+                        ^ Keeper_runtime_failure_route.route_class_label route) )
+                 ])
+             Keeper_runtime_manifest.Runtime_routed;
+           on_deferred
+             { assignment_id = runtime_id
+             ; failed_runtime_id = attempt_runtime_id
+             ; next_runtime_id = attempt_runtime_id
+             ; later_runtime_ids = []
+             ; failure = error
+             ; resumed = Not_resumed
+             }
+         | Some
+             { continuation = Resume_operation_checkpoint _ | Restart_cycle
+             ; on_deferred = _
+             }
+         | None -> ()
+       in
        if not request_retry_admitted
        then lane_terminal (this_candidate error)
        else if not effect_retry_admitted
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
-       then loop ~observed_overflow (idx + 1) rest
+       then loop ~observed_overflow ~untried (idx + 1) rest
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation
@@ -1031,61 +1183,30 @@ let attempt_runtime_candidates
          match observed_overflow with
          | Some overflow -> lane_terminal overflow
          | None ->
-           (* RFC last-path-resumes-after-progress §3.1: a chat operation whose
-              last candidate saved tool results before a failure that passes
-              with time continues on that candidate from its latest
-              checkpoint. Each such resume needs tool results saved after the
-              previous one, so resumes cannot outnumber the tool rounds the
-              operation ran. A cycle-restarting lane starts a new turn that
-              regains progress with its first tool, so it never resumes here. *)
-           (match retry_deferral with
-            | Some
-                { continuation = Resume_operation_checkpoint { operation_id }
-                ; on_deferred
-                }
-              when tool_results_saved ()
-                   && Keeper_runtime_failure_route.route_resumes_on_same_path route ->
-              Log.Keeper.info
-                "deferred operation %s to the path it failed on \
-                 (runtime_id=%s assignment=%s route=%s:%s)"
-                (Keeper_operation_id.to_string operation_id)
-                attempt_runtime_id
-                runtime_id
-                (Keeper_runtime_failure_route.route_kind_label route)
-                (Keeper_runtime_failure_route.route_class_label route);
-              (* The row a reader counts this decision by. Only a lane that
-                 named an operation reaches it, so a lane that must not resume
-                 is the lane whose walks never carry this status. *)
-              emit_runtime_manifest
-                ~status:"deferred_same_path"
-                ~decision:
-                  (`Assoc
-                    [ "idx", `Int idx
-                    ; "runtime_id", `String attempt_runtime_id
-                    ; "operation_id", `String (Keeper_operation_id.to_string operation_id)
-                    ; ( "route"
-                      , `String
-                          (Keeper_runtime_failure_route.route_kind_label route
-                           ^ ":"
-                           ^ Keeper_runtime_failure_route.route_class_label route) )
-                    ])
-                Keeper_runtime_manifest.Runtime_routed;
-              on_deferred
-                { assignment_id = runtime_id
-                ; failed_runtime_id = attempt_runtime_id
-                ; next_runtime_id = attempt_runtime_id
-                ; later_runtime_ids = []
-                ; failure = error
-                }
-            | Some
-                { continuation = Resume_operation_checkpoint _ | Restart_cycle
-                ; on_deferred = _
-                }
-            | None -> ());
+           defer_to_the_failed_path ();
            lane_terminal (this_candidate error))
        else (
-         (match error_is_retryable, effect_retry_admitted, rest with
-          | true, true, next :: later ->
+         (* The walk stops before the end of its lane. It hands the input to
+            the candidates its hint left untried that it has not reached, in
+            walk order. Candidates the chain already tried are not handed the
+            input again: a resumed walk covers the whole lane, and a hint that
+            named them would never shrink, so turns that each stop after a
+            checkpoint would follow one another without end. A walk that
+            reached none of its untried candidates hands no suffix on, because
+            it would name the same untried candidates again. Each suffix of a
+            chain therefore names fewer candidates than the one before, and
+            the chain ends when none is left. With no suffix to hand on, a chat
+            operation may still continue on the path it failed on, above. *)
+         let untried_rest =
+           List.filter
+             (fun candidate ->
+                match member_of candidate with
+                | Untried -> true
+                | Retry_of_tried | Failed_last -> false)
+             rest
+         in
+         (match error_is_retryable, untried, untried_rest with
+          | true, Untried_attempted, next :: later ->
             Option.iter
               (fun { continuation = _; on_deferred } ->
                  on_deferred
@@ -1094,12 +1215,15 @@ let attempt_runtime_candidates
                    ; next_runtime_id = runtime_id_of next
                    ; later_runtime_ids = List.map runtime_id_of later
                    ; failure = error
+                   ; resumed = Not_resumed
                    })
               retry_deferral
-          | false, _, _ | true, false, _ | true, true, [] -> ());
+          | true, Untried_attempted, [] | true, No_untried_attempted, _ ->
+            defer_to_the_failed_path ()
+          | false, (Untried_attempted | No_untried_attempted), _ -> ());
          lane_terminal (this_candidate terminal_error)))
   in
-  loop ~observed_overflow:None 0 candidates
+  loop ~observed_overflow:None ~untried:No_untried_attempted 0 candidates
 
 (* A candidate a reload removed is a binding that cannot serve, not an
    internal defect: typed as the provider's own NotFound, the lane walk
@@ -1173,9 +1297,10 @@ let dedupe_runtimes_preserve_order runtimes =
    observation names no time and only an answer ends it, so it keeps the
    candidate in the set, demoted: while a text-only lane head serves, an image
    turn led by that candidate is the dispatch that can end the observation.
-   A deferred lane offers no candidates: its walk dispatches the frozen suffix
-   ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
-   head would be recorded as a reroute the walk never performs. *)
+   A deferred lane offers no candidates: it dispatches the resumed walk
+   ordered before pre-dispatch ([lane_candidate_ids] in [run_agent_turn]), so a
+   decision that moved the head would be recorded as a reroute the walk never
+   performs. *)
 let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
@@ -2073,9 +2198,10 @@ let run_named
      siblings, never remembered as a preference. *)
   (* Quota/backpressure demotion is ordering only — a demoted candidate is still
      attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
-     selecting a fresh lane walk. A deferred suffix was already frozen before
-     pre-dispatch shaping, so re-reading wall-clock quota state here could make
-     the actual provider differ from the runtime used to shape the request. *)
+     selecting a fresh lane walk. A resumed walk was already ordered before
+     pre-dispatch shaping ([resumed_runtime_lane]), so re-reading wall-clock
+     quota state here could make the actual provider differ from the runtime
+     used to shape the request. *)
   let pre_tool_rejects =
     match pre_tool_rejects with
     | Some rejects -> rejects
@@ -2109,7 +2235,7 @@ let run_named
       Ok (saved_runtime :: List.filter (fun id -> not (String.equal id saved_runtime)) fallback)
     | None -> (match output_contract, deferred_runtime_lane with
     | Tool_verdict, _ -> Ok [runtime_id]
-    | Provider_default, Some hint -> Ok (deferred_runtime_ids hint)
+    | Provider_default, Some hint -> Ok (resumed_walk_ids hint)
     | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok []
@@ -2144,7 +2270,7 @@ let run_named
     | first :: _ -> first
     | [] -> runtime_id
   in
-  (* A reload between cycles can remove an id the deferred suffix (or the
+  (* A reload between cycles can remove an id the resumed walk (or the
      fresh order) still names. Missing ids drop out of the walk instead of
      failing it: the walk rotates past them. Only when nothing resolves
      does the turn fail, with the head's own error. *)
@@ -2180,7 +2306,7 @@ let run_named
     | None, [] -> []
   in
   (* This decision is reported, not applied: the image walk already leads with
-     the capable candidate a [Reroute] names. On a deferred lane the suffix order
+     the capable candidate a [Reroute] names. On a deferred lane the walk order
      was frozen before pre-dispatch shaping, so [modality_reroute_candidates]
      is [[]] and the decision can only be [No_reroute_needed] or
      [No_capable_runtime], and the image walk is empty. The media degrade
@@ -2232,6 +2358,16 @@ let run_named
            | Some runtime -> Resolved_runtime runtime
            | None -> Missing_runtime runtime_id)
         lane_candidate_ids
+  in
+  (* What each candidate of the walk that resumes a hint is to the chain of
+     turns the hint belongs to. Every candidate of any other walk is
+     untried. *)
+  let walk_member =
+    match native_runtime, output_contract, deferred_runtime_lane with
+    | None, Provider_default, Some hint -> resumed_member hint
+    | Some _, (Provider_default | Tool_verdict), (Some _ | None)
+    | None, Tool_verdict, (Some _ | None)
+    | None, Provider_default, None -> fun (_ : string) -> Untried
   in
   (match reroute_decision with
    | Runtime_agent.Reroute { reason; _ } ->
@@ -2346,6 +2482,9 @@ let run_named
          never resolved is a dead head. *)
       | Resolved_runtime _ -> true
       | Missing_runtime _ -> false)
+    ~member_of:(function
+      | Resolved_runtime runtime -> walk_member runtime.Runtime_instance.id
+      | Missing_runtime runtime_id -> walk_member runtime_id)
     ~provider_answered:(fun (named : named_run_result) -> run_result_answered named.run_result)
     ~emit_runtime_manifest
     ~run_attempt:(observe_native_attempt ?on_request_observation native_binding (fun ?on_request_evidence ~idx ~runtime_id:attempt_runtime_id candidate ->
@@ -2787,7 +2926,6 @@ let run_named
                  when String.trim text = "" ->
                  Ok run_result
                | ( Runtime_agent.Completed _
-                 | Runtime_agent.Yielded_to_operation_queued _
                  | Runtime_agent.Yielded_to_durable_stimulus _
                  | Runtime_agent.InputRequired _ ),
                  ([]
@@ -3474,6 +3612,8 @@ module For_testing = struct
     restore_deferred_runtime_lane ~assignment_id ~failed_runtime_id
       ~next_runtime_id ~later_runtime_ids ~failure
   ;;
+
+  let resumed_member = resumed_member
 
   let checkpoint_after_attempt = checkpoint_after_attempt
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept

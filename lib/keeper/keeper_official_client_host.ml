@@ -118,7 +118,6 @@ let lifecycle_outcome = function
        Agent_core.Agent_lifecycle_events.Completed response
      | Runtime_agent.InputRequired { request; _ } ->
        Agent_core.Agent_lifecycle_events.Input_required request
-     | Runtime_agent.Yielded_to_operation_queued { turns_used; _ }
      | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
        Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
 ;;

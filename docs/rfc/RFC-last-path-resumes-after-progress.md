@@ -184,6 +184,8 @@ match 해, 도구를 실행한 stage 일 때만 새 관측값을 켠다. 이 관
 
 - 실패한 경로에 쉼이 기록돼 있다: 429 의 rate limit 증거나 quota 창(`path_rest`, `:259`).
   → `Wait_until { release_at = 그 시각; wait = Path_release }`
+  - 단, 다음 턴은 hint 경로 뒤로 lane 의 나머지 후보까지 걷는다(`resumed_runtime_lane`).
+    쉬지 않는 다른 후보가 있으면 기다리지 않고 그 후보로 보낸다.
 - 기록이 없다: 5xx·끊김·timeout, 그리고 쉼을 남기지 않은 실패.
   → `Dispatch_now`
 - `Capacity_backpressure` 는 hint 와 상관없이 MASC 자신의 쉼을 기다린다(`:401`–`407`).

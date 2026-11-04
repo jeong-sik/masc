@@ -581,6 +581,11 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
   let default_counter = ref 0 in
   let full_counter = ref 0 in
   let unrelated_counter = ref 0 in
+  (* The planning projection carries the task backlog. *)
+  let planning_counter = ref 0 in
+  let planning_key =
+    Server_dashboard_http_core_cache.planning_cache_key ~base_path:"/task-mutation-planning"
+  in
   let read key counter =
     Dashboard_cache.get_or_compute key ~ttl:120.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       incr counter;
@@ -589,6 +594,7 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
   ignore (read "execution:default:light" default_counter);
   ignore (read "execution:operator::full" full_counter);
   ignore (read "workspace:default" unrelated_counter);
+  ignore (read planning_key planning_counter);
   let stale_generation =
     Server_dashboard_http_execution_surfaces.For_testing
     .execution_publication_generation ()
@@ -635,7 +641,9 @@ let test_task_mutation_hook_invalidates_all_execution_variants () =
       ignore (read "workspace:default" unrelated_counter);
       Alcotest.(check int) "default execution recomputed" 2 !default_counter;
       Alcotest.(check int) "full execution recomputed" 2 !full_counter;
-      Alcotest.(check int) "unrelated cache preserved" 1 !unrelated_counter)
+      ignore (read planning_key planning_counter);
+      Alcotest.(check int) "unrelated cache preserved" 1 !unrelated_counter;
+      Alcotest.(check int) "planning recomputed" 2 !planning_counter)
 
 let test_task_mutation_wakes_health_before_slow_subscriber ~clock () =
   let previous_hook = Atomic.get Workspace_hooks.on_task_mutation_fn in
@@ -2141,7 +2149,7 @@ let () =
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
           test_case "board write invalidates every board projection" `Quick
             test_board_write_invalidates_every_board_projection;
-          test_case "task mutation invalidates every execution variant" `Quick
+          test_case "task mutation invalidates every execution variant and planning" `Quick
             test_task_mutation_hook_invalidates_all_execution_variants;
           test_case "task mutation wakes health before a slow subscriber" `Quick
             (test_task_mutation_wakes_health_before_slow_subscriber ~clock);

@@ -20,7 +20,6 @@
 
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed of { provider_turn_ordinal : int }
-  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | InputRequired of {
       turns_used : int;
@@ -48,9 +47,7 @@ type cooperative_yield_probe =
     [InputRequired] carries no completion ordinal.
 
     Why this single Agent Core call yielded control. [Completed] is the
-    model's success path. [Yielded_to_operation_queued] fires when an
-    autonomous-lane run stopped at a turn boundary to let the Owner start its
-    queued Dashboard/connector operation.
+    model's success path.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
     cycle.

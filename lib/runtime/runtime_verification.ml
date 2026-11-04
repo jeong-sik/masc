@@ -130,8 +130,6 @@ let failure_detail = function
 let unfinished_run_reason (stop_reason : Runtime_agent.stop_reason) =
   match stop_reason with
   | Runtime_agent.Completed _ -> "the run completed"
-  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-    Printf.sprintf "the run yielded to a queued operation after %d turns" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Printf.sprintf "the run yielded to a durable stimulus after %d turns" turns_used
   | Runtime_agent.InputRequired { turns_used; request } ->
@@ -886,7 +884,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response
                       }
-                  | (Runtime_agent_context.Yielded_to_operation_queued _ | Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
+                  | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with

@@ -2817,7 +2817,7 @@ let test_cached_planning_reads_a_new_goal () =
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let goals () =
         let open Yojson.Safe.Util in
@@ -2863,7 +2863,7 @@ let test_cached_planning_reads_new_goal_history () =
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let history_ids () =
         let open Yojson.Safe.Util in

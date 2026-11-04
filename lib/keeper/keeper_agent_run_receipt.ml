@@ -38,10 +38,10 @@ let provider_reached_of_observation = function
     before any provider answered.
 
     A turn does not choose whether to honour the lane it was handed.
-    [Keeper_turn_driver.run_named] builds its candidate list from
-    [deferred_runtime_ids hint] whenever a lane is present and the contract is
-    [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and
-    [deferred_runtime_ids] leads with [next_runtime_id]. [run_turn] passes no
+    [Keeper_turn_driver.run_named] builds its candidate list from the walk
+    that resumes the hint whenever a lane is present and the contract is
+    [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and that
+    walk leads with [Keeper_turn_driver.resumed_head]. [run_turn] passes no
     [output_contract], so the contract is always [Provider_default] here: the
     [Tool_verdict] slot calls [run_named] directly. The walk therefore starts
     on the lane's own head, whatever [~runtime_id] this turn was routed to.

@@ -91,8 +91,8 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
     - [loading], from the deferred built-in tools and identity tools. Claude
       Code reads it as [_meta["anthropic/alwaysLoad"]], Codex as
       [deferLoading].
-    - [result_bound], from the inline ceiling of the projection each built-in
-      or Skill composition result crosses. Claude Code reads it as
+    - [result_bound], from the inline ceiling of the projection each built-in,
+      Skill composition or attached-service result crosses. Claude Code reads it as
       [_meta["anthropic/maxResultSizeChars"]]. *)
 type loading_plan =
   | All_on_demand

@@ -252,22 +252,21 @@ let test_the_official_client_lanes_get_the_tools_themselves () =
       [ "atlassian_jira_search"; "atlassian_confluence_search" ])
 ;;
 
-(* A result bound is declared only for a tool whose result MASC bounds. An
-   attached-service result reaches the wire as the service returned it, so a
-   bound on one would let the client inline a result of any size as if it
-   fitted. *)
-let test_only_bounded_tools_declare_a_result_bound () =
+(* An attached-service answer is held to the same Claude Code ceiling as a
+   built-in result (Keeper_identity_tools.tool_result_of_call), so it declares
+   that ceiling. Left undeclared, the client keeps its own threshold, which
+   is not the bound the answer was held to. *)
+let test_an_attached_tool_declares_the_ceiling_its_answer_is_held_to () =
   with_bundle (fun bundle ->
     let sent = tool_names bundle.Keeper_tools_agent_core.tools in
     let bounds = bundle.Keeper_tools_agent_core.result_bounds in
-    let bounded = List.map fst bounds in
     List.iter
       (fun name ->
          check
-           bool
-           (Printf.sprintf "%s is an attached-service tool and declares no bound" name)
-           false
-           (List.mem name bounded))
+           (option int)
+           (Printf.sprintf "%s declares the Claude Code ceiling its answer is held to" name)
+           (Some Runtime_execution.claude_code_inline_result_bytes)
+           (List.assoc_opt name bounds))
       [ "atlassian_jira_search"; "atlassian_confluence_search" ];
     check bool "the built-ins declare their bound" true (bounds <> []);
     let default_descriptor =
@@ -920,9 +919,9 @@ let () =
             `Quick
             test_the_agent_core_lane_gets_the_listing_instead
         ; test_case
-            "declares a result bound only for a tool MASC bounds"
+            "an attached tool declares the ceiling its answer is held to"
             `Quick
-            test_only_bounded_tools_declare_a_result_bound
+            test_an_attached_tool_declares_the_ceiling_its_answer_is_held_to
         ; test_case
             "holds back a built-in that declares deferral"
             `Quick

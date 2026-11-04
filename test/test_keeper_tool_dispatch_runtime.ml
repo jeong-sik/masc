@@ -4887,7 +4887,8 @@ let test_a_failed_memory_call_never_ends_the_turn () =
          ; Tool_result.Proven_post_effect
          ; Tool_result.Effect_outcome_unknown
          ])
-    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
+    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract
+    ; "browser-level action", KTD.Tool_browser_act ];
   check int
     "an applied file write ends the turn"
     1
@@ -7573,8 +7574,8 @@ value = {surface="dashboard", content="must not run"}
 ;;
 
 (* #36662: the navigation completes (a post effect), then the second node
-   fails with an unknown outcome. Called directly, BrowserInteract hands that
-   failure back to the model and BrowserAct ends the turn
+   fails with an unknown outcome. Called directly, BrowserInteract and
+   BrowserAct hand that failure back to the model
    (Keeper_tool_failure_boundary). The composition does the same, whatever the
    aggregate says. Neither node is read-only, so #35703's read exception
    cannot be what decides. *)
@@ -7658,13 +7659,11 @@ id = "second"
           "proven_post_effect"
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
         match second, bundle.terminal_effect_state (), result.abort_turn with
-        | `Interact, Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
+        | (`Interact | `Act), Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
         | `Interact, _, _ ->
           fail "a failed interaction ended the turn though a direct BrowserInteract hands it back"
-        | `Act, Masc.Keeper_tools_agent_core.Terminal_effect_failed _,
-          Some (Masc.Keeper_official_client_host.Terminal_tool_boundary _) -> ()
         | `Act, _, _ ->
-          fail "a failed browser action left the turn open though a direct BrowserAct ends it"))
+          fail "a failed browser action ended the turn though a direct BrowserAct hands it back"))
 ;;
 
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
@@ -10885,7 +10884,7 @@ let () =
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
       test_case "failed interaction after navigation returns to the model" `Quick
         (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Interact);
-      test_case "failed browser action after navigation closes the loop" `Quick
+      test_case "failed browser action after navigation returns to the model" `Quick
         (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Act);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;

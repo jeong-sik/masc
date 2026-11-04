@@ -38,6 +38,9 @@ let realtime_cache_ttl_s = 15.0
 (** Shared dashboard projection cache TTL — 120 seconds. *)
 let dashboard_projection_cache_ttl_s = 120.0
 
+let planning_cache_prefix = "planning:"
+let planning_cache_key ~base_path = planning_cache_prefix ^ base_path
+
 (* Every cached projection of the board store. A board write drops all of
    them so the SSE-triggered refetch reads the write instead of the
    previous projection for the rest of the TTL. *)

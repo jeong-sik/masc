@@ -1,6 +1,16 @@
 {
   "upstream": "astral-sh/python-build-standalone",
   "release": "20260901",
+  "ca_bundle": {
+    "upstream": "certifi/python-certifi",
+    "version": "2026.10.23",
+    "name": "certifi-2026.10.23-py3-none-any.whl",
+    "browser_download_url": "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+    "size": 135082,
+    "digest": "sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+    "member": "certifi/cacert.pem",
+    "license_member": "certifi-2026.10.23.dist-info/licenses/LICENSE"
+  },
   "platforms": {
     "macos-arm64": {
       "browser_download_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",

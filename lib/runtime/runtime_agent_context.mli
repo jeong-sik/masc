@@ -16,7 +16,6 @@
     InputRequired does not claim a completed provider response. *)
 type stop_reason =
   | Completed of { provider_turn_ordinal : int }
-  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | InputRequired of {
       turns_used : int;

@@ -1397,25 +1397,32 @@ let test_stale_connector_member_preserves_fifo_and_independent_progress () =
       Keeper_event_queue_persistence.For_testing.reset_snapshot_cache_for_testing ();
       Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name |> require in
     let admitted = pending () in
-    Keeper_event_queue_persistence.note_checkpoint_retention_result
-      ~base_path ~keeper_name ~selection:(List.hd admitted) () |> require |> ignore;
-    let stale_current = List.hd (pending ()) in
+    Keeper_event_queue_persistence.retain_checkpoint_batch_result
+      ~base_path ~keeper_name ~selections:[ List.hd admitted ] () |> require |> ignore;
+    (* Retaining one member retains its whole conversation, so both A rows
+       now carry a newer incarnation than the [admitted] snapshot. *)
+    let entry_of post_id = List.find
+      (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id = post_id) in
+    let stale_current = entry_of a1.post_id (pending ()) in
     let c1 = make "conversation-C" "c1" 4. in
     enqueue_exn ~base_path keeper_name c1;
     let failures = Keeper_registry_event_queue.retain_checkpoint_batch_result
       ~base_path keeper_name ~selections:admitted |> require in
-    check (list string) "stale exact source is reported, never silently accepted"
-      [a1.post_id] (List.map (fun ((s : Keeper_event_queue_state.pending_selection), _) ->
+    check (list string) "stale exact sources are reported, never silently accepted"
+      [a1.post_id;a2.post_id] (List.map (fun ((s : Keeper_event_queue_state.pending_selection), _) ->
         s.source.post_id) failures);
     let current = pending () in
     check (list string) "stale A stays ordered while independent B moves behind C"
       [a1.post_id;a2.post_id;c1.post_id;b1.post_id]
       (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) current);
     check bool "stale source's current state remains exactly unchanged" true
-      (List.hd current=stale_current);
+      (entry_of a1.post_id current=stale_current);
+    (* Only the selected a1 was counted by the first retention; a2 moved with
+       its conversation, and C was never admitted. *)
     List.iter (fun (s : Keeper_event_queue_state.pending_selection) ->
-      check int "healthy admitted siblings retain counts without counting C"
-        (if s.source.post_id=c1.post_id then 0 else 1) s.checkpoint_retentions) current)
+      check int "retention counts only admitted, valid selections"
+        (if s.source.post_id=c1.post_id || s.source.post_id=a2.post_id then 0 else 1)
+        s.checkpoint_retentions) current)
 ;;
 
 (* A completed, addressed turn settles the entire admitted batch through the
@@ -1522,7 +1529,7 @@ let test_checkpoint_stale_source_does_not_discard_healthy_sibling () =
       Persistence.pending_selections_result ~base_path ~keeper_name |> require in
     let admitted = pending () in
     let first = List.hd admitted in
-    Persistence.note_checkpoint_retention_result ~base_path ~keeper_name ~selection:first ()
+    Persistence.retain_checkpoint_batch_result ~base_path ~keeper_name ~selections:[ first ] ()
       |> require |> ignore;
     enqueue_exn ~base_path keeper_name (make "independent");
     (match Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations

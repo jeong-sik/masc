@@ -574,7 +574,6 @@
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
-  test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_noop_backoff
@@ -927,7 +926,6 @@
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
-  test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_noop_backoff

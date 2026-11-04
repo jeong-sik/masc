@@ -6,7 +6,7 @@ type site =
   | Sdk_prepare_json | Sdk_wire_json | Sdk_byte_count_lookup
   | Sdk_byte_count_encode | Sdk_byte_count_publication
   | Reserve_encode | Prefix_digest_encode | Prompt_metrics_encode | Provider_snapshot_encode
-  | Phase0_bytes | Final_attribution_bytes
+  | Final_attribution_bytes
   | Built_surface | Agent_core_surface | Request_surface
   | Worker_queue_and_await | Worker_work
 type json_lookup = Existing_json | Created_json
@@ -378,7 +378,7 @@ let site_name = function
   | Reserve_encode -> "reserve_encode" | Prefix_digest_encode -> "prefix_digest_encode"
   | Prompt_metrics_encode -> "prompt_metrics_encode"
   | Provider_snapshot_encode -> "provider_snapshot_encode"
-  | Phase0_bytes -> "phase0_bytes" | Final_attribution_bytes -> "final_attribution_bytes"
+  | Final_attribution_bytes -> "final_attribution_bytes"
   | Built_surface -> "built_surface" | Agent_core_surface -> "agent_core_surface"
   | Request_surface -> "request_surface" | Worker_queue_and_await -> "worker_queue_and_await"
   | Worker_work -> "worker_work"
@@ -528,7 +528,7 @@ let site_of_json = function
   | `String "reserve_encode" -> Ok Reserve_encode | `String "prefix_digest_encode" -> Ok Prefix_digest_encode
   | `String "prompt_metrics_encode" -> Ok Prompt_metrics_encode
   | `String "provider_snapshot_encode" -> Ok Provider_snapshot_encode
-  | `String "phase0_bytes" -> Ok Phase0_bytes | `String "final_attribution_bytes" -> Ok Final_attribution_bytes
+  | `String "final_attribution_bytes" -> Ok Final_attribution_bytes
   | `String "built_surface" -> Ok Built_surface | `String "agent_core_surface" -> Ok Agent_core_surface
   | `String "request_surface" -> Ok Request_surface
   | `String "worker_queue_and_await" -> Ok Worker_queue_and_await | `String "worker_work" -> Ok Worker_work

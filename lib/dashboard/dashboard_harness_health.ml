@@ -23,29 +23,6 @@ type harness_verdict_item =
         hash joins this verdict in {!Eval_calibration.find_divergences}. *)
   }
 
-(** Wake-time payload observation.
-
-    Captured once per keeper turn, just before [Keeper_turn_driver.run_named] fires.
-    Component byte fields are exact measurements of the canonical values MASC
-    owns; they do not claim to represent a provider-specific HTTP request body.
-
-    [message_count] and [role_counts] include the synthesized user turn
-    that AGENT_CORE will append from [~goal], matching the wire-level message
-    list the LLM will receive. *)
-type wake_payload_event =
-  { timestamp : float
-  ; keeper_name : string
-  ; trace_id : string
-  ; turn_index : int
-  ; context_window : int
-  ; system_prompt_bytes : int
-  ; tool_schema_json_bytes : int
-  ; message_content_bytes : int
-  ; message_count : int
-  ; role_counts : (string * int) list
-  ; tool_count : int
-  }
-
 let max_recent_verdicts = 8
 let max_signal_scan = 500
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
@@ -58,11 +35,6 @@ let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
    reviewed edit. *)
 let evaluator_fallback_warning_ratio = 0.8
 
-(** Store for wake-time payload observations. Populated lazily on the first
-    [record_wake_payload] call. *)
-let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
-let wake_payload_store_mu = Eio.Mutex.create ()
-
 let status_to_string = function
   | Healthy -> "healthy"
   | Warning -> "warning"
@@ -74,51 +46,6 @@ let trim_recent (type a) max_items (values : a list) : a list =
   if List.length values <= max_items
   then values
   else List.filteri (fun idx _ -> idx < max_items) values
-;;
-
-
-let wake_payload_location ~base_path =
-  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Keeper_wake_payload)
-;;
-
-let get_or_create_store ~store_ref ~store_mu location_fn =
-  match Atomic.get store_ref with
-  | Some store -> store
-  | None ->
-    Eio.Mutex.use_rw ~protect:true store_mu @@ fun () ->
-    (match Atomic.get store_ref with
-     | Some store -> store
-     | None ->
-       let store = Dated_jsonl.open_store (location_fn ()) in
-       Atomic.set store_ref (Some store);
-       store)
-;;
-
-let append_store_json_fail_open ~store_ref ~store_name get_store json =
-  try Dated_jsonl.append (get_store ()) json with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    (* Health/event persistence is observability only. If the backing JSONL
-         append fails, drop the poisoned store so the next call can recreate
-         it instead of leaking Eio_mutex.Poisoned into keeper control flow. *)
-    Atomic.set store_ref None;
-    Log.Harness.warn "[%s] append failed: %s" store_name (Printexc.to_string exn)
-;;
-
-
-let get_wake_payload_store () =
-  get_or_create_store
-    ~store_ref:wake_payload_store_ref
-    ~store_mu:wake_payload_store_mu
-    (fun () -> wake_payload_location ~base_path:(Env_config.base_path ()))
-;;
-
-
-
-let set_wake_payload_store_for_testing ~base_path =
-  Atomic.set
-    wake_payload_store_ref
-    (Some (Dated_jsonl.open_store (wake_payload_location ~base_path)))
 ;;
 
 let string_field json key = Safe_ops.json_string ~default:"" key json
@@ -192,178 +119,7 @@ let verdict_item_of_json json =
       }
 ;;
 
-
-
-
-let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (role, n) -> role, `Int n) counts)
-;;
-
 let ( let* ) result f = Result.bind result f
-
-let required_member fields key =
-  match List.assoc_opt key fields with
-  | Some value -> Ok value
-  | None -> Error (Printf.sprintf "missing required field %S" key)
-;;
-
-let required_string fields key =
-  let* value = required_member fields key in
-  match value with
-  | `String value -> Ok value
-  | _ -> Error (Printf.sprintf "field %S must be a string" key)
-;;
-
-let required_non_empty_string fields key =
-  let* value = required_string fields key in
-  if String.equal value ""
-  then Error (Printf.sprintf "field %S must be non-empty" key)
-  else Ok value
-;;
-
-let int_json ~field = function
-  | `Int value -> Ok value
-  | `Intlit raw ->
-    (match int_of_string_opt raw with
-     | Some value -> Ok value
-     | None -> Error (Printf.sprintf "field %S has an invalid integer" field))
-  | _ -> Error (Printf.sprintf "field %S must be an integer" field)
-;;
-
-let required_int fields key =
-  let* value = required_member fields key in
-  int_json ~field:key value
-;;
-
-let required_nonnegative_int fields key =
-  let* value = required_int fields key in
-  if value < 0
-  then Error (Printf.sprintf "field %S must be non-negative" key)
-  else Ok value
-;;
-
-let required_positive_int fields key =
-  let* value = required_int fields key in
-  if value <= 0
-  then Error (Printf.sprintf "field %S must be positive" key)
-  else Ok value
-;;
-
-let required_float fields key =
-  let* value = required_member fields key in
-  let* value =
-    match value with
-    | `Float value -> Ok value
-    | `Int value -> Ok (Float.of_int value)
-    | `Intlit raw ->
-      (match float_of_string_opt raw with
-       | Some value -> Ok value
-       | None -> Error (Printf.sprintf "field %S has an invalid number" key))
-    | _ -> Error (Printf.sprintf "field %S must be a number" key)
-  in
-  if Float.is_finite value
-  then Ok value
-  else Error (Printf.sprintf "field %S must be finite" key)
-;;
-
-let required_role_counts fields =
-  let* value = required_member fields "role_counts" in
-  match value with
-  | `Assoc counts ->
-    List.fold_left
-      (fun result (role, value) ->
-         let* counts = result in
-         let* count = int_json ~field:("role_counts." ^ role) value in
-         if count < 0
-         then Error (Printf.sprintf "field %S must be non-negative" ("role_counts." ^ role))
-         else Ok ((role, count) :: counts))
-      (Ok [])
-      counts
-    |> Result.map List.rev
-  | _ -> Error "field \"role_counts\" must be an object of integer counts"
-;;
-
-let wake_payload_record_type = "wake_payload"
-
-let wake_payload_record_json (event : wake_payload_event) =
-  `Assoc
-    [ "record_type", `String wake_payload_record_type
-    ; "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "trace_id", `String event.trace_id
-    ; "turn_index", `Int event.turn_index
-    ; "context_window", `Int event.context_window
-    ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
-    ; "message_content_bytes", `Int event.message_content_bytes
-    ; "message_count", `Int event.message_count
-    ; "role_counts", role_counts_to_json event.role_counts
-    ; "tool_count", `Int event.tool_count
-    ]
-;;
-
-let wake_payload_event_of_json json =
-  match json with
-  | `Assoc fields ->
-    let* record_type = required_string fields "record_type" in
-    if not (String.equal record_type wake_payload_record_type)
-    then Error (Printf.sprintf "unexpected record_type %S" record_type)
-    else
-      let* timestamp = required_float fields "timestamp" in
-      let* keeper_name = required_non_empty_string fields "keeper_name" in
-      let* trace_id = required_non_empty_string fields "trace_id" in
-      let* turn_index = required_nonnegative_int fields "turn_index" in
-      let* context_window = required_positive_int fields "context_window" in
-      let* system_prompt_bytes = required_nonnegative_int fields "system_prompt_bytes" in
-      let* tool_schema_json_bytes =
-        required_nonnegative_int fields "tool_schema_json_bytes"
-      in
-      let* message_content_bytes =
-        required_nonnegative_int fields "message_content_bytes"
-      in
-      let* message_count = required_positive_int fields "message_count" in
-      let* role_counts = required_role_counts fields in
-      let* () =
-        let role_count_sum =
-          List.fold_left (fun sum (_, count) -> sum + count) 0 role_counts
-        in
-        if role_count_sum = message_count
-        then Ok ()
-        else
-          Error
-            (Printf.sprintf
-               "role_counts sum %d does not equal message_count %d"
-               role_count_sum
-               message_count)
-      in
-      let* tool_count = required_nonnegative_int fields "tool_count" in
-      Ok
-        { timestamp
-        ; keeper_name
-        ; trace_id
-        ; turn_index
-        ; context_window
-        ; system_prompt_bytes
-        ; tool_schema_json_bytes
-        ; message_content_bytes
-        ; message_count
-        ; role_counts
-        ; tool_count
-        }
-  | _ -> Error "wake-payload record must be a JSON object"
-;;
-
-let wake_payload_record_identity json =
-  match json with
-  | `Assoc fields ->
-    let string_or_missing key =
-      match List.assoc_opt key fields with
-      | Some (`String value) -> value
-      | _ -> "<missing>"
-    in
-    string_or_missing "keeper_name", string_or_missing "trace_id"
-  | _ -> "<missing>", "<missing>"
-;;
 
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ~base_path ()
   : harness_verdict_item list
@@ -419,34 +175,6 @@ let read_recent_verdicts_for_agents
     trim_recent limit verdicts)
 ;;
 
-
-let read_wake_payload_events ?since ?until () =
-  let events : wake_payload_event list =
-    read_store_records
-      (get_wake_payload_store ())
-      ?since
-      ?until
-      ~f:(fun json ->
-        match wake_payload_event_of_json json with
-        | Ok event -> Some event
-        | Error detail ->
-          let keeper_name, trace_id = wake_payload_record_identity json in
-          (* Unconditional per-row warn: no quota and no early stop, so it does
-             not care that the reader calls this newest-first. *)
-          Log.Harness.warn
-            "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
-            keeper_name
-            trace_id
-            detail;
-          None)
-      ()
-  in
-  List.sort
-    (fun (left : wake_payload_event) (right : wake_payload_event) ->
-       Float.compare right.timestamp left.timestamp)
-    events
-;;
-
 let evaluator_status ~calibration latest_timestamp =
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
@@ -469,69 +197,6 @@ let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
   | item :: _ -> Some item.timestamp
   | [] -> None
 ;;
-
-
-let record_wake_payload_at
-      ~timestamp
-      ~keeper_name
-      ~trace_id
-      ~turn_index
-      ~context_window
-      ~system_prompt_bytes
-      ~tool_schema_json_bytes
-      ~message_content_bytes
-      ~message_count
-      ~role_counts
-      ~tool_count
-  =
-  let event =
-    { timestamp
-    ; keeper_name
-    ; trace_id
-    ; turn_index
-    ; context_window
-    ; system_prompt_bytes
-    ; tool_schema_json_bytes
-    ; message_content_bytes
-    ; message_count
-    ; role_counts
-    ; tool_count
-    }
-  in
-  append_store_json_fail_open
-    ~store_ref:wake_payload_store_ref
-    ~store_name:"wake_payload"
-    get_wake_payload_store
-    (wake_payload_record_json event);
-  event
-;;
-
-let record_wake_payload
-      ~keeper_name
-      ~trace_id
-      ~turn_index
-      ~context_window
-      ~system_prompt_bytes
-      ~tool_schema_json_bytes
-      ~message_content_bytes
-      ~message_count
-      ~role_counts
-      ~tool_count
-  =
-  record_wake_payload_at
-    ~timestamp:(Time_compat.now ())
-    ~keeper_name
-    ~trace_id
-    ~turn_index
-    ~context_window
-    ~system_prompt_bytes
-    ~tool_schema_json_bytes
-    ~message_content_bytes
-    ~message_count
-    ~role_counts
-    ~tool_count
-;;
-
 
 let overview_json
       ~(calibration : Yojson.Safe.t)
@@ -562,10 +227,6 @@ let overview_json
     ]
 ;;
 
-let reset_runtime_stores_for_testing () =
-  Atomic.set wake_payload_store_ref None
-;;
-
 let json ?since ?until ~base_path () =
   let calibration = Eval_calibration.calibration_stats ?since ?until ~base_path () in
   let recent_verdicts = read_recent_verdicts ?since ?until ~base_path () in
@@ -580,17 +241,6 @@ let json ?since ?until ~base_path () =
     ; "calibration", calibration
     ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts)
     ]
-;;
-
-let () =
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ->
-    let (_recorded : wake_payload_event) =
-      record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window
-        ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes
-        ~message_count ~role_counts ~tool_count
-    in
-    ()
-  )
 ;;
 
 (* ── Operator labels ─────────────────────────────────────────────────── *)

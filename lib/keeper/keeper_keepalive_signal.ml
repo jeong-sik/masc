@@ -26,60 +26,6 @@ let register_grpc_heartbeat_starter (f : grpc_heartbeat_starter_fn) =
 let grpc_heartbeat_starter ~ctx ~m ~stop =
   (Atomic.get grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
 
-let record_wake_payload_callback
-    : (keeper_name:string ->
-       trace_id:string ->
-       turn_index:int ->
-       context_window:int ->
-       system_prompt_bytes:int ->
-       tool_schema_json_bytes:int ->
-       message_content_bytes:int ->
-       message_count:int ->
-       role_counts:(string * int) list ->
-       tool_count:int ->
-       unit)
-      Atomic.t
-  =
-  Atomic.make
-    (fun ~keeper_name
-      ~trace_id:_
-      ~turn_index:_
-      ~context_window:_
-      ~system_prompt_bytes:_
-      ~tool_schema_json_bytes:_
-      ~message_content_bytes:_
-      ~message_count:_
-      ~role_counts:_
-      ~tool_count:_ ->
-      Log.Keeper.warn "wake-payload observer unavailable: keeper=%s" keeper_name)
-
-let record_wake_payload
-    ~keeper_name
-    ~trace_id
-    ~turn_index
-    ~context_window
-    ~system_prompt_bytes
-    ~tool_schema_json_bytes
-    ~message_content_bytes
-    ~message_count
-    ~role_counts
-    ~tool_count
-  =
-  (Atomic.get record_wake_payload_callback)
-    ~keeper_name
-    ~trace_id
-    ~turn_index
-    ~context_window
-    ~system_prompt_bytes
-    ~tool_schema_json_bytes
-    ~message_content_bytes
-    ~message_count
-    ~role_counts
-    ~tool_count
-;;
-
-let register_record_wake_payload f = Atomic.set record_wake_payload_callback f
-
 let record_tool_skipped_callback
     : (tool_name:string -> reason_code:string -> unit) Atomic.t
   =

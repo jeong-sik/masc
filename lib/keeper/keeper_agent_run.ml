@@ -1246,20 +1246,6 @@ let run_turn
        [Keeper_alerting_path] and [Keeper_sandbox_containment]; AGENT_CORE receives no
        ambient path capability. *)
     (
-       Agent_core.Base.Schema_observation.with_site Phase0_bytes (fun () ->
-       Keeper_agent_run_phase0_telemetry.record
-         ~meta
-         ~turn_system_prompt
-           (* Pre-dispatch: run_named's failover has not chosen a lane yet, so
-              nothing here knows which list will be sent. This records what the
-              turn was built with, which is the only answer available. *)
-         ~tools:built_tools
-         ~history_messages
-         ?user_blocks
-         ~user_message
-         ~start_turn_count
-         ~max_context
-         ());
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let raw_trace = raw_trace_for_dispatch ~config ~meta in
        (* The owner of the last candidate this turn dispatched. A turn that

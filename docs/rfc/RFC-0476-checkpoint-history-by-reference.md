@@ -99,7 +99,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
   - text 전용 후보를 위한 이미지 위임과 media 읽기는 run 전에 checkpoint 전체를 훑는다(keeper_turn_driver.ml:1261-1294, :1349-1364, keeper_media_reading.ml:349).
   - official client 는 history 를 외부 CLI 로 보낸다(keeper_official_client_context_projection.ml:22, codec.ml:72-86).
   - Librarian 입력 캡처 codec 도 세 source 만 받는다(keeper_librarian_input_capture.ml:10-12).
-  - metrics 는 `String.length data` 로 크기를 잰다(keeper_wake_telemetry.ml:53, keeper_agent_prompt_metrics.ml:353).
+  - metrics 는 `String.length data` 로 크기를 잰다(keeper_agent_prompt_metrics.ml:353).
 
 ## 3. 설계
 

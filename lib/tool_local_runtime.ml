@@ -28,44 +28,84 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
     (Yojson.Safe.to_string data)
 ;;
 
-let run_runtime_verify args : Core.tool_result =
+(* Absent means "use the default"; present-but-unusable does not. An argument
+   of the wrong shape is refused before the Gate sees the call, because reading
+   it back as the default answers for a call the caller did not make. *)
+let runtime_flag_field args ~name ~default =
+  match Json_field.bool args name with
+  | Json_field.Field_absent -> Ok default
+  | Json_field.Found value -> Ok value
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Printf.sprintf "%s must be a %s, got %s" name expected got)
+
+let runtime_text_field args ~name =
+  match Json_field.string args name with
+  | Json_field.Field_absent -> Ok None
+  | Json_field.Found value -> Ok (Some value)
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Printf.sprintf "%s must be a %s, got %s" name expected got)
+
+(* A verification that drops an expectation reports success for a check that
+   never ran, so an unreadable or non-positive expectation is refused. *)
+let runtime_positive_int_field args ~name =
+  match Json_field.int args name with
+  | Json_field.Field_absent -> Ok None
+  | Json_field.Found value when value >= 1 -> Ok (Some value)
+  | Json_field.Found value ->
+      Error (Printf.sprintf "%s must be a positive integer (got %d)" name value)
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Printf.sprintf "%s must be an %s, got %s" name expected got)
+
+type runtime_verify_args =
+  { runtime_pool : string option
+  ; expected_model : string option
+  ; expected_slots : int option
+  ; expected_ctx : int option
+  }
+
+(* Every argument is read here, before the Gate sees the call. *)
+let runtime_verify_args args : (runtime_verify_args, string) result =
+  let open Result.Syntax in
+  let* runtime_pool = runtime_text_field args ~name:"runtime_pool" in
+  let* expected_model = runtime_text_field args ~name:"expected_model" in
+  let* expected_slots = runtime_positive_int_field args ~name:"expected_slots" in
+  let* expected_ctx = runtime_positive_int_field args ~name:"expected_ctx" in
+  Ok { runtime_pool; expected_model; expected_slots; expected_ctx }
+
+let run_runtime_verify (verify : runtime_verify_args) : Core.tool_result =
   let tool_name = Tool_schemas_local_runtime.tool_name Verify in
   let start_time = Tool_timing.start () in
-  let runtime_pool = Json_util.get_string args "runtime_pool" in
-  let expected_model = Json_util.get_string args "expected_model" in
-  let expected_slots =
-    match Json_util.assoc_member_opt "expected_slots" args with
-    | Some (`Int value) -> Some (max 1 value)
-    | Some (`Intlit value) -> Core.parse_int_opt value
-    | _ -> None
-  in
-  let expected_ctx =
-    match Json_util.assoc_member_opt "expected_ctx" args with
-    | Some (`Int value) -> Some (max 1 value)
-    | Some (`Intlit value) -> Core.parse_int_opt value
-    | _ -> None
-  in
   ok_response
     ~tool_name
     ~start_time
     [
       ( "result",
         Tool_local_runtime_verify.runtime_verify_json
-          ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
+          ?runtime_pool:verify.runtime_pool ?expected_slots:verify.expected_slots
+          ?expected_ctx:verify.expected_ctx ?expected_model:verify.expected_model
+          () );
     ]
 
 (* TEL-OK: this adapter only requests the shared external-effect authorization
    and delegates the completion. The authorizer owns the Gate decision receipt;
    the outer MCP tool-call boundary owns duration and result telemetry. *)
 let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
-  let continue () = run_runtime_verify args in
-  match ctx.authorize_external_effect with
-  | None -> continue ()
-  | Some authorize ->
-    authorize
-      ~operation:(Tool_schemas_local_runtime.tool_name Verify)
-      ~input:args
-      ~continue
+  match runtime_verify_args args with
+  | Error message ->
+      err_response
+        ~tool_name:(Tool_schemas_local_runtime.tool_name Verify)
+        ~start_time:(Tool_timing.start ())
+        ~class_:Tool_result.Workflow_rejection
+        message
+  | Ok verify ->
+      let continue () = run_runtime_verify verify in
+      (match ctx.authorize_external_effect with
+       | None -> continue ()
+       | Some authorize ->
+         authorize
+           ~operation:(Tool_schemas_local_runtime.tool_name Verify)
+           ~input:args
+           ~continue)
 ;;
 
 let runtime_ollama_probe_timeout_sec args =
@@ -82,32 +122,16 @@ let runtime_ollama_probe_timeout_sec args =
            expected
            got)
 
-(* Absent means "use the default"; present-but-unusable does not. Reading a
-   string or a float back as the default answers with an ok response for a
-   probe the caller did not ask for. Out-of-range is the same story with a
-   different cause -- #24851 removed that rewrite for timeout_sec, and these
-   knobs are refused in the same place, before the Gate sees the call, so a
-   rejected probe never authorizes an external effect (#25006). *)
+(* Out-of-range is refused like a wrong shape. #24851 removed the rewrite for
+   timeout_sec, and these knobs are refused in the same place, before the Gate
+   sees the call, so a rejected probe never authorizes an external effect
+   (#25006). *)
 let runtime_ollama_probe_bounded_field args ~name ~default ~validate =
   match Json_field.int args name with
   | Json_field.Field_absent -> Ok default
   | Json_field.Found value -> validate value
   | Json_field.Wrong_shape { expected; got } ->
       Error (Printf.sprintf "%s must be an %s, got %s" name expected got)
-
-let runtime_ollama_probe_flag args ~name ~default =
-  match Json_field.bool args name with
-  | Json_field.Field_absent -> Ok default
-  | Json_field.Found value -> Ok value
-  | Json_field.Wrong_shape { expected; got } ->
-      Error (Printf.sprintf "%s must be a %s, got %s" name expected got)
-
-let runtime_ollama_probe_text args ~name =
-  match Json_field.string args name with
-  | Json_field.Field_absent -> Ok None
-  | Json_field.Found value -> Ok (Some value)
-  | Json_field.Wrong_shape { expected; got } ->
-      Error (Printf.sprintf "%s must be a %s, got %s" name expected got)
 
 (* [think_mode] names the mode outright. [think] is its boolean shorthand and
    is read only when [think_mode] is absent. *)
@@ -157,16 +181,16 @@ let runtime_ollama_probe_args args : (ollama_probe_args, string) result =
     runtime_ollama_probe_bounded_field args ~name:"ps_timeout_sec" ~default:2
       ~validate:Tool_local_runtime_probe.validate_ps_timeout_sec
   in
-  let* server_url = runtime_ollama_probe_text args ~name:"server_url" in
-  let* model = runtime_ollama_probe_text args ~name:"model" in
-  let* prompt = runtime_ollama_probe_text args ~name:"prompt" in
-  let* keep_alive = runtime_ollama_probe_text args ~name:"keep_alive" in
+  let* server_url = runtime_text_field args ~name:"server_url" in
+  let* model = runtime_text_field args ~name:"model" in
+  let* prompt = runtime_text_field args ~name:"prompt" in
+  let* keep_alive = runtime_text_field args ~name:"keep_alive" in
   let* think_mode = runtime_ollama_probe_think_mode args in
   let* generate_when_unloaded =
-    runtime_ollama_probe_flag args ~name:"generate_when_unloaded" ~default:true
+    runtime_flag_field args ~name:"generate_when_unloaded" ~default:true
   in
   let* run_generate =
-    runtime_ollama_probe_flag args ~name:"run_generate" ~default:true
+    runtime_flag_field args ~name:"run_generate" ~default:true
   in
   Ok
     { server_url

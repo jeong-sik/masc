@@ -1625,12 +1625,6 @@ let test_undecodable_primary_retains_wal_and_absence_recovers () =
       pending |> fun q -> Queue.enqueue q (stimulus "completed" 1.0)
               |> fun q -> Queue.enqueue q (stimulus "sibling" 2.0))
     |> require_ok "seed sibling sources";
-    let scope = Keeper_chat_operation.Operation_id.of_string "wal-binding"
-      |> require_ok "WAL operation ID" |> Keeper_execution_scope_id.direct_operation in
-    let selections = Persistence.pending_selections_result ~base_path ~keeper_name
-      |> require_ok "WAL pending selections" in
-    Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-      ~selections ~scope () |> require_ok "WAL bind" |> ignore;
     let selection = select_queue_entry ~base_path ~keeper_name
       ~now:3.0 ~ready:(fun _ -> true)
       |> require_ok "select" |> require_some "selection" in
@@ -1667,11 +1661,6 @@ let test_undecodable_primary_retains_wal_and_absence_recovers () =
       |> require_ok "WAL-only recovery after physical absence" in
     Alcotest.(check (list string)) "sibling recovered" ["sibling"]
       (post_ids (State.pending recovered));
-    Alcotest.(check bool) "WAL pre-state retains sibling scope" true
-      (match State.pending_selections recovered with
-       | [sibling] -> Option.fold ~none:false
-           ~some:(Keeper_execution_scope_id.equal scope) sibling.repetition_scope
-       | _ -> false);
     Alcotest.(check int) "completion outbox recovered" 1
       (List.length (State.transition_outbox recovered));
     let replay = Persistence.terminalize_pending_turn_completed_result
@@ -2207,143 +2196,34 @@ let test_unchanged_snapshot_is_not_reparsed () =
       (post_ids (State.pending third)) (post_ids (State.pending fourth)))
 ;;
 
-module Scope_id = Keeper_execution_scope_id
+(* A one-shot enqueue replay crosses the strict snapshot durability barrier
+   unless the snapshot and transition WAL are the files this process
+   confirmed. *)
+let once_source = stimulus "once-source" 4.
 
-let scope_id name =
-  Keeper_chat_operation.Operation_id.of_string name
-  |> require_ok "operation ID" |> Scope_id.direct_operation
+let enqueue_once ?(after_commit = fun _ -> ()) ~base_path ~keeper_name () =
+  Persistence.enqueue_stimulus_once_result ~already_delivered:(fun () -> Ok false)
+    ~after_commit ~base_path ~keeper_name once_source
 
-let bind_scope state selections scope =
-  State.bind_pending_repetition_scope ~selections ~scope state
-  |> Result.map_error State.scope_binding_error_to_string
-  |> require_ok "bind scope"
+let once_source_pending state =
+  List.exists (fun (selection : State.pending_selection) ->
+    String.equal selection.source.post_id once_source.post_id)
+    (State.pending_selections state)
 
-let check_scope label expected (selection : State.pending_selection) =
-  Alcotest.(check bool) label true
-    (Option.fold ~none:false ~some:(Scope_id.equal expected) selection.repetition_scope)
-
-let expect_binding_error label = function
+let expect_error label = function
   | Error _ -> ()
   | Ok _ -> Alcotest.fail label
 
-let test_scope_batch_atomic_and_idempotent () =
-  let original = State.with_pending
-    (queue [stimulus "a" 1.; stimulus "b" 2.; stimulus "c" 3.]) State.empty in
-  let entries = State.pending_selections original in
-  let a, b, c = match entries with [a; b; c] -> a,b,c | _ -> assert false in
-  let scope = scope_id "batch-a" in
-  let bound, selected = bind_scope original [b;a] scope in
-  Alcotest.(check (list string)) "caller order" ["b";"a"]
-    (List.map (fun (s : State.pending_selection) -> s.source.post_id) selected);
-  List.iter (check_scope "batch binding" scope) selected;
-  Alcotest.(check (list string)) "queue order unchanged" ["a";"b";"c"]
-    (post_ids (State.pending bound));
-  State.validate_pending_selection ~selection:c bound |> require_ok "unrelated exact authority";
-  expect_binding_error "pre-binding selector accepted"
-    (State.validate_pending_selection ~selection:a bound);
-  let repeated, _ = bind_scope bound selected scope in
-  Alcotest.(check bool) "replay is physical no-op" true (repeated == bound);
-  expect_binding_error "empty batch accepted"
-    (State.bind_pending_repetition_scope ~selections:[] ~scope bound);
-  expect_binding_error "duplicate batch accepted"
-    (State.bind_pending_repetition_scope ~selections:[c;c] ~scope bound);
-  expect_binding_error "stale batch accepted"
-    (State.bind_pending_repetition_scope ~selections:[c;a] ~scope bound);
-  expect_binding_error "conflict after unbound member accepted"
-    (State.bind_pending_repetition_scope ~selections:(c::selected)
-       ~scope:(scope_id "other-batch") bound);
-  Alcotest.(check bool) "failed batch did not bind unrelated source" true
-    ((List.nth (State.pending_selections bound) 2).repetition_scope = None)
-
-let test_scope_preserved_by_scheduling_not_reincarnation () =
-  let scope = scope_id "scheduling" in
-  let original = State.with_pending
-    (queue [stimulus "a" 1.; stimulus "b" 2.]) State.empty in
-  let bound, _ = bind_scope original (State.pending_selections original) scope in
-  let changed, _ = State.reprioritize_pending ~selection:(select bound)
-    ~urgency:Queue.Immediate bound |> require_ok "reprioritize" in
-  List.iter (check_scope "priority preserves binding" scope) (State.pending_selections changed);
-  let deferred, _ = State.defer_pending ~selection:(select changed) changed
-    |> require_ok "defer" in
-  List.iter (check_scope "defer preserves binding" scope) (State.pending_selections deferred);
-  let retained, (selected, _) = State.note_checkpoint_retention
-    ~selection:(select deferred) deferred |> require_ok "retention" in
-  check_scope "retention preserves binding" scope selected;
-  let removed = State.ack_pending ~selection:selected retained |> require_ok "ack" in
-  let reinserted = State.with_pending (Queue.enqueue (State.pending removed) selected.source) removed in
-  let fresh = State.pending_selections reinserted
-    |> List.find (fun (s : State.pending_selection) -> s.source.post_id = selected.source.post_id) in
-  Alcotest.(check bool) "new source does not inherit removed binding" true
-    (fresh.repetition_scope = None);
-  State.pending_selections removed |> List.iter (check_scope "sibling retains binding" scope)
-
-let test_scope_codec_strict_optional_binding () =
-  let state = State.with_pending (queue [stimulus "a" 1.]) State.empty in
-  let raw = State.to_yojson state in
-  let entry_fields = match Yojson.Safe.Util.member "pending" raw with
-    | `List [`Assoc fields] -> fields | _ -> Alcotest.fail "pending codec shape" in
-  Alcotest.(check bool) "unbound field omitted" false (List.mem_assoc "repetition_scope" entry_fields);
-  State.of_yojson raw |> require_ok "unbound roundtrip" |> ignore;
-  let scope = scope_id "codec" in
-  let bound, _ = bind_scope state (State.pending_selections state) scope in
-  State.of_yojson (State.to_yojson bound) |> require_ok "bound roundtrip"
-    |> State.pending_selections |> List.iter (check_scope "binding roundtrip" scope);
-  let replace_pending fields = match raw with
-    | `Assoc outer -> `Assoc (("pending", `List [`Assoc fields]) :: List.remove_assoc "pending" outer)
-    | _ -> assert false in
-  List.iter (fun bad -> expect_binding_error "malformed binding decoded"
-    (State.of_yojson (replace_pending (("repetition_scope", bad)::entry_fields))))
-    [`Null; `String "codec"; `Assoc ["kind", `String "autonomous_admission"; "id", `String "bad-uuid"]];
-  expect_binding_error "duplicate binding decoded"
-    (State.of_yojson (replace_pending
-      (("repetition_scope", Scope_id.to_json scope)::("repetition_scope", Scope_id.to_json scope)::entry_fields)))
-
-let test_scope_durable_reload_noop_and_conflict () =
-  with_temp_dir "keeper-repetition-scope-binding" (fun base_path ->
-    let keeper_name = "scope-binding" in
-    Persistence.update_result ~base_path ~keeper_name (fun _ ->
-      queue [stimulus "a" 1.; stimulus "b" 2.]) |> require_ok "seed";
-    let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
-    let initial = read () in
-    let scope = scope_id "durable-batch" in
-    let committed = ref 0 in
-    let bind selections scope = Persistence.bind_pending_repetition_scope_result
-      ~after_commit:(fun _ -> incr committed) ~base_path ~keeper_name ~selections ~scope () in
-    bind (State.pending_selections initial) scope |> require_ok "durable bind" |> ignore;
-    Alcotest.(check int) "first binding publishes once" 1 !committed;
-    Persistence.For_testing.reset_snapshot_cache_for_testing ();
-    let reloaded = read () in
-    List.iter (check_scope "cold reload binding" scope) (State.pending_selections reloaded);
-    Alcotest.(check int64) "one committed revision" (Int64.succ (State.revision initial)) (State.revision reloaded);
-    let primary = Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      Persistence.snapshot_filename in
-    let bytes () = In_channel.with_open_bin primary In_channel.input_all in
-    let before = bytes () in
-    let written = Unix.lstat primary in
-    bind (State.pending_selections reloaded) scope |> require_ok "same-scope replay" |> ignore;
-    (* The cache reset re-reads the file; it does not make the bytes this
-       process confirmed any less durable. *)
-    Alcotest.(check int) "replay of a confirmed binding publishes nothing" 1 !committed;
-    Alcotest.(check bool) "replay of a confirmed binding writes nothing" true
-      (same_file_identity written (Unix.lstat primary));
-    expect_binding_error "conflicting durable binding accepted"
-      (bind (State.pending_selections reloaded) (scope_id "conflicting"));
-    expect_binding_error "stale durable binding accepted" (bind (State.pending_selections initial) scope);
-    Alcotest.(check string) "no-op and errors preserve bytes" before (bytes ());
-    Alcotest.(check int) "refused bindings publish nothing" 1 !committed;
-    Alcotest.(check int64) "no phantom revision" (State.revision reloaded) (State.revision (read ())))
-
-let test_scope_uncertain_rename_requires_durability_confirmation () =
-  with_temp_dir "keeper-repetition-uncertain-rename" (fun base_path ->
-    let keeper_name = "uncertain-binding" in
+let test_once_uncertain_rename_requires_durability_confirmation () =
+  with_temp_dir "keeper-once-uncertain-rename" (fun base_path ->
+    let keeper_name = "uncertain-once" in
     Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [stimulus "a" 1.])
       |> require_ok "seed";
     let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
     let initial = read () in
-    let scope = scope_id "uncertain" in
-    let bound, _ = bind_scope initial (State.pending_selections initial) scope in
-    let bound = State.with_revision (Int64.succ (State.revision initial)) bound in
+    let enqueued =
+      State.with_pending (Queue.enqueue (State.pending initial) once_source) initial
+      |> State.with_revision (Int64.succ (State.revision initial)) in
     let primary = Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
       Persistence.snapshot_filename in
@@ -2356,38 +2236,36 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
           Error (Fs_compat.atomic_replace_failure_to_string error)
       | Error _ -> Alcotest.fail "fixture failed before rename"
       | Ok () -> Alcotest.fail "fixture unexpectedly synced parent" in
-    expect_binding_error "uncertain write succeeded" (fail_after_rename primary bound);
+    expect_error "uncertain write succeeded" (fail_after_rename primary enqueued);
     Persistence.For_testing.reset_snapshot_cache_for_testing ();
-    let visible = read () in
-    let selections = State.pending_selections visible in
-    List.iter (check_scope "binding visible despite sync failure" scope) selections;
+    Alcotest.(check bool) "source visible despite sync failure" true
+      (once_source_pending (read ()));
     let confirmations = ref 0 in
     let failed_notifications = ref 0 in
     with_state_change_observer (fun () -> incr failed_notifications) (fun () ->
-      expect_binding_error "strict no-op skipped failing durability confirmation"
-        (Persistence.For_testing.bind_pending_repetition_scope_with_confirmation
+      expect_error "strict replay skipped failing durability confirmation"
+        (Persistence.For_testing.enqueue_stimulus_once_with_confirmation
           ~confirm_snapshot:(fun path state ->
             incr confirmations; fail_after_rename path state)
-          ~base_path ~keeper_name ~selections ~scope ()));
-    Alcotest.(check int) "same binding retried the barrier" 1 !confirmations;
+          ~already_delivered:(fun () -> Ok false)
+          ~base_path ~keeper_name once_source));
+    Alcotest.(check int) "same source retried the barrier" 1 !confirmations;
     Alcotest.(check int) "failed durability confirmation does not notify" 0 !failed_notifications;
     let before = In_channel.with_open_bin primary In_channel.input_all in
     let notifications = ref 0 in
     let publications = ref 0 in
     with_state_change_observer (fun () -> incr notifications) (fun () ->
-      Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-        ~after_commit:(fun _ -> incr publications) ~selections ~scope ()
+      enqueue_once ~after_commit:(fun _ -> incr publications) ~base_path ~keeper_name ()
         |> require_ok "real strict durability confirmation" |> ignore);
     Alcotest.(check int) "confirmed snapshot notifies once" 1 !notifications;
     Alcotest.(check int) "confirmed snapshot republishes once" 1 !publications;
     Alcotest.(check string) "confirmation preserves snapshot bytes" before
       (In_channel.with_open_bin primary In_channel.input_all);
     Alcotest.(check int64) "confirmation preserves committed revision"
-      (State.revision bound) (State.revision (read ()));
+      (State.revision enqueued) (State.revision (read ()));
     let confirmed = Unix.lstat primary in
     with_state_change_observer (fun () -> incr notifications) (fun () ->
-      Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-        ~after_commit:(fun _ -> incr publications) ~selections ~scope ()
+      enqueue_once ~after_commit:(fun _ -> incr publications) ~base_path ~keeper_name ()
         |> require_ok "replay after confirmation" |> ignore);
     Alcotest.(check int) "replay after confirmation does not notify" 1 !notifications;
     Alcotest.(check int) "replay after confirmation does not republish" 1 !publications;
@@ -2397,20 +2275,17 @@ let test_scope_uncertain_rename_requires_durability_confirmation () =
 (* What lets a replay skip the barrier is that the snapshot and the
    transition WAL are the files this process confirmed. A writer that puts
    the same bytes back, or a WAL that appears or goes, is not that. *)
-let test_scope_replay_crosses_the_barrier_again_after_the_files_change () =
-  with_temp_dir "keeper-repetition-files-change" (fun base_path ->
+let test_once_replay_crosses_the_barrier_again_after_the_files_change () =
+  with_temp_dir "keeper-once-files-change" (fun base_path ->
     let keeper_name = "files-change" in
     Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [stimulus "a" 1.])
       |> require_ok "seed";
     let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
-    let scope = scope_id "files-change" in
     let notifications = ref 0 in
     let publications = ref 0 in
-    let bind label =
+    let enqueue label =
       with_state_change_observer (fun () -> incr notifications) (fun () ->
-        Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-          ~after_commit:(fun _ -> incr publications)
-          ~selections:(State.pending_selections (read ())) ~scope ()
+        enqueue_once ~after_commit:(fun _ -> incr publications) ~base_path ~keeper_name ()
         |> require_ok label |> ignore)
     in
     let check_counts label expected =
@@ -2420,23 +2295,23 @@ let test_scope_replay_crosses_the_barrier_again_after_the_files_change () =
       Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name in
     let primary = Filename.concat directory Persistence.snapshot_filename in
     let wal = Filename.concat directory Persistence.transition_wal_filename in
-    bind "first binding";
-    check_counts "first binding writes and publishes" 1;
+    enqueue "first enqueue";
+    check_counts "first enqueue writes and publishes" 1;
     let revision = State.revision (read ()) in
-    bind "replay";
+    enqueue "replay";
     check_counts "replay of the confirmed files is quiet" 1;
     let same_bytes = In_channel.with_open_bin primary In_channel.input_all in
     Fs_compat.save_file_atomic primary same_bytes |> require_ok "same bytes, another file";
-    bind "replay after the snapshot was replaced";
+    enqueue "replay after the snapshot was replaced";
     check_counts "replaced snapshot is confirmed and published again" 2;
-    bind "replay after the new confirmation";
+    enqueue "replay after the new confirmation";
     check_counts "new confirmation makes the replay quiet again" 2;
     (* Compaction leaves an absent WAL absent; a transition would create it. *)
     Alcotest.(check bool) "no WAL before the change" false (Sys.file_exists wal);
     Out_channel.with_open_bin wal (fun (_ : out_channel) -> ());
-    bind "replay after the WAL changed";
+    enqueue "replay after the WAL changed";
     check_counts "changed WAL is confirmed and published again" 3;
-    bind "replay after the WAL confirmation";
+    enqueue "replay after the WAL confirmation";
     check_counts "WAL confirmation makes the replay quiet again" 3;
     Alcotest.(check int64) "replays never advance the revision" revision
       (State.revision (read ())))
@@ -2445,19 +2320,15 @@ let test_scope_replay_crosses_the_barrier_again_after_the_files_change () =
    transition appends to that file in place: same inode, larger size. A
    replay after that must cross the barrier again, and so must one after the
    WAL is gone. *)
-let test_scope_replay_crosses_the_barrier_again_after_a_transition () =
-  with_temp_dir "keeper-repetition-after-transition" (fun base_path ->
+let test_once_replay_crosses_the_barrier_again_after_a_transition () =
+  with_temp_dir "keeper-once-after-transition" (fun base_path ->
     let keeper_name = "after-transition" in
     Persistence.update_result ~base_path ~keeper_name (fun _ ->
       queue [stimulus "first" 1.; stimulus "second" 2.; stimulus "third" 3.])
       |> require_ok "seed";
-    let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
-    let scope = scope_id "after-transition" in
     let publications = ref 0 in
-    let bind label =
-      Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name
-        ~after_commit:(fun _ -> incr publications)
-        ~selections:(State.pending_selections (read ())) ~scope ()
+    let enqueue label =
+      enqueue_once ~after_commit:(fun _ -> incr publications) ~base_path ~keeper_name ()
       |> require_ok label |> ignore
     in
     let complete_next applied_at =
@@ -2479,16 +2350,16 @@ let test_scope_replay_crosses_the_barrier_again_after_a_transition () =
     let wal = Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
       Persistence.transition_wal_filename in
-    bind "first binding";
+    enqueue "first enqueue";
     complete_next 10.;
     Alcotest.(check bool) "the transition wrote the WAL" true
       ((Unix.lstat wal).st_size > 0);
-    bind "replay after the first transition";
+    enqueue "replay after the first transition";
     Alcotest.(check int) "a new WAL is confirmed and published" 2 !publications;
-    bind "quiet replay";
+    enqueue "quiet replay";
     Alcotest.(check int) "then the replay is quiet" 2 !publications;
     project ();
-    bind "replay after the projection";
+    enqueue "replay after the projection";
     Alcotest.(check int) "a projected receipt is confirmed and published" 3 !publications;
     let before_append = Unix.lstat wal in
     complete_next 11.;
@@ -2496,42 +2367,38 @@ let test_scope_replay_crosses_the_barrier_again_after_a_transition () =
     Alcotest.(check bool) "the second transition appended in place" true
       (before_append.st_ino = after_append.st_ino
        && after_append.st_size > before_append.st_size);
-    bind "replay after the append";
+    enqueue "replay after the append";
     Alcotest.(check int) "an appended WAL is confirmed and published" 4 !publications;
-    bind "quiet replay after the append";
+    enqueue "quiet replay after the append";
     Alcotest.(check int) "then the replay is quiet again" 4 !publications;
     Sys.remove wal;
-    bind "replay after the WAL is gone";
+    enqueue "replay after the WAL is gone";
     Alcotest.(check int) "a removed WAL is confirmed and published" 5 !publications;
-    bind "quiet replay without a WAL";
+    enqueue "quiet replay without a WAL";
     Alcotest.(check int) "then the replay is quiet once more" 5 !publications)
 
 (* The record is kept only after the publication returns. A publication that
    raised left the state durable but unannounced, and the next replay is the
    one that announces it. *)
-let test_scope_replay_publishes_what_a_raising_publication_did_not () =
-  with_temp_dir "keeper-repetition-raising-publication" (fun base_path ->
+let test_once_replay_publishes_what_a_raising_publication_did_not () =
+  with_temp_dir "keeper-once-raising-publication" (fun base_path ->
     let keeper_name = "raising-publication" in
     Persistence.update_result ~base_path ~keeper_name (fun _ -> queue [stimulus "a" 1.])
       |> require_ok "seed";
     let read () = Persistence.load_state_result ~base_path ~keeper_name |> require_ok "read" in
-    let scope = scope_id "raising-publication" in
-    let bind after_commit =
-      Persistence.bind_pending_repetition_scope_result ~base_path ~keeper_name ~after_commit
-        ~selections:(State.pending_selections (read ())) ~scope ()
-    in
-    (match bind (fun _ -> failwith "injected publication failure") with
+    let enqueue after_commit = enqueue_once ~after_commit ~base_path ~keeper_name () in
+    (match enqueue (fun _ -> failwith "injected publication failure") with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "a raising publication was reported as committed");
-    List.iter (check_scope "the binding is durable" scope) (State.pending_selections (read ()));
+    Alcotest.(check bool) "the source is durable" true (once_source_pending (read ()));
     (* The replay that writes the state again can raise the same way. *)
-    (match bind (fun _ -> failwith "injected replay publication failure") with
+    (match enqueue (fun _ -> failwith "injected replay publication failure") with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "a raising replay publication was reported as committed");
     let publications = ref 0 in
-    bind (fun _ -> incr publications) |> require_ok "replay" |> ignore;
-    Alcotest.(check int) "the replay publishes the binding once" 1 !publications;
-    bind (fun _ -> incr publications) |> require_ok "second replay" |> ignore;
+    enqueue (fun _ -> incr publications) |> require_ok "replay" |> ignore;
+    Alcotest.(check int) "the replay publishes the source once" 1 !publications;
+    enqueue (fun _ -> incr publications) |> require_ok "second replay" |> ignore;
     Alcotest.(check int) "the next replay is quiet" 1 !publications)
 
 (* The maintenance tick's Ask pass replays this for every answered Ask of a
@@ -2742,18 +2609,14 @@ let () =
         ; Alcotest.test_case "a commit before a restart install reaches the entry" `Quick
             test_restart_registration_sees_a_commit_before_its_install
         ] )
-    ; ( "scope binding"
-      , [ Alcotest.test_case "atomic batch and idempotent replay" `Quick test_scope_batch_atomic_and_idempotent
-        ; Alcotest.test_case "scheduling preserves; reincarnation clears" `Quick test_scope_preserved_by_scheduling_not_reincarnation
-        ; Alcotest.test_case "strict optional codec" `Quick test_scope_codec_strict_optional_binding
-        ; Alcotest.test_case "durable reload, no-op and conflict" `Quick test_scope_durable_reload_noop_and_conflict
-        ; Alcotest.test_case "uncertain rename retries durability" `Quick test_scope_uncertain_rename_requires_durability_confirmation
+    ; ( "one-shot durability"
+      , [ Alcotest.test_case "uncertain rename retries durability" `Quick test_once_uncertain_rename_requires_durability_confirmation
         ; Alcotest.test_case "changed files cross the barrier again" `Quick
-            test_scope_replay_crosses_the_barrier_again_after_the_files_change
+            test_once_replay_crosses_the_barrier_again_after_the_files_change
         ; Alcotest.test_case "a transition crosses the barrier again" `Quick
-            test_scope_replay_crosses_the_barrier_again_after_a_transition
+            test_once_replay_crosses_the_barrier_again_after_a_transition
         ; Alcotest.test_case "a raising publication is published by the replay" `Quick
-            test_scope_replay_publishes_what_a_raising_publication_did_not
+            test_once_replay_publishes_what_a_raising_publication_did_not
         ; Alcotest.test_case "durable enqueue replays write and signal nothing" `Quick
             test_durable_enqueue_replays_write_and_signal_nothing
         ; Alcotest.test_case "durable enqueue event stays in its workspace" `Quick

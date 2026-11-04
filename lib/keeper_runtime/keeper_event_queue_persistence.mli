@@ -174,23 +174,6 @@ val ack_pending_result :
   unit ->
   (unit, string) result
 
-val bind_pending_repetition_scope_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selections:Keeper_event_queue_state.pending_selection list ->
-  scope:Keeper_execution_scope_id.t ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection list, string) result
-(** Bind under the owner lock with strict snapshot durability. The producer
-    supplies identity once; this function never invents identity or infers a
-    parent from event payloads. Success returns fresh selection authority only
-    after the durable commit. A replay of a binding this process already
-    confirmed writes nothing and does not run [after_commit] again (see
-    {!enqueue_stimulus_once_result}). This is not a complete continuation
-    contract. *)
-
-
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
@@ -310,13 +293,6 @@ module For_testing : sig
       The writer is used for the first publication and for same-source
       retries until one of its writes is confirmed; a retry after that writes
       nothing. *)
-
-  val bind_pending_repetition_scope_with_confirmation :
-    confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
-    base_path:string -> keeper_name:string ->
-    selections:Keeper_event_queue_state.pending_selection list ->
-    scope:Keeper_execution_scope_id.t -> unit ->
-    (Keeper_event_queue_state.pending_selection list, string) result
 
   val load_state_with_read_interleave
     : after_read:(unit -> unit)

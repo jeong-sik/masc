@@ -1531,15 +1531,6 @@ let ack_pending_with ~before_write
 let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
 ;;
 
-let bind_pending_repetition_scope_result
-      ?(after_commit = fun _ -> ())
-      ~base_path ~keeper_name ~selections ~scope () =
-  commit_transform ~strict_snapshot_durability:true
-    ~base_path ~keeper_name ~after_commit (fun state ->
-      State.bind_pending_repetition_scope ~selections ~scope state
-      |> Result.map_error State.scope_binding_error_to_string)
-;;
-
 let commit_transition_unlocked_with
       ?(before_wal_write = fun () -> ())
       ~save_checkpoint
@@ -2015,13 +2006,5 @@ module For_testing = struct
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
     Atomic.set snapshot_cache_read_counter 0;
     Atomic.set snapshot_cache_hit_counter 0
-  ;;
-  let bind_pending_repetition_scope_with_confirmation
-        ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
-    commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
-      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
-      ~base_path ~keeper_name ~after_commit:ignore (fun state ->
-        State.bind_pending_repetition_scope ~selections ~scope state
-        |> Result.map_error State.scope_binding_error_to_string)
   ;;
 end

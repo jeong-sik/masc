@@ -582,12 +582,9 @@ let pending_entry_to_yojson entry =
      ; "admitted_revision", int64_json entry.admitted_revision
      ; "arrival", int64_json entry.arrival
      ; "checkpoint_retentions", `Int entry.checkpoint_retentions
-     ] @ (match entry.first_admitted_at with
+     ] @ match entry.first_admitted_at with
        | None -> []
        | Some time -> [ "first_admitted_at", `Float time ])
-     @ match entry.repetition_scope with
-       | None -> []
-       | Some scope -> [ "repetition_scope", Keeper_execution_scope_id.to_json scope ])
 ;;
 
 let pending_entry_of_yojson json =
@@ -597,7 +594,6 @@ let pending_entry_of_yojson json =
     exact_fields
       ~context
       ~expected:([ "source"; "admitted_revision"; "arrival"; "checkpoint_retentions" ]
-        @ (if List.mem_assoc "repetition_scope" fields then [ "repetition_scope" ] else [])
         @ if List.mem_assoc "first_admitted_at" fields then [ "first_admitted_at" ] else [])
       fields
   in
@@ -619,9 +615,6 @@ let pending_entry_of_yojson json =
   else if checkpoint_retentions < 0 then
     Error "event queue pending checkpoint retentions must not be negative"
   else
-    let* repetition_scope = match List.assoc_opt "repetition_scope" fields with
-      | None -> Ok None
-      | Some json -> Keeper_execution_scope_id.of_json json |> Result.map Option.some in
     let* first_admitted_at = match List.assoc_opt "first_admitted_at" fields with
       | None -> Ok None
       | Some _ ->
@@ -629,7 +622,7 @@ let pending_entry_of_yojson json =
         if Float.is_finite time then Ok (Some time)
         else Error "event queue admission time must be finite" in
     Ok { source; admitted_revision; arrival; checkpoint_retentions
-       ; repetition_scope; first_admitted_at }
+       ; first_admitted_at }
 ;;
 
 let to_yojson state =

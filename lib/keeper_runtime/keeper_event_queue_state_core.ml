@@ -97,28 +97,8 @@ type pending_selection =
   ; admitted_revision : int64
   ; arrival : int64
   ; checkpoint_retentions : int
-  ; repetition_scope : Keeper_execution_scope_id.t option
   ; first_admitted_at : float option
   }
-
-type scope_binding_error =
-  | Empty_scope_batch
-  | Duplicate_scope_selection
-  | Invalid_scope_selection of string
-  | Scope_binding_conflict of
-      { requested : Keeper_execution_scope_id.t
-      ; existing : Keeper_execution_scope_id.t
-      }
-
-let scope_binding_error_to_string = function
-  | Empty_scope_batch -> "repetition scope binding requires a nonempty source batch"
-  | Duplicate_scope_selection -> "repetition scope batch repeats an exact selection"
-  | Invalid_scope_selection detail -> "repetition scope selection is stale: " ^ detail
-  | Scope_binding_conflict { requested; existing } ->
-    Printf.sprintf "repetition scope binding conflict: requested %s, existing %s"
-      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json requested))
-      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json existing))
-;;
 
 type t =
   { revision : int64
@@ -464,7 +444,6 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
                    ; admitted_revision = state.revision
                    ; arrival = state.next_arrival
                    ; checkpoint_retentions = 0
-                   ; repetition_scope = None
                    ; first_admitted_at = admitted_at
                    }
                  ]
@@ -575,7 +554,7 @@ let reconcile_pending ~first_admitted_at pending state =
         | None ->
           ( { source; admitted_revision = state.revision
             ; arrival = next_arrival; checkpoint_retentions = 0
-            ; repetition_scope = None; first_admitted_at }
+            ; first_admitted_at }
           , Int64.succ next_arrival )
       in
       reconcile available (entry :: acc) next_arrival rest
@@ -682,34 +661,6 @@ let ack_pending ~(selection : pending_selection) state =
     Ok { state with pending_entries; last_non_immediate_served }
 ;;
 
-let bind_pending_repetition_scope ~selections ~scope state =
-  let open Result.Syntax in
-  let* () = if selections = [] then Error Empty_scope_batch else Ok () in
-  let rec validate seen = function
-    | [] -> Ok ()
-    | selection :: rest ->
-      let* () = if List.mem selection seen then Error Duplicate_scope_selection else Ok () in
-      let* () = validate_pending_selection ~selection state
-        |> Result.map_error (fun detail -> Invalid_scope_selection detail) in
-      let* () = match selection.repetition_scope with
-        | None -> Ok ()
-        | Some existing when Keeper_execution_scope_id.equal existing scope -> Ok ()
-        | Some existing -> Error (Scope_binding_conflict { requested = scope; existing }) in
-      validate (selection :: seen) rest
-  in
-  let* () = validate [] selections in
-  if List.for_all (fun selection -> Option.is_some selection.repetition_scope) selections
-  then Ok (state, selections)
-  else
-    let updates = List.map (fun selection ->
-      selection, { selection with repetition_scope = Some scope }) selections in
-    let pending_entries = List.map (fun entry ->
-      match List.assoc_opt entry updates with
-      | Some updated -> updated
-      | None -> entry) state.pending_entries in
-    Ok ({ state with pending_entries }, List.map snd updates)
-;;
-
 (* A checkpoint-yield turn retains Connector_attention entries instead of
    acking them (see [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome]).
    That retention is a typed fact about delivery, so it is counted on the
@@ -750,7 +701,6 @@ let reprioritize_pending
         ; admitted_revision = next_revision
         ; arrival = selection.arrival
         ; checkpoint_retentions = selection.checkpoint_retentions
-        ; repetition_scope = selection.repetition_scope
         ; first_admitted_at = selection.first_admitted_at
         }
       in

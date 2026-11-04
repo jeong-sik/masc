@@ -345,6 +345,17 @@ let async_requests_changed = function
   | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
       false
 
+let async_requests_keeper = function
+  | Keeper_async_requests_changed { keeper } -> Some keeper
+  | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Keeper_turn_complete _
+  | Keeper_composite_changed _ | Keeper_metrics_appended _
+  | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
+  | Fusion_run_status _ | Internal_agent_runs_changed _ | Workspace_store_changed _ | Dataset_changed _ | Gate_connector_changed _ | Keeper_event_queue_changed _ | Board_changed _ | Approval_change _
+  | Lane_resource _ | Snapshot _ | Execution_snapshot | Other _ ->
+      None
+
 let dataset_owed = function
   | Dataset_changed dataset -> Some dataset
   (* The Verification queue's rows read their review from this registry. *)

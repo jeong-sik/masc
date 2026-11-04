@@ -716,9 +716,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
-let planning_cache_key ~base_path =
-  Printf.sprintf "planning:%s" base_path
-;;
+let planning_cache_key = Server_dashboard_http_core_cache.planning_cache_key
 
 let cached_planning_payload ~(config : Workspace.config) =
   Dashboard_cache.get_or_compute_payload (planning_cache_key ~base_path:config.base_path)

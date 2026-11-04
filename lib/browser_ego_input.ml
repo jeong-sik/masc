@@ -109,7 +109,7 @@ let create_persistent ~persistence ~writer ~space_id =
   let* ()=commit t state in Ok t
 let status t = match t.state with Available ready -> Ready ready | Pending {pending;_} -> Uncertain pending
 let busy t = Option.is_some t.running_command
-let refusal = "ego input release is unconfirmed; inputLock in this answer names the pending input and how it is released. The original command's effect is unknown, so running it again can repeat it."
+let refusal = "ego input release is unconfirmed; inspect the same Space and confirm input checking/reset in the Browser connections private operator controls. Never replay the original command."
 let admit t = match t.state with
   | Pending _ -> Error refusal
   | Available _ -> match t.retained with

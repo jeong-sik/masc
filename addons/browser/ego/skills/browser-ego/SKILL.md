@@ -111,24 +111,17 @@ managed Page and call its boolean method directly without first reading info;
 `answered = true` does not certify input release or identify unobserved dialog text.
 Never repeat an uncertain answer or infer a clean key/button state from it.
 
-Every result object and failure the Ego connection answers carries
-`inputReadiness`: `command_settled`, `operator_asserted`, `keeper_asserted`, or
-`release_uncertain` while input on that Space is refused. A tab list that comes
-back as a plain array carries nothing, and a failure the server reports on its
-own (for example when it stopped waiting for the connection) carries nothing
-either. While input is refused the answer also carries `inputLock`: the pending
-input (`operation`, `tabId`, `heldAt`, `generation`) and `releasePath`. Only a
-`space_status` answer observes the Space's ownership; in other answers
-`keeperCallable` is false and `blockedBy` asks for `space_status`. With
-`keeperCallable: true` in a `space_status` answer the Space is agent-owned, and
-after reading the Space the Keeper releases it with `BrowserAct`
-`action: "release_input"`, that `generation` and
-`confirmation: "checked_and_released"`. With `keeperCallable: false` there,
-`blockedBy` names who holds the Space; the operator's private Browser
-connections controls release it as well. A release records `keeper_asserted`
-or `operator_asserted` for that generation only; it is not SDK proof that a key
-went up. The original command's effect is unknown, so running it again can
-repeat it. Answering a JavaScript dialog is separate from this release.
+If an Ego result says input release is unconfirmed, keep the original connection
+and do not replay its command. Answer any JavaScript dialog separately. Ask the
+operator to check/reset key and button state in that Space and use this Browser
+installation's private operator controls to confirm completion. The confirmation
+applies only to the pending input generation. It is not SDK cleanup proof,
+login completion, takeover permission or a model-callable reset action. Every
+result object and failure the Ego connection answers carries `inputReadiness`:
+`command_settled`, `operator_asserted` after that confirmation, or
+`release_uncertain` while input is still refused. A tab list that comes back as
+a plain array carries nothing, and neither does a failure the server reports on
+its own (for example when it stopped waiting for the connection).
 A click, double click or drag whose target the SDK could not resolve fails with
 `refusedBeforePress: {"kind": ...}` and keeps `inputReadiness` as it was: no
 key or button is left down and the next input is admitted. A double click may

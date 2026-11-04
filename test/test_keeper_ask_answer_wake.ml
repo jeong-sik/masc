@@ -889,7 +889,8 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
            (match failure.Wake.error with
             | Wake.Queue_storage_failed _ -> ()
             | Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
-            | Invalid_answered_record _ | Delivery_evidence_unavailable _ ->
+            | Invalid_answered_record _ | Delivery_evidence_unavailable _
+            | Owner_unavailable _ ->
                 fail "fresh intake fence was not authoritative")
        | [] | _ :: _ -> fail "original active batch was replaced or duplicated");
       check (list string) "fresh shutdown refuses delivery" []

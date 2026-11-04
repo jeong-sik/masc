@@ -79,7 +79,13 @@ let read_standing ~config ~now =
 let next_standing ~config ~now ~next_change_before =
   match read_standing ~config ~now with
   | Ok (document, next_change) -> Standing document, next_change
-  | Error () -> Standing_unbuilt, Option.filter (fun at -> at > now) next_change_before
+  | Error () ->
+    let next_change =
+      match next_change_before with
+      | Some at when at > now -> Some at
+      | Some _ | None -> None
+    in
+    Standing_unbuilt, next_change
 ;;
 
 let standing_moved ~before ~after =

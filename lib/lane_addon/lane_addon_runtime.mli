@@ -376,6 +376,11 @@ type inventory = {
   applications : configuration_application list;
 }
 val inventory : config:Workspace.config -> inventory
+(** Operator-only metadata source; the HTTP caller must enforce CanAdmin.
+    Runs live reads on the existing owner domain and offloads retained file reads.
+    Does not create a manager/store, start workers, reconcile or clean resources.
+    [owner_present=false] means no manager has been observed in this process,
+    not that there are no retained bindings or declarations. *)
 
 type inventory_change = Observation_commit | Configuration_changed | Retained_changed
 
@@ -392,13 +397,6 @@ val configuration_applications :
   config:Workspace.config -> inventory:inventory -> configuration_application list
 (** Project the last reconciled declarations against the supplied live and
     retained inventory without rereading that inventory. *)
-
-val inventory : config:Workspace.config -> inventory
-(** Operator-only metadata source; the HTTP caller must enforce CanAdmin.
-    Runs live reads on the existing owner domain and offloads retained file reads.
-    Does not create a manager/store, start workers, reconcile or clean resources.
-    [owner_present=false] means no manager has been observed in this process,
-    not that there are no retained bindings or declarations. *)
 val read_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->

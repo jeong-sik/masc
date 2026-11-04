@@ -21,6 +21,9 @@ type dataset =
   | Harness_verdicts
       (** The judge verdicts and operator labels [Eval_calibration] records,
           read by [GET /api/v1/dashboard/harness-health]. *)
+  | Goals
+      (** The Goal projection: the Goals, the verification ledger and the
+          measurements the planning projection and the Goal tree join. *)
 
 val event_type : string
 

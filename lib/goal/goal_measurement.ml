@@ -239,6 +239,7 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
     with
     | Ok (goal_at_recording, Ok measurement) ->
         Goal_projection_generation.advance ();
+        Goal_store.notify_projection_change config;
         Ok { measurement; goal_at_recording }
     | Ok (_, Error error) -> Error error
     | Error (Goal_store.Goal_not_found _) ->

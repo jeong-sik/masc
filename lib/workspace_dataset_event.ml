@@ -5,21 +5,24 @@ type dataset =
   | Verification_requests
   | Keeper_metrics of { keeper : string }
   | Harness_verdicts
+  | Goals
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
 let keeper_metrics_name = "keeper_metrics"
 let harness_verdicts_name = "harness_verdicts"
+let goals_name = "goals"
 
 let dataset_name = function
   | Repositories -> repositories_name
   | Verification_requests -> verification_requests_name
   | Keeper_metrics _ -> keeper_metrics_name
   | Harness_verdicts -> harness_verdicts_name
+  | Goals -> goals_name
 ;;
 
 let keeper_field = function
-  | Repositories | Verification_requests | Harness_verdicts -> []
+  | Repositories | Verification_requests | Harness_verdicts | Goals -> []
   | Keeper_metrics { keeper } -> [ "keeper", `String keeper ]
 ;;
 
@@ -29,6 +32,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name verification_requests_name ->
     Ok Verification_requests
   | Some (`String name) when String.equal name harness_verdicts_name -> Ok Harness_verdicts
+  | Some (`String name) when String.equal name goals_name -> Ok Goals
   | Some (`String name) when String.equal name keeper_metrics_name ->
     (match List.assoc_opt "keeper" fields with
      | Some (`String keeper) when not (String.equal keeper "") -> Ok (Keeper_metrics { keeper })

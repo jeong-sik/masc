@@ -369,8 +369,9 @@ val async_requests_changed : event -> bool
 val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
 (** The workspace dataset a push owes a read: the dataset it names as
     written, or the verification requests when the verification run registry
-    their rows read changed. The goal-verification and exact-lane registries
-    owe nothing. A backlog commit arrives as {!Execution_snapshot}. *)
+    their rows read changed, or the Goal projection when the goal verification
+    registry it carries changed. The exact-lane registry owes nothing. A
+    backlog commit arrives as {!Execution_snapshot}. *)
 
 val transport_health_measured : event -> bool
 (** The server's transport refresh loop measured again; the Usage surface's

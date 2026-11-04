@@ -4643,7 +4643,8 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
 (* The bundle sources a server push re-reads instead of the refresh cadence
    (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
    cadence then leaves it out and its read is owed. *)
-let pushed_sources : Surface_read_source.t list = [ Surface_read_source.Transport ]
+let pushed_sources : Surface_read_source.t list =
+  [ Surface_read_source.Transport; Surface_read_source.Planning; Surface_read_source.Overview_goals ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.

@@ -324,8 +324,10 @@ let dataset_owed = function
   (* The Verification queue's rows read their review from this registry. *)
   | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification ->
       Some Masc.Workspace_dataset_event.Verification_requests
-  | Internal_agent_runs_changed
-      (Masc.Internal_agent_runs_event.Goal_verification | Masc.Internal_agent_runs_event.Exact_lane)
+  (* The planning projection carries the goal verifier's live runs. *)
+  | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Goal_verification ->
+      Some Masc.Workspace_dataset_event.Goals
+  | Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
   | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
   | Keeper_turn_complete _

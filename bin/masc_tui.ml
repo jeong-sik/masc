@@ -7954,6 +7954,25 @@ let owe_keeper_log_read state keeper =
       state.keeper_log_owed <- Masc_tui_owed_read.changed state.keeper_log_owed
   | Some _ | None -> ()
 
+let pushed_read state source =
+  Option.value ~default:Masc_tui_owed_read.settled (List.assoc_opt source state.pushed_reads)
+
+let set_pushed_read state source read =
+  state.pushed_reads <- (source, read) :: List.remove_assoc source state.pushed_reads
+
+(* A bundle source in [pushed_sources] reads again when the server announces
+   its change while its surface is on screen, and after a failed read
+   (RFC-0480 §3.4). Entering the surface and a revalidation read it in the
+   surface bundle. *)
+let owe_pushed_read state source =
+  set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
+
+(* The planning projection and the Goal tree read when the Goal projection,
+   a Task (the execution push) or the goal verifier's runs change. *)
+let owe_goal_projection_reads state =
+  owe_pushed_read state Surface_read_source.Planning;
+  owe_pushed_read state Surface_read_source.Overview_goals
+
 (* Harness reads when the server says a verdict or a label was recorded, on a
    revalidation and on arrival, and again after a failed read (RFC-0480
    §3.4). *)
@@ -7967,6 +7986,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> owe_keeper_log_read state keeper
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
+  | Masc.Workspace_dataset_event.Goals -> owe_goal_projection_reads state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8653,19 +8673,6 @@ let failed_read owed =
     (Masc_tui_owed_read.started (Masc_tui_owed_read.changed owed))
 
 let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
-
-let pushed_read state source =
-  Option.value ~default:Masc_tui_owed_read.settled (List.assoc_opt source state.pushed_reads)
-
-let set_pushed_read state source read =
-  state.pushed_reads <- (source, read) :: List.remove_assoc source state.pushed_reads
-
-(* A bundle source in [pushed_sources] reads again when the server announces
-   its change while its surface is on screen, and after a failed read
-   (RFC-0480 §3.4). Entering the surface and a revalidation read it in the
-   surface bundle. *)
-let owe_pushed_read state source =
-  set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
 
 (* Any surface bundle that reads a pushed source, full or scoped, is the read
    its owed change waits on. *)
@@ -22815,8 +22822,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
-      (if !execution_snapshot_seen && not !observer_source_loss_seen then
-         owe_verification_read state);
+      (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
+         owe_verification_read state;
+         owe_goal_projection_reads state
+       end);
+      (* The Goal tree carries the approvals waiting on each Goal. *)
+      (if !gate_changed && not !observer_source_loss_seen then
+         owe_pushed_read state Surface_read_source.Overview_goals);
       (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_owed);
       (if !transport_measured && not !observer_source_loss_seen then
          owe_pushed_read state Surface_read_source.Transport);

@@ -717,7 +717,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
 ;;
 
 let planning_cache_key ~base_path =
-  Printf.sprintf "planning:%s" base_path
+  Server_dashboard_http_core_cache.planning_cache_prefix ^ base_path
 ;;
 
 let cached_planning_payload ~(config : Workspace.config) =
@@ -729,7 +729,8 @@ let cached_planning_payload ~(config : Workspace.config) =
 
 let install_planning_cache_invalidation () =
   Atomic.set Workspace_hooks.on_goal_projection_mutation_fn (fun ~base_path ->
-    Dashboard_cache.invalidate (planning_cache_key ~base_path))
+    Dashboard_cache.invalidate (planning_cache_key ~base_path);
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Goals)
 ;;
 
 let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =

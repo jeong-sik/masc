@@ -2857,6 +2857,31 @@ let test_cached_planning_reads_a_new_goal () =
       check bool "notification delivery keeps the planning cache" true
         (Option.is_some (Dashboard_cache.peek key)))
 
+(* RFC-0480 §3.4: the verification ledger the planning projection joins tells
+   the Goal projection observer, so the planning cache and the Goal readers
+   do not keep the record from before the write. *)
+let test_a_verification_ledger_write_reaches_the_goal_observer () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
+    (fun () ->
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+      let goal, _, _ =
+        match Goal_store.upsert_goal_with_events config ~actor:"dashboard"
+                ~title:"Ledger Goal" ~metric:"goals" ~target_value:"1" () with
+        | Ok result -> result
+        | Error error -> fail (Goal_store.write_error_to_string error)
+      in
+      let observed = ref 0 in
+      Atomic.set Workspace_hooks.on_goal_projection_mutation_fn (fun ~base_path:_ ->
+        incr observed);
+      (match Goal_verification.mark_proof_pending config ~goal_id:goal.id
+               ~criterion:(Goal_store.criterion_of_goal goal) with
+       | Ok _ -> ()
+       | Error detail -> fail detail);
+      check bool "the ledger write reached the observer" true (!observed >= 1))
+
 let test_cached_planning_reads_new_goal_history () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let previous = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
@@ -8823,6 +8848,8 @@ let () =
             test_cached_planning_reads_a_new_goal;
           test_case "cached planning reads new Goal history" `Quick
             test_cached_planning_reads_new_goal_history;
+          test_case "a verification ledger write reaches the Goal observer" `Quick
+            test_a_verification_ledger_write_reaches_the_goal_observer;
           test_case "planning counts a task awaiting verification on its own"
             `Quick
             test_planning_counts_a_task_awaiting_verification_on_its_own;

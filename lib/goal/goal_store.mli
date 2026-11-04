@@ -250,6 +250,13 @@ val load_goals_by_id_result :
 
 (** {1 State I/O} *)
 
+val notify_projection_change : Workspace_utils.config -> unit
+(** Tell the installed projection observer
+    ([Workspace_hooks.on_goal_projection_mutation_fn]) that what the Goal
+    readers project for [config]'s workspace changed. A store whose records
+    those readers join calls it after its own write. The observer's failure
+    is logged, a cancellation is re-raised. *)
+
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path}, then a best-effort mirror update with
     the supplied state. An observed mirror symlink is left in place and a

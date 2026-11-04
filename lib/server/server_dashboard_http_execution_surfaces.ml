@@ -576,6 +576,10 @@ let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
   let cancellation = ref None in
   invalidate_execution_cache_with
     ~before_broadcast:(fun () ->
+      (* The planning projection counts Tasks, and its readers re-read on
+         this execution push. The hook names no workspace, so every planning
+         entry goes. *)
+      Dashboard_cache.invalidate_prefix Server_dashboard_http_core_cache.planning_cache_prefix;
       try invalidate_full_health_snapshot () with
       | Eio.Cancel.Cancelled _ as exn ->
         cancellation := Some (exn, Printexc.get_raw_backtrace ())

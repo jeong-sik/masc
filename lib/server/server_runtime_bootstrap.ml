@@ -836,7 +836,10 @@ let initialize_owner_state_blocking
     (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Verification);
   Atomic.set
     Goal_verification_run_registry.change_observer_fn
-    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Goal_verification);
+    (fun () ->
+      (* The planning projection carries the goal verifier's live runs. *)
+      Dashboard_cache.invalidate_prefix Server_dashboard_http_core_cache.planning_cache_prefix;
+      broadcast_internal_agent_runs_changed Internal_agent_runs_event.Goal_verification ());
   Atomic.set
     Exact_lane_run_registry.change_observer_fn
     (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Exact_lane);

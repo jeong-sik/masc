@@ -145,7 +145,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
-         | Masc.Workspace_dataset_event.Harness_verdicts -> "")
+         | Masc.Workspace_dataset_event.Harness_verdicts
+         | Masc.Workspace_dataset_event.Goals -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -842,7 +843,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
                   | Masc.Workspace_dataset_event.Keeper_metrics _
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Goals )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -853,6 +855,21 @@ let test_a_verification_or_run_push_reads_the_requests () =
     [ "internal_runs(goal_verification)"; "internal_runs(exact_lane)" ]
     (List.map summary (decode_all other_run_registry_frames));
   check int "and owe the verification requests nothing" 0 (count other_run_registry_frames);
+  check (list bool) "the goal verifier's runs owe the Goal projection"
+    [ true; false ]
+    (List.map
+       (function
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Goals -> true
+              | Some
+                  ( Masc.Workspace_dataset_event.Repositories
+                  | Masc.Workspace_dataset_event.Verification_requests
+                  | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
+              | None -> false)
+         | Observer.Undecodable _ -> false)
+       (decode_all other_run_registry_frames));
   List.iter
     (fun frame ->
        match decode_all [ frame ] with
@@ -905,7 +922,8 @@ let test_a_repository_push_reads_the_list () =
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Keeper_metrics _
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Goals )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -919,7 +937,8 @@ let test_a_repository_push_reads_the_list () =
           | Some
               ( Masc.Workspace_dataset_event.Repositories
               | Masc.Workspace_dataset_event.Keeper_metrics _
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Goals )
           | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);

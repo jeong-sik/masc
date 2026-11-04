@@ -439,7 +439,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_roster_change Observer.Every_row_changed
   | Observer.Dataset_changed
       ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Verification_requests
-      | Masc.Workspace_dataset_event.Harness_verdicts )
+      | Masc.Workspace_dataset_event.Harness_verdicts | Masc.Workspace_dataset_event.Goals )
   | Observer.Internal_agent_runs_changed _ | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -491,6 +491,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics _) -> "metrics"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals -> "goals"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -647,6 +648,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper; glyph = Quiet; label; detail = "the metrics ledger took a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Goal projection changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

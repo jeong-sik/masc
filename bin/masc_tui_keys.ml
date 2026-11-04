@@ -457,7 +457,8 @@ let board_vote_key =
   b Act "v / V" "up / down"
     ~help:"press twice to vote: v up, V down; while reading, on the selected \
            comment when the comments have focus, otherwise on the post"
-let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
+let board_reply_key =
+  b Act "c" "reply" ~detail:Detail_only ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 let board_read_focus_key =
   b Navigate "b" "post / comments" ~detail:Detail_only
@@ -821,9 +822,12 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
-      ; b Navigate "t" "Goals / Tasks"
+        (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
+           and [r] is Resume (the Actions row), so the detail footer must not
+           name [p] as Approvals. *)
+      ; b Navigate "t" "Goals / Tasks" ~detail:List_only
           ~help:"switch between Goals and the active task list"
-      ; b Navigate "p" "Approvals"
+      ; b Navigate "p" "Approvals" ~detail:List_only
           ~help:"open operator approvals and Keeper questions; Esc returns to Work"
       ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
@@ -847,8 +851,9 @@ let for_surface = function
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
-      ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "/" "find" ~detail:List_only
+          ~help:"jump the cursor to a matching goal id or title"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->

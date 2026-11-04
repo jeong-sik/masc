@@ -283,7 +283,12 @@ let runs_payload_is_clean state = function
   | Error _ -> false
   | Ok (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) ->
       (match state.fusion_mode with
-       | Fusion_list -> true
+       | Fusion_list ->
+           (* Only the list screen: there is no open identity to compare with.
+              An open run or Board original is cleared by the two cases below
+              and by [detail_payload_is_clean] / [historical_payload_is_clean],
+              never by this one. *)
+           true
        | Fusion_detail run_id ->
            List.exists
              (fun (run : Masc.Tui_decode_fusion.fusion_run) ->

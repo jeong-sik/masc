@@ -88,6 +88,14 @@ let test_committed_text_announces_and_publications_do_not () =
    | Ok _ -> ()
    | Error detail -> failf "save: %s" detail);
   expect_change "a committed text";
+  (* RFC-0482 §3.1: a terminal reader's pick goes through the same commit. *)
+  (match
+     Runtime.edit_config_text ~runtime_config_path:path
+       (Tui_preference.edit (Tui_preference.Theme_chosen (Some "ayu-dark")))
+   with
+   | Ok _ -> ()
+   | Error detail -> failf "tui preference: %s" detail);
+  expect_change "a TUI preference";
   Runtime.enter_setup_required ~reason:Runtime_startup_state.Config_missing ();
   expect_quiet "setup-required writes no text"
 

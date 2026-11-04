@@ -160,6 +160,52 @@ class TwoWeeks(unittest.TestCase):
         (measures,) = [row for row in output["rows"] if row["lane_id"] == p.MEASURES]
         self.assertEqual(measures["fields"]["failed_sessions"], {"author_invalid_output": 1})
 
+    def test_the_scorecard_windows_anchor_on_the_last_answer_day(self):
+        cards = {row["subject_id"]: row["fields"] for row in self.rows(p.SCORECARD)}
+        self.assertEqual(set(cards), {"day", "7d", "30d", "all"})
+        # The last answer is s12's written one on day 14: the anchor day, with
+        # nothing graded inside the one-day window.
+        self.assertEqual(cards["day"]["anchor_local_date"], "2026-10-14")
+        self.assertEqual(cards["day"]["graded"], 0)
+        self.assertEqual(cards["day"]["score"], {"n": 0, "d": 0})
+        # Days 8..14 hold two graded answers: i4's recovery on day 8 and
+        # s11's miss on day 9.
+        self.assertEqual((cards["7d"]["graded"], cards["7d"]["incorrect"]),
+                         (2, 1))
+        self.assertEqual(cards["7d"]["miss_topics"], [{"topic": "asks", "misses": 1}])
+        # The whole log agrees with the measures row it stands next to.
+        self.assertEqual(cards["all"]["score"], {"n": 5, "d": 11})
+        self.assertEqual(cards["30d"]["score"], {"n": 5, "d": 11})
+
+    def test_the_scorecard_all_window_matches_measures(self):
+        (measures,) = self.rows(p.MEASURES)
+        (whole,) = [row for row in self.rows(p.SCORECARD) if row["subject_id"] == "all"]
+        self.assertEqual(whole["fields"]["score"], measures["fields"]["score"])
+        self.assertEqual(whole["fields"]["graded"], measures["fields"]["participation"]["n"])
+
+    def test_review_rows_carry_the_last_answer_of_each_unrecovered_miss(self):
+        review = {row["subject_id"]: row["fields"] for row in self.rows(p.REVIEW)}
+        self.assertEqual(set(review), {"i2", "i3"})
+        self.assertEqual(review["i2"]["response"], {"kind": "chose", "choice_ids": ["b"]})
+        self.assertEqual(review["i2"]["key"], {"kind": "choices", "choice_ids": ["a"]})
+        self.assertEqual(review["i2"]["question"]["header"], "Ledger")
+        self.assertEqual((review["i2"]["latest"], review["i2"]["attempts"]), ("incorrect", 2))
+        self.assertEqual(review["i2"]["last_miss_at"], at(4, 8, 30))
+        self.assertEqual(review["i3"]["last_miss_at"], at(2, 9))
+        (i2,) = [row for row in self.rows(p.REVIEW) if row["subject_id"] == "i2"]
+        self.assertEqual(i2["evidence"],
+                         [{"uri": f"lane-evidence:{'a' * 64}", "sha256": "a" * 64}])
+
+    def test_no_scorecard_or_review_row_before_any_answer(self):
+        events = asked(1, "i9", "fresh", at(1, 9))
+        output = p.observation(q.fold(events), {}, SEOUL, at(1, 10))
+        self.assertNotIn(p.SCORECARD, {row["lane_id"] for row in output["rows"]})
+        self.assertNotIn(p.REVIEW, {row["lane_id"] for row in output["rows"]})
+
+    def test_a_written_latest_answer_is_not_open_debt_and_gets_no_review_row(self):
+        # i6's latest attempt waits for a judgment: no wrong-answer note yet.
+        self.assertNotIn("i6", {row["subject_id"] for row in self.rows(p.REVIEW)})
+
 
 if __name__ == "__main__":
     unittest.main()

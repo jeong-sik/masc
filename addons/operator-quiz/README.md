@@ -22,7 +22,7 @@ reported as unavailable; original questions, answers and request blobs stay inta
 - `quiz_flow.py`: the listing and the consumption of each result, including
   the quote check of every draft against the record bytes the host retained.
 - `quiz_grading.py`: choice verdicts and review items.
-- `quiz_projection.py`: the five lanes' rows, R and P.
+- `quiz_projection.py`: the seven lanes' rows, R and P, the scorecard windows and the wrong-answer notes.
 - `server.py`: the MCP worker; it reads `max_reply_bytes` from `lane.toml`.
 
 The host mounts this directory at `/addon`; the image carries Python and the

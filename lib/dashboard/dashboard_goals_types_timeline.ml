@@ -1,15 +1,12 @@
-(** Dashboard_goals_types_timeline — Stage 22 split (was inline in
-    dashboard_goals_types.ml).
-
-    Pure JSON projections for the timeline lane: color helpers, task tree
-    JSON, tree flatten, goal-detail keeper JSON, generic timeline event
-    record + goal-event timeline normalizer, and the [build_goal_timeline]
-    composition that merges task / approval / keeper / goal-event streams.
+(** Dashboard_goals_types_timeline — pure JSON projections for the timeline
+    lane: color helpers, task tree JSON, tree flatten, goal-detail keeper
+    JSON, generic timeline event record + goal-event timeline normalizer, and
+    the [build_goal_timeline] composition that merges task / approval /
+    keeper / goal-event streams.
 
     Depends on [Dashboard_goals_types_accessor] for the [tree_node] /
-    [goal_detail_keeper] records and the task / receipt / trust
-    inspectors. Re-included by [Dashboard_goals_types] so the public
-    surface is unchanged. *)
+    [goal_detail_keeper] records and the task / receipt / trust inspectors.
+    Re-included by [Dashboard_goals_types]. *)
 
 open Dashboard_goals_types_accessor
 

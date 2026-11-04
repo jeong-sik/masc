@@ -5366,7 +5366,6 @@ let test_typed_terminal_stop_records_pre_result_turn_identity () =
             (match result.stop_reason with
              | Runtime_agent.Yielded_to_durable_stimulus _ -> ()
              | Runtime_agent.Completed _
-             | Yielded_to_operation_queued _
              | InputRequired _ ->
                fail "typed terminal deferral did not settle the host boundary"));
          match (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase with

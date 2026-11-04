@@ -668,17 +668,14 @@ let batch_disposition_of_cycle_outcome
     Batch_ack_completed
   | Some
       (Cycle.Checkpointed
-         { checkpoint_reason =
-             ( Keeper_unified_turn.Durable_stimulus_arrived
-             | Keeper_unified_turn.Operation_queued )
+         { checkpoint_reason = Keeper_unified_turn.Durable_stimulus_arrived
          ; _
          }) ->
     (* The admitted batch is an attention layer, not the continuation store.
        Every checkpoint reason is produced after at least one model round
        ran with the admitted attention projected: a newer durable source
-       arrived, a tool call was deferred to the Gate, or a chat operation
-       took the slot. On the
-       agent-core lane the checkpoint preserves canonical turn state, while
+       arrived or a tool call was deferred to the Gate. On the agent-core
+       lane the checkpoint preserves canonical turn state, while
        provider-specific dynamic context can remain request-only (in
        particular on OpenAI-compatible requests). On an official-client lane
        a session replacement can lose prior context. This delivery ACK is not

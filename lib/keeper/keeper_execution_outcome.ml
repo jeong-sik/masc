@@ -15,7 +15,6 @@ type t =
 
 let terminal_of_stop_reason = function
   | Runtime_agent.Completed _ -> Completed
-  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Checkpointed
   | Runtime_agent.InputRequired _ -> Input_required

@@ -1172,68 +1172,6 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
-let test_direct_waiter_skips_continuations_and_wakes_on_new_input () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let owner = owner_ok (start_owner ~sw
-    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~keeper_name:"direct-waiter" ~initial_meta:(Some (make_meta "direct-waiter"))) in
-  let first = operation_id "kmsg-waiter-first" in
-  let continued = operation_id "kmsg-waiter-continuation" in
-  let submit id = ignore (owner_ok (Owner.submit_operation owner ~operation_id:id
-    ~source:operation_source ~input:(operation_input "original work"))) in
-  submit first;
-  submit continued;
-  ignore (owner_ok (Owner.move_queued_operation_to_end owner first));
-  let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
-  check bool "newer operation claimed first" true
-    (Chat_operation.Operation_id.equal continued running.operation_id);
-  let checkpoint = Keeper_checkpoint_ref.of_persisted
-    ~trace_id:(Keeper_id.Trace_id.of_string "trace-waiter" |> Result.get_ok)
-    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "durable prior progress") |> Result.get_ok in
-  ignore (owner_ok (Owner.defer_direct_checkpoint owner ~operation_id:continued
-    ~execution_digest:running.execution_digest
-    ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)));
-  let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
-  check bool "original operation now owns the slot" true
-    (Chat_operation.Operation_id.equal first running.operation_id);
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_observed
-    (Owner.await_queued_handoff_recipient owner ~operation_id:first));
-  Eio.Fiber.yield ();
-  ignore (owner_ok (Owner.exact_operation owner first));
-  check bool "a later continuation does not cause handoff ping-pong" true
-    (Option.is_none (Eio.Promise.peek observed));
-  submit (operation_id "kmsg-waiter-fresh");
-  Eio.Fiber.yield ();
-  ignore (owner_ok (Owner.exact_operation owner first));
-  check bool "fresh input behind the FIFO barrier does not cause a handoff" true
-    (Option.is_none (Eio.Promise.peek observed));
-  ignore (owner_ok (Owner.move_queued_operation_to_end owner continued));
-  check bool "a fresh original at the actual head wakes the direct waiter" true
-    (Eio.Promise.await observed)
-;;
-
-let test_direct_waiter_returns_when_owner_closes () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun waiter_sw ->
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Switch.run (fun sw ->
-    let owner = owner_ok (start_owner ~sw
-      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-      ~keeper_name:"direct-waiter-close" ~initial_meta:(Some (make_meta "direct-waiter-close"))) in
-    let operation_id = operation_id "kmsg-waiter-close" in
-    ignore (owner_ok (Owner.submit_operation owner ~operation_id
-      ~source:operation_source ~input:(operation_input "running work")));
-    ignore (owner_ok (Owner.claim_next_operation owner));
-    Eio.Fiber.fork ~sw:waiter_sw (fun () -> Eio.Promise.resolve resolve_observed
-      (Owner.await_queued_handoff_recipient owner ~operation_id));
-    Eio.Fiber.yield ();
-    ignore (owner_ok (Owner.exact_operation owner operation_id)));
-  check bool "owner closure releases its direct waiter" false
-    (Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await observed))
-;;
-
 let test_operation_waiting_event_is_scoped_to_owner_workspace () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let other_path = Filename.concat base_path "other-workspace" in
@@ -1287,10 +1225,6 @@ let test_operation_lifecycle_is_durable_and_projected () =
          ~initial_meta:(Some (make_meta "operation-lifecycle")))
   in
   let operation_id = operation_id "kmsg-operation-lifecycle" in
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve resolve_observed (Owner.await_claimable_operation owner));
-  Eio.Fiber.yield ();
   let accepted =
     owner_ok
       (Owner.submit_operation
@@ -1304,9 +1238,6 @@ let test_operation_lifecycle_is_durable_and_projected () =
   let queued_projection = Owner.operation_projection owner in
   check int "queued projection publishes after commit" 1 queued_projection.queued_count;
   check bool "queued input is ready" true queued_projection.has_claimable_queued;
-  check bool "queue commit wakes a sleeping subscriber" true (Eio.Promise.await observed);
-  check bool "subscription after commit observes existing input" true
-    (Owner.await_claimable_operation owner);
   check bool
     "queued projection has no running operation"
     true
@@ -1325,7 +1256,7 @@ let test_operation_lifecycle_is_durable_and_projected () =
     (Option.is_none (owner_ok (Owner.claim_next_operation owner)));
   let running_projection = Owner.operation_projection owner in
   check int "claim drains queued projection" 0 running_projection.queued_count;
-  check bool "claimed input no longer requests a yield" false running_projection.has_claimable_queued;
+  check bool "claimed input is no longer claimable" false running_projection.has_claimable_queued;
   check bool
     "claim publishes running identity"
     true
@@ -6673,11 +6604,7 @@ let () =
         ; test_case "later deadline preserves an armed earlier wake" `Quick
             (test_cooling_retry_rearms_earliest ~earlier_added_second:false) ] )
     ; ( "reducer"
-      , [ test_case "direct waiter ignores continuations and wakes on original input" `Quick
-            test_direct_waiter_skips_continuations_and_wakes_on_new_input;
-          test_case "direct waiter is released on owner closure" `Quick
-            test_direct_waiter_returns_when_owner_closes;
-          test_case
+      , [ test_case
             "additive usage and pause are exact"
             `Quick
             test_pure_reducer_adds_deltas_and_preserves_pause

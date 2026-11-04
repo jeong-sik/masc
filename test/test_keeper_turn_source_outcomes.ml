@@ -6,6 +6,12 @@ module State = Keeper_event_queue_state
 module Ledger = Keeper_reaction_ledger
 module Manifest = Keeper_runtime_manifest
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let ok = function Ok value -> value | Error detail -> fail detail
 let keeper_name = "source-outcome-reviewer"
 let trace_id = "source-outcome-trace"
@@ -26,7 +32,7 @@ let source : Keeper_event_queue.stimulus =
   ; payload=Bootstrap }
 
 let select config =
-  match Persistence.select_when_result ~base_path:config.Workspace.base_path ~keeper_name
+  match select_queue_entry ~base_path:config.Workspace.base_path ~keeper_name
     ~now:(Unix.gettimeofday ()) ~ready:(fun _ -> true) |> ok with
   | Some selection -> selection
   | None -> fail "source was not selected"

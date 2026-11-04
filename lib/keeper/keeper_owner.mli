@@ -289,10 +289,6 @@ val projection : t -> Keeper_owner_reducer.projection
 val operation_projection : t -> operation_projection
 (** Lock-free immutable operation inventory. *)
 
-val await_claimable_operation : t -> bool
-(** Wait for a durable claimable queued operation without consuming it. Returns
-    false when the owner closes. Cancellation unregisters the condition waiter. *)
-
 val wake_operation_drain : t -> (unit, error) result
 (** Reconsider existing Queued rows after the operation runner's dependency
     becomes ready. This command never changes sequence or state itself.
@@ -381,21 +377,6 @@ val exact_operation
   :  t
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t option, error) result
-
-val has_queued_handoff_recipient
-  :  t
-  -> operation_id:Chat_operation.Operation_id.t
-  -> (bool, error) result
-
-val await_queued_handoff_recipient
-  : t -> operation_id:Chat_operation.Operation_id.t -> bool
-(** Wait until the actual claimable head is later original input while the named
-    direct operation is running. A continuation or frozen batch at the head
-    keeps this waiter asleep; fresh input behind it cannot accept a handoff.
-    This observes the current queue, without reserving or reordering it.
-    Returns false if the operation
-    stops running, the store cannot be read or the owner closes. Cancellation
-    unregisters the condition waiter; no timer or polling loop is installed. *)
 
 (** Durable [Failed] records, including batch members
     and earlier starts. The registry retries their idempotent journal and

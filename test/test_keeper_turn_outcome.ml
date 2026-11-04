@@ -95,9 +95,6 @@ let test_of_stop_reason () =
   in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason (Runtime_agent.Completed { provider_turn_ordinal = 17 }));
-  check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_operation_queued { turns_used = 2 ; provider_turn_ordinal = 17 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }));
@@ -128,8 +125,7 @@ let test_progress_post_keeps_typed_continuation () =
       check bool "delivery evidence survives alongside continuation" true
         (retained_receipt = Some receipt)
     | Error error -> fail (Agent_core.Error.to_string error))
-    [ Runtime_agent.Yielded_to_operation_queued { turns_used = 1 ; provider_turn_ordinal = 17 }
-    ; Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 ; provider_turn_ordinal = 17 }
+    [ Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 ; provider_turn_ordinal = 17 }
     ];
   (match finish (Runtime_agent.Completed { provider_turn_ordinal = 17 }) posted with
    | Ok (turn_outcome, retained_receipt) ->
@@ -141,7 +137,7 @@ let test_progress_post_keeps_typed_continuation () =
     ; effect_disposition = Tool_result.Proven_post_effect
     ; detail = Keeper_terminal_effect_detail.Output_artifact_unstored { message = "disk unavailable" }
     } in
-  match finish (Runtime_agent.Yielded_to_operation_queued { turns_used = 1 ; provider_turn_ordinal = 17 }) failed with
+  match finish (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1 ; provider_turn_ordinal = 17 }) failed with
   | Error error ->
     (match Keeper_internal_error.classify_masc_internal_error error with
      | Some (Keeper_internal_error.Terminal_effect_failed
@@ -760,7 +756,6 @@ let test_autonomous_yield_boundary_contract () =
      with
      | Runtime_agent.Completed { provider_turn_ordinal = 17 } -> true
      | Runtime_agent.Completed _ -> false
-     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.InputRequired _ -> false)
 

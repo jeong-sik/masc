@@ -12,6 +12,31 @@ module Keeper_registry_event_queue = struct
   ;;
 end
 
+(* Withdraw one queued source through the production exact-selection ACK. *)
+let ack_queued_post_id ~base_path ~keeper_name ~post_id =
+  match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok selections ->
+    (match
+       List.filter
+         (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            String.equal selection.source.post_id post_id)
+         selections
+     with
+     | [ selection ] ->
+       Keeper_event_queue_persistence.ack_pending_result
+         ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
+         ~base_path ~keeper_name ~selection ()
+     | [] -> Error ("no queued source " ^ post_id)
+     | _ :: _ :: _ -> Error ("queued source repeated " ^ post_id))
+;;
+
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 (* Fixture tick for create and modify: the runner's floor tick, below every
    interval these fixtures declare, so the runner-tick check never refuses one
    of them. *)
@@ -514,7 +539,7 @@ let single_occurrence_id (result : Schedule_runner.tick_result) =
 
 let pending_selection_exn ~base_path ~keeper_name =
   match
-    Keeper_event_queue_persistence.select_when_result
+    select_queue_entry
       ~base_path
       ~keeper_name
       ~now:(Unix.gettimeofday ())
@@ -2898,14 +2923,10 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (* Withdraw the interleaved stimulus so the assertions below still measure
          what the cancelled retry produced rather than what this probe added. *)
       (match
-         Keeper_event_queue_persistence.drop_by_post_id
-           ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
-           ~base_path
-           ~keeper_name
+         ack_queued_post_id ~base_path ~keeper_name
            ~post_id:interleaved_stimulus.post_id
-           ()
        with
-       | Ok _ -> ()
+       | Ok () -> ()
        | Error message -> fail ("interleaved stimulus drop failed: " ^ message));
       (match
          Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
@@ -3535,16 +3556,9 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let request = create_keeper_wake_schedule config in
   let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
-  (match
-     Keeper_event_queue_persistence.drop_by_post_id
-       ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
-       ~base_path
-       ~keeper_name
-       ~post_id:occurrence_id
-       ()
-   with
+  (match ack_queued_post_id ~base_path ~keeper_name ~post_id:occurrence_id with
    | Error message -> fail ("drop failed: " ^ message)
-   | Ok removed -> check int "removed current occurrence" 1 (List.length removed));
+   | Ok () -> ());
   let stale_payload_json =
     `Assoc
       [ "kind", `String "masc.keeper_wake"

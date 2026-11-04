@@ -1328,7 +1328,7 @@ interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
 folded approval records. `Ctrl-D` expands tool details independently of metadata.
 
 Auto-next requests priority for your message; current work continues until it
-finishes or yields. Use the explicit interrupt controls to stop current work.
+finishes. Use the explicit interrupt controls to stop current work.
 When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit

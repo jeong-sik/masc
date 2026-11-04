@@ -38,7 +38,6 @@ let transport_error_kind_of_exception exn =
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed of { provider_turn_ordinal : int }
-  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
   | InputRequired of {
       turns_used : int;
@@ -47,7 +46,6 @@ type stop_reason =
 
 let final_provider_turn_ordinal = function
   | Completed { provider_turn_ordinal }
-  | Yielded_to_operation_queued { provider_turn_ordinal; _ }
   | Yielded_to_durable_stimulus { provider_turn_ordinal; _ } ->
     Some provider_turn_ordinal
   | InputRequired _ -> None
@@ -989,8 +987,6 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed _ -> Dashboard_agent_core_bridge.Success
-  | Yielded_to_operation_queued _ ->
-      Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_operation_queued" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
   | InputRequired _ ->

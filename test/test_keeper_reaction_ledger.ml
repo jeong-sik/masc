@@ -2,6 +2,12 @@ open Alcotest
 open Masc
 open Yojson.Safe.Util
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 let with_temp_base f =
   let base_path = Filename.temp_file "masc-krl-" "" in
   Sys.remove base_path;
@@ -1731,7 +1737,7 @@ let consume_delivery_source ~base_path ~keeper_name source =
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
   ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
     ~base_path ~keeper_name source |> require_ok "enqueue exact source");
-  let selection = match Keeper_event_queue_persistence.select_when_result
+  let selection = match select_queue_entry
       ~base_path ~keeper_name ~now:(Unix.gettimeofday ()) ~ready:(fun _ -> true)
       |> require_ok "select exact source" with
     | Some selection -> selection | None -> fail "exact source was not selectable" in

@@ -101,7 +101,6 @@ let execution_boundary_of_turn_failure error =
 ;;
 
 type checkpoint_reason =
-  | Operation_queued
   | Durable_stimulus_arrived
 
 type turn_success =
@@ -116,8 +115,6 @@ type turn_success =
 
 let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.Completed _ -> Turn_completed { meta }
-  | Runtime_agent.Yielded_to_operation_queued _ ->
-    Turn_checkpointed { meta; checkpoint_reason = Operation_queued }
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Turn_checkpointed { meta; checkpoint_reason = Durable_stimulus_arrived }
   | Runtime_agent.InputRequired _ -> Turn_input_required meta

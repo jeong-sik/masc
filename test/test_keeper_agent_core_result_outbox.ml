@@ -159,7 +159,7 @@ streaming = false
      let result = core result in
      (match result.run_result.stop_reason with
       | Runtime_agent.Yielded_to_durable_stimulus _ -> ()
-      | Runtime_agent.Completed _ | Yielded_to_operation_queued _ | InputRequired _ ->
+      | Runtime_agent.Completed _ | InputRequired _ ->
         fail "consumer did not yield at its settled tool boundary");
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));

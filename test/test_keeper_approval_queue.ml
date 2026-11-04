@@ -8,6 +8,12 @@ let () =
   Masc.Prompt_defaults.init ()
 ;;
 
+(* The production loader with the pure first-ready selection. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (Keeper_event_queue_state.select_when ~now ~ready)
+;;
+
 module AQ = Masc.Keeper_approval_queue
 module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
@@ -133,8 +139,23 @@ let pending_entry_exn id =
 
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
-  match Keeper_event_queue_persistence.drop_by_post_id ~base_path ~keeper_name ~post_id () with
-  | Ok _ -> ()
+  let acked =
+    Result.bind
+      (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name)
+      (fun selections ->
+         match
+           List.find_opt
+             (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                String.equal selection.source.post_id post_id)
+             selections
+         with
+         | None -> Ok ()
+         | Some selection ->
+           Keeper_event_queue_persistence.ack_pending_result
+             ~base_path ~keeper_name ~selection ())
+  in
+  match acked with
+  | Ok () -> ()
   | Error reason -> Alcotest.fail reason
 ;;
 
@@ -2598,7 +2619,7 @@ let approve_with_wake ~base_path ~keeper_name ~input =
 let acknowledge_wake ~base_path ~keeper_name =
   let selection =
     match
-      Event_queue_persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -5671,7 +5692,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        in
        let selection =
          match
-           Event_queue_persistence.select_when_result
+           select_queue_entry
              ~base_path
              ~keeper_name
              ~now:(Unix.gettimeofday ())
@@ -5783,7 +5804,7 @@ let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
          |> require_some "HITL wake was not durably queued"
        in
        let selection =
-         Event_queue_persistence.select_when_result
+         select_queue_entry
            ~base_path
            ~keeper_name
            ~now:(Unix.gettimeofday ())

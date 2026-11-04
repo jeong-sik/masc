@@ -907,7 +907,7 @@ max-context = 100000
               selected.Keeper_turn_driver.selected_runtime_id;
             (match selected.run_result.stop_reason with
              | Runtime_agent.Completed _ -> ()
-             | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+             | Yielded_to_durable_stimulus _
              | InputRequired _ -> fail "candidate did not complete its own request")
           | Error error -> fail (Agent_core.Error.to_string error)
         in

@@ -22910,6 +22910,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
       let open_chat_memory_grew = ref false in
+      let open_chat_skill_ledger_changed = ref false in
       let selected_composite_changed = ref false in
       let shown_metrics_appended = ref false in
       let selected_tool_called = ref false in
@@ -23003,6 +23004,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               (match Masc_tui_observer.memory_journal_appended_keeper event with
                | Some keeper when state.msg_target_keeper_name = Some keeper ->
                    open_chat_memory_grew := true
+               | Some _ | None -> ());
+              (* The chat history carries the exact Skill evidence of its
+                 turns, read from the Keeper's activation ledger
+                 (RFC-0483 L5). *)
+              (match Masc_tui_observer.skill_activations_keeper event with
+               | Some keeper when state.msg_target_keeper_name = Some keeper ->
+                   open_chat_skill_ledger_changed := true
                | Some _ | None -> ());
               (match Masc_tui_observer.composite_changed_keeper event, selected_keeper state with
                | Some keeper, Some (selected : keeper) when String.equal keeper selected.k_name ->
@@ -23302,7 +23310,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                owe_chat_journal_read state ~keeper journal)
            !runtime_journals);
       (if !tool_modes_changed && not !observer_source_loss_seen then owe_tool_modes_read state);
-      (if (!open_chat_gained_turn || !open_chat_memory_grew)
+      (if (!open_chat_gained_turn || !open_chat_memory_grew || !open_chat_skill_ledger_changed)
           && not !observer_source_loss_seen then
          match state.msg_target_keeper_name with
          | Some keeper_name ->

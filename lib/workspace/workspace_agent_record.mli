@@ -11,6 +11,10 @@ val install_rows_changed_observer : (Workspace_utils_backend_setup.config -> uni
     under the record's file lock where the caller holds one, so it must not
     yield and must not raise. The default does nothing. *)
 
+val report_roster_changed : Workspace_utils_backend_setup.config -> unit
+(** Report a roster change that is not a record write: a name added to or
+    pruned from the workspace state's [active_agents]. *)
+
 val write :
   Workspace_utils_backend_setup.config ->
   string ->

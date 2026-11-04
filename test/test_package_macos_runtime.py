@@ -29,9 +29,9 @@ class PythonHttpsProbe(unittest.TestCase):
     def run_probe(self):
         shipped = os.path.join(sys.base_prefix, 'ssl', 'cacert.pem')
         with patch.dict(os.environ, {'SSL_CERT_FILE': shipped}):
-            exec(package.PYTHON_HTTPS_PROBE, {})
+            exec(package.MACOS_PYTHON_HTTPS_PROBE, {})
 
-    def test_probe_requires_the_shipped_bundle(self):
+    def test_macos_probe_requires_the_shipped_bundle(self):
         for cafile in (None, '/private/etc/ssl/cert.pem'):
             environ = {name: value for name, value in os.environ.items() if name != 'SSL_CERT_FILE'}
             if cafile is not None:
@@ -39,7 +39,7 @@ class PythonHttpsProbe(unittest.TestCase):
             with self.subTest(cafile=cafile), patch.dict(os.environ, environ, clear=True), \
                     patch.object(urllib.request, 'urlopen') as request:
                 with self.assertRaisesRegex(ValueError, 'shipped CA bundle'):
-                    exec(package.PYTHON_HTTPS_PROBE, {})
+                    exec(package.MACOS_PYTHON_HTTPS_PROBE, {})
                 request.assert_not_called()
 
     def test_https_rejection_is_a_validated_response(self):
@@ -76,6 +76,66 @@ class PythonHttpsProbe(unittest.TestCase):
         with patch.object(urllib.request, 'urlopen', return_value=response):
             self.run_probe()
         self.assertTrue(body.closed)
+
+
+class LinuxRuntimeProbe(unittest.TestCase):
+    """The Linux runtime ships no CA bundle, so its probe must not ask for one."""
+    PLATFORM = 'linux-x64'
+
+    def load_linux_packager(self):
+        script = SCRIPT.with_name('package-linux-runtime.py')
+        spec = importlib.util.spec_from_file_location('linux_runtime_package', script)
+        if spec is None or spec.loader is None:
+            raise ImportError('cannot load ' + str(script))
+        linux = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(linux)
+        return linux
+
+    def packaged_probe(self):
+        linux = self.load_linux_packager()
+        commit, archive = 'a' * 40, b'reviewed Linux Python archive'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / 'dist'
+            dist.mkdir()
+            for name in linux.portable.NAMES:
+                (dist / (name + '-' + self.PLATFORM)).write_bytes(b'staged executable')
+            lock = root / 'lock.json'
+            lock.write_text(json.dumps({'release': 'pinned', 'upstream': 'pinned', 'platforms': {self.PLATFORM: {
+                'browser_download_url': 'https://github.com/astral-sh/python-build-standalone/pinned.tar.gz',
+                'size': len(archive), 'digest': 'sha256:' + hashlib.sha256(archive).hexdigest()}}}))
+            with patch.object(linux.portable, 'fetch', return_value=archive), \
+                    patch.object(linux.portable, 'unpack_python'), \
+                    patch.object(linux.portable, 'run', return_value=commit + '\n'), \
+                    patch.object(linux.subprocess, 'run') as interpreter, \
+                    patch.object(linux.portable, 'freeze_python_bytecode',
+                                 side_effect=RuntimeError('probe ran')):
+                with self.assertRaisesRegex(RuntimeError, 'probe ran'):
+                    linux.package(dist, root / 'stage', self.PLATFORM, commit, lock)
+        interpreter.assert_called_once()
+        (argv,), _ = interpreter.call_args
+        self.assertEqual(argv[1:3], ['-I', '-c'])
+        return argv[3]
+
+    def test_linux_probe_validates_https_without_a_shipped_bundle(self):
+        probe = self.packaged_probe()
+        environ = {name: value for name, value in os.environ.items()
+                   if name not in ('SSL_CERT_FILE', 'SSL_CERT_DIR')}
+        body = io.BytesIO(b'ok')
+        response = urllib.error.HTTPError('https://example.com', 200, 'OK', Message(), body)
+        with patch.dict(os.environ, environ, clear=True), \
+                patch.object(urllib.request, 'urlopen', return_value=response) as request:
+            exec(probe, {})
+        request.assert_called_once_with('https://example.com', timeout=30)
+        self.assertTrue(body.closed)
+
+    def test_linux_probe_still_fails_on_certificate_errors(self):
+        probe = self.packaged_probe()
+        error = urllib.error.URLError(ssl.SSLCertVerificationError('untrusted certificate'))
+        with patch.object(urllib.request, 'urlopen', side_effect=error):
+            with self.assertRaises(urllib.error.URLError) as raised:
+                exec(probe, {})
+        self.assertIs(raised.exception, error)
 
 
 class PythonArchive(unittest.TestCase):

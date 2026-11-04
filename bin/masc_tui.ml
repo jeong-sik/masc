@@ -18146,6 +18146,30 @@ let owe_tools_async_detail_read state keeper =
        String.equal target.keeper_name keeper) state.tools_async_selection
   then state.tools_async_detail_owed <- Masc_tui_owed_read.changed state.tools_async_detail_owed
 
+(* The open source Task's body reads again when the backlog changes, on a
+   revalidation, and after a failed read (RFC-0480 §3.4). Its history reads
+   its first page on opening and more on request; [r] reads it again. *)
+let owe_tools_async_task_read state =
+  state.tools_async_task_owed <- Masc_tui_owed_read.changed state.tools_async_task_owed
+
+(* Runs on every loop iteration. Only an open source Task owes a read. *)
+let launch_owed_tools_async_task state ~mailbox =
+  let open_task =
+    state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open
+    && Option.is_some state.tools_async_task_source
+  in
+  if not open_task then state.tools_async_task_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Option.is_some state.tools_async_task_body_request in
+    let read =
+      if reading then state.tools_async_task_owed
+      else Masc_tui_owed_read.abandoned state.tools_async_task_owed
+    in
+    state.tools_async_task_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_tools_async_task state ~mailbox
+  end
+
 (* Runs on every loop iteration. Only an open request detail owes a read:
    opening it, or moving the selection, reads it. *)
 (* Runs on every loop iteration. Off the Clients surface nothing is owed:
@@ -18956,6 +18980,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_runtime_config_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_tools_read state;
+       owe_tools_async_task_read state;
        owe_clients_read state;
        Option.iter (fun (target : Masc.Tui_decode_async_request.target) ->
            owe_tools_async_detail_read state target.keeper_name)
@@ -23443,6 +23468,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if !execution_snapshot_seen && not !observer_source_loss_seen then
          owe_verification_read state);
+      (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
+         owe_verification_read state;
+         (* The call scope reads the selected Keeper's current Task. *)
+       end);
+      (* The Goal tree carries the approvals waiting on each Goal. *)
+      (if !gate_changed && not !observer_source_loss_seen then
+         owe_pushed_read state Surface_read_source.Overview_goals);
       (if not !observer_source_loss_seen then List.iter (owe_dataset_read state) !datasets_owed);
       (if !connectors_changed && not !observer_source_loss_seen then owe_connectors_read state);
       (if !transport_measured && not !observer_source_loss_seen then
@@ -41618,6 +41650,13 @@ Use relative paths for resources already held in the package. -->
                           (fun request -> List.mem Tools_inventory_read request.tri_pending)
                           state.tools_read_inflight)
              then launch_tools_parts state ~mailbox:async_messages [ Tools_inventory_read ]
+         (* The catalog and the selected Keeper's surface re-read on the
+            request on its Keeper's request and journal pushes
+            Each retries a failed read. *)
+         | Tools -> ()
+         (* runtime.toml re-reads when the server commits it and retries a
+            failed read ([launch_owed_runtime_config]). *)
+         | Config -> ()
          | Resources ->
              (* Loaded on arrival and on r. A tick-cadence relist would open
                 an MCP session every two seconds for an inventory that moves

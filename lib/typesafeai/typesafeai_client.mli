@@ -90,6 +90,38 @@ val failure_to_string : failure -> string
 
 val failure_to_yojson : failure -> Yojson.Safe.t
 
+type refusal_class =
+  | Payment_required  (** HTTP 402: the account has no credit left. *)
+  | Credential_refused  (** HTTP 401 or 403: the key is not accepted. *)
+  | Rate_limited  (** HTTP 429 *)
+  | Server_error  (** HTTP 5xx *)
+  | Request_refused  (** any other HTTP 4xx *)
+  | Response_unusable
+      (** a response outside 4xx and 5xx the client could not use, such as a
+          200 whose body does not decode *)
+  | Transport  (** no response arrived *)
+
+val refusal_class : refusal -> refusal_class
+(** The kind of a refusal, read from the HTTP status it carries. *)
+
+val refusal_class_to_string : refusal_class -> string
+
+type destination_outcome =
+  | Answered of { at : float }
+  | Refusing of
+      { since : float  (** the first refusal since the last answer *)
+      ; last_at : float
+      ; last : refusal_class  (** the newest refusal's kind *)
+      ; last_answer_at : float option
+      }
+(** The latest outcome one destination gave {!evaluate} in this process. *)
+
+val destination_outcomes : unit -> (destination_id * destination_outcome) list
+(** Every destination {!evaluate} asked since the process started, with its
+    latest outcome (RFC-0484 §3.2). Process memory only: empty after a
+    restart until the next ask. A projection for health; nothing reads it to
+    decide a call. *)
+
 type failure_kind = Capacity_refused | Other_refusal
 val failure_kind : failure -> failure_kind
 (** Capacity requires every attempted destination to return HTTP 400 with the

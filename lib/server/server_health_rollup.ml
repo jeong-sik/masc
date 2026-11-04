@@ -28,6 +28,7 @@ let cached_field_names =
     "keeper_hitl_gate";
     "keeper_event_queue";
     "keeper_waiting_inventory";
+    "typesafeai";
     "keeper_terminal_effect_policy";
     "keeper_observability_artifacts";
     "skill_catalog";

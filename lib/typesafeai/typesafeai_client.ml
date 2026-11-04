@@ -177,6 +177,81 @@ let ask ~timeout_sec ?clock ~state ~questions { endpoint; model; api_key } =
     failed response_body
 ;;
 
+type refusal_class =
+  | Payment_required
+  | Credential_refused
+  | Rate_limited
+  | Server_error
+  | Request_refused
+  | Response_unusable
+  | Transport
+
+let refusal_class = function
+  | Transport_failure _ -> Transport
+  | Http_response_failure { status; _ } ->
+    if status = 402 then Payment_required
+    else if status = 401 || status = 403 then Credential_refused
+    else if status = 429 then Rate_limited
+    else if status >= 500 && status <= 599 then Server_error
+    else if status >= 400 && status <= 499 then Request_refused
+    else Response_unusable
+;;
+
+let refusal_class_to_string = function
+  | Payment_required -> "payment_required"
+  | Credential_refused -> "credential_refused"
+  | Rate_limited -> "rate_limited"
+  | Server_error -> "server_error"
+  | Request_refused -> "request_refused"
+  | Response_unusable -> "response_unusable"
+  | Transport -> "transport"
+;;
+
+type destination_outcome =
+  | Answered of { at : float }
+  | Refusing of
+      { since : float
+      ; last_at : float
+      ; last : refusal_class
+      ; last_answer_at : float option
+      }
+
+module Destination_key = struct
+  type t = destination_id
+
+  let compare (a : t) (b : t) =
+    match String.compare a.destination_uri b.destination_uri with
+    | 0 -> String.compare a.model b.model
+    | order -> order
+  ;;
+end
+
+module Outcomes = Map.Make (Destination_key)
+
+(* The latest outcome of every destination this process asked (RFC-0484
+   §3.2). An immutable map behind an atomic: asks run on several fibers and
+   domains, readers take a snapshot without waiting, and nothing here
+   decides a call. *)
+let outcomes : destination_outcome Outcomes.t Atomic.t = Atomic.make Outcomes.empty
+
+let note_outcome key update =
+  Atomic_util.update outcomes (fun current ->
+    Outcomes.update key (fun previous -> Some (update previous)) current)
+;;
+
+let note_answer key ~at = note_outcome key (fun _ -> Answered { at })
+
+let note_refusal key ~at refusal =
+  let last = refusal_class refusal in
+  note_outcome key (function
+    | None -> Refusing { since = at; last_at = at; last; last_answer_at = None }
+    | Some (Answered { at = answered_at }) ->
+      Refusing { since = at; last_at = at; last; last_answer_at = Some answered_at }
+    | Some (Refusing refusing) -> Refusing { refusing with last_at = at; last })
+;;
+
+let destination_outcomes () = Outcomes.bindings (Atomic.get outcomes)
+
 (* Every refusal moves the walk on, whatever it says. The destinations share
    the state and the questions but not the body: each is asked for its own
    model id, and their limits differ, so one server calling a request wrong
@@ -200,6 +275,7 @@ let evaluate
   let rec walk refused_so_far destination rest =
     match ask ~timeout_sec ?clock ~state ~questions destination with
     | Ok (response, request_body_sha256) ->
+      note_answer (identify destination) ~at:(Time_compat.now ());
       Ok
         { response
         ; destination = identify destination
@@ -208,6 +284,7 @@ let evaluate
         }
     | Error refusal ->
       let asked = identify destination in
+      note_refusal asked ~at:(Time_compat.now ()) refusal;
       let attempt =
         { destination_uri = asked.destination_uri; model = asked.model; refusal }
       in

@@ -488,6 +488,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         | None ->
           Server_keeper_waiting_inventory.health_placeholder ~status:Health_status.Unavailable)
   in
+  let typesafeai_json =
+    compute_section ~name:"typesafeai" ?section_timings_ref Server_typesafeai_health.health_json
+  in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
@@ -589,6 +592,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_hitl_gate", keeper_hitl_gate_json);
     ("keeper_event_queue", keeper_event_queue_json);
     ("keeper_waiting_inventory", keeper_waiting_inventory_json);
+    ("typesafeai", typesafeai_json);
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"
@@ -848,6 +852,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ] );
     ( "keeper_waiting_inventory",
       Server_keeper_waiting_inventory.health_placeholder
+        ~status:(Health_status.of_string status) );
+    ( "typesafeai",
+      Server_typesafeai_health.health_placeholder
         ~status:(Health_status.of_string status) );
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );

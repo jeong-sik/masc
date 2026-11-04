@@ -237,66 +237,25 @@ Spaces in one worker, automatically reassign bindings, or finish them on Goal co
 User-held and delegated Spaces retain their existing admission rules; the stored
 binding is no takeover authorization or proof of visible UI/login completion.
 
-### Operator-confirmed input recovery
+### Input readiness
 
-The browser installation advertises a private `lane_operator` form using the
-existing Add-on operator controls. A pending input records a fresh generation,
-original issued command ID, historical tab number, Page label and operation.
-The form binds that generation to the currently connected client and
-numeric Space ID; the host's existing private operator endpoint additionally
-requires an operator credential and that current worker incarnation. The port
-cannot be exported as a model tool.
+An input-holding command records a fresh generation, its issued command ID,
+historical tab number, Page label and operation before its native effect. It
+settles only from a proof that `Browser_ego_release` builds from the answers
+the SDK declared for its holding steps; a refusal before the press restores
+the readiness it had. Every result object and failure the connection returns
+carries `inputReadiness`: `command_settled`, or `release_uncertain` when the
+last holding command ended without that proof. Native workflows stop on a
+receipt-less holding step without using Page.info to infer release or counting
+that step as completed.
 
-After checking and resetting keys/buttons in that same Space, the operator may
-press “입력 상태 확인·초기화 완료”. This sends no SDK input. It records
-`Operator_reset_asserted`, permits a subsequent distinct command, and shows
-`inputReadiness=operator_asserted` on results until a new holding operation
-settles. Every result that is a JSON object carries `inputReadiness`:
-`command_settled`, `operator_asserted` or `release_uncertain`. A tab list that
-is a plain array carries nothing. An input preflight refusal restores the prior
-provenance. A new input uncertainty creates a new generation, so an older
-confirmation cannot unlock it. The form refuses active commands, foreign
-clients/Spaces and stale generations;
-a duplicate confirmation for the same still-current assertion is idempotent.
-Stale form submissions return a `not_applied` view rather than an MCP error
-that could unnecessarily retire the worker. After a lost reply, inspect the
-current installation and read its current form; do not replay browser input or
-reuse the old client/worker form. The generic private-operator transport may
-retire a worker on an unknown reply; this does not clear input uncertainty.
-
-Managed Ego workers retain the Input state in the workspace's existing
-`lane-addons/ego-input` store, keyed by numeric native Space identity rather than
-the declaration, client UUID or name. A holding intent must be durably published
-before its native effect. Attachment restores that complete state and claims a
-new immutable writer epoch. Full-record compare-and-set under a private
-cross-process lock fences replaced writers; settlement, proven-before-effect
-rollback and checked reset also require the exact pending generation. A retired
-owner refuses new transitions. This is not an atomic retirement fence: an
-already admitted genuine settlement can complete before a replacement claims
-its epoch if its exact record still matches.
-
-Unreadable/malformed records refuse attachment. Failed or unconfirmed intent
-publication never permits the SDK effect; failed settlement publication leaves
-that peer blocked. Exit, revoke, dialog answers, control handoff and Space finish
-never erase the retained input record. Historical tab numbers and Page labels
-describe the original command and grant no current Page authority. A missing
-record retains the previous no-known-MASC-pending baseline, not a native
-freshness/release attestation. This cannot recover uncertainty from workers
-that predate retention: preserve such a live uncertain peer until the operator
-has actually checked/reset its Space. Installing this source alone does not
-authorize a reset, replacement, migration or inferred cleanup.
-
-Dialog answers, handoff, takeover and generic “go” do not create this assertion.
-It does not establish original SDK cleanup, visible UI or successful login. The
-local admission state adds no release evidence of its own. It settles only from a
-proof that `Browser_ego_release` builds from the answers the SDK declared for the
-input-holding steps. Native workflows stop on a receipt-less holding step without
-using Page.info to infer release or counting that uncertain step as completed.
-The current SDK's keyboard.type returns void even after ordinary typing, so
-this requires explicit operator recovery there as well. It does not supply the
-missing SDK settlement contract or establish non-workflow input cleanup.
-Real operator recovery and current installed Keeper/UI acceptance still require
-execution evidence.
+This is an observation, not admission: the next input is admitted either way,
+and the state lives with one connection. RFC #48037 measured on ego-browser
+0.6.2.5 that a dialog-interrupted input leaves at most a `repeat` flag on the
+next press of the interrupted key on that Page after `keyboard.type`, which no
+lock or assertion could clear. Answering a dialog, handoff and takeover do not
+change readiness. It does not establish original SDK cleanup, visible UI or
+successful login.
 
 
 ### Read the bound Space's native status
@@ -309,8 +268,8 @@ claim, takeover or input settlement. Delegation does not block this metadata
 query; missing or foreign IDs never fall back to a name or create a Space.
 It does not establish visible UI, user completion or permission for later input.
 
-The private operator view shows the last cached SDK observation without browser
-I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
+The ordinary Add-on connection row shows the last cached SDK observation without
+browser I/O. Hand-off, takeover, control waits and failed metadata refreshes invalidate
 that cache. Ordinary connection identity remains the attachment name and fixed
 ID; refreshed native names are separate observations. The ordinary Add-on
 connection row also carries `spaceObservation` (or explicit null) for that exact client and numeric Space. The host validates this field

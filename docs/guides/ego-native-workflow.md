@@ -103,15 +103,13 @@ If a pointer click or drag fails, release stays unconfirmed. The SDK's
 selector click does not preserve its coordinates in the public mouse handle.
 Native workflows and selector `drag_to` therefore do not synthesize a release
 from that handle or call its void return a release acknowledgement. A failed
-selector drag preserves the original SDK failure and blocks further input until
-its unconfirmed input state is resolved. A selector drag that returns normally
-unblocks input only when `dragAndDrop` answers with an object receipt that has
-no `dialog` (see below). Coordinate-path drag (`page.drag`) calls `mouse.down`,
+selector drag preserves the original SDK failure and reports
+`release_uncertain`. A selector drag that returns normally reports
+`command_settled` only when `dragAndDrop` answers with an object receipt that
+has no `dialog` (see below). Coordinate-path drag (`page.drag`) calls `mouse.down`,
 `mouse.move` and `mouse.up`, which return void and swallow a dialog interruption,
 so no SDK answer shows that the button came up. Current admission refuses these
-raw drags before input. An already dispatched raw drag from an older session
-remains an unknown outcome and blocks further input until the operator's input
-reset; a new preflight refusal does not reset that prior uncertainty. A lost key press/type/paste response also
+raw drags before input; that refusal keeps the readiness it had. A lost key press/type/paste response also
 keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
 uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
 `press` is included because its key sequence may be held if
@@ -204,17 +202,11 @@ tail, with no later pending action or Page transition. A lost or malformed
 overall reply, ambiguous progress, or an unconfirmed later holding step still
 leaves input pending. Never replay typing because cleanup or its reply failed.
 
-A pre-effect refusal preserves previous input readiness; it does not reset an
-existing uncertain command. Already dispatched receipt-less holding input from
-an older session remains uncertain. Keep that original command and inspect the
-page rather than typing it again. Managed workers persist known holding intent
-before dispatch and restore it for the same numeric native Space after worker
-replacement. Use the current installation's private operator input-reset confirmation;
-old client/worker forms remain invalid. The confirmation
-permits a new distinct command after the operator has checked/reset that Space;
-it does not prove SDK cleanup. Retention cannot recover an older worker's
-uncertainty that was never recorded: installing/restarting is not an input reset.
-A missing record means no retained MASC intent, not proven native freshness.
+A pre-effect refusal preserves previous input readiness. Already dispatched
+receipt-less holding input stays unconfirmed: inspect the page rather than
+typing the same text again, because its effect is unknown. Input readiness
+lives with one connection; a new connection starts `command_settled`, which
+says nothing about an older connection's input.
 The separate native window does not change the SDK's void contract or repair
 historical receipt-less failures. The retained
 [normal one-key experiment](../evidence/ego-native-window-foundation-20261102/README.md)
@@ -290,8 +282,7 @@ that error into void
 ([raw action](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674-L2687),
 [mouse](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L512-L568)),
 so void is never release proof. Raw pointer drags remain refused before input;
-raw typing uses only the separate bounded native-window path above. The
-operator's input reset still applies to already uncertain input.
+raw typing uses only the separate bounded native-window path above.
 `Page.info()` and unbounded event samples cannot establish that interval or
 complete an interrupted call. The SDK documents no release acknowledgement,
 and neither a receipt nor a verified typing tail proves that every key or
@@ -395,7 +386,7 @@ reading it; takeover itself neither adopts nor reads a document. Explicit
 effects then use the adopted native Page with its original origin. List tabs
 and observe the
 intended managed Page to verify login. SDK takeover runs without a host reply
-clock; a lost result is never replayed or treated as input-reset confirmation.
+clock; a lost result is never replayed.
 A question or an invisible-window
 report is not completion. See the [Keeper procedure](../../skills/browser-lanes/references/connection.md#로그인인증-인계).
 These tools are composed by the Keeper; handoff does not automatically create
@@ -648,8 +639,7 @@ match, hidden, disabled, covered by another element, a stale ref), it throws
 `ElementResolutionError` with a declared `kind`, `transient` or `permanent`.
 The peer reads that name and kind as data and judges them in
 `Browser_ego_release`; the message text is not read. Such a gesture holds no
-key or button, so the input keeps the readiness it had and the Space is not
-locked.
+key or button, so the input keeps the readiness it had.
 
 **What the caller sees.** The command still fails, with the SDK's message, an
 uncertain effect (the SDK may have scrolled the target, and a double click may
@@ -659,9 +649,9 @@ have finished its first click) and two fields in the receipt:
 page again and pick a narrower target, such as a snapshot ref. A `transient`
 one may resolve once the page settles.
 
-**What still locks.** Any other error, a missing or malformed name or kind, and
-`press` (its key goes out outside the SDK input tracking) keep the earlier rule:
-the input stays `release_uncertain` until it is released.
+**What stays unconfirmed.** Any other error, a missing or malformed name or
+kind, and `press` (its key goes out outside the SDK input tracking) leave the
+input `release_uncertain`.
 
 **Evidence.** The error class is `src/element-resolver.ts` lines 28-35 at
 `citrolabs/ego-lite@12407167f84a`. On ego-browser 0.6.2.5 (Chromium 156,
@@ -670,61 +660,25 @@ the input stays `release_uncertain` until it is released.
 The same probe saw `page.press` throw the same error, which is why `press`
 stays out: the error alone cannot show its key was never sent.
 
-## Releasing a pending input lock as the owning agent (experimental)
+## Input readiness is an observation
 
-**What.** When an Ego command might have left a native key or button down, the
-peer stays `inputReadiness: release_uncertain` and refuses `click`, `fill`,
-`scroll` and `hover` before any effect. The operator can confirm in the private
-Browser connections controls. An agent that owns the Space can now also release
-it itself with `BrowserAct action: "release_input"`. It records
-`inputReadiness: keeper_asserted`; like the operator assertion it is not native
-release proof and the original command is never replayed.
+Every result object and failure an Ego connection returns carries
+`inputReadiness`:
 
-**Read the lock first.** `BrowserAct action: "space_status"` (live lane, exact
-`clientId`) now carries `inputLock`:
+- `command_settled`: the last input-holding command ended with a release the
+  SDK declared (a receipt without `dialog`, or a verified native typing tail),
+  or no holding command ran yet on this connection.
+- `release_uncertain`: the last holding command ended without that, for
+  example after a dialog cut it or its answer was lost.
 
-- `state`: `release_uncertain`, `operator_asserted`, `keeper_asserted` or
-  `command_settled`.
-- `pending`: `generation`, `commandId`, `operation`, `tabId`, `pageLabel`,
-  `scope` and `heldAt` (Unix seconds when the lock was taken; `null` for a
-  record written before it was kept).
-- `releasePath`: `keeperCallable` and, when false, `blockedBy`; plus the action
-  name and what it requires.
-- `lastRejection`: the last release that was not applied, with
-  `requestedGeneration`, `currentGeneration`, `heldAt`, `at` and `reason`.
-  A successful release clears it.
+The value never refuses input. The next click, fill or key on the same Space is
+admitted either way, and a new connection starts `command_settled`. A tab list
+returned as a plain array and failures the server reports on its own (it
+stopped waiting, the lane is absent) carry no value.
 
-**Release.** After you inspected the same Space (read its pages and, where
-needed, the keys and buttons it could hold):
-
-```json
-{"action":"release_input","lane":"live","clientId":"<exact clientId>",
- "generation":"<inputLock.pending.generation>","confirmation":"checked_and_released"}
-```
-
-The result is `outcome: "released"` (or `"already_released"` when the same
-generation was already released; who asserted it is not rewritten) with the new
-`inputLock`. The next `click`, `fill` or `scroll` on that Space is admitted
-again.
-
-**When it refuses (nothing is released).**
-
-- The Space is not agent-owned, for example the operator holds it after
-  `hand_off`: refused before any effect. Use `take_over` after the operator says
-  they are done.
-- `generation` is not the pending one (a newer input lock replaced it, or none is
-  pending): the refusal text carries both generations; `lastRejection` in
-  `space_status` keeps them and `heldAt`. Read `space_status` again and use the
-  reported generation.
-- The worker's retained record was replaced by another writer: reconnect, then
-  read `space_status` again.
-
-The operator's `assert_input_reset` refusal now also states why it was not
-applied (stale generation, a command still running, client or Space mismatch)
-in the operator view's `reason` field instead of only saying it was not applied.
-
-**Turning it off / limits.** There is no setting: the action does nothing unless
-you call it, and the operator path is unchanged. Only an ego connection serves
-it; other lanes refuse it. There is no automatic lease expiry, because elapsed
-time alone does not show that a key was released. This feature is experimental
-until it has been exercised against a live Ego Space.
+On ego-browser 0.6.2.5, dialogs that cut `click`, `dblclick`, `dragAndDrop`,
+`press` and `keyboard.press` left no key or button down on the same Page or
+another Page of the Space. A cut `keyboard.type` left the next press of the
+interrupted key on that Page marked `repeat: true`; the typed value was right
+and the flag cleared after that key went up once. RFC #48037 has the
+measurements.

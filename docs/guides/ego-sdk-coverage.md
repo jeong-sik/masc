@@ -60,7 +60,7 @@ local Space is visible or that its login is complete.
 | `takeOverTaskSpace` | `page.act` take_over uses the native execution wait on the fixed original numeric Space; returns its native user-boundary Page with no active-tab replacement | Explicit operator completion, currently only configured Space; real SDK/installed login handoff remains unverified |
 | `TaskSpace.spaceId` | SDK-observed ID follows client inventory, tool receipts, stored screenshots and the TUI connection identity | Installed-route proof and per-goal Space lifecycle |
 | `TaskSpace.name` | Attachment name follows connection context; explicit space_status returns the native-inventory name for the same numeric ID | Per-goal lifecycle and actual visible UI proof |
-| `TaskSpace.ownership` | Explicit page.act space_status reads native listTaskSpaces ownership and observation time without constructing a TaskSpace handle, Page calls or changing control; private operator form, ordinary Add-on Dashboard connection list/selected event and TUI Browser Lane selection/detail show the dated cached observation; strict host/UI decoding binds the numeric Space | Real installed Keeper/UI proof; TUI component checks are not rendered TUI evidence |
+| `TaskSpace.ownership` | Explicit page.act space_status reads native listTaskSpaces ownership and observation time without constructing a TaskSpace handle, Page calls or changing control; ordinary Add-on Dashboard connection list/selected event and TUI Browser Lane selection/detail show the dated cached observation; strict host/UI decoding binds the numeric Space | Real installed Keeper/UI proof; TUI component checks are not rendered TUI evidence |
 | `TaskSpace.page` | Permanent label resolution; tab inventory and document-read projection retain the observed label | Lifecycle tools and installed-route proof |
 | `TaskSpace.userPage` | Native takeover freezes the managed/unmanaged boundary handle and checks its Space/target/label/origin against that same Space's tabs. The receipt returns activeTabId/egoPage; absence stays absent | Explicit adoption before unmanaged reads; no current focus, login or input-reset proof; real SDK/installed execution unverified |
 | `TaskSpace.pages` | Managed pages known through tab enumeration | Direct lifecycle-aware managed inventory |
@@ -237,21 +237,16 @@ not mean the user created the tab. The same context survives partial inventories
 and document projection. These observations grant no adoption, takeover or close
 authority. The TUI changes are source integration; visible behavior is unverified.
 
-A pending input may be resumed through the private operator confirmation form.
-This records a human check/reset assertion for the exact connected Space and
-pending generation, not an SDK cleanup acknowledgement or proof of login/visible
-UI. Managed workers durably record known holding intent before dispatch and
-restore that Input state for the same numeric native Space after worker
-replacement. Use the current installation's form; a retired worker's form does
-not authorize a replacement. Retention cannot recover uncertainty that an older
-worker never recorded, and a missing record does not prove native freshness.
+An input whose release the SDK did not declare is reported as
+`inputReadiness: release_uncertain` on the connection's answers. It does not
+refuse later input, and it lives with the connection.
 
 Current admission refuses raw typing and raw coordinate/waypoint/scene drags
 before input. That refusal preserves existing readiness; it does not clear an
 earlier uncertain command. Already-dispatched uncertain input must not be
 replayed or inferred released from Page.info. See the
 [native workflow input contract](ego-native-workflow.md) for the supported
-fill, insertText, paste and selector-drag paths. Durable Input does not establish
+fill, insertText, paste and selector-drag paths. Input readiness does not establish
 complete task continuation, durable download/finish reconciliation or physical
 input release. Exact-source checks, installed execution and goal-only Keeper
 results remain separate evidence.

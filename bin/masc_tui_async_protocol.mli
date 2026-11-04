@@ -250,6 +250,13 @@ type tools_read =
       ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
       }
 
+(* A timer's tick. Each carries the workspace authority it was set under;
+   the observer and contact ticks also the owner token that set them. *)
+type retry_tick =
+  | Observer_retry of workspace_authority * unit ref
+  | Contact_retry of workspace_authority * unit ref
+  | Fleet_stream_retry of workspace_authority
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -821,9 +828,7 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
-  | Observer_retry_due of workspace_authority * unit ref
-  | Contact_retry_due of workspace_authority * unit ref
-  | Fleet_stream_retry_due of workspace_authority
+  | Retry_due of retry_tick
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity

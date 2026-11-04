@@ -139,7 +139,15 @@ if [ "${#aliases[@]}" -gt 0 ]; then
       *) continue ;;
     esac
     alias_name="${alias#@runtest-}"
-    alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>/dev/null) || alias_dep_lines=""
+    # The reader failing is not this dispatch's failure: the alias is still
+    # built under its own budget below, which is the behaviour before this
+    # preparation existed. Say so instead of falling back silently -- a run
+    # that quietly lost the preparation looks exactly like the 601s TIMEOUT it
+    # was meant to prevent, and nobody re-reads a log that never complained.
+    if ! alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>&1); then
+      log "[targeted] ${alias_name}: could not read the rule's deps; building the alias under its own budget instead: ${alias_dep_lines}"
+      alias_dep_lines=""
+    fi
     while IFS= read -r alias_dep; do
       [ -n "${alias_dep}" ] || continue
       alias_deps+=("${alias_dep}")

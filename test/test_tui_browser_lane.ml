@@ -349,6 +349,35 @@ let test_viewport_cadence_skip_inputs () =
       "client picker", {settled with client_picker = Some 0};
       "URL draft", {settled with url_draft = Some "https://example.org/new"} ]
 
+let test_observation_scope_tracks_exact_selection () =
+  let open Masc.Workspace_dataset_event in
+  let initial = loaded () in
+  let expected = { source = Live; client_id = Some firefox.client_id; tab_id = 2; view = Read } in
+  expect "text observation follows the selected live client and tab"
+    (observation_scope initial = Some expected);
+  expect "choosing another client changes the observation owner"
+    (observation_scope (choose_client zen initial)
+     = Some { expected with client_id = Some zen.client_id });
+  expect "an owned browser has no fabricated client id"
+    (observation_scope { initial with source = Automation; selected_client = None }
+     = Some { expected with source = Automation; client_id = None });
+  let shot = success (decode_screenshot (screenshot_response ())) in
+  expect "the open image is observed as a viewport"
+    (observation_scope ~image_open:true ~viewport:shot initial
+     = Some { expected with view = Viewport });
+  let target = { Browser_lane.document_id = "fixture"; node_id = "region-1" } in
+  let focused = { initial with read_view = Scene_view { scene_view = Browser_lane.Regions; scope = Some target } } in
+  expect "the focused scene retains its exact region"
+    (observation_scope focused
+     = Some { expected with view = Scene { scene_view = Browser_lane.Regions; scope = Some target } });
+  List.iter
+    (fun (name, view) -> expect (name ^ " pauses the observation subscription")
+      (observation_scope view = None))
+    [ "in-flight read", { initial with load = Loading (8, Read) }
+    ; "pending refresh", { initial with refresh_pending = Some 8 }
+    ; "client picker", { initial with client_picker = Some 0 }
+    ; "URL draft", { initial with url_draft = Some "https://example.org/new" } ]
+
 let test_activity_refresh_preserves_pending_read () =
   let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);
     refresh_pending=Some 42;url_draft=Some "https://example.org/draft"} in
@@ -1190,6 +1219,7 @@ let () =
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
      "viewport cadence skip inputs", test_viewport_cadence_skip_inputs;
+     "observation scope follows exact selection", test_observation_scope_tracks_exact_selection;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;

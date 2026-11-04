@@ -1,7 +1,7 @@
 open Alcotest
 
 (* The fixtures are MSP golden transcripts copied verbatim from
-   github.com/meta-models/muse-code-sdk schema/msp/transcripts at 22a8a56
+   github.com/meta-models/muse-code-sdk schema/msp/transcripts at 42c7658
    (MIT; see fixtures/muse_msp/README.md). Each line is
    {"dir":"client"|"server","raw":"<one wire frame>"}. *)
 

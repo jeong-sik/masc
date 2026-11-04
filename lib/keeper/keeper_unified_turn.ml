@@ -225,11 +225,11 @@ let run_keeper_cycle
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
   (* Quota expiry is wall-clock provider evidence. Freeze this observation so
-     shaping and dispatch share one ordered runtime suffix. NDT-OK. *)
+     shaping and dispatch share one resumed walk. NDT-OK. *)
   let quota_snapshot_now = Unix.gettimeofday () in
   let deferred_runtime_lane =
     Option.map
-      (Keeper_turn_driver.quota_ordered_deferred_runtime_lane
+      (Keeper_turn_driver.resumed_runtime_lane
          ~now:quota_snapshot_now)
       deferred_runtime_lane
   in
@@ -296,7 +296,7 @@ let run_keeper_cycle
     =
       let effective_runtime_id =
         match deferred_runtime_lane with
-        | Some hint -> hint.Keeper_turn_driver.next_runtime_id
+        | Some hint -> Keeper_turn_driver.resumed_head hint
         | None -> Keeper_meta_contract.runtime_id_of_meta meta
       in
       let source =

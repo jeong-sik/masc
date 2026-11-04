@@ -131,10 +131,13 @@ val owner_turn_rejection_cycle_status :
 (** What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
     belongs to the path that received the rate limit or quota answer; the
     keeper waits only while the path it would send next rests.
-    [Continue_on_deferred_lane] names the walk head of the deferred suffix,
-    which is not resting; a pending input runs on it without a sleep. The
-    failed lane is removed before the suffix is recorded, so consecutive
-    immediate cycles walk a finite candidate set and end when it is empty.
+    [Continue_on_deferred_lane] names the head of the walk that resumes the
+    deferred suffix ({!Keeper_turn_driver.resumed_head}), which is not
+    resting; a pending input runs on it without a sleep. A resumed turn leaves
+    a suffix only after attempting a candidate of the suffix it resumed, and
+    that suffix names only the candidates of it the turn did not reach, so
+    consecutive immediate cycles walk a shrinking candidate set and end when
+    it is empty.
     [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
     runtime or assignment whose release that is. A wakeup does not cut it
     short (#34653). *)

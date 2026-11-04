@@ -60,9 +60,9 @@ let restore_retry ~keeper_name (retry : Semantic.runtime_retry) =
     | `Unavailable missing -> Error (Runtime.missing_catalog_model_to_string missing)
     | `Lane lane ->
       let declared = Runtime_lane.ordered_candidates lane in
-      (* The saved suffix owns progress through this assignment. Removing a
-         candidate must not reinsert paths already attempted. Keep the surviving
-         suffix's order and deadline; restart cannot reconstruct its live witness. *)
+      (* The saved suffix names where the resumed walk starts; a candidate the
+         lane no longer declares drops out of it. Keep the surviving suffix's
+         order and deadline; restart cannot reconstruct its live witness. *)
       match List.filter (fun id -> List.exists (String.equal id) declared)
           (retry.next_runtime_id :: retry.later_runtime_ids) with
       | [] -> Error "saved direct retry has no remaining candidate in its assignment"
@@ -158,7 +158,7 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
        next dispatch, including when a restart discarded the live witness. *)
     let* dispatch_retry = restore_retry ~keeper_name observed in
     let lane = restored_lane dispatch_retry
-      |> Keeper_turn_driver.quota_ordered_deferred_runtime_lane ~now:(Time_compat.now ()) in
+      |> Keeper_turn_driver.resumed_runtime_lane ~now:(Time_compat.now ()) in
     Ok (Some {checkpoint; observed; lane})
 
 let consume ~base_path ~keeper_name ~operation_id admission =

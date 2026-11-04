@@ -183,7 +183,7 @@ let resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume =
   | Some checkpoint -> Ok checkpoint.runtime_id
   | None -> match resume_lane with
     | None -> resolve_turn_runtime_id meta
-    | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id
+    | Some lane -> Ok (Keeper_turn_driver.resumed_head lane)
 
 module For_testing = struct
   let resolve_direct_turn_runtime_id = resolve_direct_turn_runtime_id

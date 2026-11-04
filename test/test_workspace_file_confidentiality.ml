@@ -696,6 +696,158 @@ let test_worktrees_distinguish_empty_from_unavailable () =
     | Error (W.Worktrees_failed _) -> ()
     | Ok _ | Error _ -> Alcotest.fail "Git failure became an empty list")
 
+let search_or_fail ?(ignore_case = false) ~base ~path query =
+  match W.For_testing.workspace_search ~base ~path ~query ~ignore_case with
+  | Ok found -> found
+  | Error W.Search_invalid_query -> Alcotest.fail "unexpected invalid search query"
+  | Error W.Search_invalid_path -> Alcotest.fail "unexpected invalid search path"
+  | Error W.Search_directory_unavailable -> Alcotest.fail "search directory unavailable"
+  | Error W.Search_repository_unavailable -> Alcotest.fail "search repository unavailable"
+  | Error (W.Search_failed detail) -> Alcotest.fail detail
+
+let search_paths (found : W.workspace_search) =
+  List.sort_uniq String.compare
+    (List.map (fun (m : W.workspace_search_match) -> m.sm_path) found.search_matches)
+
+let test_search_reports_only_files_the_reader_serves () =
+  with_temp_dir (fun base ->
+    with_temp_dir (fun outside ->
+      catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+      write_file (Filename.concat base "src/selected.ml") "let needle = 1\n";
+      write_file (Filename.concat base "elsewhere/other.ml") "let needle = 2\n";
+      write_file (Filename.concat base ".gitignore") "*.ignored\n";
+      write_file (Filename.concat base "hidden.ignored") "needle ignored\n";
+      write_file (Filename.concat base "tracked.ignored") "needle tracked\n";
+      catalog_git ~cwd:base [ "add"; "--force"; "--"; "tracked.ignored" ];
+      write_file (Filename.concat base ".env") "needle secret\n";
+      write_file (Filename.concat base "keys/credentials.json") "needle secret\n";
+      write_file (Filename.concat base ".masc/state") "needle internal\n";
+      write_file (Filename.concat outside "secret") "needle outside\n";
+      Unix.symlink (Filename.concat outside "secret") (Filename.concat base "escape");
+      (* Both files exist: a POSIX backslash name must not report the slash name. *)
+      write_file (Filename.concat base "src\\selected.ml") "needle different\n";
+      let found = search_or_fail ~base ~path:"" "needle" in
+      check string "root stays workspace relative" "" found.search_root;
+      check (list string) "only files the file reader serves"
+        [ "elsewhere/other.ml"; "src/selected.ml"; "tracked.ignored" ]
+        (search_paths found);
+      check bool "not truncated" false found.search_truncated;
+      List.iter
+        (fun (m : W.workspace_search_match) ->
+          match W.For_testing.resolve_workspace_file base m.sm_path with
+          | Error _ -> Alcotest.fail "search result cannot resolve for file reading"
+          | Ok file ->
+              match W.For_testing.load_workspace_file_content file with
+              | Ok _ -> ()
+              | Error _ -> Alcotest.fail "search result cannot be read")
+        found.search_matches;
+      let scoped = search_or_fail ~base ~path:"src" "needle" in
+      check (list string) "directory scope narrows the search" [ "src/selected.ml" ]
+        (search_paths scoped)))
+
+let test_search_scope_stops_at_workspace_and_keeps_nested_prefix () =
+  with_temp_dir (fun parent ->
+    catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
+    write_file (Filename.concat parent "keeper/note.ml") "needle\n";
+    let base = Filename.concat parent "keeper" in
+    (match W.For_testing.workspace_search ~base ~path:"" ~query:"needle" ~ignore_case:false with
+     | Error W.Search_repository_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "search borrowed the enclosing checkout");
+    let repo = Filename.concat base "repos/example" in
+    mkdir_p repo;
+    catalog_git ~cwd:repo [ "init"; "-b"; "main" ];
+    write_file (Filename.concat repo "src/one.ml") "needle one\n";
+    write_file (Filename.concat repo "two.ml") "needle two\n";
+    let found = search_or_fail ~base ~path:"repos/example/src" "needle" in
+    check string "owning nested checkout" "repos/example" found.search_root;
+    check (list string) "paths keep the Keeper bundle prefix and the directory scope"
+      [ "repos/example/src/one.ml" ] (search_paths found))
+
+let test_search_rejects_bad_queries_and_directories () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    write_file (Filename.concat base "a.ml") "needle\n";
+    List.iter
+      (fun (label, query) ->
+        match W.For_testing.workspace_search ~base ~path:"" ~query ~ignore_case:false with
+        | Error W.Search_invalid_query -> ()
+        | Ok _ | Error _ -> Alcotest.fail (label ^ " was not rejected"))
+      [ "empty", ""
+      ; "one byte", "n"
+      ; "line break", "nee\ndle"
+      ; "carriage return", "nee\rdle"
+      ; "NUL", "nee\000dle"
+      ; "DEL", "nee\127dle"
+      ; "too long", String.make 201 'a'
+      ; "invalid UTF-8", "\xff\xfe"
+      ];
+    ignore (search_or_fail ~base ~path:"" (String.make 200 'a'));
+    ignore (search_or_fail ~base ~path:"" "ne");
+    ignore (search_or_fail ~base ~path:"" "a\tb");
+    (match W.For_testing.workspace_search ~base ~path:".env" ~query:"needle" ~ignore_case:false with
+     | Error W.Search_invalid_path -> ()
+     | Ok _ | Error _ -> Alcotest.fail "confidential search directory was not rejected");
+    (match W.For_testing.workspace_search ~base ~path:"missing" ~query:"needle" ~ignore_case:false with
+     | Error W.Search_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "missing directory became an empty search");
+    (match W.For_testing.workspace_search ~base ~path:"a.ml" ~query:"needle" ~ignore_case:false with
+     | Error W.Search_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a file was searched as a directory");
+    check (list string) "no match is an answer, not an error" []
+      (search_paths (search_or_fail ~base ~path:"" "absent-text")))
+
+let test_search_is_fixed_string_and_honours_ignore_case () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    write_file (Filename.concat base "a.ml") "Needle (x) .*\n";
+    check (list string) "case sensitive by default" []
+      (search_paths (search_or_fail ~base ~path:"" "needle"));
+    check (list string) "ignore_case matches" [ "a.ml" ]
+      (search_paths (search_or_fail ~ignore_case:true ~base ~path:"" "needle"));
+    check (list string) "regex characters are literal" [ "a.ml" ]
+      (search_paths (search_or_fail ~base ~path:"" "(x) .*"));
+    check (list string) "a pattern is not interpreted" []
+      (search_paths (search_or_fail ~base ~path:"" "Nee.le")))
+
+let test_search_lines_are_valid_utf8_within_the_byte_limit () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    let repeat count piece = String.concat "" (List.init count (fun _ -> piece)) in
+    write_file (Filename.concat base "wide.txt") ("needle" ^ repeat 200 "\xea\xb0\x80" ^ "\n");
+    write_file (Filename.concat base "emoji.txt") ("needle" ^ repeat 100 "\xf0\x9f\x98\x80" ^ "\n");
+    write_file (Filename.concat base "broken.txt") "needle \xff\xfe tail\n";
+    let found = search_or_fail ~base ~path:"" "needle" in
+    let text_of path =
+      match
+        List.find_opt (fun (m : W.workspace_search_match) -> String.equal m.sm_path path)
+          found.search_matches
+      with
+      | Some m -> m.sm_text
+      | None -> Alcotest.fail ("missing match in " ^ path)
+    in
+    check int "3-byte characters fill the limit exactly" 300
+      (String.length (text_of "wide.txt"));
+    check int "a 4-byte character is not cut in half" 298
+      (String.length (text_of "emoji.txt"));
+    check string "invalid bytes become U+FFFD" "needle \xef\xbf\xbd\xef\xbf\xbd tail"
+      (text_of "broken.txt");
+    List.iter
+      (fun (m : W.workspace_search_match) ->
+        check bool (m.sm_path ^ " is valid UTF-8") true (String.is_valid_utf_8 m.sm_text))
+      found.search_matches)
+
+let test_search_caps_the_answer_and_says_so () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    (* git grep stops at 20 lines per file, so 11 files make 220 readable rows. *)
+    for file = 1 to 11 do
+      write_file (Filename.concat base (Printf.sprintf "f%02d.txt" file))
+        (String.concat "" (List.init 25 (fun line -> Printf.sprintf "needle %d\n" line)))
+    done;
+    let found = search_or_fail ~base ~path:"" "needle" in
+    check int "answer is capped" 200 (List.length found.search_matches);
+    check bool "the cap is reported" true found.search_truncated)
+
 (* Use the production router and file reader: a surviving project file must
    never stand in for the selected scope after its catalog was accepted. *)
 let workspace_http_response ?(meth = "GET") ?(body = "") ?token ~router target =
@@ -1209,6 +1361,20 @@ let () =
             test_worktrees_stop_at_workspace_and_keep_nested_prefix
         ; test_case "distinguishes empty checkout and unavailable directory" `Quick
             test_worktrees_distinguish_empty_from_unavailable
+        ] )
+    ; ( "content search"
+      , [ test_case "reports only files the file reader serves" `Quick
+            test_search_reports_only_files_the_reader_serves
+        ; test_case "stops at selected workspace and keeps nested prefix" `Quick
+            test_search_scope_stops_at_workspace_and_keeps_nested_prefix
+        ; test_case "rejects bad queries and directories" `Quick
+            test_search_rejects_bad_queries_and_directories
+        ; test_case "fixed string and ignore_case" `Quick
+            test_search_is_fixed_string_and_honours_ignore_case
+        ; test_case "lines are valid UTF-8 within the byte limit" `Quick
+            test_search_lines_are_valid_utf8_within_the_byte_limit
+        ; test_case "caps the answer and says so" `Quick
+            test_search_caps_the_answer_and_says_so
         ] )
     ; ( "selected file scope"
       , [ test_case "removed repository registration cannot read project file" `Quick

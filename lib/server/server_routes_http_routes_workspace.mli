@@ -159,6 +159,28 @@ type workspace_file_catalog_error =
   | Catalog_repository_unavailable
   | Catalog_scan_failed of string
 
+(** One matching line of a content search. [sm_path] is relative to the
+    workspace base, the address [/api/v1/workspace/file] takes. [sm_text] is
+    valid UTF-8 cut to at most 300 bytes at a character boundary. *)
+type workspace_search_match = {
+  sm_path : string;
+  sm_line : int;  (** 1-based. *)
+  sm_text : string;
+}
+
+type workspace_search = {
+  search_root : string;
+  search_matches : workspace_search_match list;  (** At most 200. *)
+  search_truncated : bool;  (** More readable matches existed than returned. *)
+}
+
+type workspace_search_error =
+  | Search_invalid_query
+  | Search_invalid_path
+  | Search_directory_unavailable
+  | Search_repository_unavailable
+  | Search_failed of string
+
 (** [tree_node_limit_of_query value] applies the workspace tree route's
     [limit] query parameter defaulting and [1, max_tree_node_limit] clamp.
     Invalid or missing values fall back to the route default. Exposed for
@@ -239,6 +261,17 @@ module For_testing : sig
       worktree row is [{name; main; head; state; branch; locked; prunable}]
       where [state] is ["branch"], ["detached"] or ["bare"], and [head] and
       [branch] are [null] when absent. *)
+
+  val workspace_search :
+    base:string ->
+    path:string ->
+    query:string ->
+    ignore_case:bool ->
+    (workspace_search, workspace_search_error) result
+  (** Fixed-string search of the checkout containing directory [path],
+      stopping at [base]. Only files the file reader would serve are
+      reported; a [query] with a line break or control character, outside 2
+      to 200 bytes, or not valid UTF-8 is [Search_invalid_query]. *)
 
   val workspace_file_catalog :
     base:string ->

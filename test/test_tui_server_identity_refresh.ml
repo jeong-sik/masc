@@ -173,7 +173,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
     k_paused=false; k_identity=Error "not observed";
     k_activity=Some { k_current_task_id=Some "task-current"; k_total_turns=0;
       k_total_tokens=0; k_total_cost_usd=Keeper_cost_coverage.empty;
-      k_last_turn_ts=""; k_last_proactive_outcome=None } }];
+      k_last_turn_at=None; k_last_proactive_outcome=None } }];
   let change : Tui_decode.file_change =
     { fc_at=1.; fc_keeper="alpha"; fc_turn=None; fc_task_id=Some "task-original";
       fc_execution_id=None; fc_line_evidence=None;
@@ -5816,7 +5816,7 @@ let test_waiting_since_does_not_replace_a_fresher_turn () =
         ; k_total_turns = 1
         ; k_total_tokens = 0
         ; k_total_cost_usd = Keeper_cost_coverage.empty
-        ; k_last_turn_ts = "1970-01-01T00:01:40Z"
+        ; k_last_turn_at = Some 100.
         ; k_last_proactive_outcome = None
         }
     }
@@ -6534,7 +6534,7 @@ let test_roster_rows_join_each_reading_by_keeper_name () =
   let open Masc_tui_types in
   let state, alpha, _ = local_keeper_source_fixture () in
   let activity task_id = Tui_decode.{ k_current_task_id = task_id; k_total_turns = 0;
-    k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_ts = "";
+    k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_at = None;
     k_last_proactive_outcome = None } in
   let alpha = { alpha with Tui_decode.k_activity = Some (activity (Some "task-alpha")) } in
   let beta = { alpha with Tui_decode.k_name = "beta"; k_activity = Some (activity None) } in

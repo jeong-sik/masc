@@ -35,7 +35,7 @@ type keeper_activity = {
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : Keeper_cost_coverage.t;
-  k_last_turn_ts : string;
+  k_last_turn_at : float option;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
 }
 
@@ -582,9 +582,9 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
   let usage = runtime.usage in
   let proactive = runtime.proactive_rt in
-  let k_last_turn_ts =
-    if Float.compare usage.last_turn_ts 0.0 <= 0 then ""
-    else Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts
+  let k_last_turn_at =
+    if Float.compare usage.last_turn_ts 0.0 <= 0 then None
+    else Some usage.last_turn_ts
   in
   {
     k_origin = Persisted_keeper;
@@ -601,7 +601,7 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
       k_total_turns = usage.total_turns;
       k_total_tokens = usage.total_tokens;
       k_total_cost_usd = usage.total_cost_usd;
-      k_last_turn_ts;
+      k_last_turn_at;
       k_last_proactive_outcome = Some proactive.last_outcome;
     };
   }

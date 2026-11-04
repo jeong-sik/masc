@@ -1821,7 +1821,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          add_row "Total Tokens:"
            (Masc_tui_message_layout.compact_count activity.k_total_tokens);
          add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
-         add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
+         add_row "Last Turn:"
+           (match activity.k_last_turn_at with
+            | Some at -> Terminal_text.short_timestamp_of_unix at
+            | None -> "(never)"));
       (match k.k_identity with
        | Ok identity ->
          add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);

@@ -2117,18 +2117,15 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
             ~tools:[]
         in
         let config = { config with max_tokens } in
-        let builder =
-          Runtime_agent_context.builder
+        let agent =
+          Runtime_agent_context.create_agent
             ~net:(Eio.Stdenv.net env)
             ~config
             ()
         in
-        match Agent_core.Builder.build_safe builder with
-        | Error err -> fail (Agent_core.Error.to_string err)
-        | Ok agent ->
-          check (option int) "builder max_tokens intent" expected
-            (Agent_core.Agent.state agent).config.max_tokens;
-          Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent)
+        check (option int) "fresh agent max_tokens intent" expected
+          (Agent_core.Agent.state agent).config.max_tokens;
+        Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent)
       in
       check_builder_max_tokens None None;
       check_builder_max_tokens (Some 2048) (Some 2048)))
@@ -2153,23 +2150,20 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   check (option (float 0.0001)) "config min_p" (Some 0.07) config.min_p;
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
-      let builder =
-        Runtime_agent_context.builder
+      let agent =
+        Runtime_agent_context.create_agent
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
       in
-      match Agent_core.Builder.build_safe builder with
-      | Error err -> fail (Agent_core.Error.to_string err)
-      | Ok agent ->
-        let agent_config = (Agent_core.Agent.state agent).config in
-        check (option (float 0.0001)) "builder top_p" (Some 0.91)
-          agent_config.top_p;
-        check (option int) "builder top_k" (Some 42) agent_config.top_k;
-        check (option (float 0.0001)) "builder min_p" (Some 0.07)
-          agent_config.min_p;
-        Eio.Switch.on_release sw (fun () ->
-          Agent_core.Agent.close agent)));
+      let agent_config = (Agent_core.Agent.state agent).config in
+      check (option (float 0.0001)) "fresh agent top_p" (Some 0.91)
+        agent_config.top_p;
+      check (option int) "fresh agent top_k" (Some 42) agent_config.top_k;
+      check (option (float 0.0001)) "fresh agent min_p" (Some 0.07)
+        agent_config.min_p;
+      Eio.Switch.on_release sw (fun () ->
+        Agent_core.Agent.close agent)));
   let checkpoint =
     { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
@@ -2197,7 +2191,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; working_context = None
     }
   in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport:None in
   check (option (float 0.0001)) "resume checkpoint top_p" (Some 0.91)
     prepared.patched_checkpoint.top_p;
   check (option int) "resume checkpoint top_k" (Some 42)
@@ -2210,6 +2204,59 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     prepared.agent_config.top_k;
   check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
     prepared.agent_config.min_p
+
+(* A fresh agent and a resumed one take the same options (#48385): the
+   approval callback, the AGENT_CORE tracer and the keeper-turn span link the
+   runtime config carries reach both. *)
+let test_runtime_agent_context_fresh_and_resumed_agents_share_options () =
+  let tool_approval (_ : Agent_core.Hooks.tool_approval_request) =
+    Agent_core.Hooks.Denied
+  in
+  let trace_link = Some ("keeper-trace", "keeper-span") in
+  let config =
+    { (Runtime_agent.default_config
+         ~media_store:(Agent_core.History.Memory_store.create ())
+         ~name:"agent_core-runpod_mtp.qwen"
+         ~provider_cfg:(provider_cfg ())
+         ~system_prompt:""
+         ~tools:[])
+      with
+      tool_approval = Some tool_approval
+    ; trace_link
+    }
+  in
+  let check_options label (options : Agent_core.Agent.options) =
+    check bool (label ^ " tool_approval") true
+      (match options.tool_approval with
+       | Some installed -> installed == tool_approval
+       | None -> false);
+    check bool (label ^ " tracer") true
+      (options.tracer == Agent_core.Tracing.fmt);
+    check (option (pair string string)) (label ^ " trace_link") trace_link
+      options.trace_link
+  in
+  Runtime_agent_context.set_agent_core_tracer Agent_core.Tracing.fmt;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_agent_context.set_agent_core_tracer Agent_core.Tracing.null)
+    (fun () ->
+       Eio_main.run (fun env ->
+         Eio.Switch.run (fun sw ->
+           let agent =
+             Runtime_agent_context.create_agent
+               ~net:(Eio.Stdenv.net env)
+               ~config
+               ()
+           in
+           Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
+           check_options "fresh" (Agent_core.Agent.options agent);
+           let prepared =
+             Runtime_agent_context.prepare_resume
+               ~config
+               ~checkpoint:(Agent_core.Agent.checkpoint agent)
+               ~transport:None
+           in
+           check_options "resumed" prepared.options)))
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
   let provider_cfg_with_response_format =
@@ -2252,7 +2299,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; working_context = None
     }
   in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport:None in
   let expected_response_format =
     provider_cfg_with_response_format.Llm_provider.Provider_config.response_format
   in
@@ -2277,23 +2324,20 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   in
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
-      let builder =
-        Runtime_agent_context.builder
+      let agent =
+        Runtime_agent_context.create_agent
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
       in
-      match Agent_core.Builder.build_safe builder with
-      | Error err -> fail (Agent_core.Error.to_string err)
-      | Ok agent ->
-        let agent_config = (Agent_core.Agent.state agent).config in
-        check
-          (option string)
-          "tool_choice remains unset"
-          None
-          (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice);
-        Eio.Switch.on_release sw (fun () ->
-          Agent_core.Agent.close agent)))
+      let agent_config = (Agent_core.Agent.state agent).config in
+      check
+        (option string)
+        "tool_choice remains unset"
+        None
+        (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice);
+      Eio.Switch.on_release sw (fun () ->
+        Agent_core.Agent.close agent)))
 
 let fresh_loopback_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -3332,9 +3376,7 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
        | Some caps -> check bool "catalog capability remains true" true caps.supports_parallel_tool_calls);
       let config = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
           ~name:"parallel-policy" ~provider_cfg ~system_prompt:"inspect" ~tools:[] in
-      let builder = Runtime_agent_context.builder ~net:(Eio.Stdenv.net env) ~config () in
-      let agent = match Agent_core.Builder.build_safe builder with
-        | Ok agent -> agent | Error e -> fail (Agent_core.Error.to_string e) in
+      let agent = Runtime_agent_context.create_agent ~net:(Eio.Stdenv.net env) ~config () in
       Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent);
       let check_wire label agent_config =
         let request = Agent_core.Agent_turn.provider_config_with_agent_config
@@ -3346,7 +3388,7 @@ let test_parallel_policy_survives_fresh_resume_and_wire_serialization () =
       check_wire "fresh request" (Agent_core.Agent.state agent).config;
       let checkpoint = { (Agent_core.Agent.checkpoint agent) with
           disable_parallel_tool_use = not expected } in
-      let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+      let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport:None in
       check bool "resume replaces stale checkpoint policy" expected
         prepared.patched_checkpoint.disable_parallel_tool_use;
       check_wire "resumed request" prepared.agent_config
@@ -4078,6 +4120,10 @@ let () =
             "runtime agent context preserves provider sampling config"
             `Quick
             test_runtime_agent_context_preserves_provider_sampling_config
+        ; test_case
+            "runtime agent context gives fresh and resumed agents the same options"
+            `Quick
+            test_runtime_agent_context_fresh_and_resumed_agents_share_options
         ; test_case
             "runtime agent context resume patches stale response_format to base contract"
             `Quick

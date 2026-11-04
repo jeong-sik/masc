@@ -117,22 +117,22 @@ type config =
   ; context_injector : Agent_core.Hooks.context_injector option
   ; context : Agent_core.Context.t option
   ; top_p : float option
-    (** Nucleus sampling probability forwarded to AGENT_CORE [Builder.with_top_p].
+    (** Nucleus sampling probability sent in the AGENT_CORE request config.
         [None] leaves the provider/model default intact. *)
   ; top_k : int option
-    (** Top-k sampling limit forwarded to AGENT_CORE [Builder.with_top_k].
+    (** Top-k sampling limit sent in the AGENT_CORE request config.
         [None] leaves the provider/model default intact. *)
   ; min_p : float option
     (** Minimum probability threshold for nucleus sampling, forwarded
-        to AGENT_CORE [Builder.with_min_p]. [None] leaves the provider default;
+        in the AGENT_CORE request config. [None] leaves the provider default;
         [Some 0.0] is a no-op and some providers reject the field. *)
   ; on_run_complete : (bool -> unit) option
     (** Callback invoked when an AGENT_CORE run finishes (success or failure).
-        Forwarded to [Builder.with_on_run_complete]. Useful for emitting
+        Forwarded to [Agent_core.Agent.options.on_run_complete]. Useful for emitting
         telemetry, flushing OTel spans, or finalizing receipts. *)
   ; checkpoint_sink : Agent_core.Agent.checkpoint_sink option
     (** Caller-owned turn-boundary checkpoint sink, forwarded to
-        [Builder.with_checkpoint_sink]. Allows consumers to persist
+        [Agent_core.Agent.create] and [Agent_core.Agent.resume]. Allows consumers to persist
         checkpoints at AGENT_CORE turn boundaries. *)
   ; execution_store : Agent_core.Agent.execution_store option
     (** One caller-owned durable scope per native Agent API call. [None]
@@ -212,10 +212,10 @@ let configured_or_inherited configured inherited =
   | None -> inherited
 ;;
 
-(* Fresh Builder construction starts from [provider_cfg] and applies only
-   explicit Runtime_agent overrides. Resume must use that same resolution:
-   otherwise an absent caller override clears provider-owned request fields
-   such as Anthropic's required [max_tokens] and changes admission semantics. *)
+(* Fresh and resumed agents both take this resolution: it starts from
+   [provider_cfg] and applies only explicit Runtime_agent overrides, so an
+   absent caller override keeps provider-owned request fields such as
+   Anthropic's required [max_tokens]. *)
 let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
   let provider = config.provider_cfg in
   { (Agent_core.Types.default_config ~model:config.model_id) with
@@ -245,169 +245,56 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
   }
 ;;
 
-let builder
+(* Fresh and resumed agents take this one options record, so every field the
+   runtime config carries reaches both: the approval Gate's callback, the
+   AGENT_CORE tracer, and the keeper-turn span link. *)
+let agent_options ~(config : config) ~transport : Agent_core.Agent.options =
+  { Agent_core.Agent.default_options with
+    provider_config = Some config.provider_cfg
+  ; reasoning_source_change =
+      Llm_provider.Reasoning_history_projection.Exclude_unselected
+  ; stream_idle_timeout_s = config.stream_idle_timeout_s
+  ; first_event_timeout_s = config.first_event_timeout_s
+  ; body_timeout_s = config.body_timeout_s
+  ; call_timeout_s = config.call_timeout_s
+  ; admission_timeout_s = config.admission_timeout_s
+  ; permit_wait = config.permit_wait
+  ; hooks =
+      (match config.hooks with
+       | Some hooks -> hooks
+       | None -> Agent_core.Hooks.empty)
+  ; tracer = Atomic.get agent_core_tracer_ref
+  ; trace_link = config.trace_link
+  ; raw_trace = config.raw_trace
+  ; context_injector = config.context_injector
+  ; event_bus = config.event_bus
+  ; tool_approval = config.tool_approval
+  ; description = config.description
+  ; on_run_complete = config.on_run_complete
+  ; transport
+  }
+;;
+
+let create_agent
       ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
       ~(config : config)
       ?transport
       ()
-  : Agent_core.Builder.t
+  : Agent_core.Agent.t
   =
-  let builder =
-    Agent_core.Builder.create ~net ~media_store:config.media_store ~model:config.model_id
-    |> Agent_core.Builder.with_provider_config config.provider_cfg
-    |> Agent_core.Builder.with_name config.name
-    |> Agent_core.Builder.with_system_prompt config.system_prompt
-    |> Agent_core.Builder.with_tools config.tools
-    |> Agent_core.Builder.with_reasoning_source_change
-         Llm_provider.Reasoning_history_projection.Exclude_unselected
-    |> Agent_core.Builder.with_context_fit_admission
-         (context_fit_admission config.provider_cfg)
-  in
-  let builder =
-    match config.temperature with
-    | Some temperature -> Agent_core.Builder.with_temperature temperature builder
-    | None -> builder
-  in
-  let builder =
-    (* masc#24067 / agent-core boundary: [None] means the request carries no
-       [max_tokens] field at all — [Builder.with_max_tokens] is simply not
-       called, rather than filling in a synthesized default. *)
-    match config.max_tokens with
-    | Some max_tokens -> Agent_core.Builder.with_max_tokens max_tokens builder
-    | None -> builder
-  in
-  let builder =
-    match config.stream_idle_timeout_s with
-    | Some timeout_s -> Agent_core.Builder.with_stream_idle_timeout timeout_s builder
-    | None -> builder
-  in
-  let builder =
-    match config.first_event_timeout_s with
-    | Some s -> Agent_core.Builder.with_first_event_timeout s builder
-    | None -> builder
-  in
-  let builder =
-    match config.body_timeout_s with
-    | Some s -> Agent_core.Builder.with_body_timeout s builder
-    | None -> builder
-  in
-  let builder =
-    match config.call_timeout_s with
-    | Some s -> Agent_core.Builder.with_call_timeout s builder
-    | None -> builder
-  in
-  let builder =
-    match config.admission_timeout_s with
-    | Some s -> Agent_core.Builder.with_admission_timeout s builder
-    | None -> builder
-  in
-  let builder =
-    match config.permit_wait with
-    | Some cell -> Agent_core.Builder.with_permit_wait cell builder
-    | None -> builder
-  in
-  let builder =
-    match config.hooks with
-    | Some h -> Agent_core.Builder.with_hooks h builder
-    | None -> builder
-  in
-  let builder =
-    match config.description with
-    | Some d -> Agent_core.Builder.with_description d builder
-    | None -> builder
-  in
-  let builder =
-    match config.raw_trace with
-    | Some raw_trace -> Agent_core.Builder.with_raw_trace raw_trace builder
-    | None -> builder
-  in
-  let builder =
-    match config.enable_thinking with
-    | Some enabled -> Agent_core.Builder.with_enable_thinking enabled builder
-    | None -> builder
-  in
-  let builder =
-    match config.preserve_thinking with
-    | Some preserve -> Agent_core.Builder.with_preserve_thinking preserve builder
-    | None -> builder
-  in
-  let builder =
-    if config.cache_system_prompt
-    then Agent_core.Builder.with_cache_system_prompt true builder
-    else builder
-  in
-  let builder =
-    if config.yield_on_tool
-    then Agent_core.Builder.with_yield_on_tool true builder
-    else builder
-  in
-  let builder =
-    if config.initial_messages <> []
-    then Agent_core.Builder.with_initial_messages config.initial_messages builder
-    else builder
-  in
-  let builder =
-    match config.model_input_projection with
-    | Some project -> Agent_core.Builder.with_model_input_projection project builder
-    | None -> builder
-  in
-  let builder =
-    match config.pre_dispatch_serialization_observer with
-    | Some observe ->
-      Agent_core.Builder.with_pre_dispatch_serialization_observer observe builder
-    | None -> builder
-  in
-  let builder =
-    match config.serialization_executor with
-    | Some executor -> Agent_core.Builder.with_serialization_executor executor builder
-    | None -> builder
-  in
-  let builder =
-    match config.context_injector with
-    | Some injector -> Agent_core.Builder.with_context_injector injector builder
-    | None -> builder
-  in
-  let builder =
-    match config.context with
-    | Some ctx -> Agent_core.Builder.with_context ctx builder
-    | None -> builder
-  in
-  let builder =
-    match config.top_p with
-    | Some top_p -> Agent_core.Builder.with_top_p top_p builder
-    | None -> builder
-  in
-  let builder =
-    match config.top_k with
-    | Some top_k -> Agent_core.Builder.with_top_k top_k builder
-    | None -> builder
-  in
-  let builder =
-    match config.min_p with
-    | Some min_p -> Agent_core.Builder.with_min_p min_p builder
-    | None -> builder
-  in
-  let builder =
-    match config.event_bus with
-    | Some bus -> Agent_core.Builder.with_event_bus bus builder
-    | None -> builder
-  in
-  let builder =
-    match config.on_run_complete with
-    | Some cb -> Agent_core.Builder.with_on_run_complete cb builder
-    | None -> builder
-  in
-  let builder =
-    match config.checkpoint_sink with
-    | Some sink -> Agent_core.Builder.with_checkpoint_sink sink builder
-    | None -> builder
-  in
-  let builder =
-    Agent_core.Builder.with_tracer (Atomic.get agent_core_tracer_ref) builder
-  in
-  match transport with
-  | Some transport -> Agent_core.Builder.with_transport transport builder
-  | None -> builder
+  Agent_core.Agent.create
+    ~net
+    ~media_store:config.media_store
+    ~config:(agent_config_for_request config)
+    ~tools:config.tools
+    ?context:config.context
+    ~options:(agent_options ~config ~transport)
+    ~context_fit_admission:(context_fit_admission config.provider_cfg)
+    ?model_input_projection:config.model_input_projection
+    ?pre_dispatch_serialization_observer:config.pre_dispatch_serialization_observer
+    ?serialization_executor:config.serialization_executor
+    ?checkpoint_sink:config.checkpoint_sink
+    ()
 ;;
 
 type prepared_resume =
@@ -417,7 +304,10 @@ type prepared_resume =
   ; context_fit_admission : Agent_core.Agent.context_fit_admission
   }
 
-let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
+let prepare_resume
+      ~(config : config)
+      ~(checkpoint : Agent_core.Checkpoint.t)
+      ~transport
   : prepared_resume
   =
   let agent_config = agent_config_for_request config in
@@ -438,26 +328,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
     ; response_format = agent_config.response_format
     }
   in
-  let options : Agent_core.Agent.options =
-    { Agent_core.Agent.default_options with
-      hooks = (match config.hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty)
-    ; provider_config = Some config.provider_cfg
-    ; reasoning_source_change =
-        Llm_provider.Reasoning_history_projection.Exclude_unselected
-    ; stream_idle_timeout_s = config.stream_idle_timeout_s
-    ; first_event_timeout_s = config.first_event_timeout_s
-    ; body_timeout_s = config.body_timeout_s
-    ; call_timeout_s = config.call_timeout_s
-    ; admission_timeout_s = config.admission_timeout_s
-    ; permit_wait = config.permit_wait
-    ; context_injector = config.context_injector
-    ; tool_approval = config.tool_approval
-    ; event_bus = config.event_bus
-    ; raw_trace = config.raw_trace
-    ; description = config.description
-    ; on_run_complete = config.on_run_complete
-    }
-  in
+  let options = agent_options ~config ~transport in
   { patched_checkpoint
   ; agent_config
   ; options

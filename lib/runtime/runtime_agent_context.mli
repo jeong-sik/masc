@@ -34,13 +34,13 @@ type config = {
   first_event_timeout_s : float option;
       (** Bound on the silent wait for the FIRST streaming provider event
           (TTFT/prefill), forwarded to AGENT_CORE
-          [Builder.with_first_event_timeout]. [stream_idle_timeout_s] arms
+          [Agent.options.first_event_timeout_s]. [stream_idle_timeout_s] arms
           only after that event; when [None], AGENT_CORE's resolver falls
           back to [body_timeout_s], then to [stream_idle_timeout_s]
           (RFC-AC-037). *)
   body_timeout_s : float option;
       (** Total HTTP body-consumption ceiling forwarded to AGENT_CORE
-          [Builder.with_body_timeout] for non-streaming completion paths.
+          [Agent.options.body_timeout_s] for non-streaming completion paths.
           Streaming paths deliberately ignore this knob so active long
           streams are not killed by total duration; streaming liveness is
           owned by [stream_idle_timeout_s] and the attempt liveness
@@ -68,7 +68,7 @@ type config = {
   permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option;
       (** The cell a bounded wait for the provider's admission permit writes
           as it begins and ends, handed to AGENT_CORE
-          [Builder.with_permit_wait]. The keeper stands its attempt watchdog
+          [Agent.options.permit_wait]. The keeper stands its attempt watchdog
           down while the wait is on, the wait having a deadline of its own,
           and counts again from the instant the wait settled. Nothing in the
           types makes that deadline shorter than the watchdog's threshold;
@@ -125,14 +125,14 @@ type config = {
   context_injector : Agent_core.Hooks.context_injector option;
   context : Agent_core.Context.t option;
   top_p : float option;
-      (** Nucleus sampling probability forwarded to AGENT_CORE [Builder.with_top_p].
+      (** Nucleus sampling probability sent in the AGENT_CORE request config.
           [None] leaves the provider/model default intact. *)
   top_k : int option;
-      (** Top-k sampling limit forwarded to AGENT_CORE [Builder.with_top_k].
+      (** Top-k sampling limit sent in the AGENT_CORE request config.
           [None] leaves the provider/model default intact. *)
   min_p : float option;
       (** Minimum probability threshold for nucleus sampling, forwarded
-          to AGENT_CORE [Builder.with_min_p]. [None] leaves the provider default
+          in the AGENT_CORE request config. [None] leaves the provider default
           intact; [Some 0.0] is a no-op and some providers (Groq, GLM)
           reject the field, so leave [None] unless explicitly needed. *)
   on_run_complete : (bool -> unit) option;
@@ -164,18 +164,28 @@ val default_config :
     returns a {!config} populated with sensible defaults for every
     field except the four required ones.  Caller mutates fields
     in place via record copy ([{ cfg with ... }]) before passing
-    to {!builder} or {!prepare_resume}. *)
+    to {!create_agent} or {!prepare_resume}. *)
 
-(** {1 Builder} *)
+(** {1 Agent construction} *)
 
-val builder :
+val agent_options :
+  config:config ->
+  transport:Llm_provider.Llm_transport.t option ->
+  Agent_core.Agent.options
+(** The options record both {!create_agent} and {!prepare_resume} hand to
+    AGENT_CORE. Every option the runtime config carries goes here once, so a
+    fresh agent and a resumed one see the same hooks, tool-approval callback,
+    tracer, keeper-turn span link and timeouts. *)
+
+val create_agent :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
   ?transport:Llm_provider.Llm_transport.t ->
   unit ->
-  Agent_core.Builder.t
-(** [builder ~net ~config ?transport ()] builds an {!Agent_core.Builder.t}
-    from [config]. *)
+  Agent_core.Agent.t
+(** [create_agent ~net ~config ?transport ()] creates a fresh agent with
+    {!agent_options} and the same request config resolution as
+    {!prepare_resume}. *)
 
 val context_fit_admission
   :  Llm_provider.Provider_config.t
@@ -193,17 +203,20 @@ type prepared_resume = {
   context_fit_admission : Agent_core.Agent.context_fit_admission;
 }
 (** Output of {!prepare_resume}. [patched_checkpoint] and [agent_config] use
-    the same provider-base-plus-explicit-override resolution as a fresh
-    builder. *)
+    the same provider-base-plus-explicit-override resolution as
+    {!create_agent}, and [options] is {!agent_options}. *)
 
 val set_agent_core_tracer : Agent_core.Tracing.t -> unit
-(** Set the AGENT_CORE tracer used by {!builder}.  Called once
+(** Set the AGENT_CORE tracer {!agent_options} reads.  Called once
     at server bootstrap so AGENT_CORE spans flow to the same OTLP collector as
     MASC-native telemetry.  Defaults to [Tracing.null] until set. *)
 
 val prepare_resume :
-  config:config -> checkpoint:Agent_core.Checkpoint.t -> prepared_resume
-(** [prepare_resume ~config ~checkpoint] computes the patched checkpoint,
+  config:config ->
+  checkpoint:Agent_core.Checkpoint.t ->
+  transport:Llm_provider.Llm_transport.t option ->
+  prepared_resume
+(** [prepare_resume ~config ~checkpoint ~transport] computes the patched checkpoint,
     agent config, and options for an [Agent.resume] call. Runtime resumes
     provisionally admit source changes; dispatch excludes only foreign reasoning
     outside the target's replay selection. The checkpoint message spine and

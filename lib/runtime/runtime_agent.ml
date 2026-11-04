@@ -178,10 +178,9 @@ let observed_http_transport
     ?body_timeout_s
     ()
   : Llm_provider.Llm_transport.t =
-  (* Agent Core contract: stream_idle_timeout_s moved off transport construction
-     (AGENT_CORE 0.211.10 "remove implicit execution limits") and is now applied at
-     the agent builder via [Agent_core.Builder.with_stream_idle_timeout]. The
-     transport itself carries no idle deadline; AGENT_CORE does not infer one. *)
+  (* The transport carries no idle deadline: stream_idle_timeout_s rides on
+     the agent options ({!Runtime_agent_context.agent_options}), and AGENT_CORE
+     does not infer one. *)
   let http_transport =
     (* AGENT_CORE owns stream-idle liveness on
        [Llm_transport.completion_request.stream_idle_timeout_s]. The exact
@@ -220,11 +219,10 @@ let transport_for_provider
     ?body_timeout_s
     ()
   =
-  (* CLI subprocess transport removed (2026-05-31); every provider dispatches
-     over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
-     per-request patching, not at transport construction, so it is no longer
-     threaded here. stream_idle_timeout_s is applied at the builder, not here
-     (see Agent Core contract note above). *)
+  (* Every provider dispatches over HTTP. Runtime MCP policy is applied via
+     the tool-lane resolver and per-request patching, not at transport
+     construction. stream_idle_timeout_s rides on the agent options, not here
+     (see the note above). *)
   Ok
     (Some
        (observed_http_transport
@@ -979,8 +977,7 @@ let build
      with
      | Error _ as e -> e
      | Ok transport ->
-      let builder = Runtime_agent_context.builder ~net ~config ?transport () in
-      Agent_core.Builder.build_safe builder)
+      Ok (Runtime_agent_context.create_agent ~net ~config ?transport ()))
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
@@ -1063,16 +1060,11 @@ let resume_from_checkpoint
      | Error _ as e -> e
      | Ok transport ->
       let prepared_resume =
-        Runtime_agent_context.prepare_resume ~config ~checkpoint
+        Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport
       in
-      (* [turn_limit=unlimited] used to ride on this line. Nothing in the
-         runtime agent or in [Agent_core.Agent.resume] carries a turn limit,
-         so the field asserted a configuration that has no producer — 256 of
-         these lines in the two hours to 2026-08-22T02:03Z all repeated it. *)
       Log.Runtime_agent.info
         "%s: resume checkpoint_turn_count=%d"
         config.name checkpoint.turn_count;
-      let options = { prepared_resume.options with transport } in
       (Agent_core.Agent.resume ~net ~media_store:config.media_store
            ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
@@ -1081,7 +1073,7 @@ let resume_from_checkpoint
            ?pre_dispatch_serialization_observer:
              config.pre_dispatch_serialization_observer
            ?serialization_executor:config.serialization_executor
-           ~options ~config:prepared_resume.agent_config
+           ~options:prepared_resume.options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ())
       |> Result.map_error (fun error ->

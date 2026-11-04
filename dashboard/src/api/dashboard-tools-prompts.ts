@@ -14,6 +14,7 @@ import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 import { parsePromptAuthoringIssues, type PromptAuthoringIssue } from './schemas/prompt-authoring'
+import { parseToolMetricsSeriesResponse, type ToolMetricsSeriesResponse } from './schemas/tool-metrics-series'
 
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
@@ -909,6 +910,30 @@ export type {
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
+}
+
+/** One window of the hourly or daily tool-call series. */
+export interface ToolMetricsSeriesRequest {
+  readonly sinceHours: number
+  readonly bucket: 'hour' | 'day'
+  /** Minutes east of UTC, so a day bucket starts at the viewer's midnight. */
+  readonly utcOffsetMin: number
+  /** A stored tool name, or null for every tool. */
+  readonly tool: string | null
+}
+
+export async function fetchToolMetricsSeries(
+  request: ToolMetricsSeriesRequest,
+  opts?: AbortableRequestOptions,
+): Promise<ToolMetricsSeriesResponse> {
+  const query = new URLSearchParams({
+    since_hours: String(request.sinceHours),
+    bucket: request.bucket,
+    utc_offset_min: String(request.utcOffsetMin),
+  })
+  if (request.tool !== null) query.set('tool', request.tool)
+  const raw = await get<unknown>(`/api/v1/tool-metrics/series?${query.toString()}`, { signal: opts?.signal })
+  return parseToolMetricsSeriesResponse(raw)
 }
 
 export async function fetchDashboardRuntimeProbe(

@@ -295,6 +295,7 @@ export type {
   DashboardSurfaceHealth,
   ToolMetricsTopEntry,
   ToolMetricsResponse,
+  ToolMetricsSeriesRequest,
   DashboardScheduledAutomationFsm,
   DashboardScheduledAutomationWakeReceipt,
   DashboardScheduledAutomationDispatchReceipt,
@@ -354,6 +355,7 @@ export type {
 } from './dashboard-tools-prompts'
 export {
   fetchToolMetrics,
+  fetchToolMetricsSeries,
   fetchDashboardRuntimeProbe,
   fetchDashboardFullHealth,
   fetchDashboardTools,

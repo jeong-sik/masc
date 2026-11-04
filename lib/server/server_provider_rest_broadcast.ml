@@ -54,6 +54,20 @@ let moved ~before ~after =
     after
 ;;
 
+(* What the runtime document shows of every runtime's standing, and the
+   earliest time it changes with no write. *)
+let read_standing ~config ~now =
+  match
+    ( Server_dashboard_runtime_resolved_json.standing ~now ~config
+    , Server_dashboard_runtime_resolved_json.next_standing_change_at ~now )
+  with
+  | standing, next_change -> Some standing, next_change
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Log.Server.warn "provider rest broadcast: runtime standing failed: %s" (Printexc.to_string exn);
+    None, None
+;;
+
 let install ~sw ~clock ~(config : Workspace.config) =
   let wake = Eio.Stream.create 1 in
   let wake_mu = Stdlib.Mutex.create () in
@@ -69,19 +83,29 @@ let install ~sw ~clock ~(config : Workspace.config) =
       before, None
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec watch before =
+    let rec watch before standing_before =
       let after, next_release = read ~before in
       List.iter
         (fun keeper_name -> Keeper_row_broadcast.changed ~base_path:config.base_path ~keeper_name)
         (moved ~before ~after);
-      (match next_release with
+      let standing, next_change = read_standing ~config ~now:(Eio.Time.now clock) in
+      (* A runtime's quota or rate-limit standing, a reset passing included,
+         changes the runtime document the Usage view reads. A standing that
+         could not be computed is announced too, so a reader looks. *)
+      (match standing, standing_before with
+       | Some standing, Some previous when Yojson.Safe.equal standing previous -> ()
+       | (Some _ | None), (Some _ | None) ->
+         Workspace_dataset_event.announce ~base_path:config.base_path
+           Workspace_dataset_event.Provider_usage);
+      (match earliest (Option.to_list next_release @ Option.to_list next_change) with
        | None -> Eio.Stream.take wake
        | Some at ->
          Eio.Fiber.first
            (fun () -> Eio.Stream.take wake)
            (fun () -> Eio.Time.sleep_until clock at));
-      watch after
+      watch after standing
     in
     let initial, _ = read ~before:[] in
-    watch initial)
+    let initial_standing, _ = read_standing ~config ~now:(Eio.Time.now clock) in
+    watch initial initial_standing)
 ;;

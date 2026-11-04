@@ -98,12 +98,15 @@ let remember t page = match List.assoc_opt page t.pages with
   | None -> t.next_tab <- t.next_tab + 1; t.pages <- (page, t.next_tab) :: t.pages; t.next_tab
 
 (* A run that ended without an answer, an answer that is not the frame's, a
-   refusal the script made before it acted ([before: true]), and an error
-   thrown at a point the script does not know, caught by the frame. *)
+   refusal the script made before it acted ([before: true]), an error
+   thrown at a point the script does not know, caught by the frame, and the
+   bound Space that did not open ([spaceOpen: "failed"]): taskSpace itself
+   threw, so the body never ran. *)
 type step_failure = Unanswered of run_failure | Unreadable of string | Refused of string | Failed of string
+  | Space_unopened of string
 let step_failure_message = function
   | Unanswered failure -> run_failure_message failure
-  | Unreadable detail | Refused detail | Failed detail -> detail
+  | Unreadable detail | Refused detail | Failed detail | Space_unopened detail -> detail
 
 (* ego's owner of a task space, as a TaskSpace handle and listTaskSpaces
    name it. The agent holds a space it opened until it hands the space to
@@ -151,8 +154,19 @@ let frame ~step ~args lines = String.concat "\n" ([
   "} catch (error) {";
   "  emit({ok: false, error: String(error && error.message || error)});";
   "}" ])
+(* taskSpace is opened apart from the body. When it throws, the answer says
+   so and the body does not run: where the script failed, not ego's words,
+   tells the peer that nothing was done (ego gives this error no code). *)
 let script ~step ~space ~holder ~args body =
-  frame ~step ~args (("  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");") :: held_by holder body)
+  frame ~step ~args ([
+    "  let task, opened = false;";
+    "  try {";
+    "    task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");";
+    "    opened = true;";
+    "  } catch (error) {";
+    "    emit({ok: false, spaceOpen: \"failed\", error: String(error && error.message || error)});";
+    "  }";
+    "  if (opened) {" ] @ held_by holder body @ [ "  }" ])
 
 (* taskSpace makes the space it does not find, so the spaces are read from
    the list without opening one. Every row is passed on and the name is
@@ -176,10 +190,11 @@ let answer output =
   | [line] ->
     match Yojson.Safe.from_string line with
     | exception Yojson.Json_error _ -> Error (Unreadable "ego-browser nodejs answered unreadable JSON")
-    | json -> match field "ok" json, field "value" json, field "error" json, field "before" json with
-      | Some (`Bool true), Some value, None, None -> Ok value
-      | Some (`Bool false), None, Some (`String error), Some (`Bool true) -> Error (Refused (head error))
-      | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
+    | json -> match field "ok" json, field "value" json, field "error" json, field "before" json, field "spaceOpen" json with
+      | Some (`Bool true), Some value, None, None, None -> Ok value
+      | Some (`Bool false), None, Some (`String error), Some (`Bool true), None -> Error (Refused (head error))
+      | Some (`Bool false), None, Some (`String error), None, None -> Error (Failed (head error))
+      | Some (`Bool false), None, Some (`String error), None, Some (`String "failed") -> Error (Space_unopened (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
@@ -189,7 +204,7 @@ let matching_spaces ~space output =
     (* ego threw inside the frame, for one that could not reach ego lite. *)
     | Error (Failed detail) -> Error (Spaces_failed detail)
     | Error (Unanswered failure) -> Error (Spaces_failed (run_failure_message failure))
-    | Error (Unreadable detail | Refused detail) -> Error (Spaces_malformed detail) in
+    | Error (Unreadable detail | Refused detail | Space_unopened detail) -> Error (Spaces_malformed detail) in
   let row = function
     | `Assoc _ as listed ->
       (match field "spaceId" listed, field "name" listed, field "ownership" listed with
@@ -277,14 +292,52 @@ let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (s
 let with_download_root t = function
   | `Assoc fields -> `Assoc (("downloads", str t.downloads.root) :: fields)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
-let run_step t ~window_s ~step ~args body =
-  asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
 let run_native_script t source =
   match t.run_native source with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
+
+(* ego's task spaces, read for the bound Space alone. Only a list that
+   answered can establish absence; a failed read leaves presence unknown. *)
+let space_status_script ~space_id = frame ~step:"space.status" ~args:(obj ["spaceId",`Int space_id]) [
+  "  const spaces = await listTaskSpaces();";
+  "  emit({ok: true, value: Array.isArray(spaces)";
+  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
+  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
+  "    : spaces});" ]
+let presence_of t listed = match listed with
+  | Ok value -> Browser_ego_space_observation.inventory ~expected_id:t.space.id ~observed_at:(t.now ()) value
+  | Error failure ->
+    {Browser_ego_space_observation.space_id=t.space.id;observed_at=t.now ();
+     state=Unknown (Transport_unavailable (step_failure_message failure))},None
+let space_missing_refused = "the original bound Space is missing from the native inventory; no replacement was opened"
+let unknown_presence_message = function
+  | Browser_ego_space_observation.Transport_unavailable detail | Invalid_inventory detail -> "Space presence is unknown: " ^ detail
+  | Ambiguous_inventory -> "Space presence is unknown: the native inventory lists the original ID more than once"
+
+(* A bound Space that did not open is looked up in ego's list once, within a
+   read's window. A list that settles it becomes the connection's presence,
+   as space_status keeps it, so a Space ego no longer lists leaves automatic
+   selection. A list that does not settle it leaves the earlier presence and
+   says why in the answer. The body did not run either way. *)
+let settle_open t = function
+  | Error (Space_unopened detail) ->
+    let listed=match t.run ~window_s:read_window_s (space_status_script ~space_id:t.space.id) with
+      | Error failure -> Error (Unanswered failure)
+      | Ok output -> answer output in
+    let presence,observation=presence_of t listed in
+    let keep ()=t.space_presence <- presence; t.space_observation <- observation in
+    (match presence.state with
+     | Browser_ego_space_observation.Missing -> keep (); Error (Space_unopened space_missing_refused)
+     | Present -> keep (); Error (Space_unopened detail)
+     | Unknown reason -> Error (Space_unopened (detail ^ "; " ^ unknown_presence_message reason)))
+  | (Ok _ | Error (Unanswered _ | Unreadable _ | Refused _ | Failed _)) as answered -> answered
+let run_step t ~window_s ~step ~args body =
+  asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
+  |> settle_open t
 let run_native_step t ~step ~args body =
   run_native_script t (script ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body)
+  |> settle_open t
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
@@ -681,7 +734,7 @@ let http_url url =
 (* What a failed effect says: refused before it acted, never started, or
    unknown, with what to do about the unknown. *)
 let effect_failure ~unknown = function
-  | Refused detail | Unanswered (Unstarted detail) -> Live.Before_effect detail
+  | Refused detail | Space_unopened detail | Unanswered (Unstarted detail) -> Live.Before_effect detail
   | Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _ as failure) ->
     Live.Outcome_unknown (run_failure_message failure ^ "; " ^ unknown)
   | Unreadable detail | Failed detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)
@@ -732,7 +785,7 @@ let finish_space t keep =
         "  const receipt = await task.finish({keep: args.keep});\n  emit({ok: true, value: receipt});" with
     | Error failure ->
       (match failure with
-       | Refused _|Unanswered (Unstarted _) -> t.finish_state <- Active
+       | Refused _|Space_unopened _|Unanswered (Unstarted _) -> t.finish_state <- Active
        | Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _) -> ());
       Error (effect_failure ~unknown failure)
     | Ok value ->
@@ -1402,7 +1455,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "    }";
         "  }" ]) in
   let* ()=match pending,response with
-    | Some pending,Error (Refused _ | Unanswered (Unstarted _)) ->
+    | Some pending,Error (Refused _ | Space_unopened _ | Unanswered (Unstarted _)) ->
         Input.not_started t.input ~generation:pending.generation |> Result.map_error (fun detail -> Live.Before_effect detail)
     | None,_ | Some _,(Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _)) -> Ok () in
   match response with
@@ -1549,6 +1602,9 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
   | Error (Refused _|Unanswered (Unstarted _)) ->
     let* ()=before (Input.not_started t.input ~generation:pending.generation) in
     Error (Live.Before_effect "native typing was refused before its producer ran")
+  | Error (Space_unopened detail) ->
+    let* ()=before (Input.not_started t.input ~generation:pending.generation) in
+    Error (Live.Before_effect detail)
   | Error (Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Error unknown
   | Ok value ->
     let* fields=match value with
@@ -1714,7 +1770,8 @@ let take_over t =
   t.space_observation <- None;
   let unknown = Printf.sprintf "control of original ego Space #%d is unconfirmed; confirm operator control and inspect that same Space; never automatically repeat take_over or select a replacement" t.space.id in
   match run_native_script t (script ~step:"space.take_over" ~space:(`Int t.space.id)
-      ~holder:Operator_holds ~args:(obj ["spaceId",`Int t.space.id]) Browser_ego_takeover.script) with
+      ~holder:Operator_holds ~args:(obj ["spaceId",`Int t.space.id]) Browser_ego_takeover.script)
+        |> settle_open t with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
     let* receipt=Browser_ego_takeover.decode ~expected_id:t.space.id value
@@ -1767,23 +1824,12 @@ let release_input t ~generation =
      | (None|Some _),(None|Some _) -> Error (Live.Before_effect "release_input requires an agent-owned Space; the observed owner differs"))
   | Ok _ -> Error (Live.Before_effect "invalid native release_input observation")
 
-let space_status_script ~space_id = frame ~step:"space.status" ~args:(obj ["spaceId",`Int space_id]) [
-  "  const spaces = await listTaskSpaces();";
-  "  emit({ok: true, value: Array.isArray(spaces)";
-  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
-  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
-  "    : spaces});" ]
-
 let space_status t =
   (* Only an authoritative inventory can establish absence. A failed query
      remains unknown; neither outcome changes the original attachment. *)
   let module Observation=Browser_ego_space_observation in
   t.space_observation <- None;
-  let presence,observation=match run_native_script t (space_status_script ~space_id:t.space.id) with
-    | Ok value -> Observation.inventory ~expected_id:t.space.id ~observed_at:(t.now ()) value
-    | Error failure ->
-      {Observation.space_id=t.space.id;observed_at=t.now ();
-       state=Unknown (Transport_unavailable (step_failure_message failure))},None in
+  let presence,observation=presence_of t (run_native_script t (space_status_script ~space_id:t.space.id)) in
   t.space_presence <- presence;
   t.space_observation <- observation;
   match presence.state,observation with
@@ -1791,9 +1837,8 @@ let space_status t =
     (match Observation.to_json observation with
      | `Assoc fields -> Ok (obj (("action",str "space_status")::fields @ ["inputLock",Input.lock_report t.input ~owner:(Some observation.ownership)]))
      | _ -> Error (Live.Before_effect "invalid encoded Space observation"))
-  | Missing,None -> Error (Live.Before_effect "the original bound Space is missing from the native inventory; no replacement was opened")
-  | Unknown (Transport_unavailable detail|Invalid_inventory detail),None -> Error (Live.Before_effect ("Space presence is unknown: " ^ detail))
-  | Unknown Ambiguous_inventory,None -> Error (Live.Before_effect "Space presence is unknown: the native inventory lists the original ID more than once")
+  | Missing,None -> Error (Live.Before_effect space_missing_refused)
+  | Unknown reason,None -> Error (Live.Before_effect (unknown_presence_message reason))
   | (Present,None)|((Missing|Unknown _),Some _) -> Error (Live.Before_effect "inconsistent native Space presence observation")
 
 let page_management_script = {js|async (task, args) => {
@@ -1944,11 +1989,12 @@ let workflow ?actor t args =
   match result with
   | Error error ->
     let* ()=match pending,error with
-     | Some pending,(Refused _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
+     | Some pending,(Refused _|Space_unopened _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
          |> Result.map_error (fun detail -> Live.Before_effect detail)
      | None,_ | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Ok () in
     (match windows,error with
      | Some _,(Refused _|Unanswered (Unstarted _)) -> Error (Live.Before_effect "native workflow was refused before its producer ran")
+     | Some _,Space_unopened detail -> Error (Live.Before_effect detail)
      | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) ->
        Error (Live.Outcome_unknown "native workflow result is unknown; read the same tab before another step; never replay the workflow")
      | None,_ -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error))

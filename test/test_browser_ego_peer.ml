@@ -24,7 +24,7 @@ let sent_of ~window_s script =
       | _ -> failwith "the production args envelope must contain a JSON string" in
   { step;args;
     space = (if step="space.status" then Yojson.Safe.Util.member "spaceId" args
-      else Yojson.Safe.from_string (trailing (find "const task = await taskSpace(") ");")); window_s }
+      else Yojson.Safe.from_string (trailing (find "task = await taskSpace(") ");")); window_s }
 
 (* ego writes other lines too, such as its update notice; only the marked line is the answer. *)
 let answered value = Ok ("[ego-browser:notice] an update is available\n" ^ Peer.result_marker
@@ -3893,6 +3893,60 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name
   ignore (dispatch peer Live.Page_act (obj ["action",str "hand_off"]));
   check bool "control changes invalidate cached owner metadata" true (Option.is_none (Peer.space_observation peer))
 
+(* ego lite 0.6.2.5 throws from taskSpace itself for a number it does not
+   list (probed 2026-11-04), with no error code. The production script runs
+   under node with that taskSpace; the body never runs, and one read of
+   ego's list says whether the Space is gone. *)
+let test_a_space_that_did_not_open_is_looked_up_once () =
+  let opens=ref true and listing=ref (`Ids [51]) and lookups=ref [] and output=ref "" in
+  let missing_task_space = "const taskSpace=async id=>{throw new Error('task space not found: '+id);};\n" in
+  let run ~window_s script =
+    let sent=sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | ("tabs.list" | "page.open") when !opens -> if sent.step="tabs.list" then answered tabs
+      else answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://slack.com/";"title",str "Slack";"active",`Bool true]])
+    | "tabs.list" | "page.open" -> output:=in_node (missing_task_space ^ script); Ok !output
+    | "space.status" ->
+      lookups:=sent.window_s :: !lookups;
+      check bool "the lookup reads the original numeric Space" true (sent.space=`Int 51);
+      (match !listing with
+       | `Unanswered -> Error (Peer.Unobserved "ego went away")
+       | `Ids ids -> answered (`List (List.map (fun id ->
+           obj ["spaceId",`Int id;"name",str "SDK Space";"ownership",str "agent"]) ids)))
+    | other -> failf "unexpected step %s" other in
+  let peer=match Peer.open_space ~input:volatile_input ~run ~run_native:(run ~window_s:0.) ~now
+    ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture"
+    ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
+    | Ok peer -> peer | Error detail -> fail detail in
+  let presence ()=(Peer.space_presence peer).state in
+  let answers ()=List.length (List.filter (String.starts_with ~prefix:Peer.result_marker)
+    (String.split_on_char '\n' !output)) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  check int "a Space that opened is not looked up" 0 (List.length !lookups);
+  opens:=false;
+  let detail=before_effect "a Space ego still lists" (dispatch peer Live.Tabs_list (obj [])) in
+  check string "a listed Space gives ego's own error back" "task space not found: 51" detail;
+  check int "the script answers once" 1 (answers ());
+  check bool "it says the Space did not open" true (contains !output {|"spaceOpen":"failed"|});
+  check int "one lookup" 1 (List.length !lookups);
+  check bool "the lookup has a read's window" true (List.hd !lookups > 0.);
+  check bool "a listed Space stays present" true (presence ()=Masc.Browser_ego_space_observation.Present);
+  listing:=`Unanswered;
+  let detail=before_effect "an unanswered lookup" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "an unanswered lookup keeps ego's error" true (String.starts_with ~prefix:"task space not found: 51" detail);
+  check bool "and says presence is unknown" true (contains detail "Space presence is unknown: ego went away");
+  check bool "an unanswered lookup leaves the earlier presence" true (presence ()=Masc.Browser_ego_space_observation.Present);
+  listing:=`Ids [52];
+  let detail=before_effect "a Space ego no longer lists" (dispatch peer Live.Tabs_list (obj [])) in
+  check string "a missing Space is named as missing, and nothing replaces it"
+    "the original bound Space is missing from the native inventory; no replacement was opened" detail;
+  check bool "the connection's presence is missing" true (presence ()=Masc.Browser_ego_space_observation.Missing);
+  let detail=before_effect "an effect step on a missing Space"
+    (dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/"))) in
+  check string "an effect step on it did nothing" "the original bound Space is missing from the native inventory; no replacement was opened" detail;
+  check int "each failed open is looked up once" 4 (List.length !lookups)
+
 let test_explicit_completion_is_terminal_and_never_replayed () =
   let scenario reply keep =
     let calls=ref 0 in
@@ -4019,6 +4073,7 @@ let () =
       test_case "popup workflow preserves Page routing and Space input uncertainty" `Quick test_popup_workflow_identity_and_scope;
       test_case "popup workflow binds the full pre-effect source and fails closed on changed identity" `Quick test_popup_workflow_source_binding;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
+      test_case "a bound Space that did not open is looked up once, and nothing ran" `Quick test_a_space_that_did_not_open_is_looked_up_once;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;
       test_case "native dialog errors retain progress and wire observation" `Quick test_native_dialog_error_keeps_progress_and_wire_observation;

@@ -172,7 +172,7 @@ let authorize state =
     ; sid_runtime_instance_id = None
     ; sid_base_path = path "/workspace"; sid_masc_root = path "/workspace/.masc"
     ; sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None
-    ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+    ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
 
 let test_observer_open_and_authority () =
   let state = fresh () in

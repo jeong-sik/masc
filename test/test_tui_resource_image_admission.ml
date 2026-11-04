@@ -415,7 +415,7 @@ let board_state post comments =
      sid_base_path=Decode.Canonical_path.of_path "/board-test";
      sid_masc_root=Decode.Canonical_path.of_path "/board-test/.masc";
      sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
-     sid_sse_clients=None;sid_gc=None;sid_scheduler=None} in
+     sid_sse_clients=None;sid_gc=None;sid_scheduler=None;sid_operator_action=None} in
   state.server_identity <- Some identity;
   state.workspace_identity <- Types.Workspace_identity_match;
   state.view <- Types.Board;

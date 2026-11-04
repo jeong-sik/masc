@@ -680,7 +680,7 @@ let test_oauth_polling_survives_unread_authority () =
       sid_binary_commit_age_s = None; sid_runtime_instance_id = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace/a";
       sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/a/.masc"; sid_executable_in_worktree = None;
       sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None;
-      sid_gc = None; sid_scheduler = None } in
+      sid_gc = None; sid_scheduler = None; sid_operator_action = None } in
   let remember () = Masc_tui_types.remember_identity_login state
     (pending_login ~keeper:"A" ~provider:"slack" ~url:"https://consent" ()) in
   let pending () = Masc_tui_types.identity_login_pending_for_keeper state ~now:10. "A" in

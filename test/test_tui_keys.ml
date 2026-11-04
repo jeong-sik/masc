@@ -1554,7 +1554,7 @@ let test_keeper_peer_selection_owns_its_observation () =
     sid_base_path = D.Canonical_path.of_path "/owned-workspace";
     sid_masc_root = D.Canonical_path.of_path "/owned-workspace/.masc";
     sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
-    sid_sse_clients = None; sid_gc = None; sid_scheduler = None };
+    sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
   state.keepers <- [roster_keeper "Alice"; roster_keeper "Bob"];
   let relation operation_id sender : Masc_tui_queue_inspection.peer_relation =
     {operation_id; sender; recipient = "receiver"; reply_to = None} in

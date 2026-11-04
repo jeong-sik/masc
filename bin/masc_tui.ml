@@ -23296,7 +23296,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             sid_uptime = None;
             sid_sse_clients = None;
             sid_gc = None;
-            sid_scheduler = None } in
+            sid_scheduler = None; sid_operator_action = None } in
         let before = read_authority state in
         state.connection_status <- Masc_tui_types.Degraded;
         apply_server_identity_reading state ~mailbox (Ok identity);

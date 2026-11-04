@@ -254,7 +254,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
     ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace"
     ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/.masc"; sid_executable_in_worktree = None
     ; sid_state_ready = Some true; sid_uptime = None; sid_sse_clients = None
-    ; sid_gc = None; sid_scheduler = None };
+    ; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
   state.keepers <- [keeper "alpha"; keeper "beta"];
   let ask name = Types.mark_detail_read_started state
     ~tab:Types.Detail_automation ~keeper:name ~now_ns:(ns 10) in

@@ -5187,6 +5187,7 @@ type server_identity = {
   sid_sse_clients : int option;
   sid_gc : server_gc_health option;
   sid_scheduler : server_scheduler_health option;
+  sid_operator_action : string list option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -5300,6 +5301,20 @@ let decode_server_identity json =
           ; ssch_pool_domains = opt_int_in sched_obj "pool_domains"
           }
   in
+  let sid_operator_action =
+    (* Both fields or neither: [operator_action_required] says whether the
+       list is the answer, so a list alone, or a flag that disagrees with
+       the list, is not read. *)
+    match member "operator_action_required" json, member "operator_action_reasons" json with
+    | `Bool required, `List values ->
+      let reasons =
+        List.filter_map (function `String reason -> Some reason | _ -> None) values
+      in
+      if List.length reasons = List.length values && Bool.equal required (reasons <> [])
+      then Some reasons
+      else None
+    | _ -> None
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -5319,6 +5334,7 @@ let decode_server_identity json =
     ; sid_sse_clients
     ; sid_gc
     ; sid_scheduler
+    ; sid_operator_action
     }
 ;;
 

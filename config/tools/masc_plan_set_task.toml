@@ -1,9 +1,11 @@
 name = "masc_plan_set_task"
 title = "Bind Current Task"
 description = """
-Set the current task for your session so you can omit task_id in subsequent \
-planning calls. Use when starting work on a task after claiming it. After \
-keeper_task_claim; auto-cleared on session end."""
+Point the workspace's current-task marker at task_id. A claim already sets \
+the marker, and each later claim or transition by the same agent resets it \
+to the first task assigned to that agent, or clears it when none is. A \
+value set here lasts until then. masc_status reports a marker on a task \
+that is not assigned to you as drift."""
 additional_properties = false
 
 [[params]]
@@ -13,11 +15,11 @@ required = true
 description = "Task ID to set as current"
 
 [help]
-short_description = "Set or update the plan-of-record for a claimed task."
-when_to_use = "Use after masc_claim to record the high-level plan (1-5 bullet outline) before doing significant work. Future-you and reviewers read this to understand intent without rerunning your reasoning."
+short_description = "Point the workspace's current-task marker at a task."
+when_to_use = "A claim already sets the marker, so there is nothing to call after masc_transition(action='claim'). Call this only to point the marker at a different task."
 key_constraints = [
-  "Caller must own a claim on the target task_id.",
-  "Plan body should be short prose, not a runbook — it is a commitment, not a script.",
+  "Writes task_id as given. The task is not looked up and your claim on it is not checked.",
+  "The marker is one value for the whole workspace. Ending a session does not clear it.",
 ]
-details_markdown = "Replaces any prior plan on the task; history is preserved in the audit log."
-examples = ["task_id='task-123' plan='1) Extend tool_help_registry record  2) Backfill 6 manual entries  3) Add regression tests.'"]
+details_markdown = "The next claim or transition by an agent that is not a Keeper resets the marker to the first task assigned to that agent, or clears it when none is. masc_status compares the marker with the tasks assigned to you and reports a mismatch as drift. Read the marker with masc_plan_get_task and clear it with masc_plan_clear_task. The task's own status never changes."
+examples = ["task_id='task-123'"]

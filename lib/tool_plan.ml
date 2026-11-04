@@ -1,7 +1,7 @@
 (** Plan Tool Handlers
 
-    Extracted from mcp_server_eio.ml for testability.
-    3 tools: plan_set_task, plan_get_task, plan_clear_task
+    3 tools: plan_set_task, plan_get_task, plan_clear_task. Each reads or
+    writes the workspace's current-task marker ([Planning_eio]).
 *)
 
 module Planning_eio = Task.Planning_eio

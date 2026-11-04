@@ -56,8 +56,11 @@ val refresh :
 val install_publication_observer : (unit -> unit) -> unit
 (** Install the process-wide observer called after every [Published]
     publication, whichever call made it. An [Unchanged] one does not call it.
-    The server installs the full-health invalidation here, so [/health?full=1]
-    reads the new catalog without waiting for its periodic refresh. An
+    The server installs the full-health invalidation and the
+    [skill_catalog_published] announcement here
+    ([Server_skill_catalog_broadcast]), so [/health?full=1] reads the new
+    catalog without waiting for its periodic refresh and observers read the
+    skills again. An
     observer failure is logged and never changes the publication. *)
 
 val refresh_with_sources :

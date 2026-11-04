@@ -33,13 +33,11 @@ open Tool_args
    [Tool_result.result]. Dispatch returns [Tool_result.result option].
 
    Failure class assignments:
-   - Planning_eio internal "Failed to ..." errors → Runtime_failure
-     (Planning_eio is the persistence boundary; the error is opaque
-      to the caller and not retryable with different args).
-   - "task_id is required" / "content is required" / resolve_task_id
-     parse errors / set_current_task validation
-     → Workflow_rejection (caller-input violations; same args won't
-      succeed on retry). *)
+   - "task_id is required" → Workflow_rejection (caller input; the same
+     args won't succeed on retry).
+   - [Planning_eio.set_current_task] returning [Error] → Runtime_failure.
+     It fails only on the store: the marker path is a directory that
+     cannot be moved aside. The caller's arguments were fine. *)
 
 (** {1 Individual Handlers} *)
 
@@ -55,7 +53,7 @@ let handle_plan_set_task ~tool_name ~start_time ctx args : Tool_result.result =
   | Error e ->
       Tool_result.make_err
         ~tool_name
-        ~class_:Tool_result.Workflow_rejection
+        ~class_:Tool_result.Runtime_failure
         ~start_time
         e
   | Ok () ->

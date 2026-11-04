@@ -138,7 +138,11 @@ let invoke ~owner ~principal arguments =
     (* A read leaves browser content unchanged, but can still publish a host
        artifact. Keep the original receipt's evidence of partial or unknown
        effects instead of authorizing replay from the verb classification. *)
-    result ~start_time ~failed ~disposition data "browser command failed; inspect its original receipt before further input" in
+    let message=match disposition with
+      | Tool_result.Proven_pre_effect -> "browser command was refused before any effect"
+      | Tool_result.Proven_post_effect -> "browser command failed after part of its effect; inspect its receipt before further input"
+      | Tool_result.Effect_outcome_unknown -> "browser command failed and its effect is unknown; inspect its receipt before further input" in
+    result ~start_time ~failed ~disposition data message in
   match run () with
   | value -> value
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled

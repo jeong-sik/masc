@@ -125,11 +125,14 @@ SDK 영수증은 정의된 필드만 담고 `dialog`가 없는 객체여야 한�
 native 타이핑 완료 근거를 사용하며, `receipt: null`과 별도 `nativeCompletion`을 돌려준다.
 값 없는 반환이나 `Page.info()`만으로는 완료를 인정하지 않는다. 키·버튼이 실제로 해제됐는지,
 그 뒤 입력 상태가 바뀌지 않았는지, 앱이 입력을 처리했는지까지는 이 근거로 알 수 없다.
-해제가 확인되지 않으면 그 연결의 추가 입력은 거절되며, 운영자가 입력 초기화를 확인해야 풀린다.
+해제가 확인되지 않으면 그 Space 의 추가 입력은 거절된다.
+그동안 오는 답(거절·실패 포함)에는 `inputLock` 이 붙어, 보류된 입력과 푸는 길(`releasePath`)을 알려 준다.
+`releasePath.keeperCallable` 이 `true` 면 Space 를 가진 Keeper 가 `release_input` 으로 풀고, `false` 면 `blockedBy` 가 누가 쥐고 있는지 알려 준다. 운영자는 private 컨트롤로 푼다.
 자동 재접속이나 새 Space로 이 경계를 우회하지 않는다.
-모든 Ego 결과 객체에는 `inputReadiness`가 붙어 지금 입력 상태를 알려 준다.
+모든 Ego 결과 객체와 실패에는 `inputReadiness`가 붙어 지금 입력 상태를 알려 준다.
 `command_settled`는 이 연결에서 해제 미확인으로 보류한 입력이 없다는 뜻이다.
 `operator_asserted`는 운영자가 확인했을 뿐 SDK가 확인한 것은 아니라는 뜻이다.
+`keeper_asserted`는 Space 를 가진 Keeper 가 확인했다고 기록했을 뿐 SDK가 확인한 것은 아니라는 뜻이다.
 `release_uncertain`은 해제가 확인되지 않아 추가 입력이 거절되는 중이라는 뜻이다.
 탭 목록이 배열로 오면 이 필드가 없다.
 클릭·더블클릭·드래그의 대상을 SDK가 찾지 못하면 명령은 실패하지만

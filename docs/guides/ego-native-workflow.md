@@ -680,8 +680,15 @@ it itself with `BrowserAct action: "release_input"`. It records
 `inputReadiness: keeper_asserted`; like the operator assertion it is not native
 release proof and the original command is never replayed.
 
-**Read the lock first.** `BrowserAct action: "space_status"` (live lane, exact
-`clientId`) now carries `inputLock`:
+**Read the lock first.** While input is held, every answer on that Space,
+including the refusal of the next input and any other failure, carries
+`inputReadiness` and `inputLock`; a failure that had only a message keeps its
+effect phase and gains a receipt for them. `BrowserAct action: "space_status"`
+(live lane, exact `clientId`) carries `inputLock` too, with freshly observed
+ownership. Other answers use the last observation, taken when the Space opened
+or by `space_status` and dropped by control actions; without one,
+`keeperCallable` is false and `blockedBy` asks for `space_status`.
+`inputLock` has:
 
 - `state`: `release_uncertain`, `operator_asserted`, `keeper_asserted` or
   `command_settled`.

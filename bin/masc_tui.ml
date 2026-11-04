@@ -2830,6 +2830,9 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
   match request with
   | None -> ()
   | Some request ->
+  (* As for the Gate: whatever started this read, it answers the changes
+     announced before it. *)
+  state.held_calls_owed <- Masc_tui_owed_read.started state.held_calls_owed;
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
@@ -3517,6 +3520,9 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   match request with
   | None -> ()
   | Some request ->
+  (* A Gate read began, whatever started it: a change announced from now on
+     owes the one after it, and one announced before it is answered by it. *)
+  state.gate_snapshot_owed <- Masc_tui_owed_read.started state.gate_snapshot_owed;
   let host = server_peer_host in
   let port = state.port in
   Log.Transport.debug "started Gate snapshot request=%d intent=%s"
@@ -8688,10 +8694,7 @@ let launch_owed_gate_snapshot state ~mailbox =
   if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
      && server_authority_ready state
      && not reading
-  then begin
-    state.gate_snapshot_owed <- Masc_tui_owed_read.started read;
-    launch_gate_snapshot_load state ~mailbox
-  end
+  then launch_gate_snapshot_load state ~mailbox
 
 let held_calls_on_screen state =
   match state.view with
@@ -8724,10 +8727,7 @@ let launch_owed_held_calls state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
        && server_authority_ready state
        && not reading
-    then begin
-      state.held_calls_owed <- Masc_tui_owed_read.started read;
-      launch_keeper_tool_approvals_load state ~mailbox
-    end
+    then launch_keeper_tool_approvals_load state ~mailbox
   end
 
 let verification_on_screen state =
@@ -32234,26 +32234,23 @@ Use relative paths for resources already held in the package. -->
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Refresh base_path;
         let host = server_peer_host in
         let port = state.port in
+        start_http_refresh state ~host ~port ~intent:Revalidate
+          ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup
+          ~mailbox:async_messages;
         (* Each source owns its read even while the whole-surface refresh
            is busy. Cadence reads share these requests rather than
-           superseding them before their responses can arrive. *)
+           superseding them before their responses can arrive. They start
+           after the revalidation owes them a read, so each answers that
+           debt instead of being overtaken by it. *)
         (match state.connection_status with
          | Booting -> ()
          | Disconnected | Connecting | Degraded | Connected ->
            launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
-             state ~mailbox:async_messages);
-        start_http_refresh state ~host ~port ~intent:Revalidate
-          ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight
-          ~scoped_refresh_followup
-          ~mailbox:async_messages;
-        (* After the revalidation owes the schedules a read, so this read
-           answers that debt instead of being overtaken by it. *)
-        (match state.connection_status with
-         | Booting -> ()
-         | Disconnected | Connecting | Degraded | Connected ->
+             state ~mailbox:async_messages;
            launch_schedules_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages)
       in

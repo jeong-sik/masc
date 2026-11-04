@@ -1187,21 +1187,33 @@ let terminalize_pending_turn_completed
     ; source_receipt = Turn_completed
     }
   in
+  let completed_receipt = function
+    | Turn_completed -> true
+    | Fusion_terminal _ | Hitl_terminal _ -> false
+  in
+  let completed_witness = function
+    | Projected_turn_completed -> true
+    | Projected_cancel _
+    | Projected_transfer _
+    | Projected_fusion_terminal
+    | Projected_hitl_terminal -> false
+  in
   match prior_disposition_by_operation_id operator_operation_id state with
   | Some
       (Current_receipt
         ({ transition =
              Ack_source_terminal
                { source = prior_source
-               ; source_receipt = Turn_completed
+               ; source_receipt = prior_receipt
                ; _
                }
          ; _
          } as receipt))
-    when prior_source = source ->
+    when prior_source = source && completed_receipt prior_receipt ->
     Ok (state, Transition_already_applied receipt)
-  | Some (Projected_witness ({ kind = Projected_turn_completed; _ } as witness))
-    when String.equal witness.source_ref (source_snapshot_ref source)
+  | Some (Projected_witness witness)
+    when completed_witness witness.kind
+         && String.equal witness.source_ref (source_snapshot_ref source)
          && Int64.equal witness.source_incarnation admitted_revision ->
     let receipt =
       { transition_id = witness.transition_id

@@ -4064,11 +4064,12 @@ let launch_tools_parts state ~mailbox parts =
   List.iter
     (function
       | Tools_inventory_read ->
-          (* A reading held for another Keeper is not this Keeper's, so it is
-             not kept on screen while this read runs. *)
+          (* A reading or a failure held for another Keeper is not this
+             Keeper's, so neither is kept on screen while this read runs. *)
           if not (Option.equal String.equal state.tools_inventory_keeper keeper) then begin
             state.tools_inventory <- None;
-            state.tools_inventory_keeper <- None
+            state.tools_inventory_keeper <- None;
+            state.tools_error <- None
           end;
           state.tools_inventory_owed <- Masc_tui_owed_read.started state.tools_inventory_owed;
           launch_workspace_json_read state ~mailbox
@@ -9298,12 +9299,12 @@ let launch_owed_tools state ~mailbox =
     (* Every pane but Async draws the selected Keeper's Skill heading from
        the inventory's skill profiles, and its Skill keys act on them. The
        inventory follows the selected Keeper however the selection moved,
-       like the activations. *)
+       like the activations. A wait after another Keeper's failed read is
+       not this Keeper's: the read is owed now, with no failures behind it. *)
     let inventory_parts () =
       (match state.tools_inventory_owed with
        | Masc_tui_owed_read.(Settled | Waiting _)
-         when Option.is_some state.tools_inventory
-              && not (Option.equal String.equal state.tools_inventory_keeper selected) ->
+         when not (Option.equal String.equal state.tools_inventory_keeper selected) ->
            state.tools_inventory_owed <-
              Masc_tui_owed_read.changed Masc_tui_owed_read.settled
        | Masc_tui_owed_read.(Settled | Owed _ | Reading _ | Waiting _) -> ());
@@ -18214,15 +18215,16 @@ let enter_tools_pane state pane =
   state.tools_pane <- pane;
   tools_task_user_scroll state 0;
   (* Opening the Usage pane reads the catalog and every Keeper's usage once,
-     the Activations pane the selected Keeper's ledger, and the Surface and
-     Catalog panes its inventory (RFC-0483 §4.3). *)
+     and the Activations pane the selected Keeper's ledger (RFC-0483 §4.3).
+     The inventory is read on its pushes on every pane but Async, so opening
+     Surface or Catalog owes it nothing; a push that came during Async is
+     still owed. *)
   match pane with
   | Tools_usage ->
       owe_tools_catalog_read state;
       owe_every_skill_usage_read state
   | Tools_activations -> owe_tools_activations_read state
-  | Tools_surface | Tools_catalog -> owe_tools_inventory_read state
-  | Tools_async -> ()
+  | Tools_surface | Tools_catalog | Tools_async -> ()
 ;;
 
 (* The cursor restarts because the row under it belongs to the listing being
@@ -27130,6 +27132,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                |> Option.iter (fun index -> state.tools_skill_cursor <- index));
           normalize_tools_skill_cursor state
       | Error detail ->
+          (* The failure and its wait are this Keeper's, like a reading. *)
+          state.tools_inventory_keeper <- keeper_name;
           state.tools_error <- Some detail;
           state.tools_inventory_owed <- failed_read state.tools_inventory_owed)
   | Skill_evidence_loaded (request, key, result) ->

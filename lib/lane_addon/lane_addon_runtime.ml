@@ -1363,6 +1363,8 @@ let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
              announces that its exports are no longer ready. A cleanup that
              fails afterwards keeps this cause as the earliest one. *)
           let cause = Lifecycle.Worker_failed ("model request watcher: " ^ detail) in
+          Log.Misc.warn "Lane Add-on instance %s (package %s): %s" e.instance_id e.package.id
+            (Lifecycle.failure_to_string cause);
           retire_admission e;
           e.state <- fail_state e cause;
           notify_exports m e;

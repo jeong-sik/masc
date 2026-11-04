@@ -4843,9 +4843,16 @@ let test_chat_timeline_index_reuses_only_identical_inputs () =
   let changed_visible = List.map (fun (message, _) -> message, Some 6.) visible in
   let changed = Tui_types.chat_timeline_index ~messages:rows ~visible:changed_visible in
   check bool "a changed visible list rebuilds the derived index" false (first == changed);
+  check (option (float 0.)) "the rebuilt index carries the changed visible timestamp" (Some 6.)
+    (snd changed.cti_visible.(0));
   let got = Tui_types.chat_log_timeline_context changed
       ~member_ids:[ "r" ] ~request_id:"r" ~started_at:5. in
-  check (option (float 0.)) "the rebuilt index keeps the changed visible moment" (Some 6.) got.clt_timeline_at;
+  let expected_timeline = Tui_types.chat_live_timeline_at ~member_ids:[ "r" ]
+      ~request_id:"r" ~started_at:5. ~request_messages:rows changed_visible in
+  let expected_insertion = Tui_types.chat_block_insertion_index ~member_ids:[]
+      ~bounds:(fun _ -> false) ~request_id:"r" ~timeline_at:expected_timeline changed_visible in
+  check (option (float 0.)) "the rebuilt index matches the full-list moment" expected_timeline got.clt_timeline_at;
+  check int "the rebuilt index matches the full-list insertion" expected_insertion got.clt_insertion;
   check bool "the rebuilt index keeps no false committed error" false got.clt_committed_error
 ;;
 

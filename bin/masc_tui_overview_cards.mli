@@ -1,5 +1,6 @@
 (** The Dashboard's readings as titled cards in two columns: what needs a
-    decision and what to continue on the left, the status readings on the right.
+    decision and what to continue on the left, the status readings on the right
+    and, under them, what the server says needs the operator.
 
     Every row is written out in full. A row is as many lines as its text takes
     at the card's width, so a long Keeper name or the note that a chat is saved
@@ -22,6 +23,7 @@ val draw :
   decisions_whole:bool ->
   continuation:('action * string) list ->
   status:(cells:int -> string list) ->
+  actions:string list ->
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit
     and the caller draws the plain rows instead: [inner] holds fewer than two
@@ -29,4 +31,9 @@ val draw :
     false. [decisions_whole] says the window holds every decision; a window
     that holds only some is named by its row range in the plain layout's
     heading, which the card title has no place for. The cards are as tall as
-    their rows and the two columns end on the same line. *)
+    their rows and the two columns end on the same line.
+
+    [actions] are the reasons the server gives for needing the operator, one
+    row each, drawn as a card under the status readings. With none, there is
+    no card. When the card would make the cards need more than [rows] lines,
+    the cards are drawn without it: the footer still counts the reasons. *)

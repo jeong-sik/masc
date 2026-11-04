@@ -50,7 +50,7 @@ let test_a_blank_row_is_still_one_line () =
 
 (* The two columns: what to do on the left, readings on the right. *)
 let draw ?(inner = 120) ?(rows = 40) ?(selected = 1) ?(decisions = labels)
-    ?(decisions_whole = true)
+    ?(decisions_whole = true) ?(actions = [])
     ?(continuation = [ 100, "Continue with kidsnote-slack-context-collector · save durability unconfirmed" ]) () =
   Cards.draw ~inner ~rows
     ~is_selected:(fun action -> action = selected)
@@ -58,6 +58,7 @@ let draw ?(inner = 120) ?(rows = 40) ?(selected = 1) ?(decisions = labels)
     ~decisions_whole
     ~continuation
     ~status:(fun ~cells:_ -> [ "Health: ok"; "Work: 3 done" ])
+    ~actions
 
 let rows_exn = function
   | Some rows -> rows
@@ -142,6 +143,19 @@ let test_a_partial_decision_window_draws_no_card () =
   check bool "a partial window falls back to the plain rows" true
     (draw ~rows:200 ~decisions_whole:false () = None)
 
+(* The reasons are an addition to the cards. Where the cards fit without them
+   they are still drawn, and where they do not fit either way the caller draws
+   the plain rows. *)
+let test_the_reasons_never_cost_the_cards () =
+  let reasons =
+    [ "keeper_fleet_safety:no_executable_keeper_fibers"; "a second reason"; "a third reason" ]
+  in
+  let needed = List.length (rows_exn (draw ())) in
+  check bool "exactly enough" true
+    (Option.is_some (draw ~rows:needed ~actions:reasons ()));
+  check bool "one line short" true
+    (draw ~rows:(needed - 1) ~actions:reasons () = None)
+
 let test_an_empty_decision_list_says_so_in_a_card () =
   let rows = rows_exn (draw ~decisions:[] ~continuation:[] ()) in
   check bool "the cards are still drawn" true (rows <> [])
@@ -165,6 +179,8 @@ let () =
             test_cards_fall_back_when_they_do_not_fit
         ; test_case "a partial decision window draws no card" `Quick
             test_a_partial_decision_window_draws_no_card
+        ; test_case "the reasons never cost the cards" `Quick
+            test_the_reasons_never_cost_the_cards
         ; test_case "an empty decision list still draws the cards" `Quick
             test_an_empty_decision_list_says_so_in_a_card
         ] )

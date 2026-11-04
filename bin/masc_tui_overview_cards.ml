@@ -22,7 +22,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status =
+let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
@@ -49,13 +49,32 @@ let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~st
     let status_card =
       { Masc_tui_card.title = "Status"; body = (fun ~cells -> status ~cells) }
     in
+    let actions_card =
+      { Masc_tui_card.title = Printf.sprintf "Action needed (%d)" (List.length actions)
+      ; body =
+          (fun ~cells ->
+             List.concat_map
+               (fun reason ->
+                  List.map (fun line -> Theme.warn () ^ line ^ Ansi.reset)
+                    (row_lines ~cells reason))
+               actions)
+      }
+    in
     let style =
       { Masc_tui_card.edge = Theme.recede ()
       ; title_style = Ansi.bold
       ; reset = Ansi.reset
       }
     in
-    Masc_tui_card.grid ~style ~inner_width:inner ~gap:column_gap
-      ~row_gap:card_row_gap ~max_rows:rows
-      [ [ decision_card; continue_card ]; [ status_card ] ]
+    let grid status_column =
+      Masc_tui_card.grid ~style ~inner_width:inner ~gap:column_gap
+        ~row_gap:card_row_gap ~max_rows:rows
+        [ [ decision_card; continue_card ]; status_column ]
+    in
+    match actions with
+    | [] -> grid [ status_card ]
+    | _ :: _ ->
+        (match grid [ status_card; actions_card ] with
+         | Some _ as drawn -> drawn
+         | None -> grid [ status_card ])
   end

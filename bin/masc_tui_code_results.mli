@@ -17,6 +17,9 @@ type msg =
   | Code_worktrees_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.git_worktrees, string) result
+  | Code_search_loaded of
+      Masc_tui_types.code_search_key Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_search, string) result
   | Code_finder_file_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_file_source, string) result

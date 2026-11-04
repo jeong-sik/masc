@@ -1143,6 +1143,8 @@ let for_surface = function
           ~help:"list the local branches of the owning Git checkout, newest tip first, with how each stands against its upstream; type to filter, Enter or Esc returns"
       ; b Search "W" "worktrees"
           ~help:"list the worktrees of the owning Git repository: each one's directory name, what it has checked out, and whether it is locked or prunable; type to filter, Enter or Esc returns"
+      ; b Search "Ctrl-G" "search in files"
+          ~help:"type text and press Enter to find it in every tracked and nonignored file of the owning Git checkout; pick a match and Enter opens it at that line, Esc returns"
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open. From the

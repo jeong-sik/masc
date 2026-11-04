@@ -20982,6 +20982,41 @@ let open_code_worktrees (state : state) =
       };
   state.palette_open <- true
 
+(* The server refuses a query under two bytes. Asking first would only bring
+   that refusal back, so the palette says it before sending. *)
+let code_search_min_query_bytes = 2
+
+(* Smart case: a query with an uppercase ASCII letter is case sensitive, any
+   other is not. The rule is the palette's, so one typed text always means the
+   same read. *)
+let code_search_ignores_case query =
+  not (String.exists (fun c -> c >= 'A' && c <= 'Z') query)
+
+(* Opens the search palette over the Code pane, in the directory and over the
+   file it is looking at, with nothing asked yet. *)
+let open_code_search (state : state) =
+  state.code_navigation <- None;
+  close_code_finder state;
+  state.palette_mode <-
+    Palette_search
+      { cfo_workspace = state.workspace_authority
+      ; cfo_reading = state.workspace_read_authority
+      ; cfo_scope = state.code_scope
+      ; cfo_dir = state.code_dir
+      ; cfo_file = Masc_tui_fetched.current_request state.code_file
+      };
+  state.palette_open <- true
+
+(* Enter in the search palette chooses a match only when the answer on screen
+   is for exactly the text in the prompt. Any other text is a new search. *)
+let code_search_answer_is_for_prompt (state : state) =
+  match code_search_current state with
+  | Some (key, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale (_, _))) ->
+      String.equal key.css_query state.palette_query
+      && Bool.equal key.css_ignore_case (code_search_ignores_case state.palette_query)
+  | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | None -> false
+
 let code_listing_view (state : state) =
   Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing
     ~key:(code_listing_key state)

@@ -36102,6 +36102,10 @@ Use relative paths for resources already held in the package. -->
                 | Palette_search _ -> true
                 | Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
                 | Palette_worktrees _ -> false) ->
+                if not (code_search_answer_is_for_prompt state) then
+                  Masc_tui_code_requests.launch_search state ~host:server_peer_host
+                    ~deliver:(deliver_code state async_messages)
+                else
                 (match Masc_tui_palette.selected_search_match state with
                  | None -> ()
                  | Some found ->
@@ -38328,6 +38332,9 @@ Use relative paths for resources already held in the package. -->
        | Some "W" when state.view = Code ->
            Masc_tui_code_requests.launch_worktrees state ~host:server_peer_host
              ~deliver:(deliver_code state async_messages)
+       | Some "\007" when state.view = Code ->
+           if server_authority_ready state then open_code_search state
+           else report_action state "error" "Search needs a confirmed workspace"
        | Some "B" when state.view = Code ->
            Masc_tui_code_requests.return_to_reading state ~host:server_peer_host
              ~deliver:(deliver_code state async_messages)

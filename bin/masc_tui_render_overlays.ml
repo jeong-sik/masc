@@ -425,7 +425,7 @@ let render_palette (state : state) =
     | Masc_tui_types.Palette_worktrees _ ->
         (" MASC Worktrees", "filter:", "close")
     | Masc_tui_types.Palette_search _ ->
-        (" MASC Search in files", "search:", "open")
+        (" MASC Search in files", "search:", "search/open")
     | Masc_tui_types.Palette_locations offer ->
         let query = Masc_tui_fetched.request_key offer.clo_query in
         (Printf.sprintf " %s · %s" query.clq_question

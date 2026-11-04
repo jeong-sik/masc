@@ -729,7 +729,7 @@ let search_answer matches =
 
 let search_key state query =
   { css_scope = state.code_scope; css_dir = state.code_dir; css_query = query
-  ; css_ignore_case = false }
+  ; css_ignore_case = code_search_ignores_case query }
 
 (* The Code pane has src/old.ml open at its third line, with the search palette
    open over it and one answer for "needle" landed. *)
@@ -812,6 +812,45 @@ let test_choosing_a_search_match_opens_it_at_its_line () =
    | Code_results.No_followup | Code_results.Choose_location | Code_results.Reveal_cursor ->
        Alcotest.fail "another file should be read first");
   Alcotest.(check bool) "its palette closes too" false state.palette_open
+
+let test_search_palette_opens_over_the_current_reading_and_asks_nothing () =
+  let state, _ = finder_fixture () in
+  state.palette_query <- "stale text";
+  open_code_search state;
+  Alcotest.(check bool) "the palette is open" true state.palette_open;
+  Alcotest.(check string) "the prompt starts empty" "" state.palette_query;
+  (match state.palette_mode with
+   | Palette_search origin ->
+       Alcotest.(check bool) "it is over this directory" true
+         (origin.cfo_scope = Code_scope_repo "example" && String.equal origin.cfo_dir "src");
+       Alcotest.(check bool) "its owner is current" true (code_finder_current state origin)
+   | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _ ->
+       Alcotest.fail "the search palette did not open");
+  Alcotest.(check bool) "nothing was asked" true
+    (Option.is_none (Fetched.current state.code_search))
+
+let test_search_case_follows_the_text_and_enter_follows_the_answer () =
+  Alcotest.(check bool) "lowercase ignores case" true (code_search_ignores_case "needle");
+  Alcotest.(check bool) "an uppercase letter keeps case" false (code_search_ignores_case "Needle");
+  Alcotest.(check bool) "digits and symbols do not" true (code_search_ignores_case "a_1 (x)");
+  let state, _, _, _ = search_fixture () in
+  Alcotest.(check bool) "an answer for the prompt text can be chosen" true
+    (code_search_answer_is_for_prompt state);
+  state.palette_query <- "needl";
+  Alcotest.(check bool) "other text is a new search" false (code_search_answer_is_for_prompt state);
+  state.palette_query <- "needle";
+  let reading, request =
+    start_read ~equal:code_search_key_equal state.code_search
+      { (search_key state "needle") with css_ignore_case = false } in
+  state.code_search <- reading;
+  Code_results.apply_search state request (Ok (search_answer []));
+  Alcotest.(check bool) "the same text under another case rule is a new search" false
+    (code_search_answer_is_for_prompt state);
+  let reading, _ =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "needle2") in
+  state.code_search <- reading;
+  Alcotest.(check bool) "a search still in flight cannot be chosen from" false
+    (code_search_answer_is_for_prompt state)
 
 let test_finder_failure_and_cancel_preserve_original () =
   let state, origin = finder_fixture () in
@@ -2213,6 +2252,10 @@ let () =
             test_search_answer_lands_unfiltered_and_late_answers_are_dropped
         ; Alcotest.test_case "search answer needs the palette and directory it was asked in" `Quick
             test_search_answer_needs_the_search_palette_it_was_asked_in
+        ; Alcotest.test_case "search palette opens over the reading and asks nothing" `Quick
+            test_search_palette_opens_over_the_current_reading_and_asks_nothing
+        ; Alcotest.test_case "search case follows the text and Enter follows the answer" `Quick
+            test_search_case_follows_the_text_and_enter_follows_the_answer
         ; Alcotest.test_case "choosing a search match opens it at its line" `Quick
             test_choosing_a_search_match_opens_it_at_its_line
         ; Alcotest.test_case "catalog decoder keeps identity and refuses malformed data" `Quick

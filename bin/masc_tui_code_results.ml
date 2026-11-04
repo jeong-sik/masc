@@ -18,6 +18,9 @@ type msg =
   | Code_worktrees_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.git_worktrees, string) result
+  | Code_search_loaded of
+      Masc_tui_types.code_search_key Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_search, string) result
   | Code_finder_file_loaded of
       (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_file_source, string) result
@@ -794,6 +797,7 @@ let saved_refresh_path state ~input_pending =
 let answer_kind = function
   | Code_draft_saved _ -> Save
   | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
+  | Code_search_loaded _
   | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_file_loaded _
   | Code_history_loaded _ | Code_diff_loaded _ | Code_blame_loaded _
   | Code_lsp_answered _ -> Read
@@ -807,6 +811,9 @@ let apply state = function
       No_answer_followup
   | Code_worktrees_loaded (request, result) ->
       apply_worktrees state request result;
+      No_answer_followup
+  | Code_search_loaded (request, result) ->
+      apply_search state request result;
       No_answer_followup
   | Code_finder_file_loaded (request, result) ->
       (* Publication is not navigation. The loop gives ready keys, pastes and

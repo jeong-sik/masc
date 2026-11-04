@@ -3515,109 +3515,6 @@ let test_successor_recall_keeps_binding_outcomes_separate () =
       reason=Current.Retired_without_successor current.revision}])
 ;;
 
-let test_prepared_receipt_before_revision_links_recovers_with_no_lineage () =
-  with_temp_keepers @@ fun keepers_dir ->
-  (* A receipt written before the [revision_links] field existed must decode:
-     refusing it turns a leftover prepared transaction into a decode failure
-     that blocks archive reads. It decodes with an empty lineage — no link is
-     invented for the old writer — so the reader reports the ordinary
-     pending-finalization state instead. *)
-  let original = fact ~claim:"legacy prepared receipt drop reason" () in
-  let legacy =
-    `Assoc
-      [ "plan_id", `Null
-      ; "state", `String "prepared"
-      ; "prior_revision", `Int 3
-      ; "prior_snapshot_sha256", `String (String.make 64 'a')
-      ; "target_revision", `Int 4
-      ; "target_snapshot_sha256", `String (String.make 64 'b')
-      ; ( "dropped"
-        , `List
-            [ `Assoc
-                [ "memory_id", `String (Types.memory_id original)
-                ; "reason", `String "verified split recorded before lineage"
-                ] ] )
-      ]
-  in
-  let path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
-  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string legacy) |> require_ok;
-  match Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:[] with
-  | Error message ->
-    check bool
-      "legacy receipt reads as pending finalization, not a decode failure" true
-      (String.starts_with
-         ~prefix:"memory archive journal finalization pending keeper=keeper target_revision=4"
-         message)
-  | Ok _ -> fail "legacy prepared receipt read as a settled archive"
-;;
-
-(* An older writer may append its removal line and stop before clearing the
-   receipt. Its line has no [revision_links] (a writer before [commit_effect]
-   has neither key) and its receipt has no [revision_links]. Recovery reads
-   that line as the rewrite and clears the receipt instead of appending the
-   same revision a second time. *)
-let test_legacy_removal_line_clears_legacy_receipt_once () =
-  List.iter (fun missing_keys -> with_temp_keepers @@ fun keepers_dir ->
-    let target = fact ~claim:"removal recorded by an older writer" () in
-    let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
-    let seeded_hash =
-      match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
-      | Ok (Some (_, hash)) -> hash
-      | Ok None | Error _ -> fail "seeded snapshot hash is unavailable"
-    in
-    let journal_path =
-      Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
-    in
-    let seed_journal = Fs_compat.load_file journal_path in
-    Fs_compat.invalidate_cached_writer journal_path;
-    Sys.remove journal_path;
-    Unix.mkdir journal_path 0o700;
-    let request () =
-      Current.retract_facts
-        ~keepers_dir
-        ~keeper_id:"keeper"
-        ~expected_revision:seeded.revision
-        ~expected_snapshot_sha256:seeded_hash
-        ~now:300.0
-        ~source:{ Current.kind = Current.Explicit_retract; trace_id = "legacy-removal-line" }
-        [ { Current.memory_id = Types.memory_id target
-          ; reason = "an older writer recorded this removal"
-          } ]
-    in
-    (match request () with
-     | Error (Current.Retract_batch_plan_evidence_pending _) -> ()
-     | Error _ | Ok _ -> fail "journal failure did not leave a prepared plan");
-    let receipt_path =
-      Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"
-    in
-    let receipt = Yojson.Safe.from_file receipt_path in
-    Unix.rmdir journal_path;
-    Fs_compat.save_file journal_path seed_journal;
-    (* Recovery appends the exact line once; then the journal and the receipt
-       are rewritten the way the older writer left them. *)
-    (match request () with
-     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
-     | Error _ | Ok _ -> fail "restart reconciliation did not precede stale CAS");
-    let strip = function
-      | `Assoc fields ->
-        `Assoc (List.filter (fun (name, _) -> not (List.mem name missing_keys)) fields)
-      | _ -> fail "fixture expected a JSON object"
-    in
-    let legacy_rows = List.map strip (read_journal_lines ~keepers_dir) in
-    Fs_compat.invalidate_cached_writer journal_path;
-    Fs_compat.save_file journal_path
-      (String.concat "\n" (List.map Yojson.Safe.to_string legacy_rows) ^ "\n");
-    Fs_compat.save_file_atomic_strict receipt_path
-      (Yojson.Safe.to_string (strip receipt)) |> require_ok;
-    (match request () with
-     | Error (Current.Retract_batch_snapshot_conflict _) -> ()
-     | Error _ | Ok _ -> fail "legacy receipt did not reconcile before stale CAS");
-    check bool "legacy receipt is cleared" false (Sys.file_exists receipt_path);
-    check int "legacy removal line is not appended again" (List.length legacy_rows)
-      (List.length (read_journal_lines ~keepers_dir)))
-    [ [ "revision_links" ]; [ "revision_links"; "commit_effect" ] ]
-;;
-
 let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
   List.iter (fun damage ->
     with_temp_keepers @@ fun keepers_dir ->
@@ -5430,10 +5327,6 @@ let () =
             test_successor_recall_distinguishes_replayed_and_conflicting_rewrites
         ; test_case "successor recall keeps direct, revised and retired bindings separate" `Quick
             test_successor_recall_keeps_binding_outcomes_separate
-        ; test_case "prepared receipt before revision links recovers with no lineage" `Quick
-            test_prepared_receipt_before_revision_links_recovers_with_no_lineage
-        ; test_case "legacy removal line clears its legacy receipt once" `Quick
-            test_legacy_removal_line_clears_legacy_receipt_once
         ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
             test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case

@@ -897,10 +897,6 @@ let list_durable_range_receipt_keeper_ids ~keepers_dir =
     |> List.sort String.compare
 ;;
 
-let exact_object_fields names fields =
-  Result.is_ok (exact_field_names_result names fields)
-;;
-
 let source_kind_to_string = Snapshot_codec.source_kind_to_string
 let to_json = Snapshot_codec.to_json
 let snapshot_sha256 snapshot = sha256 (Snapshot_codec.snapshot_bytes snapshot)
@@ -1203,34 +1199,20 @@ let retraction_plan_receipt_to_json receipt =
 ;;
 
 let retraction_plan_receipt_of_json = function
-  | `Assoc fields
-    when exact_object_fields
-           [ "plan_id"
-           ; "state"
-           ; "prior_revision"
-           ; "prior_snapshot_sha256"
-           ; "target_revision"
-           ; "target_snapshot_sha256"
-           ; "revision_links"
-           ; "dropped"
-           ]
-           fields
-         (* Receipts prepared before [revision_links] existed carry the
-            older seven-field shape. Read them with no lineage rather than
-            refusing, so a leftover prepared receipt cannot block the next
-            writer's recovery; the lineage is left empty instead of guessed,
-            because an inferred link would fabricate history the old writer
-            never recorded. *)
-         || exact_object_fields
-              [ "plan_id"
-              ; "state"
-              ; "prior_revision"
-              ; "prior_snapshot_sha256"
-              ; "target_revision"
-              ; "target_snapshot_sha256"
-              ; "dropped"
-              ]
-              fields ->
+  | `Assoc fields ->
+    let* () =
+      exact_field_names_detail ~subject:"retraction plan receipt"
+        [ "plan_id"
+        ; "state"
+        ; "prior_revision"
+        ; "prior_snapshot_sha256"
+        ; "target_revision"
+        ; "target_snapshot_sha256"
+        ; "revision_links"
+        ; "dropped"
+        ]
+        fields
+    in
     (match
        ( List.assoc_opt "plan_id" fields
        , List.assoc_opt "state" fields
@@ -1238,6 +1220,7 @@ let retraction_plan_receipt_of_json = function
        , List.assoc_opt "prior_snapshot_sha256" fields
        , List.assoc_opt "target_revision" fields
        , List.assoc_opt "target_snapshot_sha256" fields
+       , List.assoc_opt "revision_links" fields
        , List.assoc_opt "dropped" fields )
      with
      | ( Some plan_id_json
@@ -1246,14 +1229,13 @@ let retraction_plan_receipt_of_json = function
        , Some (`String prior_snapshot_sha256)
        , Some (`Int target_revision)
        , Some (`String target_snapshot_sha256)
+       , Some revision_links_json
        , Some (`List dropped_json) )
        when prior_revision > 0
             && target_revision = prior_revision + 1
             && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
             && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
-       let* revision_links = match List.assoc_opt "revision_links" fields with
-         | Some json -> Journal_codec.revision_links_of_json json
-         | None -> Ok [] in
+       let* revision_links = Journal_codec.revision_links_of_json revision_links_json in
        let* plan_id =
          match plan_id_json with
          | `Null -> Ok None
@@ -1300,8 +1282,7 @@ let retraction_plan_receipt_of_json = function
         | Ok _ -> Error "prepared removal has neither reasons nor revision links"
         | Error _ as error -> error)
      | _ -> Error "retraction plan receipt fields are invalid")
-  | _ ->
-    Error "retraction plan receipt has unknown, duplicate, or missing fields"
+  | _ -> Error "retraction plan receipt is not a JSON object"
 ;;
 
 let read_retraction_plan_receipt ~keepers_dir ~keeper_id =
@@ -1515,15 +1496,21 @@ let publication_to_json receipt =
     ; "journal", receipt.journal ]
 
 let publication_of_json = function
-  | `Assoc fields when exact_object_fields
-      ["phase"; "prior"; "target_revision"; "target_sha256"; "journal"] fields ->
+  | `Assoc fields ->
+    let* () =
+      exact_field_names_detail ~subject:"publication receipt"
+        ["phase"; "prior"; "target_revision"; "target_sha256"; "journal"] fields
+    in
     let* phase = match List.assoc "phase" fields with
       | `String "prepared" -> Ok Publication_prepared
       | `String "notification_pending" -> Ok Notification_pending
       | _ -> Error "invalid publication phase" in
     let* prior = match List.assoc "prior" fields with
       | `Null -> Ok None
-      | `Assoc fields when exact_object_fields ["revision"; "sha256"] fields ->
+      | `Assoc fields ->
+        let* () =
+          exact_field_names_detail ~subject:"publication prior" ["revision"; "sha256"] fields
+        in
         (match List.assoc "revision" fields, List.assoc "sha256" fields with
          | `Int revision, `String digest when revision > 0
              && String_util.is_lowercase_sha256_hex digest -> Ok (Some (revision, digest))
@@ -1551,7 +1538,7 @@ let publication_of_json = function
           (Some _ | None) ->
           Error "publication journal is not the target rewrite")
      | _ -> Error "invalid publication target")
-  | _ -> Error "publication receipt has unknown, duplicate, or missing fields"
+  | _ -> Error "publication receipt is not a JSON object"
 
 let parse_publication text =
   match Yojson.Safe.from_string text with

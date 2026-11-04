@@ -6,10 +6,6 @@ open Result.Syntax
 
 module Snapshot_codec = Keeper_memory_os_snapshot_codec
 
-let exact_object_fields names fields =
-  Result.is_ok (exact_field_names_result names fields)
-;;
-
 let librarian_failure_kind_to_string = function
   | Prompt_render_failure -> "prompt_render_failure"
   | Execution_clock_unavailable -> "execution_clock_unavailable"
@@ -137,7 +133,6 @@ let committed_entry_of_fields fields =
     @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else [])
     @ (if List.mem_assoc "revision_links" fields then ["revision_links"] else [])
     @ (if List.mem_assoc "ordered_program" fields then ["ordered_program"] else []) in
-  let fields_are_exact = exact_object_fields expected fields in
   let* program = match List.assoc_opt "ordered_program" fields with
     | None -> Ok None
     | Some json ->
@@ -163,9 +158,7 @@ let committed_entry_of_fields fields =
       loop 0 [] items
     | _ -> Error "is not an array"
   in
-  if not fields_are_exact
-  then Error "committed line has unknown, duplicate, or missing fields"
-  else
+  let* () = exact_field_names_detail ~subject:"committed line" expected fields in
   match
     ( List.assoc_opt "recorded_at" fields
     , List.assoc_opt "revision" fields
@@ -217,19 +210,11 @@ let committed_entry_of_fields fields =
 ;;
 
 let failed_entry_of_fields fields =
-  if
-    not
-      (exact_object_fields
-         [ "outcome"
-         ; "recorded_at"
-         ; "trace_id"
-         ; "kind"
-         ; "detail"
-         ; "snapshot_present"
-         ]
-         fields)
-  then Error "failed line has unknown, duplicate, or missing fields"
-  else
+  let* () =
+    exact_field_names_detail ~subject:"failed line"
+      [ "outcome"; "recorded_at"; "trace_id"; "kind"; "detail"; "snapshot_present" ]
+      fields
+  in
   match
     ( List.assoc_opt "recorded_at" fields
     , List.assoc_opt "trace_id" fields
@@ -251,13 +236,11 @@ let failed_entry_of_fields fields =
 ;;
 
 let quarantined_entry_of_fields fields =
-  if
-    not
-      (exact_object_fields
-         [ "outcome"; "recorded_at"; "rejection"; "rejected_path" ]
-         fields)
-  then Error "quarantined line has unknown, duplicate, or missing fields"
-  else
+  let* () =
+    exact_field_names_detail ~subject:"quarantined line"
+      [ "outcome"; "recorded_at"; "rejection"; "rejected_path" ]
+      fields
+  in
     match
       ( List.assoc_opt "recorded_at" fields
       , List.assoc_opt "rejection" fields

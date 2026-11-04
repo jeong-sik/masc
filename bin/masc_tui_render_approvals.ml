@@ -487,8 +487,17 @@ let draw_ask_questions buf cols (state : state) ~budget =
   | None -> ()
   | Some open_rows -> (
       box_divider buf cols;
+      (* The warning colour says someone is waiting. With nobody waiting the
+         heading drew it anyway, over a line that reads "none", so the one
+         row on the screen asking for attention was the one with nothing to
+         ask. *)
+      let heading_tone =
+        match open_rows with
+        | [] -> Theme.recede ()
+        | _ :: _ -> Ansi.bold ^ Theme.warn ()
+      in
       box_line buf cols
-        (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
+        (Printf.sprintf "  %s[?] Questions waiting on you (%d) · a:open answers%s" heading_tone
            (Masc_tui_approvals_model.approvals_open_question_count state) Ansi.reset);
       match open_rows with
       | [] ->

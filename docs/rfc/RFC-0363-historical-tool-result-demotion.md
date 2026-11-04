@@ -177,6 +177,36 @@ reasoning 제거 32건 중 25건은 바로 다음 메시지가 tool 결과 강�
 
 reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정한다. GLM 모델 선언이 `preserve-thinking = false` 면 `clear_thinking: true` 가 나가고, replay 정책이 최신 user 턴의 reasoning 만 남긴다(`Reasoning_dialect.apply_clear_thinking_replay_gate`). z.ai 는 Coding Plan endpoint 에서 reasoning 보존을 기본값으로 두고, 그 블록을 고치거나 순서를 바꾸면 캐시 적중이 떨어진다고 적는다(https://docs.z.ai/guides/capabilities/thinking-mode, 2026-11-04 확인). 이 개정의 이득은 선언이 reasoning 을 보존할 때 나온다.
 
+### 3.4.2 측정 — 모델이 강등된 호출 인자를 호출 모양으로 따라 한다 (2026-11-05)
+
+강등된 인자는 `{"_blob": {"sha256","bytes","mime","preview"}}` 로 나간다(`with_reference` 의 `ToolUse.input`). 모델이 보는 지난 호출이 도구 스키마에 없는 모양이 된다. 이슈 #47642 가 센 것이 이 모양으로 들어온 호출이다.
+
+`docs/evidence/blob-input-2026-11/measure_blob_inputs.py` 로 10-19 ~ 11-04T19:10Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다.
+
+| 측정 | 값 |
+|---|---|
+| 저장된 요청 중 강등된 인자가 있는 요청 | 4,400 / 5,244 (83.9%) |
+| 강등된 인자의 서로 다른 해시 | 12,855개, 이 중 12,313개(95.8%)는 blob 이 같은 크기로 있다 |
+| `masc-productor-owner` (deepseek-v4.1-flash) | 요청의 95.4%, 요청당 중앙값 334개, 줄인 바이트 중앙값 366,414 (본문의 29.9%) |
+| `wkbl-front` (deepseek-v4.1-flash) | 93.5%, 307개, 335,098 (26.2%) |
+| `ocaml-agent-ic` (glm-5.3-flash) | 95.2%, 231개, 88,128 (4.7%) |
+| 입력이 `_blob` 하나뿐인 호출 | 2,464건, 이 중 2,463건이 실행 전에 거절됐다 |
+| 그중 네 필드가 다 있는 봉투 | 1,344건, `sha256` 의 blob 이 저장소에 있는 것은 7건 |
+| 그중 진짜 인자를 `_blob` 아래에 넣은 호출 | 784건 |
+| 그중 객체가 아닌 값 | 336건 |
+
+본문의 몫은 요청마다 `줄인 바이트 ÷ wire.body_bytes` 를 구한 중앙값이다.
+
+봉투를 보낸 호출 1,344건 중 1,337건은 `sha256` 의 blob 이 없다. 기록에서 복사한 해시는 저장소에 있어야 하므로, 대부분은 복사가 아니라 모델이 만든 값이다. GLM 으로 요청을 보낸 Keeper 다섯(`ocaml-agent-ic`, `wkbl-data`, `wkbl-web-leader`, `e-masc-the-leader`, `code-reviewer-father`)도 요청의 84.8~98.9%에서 같은 강등된 인자를 받는다. 그런데 `_blob` 하나뿐인 호출은 각각 2, 61, 23, 0, 0건이다. 같은 기록을 받아도 따라 하는 쪽이 따로 있다. 원장에 모델이 없어서 호출은 Keeper 단위로만 나눴다.
+
+이 측정으로 정해지지 않는 것이 셋이다.
+
+- 모양을 지키는 강등(긴 문자열 값만 줄임)은 이 거절을 실행으로 바꾼다고 본다(추론, 재지 않았다). 모델이 지난 호출을 베끼면 줄어든 값이 그대로 실행된다. 지금의 실행 전 거절은 안전한 실패다.
+- 인자를 강등하지 않으면 요청 본문이 지금보다 0.1~29.9% 커진다(위 표를 포함한 열 개 Keeper-모델 조합의 요청별 중앙값). 이 크기가 크기 거절을 다시 부르는지는 재지 않았다.
+- 강등이 요청의 84%에 있는 이유를 이 측정은 가르지 않는다. §3.4.1 의 2번(크기 거절 뒤 재전송)과 official client host 의 턴 경계 인자 강등(`plan_arguments`)이 둘 다 같은 값을 만든다. 레인마다 어느 길을 타는지 확인하지 못했다.
+
+이 절은 측정이고 결정이 아니다. 표현을 바꾸는 일은 모델이 `keeper_artifact_read` 로 원문을 읽을 때 쓰는 `sha256` 참조와 prompt cache 에 닿으므로 이 RFC 를 고쳐서 정한다.
+
 ### 3.5 물질화와 실패
 
 1단계는 포화 후보로 측정만 한다. 2단계는 cut 을 살아남은 강등 메시지에 대해서만 `Tool_blob_store.put` 한다.

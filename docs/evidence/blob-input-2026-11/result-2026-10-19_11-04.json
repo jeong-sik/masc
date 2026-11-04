@@ -1,0 +1,335 @@
+{
+  "blob_calls": {
+    "alone": 2464,
+    "alone_by_keeper": {
+      "code-reviewer": 372,
+      "code-reviewer-brother": 27,
+      "code-reviewer-mother": 64,
+      "code-reviewer-sister": 217,
+      "code-reviewer-uncle": 10,
+      "context-reviewer": 270,
+      "glossary-maniac": 13,
+      "goo-yang-bong": 14,
+      "jazz-developer": 12,
+      "kidsnote-incoming-dd-manager": 38,
+      "kidsnote-job-manager": 26,
+      "kidsnote-qa-hub-manager": 1,
+      "masc-productor-owner": 520,
+      "msx-retro-mania": 204,
+      "ocaml-agent-ic": 2,
+      "pr-updater": 16,
+      "rondo": 20,
+      "tui-developer": 89,
+      "wkbl-data": 61,
+      "wkbl-front": 457,
+      "wkbl-growth": 7,
+      "wkbl-web-leader": 23,
+      "won-chik": 1
+    },
+    "by_day": {
+      "2026-10-19": {
+        "alone": 529,
+        "mixed": 12
+      },
+      "2026-10-20": {
+        "alone": 41,
+        "mixed": 4
+      },
+      "2026-10-21": {
+        "alone": 67
+      },
+      "2026-10-23": {
+        "mixed": 17
+      },
+      "2026-10-26": {
+        "alone": 413,
+        "mixed": 21
+      },
+      "2026-10-27": {
+        "alone": 405,
+        "mixed": 9
+      },
+      "2026-10-28": {
+        "alone": 32,
+        "mixed": 6
+      },
+      "2026-10-30": {
+        "alone": 19,
+        "mixed": 27
+      },
+      "2026-10-31": {
+        "alone": 4
+      },
+      "2026-11-02": {
+        "alone": 610,
+        "mixed": 251
+      },
+      "2026-11-03": {
+        "alone": 339,
+        "mixed": 5
+      },
+      "2026-11-04": {
+        "alone": 5
+      }
+    },
+    "calls": 2816,
+    "complete_envelope_alone": {
+      "calls": 1344,
+      "hash_in_store": 7,
+      "hash_not_in_store": 1337
+    },
+    "mixed": 352,
+    "outcome_alone": {
+      "completed": 1,
+      "refused_before_run": 2463
+    },
+    "outcome_mixed": {
+      "completed": 257,
+      "other": 6,
+      "refused_before_run": 89
+    },
+    "shape_alone": {
+      "complete_envelope": 1344,
+      "not_an_object": 336,
+      "wrapped_arguments": 784
+    },
+    "top_keepers_alone": [
+      {
+        "calls": 520,
+        "keeper": "masc-productor-owner",
+        "outcome": {
+          "refused_before_run": 520
+        }
+      },
+      {
+        "calls": 457,
+        "keeper": "wkbl-front",
+        "outcome": {
+          "refused_before_run": 457
+        }
+      },
+      {
+        "calls": 372,
+        "keeper": "code-reviewer",
+        "outcome": {
+          "refused_before_run": 372
+        }
+      },
+      {
+        "calls": 270,
+        "keeper": "context-reviewer",
+        "outcome": {
+          "refused_before_run": 270
+        }
+      },
+      {
+        "calls": 217,
+        "keeper": "code-reviewer-sister",
+        "outcome": {
+          "refused_before_run": 217
+        }
+      },
+      {
+        "calls": 204,
+        "keeper": "msx-retro-mania",
+        "outcome": {
+          "completed": 1,
+          "refused_before_run": 203
+        }
+      },
+      {
+        "calls": 89,
+        "keeper": "tui-developer",
+        "outcome": {
+          "refused_before_run": 89
+        }
+      },
+      {
+        "calls": 64,
+        "keeper": "code-reviewer-mother",
+        "outcome": {
+          "refused_before_run": 64
+        }
+      }
+    ],
+    "top_tools_alone": [
+      {
+        "calls": 1221,
+        "tool": "masc_board_comment"
+      },
+      {
+        "calls": 478,
+        "tool": "Write"
+      },
+      {
+        "calls": 305,
+        "tool": "Execute"
+      },
+      {
+        "calls": 154,
+        "tool": "keeper_memory_write"
+      },
+      {
+        "calls": 102,
+        "tool": "masc_board_post"
+      },
+      {
+        "calls": 47,
+        "tool": "Edit"
+      },
+      {
+        "calls": 31,
+        "tool": "masc_schedule_create"
+      },
+      {
+        "calls": 16,
+        "tool": "masc_ask"
+      }
+    ]
+  },
+  "history_arguments": {
+    "by_keeper_and_model": [
+      {
+        "argument_saved_bytes_median": 366414,
+        "argument_saved_percent_of_body_median": 29.9,
+        "body_bytes_median": 1120634,
+        "demoted_arguments_median": 334,
+        "keeper": "masc-productor-owner",
+        "model": "deepseek-v4.1-flash",
+        "requests": 409,
+        "result_saved_bytes_median": 1347572,
+        "with_demoted_arguments": 390,
+        "with_demoted_arguments_percent": 95.4,
+        "with_demoted_results_percent": 96.1
+      },
+      {
+        "argument_saved_bytes_median": 88128,
+        "argument_saved_percent_of_body_median": 4.7,
+        "body_bytes_median": 1036594,
+        "demoted_arguments_median": 231,
+        "keeper": "ocaml-agent-ic",
+        "model": "glm-5.3-flash",
+        "requests": 373,
+        "result_saved_bytes_median": 757718,
+        "with_demoted_arguments": 355,
+        "with_demoted_arguments_percent": 95.2,
+        "with_demoted_results_percent": 98.7
+      },
+      {
+        "argument_saved_bytes_median": 118422,
+        "argument_saved_percent_of_body_median": 6.1,
+        "body_bytes_median": 1930096,
+        "demoted_arguments_median": 136,
+        "keeper": "code-reviewer",
+        "model": "deepseek/deepseek-v4.1-flash-1017",
+        "requests": 342,
+        "result_saved_bytes_median": 830960,
+        "with_demoted_arguments": 336,
+        "with_demoted_arguments_percent": 98.2,
+        "with_demoted_results_percent": 99.7
+      },
+      {
+        "argument_saved_bytes_median": 335098,
+        "argument_saved_percent_of_body_median": 26.2,
+        "body_bytes_median": 1255569,
+        "demoted_arguments_median": 307,
+        "keeper": "wkbl-front",
+        "model": "deepseek-v4.1-flash",
+        "requests": 337,
+        "result_saved_bytes_median": 1239775,
+        "with_demoted_arguments": 315,
+        "with_demoted_arguments_percent": 93.5,
+        "with_demoted_results_percent": 93.8
+      },
+      {
+        "argument_saved_bytes_median": 159642,
+        "argument_saved_percent_of_body_median": 14.9,
+        "body_bytes_median": 1074235,
+        "demoted_arguments_median": 290,
+        "keeper": "wkbl-data",
+        "model": "glm-5.3",
+        "requests": 344,
+        "result_saved_bytes_median": 1477811,
+        "with_demoted_arguments": 302,
+        "with_demoted_arguments_percent": 87.8,
+        "with_demoted_results_percent": 89.0
+      },
+      {
+        "argument_saved_bytes_median": 232355,
+        "argument_saved_percent_of_body_median": 16.0,
+        "body_bytes_median": 1409582,
+        "demoted_arguments_median": 401,
+        "keeper": "wkbl-web-leader",
+        "model": "glm-5.3",
+        "requests": 348,
+        "result_saved_bytes_median": 1326383,
+        "with_demoted_arguments": 295,
+        "with_demoted_arguments_percent": 84.8,
+        "with_demoted_results_percent": 98.9
+      },
+      {
+        "argument_saved_bytes_median": 110584,
+        "argument_saved_percent_of_body_median": 9.8,
+        "body_bytes_median": 1103284,
+        "demoted_arguments_median": 267,
+        "keeper": "e-masc-the-leader",
+        "model": "glm-5.3",
+        "requests": 265,
+        "result_saved_bytes_median": 981367,
+        "with_demoted_arguments": 262,
+        "with_demoted_arguments_percent": 98.9,
+        "with_demoted_results_percent": 98.9
+      },
+      {
+        "argument_saved_bytes_median": 154299,
+        "argument_saved_percent_of_body_median": 13.0,
+        "body_bytes_median": 1071729,
+        "demoted_arguments_median": 273,
+        "keeper": "code-reviewer-father",
+        "model": "glm-5.3",
+        "requests": 245,
+        "result_saved_bytes_median": 1668842,
+        "with_demoted_arguments": 230,
+        "with_demoted_arguments_percent": 93.9,
+        "with_demoted_results_percent": 94.3
+      },
+      {
+        "argument_saved_bytes_median": 16065,
+        "argument_saved_percent_of_body_median": 0.1,
+        "body_bytes_median": 11842861,
+        "demoted_arguments_median": 12,
+        "keeper": "msx-retro-mania",
+        "model": "deepseek-v4.1-flash",
+        "requests": 237,
+        "result_saved_bytes_median": 468016,
+        "with_demoted_arguments": 219,
+        "with_demoted_arguments_percent": 92.4,
+        "with_demoted_results_percent": 95.8
+      },
+      {
+        "argument_saved_bytes_median": 52529,
+        "argument_saved_percent_of_body_median": 6.0,
+        "body_bytes_median": 797292,
+        "demoted_arguments_median": 59,
+        "keeper": "wkbl-front",
+        "model": "glm-5.3-flash",
+        "requests": 220,
+        "result_saved_bytes_median": 736582,
+        "with_demoted_arguments": 209,
+        "with_demoted_arguments_percent": 95.0,
+        "with_demoted_results_percent": 95.9
+      }
+    ],
+    "distinct_demoted_arguments": 12855,
+    "requests": 5244,
+    "stored_and_same_size": 12313,
+    "unreadable_messages": 0,
+    "with_demoted_arguments": 4400,
+    "with_demoted_arguments_percent": 83.9
+  },
+  "window": {
+    "from": "2026-10-19",
+    "to": "2026-11-04",
+    "until": "2026-11-04T19:10:00+00:00"
+  }
+}

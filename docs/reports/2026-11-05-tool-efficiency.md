@@ -18,6 +18,7 @@
 - 호출 사이 시간 510.1시간을 도구 쌍으로 나누면 같은 도구가 이어진 쌍이 259.5시간(50.9%)이고, `Execute` 다음 `Execute` 가 207.7시간이에요.
 - 모델 요청 35,684개의 입력은 평균 35.7만 토큰이고 90.3%는 캐시에서 읽은 토큰이에요. `msx-retro-mania` 의 요청 본문은 중앙값 11.6 MB 로 본문 합계 상위의 다른 Keeper 7명(1.0~1.8 MB)의 6~11배이고, 화면 이미지가 중앙값 113장(최대 1,186장) 실려요. 이미지를 지우는 코드는 이미지를 못 받는 런타임에만 있어요. 모델 응답을 한 번도 못 받은 턴의 요청 본문 합계 2.92 GB 중 95.6%가 이 Keeper 예요(§1.5).
 - 모델 요청 하나에는 도구 스키마가 중앙값 93 KB(도구 45개)와 시스템 프롬프트가 121 KB 실려요. `keeper_skill` 한 도구가 22 KB 로 도구 스키마 바이트의 22.5%이고, 설명 끝의 스킬 목록(중앙값 50행, 19.4 KB)이 요청의 99.9%에 실려요. 같은 기간 `keeper_skill` 호출은 모델 요청 100개에 2.95번이에요(§1.6).
+- 도구 인자를 `{"_blob": ...}` 한 덩어리로 보내 실행 전에 거절된 호출이 10-19~11-04 에 2,463건이에요. 모델에 보내는 요청 5,244개 중 83.9%가 지난 호출의 인자를 그 모양으로 바꿔서 싣고, 모델이 그 모양을 따라 해요. 봉투 모양으로 보낸 1,344건 중 1,337건은 해시의 blob 이 저장소에 없는 지어낸 값이에요(§2 `_blob` 흉내).
 - 못 고친 것: 비동기 실행. 설계는 이미 `RFC-keeper-async-fleet-continuity` 에 있어서 새 설계를 만들지 않았어요. 지금 낼 수 있는 가장 작은 조각(Docker 한정)은 Keeper 설정 43개 중 1개에만 닿아서 위 5명에게는 효과가 없어요. Execute 를 서버 fiber 에서 돌리는 조각은 코드로는 나오지만 RFC 의 수명 요구를 못 채워요. 근거는 §6 에 있어요.
 
 ## 1. 측정
@@ -138,7 +139,7 @@
 | `Execute` | 시간의 31.2%가 기다리는 명령 | Keeper 체크아웃에서 도는 프로세스를 턴 밖으로 보내고 끝나면 깨우는 도구가 없어요. 격리 job(`keeper_job_*`)은 있지만 0호출이에요. 그래서 모델이 `sleep` 으로 직접 기다리는 것으로 읽었어요(추정) | 미구현(아래 "비동기 실행") |
 | `masc_dos_screen`, `masc_dos_press` | `masc_dos_screen` 1,700호출(155.8 MB, 평균 91.7 KB, 1,563호출이 넘침)과 `masc_dos_press` 1,739호출(19.9 MB, 평균 11.5 KB). 모두 Keeper 한 명(`msx-retro-mania`)의 호출이에요. `screen`, `press`, `step`, `type` 네 도구가 결과 바이트의 19.2%예요. `press` → `screen` 이 되풀이돼서 두 도구 사이 시간이 19.4시간(2,459쌍)이에요 | `screen` 결과의 대부분은 PNG(base64 83 KB)예요. 프레임 148장을 열어 보니 모두 640x480에 색이 16개 이하이고, Pillow 로 4비트 팔레트 PNG 를 만들어 비교하면 합계가 18.9% 줄어요(픽셀은 그대로예요. 일회성 확인이라 스크립트는 저장소에 넣지 않았어요). 이 게임은 글자를 자기 글꼴로 그려서(video_mode 12h) `press` 결과의 `screen_text` 가 비어 있고, 글자는 PNG 로만 읽어요. 그래서 `press` 다음에 `screen` 을 따로 불러요(`keeper_analyze_image` 는 이 Keeper 가 9번만 불렀어요). `press` 결과는 1,739호출 중 1,736호출이 11.4~11.5 KB 예요. `screen` 결과를 열어 보면 같은 관측이 `content` 와 `structuredContent` 에 한 벌씩 들어 있어서(`dos_addon_worker.ml:5-9`) `press` 도 같은 모양으로 보여요(추정) | 처리 안 함. 팔레트 인코딩은 `Rgb_png` 를 쓰는 다른 곳(MSX, 초상화)도 건드리는데 이득이 18.9%라서 하지 않았어요. `press` 가 PNG 를 같이 주는 방법은 도구 인자와 DOS worker 이미지를 바꾸는 일이고 쓰는 Keeper 가 한 명이라서, 하려면 RFC 로 정할 일이에요 |
 | `keeper_tools_list` | 47호출이 모두 넘침, 호출당 약 300 KB(14.2 MB) | 이름대로 도구 목록 전체를 한 번에 돌려줘요 | 처리 안 함 |
-| `masc_board_comment` | 실패율 10-05~10-31 31.3%(23,298호출 중 7,303), 11-01~11-04 16.5%(3,948호출 중 653) | 실패 원인을 전부 가르지는 못했어요. 호출 인자를 `{"_blob": ...}` 모양으로 보낸 호출이 이 도구에서만 1,336건이에요(아래 "`_blob` 흉내") | #47642 에 달 초안을 부록에 두었어요 |
+| `masc_board_comment` | 실패율 10-05~10-31 31.3%(23,298호출 중 7,303), 11-01~11-04 16.5%(3,948호출 중 653) | 실패 원인을 전부 가르지는 못했어요. 인자가 `_blob` 하나뿐인 호출이 이 도구에서만 1,221건이에요(아래 "`_blob` 흉내") | #47642 에 달 초안을 부록에 두었어요 |
 | 빈 입력 호출 | 실패 676건. muse-spark 프로필이 397건(3.6%), 프로필 기록 없음 226건(19%), codex 는 76,628호출 중 2건 | 프로필마다 크게 달라요. Muse 쪽 원인은 이슈 #48214 에 적혀 있고 이 세션에서 확인하지 않았어요 | 이 작업 범위 밖 |
 | `if_revision`(변경 없음 응답) | 11-01~11-04 에 `masc_board_list` 5/1,052호출, `keeper_tasks_list` 0/2,505호출이 씀 | 있는 기능인데 모델이 인자를 안 넘겨요. 쓴 5호출은 모두 revision 이 바뀌어 약 3 KB 짜리 snapshot 을 받았고, 변경 없음 응답의 크기는 원장에서 못 봤어요 | 처리 안 함 |
 | `masc_keeper_delegate` | 394호출 중 19건 실패(4.8%). 11건은 `keeper not found: <이름>`(에이전트 이름이나 `root`, `admin` 을 넣음), 7건은 입력 모양 오류, 1건은 서버가 막 재시작한 직후. `_status` 는 164호출 | 모두 실행 전에 거절됨 | 처리 안 함(아래 "Delegate") |
@@ -146,10 +147,32 @@
 
 ### `_blob` 흉내
 
-도구 호출 인자 안에 `{"_blob": {...}}` 키가 든 `tool_call` 행이 10-19~11-04 에 2,816건이에요. 거절이 2,558건(`_blob` 하나뿐 2,463건, 다른 키와 섞인 95건), 성공이 258건이에요.
-성공한 258건 중 257건은 진짜 인자 옆에 `_blob` 키를 하나 더 붙여 보낸 것이고, 도구가 모르는 키를 무시해서 실행됐어요. 11-02 이전에도 있어서 deepseek 로 옮긴 뒤 시작된 일이 아니에요.
-도구별로는 `masc_board_comment` 1,336건, `Write` 527건, `Execute` 345건, `keeper_memory_write` 236건이에요. `runtime_profile` 이 비어 있는 행이 78%라 모델별로는 못 나눠요.
-Keeper 프롬프트에는 이미 `_blob` 을 새 호출의 인자 양식으로 쓰지 말라는 문단이 있어요(`config/prompts/keeper.md:13`). 그래도 위 거절이 같은 기간에 쌓였어요.
+도구 호출의 `input` 에 `_blob` 키가 든 행이 10-19~11-04T19:10Z 에 2,816건이에요. 스크립트와 정의는 `docs/evidence/blob-input-2026-11` 에 있어요.
+
+- `_blob` 하나뿐인 호출(`alone`)이 2,464건이고 2,463건이 실행 전에 거절됐어요(`disposition` 이 없고 `wire_outcome` 이 `error`). 거절된 호출은 도구가 실행되지 않았지만 모델이 그 호출을 만든 응답 한 번을 썼어요.
+- 다른 키와 섞인 호출(`mixed`)은 352건이에요. 진짜 인자 옆에 `_blob` 키를 하나 더 붙인 모양이고, 257건이 실행됐어요. 도구가 모르는 키를 무시해서요.
+- `alone` 의 `_blob` 값은 봉투(`bytes`, `mime`, `preview`, `sha256` 네 필드)가 1,344건, 진짜 인자를 `_blob` 아래에 넣은 것이 784건, 객체가 아닌 것이 336건이에요.
+- 도구는 `masc_board_comment` 1,221건, `Write` 478건, `Execute` 305건, `keeper_memory_write` 154건 순이에요. Keeper 는 `masc-productor-owner` 520건, `wkbl-front` 457건, `code-reviewer` 372건 순이에요.
+
+**모델이 이 모양을 보는 길.** 이슈 본문은 Recent Actions 가 거절된 호출의 인자를 다시 보여 줘서 생긴다고 적었어요. 요청 기록을 열어 보니 더 큰 길이 있어요.
+
+- `Keeper_model_input_demotion`(RFC-0363)이 이미 끝난 호출의 인자를 `{"_blob": {"sha256", "bytes", "mime", "preview"}}` 로 바꿔서 보내요(`with_reference`, `keeper_model_input_demotion.ml:167`). 모델이 보는 지난 호출이 도구 스키마에 없는 모양이 돼요.
+- 저장된 요청 5,244개 중 4,400개(83.9%)에 그렇게 바뀐 인자가 있어요. `masc-productor-owner`(deepseek-v4.1-flash)는 요청의 95.4%에 중앙값 334개가 들어 있고, 줄인 바이트의 중앙값이 366 KB(본문의 29.9%)예요. 이 Keeper 의 요청 하나를 열어서 assistant 메시지의 `masc_board_comment` 호출 `input` 이 `{"_blob": {"sha256": "4f394ce0…", "bytes": 4698, …}}` 인 것을 확인했어요.
+- GLM 으로 도는 Keeper 도 같은 비율로 받아요. `ocaml-agent-ic`(glm-5.3-flash)가 95.2%, `wkbl-data`·`wkbl-web-leader`·`e-masc-the-leader`·`code-reviewer-father`(glm-5.3)가 85~99%예요. 그런데 `_blob` 하나뿐인 호출은 `ocaml-agent-ic` 2건, `wkbl-data` 61건, `wkbl-web-leader` 23건, `e-masc-the-leader` 0건, `code-reviewer-father` 0건이에요. 같은 기록을 받아도 따라 하는 모델이 따로 있어요.
+
+**베낀 것이 아니라 지어낸 값.** 봉투 1,344건 가운데 `sha256` 의 blob 이 저장소에 있는 것은 7건이고 1,337건(99.5%)은 없어요. 요청 기록에서 본 강등된 인자의 해시는 12,855개 중 12,313개(95.8%)가 blob 이 같은 크기로 있어요. 기록에서 복사한 해시라면 대부분 있어야 해서, 모델이 봉투 모양을 따라 해시와 크기를 지어낸 거예요(`config/prompts/keeper.md` 문단이 "해시를 지어내지 않는다" 고 적은 일이에요). 예: 11-04 00:16Z `masc-productor-owner` 가 `masc_board_comment` 를 `{"_blob": {"bytes": 2905, "sha256": "a5bc9d78…", …}}` 로 불러 거절됐고, 그 해시의 blob 은 저장소에 없어요. 6.8초 뒤 같은 글을 제대로 된 인자로 다시 보내서 실행됐어요.
+
+**Recent Actions 만 고치면.** 첫 길이 요청의 84%를 덮고 있어서, 이슈가 제안한 수정(거절된 호출의 인자를 다시 보여 주지 않기)만으로는 이 숫자가 거의 안 바뀔 거라고 봐요(추정). 그래서 이 수정은 만들지 않았어요.
+
+**프롬프트 문단.** `config/prompts/keeper.md` 에 `_blob` 을 새 호출의 인자로 쓰지 말라는 문단이 있어요(#46216, 10-27 10:45 KST 에 main 에 들어갔고 배포 시각은 확인하지 못했어요). `_blob` 하나뿐인 호출은 10-26 413건, 10-27 405건이었다가 10-28 32건, 10-30 19건, 10-31 4건이 됐고 11-01 에는 한 건도 없어요. 11-02 에 610건으로 돌아왔어요. 호출을 모델별로 나눌 수 없어서 문단의 효과라고는 못 해요.
+
+**고칠 방향(코드는 안 썼어요).**
+
+- 모양을 지키는 강등(긴 문자열 값만 줄임)은 거절을 실행으로 바꿔요. 모델이 지난 호출을 베끼면 줄어든 값이 그대로 실행돼서(글이 잘린 채 게시되고, 파일이 잘린 채 써져요), 지금의 실행 전 거절이 안전한 쪽이에요.
+- 인자를 강등하지 않으면 요청 본문이 지금보다 4.7~29.9% 커져요(위에 이름을 적은 Keeper 별 요청 중앙값). 이 크기가 크기 거절을 다시 부를지는 재지 않았어요.
+- 강등이 요청의 84%에 있는 이유는 가르지 못했어요. 크기 거절 뒤 재전송과 Official client host 의 턴 경계 인자 강등이 둘 다 같은 값을 만들어요(RFC-0363 §3.4.1).
+- 증거는 `RFC-0363` §3.4.2 에도 옮겼어요. 표현을 바꾸는 일은 해시를 인용하는 계약과 캐시에 닿아서 RFC 로 정할 일이에요.
+
 이슈 #47642 에는 아직 달지 않았어요. 달 때 쓸 초안은 [부록](#부록-47642-에-달-코멘트-초안)에 있어요.
 
 ## 3. 시스템이 거는 제약과 관측의 구멍
@@ -348,6 +371,8 @@ RFC 는 이미 진행 중인 계획(`goal-keeper-async-fleet-20261026`)이에요
 - 호출이 모델 요청보다 많은 Keeper(`code-reviewer-sister` 는 호출 121, 모델 요청 42)가 한 응답에 `keeper_skill` 을 여러 번 부르는지, `usage` 이벤트가 일부 턴에 없는지.
 - 저장된 요청 본문이 그 턴의 어느 요청(첫 요청인지 마지막인지)인지. 턴마다 하나만 저장돼서 모델 요청의 9.0%만 보여요.
 - `msx-retro-mania` 8339~8361번 턴이 `sse_stream_incomplete` 로 끝난 이유(요청 크기인지 런타임 쪽인지), 그리고 8362번 턴에서 본문이 113 MiB 에서 2.9 MiB 로 줄어든 이유.
+- `_blob` 호출을 모델별로 나눈 값. 원장에 모델이 없어서 못 셌어요. 같은 Keeper 의 요청 기록(`wire.model`)과 날짜로 짝지으면 알 수 있어요.
+- 지난 호출 인자의 강등이 요청의 84%에 있는 이유가 크기 거절 뒤 재전송인지 Official client host 의 턴 경계 강등인지. 레인마다 어느 길을 타는지 확인하지 못했어요.
 
 ## 9. 배포 뒤 다시 재기
 
@@ -368,31 +393,16 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - `measure_lane_time.py` 결과의 `schedule_wakes`(일정 깨움이 기다린 시간 합계 458.6시간, 그중 60초 이상 Execute 와 겹친 17.6시간이 기준선)
 - `docs/evidence/request-context-2026-11/measure_request_context.py` 결과의 `captured_request_bodies.tool_schemas`(도구 스키마 중앙값 93,177바이트, `keeper_skill` 중앙값 22,093바이트·3,213 요청), `skill_catalog`(행 중앙값 50, 블록 중앙값 19,425바이트), `skill_calls.calls_per_100_requests`(2.95)
 - `docs/evidence/request-context-2026-11/measure_request_context.py` 결과의 `model_requests.mean_input_tokens`(357,004)와 `captured_request_bodies.by_keeper` 의 `msx-retro-mania` 행(`body_bytes_p50` 11,551,143, `unanswered_body_bytes` 2,786,260,898, `images_p50` 113)
+- `docs/evidence/blob-input-2026-11/measure_blob_inputs.py` 결과의 `blob_calls.outcome_alone.refused_before_run`(2,463)과 `by_day`, `history_arguments.with_demoted_arguments_percent`(83.9). 창이 길어서 날짜별 `by_day` 로 비교해요.
 
 ## 부록: #47642 에 달 코멘트 초안
 
-원장을 10-19 ~ 11-04T19:10Z 로 넓혀서 다시 셌어요. 11-02 이전에도 있었고, 성공하는 호출에도 같은 모양이 섞여 있어요.
+원장을 10-19 ~ 11-04T19:10Z 로 넓혀 다시 세고, 요청 기록을 열어 `_blob` 이 모델 눈에 들어오는 길을 확인했어요. 이슈 본문에 적힌 원인 가운데 Recent Actions 는 두 번째 길이에요.
 
-입력에 `_blob` 키가 든 `tool_call` 행이 2,816건이에요. 거절 2,558건(`_blob` 하나뿐 2,463건, 다른 키와 섞인 것 95건), 성공 258건이에요.
-
-| 날짜(UTC) | 호출 | 그중 성공 |
-|---|---:|---:|
-| 10-19 | 541 | 0 |
-| 10-20 | 45 | 0 |
-| 10-21 | 67 | 0 |
-| 10-23 | 17 | 17 |
-| 10-26 | 434 | 1 |
-| 10-27 | 414 | 0 |
-| 10-28 | 38 | 0 |
-| 10-30 | 46 | 26 |
-| 10-31 | 4 | 0 |
-| 11-02 | 861 | 214 |
-| 11-03 | 344 | 0 |
-| 11-04 | 5 | 0 |
-
-- 11-02 하루를 끝까지 세면 `_blob` 하나뿐인 호출이 610건(전부 실행 전 거절), 다른 키와 섞인 호출이 251건(성공 214건, 거절 37건)이에요. 이슈 본문에 적힌 377건보다 많아요.
-- 날짜별로 많은 Keeper 는 10-19 에 code-reviewer 156건, masc-productor-owner 140건, context-reviewer 127건, 10-26 에 code-reviewer-sister 122건, code-reviewer 110건, 10-27 에 code-reviewer-sister 109건, 11-02 에 wkbl-front 381건, masc-productor-owner 362건, wkbl-data 71건이에요.
-- 도구별로는 `masc_board_comment` 1,336건, `Write` 527건, `Execute` 345건, `keeper_memory_write` 236건, `masc_board_post` 109건, `Edit` 49건이에요.
-- 성공한 258건 중 257건은 진짜 인자 옆에 `_blob` 키를 하나 더 붙여 보낸 호출이에요(예: `keeper_surface_post` 의 입력이 `{"_blob": {...}, "surface": "dashboard", "content": "..."}`). 도구가 모르는 키를 무시해서 실행은 됐어요.
-- 같은 모양이 모델 입력에 들어가는 길로, 지난 호출의 인자를 `{"_blob": ...}` 로 줄이는 코드(`lib/keeper/keeper_model_input_demotion.ml`, `docs/rfc/RFC-0363-historical-tool-result-demotion.md`, Draft, 2026-08-05 작성)가 있어요. 이 길이 실제 요청에 `_blob` 을 넣었는지는 wire-capture 로 확인하지 못했어요.
-- 센 방법: `~/me/.masc/tool_calls/2026-10`, `2026-11` 의 `record_kind = tool_call` 행에서 `input` 이 `_blob` 키를 가진 행. 거절은 `disposition` 이 `completed` 가 아니거나 `wire_outcome` 이 `ok` 가 아닌 행이에요. 고친 뒤에는 `_blob` 하나뿐인 호출과 섞인 호출을 따로 세면 둘 다 0 에 가까워져야 해요.
+- `input` 이 `_blob` 하나뿐인 호출이 2,464건이고 2,463건이 실행 전에 거절됐어요. 11-02 하루가 610건(본문의 377건보다 많아요), 11-03 이 339건이에요.
+- 첫 길은 `Keeper_model_input_demotion`(RFC-0363)이에요. 이미 끝난 호출의 인자를 `{"_blob": {...}}` 로 바꿔서 모델에 보내요. 저장된 요청 5,244개 중 4,400개(83.9%)에 있고, `masc-productor-owner` 는 95.4%에 중앙값 334개예요. assistant 메시지의 `tool_use.input` 을 직접 열어 확인했어요.
+- 모델이 베낀 값이 아니라 지어낸 값이에요. 봉투 모양으로 보낸 1,344건 중 1,337건은 `sha256` 의 blob 이 저장소에 없어요. 강등이 만든 해시는 95.8%가 있어요.
+- 784건은 진짜 인자를 `_blob` 아래에 넣었어요(`{"_blob": {"post_id": ..., "content": ...}}`).
+- GLM 으로 도는 Keeper 다섯도 요청의 85~99%에 같은 강등된 인자를 받는데 `_blob` 호출은 `ocaml-agent-ic` 2건, `wkbl-data` 61건, `wkbl-web-leader` 23건, `e-masc-the-leader` 0건, `code-reviewer-father` 0건이에요. 따라 하는 모델이 따로 있어요.
+- 그래서 Recent Actions 의 인자 재표시를 막아도 첫 길이 남아요(추정). 제안한 수정만으로는 이 숫자가 거의 안 바뀔 거예요.
+- 센 방법과 스크립트는 `docs/evidence/blob-input-2026-11` 에 있어요(시험 89개). 고친 뒤에는 `blob_calls.outcome_alone.refused_before_run` 이 0 에 가까워져야 해요.

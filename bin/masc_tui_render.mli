@@ -68,7 +68,7 @@ val acting_pane_suppressed : Masc_tui_types.state -> bool
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
 
-type lane_run_tool_counts = {
+type lane_run_tool_counts = Masc_tui_render_lanes.lane_run_tool_counts = {
   completed : int;
   deferred : int;
   failed : int;

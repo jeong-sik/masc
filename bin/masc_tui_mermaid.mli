@@ -148,7 +148,8 @@ type sequence_event =
   | Block_else of string
   | Block_close
 
-type participant = {
+(** A diagram participant. [alias] is what the box says. *)
+type participant = Masc_tui_mermaid_grammar.participant = {
   pid : string;
   alias : string;  (** what the box says *)
 }

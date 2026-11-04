@@ -10,13 +10,13 @@
 
 (** {1 Types} *)
 
-type persistence_target =
+type persistence_target = Keeper_msg_async_types.persistence_target =
   | Acceptance_callback
   | State_transition of string
 (** The state label is diagnostic only. Admission recovery branches on the
     constructor, never on a status or reason string. *)
 
-type request_status =
+type request_status = Keeper_msg_async_types.request_status =
   | Queued
   | Running
   | Cancelling of
@@ -67,7 +67,7 @@ val same_entry_record : entry -> entry -> bool
     cannot be constructed). [Caller_mismatch] intentionally does not expose
     the persisted owner value. A different base path is a different store and
     therefore yields [Absent], not an ownership oracle. *)
-type access_rejection =
+type access_rejection = Keeper_msg_async_types.access_rejection =
   | Invalid_base_path of { reason : string }
   | Invalid_caller
   | Invalid_request_id
@@ -203,7 +203,7 @@ and recovery_record_error_kind =
   | Recovery_source_cleanup_failed
   | Recovery_entry_exception of string
 
-type submit_error =
+type submit_error = Keeper_msg_async_types.submit_error =
   | Submit_lane_unavailable of
       { lane : string
       ; wait_budget_sec : float

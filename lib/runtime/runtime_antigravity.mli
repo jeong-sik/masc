@@ -77,7 +77,7 @@ type conversation_mode =
     workspace state cannot select an earlier conversation. [Resume] names the
     exact durable conversation and never creates a project. *)
 
-type usage =
+type usage = Runtime_antigravity_protocol.usage =
   { input_tokens : int
   ; output_tokens : int
   ; thinking_tokens : int
@@ -92,7 +92,7 @@ type usage =
     through [Backend_anthropic.usage_of_wire_counts] rather than copying the
     fields across. *)
 
-type permission_mode =
+type permission_mode = Runtime_antigravity_protocol.permission_mode =
   | Always_proceed
   | Request_review
   | Unrecognized_permission_mode of string
@@ -118,9 +118,9 @@ type turn_result =
   ; wall_duration_s : float
   }
 
-type response_ending = Response_done | Response_error
+type response_ending = Runtime_antigravity_protocol.response_ending = Response_done | Response_error
 
-type noncompletion_status =
+type noncompletion_status = Runtime_antigravity_protocol.noncompletion_status =
   | Canceled
   | Interrupted
   | Invalid
@@ -131,7 +131,7 @@ type noncompletion_status =
 
 val noncompletion_status_to_string : noncompletion_status -> string
 
-type stream_event =
+type stream_event = Runtime_antigravity_protocol.stream_event =
   | Turn_started of
       { conversation_id : string
       ; model : string

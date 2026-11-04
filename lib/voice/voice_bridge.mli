@@ -19,7 +19,7 @@ include module type of Voice_bridge_core
     and [-v] wants spaces. [voice_aliases] holds the other selections that
     reach the voice -- espeak-ng's parenthesised aliases -- and is empty for
     the kinds that publish none. *)
-type catalogue_voice =
+type catalogue_voice = Voice_catalogue.catalogue_voice =
   { voice_id : string
   ; voice_name : string option
   ; voice_language : string option

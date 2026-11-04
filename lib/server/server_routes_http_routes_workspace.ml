@@ -862,6 +862,27 @@ let workspace_file_catalog ~base ~path =
   | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
       Error (Catalog_scan_failed (Printexc.to_string ex))
 
+(* [head] is null for a detached HEAD. [upstream] is null without a configured
+   upstream; its ahead/behind are null when the configured upstream ref is
+   gone. *)
+let git_branch_status_json (branch : Repo_git.branch_status) =
+  match branch with
+  | Repo_git.Detached -> `Assoc [ ("head", `Null); ("upstream", `Null) ]
+  | Repo_git.On_branch { name; upstream } ->
+      let upstream_json =
+        match upstream with
+        | Repo_git.No_upstream -> `Null
+        | Repo_git.Upstream_gone upstream ->
+            `Assoc [ ("name", `String upstream); ("ahead", `Null); ("behind", `Null) ]
+        | Repo_git.Tracking { upstream; ahead; behind } ->
+            `Assoc
+              [ ("name", `String upstream)
+              ; ("ahead", `Int ahead)
+              ; ("behind", `Int behind)
+              ]
+      in
+      `Assoc [ ("head", `String name); ("upstream", upstream_json) ]
+
 let git_status_file_json (change : Repo_git.status_file) =
   `Assoc
     [ ("path", `String change.path)
@@ -1219,14 +1240,18 @@ let add_routes router =
                  json_response ~status:`Not_found request reqd
                    (json_error "No Git repository at this workspace root")
                else
-                 (match Repo_git.status_files_at ~local_path:base () with
-                  | Error detail ->
+                 (match
+                    ( Repo_git.status_files_at ~local_path:base ()
+                    , Repo_git.branch_status_at ~local_path:base () )
+                  with
+                  | Error detail, _ | _, Error detail ->
                       json_response ~status:`Internal_server_error request reqd
                         (json_error detail)
-                  | Ok changes ->
+                  | Ok changes, Ok branch ->
                       json_response_with_source ~status:`OK ~source request reqd
                         (`Assoc
                            [ ("scope", scope)
+                           ; ("branch", git_branch_status_json branch)
                            ; ( "changes"
                              , `List (List.map git_status_file_json changes) )
                            ; ("total", `Int (List.length changes))

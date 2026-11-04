@@ -2424,7 +2424,9 @@ category들(정렬순) → All. 필터는 ordinary 사실만 좁힌다 — sourc
 
 Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
 `d`를 누르면 선택한 저장소(또는 Keepers 목록/상세 화면에서 누를 경우 프로젝트)의 현재 Git 변경 파일을 연다. 각 행은 staged,
-worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
+worktree, untracked, conflict 상태를 구분한다. 제목에는 체크아웃된 브랜치와 upstream 대비
+`↑ahead ↓behind`가 함께 나온다. upstream이 없으면 `(no upstream)`, upstream ref가 사라졌으면
+`(upstream … gone)`, 브랜치가 아니면 `detached HEAD`로 표시하고 숫자를 0으로 채우지 않는다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
 해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
 `v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
 

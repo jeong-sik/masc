@@ -531,6 +531,82 @@ let status_files_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
 let status_files ?timeout_sec ~repository () =
   status_files_at ?timeout_sec ~local_path:repository.local_path ()
 
+type upstream_state =
+  | No_upstream
+  | Upstream_gone of string
+  | Tracking of { upstream : string; ahead : int; behind : int }
+
+type branch_status =
+  | Detached
+  | On_branch of { name : string; upstream : upstream_state }
+
+(* Porcelain v2 prints "(detached)" as [branch.head] for a detached HEAD. A
+   branch literally named "(detached)" is a legal ref name and would read as
+   detached here; Git offers no other field in this output to tell them apart. *)
+let detached_head_marker = "(detached)"
+
+let parse_branch_ahead_behind value =
+  match String.split_on_char ' ' value with
+  | [ ahead; behind ]
+    when String.length ahead > 1
+         && ahead.[0] = '+'
+         && String.length behind > 1
+         && behind.[0] = '-' ->
+      let count field =
+        int_of_string_opt (String.sub field 1 (String.length field - 1))
+      in
+      (match count ahead, count behind with
+       | Some ahead, Some behind -> Stdlib.Ok (ahead, behind)
+       | _ ->
+           Stdlib.Error
+             (Printf.sprintf "git status branch.ab has non-numeric counts: %S" value))
+  | _ ->
+      Stdlib.Error
+        (Printf.sprintf "git status branch.ab is malformed: %S" value)
+
+let branch_status_of_porcelain_v2_z output =
+  let header_value ~key record =
+    let prefix = "# " ^ key ^ " " in
+    if String.starts_with ~prefix record then
+      Some
+        (String.sub record (String.length prefix)
+           (String.length record - String.length prefix))
+    else None
+  in
+  (* Headers precede every entry record, so the first record that is not a
+     "# " header ends them. *)
+  let rec headers acc = function
+    | record :: rest when String.starts_with ~prefix:"# " record ->
+        headers (record :: acc) rest
+    | _ -> List.rev acc
+  in
+  let records = headers [] (String.split_on_char '\000' output) in
+  let find key = List.find_map (header_value ~key) records in
+  match find "branch.head" with
+  | None -> Stdlib.Error "git status --branch printed no branch.head header"
+  | Some head when String.equal head detached_head_marker -> Stdlib.Ok Detached
+  | Some name ->
+      (match find "branch.upstream", find "branch.ab" with
+       | None, _ -> Stdlib.Ok (On_branch { name; upstream = No_upstream })
+       | Some upstream, None ->
+           Stdlib.Ok (On_branch { name; upstream = Upstream_gone upstream })
+       | Some upstream, Some counts ->
+           (match parse_branch_ahead_behind counts with
+            | Stdlib.Error msg -> Stdlib.Error msg
+            | Stdlib.Ok (ahead, behind) ->
+                Stdlib.Ok
+                  (On_branch { name; upstream = Tracking { upstream; ahead; behind } })))
+
+let branch_status_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
+  match
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+      [ "--no-optional-locks"; "status"; "--porcelain=v2"; "--branch"; "-z"
+      ; "--untracked-files=no"
+      ]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok output -> branch_status_of_porcelain_v2_z output
+
 let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
     run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec

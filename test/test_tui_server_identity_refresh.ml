@@ -217,6 +217,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
        && has diff_screen "Checkout unverified");
     state.repository_changes <- Some Tui_decode.{
       rcs_scope=Repository_change_repository "repo"; rcs_total=1;
+      rcs_branch=Repository_on_branch {name="main"; upstream=Repository_no_upstream};
       rcs_changes=[{rc_path="original.ml";rc_staged=false;rc_unstaged=true;
         rc_untracked=false;rc_conflicted=false}]};
     let frame, _ = Masc_tui_render_repositories.render_repository_changes state in
@@ -295,6 +296,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
     let changes = List.map (fun path -> Tui_decode.{rc_path=path; rc_staged=false;
       rc_unstaged=true;rc_untracked=false;rc_conflicted=false}) paths in
     state.repository_changes <- Some Tui_decode.{rcs_scope=Repository_change_repository "repo";
+      rcs_branch=Repository_on_branch {name="main"; upstream=Repository_no_upstream};
       rcs_changes=changes;rcs_total=List.length changes};
     let records = paths |> List.filteri (fun n _ -> n mod 2 = 0)
       |> List.map (fun path -> {change with fc_location=Fc_in_repo {repo_id="repo";relative_path=path}}) in

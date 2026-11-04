@@ -20,6 +20,7 @@ let with_overlay state ~changes =
   state.repository_changes_scope <- Some Tui_decode.Repository_change_project;
   state.repository_changes <-
     Some { Tui_decode.rcs_scope = Tui_decode.Repository_change_project
+         ; rcs_branch = Tui_decode.Repository_detached
          ; rcs_changes = changes
          ; rcs_total = List.length changes }
 

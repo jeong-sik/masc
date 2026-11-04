@@ -158,6 +158,32 @@ val status_files_at :
     remains responsible for proving that [local_path] is the requested scope's
     repository root. *)
 
+(** How the checked-out branch relates to the branch it tracks. *)
+type upstream_state =
+  | No_upstream  (** The branch has no configured upstream. *)
+  | Upstream_gone of string
+      (** An upstream is configured but its ref no longer exists, so Git
+          reports no ahead/behind counts. *)
+  | Tracking of { upstream : string; ahead : int; behind : int }
+      (** [ahead] local commits are not on [upstream]; [behind] upstream
+          commits are not local. *)
+
+type branch_status =
+  | Detached
+  | On_branch of { name : string; upstream : upstream_state }
+
+val branch_status_of_porcelain_v2_z : string -> (branch_status, string) result
+(** Pure reader for the header records of
+    [git status --porcelain=v2 --branch -z]. A missing [branch.head] or a
+    malformed [branch.ab] is an [Error _]; it never defaults to a branch. *)
+
+val branch_status_at :
+  ?timeout_sec:float -> local_path:string -> unit -> (branch_status, string) result
+(** [branch_status_at ~local_path] reads the checked-out branch and its upstream
+    counts from one read-only [git status --porcelain=v2 --branch] call. The
+    caller remains responsible for proving that [local_path] is the requested
+    scope's repository root. *)
+
 val file_paths_at :
   ?timeout_sec:float -> local_path:string -> unit -> (string list, string) result
 (** Enumerate tracked and nonignored untracked paths relative to the checkout

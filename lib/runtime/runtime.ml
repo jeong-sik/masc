@@ -3049,7 +3049,10 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     |> Result.map (fun value -> { value; warnings = locked.warnings })
 ;;
 
-let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+(* The text with [[runtime]].[key] set to [runtime_id], or removed for [None].
+   Kept apart from the write so a caller that saves through the running server
+   (RFC-0482 §3.2) makes the same edit to the server's text. *)
+let runtime_scalar_text ~key ~runtime_id content =
   let key = String.trim key in
   let runtime_id = Option.map String.trim runtime_id in
   if String.equal key ""
@@ -3062,16 +3065,19 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       Error "runtime_id must not be empty"
     | Some runtime_id when contains_newline runtime_id ->
       Error "runtime_id must not contain newlines"
-    | _ ->
-      let* path = runtime_config_path_result ?runtime_config_path () in
-      let* locked =
-        with_runtime_config_write_lock path (fun () ->
-          let* content = load_file_result path in
-          let next = update_runtime_scalar_text content ~key ~runtime_id in
-          commit_runtime_config_text ~path next)
-      in
-      let* receipt = locked.value in
-      Ok (attach_lock_warnings locked.warnings receipt)
+    | Some _ | None -> Ok (update_runtime_scalar_text content ~key ~runtime_id)
+;;
+
+let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      let* next = runtime_scalar_text ~key ~runtime_id content in
+      commit_runtime_config_text ~path next)
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
@@ -3097,6 +3103,10 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     Ok (attach_lock_warnings locked.warnings receipt))
 ;;
 
+let runtime_default_text ~runtime_id content =
+  runtime_scalar_text ~key:"default" ~runtime_id:(Some runtime_id) content
+;;
+
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
@@ -3105,7 +3115,11 @@ let exact_slot_list_key_of_api_format api_format =
   Option.map Lane_edit.exact_slot_list_key (Lane_edit.exact_slot_list_admitting api_format)
 ;;
 
-let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
+(* The text with the first-run runtime selected: [[runtime]].default, the
+   lane named after it, and the exact-output lanes, as {!set_first_run_runtime}
+   documents. Kept apart from the write so a caller that saves through the
+   running server (RFC-0482 §3.2) makes the same edit to the server's text. *)
+let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id content =
   let runtime_id = String.trim runtime_id in
   let candidate_ids = runtime_id :: List.map String.trim fallback_runtime_ids in
   if String.equal runtime_id "" || contains_newline runtime_id
@@ -3115,155 +3129,160 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
   else if List.length (List.sort_uniq String.compare candidate_ids) <> List.length candidate_ids
   then Error "primary and fallback runtime IDs must be distinct"
   else
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let* config =
-          Runtime_toml.parse_string content
-          |> Result.map_error runtime_parse_errors_to_string
-        in
-        let runtimes, _ = partition_bindings config config.bindings in
-        let* runtime =
-          match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
-          | Some runtime -> Ok runtime
-          | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
-        in
-        let* () =
-          List.fold_left
-            (fun result id ->
-              let* () = result in
-              if List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
-              then Ok ()
-              else Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" id))
-            (Ok ()) candidate_ids
-        in
-        let slots, cli_slots =
-          match Lane_edit.exact_slot_list_admitting runtime.provider.api_format with
-          | Some Lane_edit.Catalog_slots -> [ runtime_id ], []
-          | Some Lane_edit.Cli_slots -> [], [ runtime_id ]
-          (* A client with no output-schema channel (Muse Code) becomes the
-             default and its lane without being written into any slot. *)
-          | None -> [], []
-        in
-        let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
-        (* The HTTP runtime chosen here becomes an exact-output slot below, and
-           a slot whose provider declares no [exact-body-timeout-s] cannot be
-           saved (rule 3, #38779). A connection an older setup wrote has none,
-           and rendering it again yields the same id, so the batch keeps the
-           old table as it is. Setup is what points the lanes at it, so setup
-           writes the key, with the value it writes on a new connection. *)
-        let next =
-          match
-            runtime.execution,
-            runtime.provider.Runtime_schema.exact_body_timeout_s,
-            exact_output_target_source ()
-          with
-          | Runtime_execution.Agent_core _, None, Runtime_binding_targets ->
-            Toml_line_editor.edit_table_float next
-              ~path:(table_path_under providers_table runtime.provider.Runtime_schema.id)
-              ~key:Runtime_schema.exact_body_timeout_s_key
-              ~value:Runtime_setup_spec.setup_exact_body_timeout_s
-          | Runtime_execution.Agent_core _, Some (_ : float), (Runtime_binding_targets | Replacement_catalog_targets _)
-          | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
-          | ( Runtime_execution.Codex_app_server _
-            | Runtime_execution.Claude_code _
-            | Runtime_execution.Antigravity_cli _
-            | Runtime_execution.Muse_serve _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
-        in
-        let next =
-          Toml_line_editor.edit_table_multiline_array next
-            ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids
-        in
-        let next =
-          if bind_imp then update_runtime_assignment_text next ~keeper_name:"imp" ~runtime_id
-          else next
-        in
-        (* [verifier_exact] dispatches each slot as a judge, so a slot it cannot
-           judge through is written once and then refuses every completion
-           review (#37179). Setup writes this lane only with what it can
-           actually run: the chosen runtime when that runtime can judge —
-           pointing the lanes at the selected runtime is what [--setup-lanes]
-           means — otherwise whatever the file already declares that still
-           can, because there is nothing to point it at. The
-           declared cli slots are kept for the same reason the declared HTTP
-           slots are — [--setup-lanes] also runs against an operator's existing
-           config through [Runtime_setup_batch], where erasing them would
-           delete the only working judge.
-
-           With nothing left the lane is not written at all: it is not a
-           mandatory lane, and a declared lane with neither transport is a
-           publication error that would stop the whole registry from loading. *)
-        let declared_verifier_lane =
-          List.find_opt
-            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-               Runtime_schema.equal_exact_lane_owner lane.owner (Runtime_schema.Builtin Verifier))
-            config.exact_output_lane_decls
-        in
-        let declared_lane_ids =
-          List.map (fun (lane : Runtime_schema.lane_decl) -> lane.id) config.lane_decls
-        in
-        let judgeable_declared_verifier_slots =
-          match declared_verifier_lane with
-          | None -> []
-          | Some lane ->
-            List.filter
-              (fun slot_id ->
-                 match
-                   List.find_opt
-                     (fun (candidate : t) -> String.equal candidate.id slot_id)
-                     runtimes
-                 with
-                 | None -> false
-                 | Some candidate -> Result.is_ok (verifier_runtime_admission candidate))
-              lane.slot_ids
-        in
-        let judgeable_declared_verifier_cli_slots =
-          match declared_verifier_lane with
-          | None -> []
-          | Some lane ->
-            List.filter
-              (fun slot_id ->
-                 Result.is_ok
-                   (verifier_cli_slot_admission_in
-                      ~runtimes
-                      ~lane_ids:declared_lane_ids
-                      ~runtime_id:slot_id))
-              lane.cli_slot_ids
-        in
-        let lane_slot_values lane =
-          match lane, verifier_runtime_admission runtime with
-          | Verifier, Ok () -> slots, cli_slots
-          | Verifier, Error _ ->
-            judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Browser_stagehand | Candle_appraiser), _ ->
-            slots, cli_slots
-        in
-        let next =
-          List.fold_left
-            (fun content lane ->
-              let path = Runtime_schema.exact_lane_table_name (Runtime_schema.Builtin lane) in
-              let lane_slots, lane_cli_slots = lane_slot_values lane in
-              if lane_slots = [] && lane_cli_slots = []
-              then content
-              else
-                let content =
-                  Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane_slots
-                in
-                Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
-            next
-            (* The browser-specific Stagehand model and Candle appraisal are
-               explicitly configured, not enabled by provisioning a general-purpose runtime. *)
-            (List.filter
-               (function
-                 | Browser_stagehand | Candle_appraiser -> false
-                 | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
-               Standalone_lane.all)
-        in
-        commit_runtime_config_text ~path next)
+    let* config =
+      Runtime_toml.parse_string content
+      |> Result.map_error runtime_parse_errors_to_string
     in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt)
+    let runtimes, _ = partition_bindings config config.bindings in
+    let* runtime =
+      match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) runtimes with
+      | Some runtime -> Ok runtime
+      | None -> Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" runtime_id)
+    in
+    let* () =
+      List.fold_left
+        (fun result id ->
+          let* () = result in
+          if List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
+          then Ok ()
+          else Error (Printf.sprintf "runtime %S is not an enabled, materialized runtime" id))
+        (Ok ()) candidate_ids
+    in
+    let slots, cli_slots =
+      match Lane_edit.exact_slot_list_admitting runtime.provider.api_format with
+      | Some Lane_edit.Catalog_slots -> [ runtime_id ], []
+      | Some Lane_edit.Cli_slots -> [], [ runtime_id ]
+      (* A client with no output-schema channel (Muse Code) becomes the
+         default and its lane without being written into any slot. *)
+      | None -> [], []
+    in
+    let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+    (* The HTTP runtime chosen here becomes an exact-output slot below, and
+       a slot whose provider declares no [exact-body-timeout-s] cannot be
+       saved (rule 3, #38779). A connection an older setup wrote has none,
+       and rendering it again yields the same id, so the batch keeps the
+       old table as it is. Setup is what points the lanes at it, so setup
+       writes the key, with the value it writes on a new connection. *)
+    let next =
+      match
+        runtime.execution,
+        runtime.provider.Runtime_schema.exact_body_timeout_s,
+        exact_output_target_source ()
+      with
+      | Runtime_execution.Agent_core _, None, Runtime_binding_targets ->
+        Toml_line_editor.edit_table_float next
+          ~path:(table_path_under providers_table runtime.provider.Runtime_schema.id)
+          ~key:Runtime_schema.exact_body_timeout_s_key
+          ~value:Runtime_setup_spec.setup_exact_body_timeout_s
+      | Runtime_execution.Agent_core _, Some (_ : float), (Runtime_binding_targets | Replacement_catalog_targets _)
+      | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
+      | ( Runtime_execution.Codex_app_server _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Muse_serve _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+    in
+    let next =
+      Toml_line_editor.edit_table_multiline_array next
+        ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids
+    in
+    let next =
+      if bind_imp then update_runtime_assignment_text next ~keeper_name:"imp" ~runtime_id
+      else next
+    in
+    (* [verifier_exact] dispatches each slot as a judge, so a slot it cannot
+       judge through is written once and then refuses every completion
+       review (#37179). Setup writes this lane only with what it can
+       actually run: the chosen runtime when that runtime can judge —
+       pointing the lanes at the selected runtime is what [--setup-lanes]
+       means — otherwise whatever the file already declares that still
+       can, because there is nothing to point it at. The
+       declared cli slots are kept for the same reason the declared HTTP
+       slots are — [--setup-lanes] also runs against an operator's existing
+       config through [Runtime_setup_batch], where erasing them would
+       delete the only working judge.
+
+       With nothing left the lane is not written at all: it is not a
+       mandatory lane, and a declared lane with neither transport is a
+       publication error that would stop the whole registry from loading. *)
+    let declared_verifier_lane =
+      List.find_opt
+        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+           Runtime_schema.equal_exact_lane_owner lane.owner (Runtime_schema.Builtin Verifier))
+        config.exact_output_lane_decls
+    in
+    let declared_lane_ids =
+      List.map (fun (lane : Runtime_schema.lane_decl) -> lane.id) config.lane_decls
+    in
+    let judgeable_declared_verifier_slots =
+      match declared_verifier_lane with
+      | None -> []
+      | Some lane ->
+        List.filter
+          (fun slot_id ->
+             match
+               List.find_opt
+                 (fun (candidate : t) -> String.equal candidate.id slot_id)
+                 runtimes
+             with
+             | None -> false
+             | Some candidate -> Result.is_ok (verifier_runtime_admission candidate))
+          lane.slot_ids
+    in
+    let judgeable_declared_verifier_cli_slots =
+      match declared_verifier_lane with
+      | None -> []
+      | Some lane ->
+        List.filter
+          (fun slot_id ->
+             Result.is_ok
+               (verifier_cli_slot_admission_in
+                  ~runtimes
+                  ~lane_ids:declared_lane_ids
+                  ~runtime_id:slot_id))
+          lane.cli_slot_ids
+    in
+    let lane_slot_values lane =
+      match lane, verifier_runtime_admission runtime with
+      | Verifier, Ok () -> slots, cli_slots
+      | Verifier, Error _ ->
+        judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
+      | (Librarian | Hitl_auto_judge | Board_attention | Browser_stagehand | Candle_appraiser), _ ->
+        slots, cli_slots
+    in
+    let next =
+      List.fold_left
+        (fun content lane ->
+          let path = Runtime_schema.exact_lane_table_name (Runtime_schema.Builtin lane) in
+          let lane_slots, lane_cli_slots = lane_slot_values lane in
+          if lane_slots = [] && lane_cli_slots = []
+          then content
+          else
+            let content =
+              Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:lane_slots
+            in
+            Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
+        next
+        (* The browser-specific Stagehand model and Candle appraisal are
+           explicitly configured, not enabled by provisioning a general-purpose runtime. *)
+        (List.filter
+           (function
+             | Browser_stagehand | Candle_appraiser -> false
+             | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
+           Standalone_lane.all)
+    in
+    Ok next
+;;
+
+let set_first_run_runtime ?runtime_config_path ?fallback_runtime_ids ?bind_imp ~runtime_id () =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* locked =
+    with_runtime_config_write_lock path (fun () ->
+      let* content = load_file_result path in
+      let* next = first_run_runtime_text ?fallback_runtime_ids ?bind_imp ~runtime_id content in
+      commit_runtime_config_text ~path next)
+  in
+  let* receipt = locked.value in
+  Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =

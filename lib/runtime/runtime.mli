@@ -970,6 +970,21 @@ val set_runtime_default :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
+val runtime_default_text : runtime_id:string -> string -> (string, string) result
+(** The edit {!set_runtime_default} commits, applied to a runtime.toml text.
+    A command that saves through the running server (RFC-0482 §3.2) applies
+    it to the text the server holds. *)
+
+val first_run_runtime_text :
+  ?fallback_runtime_ids:string list ->
+  ?bind_imp:bool ->
+  runtime_id:string ->
+  string ->
+  (string, string) result
+(** The edit {!set_first_run_runtime} commits, applied to a runtime.toml text,
+    for the same reason as {!runtime_default_text}. [Error] for the same
+    selections {!set_first_run_runtime} refuses. *)
+
 val set_first_run_runtime :
   ?runtime_config_path:string ->
   ?fallback_runtime_ids:string list ->

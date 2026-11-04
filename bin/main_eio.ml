@@ -1906,38 +1906,82 @@ let runtime_default_id =
   let doc = "Concrete runtime id to write into [runtime].default" in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
 
-let runtime_default_set_cmd_exit base_path runtime_id setup_lanes fallback_runtime_ids bind_imp =
+let runtime_default_set_cmd_exit base_path port agent runtime_id setup_lanes fallback_runtime_ids bind_imp =
+  let fail msg = Printf.eprintf "runtime-default-set failed: %s\n" msg; 1 in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  let result =
-    try
-      (* Validate against the same catalog sources as server startup, before
-         the config writer checks deployment-local provider/model bindings.
-         This command edits the resolved runtime file, so its sibling overlay
-         must come from that same config root. No server services are started. *)
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
-      in
-      if setup_lanes then
-        Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
-      else if bind_imp then Error "--setup-imp requires --setup-lanes"
-      else if fallback_runtime_ids <> [] then
-        Error "--fallback-runtime requires --setup-lanes"
-      else Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
-    with Env_config_core.Config_error message -> Error message
+  match
+    if setup_lanes then Ok ()
+    else if bind_imp then Error "--setup-imp requires --setup-lanes"
+    else if fallback_runtime_ids <> [] then Error "--fallback-runtime requires --setup-lanes"
+    else Ok ()
+  with
+  | Error msg -> fail msg
+  | Ok () ->
+  (* Validate against the same catalog sources as server startup, before the
+     config writer checks deployment-local provider/model bindings. This
+     command edits the resolved runtime file, so its sibling overlay must come
+     from that same config root. No server services are started. *)
+  match Server_runtime_bootstrap.configure_agent_core_model_catalog_env () with
+  | exception Env_config_core.Config_error message -> fail message
+  | (_ : string option) ->
+  (* With no server answering on the port, the command writes the file
+     itself: then nothing else writes it and no reader is waiting to be told. *)
+  let write_locally () =
+    let result =
+      try
+        if setup_lanes then
+          Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
+        else Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+      with Env_config_core.Config_error message -> Error message
+    in
+    match result with
+    | Ok _receipt ->
+        Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
+          runtime_config_path;
+        0
+    | Error msg -> fail msg
   in
-  match result with
-  | Ok _receipt ->
-      Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
-        runtime_config_path;
-      0
-  | Error msg ->
-      Printf.eprintf "runtime-default-set failed: %s\n" msg;
-      1
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error _ -> write_locally ()
+  | real_base_path ->
+    let route =
+      Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+        match
+          Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent
+        with
+        | Error message -> `Refused message
+        | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+        | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+          (* RFC-0482 §3.2: the running server is the writer. The edit is the
+             one the local write commits, made to the text the server holds;
+             the server validates the whole file again when it saves. *)
+          let edit text =
+            try
+              if setup_lanes then
+                Runtime.first_run_runtime_text ~fallback_runtime_ids ~bind_imp ~runtime_id text
+              else Runtime.runtime_default_text ~runtime_id text
+            with Env_config_core.Config_error message -> Error message
+          in
+          `Through_server (Masc_cli_runtime_config_remote.save ~clock server ~edit))
+    in
+    (match route with
+     | `Refused message -> fail message
+     | `Local -> write_locally ()
+     | `Through_server (Error message) -> fail message
+     | `Through_server (Ok Masc_cli_runtime_config_remote.Unchanged) ->
+         Printf.printf "[runtime].default is already \"%s\" in the running server's runtime.toml\n"
+           runtime_id;
+         0
+     | `Through_server (Ok (Masc_cli_runtime_config_remote.Saved { path })) ->
+         Printf.printf "set [runtime].default = \"%s\" in %s through the running server\n"
+           runtime_id path;
+         0)
 
 let runtime_default_set_cmd =
   let doc =
     "Validate and update [runtime].default in runtime.toml using the runtime \
-     config writer."
+     config writer. While this workspace's server answers on the port, the \
+     edit is saved through that server."
   in
   let info = Cmd.info "runtime-default-set" ~doc in
   let setup_lanes = Arg.(value & flag & info ["setup-lanes"]
@@ -1946,7 +1990,7 @@ let runtime_default_set_cmd =
     ~docv:"RUNTIME_ID" ~doc:"Append an enabled runtime to the primary lane in option order. Requires --setup-lanes; internal exact-output lanes stay primary-only.") in
   let bind_imp = Arg.(value & flag & info ["setup-imp"]
     ~doc:"Explicitly select this primary lane for imp, preserving other Keeper assignments. Requires --setup-lanes.") in
-  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id $ setup_lanes $ fallback_runtime_ids $ bind_imp)
+  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ port $ login_agent $ runtime_default_id $ setup_lanes $ fallback_runtime_ids $ bind_imp)
 
 let runtime_wizard_field ~field value =
   if String.exists (Char.equal '\000') value

@@ -700,7 +700,7 @@ let test_event_queue_operator_routes_are_exact () =
           ; content = "private title body"
           ; hearth = None
           ; updated_at = None
-          ; audience = Some (Keeper_event_queue.Audience_targets ["fixture-keeper"])
+          ; audience = Keeper_event_queue.Audience_targets ["fixture-keeper"]
           }
     }
   in

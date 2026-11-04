@@ -166,7 +166,7 @@ type candidate =
   { candidate_id : string
   ; keeper_name : string
   ; signal : Board_dispatch.board_signal
-  ; audience : Board.audience option
+  ; audience : Board.audience
   ; keeper_context : Yojson.Safe.t
         (** Partition identity ([Context_key]), read for candidates in every
             status, so it does not ride on the pending state. *)
@@ -178,7 +178,7 @@ type candidate =
     state must be finite. [Judged] and
     [Consumed] states additionally require a nonblank verdict rationale and
     nonblank judgment provenance. The [audience] is the event-time audience
-    pinned at record; [None] is a legacy row without pinning. *)
+    pinned at record. *)
 
 module Context_key : sig
   type t

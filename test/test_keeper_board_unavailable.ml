@@ -94,7 +94,7 @@ let poison_board_signal_stimulus () : Keeper_event_queue.stimulus =
         ; content = "references a post_id that was never created"
         ; hearth = None
         ; updated_at = Some (Time_compat.now ())
-        ; audience = Some Keeper_event_queue.Audience_discoverable
+        ; audience = Keeper_event_queue.Audience_discoverable
         }
   }
 ;;
@@ -387,54 +387,6 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
    | _ -> fail "source selection changed during recovery")
 ;;
 
-(* A pre-pinning signal has no trustworthy recipient. Its exact durable
-   selection must survive even if the post later disappears, without blocking
-   a readable sibling or inventing a recipient from the current post. *)
-let test_unpinned_board_source_is_retained_without_blocking_siblings () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack ->
-  let legacy_id = seed_board "legacy audience was not recorded" in
-  let pinned = match pending () with
-    | [ selection ] -> selection
-    | _ -> fail "expected the initial Board source" in
-  ack pinned;
-  let legacy = match pinned.source.payload with
-    | Keeper_event_queue.Board_signal board ->
-      { pinned.source with payload = Board_signal { board with audience = None } }
-    | _ -> fail "expected a Board signal" in
-  seed legacy;
-  let original = match pending () with
-    | [ selection ] -> selection
-    | _ -> fail "expected the unpinned legacy source" in
-  let readable = seed_board "a later source with a pinned audience" in
-  let first = intake () in
-  check (list string) "a legacy source does not block the readable sibling"
-    [ readable ] (admitted_ids first);
-  (match first.event_queue_intake_error with
-   | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable _ as error) ->
-     check bool "unknown audience is not a crashed cycle" false
-       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
-   | _ -> fail "the retained legacy source must remain observable");
-  let selections = pending () in
-  let survivor = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = legacy_id) selections in
-  check bool "the legacy source keeps its exact incarnation" true
-    (Keeper_event_queue_state.same_entry original survivor);
-  check bool "the legacy source is not replaced or readdressed" true (survivor.source = legacy);
-  let sibling = List.find (fun selection -> selection.Keeper_event_queue_state.source.post_id = readable) selections in
-  ack sibling;
-  (match Board_dispatch.delete_post ~post_id:legacy_id with
-   | Ok Board.Durable_deletion -> ()
-   | Ok (Board.Deletion_persistence_pending detail) -> fail detail
-   | Error error -> fail (Board.show_board_error error));
-  let again = intake () in
-  check (list string) "a removed post cannot turn unknown audience into delivery" [] (admitted_ids again);
-  check int "no legacy observation was fabricated" 0 (List.length again.pending_board_events);
-  (match pending () with
-   | [ selection ] ->
-     check bool "post deletion does not acknowledge the original" true
-       (Keeper_event_queue_state.same_entry original selection && selection.source = legacy)
-   | _ -> fail "the same legacy source must remain pending")
-;;
-
 let rejection_ok = function Ok value -> value | Error detail -> fail detail
 
 let rejection_workspace_ok = function
@@ -602,7 +554,7 @@ let comment_event ~meta ~post_id ~comment_id ~author content =
           ; content
           ; hearth = None
           ; updated_at = Some (Time_compat.now ())
-          ; audience = Some Keeper_event_queue.Audience_thread_participants
+          ; audience = Keeper_event_queue.Audience_thread_participants
           }
     }
   in
@@ -875,7 +827,7 @@ let test_malformed_queued_comment_identity_is_a_failed_read () =
     ; content = "a reply"
     ; hearth = None
     ; updated_at = None
-    ; audience = None
+    ; audience = Keeper_event_queue.Audience_discoverable
     }
   in
   let refused what stimulus =
@@ -902,7 +854,7 @@ let test_malformed_queued_audience_is_a_failed_read () =
     ; content = "queued post"
     ; hearth = None
     ; updated_at = None
-    ; audience = Some (Keeper_event_queue.Audience_targets targets)
+    ; audience = Keeper_event_queue.Audience_targets targets
     }
   in
   List.iter
@@ -922,7 +874,6 @@ let test_malformed_queued_audience_is_a_failed_read () =
           | Board.Read_invalid_id _ -> ()
           | (Board.Read_post_not_found _
             | Board.Read_comment_not_found _
-            | Board.Read_audience_not_pinned _
             | Board.Read_source_unavailable _) as error ->
             failf "malformed targets must be a permanent read failure: %s"
               (Board.show_board_read_error error)))
@@ -953,8 +904,6 @@ let () =
             test_permanent_absence_does_not_spend_an_admission_slot
         ; test_case "unavailable posts retain the exact durable selection" `Quick
             test_unavailable_posts_source_retains_the_exact_durable_selection
-        ; test_case "unpinned Board source survives post removal without blocking siblings" `Quick
-            test_unpinned_board_source_is_retained_without_blocking_siblings
         ; test_case "delivered rejection remains current at intake" `Quick
             test_delivered_rejection_remains_current_at_intake
         ; test_case "superseded rejection retires before projection" `Quick

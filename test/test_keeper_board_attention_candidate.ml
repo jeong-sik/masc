@@ -99,7 +99,7 @@ let candidate ?(context = keeper_context ()) signal :
   { candidate_id
   ; keeper_name
   ; signal
-  ; audience = Some Masc.Board.Discoverable
+  ; audience = Masc.Board.Discoverable
   ; keeper_context = context
   ; recorded_at = 1.0
   ; status = A.Pending { last_delivery_failure = None }
@@ -329,6 +329,27 @@ let test_codec_and_context_identity_are_strict () =
   (match A.candidate_of_json old_schema with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "candidate schema v6 was accepted");
+  (* The audience is the event-time audience pinned at record. A row that
+     omits it or carries null is not a candidate. *)
+  let with_audience_rewritten rewrite =
+    match encoded with
+    | `Assoc fields -> `Assoc (rewrite fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
+  in
+  (match
+     A.candidate_of_json
+       (with_audience_rewritten (List.remove_assoc "audience"))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a candidate row without an audience was accepted");
+  (match
+     A.candidate_of_json
+       (with_audience_rewritten
+          (List.map (fun (name, value) ->
+             if String.equal name "audience" then name, `Null else name, value)))
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a candidate row with a null audience was accepted");
   let left = ok "left context" (A.Context_key.of_candidate original) in
   let reordered =
     candidate

@@ -132,18 +132,12 @@ type turn_usage =
 
 val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
 
-type handoff_state = Handoff_unrequested | Handoff_pending | Handoff_accepted | Handoff_rejected
-(** Scheduling notice outcome at natural turn completion. Pending means a
-    notice was sent but its acknowledgement did not precede the terminal frame;
-    it is not evidence that the original operation finished. *)
-
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
   ; dynamic_tool_calls : int
-  ; scheduling_handoff : handoff_state
   ; subscription : subscription
   ; user_agent : string option
   ; resumed : bool
@@ -467,7 +461,6 @@ type context_submission_method =
   | Thread_resume
   | Thread_inject_items
   | Turn_start
-  | Turn_steer
   | Dynamic_tool_response
 (** Every context-bearing frame MASC writes to Codex stdin. The send site names
     the frame; the method is never re-read from the serialized JSON. A
@@ -494,9 +487,9 @@ type context_submission = private
   ; write : Runtime_official_client_write.t
         (** The compact JSON written before the LF. Start and resume select
             [Developer_instructions] and [Dynamic_tools]; inject_items selects
-            each [Injected_item]; turn/start and turn/steer select each
-            [Turn_text]. A [Dynamic_tool_response] selects no slot: its
-            content items are counted in [Unattributed_carrier]. *)
+            each [Injected_item]; turn/start selects each [Turn_text]. A
+            [Dynamic_tool_response] selects no slot: its content items are
+            counted in [Unattributed_carrier]. *)
   }
 
 val context_submission_to_json : context_submission -> Yojson.Safe.t
@@ -504,12 +497,6 @@ val context_submission_to_json : context_submission -> Yojson.Safe.t
     This is neither server acceptance nor the provider's complete model input. *)
 
 val run_turn :
-  ?await_handoff:(unit -> bool) ->
-  (* Event-driven scheduling notice. The waiter returns true when queued input
-     needs the turn slot, false when its owner closes. It is cancelled when the
-     turn ends. Only the protocol consumer writes the steer, after any active
-     dynamic-tool result, including before the first tool. Input is not consumed
-     and the client still completes naturally. *)
   ?dynamic_tools:dynamic_tool list ->
   ?on_undelivered_tool_result:(undelivered_tool_result -> (unit, string) result) ->
   (* Persist before returning the ended turn. A persistence failure fails the
@@ -572,6 +559,4 @@ val run_turn :
     Among host stops, failure takes priority over completion, then checkpoint
     yield; an earlier non-host failure, including the outer protocol reader's
     error before worker drain, remains authoritative. No tool effect
-    is replayed to make this decision. During a scheduling handoff, a sole
-    completed tool may leave the natural vendor turn running. Its completion
-    still participates if an admitted peer stops, whichever settles first. *)
+    is replayed to make this decision. *)

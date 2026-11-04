@@ -5928,8 +5928,7 @@ let test_cooperative_yield_retains_checkpoint () =
     | Ok observed -> Alcotest.(check bool) "cooperative yield retains its checkpoint"
         true (observed = stopped)
     | Error _ -> Alcotest.fail "cooperative yield became a failure")
-    [Runtime_agent.Yielded_to_operation_queued {turns_used=2; provider_turn_ordinal = 17 };
-     Runtime_agent.Yielded_to_durable_stimulus {turns_used=2; provider_turn_ordinal = 17 }]
+    [Runtime_agent.Yielded_to_durable_stimulus {turns_used=2; provider_turn_ordinal = 17 }]
 ;;
 
 let guarded_accept_rejection ?(content = []) stop_reason =

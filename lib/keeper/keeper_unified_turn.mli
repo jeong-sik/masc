@@ -67,9 +67,6 @@ type turn_failure =
     possibly rotated runtime from Keeper meta. *)
 
 type checkpoint_reason =
-  | Operation_queued
-      (** A chat operation was queued for this keeper; the turn yielded the
-          slot to it. *)
   | Durable_stimulus_arrived
       (** A newer durable stimulus arrived; the turn yielded so the next
           turn carries it. *)

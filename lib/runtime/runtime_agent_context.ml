@@ -7,7 +7,6 @@
 
 type stop_reason =
   | Completed of { provider_turn_ordinal : int }
-  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
     (* The autonomous lane's AGENT_CORE run stopped at a turn boundary because a
         durable Dashboard/connector operation is queued behind the Owner child.
        Progress is checkpointed and the keeper resumes on the next cycle — the

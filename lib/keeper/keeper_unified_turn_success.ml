@@ -53,7 +53,6 @@ let terminal_outcome_of_result result =
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.Completed _ -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
-  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Terminal_checkpoint
 ;;
@@ -244,8 +243,6 @@ let emit_usage_metrics_and_log
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
     | Runtime_agent.Completed _ -> "completed"
-    | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-      Printf.sprintf "yielded_to_operation_queued(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
     | Runtime_agent.InputRequired { turns_used; _ } ->
@@ -257,7 +254,6 @@ let emit_usage_metrics_and_log
     | Terminal_input_required -> "input_required"
      | Terminal_checkpoint ->
       (match result.stop_reason with
-       | Runtime_agent.Yielded_to_operation_queued _ -> "yielded_to_operation_queued"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
        | Runtime_agent.InputRequired _ -> "input_required"
@@ -443,15 +439,6 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     then Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-    (* A clean, intentional yield to a queued operation, not a degraded outcome:
-       clear turn-failure state and record health success, like a completed
-       turn. The keeper resumes its own work on the next cycle. *)
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "yielded autonomous Owner child to a queued operation after %d turn(s), checkpoint \
-       saved — will resume next cycle"
-      turns_used;
-    reset_failure_state ()
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \

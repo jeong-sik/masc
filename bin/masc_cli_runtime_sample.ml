@@ -95,7 +95,7 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
                                    | Ok assistant ->
                                        turns (index + 1) (history @ [ T.user_msg prompt; assistant ]) rest))
                          | (Runtime_agent.Completed _, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
-                         | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _)), _) -> failure "incomplete_turn"
+                         | ((Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _), _) -> failure "incomplete_turn"
                                   "Execution did not finish a complete assistant turn")
               in
               turns 1 [] scenario.prompts

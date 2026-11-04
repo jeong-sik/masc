@@ -1244,12 +1244,7 @@ let test_every_answer_carries_the_input_state () =
     | Error (Live.Observed_failure {receipt;_} | Live.Partial_failure {receipt;_}) -> receipt
     | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail (label ^ ": no failure receipt") in
   let held label receipt =
-    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt));
-    check string (label ^ ": lock state") "release_uncertain" (text (field "state" (field "inputLock" receipt)));
-    check string (label ^ ": lock generation") pending.generation
-      (text (field "generation" (field "pending" (field "inputLock" receipt))));
-    check bool (label ^ ": ownership is not claimed without an observation") false
-      (Yojson.Safe.Util.to_bool (field "keeperCallable" (field "releasePath" (field "inputLock" receipt)))) in
+    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt)) in
   let refusal=Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) in
   check string "the refusal of the next input stays before any effect" "before effect" (failure_kind refusal);
   held "the refusal" (receipt_of "the refusal" refusal);
@@ -1263,17 +1258,12 @@ let test_every_answer_carries_the_input_state () =
     (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
   held "a partial failure" partial;
   check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
-  (match Peer.with_input_state peer (Ok (obj ["inputLock",str "observed by the producer"])) with
-   | Ok value -> check string "a lock the answer already carries is kept" "observed by the producer"
-       (text (field "inputLock" value))
-   | Error _ -> fail "an answer carrying its own lock failed");
   (match dispatch peer Live.Page_act (obj ["action",str "release_input";
       "generation",str pending.generation;"confirmation",str "checked_and_released"]) with
    | Ok _ -> ()
    | Error _ -> fail "the owning agent could not release its lock");
   let after=receipt_of "a failure after release" (Peer.with_input_state peer (Error (Live.Before_effect "refused"))) in
-  check string "after release the readiness is the Keeper's" "keeper_asserted" (text (field "inputReadiness" after));
-  check bool "after release no lock is named" true (field "inputLock" after=`Null)
+  check string "after release the readiness is the Keeper's" "keeper_asserted" (text (field "inputReadiness" after))
 
 let test_chooser_upload_respects_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in

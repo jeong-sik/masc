@@ -3132,8 +3132,7 @@ let test_task_without_contract_keeps_none () =
 let test_link_execution_artifacts_leaves_contract_alone () =
   with_test_env (fun config ->
     let stated : Masc_domain.task_contract =
-      { strict = false
-      ; completion_contract = [ "dashboard renders the linked run" ]
+      { completion_contract = [ "dashboard renders the linked run" ]
       ; required_evidence = [ "artifact:run.log" ]
       ; inspect_gate_evidence = []
       ; verify_gate_evidence = [ "artifact:run.log" ]

@@ -186,7 +186,7 @@ let board_distractor_stimulus ~post_id ~arrived_at : Q.stimulus =
         ; content = "never consumed by this suite"
         ; hearth = None
         ; updated_at = None
-        ; audience = Some (Keeper_event_queue.Audience_discoverable)
+        ; audience = Keeper_event_queue.Audience_discoverable
         }
   }
 ;;
@@ -220,7 +220,7 @@ let board_attention_stimulus ~label ~arrived_at : Q.stimulus =
             ; content = "content-" ^ label
             ; hearth = None
             ; updated_at = Some post.updated_at
-            ; audience = Some (Keeper_event_queue.Audience_discoverable)
+            ; audience = Keeper_event_queue.Audience_discoverable
             }
         }
   }

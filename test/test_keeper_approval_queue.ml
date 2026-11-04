@@ -400,7 +400,7 @@ let test_pending_origin_projection_and_audit_keep_actual_witness () =
         { post_id = "board-actual-source"; urgency = Normal; arrived_at = 1.0
         ; payload = Board_signal
             { kind = Post_created; author = "author"; title = "request"
-            ; content = "admitted request"; hearth = None; updated_at = None; audience = Some Keeper_event_queue.Audience_discoverable } }
+            ; content = "admitted request"; hearth = None; updated_at = None; audience = Keeper_event_queue.Audience_discoverable } }
       in
       let selections =
         Keeper_event_queue.enqueue Keeper_event_queue.empty board
@@ -485,7 +485,7 @@ let test_mixed_hitl_board_origin_keeps_exact_grant_separate () =
        let board : Keeper_event_queue.stimulus =
          {post_id="board-b"; urgency=Normal; arrived_at=1.0
          ; payload=Board_signal {kind=Post_created; author="author"; title="request"; content="new request"
-           ; hearth=None; updated_at=None; audience = Some Keeper_event_queue.Audience_discoverable}} in
+           ; hearth=None; updated_at=None; audience = Keeper_event_queue.Audience_discoverable}} in
        let hitl = {board with post_id="hitl-a"; payload=Hitl_resolved resolution} in
        let selections stimuli =
          List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli

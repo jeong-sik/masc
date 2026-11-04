@@ -48,7 +48,6 @@ let make_keeper_meta ?current_task_id name =
 
 let empty_contract : Masc_domain.task_contract =
   {
-    strict = false;
     completion_contract = [];
     required_evidence = [];
     inspect_gate_evidence = [];

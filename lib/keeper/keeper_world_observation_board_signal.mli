@@ -20,13 +20,12 @@ type board_observation =
   ; content : string
   ; hearth : string option
   ; updated_at : float option
-  ; audience : Board.audience option
+  ; audience : Board.audience
   }
 (** Durable queue observation, including the producer-issued comment identity.
 
     The [audience] is the event-time audience the producer pinned to the
-    queue row alongside its content. [None] is a legacy row written before
-    pinning (explicit unknown, never a default). *)
+    queue row alongside its content. *)
 
 type board_read_operation =
   | Get_post
@@ -35,8 +34,7 @@ type board_read_operation =
   | Parse_queued_audience
 
 (** A Board observation unavailable because an identifier is invalid, a row
-    is absent, or a legacy queued signal has no pinned audience. The latter
-    preserves the source instead of inferring its audience from current data. *)
+    is absent, or the Board source cannot be read. *)
 type board_unavailable =
   { operation : board_read_operation
   ; post_id : string
@@ -82,8 +80,7 @@ val board_observation_of_board_stimulus
     wire strings; they are parsed here into {!Board.Comment_id.t}, and one
     that does not parse is [Error] with [Parse_queued_comment_identity].
     The queued audience mirror becomes {!Board.audience}; a target that does
-    not parse is [Error] with [Parse_queued_audience]. A missing queue
-    audience stays [None] (legacy row) for the drain to refuse. *)
+    not parse is [Error] with [Parse_queued_audience]. *)
 
 val board_stimulus_of_board_signal
   :  Board_dispatch.addressed_board_signal
@@ -96,11 +93,10 @@ val queue_audience_of_board : Board.audience -> Keeper_event_queue.board_audienc
 
 val board_stimulus_of_signal_with_audience
   :  signal:Board_dispatch.board_signal
-  -> audience:Board.audience option
+  -> audience:Board.audience
   -> Keeper_event_queue.board_stimulus
-(** Preserve a signal with an explicitly pinned audience option. [None] is a
-    legacy row without pinning; the drain refuses audience-dependent
-    judgments for it. Candidates use this with their stored audience. *)
+(** Preserve a signal with its pinned audience. Candidates use this with
+    their stored audience. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)
@@ -124,7 +120,7 @@ val match_signal
 
 val match_observation
   :  post_kind:Board.post_kind
-  -> audience:Board.audience option
+  -> audience:Board.audience
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:board_observation
   -> match_result

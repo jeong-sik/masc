@@ -40,10 +40,6 @@ type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
   | Read_comment_not_found of string
-  | Read_audience_not_pinned of string
-      (** A durable queue stimulus predates event-audience pinning and names
-          no audience for its event. The post exists; the queued row cannot
-          support an audience-dependent judgment. *)
   | Read_source_unavailable of board_error
       (** The posts source cannot establish either a post or its absence. *)
 [@@deriving show]

@@ -89,7 +89,7 @@ let candidate post_id : Candidate.candidate =
   { candidate_id
   ; keeper_name
   ; signal
-  ; audience = Some Board.Discoverable
+  ; audience = Board.Discoverable
   ; recorded_at = 1.0
   ; keeper_context =
       `Assoc

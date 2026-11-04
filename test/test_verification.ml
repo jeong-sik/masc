@@ -1452,8 +1452,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                     ~decision);
                Eio.Promise.resolve resolve_verdict_committed ());
           let contract : Masc_domain.task_contract =
-            { strict = true
-            ; completion_contract = [ "system evaluator approves the submitted evidence" ]
+            { completion_contract = [ "system evaluator approves the submitted evidence" ]
             ; required_evidence = [ "system review evidence" ]
             ; inspect_gate_evidence = []
             ; verify_gate_evidence = []
@@ -1710,8 +1709,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                     ~decision);
                Eio.Promise.resolve resolve_verdict_committed ());
           let original_contract : Masc_domain.task_contract =
-            { strict = true
-            ; completion_contract = [ "persisted completion criterion" ]
+            { completion_contract = [ "persisted completion criterion" ]
             ; required_evidence = [ "persisted required artifact" ]
             ; inspect_gate_evidence = []
             ; verify_gate_evidence = [ "persisted gate artifact" ]

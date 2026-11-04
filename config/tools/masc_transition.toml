@@ -5,7 +5,7 @@ Move a Task through the agent actions claim, start, submit_for_verification, \
 cancel, or release. Ownership is exact and cannot be overridden by caller \
 arguments. Completion requires the assignee to submit evidence, then wait \
 for an authenticated human-operator or typed auto-judge verdict outside this \
-tool. Direct done and approve/reject are deliberately unavailable here. \
+tool. Approve/reject are deliberately unavailable here. \
 Supports expected_version CAS."""
 
 [[params]]
@@ -21,9 +21,8 @@ required = true
 description = """
 Which transition to apply. claim takes an unclaimed Task; start moves your \
 claim into progress; release hands it back; cancel ends it. Completion goes \
-through submit_for_verification with evidence in notes — done is refused \
-from every working status and cannot complete a Task here."""
-enum = ["claim", "start", "done", "cancel", "release", "submit_for_verification"]
+through submit_for_verification with evidence in notes."""
+enum = ["claim", "start", "cancel", "release", "submit_for_verification"]
 
 [[params]]
 name = "expected_version"

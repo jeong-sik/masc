@@ -219,6 +219,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; agent_core ~kind:Observer.Telemetry "analyst"
     ; heartbeat "bandleader"
     ; Observer.Keeper_composite_changed { keeper = "largo"; at = 100. }
+    ; Observer.Keeper_metrics_appended { keeper = "largo"; at = 100. }
     ; Observer.Snapshot "execution_snapshot"
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
@@ -239,7 +240,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all thirteen" 13 (under Acting.Everything);
+  check int "everything keeps all fourteen" 14 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
 

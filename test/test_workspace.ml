@@ -2075,42 +2075,6 @@ let test_verdict_rejects_blank_rejection_reason () =
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 
-let strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "deliverable verified by a second agent" ]
-  ; (* Declared up front so the strict evidence precheck is satisfied by the
-       contract itself and direct done reaches the verification-lane guard. *)
-    required_evidence = [ "artifact:deliverable" ]
-  ; inspect_gate_evidence = []
-  ; verify_gate_evidence = []
-  }
-
-let test_strict_task_done_requires_verification_submission () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~contract:strict_contract ~title:"Strict Task"
-        ~priority:1 ~description:""
-    in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
-    let direct =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Done_action
-        ~notes:"evidence attached"
-        ()
-    in
-    (match direct with
-     | Error e ->
-       Alcotest.(check bool) "error requires verification submission" true
-         (str_contains
-            (Masc_domain.masc_error_to_string e)
-            "must be submitted for verification")
-     | Ok _ -> Alcotest.fail "task bypassed verification submission");
-    Alcotest.(check bool) "task remains nonterminal" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
 let test_default_task_done_requires_verification_submission () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Default Task" ~priority:1 ~description:"" in
@@ -3553,8 +3517,6 @@ let () =
 
     (* === RFC-0323 G-1: verification-required done guard === *)
     "verification_guard", [
-      Alcotest.test_case "strict task done requires verification submission" `Quick
-        test_strict_task_done_requires_verification_submission;
       Alcotest.test_case "default task done requires verification submission" `Quick
         test_default_task_done_requires_verification_submission;
     ];

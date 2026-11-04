@@ -75,7 +75,7 @@ producer keeper 에게 돌아온다. 새 Task 상태는 없다. 타임아웃 게
 ### 2.1 Task contract — `pinned_ref` 와 `probes`
 
 `lib/types/types_core.ml:462` 의 `task_contract` 는 지금
-`strict; completion_contract; required_evidence; inspect_gate_evidence; verify_gate_evidence`
+`completion_contract; required_evidence; inspect_gate_evidence; verify_gate_evidence`
 다. 두 필드를 더한다.
 
 ```ocaml

@@ -162,8 +162,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
     match task.contract with
     | None -> []
     | Some contract ->
-        (if contract.Masc_domain.strict then [ "  contract strict" ] else [])
-        @ list_lines "done-when" contract.Masc_domain.completion_contract
+        list_lines "done-when" contract.Masc_domain.completion_contract
         @ list_lines "evidence" contract.Masc_domain.required_evidence
         @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
         @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence

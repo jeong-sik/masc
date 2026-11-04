@@ -123,9 +123,6 @@ val dispatch_keeper_phase_event_result
   -> Keeper_state_machine.event
   -> (unit, lifecycle_dispatch_error) result
 
-(** {1 Trace and Board Utilities} *)
-
-val generate_trace_id : ?now:float -> unit -> string
 (** {1 Model and Workspace Utilities} *)
 
 val resolve_max_context_resolution_for_runtime_id

@@ -202,12 +202,20 @@ let capture_observations () = Atomic.get observations
 
 (* What the planning projection shows of an observation snapshot: the scan's
    failures and each original read's failure. An in-flight read with no
-   failure shows nothing. *)
+   failure shows nothing, and neither does a scan that found no failure. The
+   row looks each failure up by Goal, so order is not shown: a reread moves
+   its observation to the head of the list. *)
 let shown snapshot =
-  ( snapshot.reconciliation
+  let reconciliation =
+    match snapshot.reconciliation with
+    | Some (root, (_ :: _ as failures)) -> Some (root, List.sort compare failures)
+    | Some (_, []) | None -> None
+  in
+  ( reconciliation
   , List.filter_map
       (fun observed -> Option.map (fun failure -> observed.binding, failure) observed.failure)
-      snapshot.original_reads )
+      snapshot.original_reads
+    |> List.sort compare )
 
 (* The observations live in this process only, so the planning projection
    changes with them and no store write announces it (RFC-0480 §3.4). *)

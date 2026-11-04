@@ -682,6 +682,21 @@ let test_unified_browser_picker () =
   expect "stale discovery cannot overwrite explicit selection"
     (accept_clients ~generation:90 (Ok (found [firefox])) live = (live, false))
 
+(* Each published reason has its own notice: a user-owned name is fixed by
+   the operator, a missing Space is reopened by take_over. *)
+let test_unavailable_notice_names_its_recovery () =
+  let notice record = unavailable_notice { (create ()) with unavailable = decode_unavailable
+      (Some (`List [Masc.Browser_addon_observation.unavailable_to_json record])) } in
+  let contains part = function
+    | Some text -> String_util.contains_substring text part
+    | None -> false in
+  expect "a user-owned name keeps the operator's fix"
+    (contains "Ego user-owned at startup" (notice (Masc.Browser_addon_observation.Ego_user_owned_name
+      {space="masc";ids=[36];observed_at=42.})));
+  expect "a missing Space says the connection ended and take_over reopens it"
+    (contains "Ego Space gone, connection ended (last list); take_over reopens"
+      (notice (Masc.Browser_addon_observation.Ego_space_missing {space="masc";space_id=12;observed_at=42.})))
+
 let test_failed_discovery_retains_startup_observation () =
   let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let unavailable = decode_unavailable
@@ -1176,6 +1191,7 @@ let () =
      "inventory completeness summary contract", test_inventory_summary_contract;
      "unified browser picker", test_unified_browser_picker;
      "failed discovery retains startup recovery", test_failed_discovery_retains_startup_observation;
+     "an unavailable notice names its recovery", test_unavailable_notice_names_its_recovery;
      "the BiDi host report rides the connection list", test_bidi_host_discovery;
      "raw refresh scroll identity", test_raw_refresh_scroll_identity;
      "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;

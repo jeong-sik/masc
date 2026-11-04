@@ -278,6 +278,11 @@ def run(script,answer):
     step=lines[0].removeprefix('// masc-ego: ')
     args=json.loads(json.loads(next(l for l in lines if l.startswith('const args = JSON.parse(')).removeprefix('const args = JSON.parse(').removesuffix(');')))
     with open(root/'steps','a') as log:log.write(step+'\n')
+    # missing: ego no longer lists the bound Space, so taskSpace throws for
+    # every step bound to it; reopening by name makes Space 52.
+    space_id=52 if (root/'reopened').exists() else 51
+    if (root/'gone').exists() and step not in ['space.inspect','space.open','space.status','space.claim']:
+        answer(error='task space not found: 51',unopened=True);return
     if step=='space.inspect':
         if mode=='inspect-fails-in-use':answer(error='listing unavailable')
         elif mode=='user-owned':answer([{'id':36,'createdBy':'user','ownership':'user'}])
@@ -286,7 +291,7 @@ def run(script,answer):
         answer({'spaceId':args['spaceId'],'name':'masc','ownership':'agent'})
     elif step=='space.open':
         if mode in ['in-use','inspect-fails-in-use']:answer(error='EGO_TASK_SPACE_NAME_IN_USE: masc')
-        else:answer({'spaceId':51,'name':'masc','ownership':'agent'})
+        else:answer({'spaceId':space_id,'name':'masc','ownership':'agent'})
     elif step=='tabs.list':
         answer([{'label':'p1','targetId':'T1','openedBy':'agent','title':'Fixture','url':'https://fixture.test/','active':True,'dialog':None,'dialogUnread':None}])
     elif step=='page.capture':
@@ -354,14 +359,17 @@ def run(script,answer):
         paths=[pathlib.Path(path) for path in args['paths']]
         (root/'uploaded').write_text(json.dumps([str(path) for path in paths]))
         answer({'error':None,'dialog':None,'tab':{'url':'https://fixture.test/','title':'Fixture'}})
-    elif step=='space.status':answer([{'spaceId':51,'name':'Renamed native Space','ownership':'agent'}])
-    elif step=='space.finish':answer({'spaceId':51,'closedSpace':True,'keptManagedLabels':[],
+    elif step=='space.status':
+        if (root/'gone').exists():answer([{'spaceId':9,'name':'other','ownership':'agent'}])
+        else:answer([{'spaceId':51,'name':'Renamed native Space','ownership':'agent'}])
+    elif step=='space.finish':answer({'spaceId':space_id,'closedSpace':True,'keptManagedLabels':[],
         'closedManagedLabels':['p1','p2'],'preservedUnmanagedCount':0})
     else:answer(error='unexpected step '+step)
 for raw in stream:
     command=json.loads(raw);out=[]
-    def answer(value=None,error=None):
+    def answer(value=None,error=None,unopened=False):
         frame={'ok':True,'value':value} if error is None else {'ok':False,'error':error}
+        if unopened:frame['spaceOpen']='failed'
         out.append('masc-ego-result '+json.dumps(frame))
     run(command['script'],answer)
     stream.write(json.dumps({'id':command['id'],'lines':out})+'\n');stream.flush()
@@ -393,7 +401,51 @@ let scenario mode =
       let dispatch command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       let work () =
         entered := true;
-        if mode = "user-owned" then (
+        let clock = Eio.Stdenv.clock env in
+        let published () = ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner)) in
+        if mode = "missing" then (
+          let client = match B.connected_clients () with [client] -> client | _ -> fail "expected one ego client" in
+          let issue verb = dispatch (W.Issue {route=B.Live_route (Some client.client_id);verb;
+            actor=Some "keeper/live-fixture";timeout_sec=B.default_timeout_sec;only_if_idle=false}) in
+          ignore (answered (issue B.Tabs_list));
+          (* The Space is closed inside ego, outside masc. *)
+          write (Filename.concat root "gone") "";
+          let refused = answered (issue B.Tabs_list) in
+          check bool "the step did nothing" true
+            (Yojson.Safe.Util.member "effectPhase" refused=`String "not_started");
+          check bool "the step names the Space as missing and opens no replacement" true
+            (String_util.contains_substring (Yojson.Safe.Util.(member "error" refused |> to_string)) "no replacement was opened");
+          let rec ended deadline = match B.connected_clients (), (published ()).unavailable with
+            | [], [Masc.Browser_addon_observation.Ego_space_missing {space="masc";space_id=51;observed_at}]
+              when observed_at > 0. -> ()
+            | _ ->
+                if Eio.Time.now clock > deadline then fail "the connection to a missing Space did not end with its record"
+                else (Eio.Time.sleep clock 0.05; ended deadline) in
+          ended (Eio.Time.now clock +. 10.);
+          check bool "the worker keeps serving" false (Owner.is_retired owner);
+          check bool "nothing opened a Space on its own" false
+            (List.length (List.filter (String.equal "space.open") (lines (Filename.concat root "steps"))) > 1);
+          Sys.remove (Filename.concat root "gone");
+          write (Filename.concat root "reopened") "";
+          check bool "take_over without a clientId reopens the configured name" true
+            (answered (dispatch (W.Issue {route=B.Live_route None;
+              verb=B.Page_act (B.Action.Control B.Action.Take_over);actor=None;timeout_sec=30.;only_if_idle=false}))
+             =`Assoc ["action",`String "take_over";"spaceName",`String "masc";"reopening",`Bool true]);
+          let rec reconnected deadline = match B.connected_clients () with
+            | [client] -> client
+            | [] ->
+                if Eio.Time.now clock > deadline then fail "the reopened Space did not connect"
+                else (Eio.Time.sleep clock 0.05; reconnected deadline)
+            | _ -> fail "the reopened Space connected more than one client" in
+          let client = reconnected (Eio.Time.now clock +. 10.) in
+          check bool "the new connection serves the Space ego made for the configured name" true
+            (client.space=Some {B.id=52;name="masc"});
+          check bool "the missing record is gone" true ((published ()).unavailable=[]);
+          ignore (answered (dispatch (W.Issue {route=B.Live_route (Some client.client_id);
+            verb=B.Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels [])));
+            actor=None;timeout_sec=B.default_timeout_sec;only_if_idle=false})));
+          check bool "the remaining worker retires normally" true (dispatch W.Retire = W.Receipt))
+        else if mode = "user-owned" then (
           check bool "the worker keeps serving" false (Owner.is_retired owner);
           check bool "the exact unavailability is published" true
             (match (ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner))).unavailable with
@@ -616,8 +668,8 @@ let scenario mode =
       let failure = try Ego.run ~env ~owner ~input_store ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
-       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned"), None -> ()
-       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned"), Some detail -> failf "the connection failed: %s" detail
+       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned" | "missing"), None -> ()
+       | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned" | "missing"), Some detail -> failf "the connection failed: %s" detail
        | ("no-version" | "in-use" | "inspect-fails-in-use"), Some detail ->
          check bool "says why" true
            (String_util.contains_substring detail (if mode = "no-version" then "not signed in" else "EGO_TASK_SPACE_NAME_IN_USE"))
@@ -666,6 +718,11 @@ let scenario mode =
       check (list string) "inspection, claim, reconnection and completion are the only steps"
         ["space.inspect";"space.claim";"space.inspect";"space.open";"space.finish"] steps;
       check int "each SDK session ran its own process" 3 processes
+    | "missing" ->
+      check bool "caller work ran" true !entered;
+      check (list string) "the failed step's lookup ends the connection; only take_over opens again"
+        ["space.inspect";"space.open";"tabs.list";"tabs.list";"space.status";"space.inspect";"space.open";"space.finish"] steps;
+      check int "the reopened connection runs its own process" 2 processes
     | _ ->
       check bool "caller work never ran" false !entered;
       check (list string) "an inconclusive or stale listing preserves the open refusal" ["space.inspect";"space.open"] steps)
@@ -696,5 +753,6 @@ let () =
       test_case "retirement stops a running command and preserves the Space" `Quick (child "retire");
       test_case "an ego that names no version fails the start" `Quick (child "no-version");
       test_case "a user-owned name leaves the owner serving after SDK cleanup" `Quick (child "user-owned");
+      test_case "a missing Space ends its connection until take_over reopens the name" `Quick (child "missing");
       test_case "a stale listing preserves the SDK refusal" `Quick (child "in-use");
       test_case "an unreadable listing preserves the SDK refusal" `Quick (child "inspect-fails-in-use") ] ]

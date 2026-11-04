@@ -297,8 +297,9 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
             |Browser_lane.Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _
             |Browser_lane.Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> false) ->
       (* The route names no client because the lane has none: the worker
-         that published the user-owned refusal is the target, and it checks
-         its own state again before it claims the Space. A worker that did
+         that published the user-owned refusal or the missing Space is the
+         target, and it checks its own state again before it recovers the
+         Space. A worker that did
          not answer its snapshot does not join this choice: the target is
          the one refuser that did answer, and its own gate re-reads the
          refusal, so an unobserved second refuser can only stay unclaimed
@@ -318,7 +319,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
                 {Browser_selection.route=Browser_lane.Live_route None;reason=Browser_selection.Explicit_browser},
                 served)
           | [] ->
-              refuse "take_over without a clientId reclaims a user-owned ego task space; no live worker reports one"
+              refuse "take_over without a clientId recovers an ego task space a worker reports as user-owned or missing; no live worker reports one"
           | _::_::_ ->
               refuse "more than one live worker reports an unavailable ego task space; inspect the inventory issues"))
     | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->

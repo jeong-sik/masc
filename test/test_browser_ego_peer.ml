@@ -3941,11 +3941,11 @@ let test_a_space_that_did_not_open_is_looked_up_once () =
   listing:=`Ids [52];
   let detail=before_effect "a Space ego no longer lists" (dispatch peer Live.Tabs_list (obj [])) in
   check string "a missing Space is named as missing, and nothing replaces it"
-    "the original bound Space is missing from the native inventory; no replacement was opened" detail;
+    "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over without a clientId asks its worker to open the configured Space again" detail;
   check bool "the connection's presence is missing" true (presence ()=Masc.Browser_ego_space_observation.Missing);
   let detail=before_effect "an effect step on a missing Space"
     (dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/"))) in
-  check string "an effect step on it did nothing" "the original bound Space is missing from the native inventory; no replacement was opened" detail;
+  check string "an effect step on it did nothing" "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over without a clientId asks its worker to open the configured Space again" detail;
   check int "each failed open is looked up once" 4 (List.length !lookups)
 
 let test_explicit_completion_is_terminal_and_never_replayed () =

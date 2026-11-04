@@ -308,7 +308,12 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
    worker's download folder the broker publishes from. *)
 let downloads_folder = "ego"
 type user_owned_name = { space : string; ids : int list; observed_at : float }
+(* The bound Space ego no longer lists, as the connection last saw it. *)
+type space_missing = { space : B.ego_space; observed_at : float }
+(* A missing Space's connection ends with the wake of the recovery that was
+   attached before its record was published. *)
 type connection_end = Connected | User_owned_name of user_owned_name
+  | Space_missing of space_missing * unit Eio.Promise.t
 
 let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (configuration : Browser_configuration.live_ego) work =
   let command = configuration.command in
@@ -318,6 +323,67 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
   (* [work] returning ends this run: the supervisor stops waiting for a
      reclaim that can no longer be served, and a serving cycle closes. *)
   let work_done, work_finished = Eio.Promise.create () in
+  let publish_missing ({space; observed_at} : space_missing) =
+    match Browser_addon_owner.mark_ego_space_missing owner ~space:space.name ~space_id:space.id ~observed_at with
+    | Error detail -> Log.Server.warn "browser Add-on could not publish the missing ego task space: %s" detail
+    | Ok () ->
+      Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); take_over without a clientId asks for the configured Space again"
+        space.id space.name in
+  (* One claim: a fresh session reclaims the Space whose task ended while the
+     operator held it, then the supervisor cycle below reconnects. The claim
+     answers the request that asked for it, the reconnection follows on its
+     own. *)
+  let claim ids = match ids with
+    | [] -> Error "the refused ego task space was observed without its id"
+    | [space_id] ->
+      let* directory = capture_directory () in
+      let removed () = Eio.Cancel.protect (fun () -> remove_capture_directory directory)
+        |> Result.map_error (fun detail -> "the ego screenshot directory was not removed: " ^ detail) in
+      let claimed () = Eio.Switch.run (fun sw ->
+        let session = session ~sw ~env ~command ~directory in
+        let answer = Peer.claim_space ~run:(runner session) ~space_id in
+        Eio.Cancel.protect (fun () -> end_session session);
+        answer) in
+      (match claimed () with
+       | exception exn ->
+         (match removed () with Ok () -> () | Error detail -> Log.Server.warn "browser Add-on %s" detail);
+         raise exn
+       | claimed ->
+         (match claimed, removed () with
+          | Error detail, Error removal -> Error (detail ^ "; " ^ removal)
+          | Error detail, Ok () | Ok _, Error detail -> Error detail
+          | Ok claimed_id, Ok () -> Ok claimed_id))
+    | _ :: _ :: _ ->
+      Error "several ego task spaces share the refused name, so one is not chosen for the operator" in
+  (* A user-owned Space is claimed back. A missing one is opened again
+     only by its configured name: a configured number names a Space
+     that is gone. *)
+  let recover (published : Browser_addon_observation.unavailable) = match published with
+    | Browser_addon_observation.Ego_user_owned_name {ids; _} ->
+      claim ids |> Result.map (fun (space_id, space_name) ->
+        Browser_addon_owner.Reclaimed {space_id; space_name})
+    | Ego_space_missing _ ->
+      (match configuration.space with
+       | Browser_configuration.Named_space space -> Ok (Browser_addon_owner.Reopening {space})
+       | Existing_space id ->
+         Error (Printf.sprintf "ego task space %d is gone and this worker's configuration names that Space by its number, so it cannot be opened again; change the configured ego space" id)) in
+  (* Attach the recovery for the record about to be published and return
+     its wake. The hook runs in the caller's fiber; a later record replaces
+     it with its own wake. *)
+  let await_recovery () =
+    Browser_addon_owner.detach_ego_recovery owner;
+    let wake, awake = Eio.Promise.create () in
+    (match Browser_addon_owner.attach_ego_recovery owner (fun published ->
+       match recover published with
+       | Ok recovered ->
+         Browser_addon_owner.clear_ego_unavailable owner;
+         ignore (Eio.Promise.try_resolve awake ());
+         Ok recovered
+       | Error detail -> Error detail) with
+     | Error detail ->
+       Log.Server.warn "browser Add-on ego recovery was not attached: %s" detail
+     | Ok () -> ());
+    wake in
   let serve_space directory ~version ~engine_version = Eio.Switch.run (fun sw ->
     let session = session ~sw ~env ~command ~directory in
     let ended outcome = Eio.Cancel.protect (fun () -> end_session session); outcome in
@@ -386,14 +452,33 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
                | Error detail ->
                  Log.Server.warn "browser Add-on ego result of command %s was not delivered: %s" command.id detail);
               Ok () in
-          if Browser_addon_owner.is_retired owner then Ok () else serve () in
+          (* A step or space_status that found the bound Space gone ends
+             this connection after its answer; nothing opens a new Space
+             until someone asks for it. *)
+          let presence = Peer.space_presence peer in
+          match presence.state with
+          | Browser_ego_space_observation.Missing ->
+            Ok (Some {space=Peer.space peer; observed_at=presence.observed_at})
+          | Present | Unknown _ ->
+            if Browser_addon_owner.is_retired owner then Ok None else serve () in
         Eio.Fiber.first serve
           (fun () -> Eio.Fiber.first
-             (fun () -> ignore (Eio.Promise.await cycle_stopping); Ok ())
-             (fun () -> ignore (Eio.Promise.await work_done); Ok ())) in
+             (fun () -> ignore (Eio.Promise.await cycle_stopping); Ok None)
+             (fun () -> ignore (Eio.Promise.await work_done); Ok None)) in
+    (* The recovery is attached before the record is published, and the
+       record while the connection is still listed: whoever reads the
+       record can act on it, and nobody sees the connection gone without
+       its reason. *)
+    let served = match served with
+      | Ok (Some missing) ->
+        let wake = await_recovery () in
+        publish_missing missing;
+        Ok (Space_missing (missing, wake))
+      | Ok None -> Ok Connected
+      | Error detail -> Error detail in
     Browser_addon_owner.disconnect_live owner client_id;
     ignore (Eio.Promise.try_resolve settle_cycle (Ok ()));
-    Result.map (fun () -> Connected) served) in
+    served) in
   let connect () =
     let* version, engine_version = version ~env ~command in
     let* directory = capture_directory () in
@@ -408,32 +493,6 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
       | Error detail, Error removal -> Error (detail ^ "; " ^ removal)
       | Error detail, Ok () | Ok _, Error detail -> Error detail
       | Ok outcome, Ok () -> Ok outcome in
-  (* One claim: a fresh session reclaims the Space whose task ended while the
-     operator held it, then the supervisor cycle below reconnects. The claim
-     answers the request that asked for it, the reconnection follows on its
-     own. *)
-  let claim ids = match ids with
-    | [] -> Error "the refused ego task space was observed without its id"
-    | [space_id] ->
-      let* directory = capture_directory () in
-      let removed () = Eio.Cancel.protect (fun () -> remove_capture_directory directory)
-        |> Result.map_error (fun detail -> "the ego screenshot directory was not removed: " ^ detail) in
-      let claimed () = Eio.Switch.run (fun sw ->
-        let session = session ~sw ~env ~command ~directory in
-        let answer = Peer.claim_space ~run:(runner session) ~space_id in
-        Eio.Cancel.protect (fun () -> end_session session);
-        answer) in
-      (match claimed () with
-       | exception exn ->
-         (match removed () with Ok () -> () | Error detail -> Log.Server.warn "browser Add-on %s" detail);
-         raise exn
-       | claimed ->
-         (match claimed, removed () with
-          | Error detail, Error removal -> Error (detail ^ "; " ^ removal)
-          | Error detail, Ok () | Ok _, Error detail -> Error detail
-          | Ok claimed_id, Ok () -> Ok claimed_id))
-    | _ :: _ :: _ ->
-      Error "several ego task spaces share the refused name, so one is not chosen for the operator" in
   Eio.Switch.run (fun lifetime ->
     Eio.Fiber.fork ~sw:lifetime (fun () ->
       let settle outcome =
@@ -457,35 +516,26 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~input_store ~downloads (confi
          | Ok () ->
            Log.Server.warn "browser Add-on ego unavailable: task space %S is user-owned; take_over without a clientId reclaims it once the operator asks to continue"
              space) in
-      let await_recovery (refusal : user_owned_name) =
-        (* The recovery hook claims in the caller's fiber and wakes this
-           cycle; a later refusal replaces the hook with its own wake. *)
-        Browser_addon_owner.detach_ego_recovery owner;
-        let wake, awake = Eio.Promise.create () in
-        (match Browser_addon_owner.attach_ego_recovery owner (fun ids ->
-           match claim ids with
-           | Ok (space_id, space_name) ->
-             Browser_addon_owner.clear_ego_unavailable owner;
-             ignore (Eio.Promise.try_resolve awake ());
-             Ok (space_id, space_name)
-           | Error detail -> Error detail) with
-         | Error detail ->
-           Log.Server.warn "browser Add-on ego recovery was not attached: %s" detail
-         | Ok () -> ());
-        wake in
-      let rec loop () =
+      let rec recovered_or_ended wake =
+        match Eio.Fiber.first
+          (fun () -> Eio.Promise.await wake; `Recovered)
+          (fun () -> ignore (Eio.Promise.await work_done); `Work_ended) with
+        | `Recovered -> loop ()
+        | `Work_ended -> ()
+      and loop () =
         match connect () with
         | Ok (User_owned_name refusal) ->
           (* The refusal is published before the startup promise answers
              with it, so a caller that reads the snapshot right after start
              sees the record it was told about. *)
+          let wake = await_recovery () in
           publish_refusal refusal;
           settle (Ok (User_owned_name refusal));
-          (match Eio.Fiber.first
-             (fun () -> ignore (Eio.Promise.await (await_recovery refusal)); `Reclaimed)
-             (fun () -> ignore (Eio.Promise.await work_done); `Work_ended) with
-           | `Reclaimed -> loop ()
-           | `Work_ended -> ())
+          recovered_or_ended wake
+        | Ok (Space_missing (_, wake)) ->
+          (* The serving cycle published the record before it ended; the
+             startup promise answered when that cycle attached. *)
+          recovered_or_ended wake
         | Ok Connected ->
           (* The serving cycle ends itself when work does; the run then
              returns from [work] below. *)

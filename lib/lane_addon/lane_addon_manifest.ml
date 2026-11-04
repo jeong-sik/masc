@@ -406,8 +406,12 @@ let load ~path =
   | Otoml.Duplicate_key message -> Error (Invalid_manifest message)
 
 let resolve_in_workspace ~workspace path =
-  let root = Exec_policy_paths.resolve_path workspace in
-  let resolved = Exec_policy_paths.resolve_path ~base_dir:workspace path in
-  if Exec_policy_paths.is_within_dir ~dir:root resolved then Some resolved else None
+  let absolute =
+    if Filename.is_relative path then Filename.concat workspace path else path
+  in
+  match Unix.realpath workspace, Unix.realpath absolute with
+  | root, resolved when Exec_policy_paths.is_within_dir ~dir:root resolved -> Some resolved
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
 
 let outside_workspace = "manifest_path must name a file inside the workspace"

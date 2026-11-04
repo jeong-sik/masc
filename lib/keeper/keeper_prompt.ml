@@ -5,18 +5,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_meta_contract
-open Keeper_types_profile
-
-
-(* The keeper name reaches the prompt through the [<identity>] block, built
-   from [keeper_name] directly. The former
-   [{your-name}] / [YOUR_KEEPER_NAME] substitution pass is gone: no prompt asset
-   declares either placeholder, so it rewrote nothing while scanning the whole
-   shared prompt body on every build. Reintroducing name interpolation belongs
-   in declared template variables, not a second substitution mechanism. *)
 
 let warned_empty_body = ref false
 

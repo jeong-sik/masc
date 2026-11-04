@@ -86,25 +86,57 @@ let input dirs = Read.input ~base_path:dirs.base ~config_dir:(Some dirs.config) 
 
 let decision_label = function
   | Read.Boot_single_user -> "boot single user"
-  | Read.Refuse (first, rest) -> "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
-  | Read.Multi_account_not_activatable -> "not activatable"
-  | Read.Multi_account_not_served mode -> "not served: " ^ B.mode_to_string mode
+  | Read.Stop (Read.Refuse (first, rest)) ->
+    "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
+  | Read.Stop Read.Multi_account_not_activatable -> "not activatable"
+  | Read.Stop (Read.Multi_account_not_served mode) -> "not served: " ^ B.mode_to_string mode
+;;
+
+let refused = function
+  | Read.Stop (Read.Refuse (first, rest)) -> Some (first, rest)
+  | Read.Boot_single_user
+  | Read.Stop (Read.Multi_account_not_activatable | Read.Multi_account_not_served _) -> None
+;;
+
+(* The first reason of a refusal, for the cases that care which check stopped
+   the boot and not what the detail says. *)
+let check_refused_by name expected dirs =
+  let d = Read.decide (input dirs) in
+  match refused d with
+  | Some (first, _) when expected first -> ()
+  | Some _ | None -> Alcotest.failf "%s: got %s" name (decision_label d)
+;;
+
+let log_unreadable = function
+  | B.Authorization_log_unreadable _ -> true
+  | _ -> false
+;;
+
+let store_unreadable = function
+  | B.External_store_unreadable _ -> true
+  | _ -> false
 ;;
 
 let decision = Alcotest.testable (fun fmt d -> Format.pp_print_string fmt (decision_label d)) ( = )
 let check_decision name expected dirs = Alcotest.check decision name expected (Read.decide (input dirs))
 
-(* ---- config_dir ---- *)
+(* ---- the config directory ---- *)
 
+(* One resolver serves the install record and the default base path record, so
+   a bootstrap and a boot cannot look in two places. *)
 let test_config_dir () =
   let check name expected ~xdg_config_home ~home =
-    Alcotest.(check (option string)) name expected (Read.config_dir ~xdg_config_home ~home)
+    Alcotest.(check (option string))
+      name
+      expected
+      (Env_config_core.masc_config_dir_of ~xdg_config_home ~home)
   in
   check "absolute XDG" (Some "/x/masc") ~xdg_config_home:(Some "/x") ~home:(Some "/h");
+  check "XDG with spaces" (Some "/x/masc") ~xdg_config_home:(Some " /x ") ~home:(Some "/h");
   check "relative XDG falls back to HOME" (Some "/h/.config/masc") ~xdg_config_home:(Some "x") ~home:(Some "/h");
   check "empty XDG falls back to HOME" (Some "/h/.config/masc") ~xdg_config_home:(Some "") ~home:(Some "/h");
   check "nothing" None ~xdg_config_home:None ~home:None;
-  check "empty HOME" None ~xdg_config_home:None ~home:(Some "")
+  check "empty HOME" None ~xdg_config_home:None ~home:(Some " ")
 ;;
 
 (* ---- the member, from parsed JSON ---- *)
@@ -166,7 +198,7 @@ let test_config_file () =
     (* The member is read even when the decoder refuses the other fields. *)
     write_config dirs {|{"enabled":"yes","account_mode":"multi"}|};
     check_config "unknown value, wrong fields" (B.Unknown_value {|"multi"|}, "unreadable") dirs;
-    check_decision "unknown value refuses" (Read.Refuse (B.Unknown_account_mode {|"multi"|}, [])) dirs)
+    check_decision "unknown value refuses" (Read.Stop (Read.Refuse (B.Unknown_account_mode {|"multi"|}, []))) dirs)
 ;;
 
 (* ---- the table, on real installations ---- *)
@@ -177,7 +209,7 @@ let test_nothing_set_up () =
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Single_user"}|};
     check_decision "Single_user" Read.Boot_single_user dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
-    check_decision "row 5" Read.Multi_account_not_activatable dirs)
+    check_decision "row 5" (Read.Stop Read.Multi_account_not_activatable) dirs)
 ;;
 
 let test_bootstrapped () =
@@ -185,10 +217,10 @@ let test_bootstrapped () =
     bootstrap dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     (* Row 7: the log, the record and the store agree. *)
-    check_decision "row 7" (Read.Multi_account_not_served B.Multi_account) dirs;
+    check_decision "row 7" (Read.Stop (Read.Multi_account_not_served B.Multi_account)) dirs;
     (* Row 3: a config cut while it was written does not lower the mode. *)
     write_config dirs {|{"enabled":true,"acc|};
-    check_decision "row 3" (Read.Refuse (B.Downgraded_from_multi_account, [])) dirs)
+    check_decision "row 3" (Read.Stop (Read.Refuse (B.Downgraded_from_multi_account, []))) dirs)
 ;;
 
 let test_restored_before_bootstrap () =
@@ -197,9 +229,9 @@ let test_restored_before_bootstrap () =
     (* A restore of the base path from before the bootstrap: no log, no
        config, and the record and the store outside the base path. *)
     Sys.remove (L.path_of_base_path ~base_path:dirs.base);
-    check_decision "row 2" (Read.Refuse (B.Rewound_before_bootstrap, [])) dirs;
+    check_decision "row 2" (Read.Stop (Read.Refuse (B.Rewound_before_bootstrap, []))) dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
-    check_decision "row 6" (Read.Refuse (B.Rewound_before_bootstrap, [])) dirs)
+    check_decision "row 6" (Read.Stop (Read.Refuse (B.Rewound_before_bootstrap, []))) dirs)
 ;;
 
 let test_install_record_lost () =
@@ -208,7 +240,7 @@ let test_install_record_lost () =
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     Sys.remove (install_record_file dirs);
     (* Row 8: the log made Multi_account and the high-water mark is absent. *)
-    check_decision "row 8" (Read.Multi_account_not_served B.Multi_account_uncertain) dirs)
+    check_decision "row 8" (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain)) dirs)
 ;;
 
 let test_unreadable_config_dir () =
@@ -221,10 +253,10 @@ let test_unreadable_config_dir () =
        says why instead of calling it a rewind. *)
     Unix.chmod dirs.config 0o770;
     let i = input dirs in
-    (match Read.decide i with
-     | Read.Refuse (B.External_store_unreadable _, []) -> ()
-     | other -> Alcotest.failf "expected the store to be unreadable, got %s" (decision_label other));
-    Alcotest.(check bool) "one message" true (List.length (Read.messages i (Read.decide i)) = 1))
+    match Read.decide i with
+    | Read.Stop (Read.Refuse (B.External_store_unreadable _, []) as stop) ->
+      Alcotest.(check int) "one message" 0 (List.length (snd (Read.messages i stop)))
+    | other -> Alcotest.failf "expected the store to be unreadable, got %s" (decision_label other))
 ;;
 
 (* The same refusal on a base path that never had a bootstrap: the boot reads
@@ -236,8 +268,95 @@ let test_config_dir_others_can_write_without_record () =
     Unix.mkdir dirs.config 0o700;
     Unix.chmod dirs.config 0o770;
     match Read.decide (input dirs) with
-    | Read.Refuse (B.External_store_unreadable _, []) -> ()
+    | Read.Stop (Read.Refuse (B.External_store_unreadable _, [])) -> ()
     | other -> Alcotest.failf "expected the store to be unreadable, got %s" (decision_label other))
+;;
+
+let write_log_line dirs line = write_file (L.path_of_base_path ~base_path:dirs.base) (line ^ "\n")
+
+(* A single-user boot of a base path that has never had a log or a store makes
+   no directory and no lock file. *)
+let test_boot_writes_nothing () =
+  with_dirs (fun dirs ->
+    let auth_dir = Filename.dirname (L.path_of_base_path ~base_path:dirs.base) in
+    check_decision "no files" Read.Boot_single_user dirs;
+    Alcotest.(check bool) "no auth directory" false (Sys.file_exists auth_dir);
+    write_config dirs {|{"enabled":true,"require_token":true}|};
+    check_decision "a config" Read.Boot_single_user dirs;
+    Alcotest.(check (list string)) "only the config" [ "config.json" ] (Array.to_list (Sys.readdir auth_dir)))
+;;
+
+let test_corrupt_log () =
+  with_dirs (fun dirs ->
+    write_log_line dirs "not a record";
+    match Read.decide (input dirs) with
+    | Read.Stop (Read.Refuse (B.Authorization_log_unreadable _, [])) -> ()
+    | other -> Alcotest.failf "expected an unreadable log, got %s" (decision_label other))
+;;
+
+let test_corrupt_store () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    Sys.remove (L.path_of_base_path ~base_path:dirs.base);
+    Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 dirs.store (fun channel ->
+      Out_channel.output_string channel "not an entry\n");
+    match Read.decide (input dirs) with
+    | Read.Stop (Read.Refuse (B.External_store_unreadable _, [])) -> ()
+    | other -> Alcotest.failf "expected an unreadable store, got %s" (decision_label other))
+;;
+
+let test_store_gone () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    let store_dir = Filename.dirname dirs.store in
+    (* The store, its lock file, and the directory that held them. *)
+    remove_tree store_dir;
+    (* Row 8 with an absent mark: the record points where no store is. *)
+    check_decision "row 8" (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain)) dirs;
+    Alcotest.(check bool) "no store directory made" false (Sys.file_exists store_dir))
+;;
+
+let test_log_of_another_bootstrap () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    (* The log of another installation: its first record is not the one the
+       store committed. *)
+    let body =
+      match Authz_mode_event.to_body { Authz_mode_event.event = Authz_mode_event.Fresh_bootstrap; workspace_id = workspace } with
+      | Ok body -> body
+      | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
+    in
+    let record =
+      match
+        R.make ~head:R.genesis ~at_ms:(at_ms + 1) ~author:Authz_records.Author.Local_operator ~kind:R.Kind.Mode_event ~body
+      with
+      | Ok record -> record
+      | Error _ -> Alcotest.fail "fixture record refused"
+    in
+    write_log_line dirs (R.to_line record);
+    let i = input dirs in
+    (match i.B.high_water with
+     | B.Judged (Authz_high_water.Mismatch _) -> ()
+     | B.Judged (Authz_high_water.Absent | Authz_high_water.Matches) | B.Store_unreadable _ ->
+       Alcotest.fail "expected a mismatch");
+    let stop = Read.Multi_account_not_served B.Multi_account_uncertain in
+    Alcotest.check decision "row 8" (Read.Stop stop) (Read.decide i);
+    Alcotest.(check bool) "the mismatch is in the message" true (snd (Read.messages i stop) <> []))
+;;
+
+let test_boot_entry () =
+  with_dirs (fun dirs ->
+    let boot () = Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false in
+    Alcotest.(check bool) "single user" true (Result.is_ok (boot ()));
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    (match boot () with
+     | Ok () -> Alcotest.fail "a Multi_account request booted"
+     | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""));
+    write_config dirs {|{"enabled":true,"require_token":true}|};
+    Alcotest.(check bool) "anonymous mutations do not matter to a single user" true
+      (Result.is_ok (Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true)))
 ;;
 
 let test_log_without_mode_event () =
@@ -261,14 +380,110 @@ let test_log_without_mode_event () =
     in
     write_file (L.path_of_base_path ~base_path:dirs.base) (R.to_line record ^ "\n");
     match Read.decide (input dirs) with
-    | Read.Refuse (B.Authorization_log_unreadable _, []) -> ()
+    | Read.Stop (Read.Refuse (B.Authorization_log_unreadable _, [])) -> ()
     | other -> Alcotest.failf "expected an unreadable log, got %s" (decision_label other))
+;;
+
+(* ---- whether a file is there ---- *)
+
+let presence_label = function
+  | Authz_presence.Not_there -> "not there"
+  | Authz_presence.There -> "there"
+  | Authz_presence.Cannot_check _ -> "cannot check"
+;;
+
+let check_presence name expected path =
+  Alcotest.(check string) name expected (presence_label (Authz_presence.of_path path))
+;;
+
+let test_presence () =
+  with_dirs (fun dirs ->
+    let at name = Filename.concat (Filename.dirname dirs.base) name in
+    check_presence "nothing" "not there" (at "missing");
+    check_presence "below a missing directory" "not there" (Filename.concat (at "missing") "file");
+    write_file (at "file") "x";
+    check_presence "a file" "there" (at "file");
+    Unix.symlink (at "nowhere") (at "dangling");
+    check_presence "a dangling link itself" "there" (at "dangling");
+    check_presence "below a dangling link" "cannot check" (Filename.concat (at "dangling") "file");
+    check_presence
+      "two levels below a dangling link"
+      "cannot check"
+      (Filename.concat (Filename.concat (at "dangling") "dir") "file");
+    Unix.mkdir (at "real") 0o700;
+    Unix.symlink (at "real") (at "resolving");
+    check_presence "below a link that resolves" "not there" (Filename.concat (at "resolving") "file");
+    check_presence "a NUL byte" "cannot check" (at "file\000x");
+    if Unix.geteuid () <> 0
+    then (
+      Unix.mkdir (at "closed") 0o700;
+      Unix.chmod (at "closed") 0o000;
+      check_presence "below a directory that cannot be searched" "cannot check" (Filename.concat (at "closed") "file")))
+;;
+
+(* A restore of the base path from before its bootstrap, with the directory of
+   the store behind a link to a volume that is not mounted. The store may be
+   there, so the boot does not call it absent. *)
+let test_store_behind_a_dangling_link () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    Sys.remove (L.path_of_base_path ~base_path:dirs.base);
+    let store_dir = Filename.dirname dirs.store in
+    remove_tree store_dir;
+    Unix.symlink (Filename.concat (Filename.dirname store_dir) "unmounted") store_dir;
+    check_refused_by "a dangling link on the way to the store" store_unreadable dirs)
+;;
+
+(* The same for the directory of the log. config.json is in that directory too,
+   so nothing else would show that the base path was set up. *)
+let test_log_behind_a_dangling_link () =
+  with_dirs (fun dirs ->
+    let auth_dir = Filename.dirname (L.path_of_base_path ~base_path:dirs.base) in
+    Fs_compat.mkdir_p (Filename.dirname auth_dir);
+    Unix.symlink (Filename.concat (Filename.dirname dirs.base) "unmounted") auth_dir;
+    check_refused_by "a dangling link on the way to the log" log_unreadable dirs)
+;;
+
+let test_log_cannot_be_checked () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_dirs (fun dirs ->
+    write_config dirs {|{"enabled":true,"require_token":true}|};
+    Unix.chmod (Filename.dirname (L.path_of_base_path ~base_path:dirs.base)) 0o000;
+    check_refused_by "an auth directory that cannot be searched" log_unreadable dirs)
+;;
+
+(* Something other than a file where the log is: the check calls it there, and
+   the open refuses it. *)
+let test_not_a_file_where_the_log_is () =
+  with_dirs (fun dirs ->
+    let log = L.path_of_base_path ~base_path:dirs.base in
+    Fs_compat.mkdir_p log;
+    check_refused_by "a directory" log_unreadable dirs;
+    Unix.rmdir log;
+    Unix.symlink (Filename.concat dirs.base "nowhere") log;
+    check_refused_by "a dangling link" log_unreadable dirs)
+;;
+
+let test_corrupt_log_beside_a_store () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_log_line dirs "not a record";
+    check_refused_by "the log is unreadable" log_unreadable dirs)
+;;
+
+(* A bootstrap creates the log empty before its first append. A log of no bytes
+   has no mode event. *)
+let test_empty_log () =
+  with_dirs (fun dirs ->
+    write_file (L.path_of_base_path ~base_path:dirs.base) "";
+    check_decision "an empty log" Read.Boot_single_user dirs)
 ;;
 
 let () =
   Alcotest.run
     "authz_boot_mode_read"
     [ "config dir", [ Alcotest.test_case "XDG rules" `Quick test_config_dir ]
+    ; "presence", [ Alcotest.test_case "of_path" `Quick test_presence ]
     ; ( "config.json"
       , [ Alcotest.test_case "member shapes" `Quick test_member_shapes
         ; Alcotest.test_case "file" `Quick test_config_file
@@ -280,7 +495,19 @@ let () =
         ; Alcotest.test_case "install record lost" `Quick test_install_record_lost
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
+        ; Alcotest.test_case "a single user boot writes nothing" `Quick test_boot_writes_nothing
+        ; Alcotest.test_case "corrupt log" `Quick test_corrupt_log
+        ; Alcotest.test_case "corrupt store" `Quick test_corrupt_store
+        ; Alcotest.test_case "store gone" `Quick test_store_gone
+        ; Alcotest.test_case "log of another bootstrap" `Quick test_log_of_another_bootstrap
+        ; Alcotest.test_case "boot entry" `Quick test_boot_entry
         ; Alcotest.test_case "same, with no record" `Quick test_config_dir_others_can_write_without_record
+        ; Alcotest.test_case "store behind a dangling link" `Quick test_store_behind_a_dangling_link
+        ; Alcotest.test_case "log behind a dangling link" `Quick test_log_behind_a_dangling_link
+        ; Alcotest.test_case "log cannot be checked" `Quick test_log_cannot_be_checked
+        ; Alcotest.test_case "not a file where the log is" `Quick test_not_a_file_where_the_log_is
+        ; Alcotest.test_case "corrupt log beside a store" `Quick test_corrupt_log_beside_a_store
+        ; Alcotest.test_case "empty log" `Quick test_empty_log
         ] )
     ]
 ;;

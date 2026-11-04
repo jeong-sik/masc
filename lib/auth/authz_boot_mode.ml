@@ -185,8 +185,8 @@ let refusal_to_string = function
   | Rewound_after_off ->
     "the last mode event is Off and the external store does not match the authorization log"
   | External_store_unreadable detail ->
-    "the external store cannot be read, so the boot cannot tell whether the base path was \
-     restored to an earlier point: " ^ detail
+    "the install record or the external store cannot be read, so the boot cannot tell whether \
+     the base path was restored to before its bootstrap: " ^ detail
   | Auth_disabled_in_multi_account -> "Multi_account needs auth enabled (config.json enabled=true)"
   | Token_not_required_in_multi_account ->
     "Multi_account needs require_token=true in config.json"

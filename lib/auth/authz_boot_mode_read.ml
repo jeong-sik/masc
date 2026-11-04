@@ -7,24 +7,11 @@ module H = Authz_high_water
 module I = Authz_install_record
 module L = Authz_log
 module M = Authz_mode_event
+module P = Authz_presence
 module R = Authz_record
 module S = Authz_external_store
 
-(* The directory under the config home, and the member of config.json. *)
-let config_subdir = "masc"
 let member_name = "account_mode"
-
-let config_dir ~xdg_config_home ~home =
-  let absolute = function
-    | Some dir when (not (String.equal dir "")) && not (Filename.is_relative dir) -> Some dir
-    | Some _ | None -> None
-  in
-  match absolute xdg_config_home, home with
-  | Some dir, (Some _ | None) -> Some (Filename.concat dir config_subdir)
-  | None, Some home when not (String.equal home "") ->
-    Some (Filename.concat (Filename.concat home ".config") config_subdir)
-  | None, (Some _ | None) -> None
-;;
 
 let requested_of_json : Yojson.Safe.t -> B.requested = function
   | `Assoc fields ->
@@ -56,10 +43,10 @@ let read_config ~base_path =
     Log.Auth.warn "%s is read as absent for the account mode: %s" file detail;
     B.Not_set, B.Settings_unreadable detail
   in
-  match Auth_credential_base.credential_path_exists file with
-  | Error error -> absent (Masc_domain.masc_error_to_string error)
-  | Ok false -> B.Not_set, settings_of Masc_domain.default_auth_config
-  | Ok true ->
+  match P.of_path file with
+  | P.Cannot_check detail -> absent detail
+  | P.Not_there -> B.Not_set, settings_of Masc_domain.default_auth_config
+  | P.There ->
     (match Auth_credential_base.read_regular_auth_file file with
      | Error error -> absent (Masc_domain.masc_error_to_string error)
      | Ok content ->
@@ -115,10 +102,35 @@ let store_state ~config_dir ~base_path : (S.State.t option, string) result =
      | Error error -> Error (I.read_error_to_string error)
      | Ok None -> Ok None
      | Ok (Some path) ->
-       (match S.open_at_start ~path ~init:S.State.empty ~step:S.apply with
-        | Error error -> Error (S.open_error_to_string S.violation_to_string error)
-        | Ok (_store, _state, { S.contents = S.Missing; _ }) -> Ok None
-        | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) -> Ok (Some state)))
+       (match P.of_path path with
+        | P.Not_there -> Ok None
+        | P.Cannot_check detail -> Error (Printf.sprintf "the external store %s: %s" path detail)
+        | P.There ->
+          (match S.open_at_start ~path ~init:S.State.empty ~step:S.apply with
+           | Error error -> Error (S.open_error_to_string S.violation_to_string error)
+           | Ok (_store, _state, { S.contents = S.Missing; _ }) -> Ok None
+           | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) -> Ok (Some state))))
+;;
+
+(* The log as the boot found it. Whether the log or the store is there is read
+   before the lock of its file is taken, so this needs every process that
+   creates either file to hold the BasePath lease, as the boot does. *)
+type log_read =
+  | Log_not_there
+  | Log_cannot_check of string
+  | Log_opened of (fold, string) result
+
+let read_log ~base_path ~state =
+  let path = L.path_of_base_path ~base_path in
+  match P.of_path path with
+  | P.Not_there -> Log_not_there
+  | P.Cannot_check detail -> Log_cannot_check (Printf.sprintf "%s: %s" path detail)
+  | P.There ->
+    (match
+       L.open_at_start ~path ~init:{ probe = H.Probe.create state; last = None; records = 0 } ~step
+     with
+     | Error error -> Log_opened (Error (L.open_error_to_string M.error_to_string error))
+     | Ok (_log, fold, _recovered) -> Log_opened (Ok fold))
 ;;
 
 let read_log_and_store ~base_path ~config_dir =
@@ -128,28 +140,25 @@ let read_log_and_store ~base_path ~config_dir =
     | Ok (Some state) -> state
     | Ok None | Error _ -> S.State.empty
   in
-  let log =
-    L.open_at_start
-      ~path:(L.path_of_base_path ~base_path)
-      ~init:{ probe = H.Probe.create state; last = None; records = 0 }
-      ~step
-  in
+  let log = read_log ~base_path ~state in
   let log_mode =
     match log with
-    | Error error -> B.Log_unreadable (L.open_error_to_string M.error_to_string error)
-    | Ok (_log, { last = Some event; _ }, _recovered) -> B.made_by event
-    | Ok (_log, { last = None; records = 0; _ }, _recovered) -> B.No_mode_event
-    | Ok (_log, { last = None; records; _ }, _recovered) ->
+    | Log_not_there -> B.No_mode_event
+    | Log_cannot_check detail | Log_opened (Error detail) -> B.Log_unreadable detail
+    | Log_opened (Ok { last = Some event; _ }) -> B.made_by event
+    | Log_opened (Ok { last = None; records = 0; _ }) -> B.No_mode_event
+    | Log_opened (Ok { last = None; records; _ }) ->
       (* A Fresh_bootstrap is the first record of every log (design 5.1). *)
       B.Log_unreadable
         (Printf.sprintf "it holds %d records and no mode event, and only a mode event starts it" records)
   in
   let high_water =
     match store, log with
-    | Error detail, (Ok _ | Error _) -> B.Store_unreadable detail
-    | Ok None, (Ok _ | Error _) -> B.Judged H.Absent
-    | Ok (Some _), Ok (_log, fold, _recovered) -> B.Judged (H.judge fold.probe)
-    | Ok (Some _), Error _ ->
+    | Error detail, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Store_unreadable detail
+    | Ok None, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Judged H.Absent
+    | Ok (Some _), Log_opened (Ok fold) -> B.Judged (H.judge fold.probe)
+    | Ok (Some state), Log_not_there -> B.Judged (H.judge (H.Probe.create state))
+    | Ok (Some _), (Log_cannot_check _ | Log_opened (Error _)) ->
       B.Store_unreadable "it was not judged, because the authorization log cannot be read"
   in
   log_mode, high_water
@@ -161,18 +170,22 @@ let input ~base_path ~config_dir ~anonymous_mutations =
   { B.requested; log_mode; high_water; settings; anonymous_mutations }
 ;;
 
-type decision =
-  | Boot_single_user
+type stop =
   | Refuse of B.refusal * B.refusal list
   | Multi_account_not_activatable
   | Multi_account_not_served of B.mode
 
+type decision =
+  | Boot_single_user
+  | Stop of stop
+
 let decide input =
   match B.judge input with
   | Ok B.Single_user -> Boot_single_user
-  | Ok B.Activation_requested -> Multi_account_not_activatable
-  | Ok ((B.Multi_account | B.Multi_account_uncertain) as mode) -> Multi_account_not_served mode
-  | Error (first, rest) -> Refuse (first, rest)
+  | Ok B.Activation_requested -> Stop Multi_account_not_activatable
+  | Ok ((B.Multi_account | B.Multi_account_uncertain) as mode) ->
+    Stop (Multi_account_not_served mode)
+  | Error (first, rest) -> Stop (Refuse (first, rest))
 ;;
 
 let high_water_detail = function
@@ -186,16 +199,22 @@ let high_water_detail = function
 ;;
 
 let messages (input : B.input) = function
-  | Boot_single_user -> []
-  | Refuse (first, rest) -> List.map B.refusal_to_string (first :: rest)
+  | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
   | Multi_account_not_activatable ->
-    [ "config.json asks for Multi_account and nothing is set up yet; this server has no \
+    ( "config.json asks for Multi_account and nothing is set up yet; this server has no \
        host-local bootstrap to activate it (Multi_account_not_activatable)"
-    ]
+    , [] )
   | Multi_account_not_served mode ->
-    Printf.sprintf
-      "the authorization log made Multi_account (%s); this server does not have the account \
-       layers that serve it"
-      (B.mode_to_string mode)
-    :: high_water_detail input.high_water
+    ( Printf.sprintf
+        "the authorization log made Multi_account (%s); this server does not have the account \
+         layers that serve it"
+        (B.mode_to_string mode)
+    , high_water_detail input.high_water )
+;;
+
+let boot ~base_path ~config_dir ~anonymous_mutations =
+  let input = input ~base_path ~config_dir ~anonymous_mutations in
+  match decide input with
+  | Boot_single_user -> Ok ()
+  | Stop stop -> Error (messages input stop)
 ;;

@@ -6,12 +6,14 @@ type dataset =
   | Harness_verdicts
   | Runtime_config
   | Keeper_oauth_attempts of { keeper : string }
+  | Clients
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
 let harness_verdicts_name = "harness_verdicts"
 let runtime_config_name = "runtime_config"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
+let clients_name = "clients"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -19,6 +21,8 @@ let dataset_name = function
   | Harness_verdicts -> harness_verdicts_name
   | Runtime_config -> runtime_config_name
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
+
+  | Clients -> clients_name
 ;;
 
 let keeper_field = function
@@ -39,6 +43,8 @@ let of_fields fields =
     Ok Verification_requests
   | Some (`String name) when String.equal name harness_verdicts_name -> Ok Harness_verdicts
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
+
+  | Some (`String name) when String.equal name clients_name -> Ok Clients
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     (match keeper_of_fields name fields with
      | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })
@@ -69,5 +75,7 @@ let announce ~base_path dataset =
 let install_store_observers () =
   Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);
   Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
-    announce ~base_path (Keeper_oauth_attempts { keeper }))
+    announce ~base_path (Keeper_oauth_attempts { keeper }));
+  Workspace_agent_record.install_rows_changed_observer (fun config ->
+    announce ~base_path:config.Workspace_utils_backend_setup.base_path Clients)
 ;;

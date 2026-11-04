@@ -106,7 +106,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
          capabilities;
          meta = Some new_meta;
        } in
-       write_json config agent_file_dedup (agent_to_yojson updated);
+       Workspace_agent_record.write config agent_file_dedup ~previous:(Some existing_agent) updated;
        if is_inactive then begin
          (* Restore to active_agents on session rebound *)
          let _state = update_state config (fun s ->
@@ -172,9 +172,8 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     last_seen = now_iso ();
     meta = Some meta;
   } in
-  let agent_json = agent_to_yojson agent in
   (* Write to filesystem — agent state is short-term workspace data. *)
-  write_json config agent_file agent_json;
+  Workspace_agent_record.write config agent_file ~previous:None agent;
 
   (* Update state *)
   let _state = update_state config (fun s ->
@@ -229,7 +228,7 @@ let end_session config ~agent_name =
     (match read_agent config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
-       write_json config agent_file (agent_to_yojson updated)
+       Workspace_agent_record.write config agent_file ~previous:(Some existing_agent) updated
      | Error e ->
          let snapshot =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file

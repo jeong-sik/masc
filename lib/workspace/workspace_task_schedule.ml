@@ -94,7 +94,7 @@ let reconcile_agent_current_task_with_prepared_backlog
              ; last_seen = (if touch_last_seen then now_iso () else agent.last_seen)
              }
            in
-           write_json config agent_file (agent_to_yojson updated);
+           Workspace_agent_record.write config agent_file ~previous:(Some agent) updated;
            log_event
              config
              (`Assoc

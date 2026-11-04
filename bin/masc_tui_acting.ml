@@ -496,6 +496,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> "runtime config"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> "clients"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -662,6 +663,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime.toml commit was attempted" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = "an OAuth login attempt changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a workspace client row changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

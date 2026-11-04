@@ -10,9 +10,9 @@ module P = Masc.Tui_preference
 
 let check_opt = Alcotest.(check (option string))
 
-(* The IO path: a runtime.toml under [base]/.masc/config is the same file the
-   server reads, so [load ~base_path] must resolve to it. A missing file reads
-   as no choice, not a crash. *)
+(* The IO path: tui-keepers.toml sits beside the runtime.toml under
+   [base]/.masc/config that the server reads. A missing file reads as no
+   choice, not a crash. *)
 let with_temp_base f =
   let base = Filename.temp_file "masc_tui_config_base" "" in
   Sys.remove base;
@@ -172,7 +172,9 @@ let settings_cases =
           let read = Config.of_settings ~base_path:base (Error "connection refused") in
           check_opt "the reason is kept" (Some "connection refused") read.settings_unread;
           check_opt "no theme" None read.theme;
-          Alcotest.(check bool) "the overview opens" true (read.opening = Ok Config.Overview)))
+          Alcotest.(check bool) "the overview opens" true (read.opening = Ok Config.Overview);
+          Alcotest.(check bool) "the last conversation stays unread, not none" true
+            (read.last_chat_keeper = Error "connection refused")))
   ; Alcotest.test_case "the server's settings are what the snapshot holds" `Quick (fun () ->
         with_temp_base (fun ~base ~config:_ ->
           let settings =
@@ -196,6 +198,51 @@ let settings_cases =
             let snapshot = Eio.Promise.await_exn startup.result in
             Alcotest.(check int) "one read" 1 !asked;
             check_opt "candle" (Some "dotted") snapshot.settings.candle))))
+  ]
+
+(* The server's answer to a stored pick. A body of another shape is an unread
+   answer, never an exception the writer would report as its own failure. *)
+let answer_cases =
+  let saved =
+    Alcotest.testable
+      (fun ppf -> function
+         | Writer.Unchanged -> Format.pp_print_string ppf "unchanged"
+         | Writer.Committed { durability = Runtime.Durable; ignored_legacy_keys } ->
+             Format.fprintf ppf "durable [%s]" (String.concat "," ignored_legacy_keys)
+         | Writer.Committed
+             { durability = Runtime.Durability_unconfirmed { detail }; ignored_legacy_keys } ->
+             Format.fprintf ppf "unconfirmed %s [%s]" detail (String.concat "," ignored_legacy_keys))
+      ( = )
+  in
+  let check label expected body =
+    Alcotest.(check (result saved pass)) label expected (Masc_tui_http.tui_preference_answer body)
+  in
+  let unread label body =
+    match Masc_tui_http.tui_preference_answer body with
+    | Ok _ -> Alcotest.failf "%s: read as a stored pick" label
+    | Error _ -> ()
+  in
+  [ Alcotest.test_case "unchanged and committed answers are read" `Quick (fun () ->
+        check "unchanged" (Ok Writer.Unchanged)
+          {|{"state":"unchanged","warnings":[],"source_revision":"r1"}|};
+        check "durable"
+          (Ok (Writer.Committed { durability = Runtime.Durable; ignored_legacy_keys = [] }))
+          {|{"state":"committed","commit":{"durability":"durable","durability_detail":null,"ignored_legacy_keys":[]}}|};
+        check "unconfirmed"
+          (Ok (Writer.Committed
+                 { durability = Runtime.Durability_unconfirmed { detail = "fsync failed" }
+                 ; ignored_legacy_keys = [ "max-prompt-bytes" ] }))
+          {|{"state":"committed","commit":{"durability":"unconfirmed","durability_detail":"fsync failed","ignored_legacy_keys":["max-prompt-bytes"]}}|})
+  ; Alcotest.test_case "other shapes are unread answers, not exceptions" `Quick (fun () ->
+        unread "not JSON" "<html>";
+        unread "not an object" "[]";
+        unread "no state" "{}";
+        unread "committed without a commit" {|{"state":"committed"}|};
+        unread "a commit that is not an object" {|{"state":"committed","commit":"yes"}|};
+        unread "unconfirmed without a detail"
+          {|{"state":"committed","commit":{"durability":"unconfirmed","ignored_legacy_keys":[]}}|};
+        unread "ignored keys that are not names"
+          {|{"state":"committed","commit":{"durability":"durable","ignored_legacy_keys":[1]}}|})
   ]
 
 (* Picks that reach the writer in one order are sent in that order, one at a
@@ -463,6 +510,7 @@ let () =
     [ ("settings", settings_cases)
     ; ("keeper_list_preferences", keeper_list_preferences_cases)
     ; ("preference_writer", writer_cases)
+    ; ("preference_answer", answer_cases)
     ; ("home", home_cases)
     ; ("ui_language_mapping", language_mapping_cases)
     ; ( "commit receipt carries the ignored legacy keys"

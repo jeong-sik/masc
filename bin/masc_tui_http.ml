@@ -2597,6 +2597,11 @@ let string_list_of_json = function
       values (Ok [])
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Error "not a list"
 
+(* A field of an answer object; a body that is not an object has none. *)
+let answer_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
 (* The answer of a stored pick: committed with its receipt, or unchanged. *)
 let tui_preference_answer body : (Masc_tui_preference_writer.saved, string) result =
   let open Result.Syntax in
@@ -2605,21 +2610,33 @@ let tui_preference_answer body : (Masc_tui_preference_writer.saved, string) resu
     | json -> Ok json
     | exception Yojson.Json_error detail -> Error ("not JSON: " ^ detail)
   in
-  let member name = Yojson.Safe.Util.member name json in
-  match member "state" with
-  | `String "unchanged" -> Ok Masc_tui_preference_writer.Unchanged
-  | `String "committed" ->
-    let commit name = Yojson.Safe.Util.member name (member "commit") in
+  match answer_field "state" json with
+  | Some (`String "unchanged") -> Ok Masc_tui_preference_writer.Unchanged
+  | Some (`String "committed") ->
+    let* commit =
+      match answer_field "commit" json with
+      | Some (`Assoc _ as commit) -> Ok commit
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+        Error "the committed answer carries no commit"
+    in
     let* durability =
-      match commit "durability", commit "durability_detail" with
-      | `String "durable", `Null -> Ok Runtime.Durable
-      | `String "unconfirmed", `String detail -> Ok (Runtime.Durability_unconfirmed { detail })
-      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), _ ->
+      match answer_field "durability" commit with
+      | Some (`String "durable") -> Ok Runtime.Durable
+      | Some (`String "unconfirmed") ->
+        (match answer_field "durability_detail" commit with
+         | Some (`String detail) -> Ok (Runtime.Durability_unconfirmed { detail })
+         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+           Error "an unconfirmed commit gives no detail")
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
         Error "the commit does not say whether it is durable"
     in
-    let* ignored_legacy_keys = string_list_of_json (commit "ignored_legacy_keys") in
+    let* ignored_legacy_keys =
+      match answer_field "ignored_legacy_keys" commit with
+      | Some keys -> string_list_of_json keys
+      | None -> Error "the commit does not list ignored keys"
+    in
     Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys })
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
     Error "the answer names no state"
 
 let post_tui_preference ~host ~port ~base_path ~masc_root change :

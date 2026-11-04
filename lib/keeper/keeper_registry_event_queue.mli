@@ -83,16 +83,6 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
-val pending_frontier_result :
-  base_path:string ->
-  string ->
-  ( Keeper_event_queue_state.frontier
-    * Keeper_event_queue_state.pending_selection list
-  , string )
-  result
-(** {!pending_selections_result} with the frontier of the state it was read
-    from, for telling later arrivals from entries already in the list. *)
-
 val pending_selections_result :
   base_path:string ->
   string ->

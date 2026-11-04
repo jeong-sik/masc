@@ -54,7 +54,6 @@ let final_provider_turn_ordinal = function
 ;;
 
 type cooperative_yield_reason =
-  | Operation_queued
   | Durable_stimulus_waiting
   | Terminal_tool_completed
 
@@ -890,7 +889,6 @@ let select_agent_result ~checkpoint ~resume ~build =
   | None -> build ()
 
 let stop_reason_of_cooperative_yield ~provider_turn_ordinal ~turns_used = function
-  | Operation_queued -> Yielded_to_operation_queued { turns_used; provider_turn_ordinal }
   | Durable_stimulus_waiting ->
     Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
   (* The provider loop yielded at AGENT_CORE's durable post-tool boundary because

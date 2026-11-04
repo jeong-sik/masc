@@ -859,8 +859,7 @@ let same_source_scope left right = match left,right with
       left.ao_origin_id=right.ao_origin_id && left.ao_source=right.ao_source
       && left.ao_channel=right.ao_channel
 
-let heartbeat_event_intake_with_priority
-      ~priority_sources
+let heartbeat_event_intake
       ~ctx
       ~meta_after_triage
       ~pending_board_events
@@ -1251,12 +1250,11 @@ let heartbeat_event_intake_with_priority
   in
   let ( queued_observations
       , consumed_selections
-      , intake_frontier
       , first_withdrawn
       , hard_error )
     =
     match
-      Keeper_registry_event_queue.pending_frontier_result
+      Keeper_registry_event_queue.pending_selections_result
         ~base_path
         keeper_name
     with
@@ -1265,25 +1263,19 @@ let heartbeat_event_intake_with_priority
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], Keeper_event_queue_state.unobserved_frontier, None
+      [], [], None
       , Some (None, Pending_selection_failed message)
-    | Ok (frontier, pending) ->
-      (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
-         source never borrows the old handoff's admission preference. *)
-      let preferred, rest = List.partition (fun source ->
-        List.exists (Keeper_event_queue_state.same_entry source) priority_sources) pending in
-      let batch = ready_batch (preferred @ rest) in
+    | Ok pending ->
+      let batch = ready_batch pending in
       let observations, selections, withdrawn, error =
         consume_batch batch
       in
       ( observations
       , selections
-      , frontier
       , withdrawn
       , Option.map (fun (selection, error) -> Some selection, error) error )
   in
-  let source_batch = Keeper_heartbeat_source_batch.of_intake
-    ~frontier:intake_frontier ~admitted:consumed_selections in
+  let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
   let diagnostic_selection =
     match hard_error, first_withdrawn with
     | Some (Some selection, _), _ -> Some selection
@@ -1362,7 +1354,3 @@ let heartbeat_event_intake_with_priority
   ; event_queue_triggers
   }
 ;;
-
-let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
-  heartbeat_event_intake_with_priority ~priority_sources:[]
-    ~ctx ~meta_after_triage ~pending_board_events

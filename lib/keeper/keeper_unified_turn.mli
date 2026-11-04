@@ -96,35 +96,6 @@ type turn_success =
     and a non-executable phase remain distinct so a durable source cannot be
     acknowledged as completed work. *)
 
-val hitl_replay_preemption_request
-  :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
-  -> now:float
-  -> Keeper_event_queue.t
-  -> Keeper_agent_run.yield_request option
-(** Pure post-tool boundary decision (#28809): yield the in-flight source when
-    a queued [Hitl_resolved] passes [resolution_deliverable]. The runtime
-    predicate accepts only an approved resolution whose one-shot grant is
-    still unspent, so a resolution already threaded into the current turn
-    (grant consumed at tool-bundle build) never preempts its own run. *)
-
-module For_testing : sig
-  val autonomous_yield_probe
-    :  turn_input:Keeper_heartbeat_source_batch.turn_input
-    -> base_path:string
-    -> keeper_name:string
-    -> (unit -> (Keeper_agent_run.yield_request option, string) result)
-       * (unit -> int)
-  (** The production source-turn callback for [turn_input], plus its actual
-      attention batch-read count. It yields to a claimable chat, to an approved
-      Gate resolution whose grant is unspent, and to a message to the Keeper,
-      a result it asked for, or input that voids its work, when the queue
-      admitted that row after the intake of [turn_input] read it. Ambient
-      signals, timers and the turn's own tool receipts never preempt. No edit
-      of an entry intake already saw (reprioritize, defer, retention) makes it
-      a later arrival. The counter observes reads; it cannot change cache
-      decisions. *)
-end
-
 val continuation_channel_of_wake :
   Keeper_registry.wake_reason -> Keeper_continuation_channel.t option
 (** The channel a turn woken by [wake] continues on: a single payload's

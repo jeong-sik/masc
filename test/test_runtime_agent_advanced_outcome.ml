@@ -92,7 +92,7 @@ let test_yield_without_decision_fails_closed () =
 let test_yield_without_response_fails_closed () =
   match
     classify
-      ~yield_reason:(Some Runtime_agent.Operation_queued)
+      ~yield_reason:(Some Runtime_agent.Durable_stimulus_waiting)
       ~boundary_response:None
       (Agent_core.Agent.Advanced.Yielded (yielded ()))
   with
@@ -104,13 +104,13 @@ let test_yield_with_decision_and_response_passes_through () =
   let boundary = response ~id:"resp-boundary" () in
   match
     classify
-      ~yield_reason:(Some Runtime_agent.Operation_queued)
+      ~yield_reason:(Some Runtime_agent.Durable_stimulus_waiting)
       ~boundary_response:(Some boundary)
       (Agent_core.Agent.Advanced.Yielded (yielded ()))
   with
   | Ok
       (Runtime_agent.Advanced_yielded
-         (Runtime_agent.Operation_queued, carried, boundary_response)) ->
+         (Runtime_agent.Durable_stimulus_waiting, carried, boundary_response)) ->
     check int "the yielded turn count is carried" 2 carried.turn;
     check int "the SDK yield ordinal is independent of count" 17 carried.provider_turn_ordinal;
     check string "the boundary response is carried" "resp-boundary"
@@ -125,8 +125,7 @@ let test_detailed_stop_reason_preserves_ordinal () =
         ~provider_turn_ordinal:ordinal ~turns_used:3 reason in
     check (option int) "SDK ordinal survives the runtime stop-reason projection"
       (Some ordinal) (Runtime_agent.final_provider_turn_ordinal stop_reason))
-    [ Runtime_agent.Operation_queued
-    ; Runtime_agent.Durable_stimulus_waiting
+    [ Runtime_agent.Durable_stimulus_waiting
     ; Runtime_agent.Terminal_tool_completed
     ];
   check (option int) "completed ordinal survives the public projection"

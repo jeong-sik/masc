@@ -28,7 +28,6 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
 
 type cooperative_yield_reason =
-  | Operation_queued
   | Durable_stimulus_waiting
   | Terminal_tool_completed
 

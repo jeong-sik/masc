@@ -1171,18 +1171,8 @@ not reset its pending deadline or create work by themselves.
 
 ## Scheduled work while a Keeper is busy
 
-A due Keeper wake is requested work. A running conversation must not keep it
-pending merely by continuing to claim the Owner. The active turn finishes its
-current tool boundary and preserves its checkpoint; the Owner then gives the
-exact waiting schedule sources a turn before reclaiming the chat continuation.
-A chat that ends without tools also leaves the next slot for waiting scheduled
-work. This handoff does not interrupt or replay an in-flight tool call.
-
-The handoff is a preference for one turn slot, not completion of the Job. Intake
-rechecks the original pending source identities. A withdrawn or replaced source
-cannot inherit an earlier source's reservation, and stale reservations release
-chat admission. Sources already present in the running turn are not new input.
-Pause, shutdown and unavailable source storage still apply.
+A due Keeper wake waits in the queue until the running turn ends; the next
+turn's intake admits it.
 
 To investigate a delayed Job, inspect the exact schedule lookup at
 `/api/v1/dashboard/scheduled-automation?schedule_id=<id>`:

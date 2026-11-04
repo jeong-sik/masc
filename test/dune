@@ -1265,11 +1265,6 @@
    (run %{test}))))
 
 (test
- (name test_keeper_yield_observability)
- (modules test_keeper_yield_observability)
- (libraries alcotest astring masc_test_deps))
-
-(test
  (name test_exec_dispatch_file_redirect)
  (modules test_exec_dispatch_file_redirect)
  (libraries alcotest astring masc_test_deps eio_main))
@@ -7153,11 +7148,6 @@
  (alias runtest-schema_wire_bytes_bench)
  (action
   (run %{exe:../packages/agent_core/bench/schema_wire_bytes_bench.exe})))
-
-(test
- (name test_keeper_informational_checkpoint_ack)
- (modules test_keeper_informational_checkpoint_ack)
- (libraries masc_test_deps exact_output_fixture eio_main unix))
 
 (include stanzas/test_endpoint_mixed_admission.inc)
 

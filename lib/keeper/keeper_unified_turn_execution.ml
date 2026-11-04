@@ -91,8 +91,6 @@ type ctx =
 let run (ctx : ctx)
       ~event_scope
       ~observation_token
-      ~(yield_requested :
-          unit -> (Keeper_agent_run.yield_request option, string) result)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
@@ -299,14 +297,6 @@ let run (ctx : ctx)
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
                       checkpoint_progress)
-                   (* This module is the autonomous lane's turn runner
-                      ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
-                      reached via the Keeper Owner child); the chat
-                      lane runs [run_keeper_msg_turn_admitted] on a separate
-                      path. Thus the probe is lane-gated and runs only at AGENT_CORE's
-                      post-tool boundary. Its signals come from the exact chat
-                      receipt and durable-event queues their consumers drain. *)
-                 ~yield_requested
                  ()
             with
             | Eio.Cancel.Cancelled _ as exn ->

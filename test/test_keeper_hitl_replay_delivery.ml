@@ -1,8 +1,6 @@
 (* #28809: an approved Gate resolution must reach a turn even when the turn
-   was woken by a different stimulus, and must be able to preempt an in-flight
-   source run while its one-shot grant is unspent. Covers the turn-start
-   projection ([ready_hitl_resolution_peek]) and the post-tool boundary
-   preemption ([hitl_replay_preemption_request] and the source-turn probe). *)
+   was woken by a different stimulus. Covers the turn-start projection
+   ([ready_hitl_resolution_peek]). *)
 open Alcotest
 open Masc
 module Q = Keeper_event_queue
@@ -108,7 +106,7 @@ let register_keeper_exn ~config name =
 
 (* Submit + approve one grant. Resolving an approval for a keeper with no
    live lane durably enqueues its [Hitl_resolved] wake, which is exactly the
-   queue state the projection and preemption read. *)
+   queue state the projection reads. *)
 let approved_grant_fixture ~base_path ~keeper_name ~input =
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> ()
@@ -163,113 +161,6 @@ let hitl_stimulus ~arrived_at ~approval_id =
     ~arrived_at
     ~payload:(Q.Hitl_resolved resolution)
 ;;
-
-let test_deliverable_resolution_preempts_source () =
-  let source =
-    stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:Q.Bootstrap
-  in
-  let hitl = hitl_stimulus ~arrived_at:990. ~approval_id:"appr-preempt" in
-  let request =
-    Keeper_unified_turn.hitl_replay_preemption_request
-      ~resolution_deliverable:(fun _ -> true)
-      ~now:1000.
-      (queue_of [ source; hitl ])
-  in
-  match request with
-  | Some
-      { Keeper_agent_run.reason = Keeper_agent_run.Durable_stimulus_waiting summary } ->
-    check int "both durable stimuli remain visible" 2 summary.pending_count;
-    (match summary.head with
-     | Some selected ->
-       check string
-         "yield names the resolved approval as the next source"
-         (Q.hitl_resolution_post_id
-            { approval_id = "appr-preempt"
-            ; decision = Q.Hitl_approved
-            ; channel = unrouted
-            })
-         selected.post_id
-     | None -> fail "hitl preemption lost its selected source");
-    check (float 0.001) "selected-source age is exact" 10. summary.head_age_sec
-  | Some { reason = Keeper_agent_run.Operation_queued } ->
-    fail "hitl preemption was mislabeled as chat"
-  | None -> fail "deliverable resolution did not preempt the in-flight source"
-;;
-
-let test_undeliverable_resolution_never_preempts () =
-  let hitl = hitl_stimulus ~arrived_at:990. ~approval_id:"appr-spent" in
-  check bool
-    "spent or unready resolution keeps the source running"
-    true
-    (Option.is_none
-       (Keeper_unified_turn.hitl_replay_preemption_request
-          ~resolution_deliverable:(fun _ -> false)
-          ~now:1000.
-          (queue_of [ hitl ])))
-;;
-
-let test_queue_without_resolution_never_preempts () =
-  let source =
-    stimulus ~post_id:"source" ~urgency:Q.Normal ~arrived_at:900. ~payload:Q.Bootstrap
-  in
-  check bool
-    "no queued resolution, no yield"
-    true
-    (Option.is_none
-       (Keeper_unified_turn.hitl_replay_preemption_request
-          ~resolution_deliverable:(fun _ -> true)
-          ~now:1000.
-          (queue_of [ source ])))
-;;
-
-(* The production source-turn probe. An approved resolution whose grant is
-   unspent stops a running turn even when nothing else is waiting; once the
-   grant is spent it does not. *)
-let test_source_turn_probe_yields_to_unspent_grant () =
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  let keeper_name = "hitl-probe-keeper" in
-  register_keeper_exn ~config keeper_name;
-  let input = `Assoc [ "target", `String "hitl-probe" ] in
-  let approval_id = approved_grant_fixture ~base_path ~keeper_name ~input in
-  let probe, _reads =
-    Keeper_unified_turn.For_testing.autonomous_yield_probe
-      ~turn_input:
-        (Keeper_heartbeat_source_batch.for_turn
-           ~reactive:false
-           Keeper_heartbeat_source_batch.empty)
-      ~base_path
-      ~keeper_name
-  in
-  (match probe () with
-   | Ok (Some { Keeper_agent_run.reason = Keeper_agent_run.Durable_stimulus_waiting _ })
-     -> ()
-   | Ok (Some { reason = Keeper_agent_run.Operation_queued }) ->
-     fail "unspent grant was mislabeled as chat"
-   | Ok None -> fail "unspent approved resolution did not stop the running turn"
-   | Error message -> fail message);
-  (match
-     Keeper_approval_queue.consume_approved_resolution
-       ~base_path
-       ~id:approval_id
-       ~keeper_name
-       ~tool_name:"external-effect"
-       ~input
-   with
-   | Ok (Masc.Keeper_approval_queue_result.Consumption_committed _) -> ()
-   | Ok Masc.Keeper_approval_queue_result.Consumption_already_committed ->
-     fail "grant was already consumed before the test consumed it"
-   | Ok Masc.Keeper_approval_queue_result.Consumption_not_matching ->
-     fail "exact grant did not match its own request"
-   | Error error -> fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
-  match probe () with
-  | Ok None -> ()
-  | Ok (Some _) -> fail "spent grant stopped the running turn again"
-  | Error message -> fail message
-;;
-
-(* --- turn-start projection --------------------------------------------- *)
 
 let test_peek_projects_ready_resolution_without_consuming () =
   with_workspace
@@ -463,42 +354,6 @@ let test_reconcile_retires_resolution_without_record () =
   check int "the wake left the queue" 0 (queue_length ~base_path ~keeper_name)
 ;;
 
-(* The store's typed answer that nothing stands behind an approved wake is a
-   fact reading again does not change, and intake retires such a wake. The
-   probe treats it as not deliverable: no yield, no error, no warning at each
-   tool boundary. *)
-let test_source_turn_probe_ignores_resolution_without_record () =
-  with_workspace
-  @@ fun config ->
-  let base_path = config.Workspace_utils.base_path in
-  let keeper_name = "hitl-probe-absent-keeper" in
-  register_keeper_exn ~config keeper_name;
-  let _approval_id = enqueue_resolution_without_record ~config ~keeper_name in
-  let probe, _reads =
-    Keeper_unified_turn.For_testing.autonomous_yield_probe
-      ~turn_input:
-        (Keeper_heartbeat_source_batch.for_turn
-           ~reactive:false
-           Keeper_heartbeat_source_batch.empty)
-      ~base_path
-      ~keeper_name
-  in
-  let cursor =
-    match Log.Ring.recent ~limit:1 () with
-    | entry :: _ -> entry.Log.Ring.seq
-    | [] -> -1
-  in
-  (match probe () with
-   | Ok None -> ()
-   | Ok (Some _) -> fail "a wake without a record stopped the running turn"
-   | Error message -> fail message);
-  let warnings =
-    Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
-    |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn)
-  in
-  check int "a wake without a record logs no warning" 0 (List.length warnings)
-;;
-
 (* --- settled continuation ------------------------------------------------ *)
 
 (* #32956: the turn that received the replay failed after the provider
@@ -664,25 +519,7 @@ let test_peek_none_on_empty_queue () =
 let () =
   run
     "keeper hitl replay delivery"
-    [ ( "post-tool boundary preemption"
-      , [ test_case
-            "deliverable resolution preempts the in-flight source"
-            `Quick
-            test_deliverable_resolution_preempts_source
-        ; test_case
-            "undeliverable resolution never preempts"
-            `Quick
-            test_undeliverable_resolution_never_preempts
-        ; test_case
-            "queue without a resolution never preempts"
-            `Quick
-            test_queue_without_resolution_never_preempts
-        ; test_case
-            "source-turn probe yields to an unspent grant"
-            `Quick
-            test_source_turn_probe_yields_to_unspent_grant
-        ] )
-    ; ( "turn-start projection"
+    [ ( "turn-start projection"
       , [ test_case
             "projects the ready resolution without consuming the queue"
             `Quick
@@ -709,10 +546,6 @@ let () =
             "a resolution without a record is retired without a turn"
             `Quick
             test_reconcile_retires_resolution_without_record
-        ; test_case
-            "the source-turn probe stays quiet about a resolution without a record"
-            `Quick
-            test_source_turn_probe_ignores_resolution_without_record
         ] )
     ; ( "settled continuation"
       , [ test_case

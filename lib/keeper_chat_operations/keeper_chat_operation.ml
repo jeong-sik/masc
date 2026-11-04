@@ -91,23 +91,24 @@ let is_terminal = function
   | Queued | Running _ -> false
 ;;
 
+let state_fields ~failure_fields operation =
+  match operation.state with
+  | Queued -> [ "state", `String "Queued" ]
+  | Running { started_at } ->
+    [ "state", `String "Running"; "started_at", `Float started_at ]
+  | Succeeded { completed_at; outcome_ref } ->
+    [ "state", `String "Succeeded"
+    ; "completed_at", `Float completed_at
+    ; "outcome_ref", `String outcome_ref
+    ]
+  | Failed { completed_at; failure } ->
+    [ "state", `String "Failed"; "completed_at", `Float completed_at ]
+    @ failure_fields operation.operation_id failure
+  | Cancelled { completed_at } ->
+    [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
+;;
+
 let to_json_with_failure ~failure_fields operation =
-  let state_fields =
-    match operation.state with
-    | Queued -> [ "state", `String "Queued" ]
-    | Running { started_at } ->
-      [ "state", `String "Running"; "started_at", `Float started_at ]
-    | Succeeded { completed_at; outcome_ref } ->
-      [ "state", `String "Succeeded"
-      ; "completed_at", `Float completed_at
-      ; "outcome_ref", `String outcome_ref
-      ]
-    | Failed { completed_at; failure } ->
-      [ "state", `String "Failed"; "completed_at", `Float completed_at ]
-      @ failure_fields operation.operation_id failure
-    | Cancelled { completed_at } ->
-      [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
-  in
   `Assoc
     ([ "schema", `String "masc.keeper_chat_operation.v1"
      ; "operation_id", `String (Operation_id.to_string operation.operation_id)
@@ -125,17 +126,31 @@ let to_json_with_failure ~failure_fields operation =
         | None -> []
         | Some member -> ["batch_execution_id", `String (Operation_id.to_string member.execution_id);
             "batch_input_digest", `String member.input_digest])
-     @ state_fields)
+     @ state_fields ~failure_fields operation)
+;;
+
+let diagnostic_failure_fields _operation_id ({ kind; detail; outcome_ref } : failure) =
+  [ "failure_kind", `String (failure_kind_to_string kind)
+  ; "failure_detail", `String detail
+  ; ( "outcome_ref"
+    , match outcome_ref with None -> `Null | Some value -> `String value )
+  ]
 ;;
 
 let to_json operation =
-  to_json_with_failure operation
-    ~failure_fields:(fun _operation_id { kind; detail; outcome_ref } ->
-      [ "failure_kind", `String (failure_kind_to_string kind)
-      ; "failure_detail", `String detail
-      ; ( "outcome_ref"
-        , match outcome_ref with None -> `Null | Some value -> `String value )
-      ])
+  to_json_with_failure operation ~failure_fields:diagnostic_failure_fields
+;;
+
+let to_status_json operation =
+  `Assoc
+    ([ "operation_id", `String (Operation_id.to_string operation.operation_id)
+     ; "created_at", `Float operation.created_at
+     ]
+     @ (match operation.batch_membership with
+        | None -> []
+        | Some member ->
+          [ "batch_execution_id", `String (Operation_id.to_string member.execution_id) ])
+     @ state_fields ~failure_fields:diagnostic_failure_fields operation)
 ;;
 
 let public_failure_message = function

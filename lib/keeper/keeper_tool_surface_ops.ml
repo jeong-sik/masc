@@ -1037,7 +1037,7 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
                ; "message", `String "Keeper chat operation was not found"
                ])
         | Ok true ->
-          let operation_json = Keeper_owner.Chat_operation.to_json operation in
+          let operation_json = Keeper_owner.Chat_operation.to_status_json operation in
           let data =
             match operation.state, operation_json with
             | Keeper_owner.Chat_operation.Succeeded { outcome_ref; _ }, `Assoc fields ->

@@ -1,0 +1,59 @@
+{
+  "after_bytes": 161930,
+  "before_result_bytes": 430806,
+  "by_state": {
+    "(no state)": {
+      "after_bytes": 427,
+      "before_bytes": 427,
+      "calls": 3,
+      "dropped_bytes": 0
+    },
+    "Failed": {
+      "after_bytes": 6005,
+      "before_bytes": 19635,
+      "calls": 19,
+      "dropped_bytes": 13630
+    },
+    "Queued": {
+      "after_bytes": 7405,
+      "before_bytes": 121340,
+      "calls": 51,
+      "dropped_bytes": 113935
+    },
+    "Running": {
+      "after_bytes": 14785,
+      "before_bytes": 136256,
+      "calls": 64,
+      "dropped_bytes": 121471
+    },
+    "Succeeded": {
+      "after_bytes": 133308,
+      "before_bytes": 153148,
+      "calls": 27,
+      "dropped_bytes": 19840
+    }
+  },
+  "calls": 164,
+  "calls_whose_stored_output_differs_from_result_bytes": 29,
+  "calls_without_result_bytes": 0,
+  "dropped_bytes": 268876,
+  "dropped_share": 0.6241,
+  "kept_fields": [
+    "operation_id",
+    "created_at",
+    "batch_execution_id",
+    "state",
+    "started_at",
+    "completed_at",
+    "outcome_ref",
+    "failure_kind",
+    "failure_detail",
+    "completed_reply"
+  ],
+  "tool": "masc_keeper_delegate_status",
+  "window": {
+    "from": "2026-11-01",
+    "to": "2026-11-04",
+    "until": "2026-11-04T19:10:00+00:00"
+  }
+}

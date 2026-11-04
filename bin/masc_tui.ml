@@ -7999,7 +7999,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | None -> ())
   | Connectors -> (
       match browser_lane_on_screen state with
-      | None -> launch_connectors_load state ~mailbox
+      | None ->
+          owe_connectors_read state;
+          launch_connectors_load state ~mailbox
       | Some _ -> refresh_browser_lane state ~mailbox)
   | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
   | Tools ->
@@ -8775,7 +8777,9 @@ let launch_owed_connectors state ~mailbox =
   if not (connectors_on_screen state) then
     state.connectors_owed <- Masc_tui_owed_read.settled
   else begin
-    let reading = Option.is_some (Connector_read.stage state.connectors_read) in
+    let reading =
+      Connector_read.reading_for ~authority:state.detail_read_authority state.connectors_read
+    in
     let read =
       if reading then state.connectors_owed
       else Masc_tui_owed_read.abandoned state.connectors_owed
@@ -17488,7 +17492,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.identity_attempt_error <- None;
       state.identity_filter <- None;
       Masc_tui_identity_requests.launch_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper.k_name
-  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_channels ->
+      owe_connectors_read state;
+      launch_connectors_load state ~mailbox
   | Detail_automation ->
       (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
          not the fleet list. *)
@@ -18385,6 +18391,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_keeper_turns_read state;
        owe_verification_read state;
        owe_repositories_read state;
+       owe_connectors_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;

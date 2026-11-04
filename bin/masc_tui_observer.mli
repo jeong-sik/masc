@@ -284,11 +284,11 @@ type event =
       (** The workspace's verification request store was written. A server
           push with no payload, named by {!Masc.Verification_request_broadcast}. *)
   | Repositories_changed
-  (* Server push: a connector's bindings, recorded names or drawn connection
-     state changed. A reader that shows connectors re-fetches them. *)
-  | Gate_connector_changed of { connector : string }
       (** The workspace's repository catalog was written. A server push with
           no payload, named by {!Masc.Repository_catalog_broadcast}. *)
+  | Gate_connector_changed of { connector : string }
+      (** [connector]'s bindings, recorded names or drawn connection state
+          changed. A server push named by {!Masc.Gate_connector_changed_event}. *)
   | Keeper_event_queue_changed of { keeper : string }
       (** [keeper]'s event queue, or the reaction record beside it, was
           written. A server push named by

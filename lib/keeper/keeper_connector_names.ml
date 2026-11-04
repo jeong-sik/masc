@@ -139,7 +139,7 @@ let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
       match Hashtbl.find_opt directory id with
       | Some known when String.equal known name -> ()
       | Some _ | None ->
-        (try
+        (match
            ignore (Keeper_fs.ensure_dir (names_dir base_dir));
            let line =
              Yojson.Safe.to_string
@@ -151,11 +151,11 @@ let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
            in
            Fs_compat.append_file file_path (line ^ "\n");
            Hashtbl.replace directory id name;
-           Hashtbl.remove sorted_directories file_path;
-           Gate_connector_announce.changed ~connector_id:connector
+           Hashtbl.remove sorted_directories file_path
          with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
+         | () -> Gate_connector_announce.changed ~connector_id:connector
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
            Log.Keeper.warn "connector_names: append failed for %s/%s: %s"
              (sanitize_name connector)
              (scope_segment scope)

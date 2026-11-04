@@ -10302,7 +10302,6 @@ type state = {
   (* The accepted queue belongs to the read authority under which it arrived.
      The last rows may stay visible after that authority is withdrawn. *)
   mutable gate_snapshot_authority: unit ref option;
-  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -19636,7 +19635,6 @@ let create_state
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
   gate_snapshot_authority = None;
-  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;

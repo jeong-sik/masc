@@ -753,6 +753,16 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   check int "all strict reads and repair retain one external action" 1 !(fixture.calls);
   detach clock fixture id)
 
+let test_machine_live_announces_only_changed_evidence () =
+  let blob = `Assoc ["sha256", `String "frame-a"] in
+  check bool "the first machine observation is announced" true
+    (Runtime.For_testing.machine_live_changed ~previous:None ~current:blob);
+  check bool "identical screen evidence does not announce a read" false
+    (Runtime.For_testing.machine_live_changed ~previous:(Some blob) ~current:blob);
+  check bool "new screen or incarnation evidence is announced" true
+    (Runtime.For_testing.machine_live_changed ~previous:(Some blob)
+      ~current:(`Assoc ["sha256", `String "frame-b"]))
+
 let test_observation_commit_announces_lane_inventory () = with_fixture (fun clock fixture ->
   Runtime.For_testing.with_inventory_change_observer Server_lane_inventory.refresh (fun () ->
   let heard = ref [] in
@@ -802,6 +812,7 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
   "optional world actions",[
+  test_case "machine live announces only changed evidence" `Quick test_machine_live_announces_only_changed_evidence;
   test_case "observation commit announces Lane inventory and its instance" `Quick test_observation_commit_announces_lane_inventory;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;

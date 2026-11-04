@@ -60,6 +60,12 @@ class ConfirmsHandler(owed.ChatHandler):
                             },
                         },
                     },
+                    # The pending-confirmation read goes through the
+                    # workspace-bound reader, which requires the admission
+                    # receipt on the response itself; without it a 200 is a
+                    # failed read and the retries replace the single answer
+                    # this test counts. 503 above stays receipt-free.
+                    workspace_receipt=True,
                 )
             if sent:
                 server.responded(phase, request.path)

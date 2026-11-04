@@ -165,7 +165,9 @@ let owner_turn_rejection_cycle_status
    belongs to the path that received the rate limit or quota answer, so the
    keeper waits only while the path it would send next rests.
    [Continue_on_deferred_lane]: the head of the walk that resumes the deferred
-   suffix is not resting, and a pending input runs on it without a sleep.
+   suffix is not resting, and a pending input runs on it without a sleep. Each
+   suffix a resumed turn leaves names fewer candidates than the one it resumed,
+   so these cycles end when no candidate is left.
    [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
    names the runtime or assignment whose release that is. A wakeup does not
    cut the wait short (#34653). *)

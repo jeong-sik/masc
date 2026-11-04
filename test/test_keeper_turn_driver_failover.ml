@@ -3233,7 +3233,7 @@ let backpressure_order runtime_ids =
       ~next_runtime_id ~later_runtime_ids
       ~failure:(retryable_network_error "previous attempt") in
     Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ()) hint
-    |> Driver.deferred_runtime_ids
+    |> Driver.resumed_walk_ids
     |> List.filter (fun id -> List.mem id runtime_ids)
 ;;
 
@@ -4819,7 +4819,7 @@ let test_deferred_quota_order_is_frozen_before_predispatch () =
            ; "shared_a.test_model"
            ; "shared_b.test_model"
            ]
-           (Driver.deferred_runtime_ids ordered)))
+           (Driver.resumed_walk_ids ordered)))
 
 let test_deferred_dispatch_preserves_predispatch_quota_order () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
@@ -4993,7 +4993,7 @@ let test_a_resumed_walk_goes_on_past_the_hint_and_reaches_the_failed_runtime_las
       let lane = Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ()) (three_account_hint ()) in
       Alcotest.(check (list string)) "the hint, the rest of the lane, then the failed runtime"
         [ "acct_b.test_model"; "acct_c.test_model"; "acct_a.test_model" ]
-        (Driver.deferred_runtime_ids lane);
+        (Driver.resumed_walk_ids lane);
       let reached =
         walk_three_accounts ~trace_id:"resumed-walk-past-the-hint" lane
           ~answer:(function
@@ -5032,10 +5032,108 @@ let test_a_resting_hint_path_does_not_hold_a_serving_lane_candidate () =
       let lane = Driver.resumed_runtime_lane ~now hint in
       Alcotest.(check (list string)) "the resting hint path moves behind the serving ones"
         [ "acct_c.test_model"; "acct_a.test_model"; "acct_b.test_model" ]
-        (Driver.deferred_runtime_ids lane);
+        (Driver.resumed_walk_ids lane);
       Alcotest.(check (list string)) "the next turn dispatches C first"
         [ "C" ]
         (walk_three_accounts ~trace_id:"resting-hint-path" lane ~answer:(fun _ -> stop_the_walk))))
+;;
+
+(* A resumed walk covers the whole lane. If each walk that stopped after a
+   checkpoint deferred everything after it, a lane whose every candidate
+   fails that way (DNS down) would defer forever and the heartbeat would run
+   cycle after cycle without sleeping. Each walk defers only the candidates
+   its hint left untried that it did not reach, so the chain ends after at
+   most one cycle per candidate the first hint named, plus one. *)
+let test_a_chain_of_resumed_walks_ends_when_its_untried_candidates_run_out () =
+  with_runtime_config runtime_toml_three_account_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      (* One immediate cycle: the walk that resumes [hint]. Every candidate
+         fails after its checkpoint, so the walk stops on the first candidate
+         it dispatches. *)
+      let cycle hint =
+        let lane = Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ()) hint in
+        let attempted = ref [] and deferred = ref [] in
+        let (_ : (unit, Agent_core.Error.t) result) =
+          Driver.For_testing.attempt_runtime_candidates ~walk_owner:Driver.One_shot_walk
+            ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+            ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
+            ~member_of:(Driver.For_testing.resumed_member hint)
+            ~runtime_id:"three_accounts"
+            ~runtime_id_of:Fun.id
+            ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+            ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+              attempted := !attempted @ [ runtime_id ];
+              attempt_without_effect (Error (retryable_network_error "DNS lookup failed")) None)
+            (Driver.resumed_walk_ids lane)
+        in
+        !attempted, !deferred
+      in
+      let first =
+        Driver.For_testing.make_deferred_runtime_lane
+          ~assignment_id:"three_accounts"
+          ~failed_runtime_id:"acct_a.test_model"
+          ~next_runtime_id:"acct_b.test_model"
+          ~later_runtime_ids:[ "acct_c.test_model" ]
+          ~failure:(retryable_network_error "A failed after a checkpoint")
+      in
+      let bound = List.length (Driver.deferred_runtime_ids first) + 1 in
+      let rec chain trace hint =
+        if List.length trace >= bound
+        then Alcotest.failf "the chain still deferred after %d cycles" (List.length trace)
+        else
+          match cycle hint with
+          | attempted, [] -> List.rev ((attempted, []) :: trace)
+          | attempted, [ next ] ->
+            chain ((attempted, Driver.deferred_runtime_ids next) :: trace) next
+          | _, hints -> Alcotest.failf "one walk deferred %d suffixes" (List.length hints)
+      in
+      Alcotest.(check (list (pair (list string) (list string))))
+        "each cycle defers fewer untried candidates, and the last one defers none"
+        [ [ "acct_b.test_model" ], [ "acct_c.test_model" ]; [ "acct_c.test_model" ], [] ]
+        (chain [] first)))
+;;
+
+(* The hint left b and d untried; c is a lane candidate an earlier turn tried,
+   and a failed. d rests, so demotion put it behind c and a. b fails before a
+   checkpoint and the walk rotates; c fails after one and the walk stops. It
+   defers d alone, not the a and d that follow c. A walk that stops on c
+   without reaching b or d defers nothing. *)
+let test_a_resumed_walk_that_stops_on_a_tried_candidate_defers_only_its_untried_rest () =
+  let hint =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"lane.resumed"
+      ~failed_runtime_id:"runtime.a"
+      ~next_runtime_id:"runtime.b"
+      ~later_runtime_ids:[ "runtime.d" ]
+      ~failure:(retryable_network_error "a failed after a checkpoint")
+  in
+  let walk ~retries candidates =
+    let attempted = ref [] and deferred = ref [] in
+    let (_ : (unit, Agent_core.Error.t) result) =
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:Driver.One_shot_walk
+        ~allow_retry:(fun ~runtime_id ~attempt:_ _ -> List.mem runtime_id retries)
+        ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
+        ~member_of:(Driver.For_testing.resumed_member hint)
+        ~runtime_id:"lane.resumed"
+        ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          attempted := !attempted @ [ runtime_id ];
+          attempt_without_effect (Error (retryable_network_error "DNS lookup failed")) None)
+        candidates
+    in
+    !attempted, List.map (fun (h : Driver.deferred_runtime_lane) ->
+      h.Driver.failed_runtime_id, Driver.deferred_runtime_ids h) !deferred
+  in
+  Alcotest.(check (pair (list string) (list (pair string (list string)))))
+    "the walk stopped on c defers only the untried d"
+    ([ "runtime.b"; "runtime.c" ], [ "runtime.c", [ "runtime.d" ] ])
+    (walk ~retries:[ "runtime.b" ] [ "runtime.b"; "runtime.c"; "runtime.a"; "runtime.d" ]);
+  Alcotest.(check (pair (list string) (list (pair string (list string)))))
+    "a walk that reached no untried candidate defers nothing"
+    ([ "runtime.c" ], [])
+    (walk ~retries:[] [ "runtime.c"; "runtime.a"; "runtime.b"; "runtime.d" ])
 ;;
 
 let test_official_client_does_not_inherit_registry_api_key_scope () =
@@ -5167,7 +5265,7 @@ let test_the_recorder_walks_the_head_again_on_its_next_cycle () =
         ~next_runtime_id:lane_head ~later_runtime_ids:[ lane_fallback ]
         ~failure:(head_timeout () |> Result.get_error)
       |> Driver.resumed_runtime_lane ~now:(Unix.gettimeofday ())
-      |> Driver.deferred_runtime_ids
+      |> Driver.resumed_walk_ids
     in
     Alcotest.(check (list string)) "the retry of a failed turn still keeps the head behind"
       [ lane_fallback; lane_head ] retry)
@@ -7306,6 +7404,14 @@ let () =
             "a resting hint path does not hold a serving lane candidate"
             `Quick
             test_a_resting_hint_path_does_not_hold_a_serving_lane_candidate;
+          Alcotest.test_case
+            "a chain of resumed walks ends when its untried candidates run out"
+            `Quick
+            test_a_chain_of_resumed_walks_ends_when_its_untried_candidates_run_out;
+          Alcotest.test_case
+            "a resumed walk stopping on a tried candidate defers only its untried rest"
+            `Quick
+            test_a_resumed_walk_that_stops_on_a_tried_candidate_defers_only_its_untried_rest;
           Alcotest.test_case
             "official client quota excludes registry API-key scope"
             `Quick

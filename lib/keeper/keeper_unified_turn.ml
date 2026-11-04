@@ -299,7 +299,7 @@ let run_keeper_cycle
     =
       let effective_runtime_id =
         match deferred_runtime_lane with
-        | Some hint -> hint.Keeper_turn_driver.next_runtime_id
+        | Some hint -> Keeper_turn_driver.resumed_head hint
         | None -> Keeper_meta_contract.runtime_id_of_meta meta
       in
       let source =

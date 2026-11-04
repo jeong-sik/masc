@@ -530,7 +530,6 @@ export interface DashboardToolsResponse {
   tool_usage: ToolMetricsResponse
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   effective_keeper_surface?: DashboardEffectiveKeeperSurface | null
-  skill_activations?: DashboardSkillActivationProjection | null
 }
 
 export interface DashboardSkillReference {
@@ -2008,7 +2007,6 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
-  const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
   return {
     ...raw,
     tool_inventory: {
@@ -2018,10 +2016,32 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
       : {}),
-    ...(normalizedSkillActivations !== undefined
-      ? { skill_activations: normalizedSkillActivations }
-      : {}),
   }
+}
+
+const KEEPER_SKILL_ACTIVATIONS_SCHEMA = 'masc.keeper-skill-activations/v1'
+
+/** One Keeper's skill activations, read from its own route (RFC-0483). */
+export async function fetchKeeperSkillActivations(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardSkillActivationProjection> {
+  await ensureDevToken()
+  const raw = await get<unknown>(
+    `/api/v1/keepers/skill-activations?keeper=${encodeURIComponent(keeperName)}`,
+    { signal: opts?.signal },
+  )
+  if (!isRecord(raw) || raw.schema !== KEEPER_SKILL_ACTIVATIONS_SCHEMA) {
+    throw new Error(`skill activations answer is not ${KEEPER_SKILL_ACTIVATIONS_SCHEMA}`)
+  }
+  if (raw.keeper !== keeperName) {
+    throw new Error(`skill activations answer belongs to ${String(raw.keeper)}, not ${keeperName}`)
+  }
+  const projection = normalizeSkillActivationProjection(raw.skill_activations)
+  if (projection === null || projection === undefined) {
+    throw new Error('skill activations answer omitted skill_activations')
+  }
+  return projection
 }
 
 export async function fetchKeeperWaitingInventory(

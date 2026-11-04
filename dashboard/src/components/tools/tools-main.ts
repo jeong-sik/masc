@@ -21,8 +21,13 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
-import { SkillActivationPanel } from './skill-activation-panel'
-import { fetchDashboardTools, type DashboardToolsResponse } from '../../api'
+import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
+import {
+  fetchDashboardTools,
+  fetchKeeperSkillActivations,
+  type DashboardSkillActivationProjection,
+  type DashboardToolsResponse,
+} from '../../api'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
   scheduledAutomationProjection,
@@ -39,21 +44,22 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
   return `latest ${formatElapsedCompact(latestAge)}`
 }
 
-function validateKeeperReceipt(
+// The selected Keeper's surface comes from the tools answer and its
+// activations from their own route (RFC-0483); both must name that Keeper.
+function keeperSkillReceipt(
   response: DashboardToolsResponse,
+  activations: DashboardSkillActivationProjection,
   expectedKeeper: string,
-): string | null {
+): KeeperSkillReceipt | string {
   const effectiveSurface = response.effective_keeper_surface
   if (!effectiveSurface) return 'Server response omitted effective_keeper_surface'
-  const activations = response.skill_activations
-  if (!activations) return 'Server response omitted skill_activations'
   if (effectiveSurface.keeper_name !== expectedKeeper) {
     return `effective_keeper_surface belongs to ${effectiveSurface.keeper_name}, not ${expectedKeeper}`
   }
   if (activations.keeper_name !== expectedKeeper) {
     return `skill_activations belongs to ${activations.keeper_name}, not ${expectedKeeper}`
   }
-  return null
+  return { effectiveSurface, activations }
 }
 
 export function Tools() {
@@ -78,7 +84,7 @@ export function Tools() {
     .map(keeper => keeper.keeper_name)
     .sort((left, right) => left.localeCompare(right))
   const [selectedKeeper, setSelectedKeeper] = useState<string | null>(null)
-  const [keeperReceipt, setKeeperReceipt] = useState<DashboardToolsResponse | null>(null)
+  const [keeperReceipt, setKeeperReceipt] = useState<KeeperSkillReceipt | null>(null)
   const [keeperReceiptLoading, setKeeperReceiptLoading] = useState(false)
   const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
 
@@ -112,16 +118,19 @@ export function Tools() {
       const current = controller
       setKeeperReceiptLoading(true)
       setKeeperReceiptError(null)
-      void fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal })
-        .then(response => {
+      void Promise.all([
+        fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal }),
+        fetchKeeperSkillActivations(selectedKeeper, { signal: current.signal }),
+      ])
+        .then(([response, activations]) => {
           if (current.signal.aborted) return
-          const receiptError = validateKeeperReceipt(response, selectedKeeper)
-          if (receiptError) {
+          const receipt = keeperSkillReceipt(response, activations, selectedKeeper)
+          if (typeof receipt === 'string') {
             setKeeperReceipt(null)
-            setKeeperReceiptError(receiptError)
+            setKeeperReceiptError(receipt)
             return
           }
-          setKeeperReceipt(response)
+          setKeeperReceipt(receipt)
         })
         .catch((cause: unknown) => {
           if (current.signal.aborted) return
@@ -197,8 +206,7 @@ export function Tools() {
         <${SkillActivationPanel}
           keeperNames=${keeperNames}
           selectedKeeper=${selectedKeeper}
-          effectiveSurface=${keeperReceipt?.effective_keeper_surface}
-          activations=${keeperReceipt?.skill_activations}
+          receipt=${keeperReceipt}
           loading=${keeperReceiptLoading}
           error=${keeperReceiptError}
           onSelectKeeper=${setSelectedKeeper}

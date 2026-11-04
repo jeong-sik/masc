@@ -10158,9 +10158,11 @@ type state = {
   mutable async_requests_owed: Masc_tui_owed_read.t;
   (* The read the confirmations waiting for an operator owe on every surface. *)
   mutable pending_confirms_owed: Masc_tui_owed_read.t;
-  (* The read the schedule list behind the agenda strip, and the Schedules
-     page, owe on every surface. *)
-  mutable schedules_owed: Masc_tui_owed_read.t;
+  (* The read the schedule list behind the agenda strip owes on every
+     surface. *)
+  mutable schedules_agenda_owed: Masc_tui_owed_read.t;
+  (* The read the Schedules page owes while it is on screen. *)
+  mutable schedules_page_owed: Masc_tui_owed_read.t;
   (* The read the schedules of the Keeper the chat pane or the Automation tab
      draws owe. *)
   mutable keeper_schedules_owed: keeper_schedules_owed option;
@@ -14472,7 +14474,8 @@ let suspend_workspace_readings state =
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;
-  state.schedules_owed <- Masc_tui_owed_read.settled;
+  state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
+  state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
@@ -17028,7 +17031,7 @@ let apply_schedule_agenda_read state ticket result =
          follows answers instead. A change no read has answered yet leaves a
          published list uncertain. *)
       let overtaken, change_unread =
-        match state.schedules_owed with
+        match state.schedules_agenda_owed with
         | Masc_tui_owed_read.Settled
         | Masc_tui_owed_read.Reading { changed_since = false; _ } -> false, false
         | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true, true
@@ -19553,7 +19556,8 @@ let create_state
   asks_owed = Masc_tui_owed_read.settled;
   async_requests_owed = Masc_tui_owed_read.settled;
   pending_confirms_owed = Masc_tui_owed_read.settled;
-  schedules_owed = Masc_tui_owed_read.settled;
+  schedules_agenda_owed = Masc_tui_owed_read.settled;
+  schedules_page_owed = Masc_tui_owed_read.settled;
   keeper_schedules_owed = None;
   chat_native_tasks_owed = None;
   chat_child_content_owed = None;

@@ -4072,7 +4072,7 @@ let launch_keeper_chat_schedules_load state ~mailbox ~keeper_name =
    from now on overtakes it ([apply_schedule_agenda_read]), and one announced
    before it is answered by it. *)
 let note_schedule_agenda_read_started state =
-  state.schedules_owed <- Masc_tui_owed_read.started state.schedules_owed
+  state.schedules_agenda_owed <- Masc_tui_owed_read.started state.schedules_agenda_owed
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   if server_authority_ready state then begin
@@ -4084,6 +4084,9 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   match request with
   | None -> ()
   | Some ticket ->
+  (* As for the agenda: whatever started this page read, it answers the
+     changes announced before it. *)
+  state.schedules_page_owed <- Masc_tui_owed_read.started state.schedules_page_owed;
   let selected_id = selected_schedule_id state in
   state.schedules_navigation <- if navigating then Some (ticket, page, selected_id) else None;
   let agenda_ticket =
@@ -8854,9 +8857,12 @@ let launch_owed_async_requests state ~mailbox =
 (* The schedule list behind the agenda strip, drawn on every surface, and the
    Schedules page read again when the server says the schedules changed, on a
    revalidation or a resumed authority, and after a failed read
-   (RFC-0480 §3.1). Entering Schedules and [r] read them directly. *)
+   (RFC-0480 §3.1). Entering Schedules and [r] read them directly. Each owes
+   its own read: the two can be in flight at once, and one answering says
+   nothing of the other. *)
 let owe_schedules_read state =
-  state.schedules_owed <- Masc_tui_owed_read.changed state.schedules_owed
+  state.schedules_agenda_owed <- Masc_tui_owed_read.changed state.schedules_agenda_owed;
+  state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
 
 (* The agenda strip says its list may be behind until a read that began after
    this point answers: on a schedule change, on a newly opened observer and
@@ -8866,34 +8872,36 @@ let owe_agenda_revalidation state =
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   owe_schedules_read state
 
-let settle_schedules_read state = function
-  | Ok _ -> state.schedules_owed <- Masc_tui_owed_read.succeeded state.schedules_owed
-  | Error _ -> state.schedules_owed <- failed_read state.schedules_owed
-
-let schedules_reading state =
-  Snapshot_read.in_flight state.schedules_agenda_read
-  || Snapshot_read.in_flight state.schedules_read
+let settled_schedule_read read = function
+  | Ok _ -> Masc_tui_owed_read.succeeded read
+  | Error _ -> failed_read read
 
 (* Runs on every loop iteration. A read already in flight is let finish
-   first; one that will not deliver leaves the schedules owed again. On
-   Schedules the page is read with the agenda; a later page reads the agenda
-   on its own as well. *)
+   first; one that will not deliver leaves its surface owed again. Off
+   Schedules the page owes nothing: entering it reads the page. On the first
+   page the page read carries the agenda, so it also waits for an agenda read
+   in flight rather than overtake it. *)
 let launch_owed_schedules state ~mailbox =
-  let reading = schedules_reading state in
-  let read =
-    if reading then state.schedules_owed else Masc_tui_owed_read.abandoned state.schedules_owed
-  in
-  state.schedules_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
-     && server_authority_ready state
-     && not reading
-  then begin
+  let page_on_screen = state.view = Schedules in
+  let page_reading = Snapshot_read.in_flight state.schedules_read in
+  let page_carries_agenda = Option.is_none state.schedules_page.sp_cursor in
+  state.schedules_agenda_owed <-
+    (if Snapshot_read.in_flight state.schedules_agenda_read then state.schedules_agenda_owed
+     else Masc_tui_owed_read.abandoned state.schedules_agenda_owed);
+  state.schedules_page_owed <-
+    (if not page_on_screen then Masc_tui_owed_read.settled
+     else if page_reading then state.schedules_page_owed
+     else Masc_tui_owed_read.abandoned state.schedules_page_owed);
+  if server_authority_ready state then begin
+    let now = monotonic_now_s () in
     let intent = Snapshot_read.Refresh in
-    (if state.view = Schedules then begin
-       launch_schedules_load ~intent state ~mailbox;
-       if Option.is_some state.schedules_page.sp_cursor then
-         launch_schedule_agenda_load ~intent state ~mailbox
-     end else launch_schedule_agenda_load ~intent state ~mailbox)
+    if page_on_screen && not page_reading
+       && not (page_carries_agenda && Snapshot_read.in_flight state.schedules_agenda_read)
+       && Masc_tui_owed_read.due ~now state.schedules_page_owed
+    then launch_schedules_load ~intent state ~mailbox;
+    if not (Snapshot_read.in_flight state.schedules_agenda_read)
+       && Masc_tui_owed_read.due ~now state.schedules_agenda_owed
+    then launch_schedule_agenda_load ~intent state ~mailbox
   end
 
 (* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
@@ -24517,16 +24525,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
-      if current then settle_schedules_read state result
+      if current then
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
   | Schedules_loaded (Schedule_page_read request, result) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
           request.spr_agenda_ticket in
-      let current =
-        Snapshot_read.is_current state.schedules_read request.spr_ticket || current_agenda
-      in
+      let current_page = Snapshot_read.is_current state.schedules_read request.spr_ticket in
       apply_schedule_page_read state request result;
-      if current then settle_schedules_read state result
+      if current_page then
+        state.schedules_page_owed <- settled_schedule_read state.schedules_page_owed result;
+      if current_agenda then
+        state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
@@ -32251,8 +32261,14 @@ Use relative paths for resources already held in the package. -->
              state ~mailbox:async_messages;
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages;
-           launch_schedules_load ~intent:Snapshot_read.Refresh
-             state ~mailbox:async_messages)
+           (* Off Schedules only the agenda strip is drawn, so a later page
+              the operator left is not read. *)
+           if state.view = Schedules then
+             launch_schedules_load ~intent:Snapshot_read.Refresh
+               state ~mailbox:async_messages
+           else
+             launch_schedule_agenda_load ~intent:Snapshot_read.Refresh
+               state ~mailbox:async_messages)
       in
       (match key, browser_lane_on_screen state with
        | Some _, Some view ->

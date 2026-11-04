@@ -122,8 +122,8 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 | pane | 읽기 | 읽는 때 |
 |---|---|---|
 | Usage | `/api/v1/skills` 본문 | 본문 알림(skill catalog 발행 #48059 등). 본문 필드마다 원천은 L3 에서 확인한다 |
-| Usage | `skill-usage`, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만 |
-| Activations | 고른 Keeper 의 `skill-activations` | 고른 Keeper 가 바뀔 때, 그 Keeper 의 알림마다 |
+| Usage | `skill-usage`, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만. catalog 발행 때는 모든 Keeper(서버가 지금 catalog 로 행을 센다) |
+| Activations | 고른 Keeper 의 `skill-activations` | 고른 Keeper 가 바뀔 때(키, roster 읽기, Keeper 가 roster 를 떠남), 그 Keeper 의 알림마다 |
 | Surface, Catalog | `/api/v1/dashboard/tools` | skill catalog 발행, lane add-on export 변경(#48060), runtime config 변경(#48036) |
 
 - Keeper 마다 `Masc_tui_owed_read` 하나를 둔다. 읽는 동안 온 알림은 다음 읽기 한 번으로 합쳐진다. 그래서 Keeper 하나당 진행 중인 읽기 하나와 밀린 읽기 하나를 넘지 않는다. 이건 횟수 제한이 아니라 읽기 빚 모델이 원래 하는 일이다.

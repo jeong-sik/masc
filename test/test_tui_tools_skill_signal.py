@@ -35,8 +35,11 @@ class SkillHandler(owed.ChatHandler):
     def do_GET(self) -> None:
         server = cast(SkillServer, self.server)
         request = urllib.parse.urlsplit(self.path)
-        if request.path == CATALOG_PATH:
-            body: dict[str, object] = {"schema": "masc.skill-snapshot/v1", "state": "not_registered"}
+        if request.path == INVENTORY_PATH:
+            # Any answer will do: the tests count the reads, not what they draw.
+            body: dict[str, object] = {}
+        elif request.path == CATALOG_PATH:
+            body = {"schema": "masc.skill-snapshot/v1", "state": "not_registered"}
         elif request.path == ACTIVATIONS_PATH:
             keeper = keeper_of(request.query)
             body = {

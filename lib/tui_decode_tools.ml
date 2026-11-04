@@ -1164,7 +1164,10 @@ let decode_keeper_skill_activations ~keeper json =
     Error (Printf.sprintf "skill activations answered for %S, not %S" answered keeper)
   else
     let* projection = required_object_field json "skill_activations" in
-    decode_skill_activation_projection projection
+    let* projection = decode_skill_activation_projection projection in
+    let named = skill_activation_keeper projection in
+    if String.equal named keeper then Ok projection
+    else Error (Printf.sprintf "skill activations projection names %S, not %S" named keeper)
 
 let keeper_skill_usage_schema = "masc.keeper-skill-usage/v1"
 

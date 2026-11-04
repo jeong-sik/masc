@@ -3781,7 +3781,7 @@ let test_a_space_that_did_not_open_is_looked_up_once () =
        | `Ids ids -> answered (`List (List.map (fun id ->
            obj ["spaceId",`Int id;"name",str "SDK Space";"ownership",str "agent"]) ids)))
     | other -> failf "unexpected step %s" other in
-  let peer=match Peer.open_space ~input:volatile_input ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~run ~run_native:(run ~window_s:0.) ~now
     ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture"
     ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
     | Ok peer -> peer | Error detail -> fail detail in

@@ -9,7 +9,9 @@
     written. Its writers are the heartbeat snapshot and the finished turn. An
     exception from resolving the runtime or from [Sse.broadcast_to] is counted
     on [keeper_sse_broadcast_failures] and logged at WARN; [Cancelled] is
-    raised again. *)
+    raised again, so a caller must not hold a lock or sit in a [finally]
+    across this call. Its two callers hold neither: the metrics store releases
+    its mutex before the announcement. *)
 
 val appended_event : string
 

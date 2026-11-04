@@ -528,7 +528,11 @@ def validate_join_authorities(
             durable_ledger_raw=payloads[ledger_join.DURABLE_EVENTS_BEFORE],
             durable_ledger_after_raw=payloads[ledger_join.DURABLE_EVENTS_AFTER],
         )
-    except (ledger_join.JoinError, skill_activation_events.SkillLedgerError) as error:
+    except (
+        proof_collector.ProofError,
+        ledger_join.JoinError,
+        skill_activation_events.SkillLedgerError,
+    ) as error:
         raise VerificationError(f"join raw authority is invalid: {error}") from error
     for field in (
         "producer",
@@ -793,8 +797,8 @@ def verify_bundle(
     require(delivery_count >= 1, "proof has no verified delivery")
     durability = object_field(proof, "durability", "proof")
     require(
-        durability.get("dashboard_projection_equals_ledger") is True,
-        "proof Dashboard projection differs from its durable ledger",
+        durability.get("activations_projection_equals_ledger") is True,
+        "proof activations projection differs from its durable ledger",
     )
     require(
         durability.get("ledger_sha256")

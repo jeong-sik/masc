@@ -3302,6 +3302,32 @@ let test_decode_keeper_skill_usage_refuses_another_keeper_schema_or_state () =
                     ; ("actions", `Int 0)
                     ; ("last_used_at", `String "2026-08-28T03:04:05Z")
                     ] ] )
+          ]));
+  (* Every object in the answer is closed to the fields its schema names. *)
+  refused "a field outside the answer"
+    (`Assoc
+       [ ("schema", `String "masc.keeper-skill-usage/v1")
+       ; ("keeper", `String "bravo")
+       ; ("usage", no_session)
+       ; ("extra", `Null)
+       ]);
+  refused "a field outside its state"
+    (keeper_skill_usage_json
+       (`Assoc [ ("state", `String "no_session"); ("rows", `List []) ]));
+  refused "a field outside the row"
+    (keeper_skill_usage_json
+       (`Assoc
+          [ ("state", `String "ready")
+          ; ( "rows",
+              `List
+                [ `Assoc
+                    [ ("reference", skill_reference_json ())
+                    ; ("invocations", `Int 1)
+                    ; ("deliveries", `Int 1)
+                    ; ("actions", `Int 0)
+                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
+                    ; ("keeper", `String "bravo")
+                    ] ] )
           ]))
 
 (* The async read boundary adds "skills catalog load failed: "; the decoder
@@ -3406,7 +3432,7 @@ let test_decode_skills_catalog_reads_reference_and_flow () =
       (match catalog.Masc.Tui_decode_tools.sc_surfaces with
        | [ surface ] ->
            Alcotest.(check string) "skill name" "work-intake"
-             surface.Masc.Tui_decode_tools.scs_name;
+             Skill_reference.(surface.Masc.Tui_decode_tools.scs_reference.identity.name);
            Alcotest.(check string) "kind" "composition"
              surface.Masc.Tui_decode_tools.scs_kind;
            Alcotest.(check string) "exact reference"
@@ -4437,16 +4463,29 @@ let test_decode_keeper_activations_refuses_another_keeper_or_schema () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "an answer for another Keeper was accepted");
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-usage/v1"
+          ; "keeper", `String "imp"
+          ; "skill_activations", projection
+          ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an answer under another schema was accepted");
   match
     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
       (`Assoc
-         [ "schema", `String "masc.keeper-skill-usage/v1"
+         [ "schema", `String "masc.keeper-skill-activations/v1"
          ; "keeper", `String "imp"
          ; "skill_activations", projection
+         ; "extra", `Null
          ])
   with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "an answer under another schema was accepted"
+  | Error detail ->
+      Alcotest.(check string) "the extra field is named"
+        "skill activations has unexpected field \"extra\"" detail
+  | Ok _ -> Alcotest.fail "an answer with a field outside its schema was accepted"
 
 let test_decode_async_actions_keeps_original_scope () =
   let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in

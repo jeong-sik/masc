@@ -70,7 +70,6 @@ type skill_flow = {
 
 type skills_catalog_surface = {
   scs_reference : Skill_reference.t;
-  scs_name : string;
   scs_kind : string;
   scs_flow : skill_flow option;
 }

@@ -1341,6 +1341,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (CaptureError, OSError) as error:
+    except (CaptureError, proof_collector.ProofError, OSError) as error:
         print(f"capture-keeper-skill-tui-proof: {error}")
         raise SystemExit(1) from error

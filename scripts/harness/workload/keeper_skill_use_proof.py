@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture one exact live Keeper Skill-use proof from the Dashboard projection.
+"""Capture one exact live Keeper Skill-use proof from the Keeper's activations answer.
 
 The caller supplies the invocation identity.  This script never selects the
 latest activation by time or guesses from Skill names.
@@ -26,7 +26,7 @@ import skill_activation_events
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-PROOF_SCHEMA = "masc.keeper-skill-use-proof.v3"
+PROOF_SCHEMA = "masc.keeper-skill-use-proof.v4"
 # One Keeper's activation ledger is its own read (RFC-0483); the tools answer
 # carries the Keeper's effective surface only.
 KEEPER_SKILL_ACTIVATIONS_SCHEMA = "masc.keeper-skill-activations/v1"
@@ -534,20 +534,20 @@ def validate_proof(
         f"Skill ledger schema is not {skill_activation_events.LEDGER_SCHEMA}",
     )
     require(
-        durable_ledger == ledger, "Dashboard ledger does not equal the durable ledger"
+        durable_ledger == ledger, "Keeper activations ledger does not equal the durable ledger"
     )
     require(
         string_field(ledger, "revision", "skill ledger")
         == skill_activation_events.ledger_revision(ledger),
         "Skill ledger revision does not match its canonical content",
     )
-    activations = list_field(ledger, "activations", "skill ledger")
+    ledger_activations = list_field(ledger, "activations", "skill ledger")
     require(
-        all(isinstance(activation, dict) for activation in activations),
+        all(isinstance(activation, dict) for activation in ledger_activations),
         "Skill ledger contains a non-object activation",
     )
     typed_activations = [
-        activation for activation in activations if isinstance(activation, dict)
+        activation for activation in ledger_activations if isinstance(activation, dict)
     ]
     rejections = list_field(ledger, "transition_rejections", "skill ledger")
     require(
@@ -1036,7 +1036,7 @@ def main() -> int:
             "ledger_path": str(events_path),
             "ledger_sha256": digest_bytes(durable_raw),
             "ledger_bytes": len(durable_raw),
-            "dashboard_projection_equals_ledger": True,
+            "activations_projection_equals_ledger": True,
         },
         "dashboard": dashboard_capture,
         "artifacts": {

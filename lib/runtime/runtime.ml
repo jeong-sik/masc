@@ -2708,7 +2708,10 @@ let edit_config_text ?runtime_config_path edit =
 ;;
 
 type config_edit =
-  | Config_text_unchanged of config_observation
+  | Config_text_unchanged of
+      { observation : config_observation
+      ; lock_warnings : config_lock_warning list
+      }
   | Config_text_committed of config_commit_receipt
 
 let edit_config_text_if_changed ?runtime_config_path edit =
@@ -2718,17 +2721,15 @@ let edit_config_text_if_changed ?runtime_config_path edit =
       let* content = load_file_result path in
       let edited = edit content in
       if String.equal edited content
-      then Ok (Config_text_unchanged (config_observation ~path content))
+      then Ok (`Unchanged (config_observation ~path content))
       else
-        Result.map
-          (fun receipt -> Config_text_committed receipt)
-          (commit_runtime_config_text ~path edited))
+        Result.map (fun receipt -> `Committed receipt) (commit_runtime_config_text ~path edited))
   in
   let* outcome = locked.value in
   match outcome with
-  | Config_text_unchanged _ -> Ok outcome
-  | Config_text_committed receipt ->
-    Ok (Config_text_committed (attach_lock_warnings locked.warnings receipt))
+  | `Unchanged observation ->
+    Ok (Config_text_unchanged { observation; lock_warnings = locked.warnings })
+  | `Committed receipt -> Ok (Config_text_committed (attach_lock_warnings locked.warnings receipt))
 ;;
 
 let validate_config_text ?runtime_config_path content =

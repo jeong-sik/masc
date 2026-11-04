@@ -10643,11 +10643,16 @@ type state = {
   mutable tools_async_detail_open: bool;
   mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
   mutable tools_async_detail_request: tools_async_detail_request option;
+  (* What the open async request detail owes after its Keeper's requests or
+     execution journal changed. *)
+  mutable tools_async_detail_owed: Masc_tui_owed_read.t;
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable tools_async_task_source: tools_async_task_source option;
   mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
   mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable tools_async_task_body_request: tools_async_task_request option;
+  (* What the open source Task body owes after a backlog write. *)
+  mutable tools_async_task_owed: Masc_tui_owed_read.t;
   mutable tools_async_task_history_request: tools_async_task_source task_history_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
@@ -14444,13 +14449,17 @@ let begin_tools_async_detail state ~force =
       let request = {tad_ticket;tad_reading=state.workspace_read_authority;tad_job=ref ()} in
       state.tools_async_detail_request <- Some request; Some request
 
+(* Whether [request] is the detail read the open selection is waiting on. *)
+let tools_async_detail_current state request =
+  request.tad_reading == state.workspace_read_authority
+  && Option.exists (fun current -> current == request) state.tools_async_detail_request
+  && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
+       (Some (Masc_tui_fetched.request_key request.tad_ticket))
+  && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
+       state.tools_async_detail request.tad_ticket
+
 let complete_tools_async_detail state request result =
-  if request.tad_reading == state.workspace_read_authority
-      && Option.exists (fun current -> current == request) state.tools_async_detail_request
-      && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
-          (Some (Masc_tui_fetched.request_key request.tad_ticket))
-      && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
-          state.tools_async_detail request.tad_ticket then begin
+  if tools_async_detail_current state request then begin
     state.tools_async_detail_request <- None;
     let result = Result.bind result (fun reading ->
       let module Detail = Masc.Tui_decode_async_request in
@@ -20020,11 +20029,13 @@ let create_state
   tools_async_detail_open = false;
   tools_async_detail = Masc_tui_fetched.initial;
   tools_async_detail_request = None;
+  tools_async_detail_owed = Masc_tui_owed_read.settled;
   tools_async_last_logical = None;
   tools_async_task_source = None;
   tools_async_task_body = Masc_tui_fetched.initial;
   tools_async_task_history = Masc_tui_fetched.initial;
   tools_async_task_body_request = None;
+  tools_async_task_owed = Masc_tui_owed_read.settled;
   tools_async_task_history_request = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;

@@ -73,10 +73,31 @@ let test_a_new_connector_name_reaches_observers () =
   check (list string) "a changed name announces again" [ "fixture" ]
     (connector_changes stream)
 
+(* The Telegram poll loop writes its state after every poll. Only a change
+   in what the connector list draws -- polling or not, the bot, the error --
+   announces; a new offset alone does not. *)
+let test_a_telegram_offset_alone_announces_nothing () =
+  let heard = ref [] in
+  Gate_connector_announce.install (fun ~connector_id -> heard := connector_id :: !heard);
+  Fun.protect ~finally:(fun () -> Gate_connector_announce.install (fun ~connector_id:_ -> ()))
+  @@ fun () ->
+  Channel_gate_telegram_state.record_error "fixture: before";
+  heard := [];
+  Channel_gate_telegram_state.record_poll_ok ~bot_user_id:7L ~next_offset:(Some 1L);
+  check (list string) "a poll that recovers announces" [ "telegram" ] !heard;
+  Channel_gate_telegram_state.record_poll_ok ~bot_user_id:7L ~next_offset:(Some 2L);
+  check (list string) "a new offset alone announces nothing" [ "telegram" ] !heard;
+  Channel_gate_telegram_state.record_error "fixture: getUpdates failed";
+  check (list string) "a failed poll announces" [ "telegram"; "telegram" ] !heard
+
 let () =
   run "gate_connector_announce"
     [ ( "observers"
       , [ test_case "a new connector name reaches observers" `Quick
             test_a_new_connector_name_reaches_observers
+        ] )
+    ; ( "poll state"
+      , [ test_case "a Telegram offset alone announces nothing" `Quick
+            test_a_telegram_offset_alone_announces_nothing
         ] )
     ]

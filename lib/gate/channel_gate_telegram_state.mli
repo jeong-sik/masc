@@ -5,6 +5,9 @@ val resolve_keeper_for_channel_result : channel_id:string -> (string option, Cha
 val record_poll_ok : bot_user_id:int64 -> next_offset:int64 option -> unit
 val record_error : string -> unit
 val record_not_configured : unit -> unit
+(** The three poll-state setters call [Gate_connector_announce.changed] when
+    the state changes in what the connector list draws: polling or not, the
+    bot, the error. A new offset alone does not. *)
 val chunks : string -> (string list, Telegram_rest_client.error) result
 (** Lossless UTF-8 chunks within Telegram's documented text limit. *)
 type send_error =

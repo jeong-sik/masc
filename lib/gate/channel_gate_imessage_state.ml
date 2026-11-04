@@ -102,19 +102,41 @@ let cursor_rowid_ref : int Atomic.t = Atomic.make 0
 let self_chat_guid_ref : string Atomic.t = Atomic.make ""
 let startup_error : string option Atomic.t = Atomic.make None
 
+let equal_poll_state previous next =
+  match previous, next with
+  | Not_started, Not_started | Polling, Polling -> true
+  | Degraded previous, Degraded next -> String.equal previous next
+  | (Not_started | Polling | Degraded _), (Not_started | Polling | Degraded _) -> false
+;;
+
+(* The poll state, the self chat and the startup error each feed what the
+   connector list draws, so a write that changes one tells its readers
+   (RFC-0480 §3.4). The cursor moves with every poll and is not drawn. *)
+let publish cell ~equal next =
+  let previous = Atomic.exchange cell next in
+  if not (equal previous next) then Gate_connector_announce.changed ~connector_id
+;;
+
 let record_poll_ok ~cursor_rowid =
   Atomic.set cursor_rowid_ref cursor_rowid;
-  Atomic.set poll_state_ref Polling
+  publish poll_state_ref ~equal:equal_poll_state Polling
 ;;
 
-let record_poll_error message = Atomic.set poll_state_ref (Degraded message)
+let record_poll_error message =
+  publish poll_state_ref ~equal:equal_poll_state (Degraded message)
+;;
 
 let record_self_chat_guid guid =
-  Atomic.set self_chat_guid_ref (String.trim guid)
+  publish self_chat_guid_ref ~equal:String.equal (String.trim guid)
 ;;
 
-let record_startup_error message = Atomic.set startup_error (Some message)
-let clear_startup_error () = Atomic.set startup_error None
+let record_startup_error message =
+  publish startup_error ~equal:(Option.equal String.equal) (Some message)
+;;
+
+let clear_startup_error () =
+  publish startup_error ~equal:(Option.equal String.equal) None
+;;
 
 let poll_state_connected = function
   | Polling -> true

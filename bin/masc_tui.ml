@@ -8033,7 +8033,8 @@ let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
 (* The Home Health line reads when the server announces it moved, on a
-   revalidation, and again after a failed read (RFC-0480 §3.4). *)
+   revalidation, when the workspace authority changes, and again after a
+   failed read (RFC-0480 §3.4). *)
 let owe_overview_read state =
   state.overview_owed <- Masc_tui_owed_read.changed state.overview_owed
 
@@ -16530,6 +16531,13 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_inflight <- false;
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
+  (* A Health line or harness read out under the old authority is refused
+     when it answers, and only its answer released the slot. The new
+     authority owes its own reads ([resume_reads_after_authority_change]). *)
+  state.overview_inflight <- false;
+  state.overview_owed <- Masc_tui_owed_read.settled;
+  state.harness_inflight <- false;
+  state.harness_owed <- Masc_tui_owed_read.settled;
   state.task_detail_id <- None;
   reset_task_detail_scroll state;
   withdraw_detail_histories state;
@@ -19274,6 +19282,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        cold admission has read no Gate yet. The same holds for the questions. *)
     owe_gate_snapshot_read state;
     owe_asks_read state;
+    owe_overview_read state;
+    owe_harness_read state;
     owe_async_requests_read state;
     owe_whole_keeper_roster_read state;
     owe_keeper_turns_read state;

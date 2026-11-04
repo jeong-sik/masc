@@ -12588,12 +12588,17 @@ let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_mode
   |> Masc_tui_keeper_list_model.order_rows ~layout:inputs.ri_layout
        ~sort:inputs.ri_sort
 
-let same_roster_inputs a b =
-  a.ri_keepers == b.ri_keepers && a.ri_turns == b.ri_turns
-  && a.ri_waiting == b.ri_waiting && a.ri_waiting_unverified == b.ri_waiting_unverified
-  && a.ri_waiting_failure == b.ri_waiting_failure && a.ri_approvals == b.ri_approvals
-  && a.ri_tasks == b.ri_tasks && a.ri_async == b.ri_async && a.ri_asks == b.ri_asks
-  && a.ri_roster == b.ri_roster && a.ri_layout = b.ri_layout && a.ri_sort = b.ri_sort
+(* The full pattern makes a new input field a build error here until it is
+   both named (warning 9) and compared (warning 27). The project leaves both
+   warnings off, so they are turned on for this function alone. *)
+let[@warning "+9+27"] same_roster_inputs
+    { ri_keepers; ri_turns; ri_waiting; ri_waiting_unverified; ri_waiting_failure;
+      ri_approvals; ri_tasks; ri_async; ri_asks; ri_roster; ri_layout; ri_sort } b =
+  ri_keepers == b.ri_keepers && ri_turns == b.ri_turns
+  && ri_waiting == b.ri_waiting && ri_waiting_unverified == b.ri_waiting_unverified
+  && ri_waiting_failure == b.ri_waiting_failure && ri_approvals == b.ri_approvals
+  && ri_tasks == b.ri_tasks && ri_async == b.ri_async && ri_asks == b.ri_asks
+  && ri_roster == b.ri_roster && ri_layout = b.ri_layout && ri_sort = b.ri_sort
 
 (* The list, the terminal title, the Activity pane and the footer each ask for
    the rows in one frame. Every input is an immutable value the state swaps
@@ -21800,13 +21805,17 @@ let agenda_of_inputs (inputs : agenda_inputs) : Masc_tui_agenda.t =
     ~confirming:inputs.ai_goals_to_confirm ~stalled:inputs.ai_stalled
 ;;
 
-let same_agenda_inputs a b =
-  a.ai_schedules == b.ai_schedules && a.ai_schedules_error == b.ai_schedules_error
-  && a.ai_schedule_freshness = b.ai_schedule_freshness
-  && Bool.equal a.ai_approvals_observed b.ai_approvals_observed
-  && a.ai_approvals_error == b.ai_approvals_error && a.ai_approvals == b.ai_approvals
-  && a.ai_asks == b.ai_asks && a.ai_asks_error == b.ai_asks_error
-  && a.ai_goals_to_confirm == b.ai_goals_to_confirm && a.ai_stalled == b.ai_stalled
+(* As [same_roster_inputs]: a new field fails the build until compared. *)
+let[@warning "+9+27"] same_agenda_inputs
+    { ai_schedules; ai_schedules_error; ai_schedule_freshness; ai_approvals_observed;
+      ai_approvals_error; ai_approvals; ai_asks; ai_asks_error; ai_goals_to_confirm;
+      ai_stalled } b =
+  ai_schedules == b.ai_schedules && ai_schedules_error == b.ai_schedules_error
+  && ai_schedule_freshness = b.ai_schedule_freshness
+  && Bool.equal ai_approvals_observed b.ai_approvals_observed
+  && ai_approvals_error == b.ai_approvals_error && ai_approvals == b.ai_approvals
+  && ai_asks == b.ai_asks && ai_asks_error == b.ai_asks_error
+  && ai_goals_to_confirm == b.ai_goals_to_confirm && ai_stalled == b.ai_stalled
 
 (* Every surface asks how many rows the strip takes, and the strip itself is
    drawn once more, all in one frame. Its inputs are immutable values the state

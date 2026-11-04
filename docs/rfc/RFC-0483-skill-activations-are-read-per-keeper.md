@@ -124,7 +124,7 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 | Usage | `/api/v1/skills` 본문 | 본문 알림(skill catalog 발행 #48059 등). 본문 필드마다 원천은 L3 에서 확인한다 |
 | Usage | `skill-usage`, 모든 Keeper | 화면을 열 때 한 번. 그 뒤로는 그 Keeper 의 `keeper_skill_activations_changed` 마다 그 Keeper 만. catalog 발행 때는 모든 Keeper(서버가 지금 catalog 로 행을 센다) |
 | Activations | 고른 Keeper 의 `skill-activations` | 고른 Keeper 가 바뀔 때(키, roster 읽기, Keeper 가 roster 를 떠남), 그 Keeper 의 알림마다 |
-| Surface, Catalog | `/api/v1/dashboard/tools` | skill catalog 발행, lane add-on export 변경(#48060), runtime config 변경(#48036) |
+| Surface, Catalog | `/api/v1/dashboard/tools` (고른 Keeper) | 그 Keeper 의 행 변경(`keeper_row_changed`: 메타데이터와 Keeper TOML 저장 뒤 Owner commit)과 roster 전체 변경, 그 Keeper 의 승인 모드 변경, skill catalog 발행, backlog 의 `execution_snapshot`(현재 Task 의 skill), runtime config 변경, lane add-on export 변경. 등록 도구 목록은 부팅 뒤 바뀌지 않는다. 서버가 아직 만들지 못한 warming 답은 실패한 읽기처럼 다시 읽는다 |
 
 - Keeper 마다 `Masc_tui_owed_read` 하나를 둔다. 읽는 동안 온 알림은 다음 읽기 한 번으로 합쳐진다. 그래서 Keeper 하나당 진행 중인 읽기 하나와 밀린 읽기 하나를 넘지 않는다. 이건 횟수 제한이 아니라 읽기 빚 모델이 원래 하는 일이다.
 - 바쁜 Keeper 가 계속 쓰면 그 Keeper 를 연달아 읽을 수 있다. 하지만 한 번 읽을 때 장부 하나만 읽고, 다른 Keeper 와 도구 목록은 읽지 않는다.
@@ -155,7 +155,7 @@ Keeper 이름은 registry 에 있다. 서버의 `Keeper_registry` 항목마다 �
 | L3e | harness 스크립트가 `skill-activations` 를 읽고, 서버 `/api/v1/dashboard/tools` 가 `skill_activations` 를 지운다 | 이름이 lib/, bin/, dashboard/, scripts/ 에 남지 않는지 |
 | L4a | 열린 async 요청 상세와 원본 Task 가 그 Keeper 의 요청·실행 저널 알림과 `execution_snapshot` 에 읽는다. 실행 저널이 쓸 때 `keeper_async_requests_changed` 를 낸다 | 다른 Keeper 의 알림에는 읽지 않는지, 실패한 읽기를 다시 읽는지(PTY) |
 | L4b-1 | TUI 가 4.3 표대로 catalog·Activations·Usage 를 알림과 pane 도착에 읽는다. 2초 주기는 고른 Keeper 의 도구 목록만 읽는다 | 알림 하나에 그 Keeper 읽기 하나, 주기에는 이 셋을 읽지 않는지(PTY) |
-| L4b-2 | Surface·Catalog pane 의 도구 목록이 catalog 발행, lane add-on export 변경, runtime config 변경에 읽고, Tools 화면의 2초 분기를 지운다 | 주기에는 Tools 화면이 아무것도 읽지 않는지(PTY) |
+| L4b-2 | Surface·Catalog pane 의 도구 목록이 4.3 표의 알림에 읽고, Tools 화면의 2초 분기를 지운다. lane add-on 의 model request watcher 오류 경로도 export 변경을 알린다 | 다른 Keeper 의 행 변경에는 읽지 않는지, 주기에는 Tools 화면이 아무것도 읽지 않는지(PTY) |
 | L5 | Keeper 채팅 기록이 그 Keeper 의 알림에 다시 읽는다 | 채팅을 연 Keeper 의 장부가 바뀌면 채팅 기록 읽기가 한 번 나가는지(PTY) |
 
 서버 필드는 그 필드를 읽는 마지막 소비자와 같은 층에서 지운다. TUI 의 `/api/v1/skills` decoder 는 최상위 키를 닫혀 있게 읽어서, 필드를 먼저 지우면 TUI 가 읽지 못하고 나중에 지우면 TUI 가 모르는 키를 거절한다.

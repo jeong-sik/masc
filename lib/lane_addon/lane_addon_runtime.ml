@@ -1361,6 +1361,9 @@ let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
       | Error detail -> if not e.stopping then (
           retire_admission e;
           failed m e (Lifecycle.Worker_failed ("model request watcher: " ^ detail));
+          (* Retiring the admission makes the entry unready; [failed] skips
+             its own announcement once the entry is stopping. *)
+          notify_exports m e;
           wake e;
           stop_entry ~sw:cleanup_sw ~backend m e) in
     watch None)

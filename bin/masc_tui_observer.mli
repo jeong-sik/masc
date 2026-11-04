@@ -223,6 +223,9 @@ type workspace_store =
   | Skill_catalog
       (** A workspace skill catalog snapshot was published
           ({!Masc.Skill_catalog_published_event}). *)
+  | Lane_addon_exports
+      (** A Lane Add-on's exported tools or their readiness changed
+          ([lane_addon_exports_changed], {!Masc.Lane_addon_exports_broadcast}). *)
 
 (** A whole-projection push. The TUI re-reads what [Transport_health]
     measures ([/api/v1/dashboard/transport-health]); the others are named for
@@ -411,6 +414,10 @@ val skill_activations_keeper : event -> string option
 val skill_catalog_published : event -> bool
 (** Whether [event] is a {!Skill_catalog} store change: a workspace skill
     catalog snapshot was published. *)
+
+val lane_addon_exports_changed : event -> bool
+(** Whether [event] is a {!Lane_addon_exports} store change. The Keeper
+    effective tool surface reads the exports. *)
 
 val dataset_owed : event -> Masc.Workspace_dataset_event.dataset option
 (** The workspace dataset a push owes a read: the dataset it names as

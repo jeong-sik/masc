@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""The Tools Activations and Usage panes read on the server's Skill pushes
-(RFC-0483 §4.3):
+"""The Tools view reads each part on the server's pushes (RFC-0483 §4.3):
+
+- the Surface pane reads the selected Keeper's inventory when that Keeper's
+  row, the Lane Add-on exports or runtime.toml change, and not for another
+  Keeper's row;
 
 - the Activations pane reads the selected Keeper's ledger when that Keeper's
   ledger changes, and not for another Keeper's change;
 - the Usage pane reads one Keeper's usage when that Keeper's ledger changes,
   and the catalog with every Keeper's usage when the catalog is published;
 - opening either pane reads it once;
-- the refresh cadence reads none of them.
+- the refresh cadence reads none of them, the inventory included.
 """
 
 import os
@@ -36,8 +39,12 @@ class SkillHandler(owed.ChatHandler):
         server = cast(SkillServer, self.server)
         request = urllib.parse.urlsplit(self.path)
         if request.path == INVENTORY_PATH:
-            # Any answer will do: the tests count the reads, not what they draw.
-            body: dict[str, object] = {}
+            # A built, empty inventory: an answer that does not decode would be
+            # read again like a failed read.
+            body: dict[str, object] = {
+                "tool_inventory": {"tools": [], "count": 0},
+                "effective_keeper_surface": None,
+            }
         elif request.path == CATALOG_PATH:
             body = {"schema": "masc.skill-snapshot/v1", "state": "not_registered"}
         elif request.path == ACTIVATIONS_PATH:
@@ -78,6 +85,18 @@ def activations_changed(keeper: str) -> dict[str, object]:
 
 def catalog_published() -> dict[str, object]:
     return {"type": "skill_catalog_published", "ts_unix": 1.0}
+
+
+def row_changed(keeper: str) -> dict[str, object]:
+    return {"type": "keeper_row_changed", "name": keeper, "ts_unix": 1.0}
+
+
+def exports_changed() -> dict[str, object]:
+    return {"type": "lane_addon_exports_changed", "ts_unix": 1.0}
+
+
+def runtime_config_changed() -> dict[str, object]:
+    return {"type": "runtime_config_changed", "ts_unix": 1.0}
 
 
 class ToolsSkillSignalTest(unittest.TestCase):
@@ -175,18 +194,43 @@ class ToolsSkillSignalTest(unittest.TestCase):
 
         self.run_tools(3, scenario)
 
-    def test_the_cadence_reads_no_skill_part(self) -> None:
+    def test_the_surface_reads_the_inventory_on_its_pushes(self) -> None:
         def scenario(server: SkillServer, step: Callable[..., None]) -> None:
-            server.set_phase("quiet")
+            server.set_phase("other")
+            server.events.put(row_changed("bravo"))
             step(
                 "wait",
-                lambda: server.response_count("quiet", INVENTORY_PATH) >= 2,
-                "the cadence did not read the inventory",
+                lambda: server.count("other", "observer-event-written") == 1,
+                "the other Keeper's row change was not sent",
             )
-            for path in SKILL_PATHS:
+            step("drain", 1.5)
+            self.assertEqual(server.count("other", INVENTORY_PATH), 0)
+            for phase, event in (
+                ("row", row_changed("analyst")),
+                ("exports", exports_changed()),
+                ("runtime", runtime_config_changed()),
+            ):
+                server.set_phase(phase)
+                server.events.put(event)
+                step(
+                    "wait",
+                    lambda phase=phase: server.response_count(phase, INVENTORY_PATH) == 1,
+                    f"the {phase} push did not read the inventory",
+                )
+                step("drain", 1.5)
+                self.assertEqual(server.count(phase, INVENTORY_PATH), 1, phase)
+
+        self.run_tools(0, scenario)
+
+    def test_the_cadence_reads_no_tools_part(self) -> None:
+        def scenario(server: SkillServer, step: Callable[..., None]) -> None:
+            server.set_phase("quiet")
+            step("drain", 3.5)
+            for path in (INVENTORY_PATH,) + SKILL_PATHS:
                 self.assertEqual(server.count("quiet", path), 0, path)
 
-        self.run_tools(3, scenario, refresh_seconds=1.0)
+        for panes in (0, 3):
+            self.run_tools(panes, scenario, refresh_seconds=1.0)
 
 
 if __name__ == "__main__":

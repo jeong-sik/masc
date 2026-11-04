@@ -10642,6 +10642,10 @@ type state = {
      catalog, the selected Keeper's activations, and each roster Keeper's
      usage. A roster Keeper with no entry has never been read. *)
   mutable tools_catalog_owed: Masc_tui_owed_read.t;
+  (* The selected Keeper's tool inventory and effective surface, and the
+     Keeper the reading on screen was read for. *)
+  mutable tools_inventory_owed: Masc_tui_owed_read.t;
+  mutable tools_inventory_keeper: string option;
   mutable tools_activations_owed: Masc_tui_owed_read.t;
   mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
@@ -14487,12 +14491,16 @@ let owe_every_skill_usage_read state =
 let owe_tools_catalog_read state =
   state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
 
+let owe_tools_inventory_read state =
+  state.tools_inventory_owed <- Masc_tui_owed_read.changed state.tools_inventory_owed
+
 let owe_tools_activations_read state =
   state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
 
-(* The Tools parts that read on a push, owed together: arriving on Tools, a
-   refresh, a revalidation and a resumed authority read them all. *)
-let owe_tools_skill_reads state =
+(* The Tools parts, owed together: arriving on Tools, a refresh, a
+   revalidation and a resumed authority read them all. *)
+let owe_tools_reads state =
+  owe_tools_inventory_read state;
   owe_tools_catalog_read state;
   owe_tools_activations_read state;
   owe_every_skill_usage_read state
@@ -20094,6 +20102,8 @@ let create_state
   tools_activations_error = None;
   tools_keeper_usage = [];
   tools_catalog_owed = Masc_tui_owed_read.settled;
+  tools_inventory_owed = Masc_tui_owed_read.settled;
+  tools_inventory_keeper = None;
   tools_activations_owed = Masc_tui_owed_read.settled;
   tools_usage_owed = [];
   skills_catalog = None;

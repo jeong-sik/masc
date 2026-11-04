@@ -4832,7 +4832,7 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
 ;;
 
 let test_chat_timeline_index_reuses_only_identical_inputs () =
-  let rows = [ chat_entry ~request_id:"r" ~text:"x" ~at:5. () ] in
+  let rows = [ chat_entry ~request_id:"r" ~role:Tui_types.Message_keeper ~text:"x" ~at:5. () ] in
   let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in
   let first = Tui_types.chat_timeline_index ~messages:rows ~visible in
   let second = Tui_types.chat_timeline_index ~messages:rows ~visible in

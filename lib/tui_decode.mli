@@ -586,6 +586,8 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
+  hov_stale_at : float option;
+      (** When the evaluator status turns Stale if no verdict arrives first. *)
 }
 
 type harness_snapshot = {

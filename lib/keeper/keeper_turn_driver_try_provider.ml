@@ -981,24 +981,24 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    last completed turn on this history ([completed_end_atom]), so only this
    turn's own atoms go out. Nothing here declares a cap.
 
-   RFC-0363 demotion runs first over the unmodified history: the atoms older
-   than the current turn — the [demote_before] boundary the caller computes
-   from [ctx.initial_messages] (RFC-0351 §4) — have their aged tool results
-   rewritten to readable addresses, and the range is then read off the
-   rewritten list. Demotion neither adds nor removes atoms, so the front is
-   the same position on both lists, and [history_atom_count] is the count
-   of the whole history, which the reported share keeps as denominator.
+   A message the range already sent goes out again exactly as it went
+   (RFC-0363 §3.4.1). Rewriting an earlier turn's tool result or argument
+   when the turn boundary moves would change the prefix the provider cached
+   at that message, on the first request of every turn. The range shrinks
+   only where its front moves, or as the answer to a size refusal.
 
    No cut refuses and nothing here measures a size against anything: the
    marks and the provider judge the request once it is counted, and the
-   request body is the provider's to accept or refuse. #28845's demotion of
-   the current turn's own tool results runs on the refusal path, never at
-   composition time: after a size refusal that the lane's own answer did not
-   turn into an accepted request, [current_turn_results] is
-   [Current_turn_demoted] and the atoms from the turn boundary to the end of
-   the refused request join the demotion, so this turn's results leave as
-   externalized markers while earlier turns stay as the policy composes them
-   ([current_turn_demotion_sequence]). *)
+   request body is the provider's to accept or refuse. #28845's demotion
+   runs on the refusal path, never at composition time: after a size refusal
+   that the lane's own answer did not turn into an accepted request,
+   [current_turn_results] is [Current_turn_demoted] and every tool result in
+   the refused request's atoms, with the completed arguments the attempt
+   bound, leaves as its externalized marker
+   ([current_turn_demotion_sequence]). Demotion neither adds nor removes
+   atoms, so the front is the same position on both lists, and
+   [history_atom_count] is the count of the whole history, which the
+   reported share keeps as denominator. *)
 type current_turn_results =
   | Current_turn_verbatim
   | Current_turn_demoted of { refused_atom_count : int }
@@ -1016,13 +1016,9 @@ type composed =
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
   ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
-  ; demote_from : int
-        (* The first atom the demotion may touch: 0 but for a demoted current
-           turn on a range whose earlier turns stay verbatim, where it is the
-           turn's first atom. *)
   ; demote_before : int
-        (* The boundary the demotion actually applied: 0 when demotion is off,
-           the refused request's atom count once the current turn is demoted. *)
+        (* The boundary the demotion actually applied: 0 when nothing is
+           demoted, the refused request's atom count after a size refusal. *)
   }
 
 (* A request as the ledger reads it, with the history it was composed from:
@@ -1040,8 +1036,8 @@ type sent_request =
 
 (* What one candidate carries between its requests and the retry policy
    around it: its working ledger, the range the last request composed, what
-   the compositions do with the current turn's tool results, and how to ask
-   whether demoting them would shorten the last request. *)
+   the compositions do with the tool results the range carries, and how to
+   ask whether demoting them would shorten the last request. *)
 type attempt_state =
   { last_request : sent_request option ref
   ; request_range : Keeper_continuity_request.range option ref
@@ -1052,8 +1048,8 @@ type attempt_state =
            attempt produces, which lie past the refused atoms, go verbatim. *)
   ; current_turn_demotion : (unit -> int option) option ref
         (* Set by each composition: the atom count of the request it composed
-           when demoting this turn's tool results in those atoms would carry fewer
-           bytes, [None] when it would change nothing. *)
+           when demoting the tool results and bound arguments in those atoms
+           would carry fewer bytes, [None] when it would change nothing. *)
   }
 
 (* The ledger's session: the history the carried positions belong to. The
@@ -1086,12 +1082,11 @@ let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
 ;;
 
-let demotion_plan ?completed_arguments ?(demote_from = 0)
-    ~measure_message_bytes ~base_path ~demote_before messages =
+let demotion_plan ?completed_arguments ~measure_message_bytes ~base_path ~demote_before messages =
   if String.equal base_path ""
   then { Keeper_model_input_demotion.messages; pending = [] }
   else Keeper_model_input_demotion.plan ?completed_arguments
-      ~demote_from ~measure_message_bytes ~demote_before messages
+      ~measure_message_bytes ~demote_before messages
 ;;
 
 (* Where a request's carried range opens (RFC keeper-context-window-in-tokens
@@ -1266,7 +1261,6 @@ let project_range_start ~unread ~measure_message_bytes ~atom_count start message
 ;;
 
 let compose_carried_model_input
-      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ?completed_arguments
       ~measure_message_bytes
@@ -1275,7 +1269,6 @@ let compose_carried_model_input
       ~(history_digest_at : int -> string option)
       ~current_turn_results
       ~base_path
-      ~demote_before
       ~turn_boundary
       messages
   =
@@ -1289,45 +1282,18 @@ let compose_carried_model_input
   let { start; outlived_seed } =
     choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
   in
-  (* A range that opens on a seed reaches behind this turn, so its aged tool
-     results are demoted at the turn boundary on either path that carries
-     one. A range that opens at the turn boundary or at a Librarian point
-     carries no atom behind it that demotion could shorten. *)
-  let ordinary_demote_before =
-    match input_policy, Option.map (fun (value : continuity) -> value.point) continuity with
-    | Keeper_input_policy.Small, _ -> demote_before
-    | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
-    | Wide, Some Without_snapshot ->
-      (match start with
-       | From_seed _ -> demote_before
-       | From_snapshot _ | From_read_position _ | Past_librarian_point _
-       | From_turn_boundary _ -> 0)
-    | Wide, None -> demote_before
-  in
-  (* After a size refusal this turn's own atoms join the demotion, whatever
-     the policy and the continuity: from where this turn began -- the turn
-     boundary, or the newest atom alone when the boundary could not be read
-     -- to the end of the refused request. Earlier turns stay as the policy
-     composes them: when the ordinary boundary already reaches this turn the
-     two ranges meet and one range from 0 covers both, and when it demotes
-     nothing the range starts at this turn. *)
-  let demote_from, demote_before =
+  (* Only the resend that answers a size refusal demotes, and then every atom
+     of the refused request with the completed arguments the attempt bound:
+     the resend is the smallest this range can carry, and the attempt's later
+     requests keep the same markers. Any other request carries what the range
+     already sent, unchanged (RFC-0363 §3.4.1). *)
+  let planned, demote_before =
     match current_turn_results with
-    | Current_turn_verbatim -> 0, ordinary_demote_before
+    | Current_turn_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
     | Current_turn_demoted { refused_atom_count } ->
-      let turn_start =
-        match turn_boundary with
-        | Keeper_carried_front.Turn_boundary { end_atom } ->
-          Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
-        | Keeper_carried_front.Turn_boundary_unknown _ ->
-          Keeper_carried_front.newest_atom ~atom_count:history_atom_count
-      in
-      if ordinary_demote_before >= turn_start
-      then 0, refused_atom_count
-      else turn_start, refused_atom_count
-  in
-  let planned =
-    demotion_plan ?completed_arguments ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
+      ( demotion_plan ?completed_arguments ~measure_message_bytes ~base_path
+          ~demote_before:refused_atom_count messages
+      , applied_demote_before ~base_path ~demote_before:refused_atom_count )
   in
   (* A response-observed persisted seed is evidence for the range it names.
      Composition consumes that evidence; it does not reinterpret the prior
@@ -1349,8 +1315,7 @@ let compose_carried_model_input
   ; history_atom_count
   ; origin = range_start_origin start
   ; outlived_seed
-  ; demote_from
-  ; demote_before = applied_demote_before ~base_path ~demote_before
+  ; demote_before
   }
 ;;
 
@@ -1408,7 +1373,6 @@ let resolve_carried ~to_wire carried =
 
 let unchecked_request_view
       ~tools
-      ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
       ?completed_arguments
       ~provider_config
@@ -1418,7 +1382,6 @@ let unchecked_request_view
       ~history_digest_at
       ~current_turn_results
       ~base_path
-      ~demote_before
       ~turn_boundary
       ~materialize
       ~to_wire
@@ -1427,14 +1390,13 @@ let unchecked_request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ~input_policy ?continuity ?completed_arguments
+        ?continuity ?completed_arguments
         ~measure_message_bytes
         ~front
         ~accepted
         ~history_digest_at
         ~current_turn_results
         ~base_path
-        ~demote_before
         ~turn_boundary
         messages)
   in
@@ -1484,15 +1446,15 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?(input_policy = Keeper_input_policy.Wide) ?continuity ?completed_arguments
+      ?continuity ?completed_arguments
       ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
-      ~history_digest_at ~current_turn_results ~base_path ~demote_before
+      ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
-    unchecked_request_view ~tools ~input_policy ?continuity ?completed_arguments
+    unchecked_request_view ~tools ?continuity ?completed_arguments
       ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
-      ~current_turn_results ~base_path ~demote_before ~turn_boundary ~materialize
+      ~current_turn_results ~base_path ~turn_boundary ~materialize
       ~to_wire messages
   in
   let* candidate = build completed_arguments in
@@ -1625,8 +1587,8 @@ let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after
    [state] receives, per request, the range this stage composed, so the
    response's usage can be written against it in the ledger and a refusal
    can be answered with a move of that very front; it hands this stage what
-   to do with the current turn's tool results and takes back the probe that
-   says whether demoting them would change the request. *)
+   to do with the tool results the range carries and takes back the probe
+   that says whether demoting them would change the request. *)
 type argument_binding_state =
   | Arguments_unbound
   | Arguments_bound of Keeper_model_input_demotion.completed_arguments option
@@ -1718,26 +1680,26 @@ let bounded_model_input_projection
   let measure_message_bytes =
     memoize_message_measurement (Keeper_context_core.message_measurer ())
   in
-  (* Scoped to the attempt for the same reason and with the same safety: the
-     demotion boundary is pinned to the turn's seed, so every request of this
-     attempt demotes the same aged tool results, and addressing one is a
+  (* Scoped to the attempt for the same reason and with the same safety: once
+     a size refusal demotes, every later request of this attempt demotes the
+     same refused atoms, and addressing one is a
      sha256 over its whole body. Built inside the per-request closure it would
      be thrown away between the attempt's 62 to 83 requests, which is what it
      was before. *)
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
   let store_failure_reported = ref false in
   let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
-  let references_enabled = match ctx.input_policy with
+  let argument_references_enabled = match ctx.input_policy with
     | Keeper_input_policy.Small ->
       reader_available
       && (match ctx.turn_boundary with
           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
           | Keeper_carried_front.Turn_boundary_unknown _ -> false)
     | Keeper_input_policy.Wide -> false in
-  let demotion_base_path = if references_enabled then ctx.base_path else "" in
   (* Core may deserialize a retained native checkpoint after dispatch. Bind
      once to its first actual request, while closure eligibility still comes
-     exclusively from the pre-admission seed. Result resends never rebind it. *)
+     exclusively from the pre-admission seed. Result resends never rebind it.
+     The bound set is demoted only by the resend that answers a size refusal. *)
   let argument_binding = ref Arguments_unbound in
   let argument_protection_reported = ref false in
   let completed_arguments_for messages =
@@ -1745,7 +1707,7 @@ let bounded_model_input_projection
     | Arguments_bound arguments -> arguments
     | Arguments_unbound ->
       let arguments =
-        if not references_enabled || String.equal ctx.base_path "" then None
+        if not argument_references_enabled || String.equal ctx.base_path "" then None
         else match ctx.argument_demotion_seed, ctx.turn_boundary with
           | Some seed, Keeper_carried_front.Turn_boundary { end_atom } ->
             (match offload_model_input_cpu (fun () ->
@@ -1764,13 +1726,13 @@ let bounded_model_input_projection
       argument_binding := Arguments_bound arguments;
       arguments
   in
-  (* The current turn's results leave as markers only for a Keeper that can
-     open them again: the marker names a body [artifact_read] reads back. *)
-  let current_turn_demotion_base_path = if reader_available then ctx.base_path else "" in
+  (* Demoted results leave as markers only for a Keeper that can open them
+     again: the marker names a body [artifact_read] reads back. *)
+  let demotion_base_path = if reader_available then ctx.base_path else "" in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
-    "input policy runtime=%s selected=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b body_externalization_enabled=%b"
+    "input policy runtime=%s selected=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b"
     ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
-    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available references_enabled;
+    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available argument_references_enabled;
 
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
@@ -1872,26 +1834,16 @@ let bounded_model_input_projection
       | None | Some Without_snapshot -> None
     in
     let current_turn_results = !(state.current_turn_results) in
-    let base_path =
+    (* The bound arguments ride only on a resend that answers a size refusal;
+       any other request sends every argument as the range first sent it. *)
+    let view_arguments =
       match current_turn_results with
-      | Current_turn_verbatim -> demotion_base_path
-      | Current_turn_demoted _ -> current_turn_demotion_base_path
-    in
-    (* Completed-turn evidence, not attempt seed length, protects unfinished
-       resumed tool work. Capacity refusal does not move this boundary. *)
-    (* Zero when the policy demotes nothing ([demotion_base_path] empty, as on
-       Wide), so a demoted current turn does not take the earlier turns with
-       it: its range then starts at this turn. *)
-    let demote_before =
-      applied_demote_before ~base_path:demotion_base_path
-        ~demote_before:
-          (match ctx.turn_boundary with
-           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
-           | Keeper_carried_front.Turn_boundary_unknown _ -> 0)
+      | Current_turn_verbatim -> None
+      | Current_turn_demoted _ -> completed_arguments
     in
     let* view =
       request_view
-        ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+        ?continuity:(input_continuity ctx.request_input) ?completed_arguments:view_arguments
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -1899,8 +1851,7 @@ let bounded_model_input_projection
         ~accepted
         ~history_digest_at
         ~current_turn_results
-        ~base_path
-        ~demote_before
+        ~base_path:demotion_base_path
         ~turn_boundary:ctx.turn_boundary
         ~materialize:(fun ~pending messages ->
           (* Blob materialization writes files, so it stays on the owning Eio
@@ -1932,9 +1883,15 @@ let bounded_model_input_projection
       |> Result.map_error (fun error -> Agent_core.Error.Media error)
     in
     (* A failed store can change the actual prefix a newly produced reasoning
-       block binds to. Recheck each request and only narrow the frozen set. *)
-    argument_binding := Arguments_bound view.completed_arguments;
-    let completed_arguments = view.completed_arguments in
+       block binds to. Recheck each demoting request and only narrow the frozen
+       set; a request that carried no arguments leaves the binding as it is. *)
+    let completed_arguments =
+      match current_turn_results with
+      | Current_turn_verbatim -> completed_arguments
+      | Current_turn_demoted _ ->
+        argument_binding := Arguments_bound view.completed_arguments;
+        view.completed_arguments
+    in
     if view.argument_prefix_protected && not !argument_protection_reported then (
       argument_protection_reported := true;
       Log.Keeper.info ~keeper_name:ctx.keeper_name
@@ -1950,15 +1907,14 @@ let bounded_model_input_projection
            offload_model_input_cpu (fun () ->
              let demoted =
                compose_carried_model_input
-                 ~input_policy:ctx.input_policy ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ?continuity:(input_continuity ctx.request_input) ?completed_arguments
                  ~measure_message_bytes
                  ~front
                  ~accepted
                  ~history_digest_at
                  ~current_turn_results:
                    (Current_turn_demoted { refused_atom_count = history_atom_count })
-                 ~base_path:current_turn_demotion_base_path
-                 ~demote_before
+                 ~base_path:demotion_base_path
                  ~turn_boundary:ctx.turn_boundary
                  messages
              in
@@ -3137,8 +3093,8 @@ let turn_boundary_resend_sequence
    lane's own answer, which on a turn with an absorbed point is one attempt --
    ends with a refusal [is_size_refusal] names, [same_run_retry_authorized]
    holds, and [demotable] names the refused request's atom count because
-   demoting this turn's tool results in those atoms would carry fewer bytes,
-   [demote] makes the compositions demote them and [resend] runs once on the
+   demoting the tool results and bound arguments in those atoms would carry
+   fewer bytes, [demote] makes the compositions demote them and [resend] runs once on the
    same candidate; its result is returned as it is. The range is not
    narrowed. Nothing to demote, or any other failure, returns the failure at
    once. A failed turn writes no boundary line, so without this step the next

@@ -670,15 +670,15 @@ val turn_boundary_resend_sequence :
 
 type current_turn_results =
   | Current_turn_verbatim
-      (** The ordinary demotion boundary: the current turn's tool results go
-          as they are. *)
+      (** No size refusal yet: every message goes as the range first sent it,
+          tool results and arguments of earlier turns included (RFC-0363
+          §3.4.1). *)
   | Current_turn_demoted of { refused_atom_count : int }
       (** A request carrying [refused_atom_count] atoms was refused for size:
-          every tool result from the turn boundary (the newest atom alone
-          when the boundary is unknown) up to [refused_atom_count] goes as its
-          externalized marker (#28845). Earlier turns go as the policy
-          composes them, and atoms appended after the refused ones, the
-          results a resent attempt produces, go as they are. *)
+          every tool result below [refused_atom_count], and every completed
+          argument the attempt bound, goes as its externalized marker
+          (#28845). Atoms appended after the refused ones, the results a
+          resent attempt produces, go as they are. *)
 
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->
@@ -692,8 +692,9 @@ val current_turn_demotion_sequence :
     keeper-context-window-in-tokens §10.4, §13.9). When [first] fails with a
     typed size refusal {!is_size_refusal} names,
     [same_run_retry_authorized] holds, and [demotable] names the refused
-    request's atom count because demoting this turn's tool results in it
-    would carry fewer bytes, [demote] is told and [resend] runs once; its
+    request's atom count because demoting the tool results and bound
+    arguments in it would carry fewer bytes, [demote] is told and [resend]
+    runs once; its
     result is returned as it is. The range is not narrowed. With nothing to
     demote, and on every other failure, the failure is returned at once. *)
 
@@ -752,20 +753,17 @@ type composed =
         (** A front this history does not open with the same message, dropped
             by {!Keeper_carried_front.for_history} with the reason; the
             request started over. *)
-  ; demote_from : int
-        (** The first atom the demotion may touch: 0, or this turn's first
-            atom under {!Current_turn_demoted} when the policy keeps earlier
-            turns verbatim. *)
   ; demote_before : int
-        (** The boundary the demotion applied: 0 when demotion is off, the
-            refused request's atom count under {!Current_turn_demoted}. *)
+        (** The boundary the demotion applied: 0 under {!Current_turn_verbatim}
+            or with no store, the refused request's atom count under
+            {!Current_turn_demoted}. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
-    (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
-    atoms older than [demote_before], joined under {!Current_turn_demoted} by
-    this turn's atoms up to the refused request's end, then the carried
-    range from where {!choose_range_start} opens it (§13.4, §13.6). Nothing
-    here measures the request against a limit. *)
+    (RFC keeper-context-window-in-tokens §10.4): under {!Current_turn_demoted}
+    RFC-0363 demotion over every atom up to the refused request's end, then
+    the carried range from where {!choose_range_start} opens it (§13.4,
+    §13.6). Under {!Current_turn_verbatim} nothing the range already sent is
+    rewritten. Nothing here measures the request against a limit. *)
 
 type request_view =
   { composed : composed
@@ -857,7 +855,6 @@ module For_testing : sig
   val message_measurement_hash : Agent_core.Types.message -> int
 
   val compose_carried_model_input :
-    ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
@@ -866,13 +863,11 @@ module For_testing : sig
     history_digest_at:(int -> string option) ->
     current_turn_results:current_turn_results ->
     base_path:string ->
-    demote_before:int ->
     turn_boundary:Keeper_carried_front.turn_start ->
     Agent_core.Types.message list ->
     composed
 
   val request_view :
-    ?input_policy:Keeper_input_policy.t ->
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?tools:Yojson.Safe.t list ->
@@ -883,7 +878,6 @@ module For_testing : sig
     history_digest_at:(int -> string option) ->
     current_turn_results:current_turn_results ->
     base_path:string ->
-    demote_before:int ->
     turn_boundary:Keeper_carried_front.turn_start ->
     materialize:
       (pending:Keeper_model_input_demotion.pending list ->

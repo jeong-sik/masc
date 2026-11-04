@@ -443,12 +443,12 @@ let test_prefit_real_continuity ~base_path () =
     |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let view = match Driver.For_testing.request_view
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
-    ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
+    ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path
-    ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
+    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical with
     | Ok view -> view
     | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in

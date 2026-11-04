@@ -495,7 +495,7 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   let original = bound identity_a (read ~send) in
   expect_context "A original handoff" original;
   let state = Masc_tui_types.create_state ~workspace:"history-protocol"
-      ~local_base_path:base_a ~port ~refresh_interval:0. () in
+      ~local_base_path:base_a ~port () in
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   state.server_identity <- Some identity_a;
   let begin_read () = match Masc_tui_types.begin_task_history_read state ~task_id:"task-original" ~limit:1 with

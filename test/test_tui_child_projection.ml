@@ -139,7 +139,7 @@ let native_load previous ~store ~through ~rows ~after =
   | Ok state -> state, !record_reads | Error error -> fail (Native.error_text error)
 
 let project_bodies ?native child =
-  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = T.create_state ~workspace:"test" ~port:8935 () in
   state.msg_child_content <- [keeper, child];
   (match native with None -> () | Some tasks -> state.msg_native_tasks <- [keeper, tasks]);
   let (projection : Render.chat_projection) =

@@ -338,8 +338,6 @@ def measured_ttyd_session(
         "differential-frame-evidence",
         "--port",
         str(api_port),
-        "--refresh",
-        "60",
     ]
     log = tempfile.TemporaryFile()
     started = time.monotonic()

@@ -2,7 +2,7 @@
 """The open chat reads its history once more when the server announced a
 change it may have missed, and again after a failed read (RFC-0480 §3.1).
 
-The refresh cadence is pushed out of the test's lifetime, so every history
+The TUI reads nothing on a clock, so every history
 read after the first comes from an announced change or a failed read.
 """
 
@@ -155,7 +155,6 @@ class ChatOwedHistoryTest(unittest.TestCase):
     def run_chat(
         self,
         scenario: Callable[[ChatServer, Callable[..., None]], None],
-        refresh_seconds: float = 1000.0,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="masc-chat-owed-") as temp_base:
             base = os.path.realpath(temp_base)
@@ -182,8 +181,6 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     base,
                     "--port",
                     str(server.server_port),
-                    "--refresh",
-                    str(refresh_seconds),
                 ],
                 stdin=slave,
                 stdout=slave,

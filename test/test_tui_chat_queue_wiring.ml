@@ -656,7 +656,7 @@ let test_pending_admission_pause_is_not_a_cancellation_claim () =
 ;;
 
 let test_stop_ack_releases_only_input_after_that_stop () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.keeper_chat_control_tokens <- ["alpha", "before"; "beta", "other"];
   let stop = Tui_types.begin_keeper_chat_control state "alpha" in
   state.keeper_interactive_waiting <- ["alpha", "after-stop", Tui_types.Awaiting_control {generation=stop;target=None}];
@@ -694,7 +694,7 @@ let test_stop_ack_releases_only_input_after_that_stop () =
 ;;
 
 let test_late_interrupt_outcome_cannot_mark_newer_control () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let stop = Tui_types.begin_keeper_chat_control state "alpha" in
   check bool "outcome without a token callback is current" true
     (Tui_types.keeper_chat_control_result_current state "alpha" ~generation:stop);
@@ -718,7 +718,7 @@ let test_late_interrupt_outcome_cannot_mark_newer_control () =
 ;;
 
 let test_control_receipts_are_scoped_to_each_keeper () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let alpha = Tui_types.begin_keeper_chat_control state "alpha" in
   let beta = Tui_types.begin_keeper_chat_control state "beta" in
   check bool "beta does not invalidate alpha receipt" true
@@ -728,7 +728,7 @@ let test_control_receipts_are_scoped_to_each_keeper () =
 ;;
 
 let test_preflight_resume_keeps_priority_intents_until_server_resume () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
   let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
   let ids requests =
@@ -755,7 +755,7 @@ let test_preflight_resume_keeps_priority_intents_until_server_resume () =
 ;;
 
 let test_new_control_discards_only_its_keeper_priority_intents () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let alpha = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"alpha" () in
   let beta = Keeper_chat.create_request ~keeper_name:"beta" ~message:"beta" () in
   state.keeper_run_next_pending <- [alpha; beta];
@@ -783,7 +783,7 @@ let test_new_control_discards_only_its_keeper_priority_intents () =
    and had no key that would take them to it (#33852). *)
 let test_a_request_to_another_keeper_does_not_pin_this_pane () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry keeper_name =
     let sent_request =
@@ -827,7 +827,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
 
 let test_live_transcripts_are_kept_per_keeper () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry keeper_name started_at =
     let sent_request =
@@ -917,7 +917,7 @@ let test_drawn_approval_is_only_a_candidate_until_presented () =
   in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (40, 160);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -963,7 +963,7 @@ let preflight_input ?(submission_seq = 0) () =
 ;;
 
 let test_preflight_recovery_retires_only_the_unsent_owner () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let entry, item = preflight_input () in
   let older = inflight_with_log ~keeper_name:"alpha" ~started_at:0.
@@ -996,7 +996,7 @@ let test_preflight_recovery_retires_only_the_unsent_owner () =
 ;;
 
 let test_preflight_recovery_rejects_ambiguous_owners () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let first, item = preflight_input () in
   let second, _ = preflight_input ~submission_seq:1 () in
   state.msg_inflight <- [first; second];
@@ -1011,7 +1011,7 @@ let test_preflight_recovery_rejects_ambiguous_owners () =
 let test_priority_recovery_follows_the_unsent_item () =
   let module Q = Masc_tui_keeper_chat_queue in
   List.iter (fun automatic ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.msg_target_keeper_name <- Some "alpha";
     let entry, item = preflight_input () in
     let priority = {item with Q.intent=Q.Run_next {automatic}} in
@@ -1045,7 +1045,7 @@ let test_priority_recovery_follows_the_unsent_item () =
 
 let test_resume_cannot_release_a_later_preflight_failure () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   Masc_tui_message_input.insert state.msg_input "newer draft";
   let entry, item = preflight_input () in
@@ -1078,7 +1078,7 @@ let test_resume_cannot_release_a_later_preflight_failure () =
 ;;
 
 let test_preflight_first_post_respects_control_epoch () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let path = Tui_decode.Canonical_path.of_path in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.server_identity <- Some
@@ -1122,7 +1122,7 @@ let test_preflight_first_post_respects_control_epoch () =
 
 let test_stop_preserves_steer_origin_without_reviving_priority () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let entry, item = preflight_input () in
   let steer = {item with Q.intent=Q.Steer_after_interrupt;
@@ -1144,7 +1144,7 @@ let test_stop_preserves_steer_origin_without_reviving_priority () =
 let test_late_priority_recovery_stays_behind_a_stopped_input () =
   let module Q = Masc_tui_keeper_chat_queue in
   List.iter (fun automatic ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.msg_target_keeper_name <- Some "alpha";
     let older = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"older stopped" () in
     let entry, _ = preflight_input () in
@@ -1178,7 +1178,7 @@ let test_late_priority_recovery_stays_behind_a_stopped_input () =
 ;;
 
 let test_admission_pending_tracks_only_the_target_keeper () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let entry, _ = preflight_input () in
   state.msg_inflight <- [entry];
   check bool "preflight has no server admission" true
@@ -1195,7 +1195,7 @@ let test_admission_pending_tracks_only_the_target_keeper () =
 ;;
 
 let test_checkpoint_requires_executed_segment_before_release () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let reply = Live.Reply_details {terminal_stream_scope=None; reply="";
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace#1"} in
   let pending_for deltas =
@@ -1214,7 +1214,7 @@ let test_checkpoint_requires_executed_segment_before_release () =
 
 let test_retained_input_footer_matches_coalescing_and_order () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
   List.iter (fun (held, expected) ->
@@ -1249,7 +1249,7 @@ let test_retained_input_is_visible_in_the_chat_footer () =
   let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.workspace_identity <- Tui_types.Workspace_identity_match;
@@ -1300,7 +1300,7 @@ let test_retained_input_is_visible_in_the_chat_footer () =
 
 let test_unmarked_input_precedes_a_superseded_steer () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let first = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"first" () in
   let steer = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later steer" () in
   let queue = match Q.push Q.empty ~submitted_at:1. first with
@@ -1331,7 +1331,7 @@ let test_unmarked_input_precedes_a_superseded_steer () =
 
 let test_stop_holds_existing_unmarked_input () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let old = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"old hold" () in
   let unmarked = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"waiting before stop" () in
   let other = Keeper_chat.create_request ~keeper_name:"beta" ~message:"other Keeper" () in
@@ -1366,7 +1366,7 @@ let test_stop_holds_existing_unmarked_input () =
 ;;
 
 let test_withdrawal_restores_only_input_before_the_first_post () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let entry, _ = preflight_input () in
   state.msg_history <- [chat_entry ~request_id:entry.sent_request.request_id
@@ -1392,7 +1392,7 @@ let test_withdrawal_restores_only_input_before_the_first_post () =
 
 let test_withdrawal_retains_staged_source_and_wire_together () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let entry, item = preflight_input () in
   let staged = {item with Q.request={item.request with Keeper_chat.message="[file reference]"};
@@ -1413,7 +1413,7 @@ let test_withdrawal_retains_staged_source_and_wire_together () =
 
 let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   Masc_tui_message_input.insert state.msg_input "newer composer";
   state.msg_references <- [Keeper_chat.Ref_url "https://example.invalid/new.png"];
@@ -1458,7 +1458,7 @@ let test_preflight_recovery_keeps_newer_input_and_a_full_queue () =
 
 let test_preflight_recovery_preserves_order_and_steer_intent () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let older, older_item = preflight_input () in
   let newer, newer_item = preflight_input ~submission_seq:1 () in
@@ -1489,7 +1489,7 @@ let test_preflight_recovery_preserves_order_and_steer_intent () =
 
 let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   Masc_tui_message_input.insert state.msg_input "newer draft";
   let entry, item = preflight_input () in
@@ -1546,7 +1546,7 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
 ;;
 
 let test_workspace_suspension_preserves_real_stop_ownership () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let entry, _ = preflight_input () in
   Tui_types.retain_preflight_inputs state [entry];
   let local = Tui_types.suspend_keeper_input state in
@@ -1566,7 +1566,7 @@ let test_workspace_suspension_preserves_real_stop_ownership () =
 
 let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
   state.msg_target_keeper_name <- Some "alpha";
@@ -1589,7 +1589,7 @@ let test_unmarked_input_cannot_escape_composer_or_recall_ownership () =
 let test_recalled_marked_input_holds_admission_for_its_keeper () =
   let module Q = Masc_tui_keeper_chat_queue in
   List.iter (fun coalesce ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     let _, item = preflight_input () in
     state.msg_queued <- Q.restore_unsent Q.empty item;
     let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later input" () in
@@ -1625,7 +1625,7 @@ let test_recalled_marked_input_holds_admission_for_its_keeper () =
 
 let test_recalled_admission_uses_the_explicitly_replaced_payload () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
   Tui_types.set_recall_edit state item;
@@ -1655,7 +1655,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
       sid_base_path=path "/workspace"; sid_masc_root=path root;
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
       sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   state.server_identity <- Some (identity "/workspace/a-root");
@@ -1800,7 +1800,7 @@ let test_recall_anchor_tracks_the_original_history_row () =
 
 let test_recall_navigation_preserves_the_edited_queue_item () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let _, item = preflight_input () in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_queued <- Q.restore_unsent Q.empty item;
@@ -1834,7 +1834,7 @@ let test_recall_navigation_preserves_the_edited_queue_item () =
 
 let test_new_enter_can_bypass_an_explicitly_stopped_input () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let _, item = preflight_input () in
   state.msg_queued <- Q.restore_unsent Q.empty item;
   let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"explicit followup" () in
@@ -1854,7 +1854,7 @@ let test_new_enter_can_bypass_an_explicitly_stopped_input () =
 
 let test_empty_composer_cannot_reverse_already_queued_input () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   let entry, item = preflight_input () in
   let later = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"later queued Enter" () in
@@ -1900,7 +1900,7 @@ let test_preflight_restoration_preserves_submission_chronology () =
 
 let test_offscreen_preflight_recovery_retains_its_owner () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "beta";
   let entry, item = preflight_input () in
   Tui_types.retain_preflight_inputs state [entry];
@@ -1917,7 +1917,7 @@ let visible_reply reply =
 
 let test_pending_delivery_keeps_full_original_identity () =
   let module Q = Masc_tui_keeper_chat_queue in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let original = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original input" () in
   let edited = { original with message = "different original input" } in
   let other = { original with keeper_name = "beta" } in
@@ -1958,7 +1958,7 @@ let test_pending_delivery_keeps_full_original_identity () =
     (has edited Tui_types.Posting alpha)
 
 let test_queue_summary_follows_admission_and_execution () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_tool_visibility <- Tui_types.Tools_full;
   let accepted keeper at = inflight_with_log ~keeper_name:keeper ~started_at:at
       [Live.Accepted {admission=Live.Queued; queue_length=99; interactive=None}] in
@@ -2045,7 +2045,7 @@ let test_queue_summary_follows_admission_and_execution () =
    stops treating it as live; an empty log is committed and let go. *)
 let test_settle_turn_log_commits_holds_and_clears_live () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2085,7 +2085,7 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
   List.iter
     (fun (record, expected) ->
       let state =
-        Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+        Tui_types.create_state ~workspace:"test" ~port:8935 ()
       in
       state.msg_target_keeper_name <- Some "alpha";
       let entry =
@@ -2113,7 +2113,7 @@ let test_a_turn_the_server_ended_without_a_closing_event_is_closed () =
 
 let test_an_ending_a_delta_already_wrote_is_not_overwritten () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2133,7 +2133,7 @@ let test_an_ending_a_delta_already_wrote_is_not_overwritten () =
    received them. *)
 let test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2163,7 +2163,7 @@ let test_a_checkpoint_closed_by_the_record_does_not_claim_the_final_reply () =
 
 let test_a_failure_learned_only_from_the_record_keeps_the_log_partial () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2181,7 +2181,7 @@ let test_a_failure_learned_only_from_the_record_keeps_the_log_partial () =
 
 let test_a_failure_the_stream_reported_still_stands_for_the_turn () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2207,7 +2207,7 @@ let completed ?(outcome = Masc.Keeper_turn_outcome.Visible_reply) reply
    was committed. A log that stands for the turn draws the reply itself. *)
 let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let entry =
     inflight_with_log ~keeper_name:"alpha" ~started_at:10.
@@ -2429,7 +2429,7 @@ let test_admission_notice_precedes_earlier_buffered_reply () =
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     List.iter (fun columns -> List.iter (fun origin ->
       set_size (60, columns);
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -2504,7 +2504,7 @@ let test_admission_notice_precedes_earlier_buffered_reply () =
 
 let test_batch_receipts_survive_source_selection_and_continuation () =
   let module Layout = Masc_tui_message_layout in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let first = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   let second = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
   let execution_id = first.sent_request.request_id in
@@ -2651,7 +2651,7 @@ let test_a_live_turn_keeps_the_merged_rows_between_journal_reads () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (60, 120);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -2714,7 +2714,7 @@ let test_a_live_turn_keeps_the_merged_rows_between_journal_reads () =
 let test_a_turn_that_stops_being_open_is_merged_again () =
   let module Layout = Masc_tui_message_layout in
   let module Render = Masc_tui_render_chat in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   let occurrence : E.tool_stream_occurrence =
@@ -2798,7 +2798,7 @@ let test_journal_replacement_retains_history_media () =
         me_identity=Tui_types.Persisted_row (Option.get history.structural_id);
         me_media=history.media;me_images=[image];
         me_turn_sequence=history.turn_sequence } in
-      let state=Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state=Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -2844,7 +2844,7 @@ let test_journal_diagram_coverage_is_source_owned () =
         ~text:(Media.append_text ~text:spoken media) ~at:2. ()) with
       me_execution_source=Some source;me_media=media;
       me_images=Preview.in_message_previews ~text:spoken ~attachments:(Media.images media) } in
-    let state=Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state=Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
@@ -2875,7 +2875,7 @@ let test_journal_diagram_coverage_is_source_owned () =
    cut live stream's partial log, or from the beginning. *)
 let test_a_journal_read_resumes_after_a_partial_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   check position "nothing held: the whole journal" Journal.Whole_turn
     (Tui_types.journal_resume_position state ~keeper_name:"alpha" (Log.Operation "op-1"));
@@ -2901,7 +2901,7 @@ let test_a_journal_read_resumes_after_a_partial_log () =
    way to the journal's whole one. *)
 let test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let ids () = List.map Tui_types.turn_log_request_id state.msg_settled_logs in
   Tui_types.hold_settled_log state (journal_log ~request_id:"op-20" ~started_at:20. ());
@@ -2928,7 +2928,7 @@ let test_hold_settled_log_orders_by_start_and_replaces_only_partial_logs () =
    that settled live: the loaded rows the log draws leave. *)
 let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -2968,7 +2968,7 @@ let test_a_settled_block_sits_before_its_requests_output_rows () =
    the block through the log's transcript. *)
 let test_loaded_tool_facts_are_folded_into_the_held_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let occurrence =
     { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
@@ -3008,7 +3008,7 @@ let test_loaded_tool_facts_are_folded_into_the_held_log () =
    result enriches that log alone. *)
 let test_enrichment_can_be_limited_to_one_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let held request_id execution_id =
     let occurrence =
@@ -3090,7 +3090,7 @@ let skill_evidence_row ~request_id ~at =
    no proof, while the exact row is already gone (#36882). *)
 let test_loaded_skill_evidence_is_folded_into_the_held_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let occurrence =
     { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
@@ -3133,7 +3133,7 @@ let test_loaded_skill_evidence_is_folded_into_the_held_log () =
    log's observation (#41737 review). *)
 let test_skill_dedup_keeps_a_distinct_runtime_visible () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let occurrence =
     { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
@@ -3193,7 +3193,7 @@ let test_skill_dedup_keeps_a_distinct_runtime_visible () =
    the loaded row the log leaves out cannot take the skill with it. *)
 let test_skill_evidence_stands_for_a_read_the_trail_missed () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let log =
     settled_log ~request_id:"op-1"
@@ -3230,7 +3230,7 @@ let test_skill_evidence_stands_for_a_read_the_trail_missed () =
    fact about that call, and it stands. *)
 let test_a_failed_skill_call_keeps_its_failure () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let occurrence =
     { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
@@ -3277,7 +3277,7 @@ let test_a_failed_skill_call_keeps_its_failure () =
    untouched, and a later reload does not bring the suppressed rows back. *)
 let test_a_settled_log_holds_its_turn_in_the_timeline () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -3328,7 +3328,7 @@ let test_a_settled_log_holds_its_turn_in_the_timeline () =
    thought; a log without reasoning does not take it away. *)
 let test_a_log_without_reasoning_leaves_the_trace_row () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -3350,7 +3350,7 @@ let test_a_log_without_reasoning_leaves_the_trace_row () =
    committed rows keep saying the rest. *)
 let test_an_unfinished_settled_log_suppresses_nothing () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -3365,7 +3365,7 @@ let test_an_unfinished_settled_log_suppresses_nothing () =
 
 let test_exact_operation_ending_keeps_unjournaled_rows () =
   List.iter (fun terminal ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
     state.msg_loaded <- loaded_turn ~request_id:"cut";
@@ -3435,7 +3435,7 @@ let test_exact_operation_ending_keeps_unjournaled_rows () =
 ;;
 
 let test_delivery_failure_keeps_complete_stream_authority () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_loaded <- loaded_turn ~request_id:"delivered";
@@ -3458,7 +3458,7 @@ let test_delivery_failure_keeps_complete_stream_authority () =
    alpha's held turn is suppressed from alpha's rows. *)
 let test_settled_logs_are_read_per_keeper () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -3486,7 +3486,7 @@ let test_settled_logs_are_read_per_keeper () =
 
 let test_pending_input_enters_transcript_only_when_execution_is_observed () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let request =
     Keeper_chat.create_request ~keeper_name:"alpha" ~message:"queued input" ()
@@ -3568,7 +3568,7 @@ let test_mismatched_keeper_rows_make_results_incomplete () =
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      Tui_types.create_state ~workspace:"test" ~port:8935 ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
@@ -3627,7 +3627,7 @@ let test_held_tool_results_follow_async_snapshot_changes () =
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (40, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -3675,7 +3675,7 @@ let test_held_tool_results_follow_async_snapshot_changes () =
 
 let test_thinking_fold_tracks_origin_body_budget () =
   let module Layout = Masc_tui_message_layout in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let thought = String.make 70 'x' in
   state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
   state.msg_history <- [chat_entry ~request_id:"boundary-thought" ~role:Tui_types.Message_thinking
@@ -3696,7 +3696,7 @@ let test_formatting_does_not_fold_a_fitting_thought () =
   let module Layout = Masc_tui_message_layout in
   List.iter (fun origin ->
     List.iter (fun decorate ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.msg_origin_display <- origin;
       state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
       let set text = state.msg_history <- [chat_entry ~request_id:"formatted-thought"
@@ -3723,7 +3723,7 @@ let test_thinking_previews_do_not_trigger_folding () =
   Preview.cache_store { preview with title = Some "A fitting thought's link" };
   List.iter (fun origin ->
     List.iter (fun mode ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.msg_origin_display <- origin;
       state.link_previews_mode <- mode;
       state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
@@ -3741,7 +3741,7 @@ let test_thinking_measurement_keeps_the_growing_draw_cache () =
   let module Layout = Masc_tui_message_layout in
   let module Render = Masc_tui_render_chat in
   let module Cache = Masc_tui_markdown_render_cache in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
   state.msg_history <- [chat_entry ~request_id:"growing-fold-cache"
     ~role:Tui_types.Message_thinking ~text:(String.make 300 'x') ~at:1. ()];
@@ -3778,7 +3778,7 @@ let test_fold_measurement_retains_raw_source_height () =
   let module Render = Masc_tui_render_chat in
   let module Cache = Masc_tui_markdown_render_cache in
   let module Markdown = Masc_tui_markdown in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
   state.msg_history <- [chat_entry ~request_id:"raw-height-owner"
     ~role:Tui_types.Message_thinking ~text:"alpha\nbeta\ngamma" ~at:1. ()];
@@ -3827,7 +3827,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     set_size (40, 100);
     let state =
       Tui_types.create_state ~tool_visibility:Tui_types.Tools_full
-        ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+        ~workspace:"test" ~port:8935 ()
     in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
@@ -3901,7 +3901,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
    observed: the journal reads feed that log in place until the turn ends. *)
 let test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   let entry =
@@ -3933,7 +3933,7 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
   in
   let fresh () =
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      Tui_types.create_state ~workspace:"test" ~port:8935 ()
     in
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_loaded_keeper <- Some "alpha";
@@ -3968,7 +3968,7 @@ let test_partial_observation_survives_history_ending_and_unavailable_journal () 
 ;;
 
 let test_retry_evidence_survives_error_suppression () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
@@ -4003,7 +4003,7 @@ let test_retry_evidence_survives_error_suppression () =
 ;;
 
 let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_loaded_keeper <- Some "alpha";
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"checkpoint-only" ~started_at:1. in
   Tui_types.turn_log_add ~now:2. log ~seq:(Some 0) Live.Run_started;
@@ -4025,7 +4025,7 @@ let test_succeeded_operation_with_checkpoint_only_keeps_final_history () =
 ;;
 
 let test_checkpoint_activities_have_exact_row_authority () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_loaded_keeper <- Some "alpha";
   let occurrence id index : Live.tool_occurrence =
     {stream_scope=0; block_index=index; provider_message_id=None; tool_call_id=Some id} in
@@ -4061,7 +4061,7 @@ let test_checkpoint_activities_have_exact_row_authority () =
 let test_skill_projection_keeps_distinct_runtime_evidence () =
   List.iter (fun partial ->
     List.iter (fun (observed_runtime, durable_runtime, distinct) ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.msg_loaded_keeper <- Some "alpha";
       let request_id = "runtime-skill-evidence" in
       let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
@@ -4111,7 +4111,7 @@ let test_skill_projection_keeps_distinct_runtime_evidence () =
 
 let test_ambiguous_skill_runtime_input_is_order_independent () =
   List.iter (fun (partial,staged,runtimes) ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.msg_loaded_keeper <- Some "alpha";
     let request_id = "ambiguous-failed-skill" in
     let occurrence : Live.tool_occurrence = {stream_scope=0;block_index=1;
@@ -4170,7 +4170,7 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
     | Changed _ | Unchanged _ -> () in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (100, 160);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -4258,7 +4258,7 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
 let test_checkpoint_remaining_skill_uses_its_own_state () =
   List.iter
     (fun retained_state ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.msg_loaded_keeper <- Some "alpha";
       let request_id = "checkpoint-skill-state" in
       let occurrence : Live.tool_occurrence =
@@ -4311,7 +4311,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
     let state = Tui_types.create_state ~workspace:"test" ~port:8935
-        ~refresh_interval:2. () in
+ () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -4369,7 +4369,7 @@ let test_observed_history_handoff_keeps_progress_and_one_final_reply () =
    same test. *)
 let test_a_journal_log_of_the_live_execution_is_not_observed () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   let live =
@@ -4401,7 +4401,7 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
 
 let test_hidden_partial_reply_cannot_remove_the_durable_reply () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935
-      ~refresh_interval:2. () in
+ () in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";
   let live = inflight_with_log ~keeper_name:"alpha" ~started_at:100.
@@ -4448,7 +4448,7 @@ let test_hidden_partial_reply_cannot_remove_the_durable_reply () =
 
 let fresh_state_with_running_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_target_keeper_name <- Some "alpha";
   Tui_types.hold_settled_log state
@@ -4467,7 +4467,7 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
   in
   let fresh () =
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      Tui_types.create_state ~workspace:"test" ~port:8935 ()
     in
     state.msg_target_keeper_name <- Some "alpha";
     state
@@ -4536,7 +4536,7 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
    seq-less settle terminal never lowers it. *)
 let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   Tui_types.journal_read_wanted state (operation_key "op-1") (Some 4);
   Tui_types.journal_read_wanted state (operation_key "op-1") (Some 9);
@@ -4564,7 +4564,7 @@ let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
 ;;
 
 let test_history_cannot_retire_a_partial_journal () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let source = Log.Operation "reply-op" in
   let key = "alpha", source in
   state.msg_loaded_keeper <- Some "alpha";
@@ -4604,7 +4604,7 @@ let test_history_cannot_retire_a_partial_journal () =
 ;;
 
 let test_journal_endpoints_preserve_terminal_and_failure_boundaries () =
-  let fresh () = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let fresh () = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let source = Log.Operation "boundary" in
   let follow state = Tui_types.journal_follow_for_source state ~keeper_name:"alpha"
       ~source ~seq:None ~at:3. in
@@ -4655,7 +4655,7 @@ let test_journal_endpoints_preserve_terminal_and_failure_boundaries () =
 ;;
 
 let test_journal_tracking_keeps_keeper_and_source_identity () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let source = Log.Operation "daily-review" in
   let alpha = "alpha", source and beta = "beta", source in
   let follow keeper = Tui_types.journal_follow_for_source state ~keeper_name:keeper
@@ -4718,7 +4718,7 @@ let test_journal_tracking_keeps_keeper_and_source_identity () =
    more of the turn; a cut log never displaces a whole one. *)
 let test_selected_source_logs_keep_first_order_and_prefer_the_whole_log () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let ids () =
     List.map Tui_types.turn_log_request_id
@@ -4842,7 +4842,7 @@ let test_held_turn_blocks_merge_among_committed_rows_by_clock () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -4893,7 +4893,7 @@ let test_held_turn_blocks_merge_among_committed_rows_by_clock () =
    as settled, including a log that is also an in-flight entry's log. *)
 let test_settled_logs_are_the_selected_logs_the_session_holds_settled () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let settled_a = journal_log ~request_id:"op-a" ~started_at:1. () in
   let settled_b = journal_log ~request_id:"op-b" ~started_at:2. () in
@@ -4929,7 +4929,7 @@ let test_held_turn_block_follows_only_its_own_requests_rows () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5088,7 +5088,7 @@ let test_journal_target_selection_matches_the_list_scanning_versions () =
   let non_empty = ref 0 in
   for _case = 1 to 300 do
     let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+      Tui_types.create_state ~workspace:"test" ~port:8935 ()
     in
     state.msg_settled_logs <-
       List.init (Random.State.int rng 10) (fun _ ->
@@ -5156,7 +5156,7 @@ let test_a_journal_built_log_starts_at_the_journal_head () =
    until enough keys have burned through the invisible excess. *)
 let test_message_scroll_accepts_the_rendered_clamp () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.msg_scroll <- 30;
   Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll {scroll=7; pin=None});
@@ -5169,7 +5169,7 @@ let test_message_scroll_accepts_the_rendered_clamp () =
    the row they drew, the same way the transcript already does. *)
 let test_resource_scroll_accepts_the_rendered_clamp () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.resource_scroll <- Masc_tui_scroll.Position.at 42;
   Tui_types.apply_clamped_scroll state (Tui_types.Resource_scroll (Masc_tui_scroll.Position.at 5));
@@ -5179,7 +5179,7 @@ let test_resource_scroll_accepts_the_rendered_clamp () =
 
 let test_approval_detail_scroll_accepts_the_rendered_clamp () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.approval_detail_scroll <- 42;
   Tui_types.apply_clamped_scroll state (Tui_types.Approval_detail_scroll (3, None));
@@ -5202,7 +5202,7 @@ let test_the_header_names_only_unusual_modes () =
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
   let started =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   check bool "the pane starts with the reading layout" true
     (started.Tui_types.msg_origin_display = Masc_tui_message_layout.Origin_bare);
@@ -5261,7 +5261,7 @@ let test_chat_header_resolves_the_effective_modes () =
 
 let test_chat_visibility_defaults_and_cycles () =
   let default =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   check string "reasoning starts visibly folded" "folded"
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
@@ -5285,7 +5285,6 @@ let test_chat_visibility_defaults_and_cycles () =
       ~tool_visibility:Tui_types.Tools_compact
       ~workspace:"test"
       ~port:8935
-      ~refresh_interval:2.0
       ()
   in
   check string "configured reasoning default" "hidden"
@@ -5364,7 +5363,7 @@ let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
 
 let test_composing_holds_only_while_the_composer_is_live () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.coalesce_queued_input <- true;
   state.msg_target_keeper_name <- Some "alpha";
@@ -5398,7 +5397,7 @@ let test_composing_holds_only_while_the_composer_is_live () =
 ;;
 
 let test_checkpoint_watcher_allows_new_input () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let request = Keeper_chat.create_request ~keeper_name:"alpha" ~message:"original" () in
   let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:request.request_id ~started_at:1. in
   state.msg_inflight <- [{Tui_types.sent_request=request; submitted_at=1.; sent_at=1.; control_generation=0;
@@ -5419,7 +5418,7 @@ let test_checkpoint_watcher_allows_new_input () =
 ;;
 
 let test_old_queued_watcher_does_not_rearm_esc () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let working = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [Live.Run_started] in
   let queued = inflight_with_log ~keeper_name:"alpha" ~started_at:2. [] in
   state.msg_inflight <- [queued; working];
@@ -5446,7 +5445,7 @@ let test_batch_source_selection_preserves_four_request_history () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (60, 120);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5517,7 +5516,7 @@ let test_history_and_renderer_share_all_inflight_candidates () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (60, 120);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5559,7 +5558,7 @@ let test_history_and_renderer_share_all_inflight_candidates () =
 ;;
 
 let test_batch_watchers_render_one_shared_settled_turn () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let make request_id execution_id =
     let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
@@ -5593,7 +5592,7 @@ let test_older_page_keeps_the_blocks_it_did_not_change () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5648,7 +5647,7 @@ let test_older_page_keeps_the_entries_it_moved_down () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5686,7 +5685,7 @@ let test_older_page_keeps_the_entries_it_moved_down () =
       before moved)
 
 let test_batch_members_preserve_execution_source_kind () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let reference = Ids.Turn_ref.make ~trace_id:"same" ~absolute_turn:1 in
   let source = Log.Autonomous_turn reference in
   let autonomous = Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:1. in
@@ -5710,7 +5709,7 @@ let test_batch_reply_follows_all_original_inputs () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5830,7 +5829,7 @@ let test_observed_checkpoint_retains_earlier_output () =
       cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (65, 140);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -5883,7 +5882,7 @@ let test_observed_checkpoint_retains_earlier_output () =
 ;;
 
 let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let make request_id execution_id =
     let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:1. in
     List.iter (fun delta -> Tui_types.turn_log_add ~now:2. log ~seq:None delta)
@@ -5962,7 +5961,7 @@ let test_only_a_moving_skill_wears_the_live_mark () =
        Keeper_chat_transcript.all_skill_states)
 
 let test_roster_starts_hidden_until_explicitly_opened () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:0 () in
   check bool "default is hidden outside chat" true (Tui_types.roster_pane_hidden state);
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   check bool "entering chat keeps the roster closed" true (Tui_types.roster_pane_hidden state);
@@ -5978,7 +5977,7 @@ let test_roster_starts_hidden_until_explicitly_opened () =
     [Masc_tui_roster_pane.Hidden, true; Masc_tui_roster_pane.Shown, false]
 
 let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:0 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   state.keeper_cursor <- 1;
@@ -6007,7 +6006,7 @@ let test_hidden_chat_roster_releases_focus_without_changing_conversation () =
     (state.keeper_message_focus = Tui_types.Left_pane)
 
 let test_priority_completion_survives_controls () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let alpha = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   let beta = inflight_with_log ~keeper_name:"beta" ~started_at:1. [] in
   state.msg_inflight <- [alpha; beta];
@@ -6032,7 +6031,7 @@ let test_priority_completion_survives_controls () =
     (Tui_types.settle_keeper_run_next state beta.sent_request (Error "duplicate") = Tui_types.Run_next_untracked)
 
 let test_priority_workspace_withdrawal () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let old = inflight_with_log ~keeper_name:"alpha" ~started_at:1. [] in
   state.msg_inflight <- [old];
   state.keeper_run_next_inflight <- [old.sent_request];
@@ -6066,7 +6065,7 @@ let test_priority_workspace_withdrawal () =
 
 let test_fusion_workspace_withdrawal () =
   let module F = Masc_tui_fetched in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let run : Masc.Tui_decode_fusion.fusion_run =
     { fur_run_id = "same-run"; fur_keeper = "alpha"; fur_preset = "A-only";
       fur_topology = Fusion_types.Simple; fur_started_at = 1.;
@@ -6124,7 +6123,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
   let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some size)) in
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (40, 160);
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -6195,7 +6194,7 @@ let test_status_details_and_fold_counts_reach_the_frame () =
       [Masc_tui_message_layout.Origin_bare, 1; Origin_inline, 2])
 
 let test_verified_rejection_is_visible_without_mutating_original_input () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let request_id = "rejected-input" in
   let row = chat_entry ~request_id
       ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator {surface=None}))
@@ -6228,7 +6227,7 @@ let test_delivery_states_and_observed_work_are_identifiable () =
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     List.iter (fun columns ->
       set_size (60, columns);
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -6305,7 +6304,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
     List.iter (fun columns ->
       set_size (60, columns);
       List.iter (fun origin ->
-        let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+        let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
         state.view <- Tui_types.Keepers Tui_types.Keeper_message;
         state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
         state.msg_target_keeper_name <- Some "alpha";
@@ -6396,7 +6395,7 @@ let test_search_measures_original_message_rows () =
     List.iter (fun columns ->
     set_size (24, columns);
     List.iter (fun origin ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
     state.msg_target_keeper_name <- Some "alpha";
@@ -6455,7 +6454,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
   Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
     set_size (24, 100);
     let fresh () =
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
       state.msg_target_keeper_name <- Some "alpha";
@@ -6533,7 +6532,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
 ;;
 
 let test_empty_post_terminal_replay_is_retained () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let source = Log.Operation "empty-terminal" in
   let terminal = Keeper_chat_operation.Cancelled {completed_at=3.} in
   let _, journal, replay = Log.read_with_operation_state
@@ -6552,7 +6551,7 @@ let test_empty_post_terminal_replay_is_retained () =
 ;;
 
 let test_search_finds_a_batched_request_by_its_own_id () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
   state.msg_target_keeper_name <- Some "alpha";
@@ -6584,7 +6583,7 @@ let test_history_suppression_preserves_typed_source_collisions () =
   let key = Ids.Turn_ref.to_string turn in
   let operation = Log.Operation key and autonomous = Log.Autonomous_turn turn in
   List.iter (fun (own, other) -> List.iter (fun complete ->
-    let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
     state.msg_loaded_keeper <- Some "alpha";
     let log = Tui_types.turn_log_create_for_source ~keeper_name:"alpha" ~source:own ~started_at:100. in
     let occurrence = { Live.stream_scope=0; block_index=0;
@@ -6618,7 +6617,7 @@ let test_interrupted_native_progress_survives_results_projection () =
     ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
       cache ~probe:(fun () -> Some (60,140)));
     List.iter (fun (label,expected_outcome,terminal) ->
-      let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
       state.msg_target_keeper_name <- Some "alpha";
       state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
@@ -6651,7 +6650,7 @@ let test_interrupted_native_progress_survives_results_projection () =
    an entry, so the entries are kept and only the list is new. *)
 let test_a_landed_preview_keeps_the_entries () =
   let module Preview = Masc_tui_link_preview in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   let url = "https://github.com/jeong-sik/masc/pull/37633" in
   let plain = { (entry_at 41.0) with me_text = "no link here" } in
   let linked = { (entry_at 42.0) with me_text = url } in
@@ -6685,7 +6684,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
         (fun () -> Preview.reset ~base_path:preview_base_path ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
-    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 () in
     let turn_ref = Ids.Turn_ref.make ~trace_id:"preparation-wire" ~absolute_turn:8 in
     let wire ~lane ~turn_ref preview = `Assoc ["schema",`String "masc.keeper_turns.v1";
       "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
@@ -6779,7 +6778,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
     let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
       Preview.reset ~base_path:preview_base_path ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
-    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 () in
     let snapshot () =
       let preview = match Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:token with
         | Some value -> Preview.to_json value | None -> fail "original writer disappeared" in
@@ -6840,7 +6839,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
 
 let test_failed_preparation_refreshes_only_selected_unsettled_operation () =
   let fresh ~ended =
-    let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
+    let state = Tui_types.create_state ~workspace:"test" ~port:0 () in
     state.view <- Tui_types.Keepers Tui_types.Keeper_message;
     state.msg_target_keeper_name <- Some "alpha";
     let log = Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"failed-member" ~started_at:0. in
@@ -6886,7 +6885,7 @@ let test_failed_preparation_refreshes_only_selected_unsettled_operation () =
 
 let test_persisted_execution_source_and_narrow_delivery_labels () =
   let module Layout = Masc_tui_message_layout in
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
   state.msg_target_keeper_name <- Some "alpha";

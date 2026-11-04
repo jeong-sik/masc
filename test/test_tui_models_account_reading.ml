@@ -14,7 +14,7 @@ let () =
 
 let () =
   let check = Alcotest.(check (pair (option string) (list string))) in
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:60. () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   (* The same provider id is loaded with home A while the source row names B. *)
   state.overview_account_emails <- Account_emails_read {
     emails = ["codex_a", "loaded-a@example.org"]; unreadable_rows = 0 };

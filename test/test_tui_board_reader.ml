@@ -98,7 +98,7 @@ let test_binary_workspace_admission () = Eio_main.run (fun _ ->
 let test_original_job_cancellation () = Eio_main.run (fun _ ->
   Eio.Switch.run (fun sw ->
     let ui=Masc_tui_types.create_state ~workspace:"owned-board-reader"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
     let never,_=Eio.Promise.create () in
     let start job =
       let entered,enter=Eio.Promise.create () in

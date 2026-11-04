@@ -164,7 +164,7 @@ run_cycle() {
   c_comm="$(ps -o comm= -p "$old" 2>/dev/null | sed 's:.*/::;s/ *$//')"
 
   ( cd "$t" && bash "$t/scripts/tui-graceful-restart.sh" --timeout 5 \
-      --base-path "$t" -- --workspace "restart workspace" --port 34393 --refresh 60 ) \
+      --base-path "$t" -- --workspace "restart workspace" --port 34393 ) \
     >"$t/cycle.out" 2>&1
   c_rc=$?
 
@@ -181,7 +181,7 @@ run_cycle() {
   if [ "$c_fresh" = "1" ] && [ -f "$t/.masc/logs/masc-tui-$fresh_pids.argv" ]; then
     c_argv="$(cat "$t/.masc/logs/masc-tui-$fresh_pids.argv")"
   fi
-  c_expected_argv="$(printf '%s\n' --base-path "$t" --workspace "restart workspace" --port 34393 --refresh 60)"
+  c_expected_argv="$(printf '%s\n' --base-path "$t" --workspace "restart workspace" --port 34393)"
 
   if grep -qF "$GRACEFUL_ROW" "$t/cycle.out"; then c_echo="yes"; else c_echo="no"; fi
 

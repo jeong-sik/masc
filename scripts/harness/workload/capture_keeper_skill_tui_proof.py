@@ -753,8 +753,6 @@ def ttyd_session(
         Path(base_path).name,
         "--port",
         str(api_port),
-        "--refresh",
-        "60",
     ]
     process = subprocess.Popen(
         command,

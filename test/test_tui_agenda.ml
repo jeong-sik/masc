@@ -211,7 +211,7 @@ let test_an_unread_agenda_keeps_the_strip_down () =
 
 let test_failed_reads_are_safe_before_the_panel_fits_them () =
   let state =
-    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Masc_tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   let raw = "오류\027[31m\n\xFF\xE2\x80\x8B literal \\x1B" in
   let expected = "오류\\x1B[31m\\x0A\\xFF\\u200B literal \\x1B" in
@@ -253,7 +253,7 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
     (fun (reason, expected) ->
        let state =
          Masc_tui_types.create_state ~workspace:"test" ~port:8935
-           ~refresh_interval:2.0 ()
+ ()
        in
        state.schedules_agenda <- Some
          { scs_status = "unknown"; scs_read_error = reason
@@ -387,7 +387,7 @@ let test_prose_rows_take_no_cursor () =
    is the identity from the earlier displayed projection; renderer lookup and
    Enter lookup must agree even though that projection's row numbers moved. *)
 let agenda_state () =
-  Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  Masc_tui_types.create_state ~workspace:"" ~port:0 ()
 
 let lines_of_state state = overlay_of (Masc_tui_types.agenda state)
 

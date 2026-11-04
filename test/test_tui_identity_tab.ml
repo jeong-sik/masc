@@ -106,7 +106,7 @@ let pending_urls state keeper =
 
 let identity_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935
-    ~refresh_interval:2.0 ()
+ ()
 
 module Decode = Masc.Tui_decode
 

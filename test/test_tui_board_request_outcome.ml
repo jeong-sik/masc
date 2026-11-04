@@ -105,7 +105,7 @@ let with_fixture run =
 
 let state base_path port =
   let state = Types.create_state ~workspace:"publication" ~local_base_path:base_path
-      ~port ~refresh_interval:0. () in
+      ~port () in
   state.server_identity <- Some (identity base_path);
   state.workspace_identity <- Types.Workspace_identity_match;
   state.board_mode <- Types.Board_compose;
@@ -461,7 +461,7 @@ let test_closed_results_settle_board_post_without_hanging_inflight () = with_fix
 
 let test_comment_launch_failure_does_not_announce_sending () =
   let state = Types.create_state ~workspace:"comment-no-launch" ~port:8935
-      ~refresh_interval:0. () in
+ () in
   state.workspace_identity <- Types.Workspace_identity_match;
   Buffer.add_string state.board_draft "draft retained";
   let request_id = ref () and reports = ref [] in
@@ -477,7 +477,7 @@ let test_comment_launch_failure_does_not_announce_sending () =
 
 let test_old_comment_result_cannot_settle_same_draft_retry () =
   let state = Types.create_state ~workspace:"comment-owner" ~port:8935
-      ~refresh_interval:0. () in
+ () in
   state.workspace_identity <- Types.Workspace_identity_match;
   Buffer.add_string state.board_draft "same draft";
   let original = ref () and successor = ref () in

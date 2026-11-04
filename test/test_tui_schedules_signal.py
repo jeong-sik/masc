@@ -3,7 +3,7 @@
 announces that the schedules changed, and again after a failed read
 (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every read
+The TUI reads nothing on a clock, so every read
 after the workspace is admitted comes from an announcement or a failed read.
 """
 
@@ -79,7 +79,6 @@ class SchedulesSignalTest(unittest.TestCase):
     def run_schedules(
         self,
         scenario: Callable[[SchedulesServer, Callable[..., None]], None],
-        refresh_seconds: float = 1000.0,
     ) -> None:
         owed.ChatServer = SchedulesServer
         owed.ChatOwedHistoryTest.binary = self.binary
@@ -93,7 +92,7 @@ class SchedulesSignalTest(unittest.TestCase):
             scenario(schedules, step)
 
         owed.ChatOwedHistoryTest.run_chat(
-            cast(owed.ChatOwedHistoryTest, self), admitted, refresh_seconds
+            cast(owed.ChatOwedHistoryTest, self), admitted
         )
 
     def test_a_schedule_change_reads_the_schedules(self) -> None:

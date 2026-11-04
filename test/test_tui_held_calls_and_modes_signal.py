@@ -3,7 +3,7 @@
 (Keepers) read again when the server announces their change, and the held
 calls again after a failed read (RFC-0480 L5).
 
-The refresh cadence is pushed out of the test's lifetime, so every read after
+The TUI reads nothing on a clock, so every read after
 a surface opens comes from an announcement or a failed read.
 """
 

@@ -267,7 +267,7 @@ let answer_memory_facts (state : Masc_tui_types.state) (snapshot : Masc.Tui_deco
 ;;
 
 let memory_state_with_facts () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.memory_facts_keeper <- Some "alpha";
   answer_memory_facts state
       { Masc.Tui_decode_memory_facts.mfs_keeper = "alpha"
@@ -352,7 +352,7 @@ let answer_fusion_runs state snapshot =
       state.fusion_runs <- Masc_tui_fetched.complete ~equal:Unit.equal next request (Ok snapshot)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let response = `Assoc
     [ "generated_at", `String "2026-09-07T00:00:00Z"
     ; "count", `Int 0; "runs", `List []
@@ -377,7 +377,7 @@ let test_fusion_historical_evidence_is_a_selectable_board_reference () =
     0 (List.length (Masc_tui_fusion_model.selected_keeper_runs state))
 
 let test_keeper_runs_selection_survives_a_shorter_list () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let keeper name : Tui_decode.keeper =
     { k_origin = Masc.Tui_decode.Persisted_keeper
   ; k_name = name
@@ -423,14 +423,14 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
 
 let ring_stop surface =
   Masc_tui_surface_navigation.surface_ring_index
-    (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
+    (create_state ~workspace:"" ~port:0 ())
     surface
 
 (* Every view lands on a stop the ring holds. The index cannot say this: a
    family missing from the ring comes back as 0, Overview's position, and a
    comparison against Overview would pass. *)
 let test_every_view_has_a_ring_stop () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   List.iter
     (fun surface ->
       Alcotest.(check bool) "the view's family is a ring stop" true
@@ -651,7 +651,7 @@ let approvals_home_in_ring state =
   List.exists (fun (surface, _) -> surface = home) Masc_tui_types.surface_ring
 
 let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Overview;
   Alcotest.(check bool) "Approvals is reached through Work" true
     (Masc_tui_surface_navigation.surface_ring_family state Approvals = Planning);
@@ -703,7 +703,7 @@ let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
    under "MASC Approvals (0)" (#39172 review, 2026-09-26). Every place that
    says whether the lists were read now reads the same per-list readings. *)
 let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Overview;
   approvals_reading_is_current state;
   Alcotest.(check bool) "every list read and empty: nothing pending" true
@@ -733,7 +733,7 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   Alcotest.(check string) "with no note" "" (Masc_tui_approvals_model.approvals_title_notes (Masc_tui_approvals_model.approvals_reading state))
 
 let test_browser_lanes_highlight_config () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Connectors;
   check Alcotest.int "channel bindings remain under Keepers"
     (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))
@@ -776,7 +776,7 @@ let test_the_question_count_counts_questions () =
     ; ar_resolution = Masc.Tui_decode_asks.Ask_open
     }
   in
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.asks_snapshot <-
     Some
       { Masc.Tui_decode_asks.asn_keeper = None
@@ -809,7 +809,7 @@ let test_the_question_count_counts_questions () =
 (* The question count reads 0 both when no question is open and when the
    questions were never read, so the title needs to know which. *)
 let test_the_questions_reading_tells_unread_from_none_open () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let reading () =
     match Masc_tui_approvals_model.approvals_questions_reading state with
     | Masc_tui_approvals_model.List_read -> "current"
@@ -931,7 +931,7 @@ let test_keeper_list_view_and_order_keys () =
     (List.length (List.filter (String.equal "v") metric_keys))
 
 let test_keeper_list_cycles_preserve_selected_name () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["alpha"; "beta"; "gamma"];
   state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
@@ -950,7 +950,7 @@ let test_keeper_list_cycles_preserve_selected_name () =
     (keeper_index state "beta")
 
 let test_keeper_list_detail_transition_preserves_selected_name () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
   state.keeper_turns <- [roster_turn "alpha"; roster_turn "gamma"];
@@ -966,7 +966,7 @@ let test_keeper_list_detail_transition_preserves_selected_name () =
   Alcotest.(check (option string)) "files return keeps the name" (Some "beta") (selected_roster_name state)
 
 let test_activity_keeper_selection_uses_the_current_roster () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["alpha"; "beta"];
   state.keeper_turns <- [roster_turn "beta"];
@@ -992,7 +992,7 @@ let test_activity_keeper_selection_uses_the_current_roster () =
     (selected_roster_name state)
 
 let test_keeper_preference_failures_are_retained_by_kind () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let next_id = ref 0 in
   let submit preference =
     incr next_id;
@@ -1057,7 +1057,7 @@ let test_keeper_preference_failures_are_retained_by_kind () =
 
 let test_keeper_preference_exit_keeps_drained_and_pending_failures () =
   Eio_main.run (fun _ ->
-    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"" ~port:0 () in
     let writer = state.keeper_preference_writer in
     let submit preference =
       ignore (Masc_tui_config.submit_keeper_preference writer
@@ -1080,8 +1080,8 @@ let test_keeper_preference_exit_keeps_drained_and_pending_failures () =
 
 let test_keeper_preference_cancelled_submission_and_exit () =
   Eio_main.run (fun _ ->
-    let cancelled_state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-    let pending_state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let cancelled_state = create_state ~workspace:"" ~port:0 () in
+    let pending_state = create_state ~workspace:"" ~port:0 () in
     let order = Masc_tui_config.Keeper_order "recent" in
     let view = Masc_tui_config.Keeper_view "grouped" in
     let previous : Masc_tui_config.keeper_preference_completion =
@@ -1142,7 +1142,7 @@ let test_keeper_preference_cancelled_submission_and_exit () =
        | _ -> false))
 
 let test_keeper_peer_reading_keeps_its_target_and_epoch () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
     { snapshot = {queued_count = 1; relations = [];
                   source_redacted_count = 0; source_unverified_count = 0}; next_sequence } in
@@ -1228,7 +1228,7 @@ let test_keeper_peer_reading_keeps_its_target_and_epoch () =
     (Option.is_some (current_detail_reading state))
 
 let test_keeper_peer_page_preserves_scroll_intent () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
     { snapshot = {queued_count = 1; relations = [];
@@ -1316,7 +1316,7 @@ let test_keeper_peer_page_preserves_scroll_intent () =
     (Option.is_none (keeper_peer_status state))
 
 let test_keeper_peer_staged_response_keeps_its_owner () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
     {snapshot = {queued_count = 1; relations = [];
@@ -1341,7 +1341,7 @@ let test_keeper_peer_staged_response_keeps_its_owner () =
     (settle_keeper_peer_reading state ~input_pending:false = Peer_no_result)
 
 let test_keeper_peer_staged_failure_preserves_visible_page () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   let page : Masc_tui_queue_inspection.peer_page =
     {snapshot = {queued_count = 1; relations = [];
@@ -1370,7 +1370,7 @@ let test_keeper_peer_staged_failure_preserves_visible_page () =
     (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:refresh (Ok page))
 
 let test_keeper_peer_failure_reason_survives_retry () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   let reason = String.make 256 'x' ^ "\nsecond line" in
   let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
@@ -1387,7 +1387,7 @@ let test_keeper_peer_failure_reason_survives_retry () =
    scrollable document. Use the same wrapping and frame width as the reader. *)
 let test_keeper_peer_retry_is_readable_on_narrow_failures () =
   let new_state () =
-    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"" ~port:0 () in
     state.view <- Keepers Keeper_list;
     state in
   let reason = "connection lost\noriginal detail" in
@@ -1465,7 +1465,7 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
 let test_keeper_peer_presented_owner_barrier () =
   let module Presented = Masc_tui_presented in
   let module Frame = Masc_tui_frame_presenter in
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
     {snapshot = {queued_count = 1; relations = [];
@@ -1544,7 +1544,7 @@ let test_keeper_peer_presented_owner_barrier () =
     (keeper_peer_frame_owner_changed ~presented:new_owner ~candidate:(owner ()))
 
 let test_keeper_peer_selection_owns_its_observation () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let module D = Masc.Tui_decode in
   state.view <- Keepers Keeper_list;
   state.workspace_identity <- Workspace_identity_match;
@@ -1628,7 +1628,7 @@ let test_keeper_peer_selection_owns_its_observation () =
     (Option.is_none (current_detail_reading state))
 
 let test_keeper_list_search_and_mouse_share_order () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
   state.keeper_list_sort <- Masc_tui_keeper_list_model.Name;
@@ -1650,7 +1650,7 @@ let test_keeper_list_search_and_mouse_share_order () =
     (state.keeper_cursor >= 0 && state.keeper_cursor < 2)
 
 let test_observation_updates_preserve_selected_name () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
   state.keepers <- List.map roster_keeper ["beta"; "alpha"; "gamma"];
   keeper_list_select_name state "beta";
@@ -1729,7 +1729,7 @@ let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
   }
 
 let lanes_state () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Lanes;
   let exact_snapshot = standalone_snapshot four_standalone_lanes in
   let module Inventory = Masc.Tui_decode_lane_inventory in
@@ -1853,7 +1853,7 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
    shows finds rows the reader cannot see. Both readers take it from
    [Masc_tui_resource_catalog.display_name]. *)
 let resources_state () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Resources;
   state.resources_list <-
     Some
@@ -1925,7 +1925,7 @@ let board_post ?(author = "alpha") id title =
   }
 
 let board_state () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Board;
   ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
     [ board_post "p-1" "release evidence sweep"
@@ -1976,7 +1976,7 @@ let planning_goal_row id title =
   }
 
 let planning_state () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Planning;
   state.planning <-
     Some
@@ -2081,7 +2081,7 @@ let test_goal_action_second_press_keeps_only_its_own_arm () =
     Goal_phase.Public_action.all
 
 let test_goal_action_receipts_follow_the_goal_and_latest_ticket () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   check Alcotest.bool "first request starts" true
     (note_goal_action_started state ~goal_id:"a" ~ticket:"a1");
   check Alcotest.bool "another request for A waits for its result" false
@@ -2133,7 +2133,7 @@ let test_goal_completion_requires_an_observed_binding () =
        ~action ~phase:Goal_phase.Executing ~retry_binding:(Some binding))
 
 let test_code_search_count_tracks_fetched_source () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Code;
   state.code_focus_file <- Right_pane;
   let load path rows =
@@ -2169,7 +2169,7 @@ let test_code_search_count_tracks_fetched_source () =
   Alcotest.(check (option int)) "loaded empty file has zero matches" (Some 0) (count "needle")
 
 let test_detail_search_counts_follow_the_active_pane () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.search_last <- "needle";
   state.harness <- Some
     { Tui_decode.hs_verdicts =
@@ -2210,7 +2210,7 @@ let test_detail_search_counts_follow_the_active_pane () =
     (fun detail -> edit_system_logs_page state (fun page -> {page with lp_detail_seq=(if detail then Some 1 else None)}))
 
 let test_changes_diff_uses_visible_search_rows () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let payload = Yojson.Safe.from_string {|{
     "keeper":"alpha", "window_hours":24, "calls_in_window":1,
     "over_budget":0, "malformed":0,
@@ -2250,7 +2250,7 @@ let test_workspace_activity_offers_no_row_search () =
      the surface has, "/" and n and N among them. What sits behind it is the
      repository list, so a settled query counted rows that no key on this
      screen could reach and the footer reported the number. *)
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let repository : Tui_decode.repository =
     { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
     ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
@@ -2297,7 +2297,7 @@ let test_acting_evidence_footer_hints_and_help_section () =
     true (has_sub "g / G:top/bottom" hints);
   Alcotest.(check bool) "acting evidence footer includes Left / Esc:back to events"
     true (has_sub "Left / Esc:back to events" hints);
-  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:0 () in
   state.view <- Acting;
   state.acting_detail <-
     Some
@@ -2328,7 +2328,7 @@ let test_runtime_detail_routes_omits_model_settings_hint () =
     true (has_sub "e:model settings" candidate_hints);
   Alcotest.(check bool) "Runtime_routes footer omits e:model settings"
     false (has_sub "e:model settings" routes_hints);
-  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:0 () in
   state.view <- Runtime;
   state.runtime_detail_target <- Some Runtime_routes;
   match Masc_tui_keys.help_sections_for_state ~cols:120 state with

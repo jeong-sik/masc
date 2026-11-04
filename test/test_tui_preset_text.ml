@@ -155,7 +155,7 @@ let preset_identity base : D.server_identity =
   }
 
 let preset_state () =
-  Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  Types.create_state ~workspace:"test" ~port:8935 ()
 
 let preset_pending (state : Types.state) identity ?chat_input name : Types.preset_save_pending =
   { psp_token = ref ()

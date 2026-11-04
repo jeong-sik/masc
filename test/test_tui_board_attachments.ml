@@ -421,7 +421,7 @@ let test_an_upload_response_must_name_a_digest () =
 (* What a finished send leaves staged. The files that went out with a new
    post are on the board; left staged they would ride the next post too. *)
 let state_with staged_files =
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   state.board_mode <- Board_compose;
   state.board_compose_attachments <- staged_files;
   Buffer.add_string state.board_draft "title";

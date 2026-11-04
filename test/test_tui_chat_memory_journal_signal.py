@@ -2,7 +2,7 @@
 """The open chat reads its memory journal again when the server announces a
 journal row for that Keeper, and not for another Keeper (RFC-0480 L2-pre).
 
-The refresh cadence is pushed out of the test's lifetime, so every journal
+The TUI reads nothing on a clock, so every journal
 read after the chat opens comes from an announcement.
 """
 

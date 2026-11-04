@@ -2,7 +2,7 @@
 """A failed Fusion read is read again with a growing wait, and a successful
 one is not read again until the server announces a change (RFC-0480 L2b).
 
-The refresh cadence is pushed out of the test's lifetime, so every Fusion read
+The TUI reads nothing on a clock, so every Fusion read
 after the first comes from a retry.
 """
 
@@ -106,8 +106,6 @@ class FusionOwedReadTest(unittest.TestCase):
                     base,
                     "--port",
                     str(server.server_port),
-                    "--refresh",
-                    "1000",
                 ],
                 stdin=slave,
                 stdout=slave,

@@ -200,7 +200,7 @@ DUNE_ROOT="$PWD" bash scripts/tui-graceful-restart.sh --build --base-path /path/
 
 The script builds before sending SIGTERM, reads the old TUI’s per-PID
 `exit: normal` log, and starts the fresh binary. It restarts every running TUI
-it finds. Add TUI options after `--`, for example `-- --port 8935 --refresh 5`.
+it finds. Add TUI options after `--`, for example `-- --port 8935`.
 See [the TUI guide](docs/TUI-GUIDE.md#troubleshooting) for the exit log details.
 
 </details>

@@ -3,7 +3,7 @@
 announces a change of that Keeper, and again after a failed read
 (RFC-0480 L3).
 
-The refresh cadence is pushed out of the test's lifetime, so every composite
+The TUI reads nothing on a clock, so every composite
 read after the detail opens comes from an announcement or a failed read.
 """
 

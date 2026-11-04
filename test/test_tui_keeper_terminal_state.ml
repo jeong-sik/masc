@@ -48,7 +48,7 @@ let window = Tui_types.keeper_execute_window
 
 (* The Terminal tab open on [analyst], with one reading of its output in hand. *)
 let state_with_reading () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.local_keepers <- Tui_types.Local_workspace_read;
   state.keepers <- [ keeper "analyst"; keeper "builder" ];
@@ -148,7 +148,7 @@ let test_a_hold_does_not_outlive_the_workspace_it_was_read_from () =
   check following "an unread workspace" Terminal.Following (hold state)
 
 let test_scrolling_before_anything_was_read_holds_nothing () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.keepers <- [ keeper "analyst" ];
   state.view <- Tui_types.Keepers Keeper_detail;

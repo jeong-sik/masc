@@ -224,7 +224,6 @@ join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can 
 |--------|---------|--------|
 | `--base-path` (`--base`) | `MASC_BASE_PATH`, then cwd | Directory holding `.masc` |
 | `--port` | `8935` | MASC server port on `127.0.0.1` |
-| `--refresh` | `2` | Seconds between refreshes |
 | `--workspace` | derived from base path | Workspace label in the header |
 
 ## What the server changes

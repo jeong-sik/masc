@@ -121,7 +121,7 @@ let test_original_body_refresh () =
      | Fetched.Ready call -> call.kc_original=changed
      | Absent | Loading | Stale _ | Failed _ -> false)
 let state () =
-  let state=create_state ~workspace:"reader-test" ~port:0 ~refresh_interval:0. () in
+  let state=create_state ~workspace:"reader-test" ~port:0 () in
   let workspace={Decode.sid_version="test";sid_binary_commit="test";
     sid_binary_commit_age_s=None; sid_runtime_instance_id = None;sid_base_path=Masc.Tui_decode.Canonical_path.of_path "/workspace";sid_masc_root=Masc.Tui_decode.Canonical_path.of_path "/workspace/.masc";
     sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;

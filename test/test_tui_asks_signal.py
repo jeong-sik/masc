@@ -3,7 +3,7 @@
 change to a Keeper's or an installation's question log, and again after a
 failed read (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every question
+The TUI reads nothing on a clock, so every question
 read after the workspace is admitted comes from an announcement or a failed
 read.
 """

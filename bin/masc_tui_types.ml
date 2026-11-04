@@ -11182,7 +11182,6 @@ type state = {
   mutable detail_scroll: int;
   workspace: string;
   port: int;
-  refresh_interval: float;
 }
 
 let clear_goal_action_error state ~goal_id =
@@ -19247,7 +19246,6 @@ let create_state
     ~workspace
     ?(local_base_path = "")
     ~port
-    ~refresh_interval
     ()
   =
   {
@@ -20229,7 +20227,6 @@ let create_state
   detail_scroll = 0;
   workspace;
   port;
-  refresh_interval;
 }
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs

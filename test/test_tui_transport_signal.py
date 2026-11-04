@@ -2,7 +2,7 @@
 """Usage's transport health reads again when the server's transport refresh
 loop pushes a new measurement, and again after a failed read (RFC-0480 §3.4).
 
-The refresh cadence is pushed out of the test's lifetime, so every transport
+The TUI reads nothing on a clock, so every transport
 read after Usage opens comes from a push or a failed read.
 """
 

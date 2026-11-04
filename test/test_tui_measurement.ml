@@ -114,7 +114,7 @@ let test_loaded_context_hashes () =
 
 let test_stale_results () =
   let loaded = decoded_report () in
-  let state = UI.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = UI.create_state ~workspace:"" ~port:0 () in
   state.lanes_mode <- UI.Lanes_measurement_detail "selected";
   state.lane_run_detail_generation <- 2;
   let accept sha256 generation result =

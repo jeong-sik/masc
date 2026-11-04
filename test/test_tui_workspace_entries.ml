@@ -54,7 +54,7 @@ let refresh_activity state changes =
   apply_workspace_activity_read state request (Ok (activity_read changes))
 
 let test_activity_refresh_reconciles_visible_selection () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.workspace_activity_repo <- Some "masc";
   refresh_activity state (List.init 20 activity_change);
   state.workspace_activity_cursor <- 19;
@@ -76,7 +76,7 @@ let test_activity_refresh_reconciles_visible_selection () =
   Alcotest.(check bool) "empty reading has no file to open" true (Option.is_none selected)
 
 let test_activity_file_starts_without_old_overlays () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Repositories;
   state.code_history_open <- true;
   state.code_diff_open <- true;
@@ -150,7 +150,7 @@ let test_a_shared_path_is_not_a_shared_request () =
    being right says nothing about the pane consulting it. *)
 let test_a_reply_from_the_scope_just_left_is_dropped () =
   let equal = code_scope_path_equal in
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let pending, from_alpha =
     start_read ~equal state.code_history (Code_scope_keeper "alpha", "lib/x.ml")
   in
@@ -175,7 +175,7 @@ let test_a_reply_from_the_scope_just_left_is_dropped () =
    that answered with no entries as "(loading…)" too. *)
 let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
   let equal = code_scope_path_equal in
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let view_is name expected =
     Alcotest.(check string) name expected
       (match code_listing_view state with
@@ -205,7 +205,7 @@ let test_moving_before_the_listing_answers_asks_for_the_new_directory () =
 ;;
 
 let test_file_reply_and_lsp_navigation_share_current_content () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
   let current, request = start_read ~equal:String.equal old "new.ml" in
@@ -247,7 +247,7 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
 
 let test_file_recovery_preserves_nested_readers () =
   List.iter (fun (had_content, nested_first) ->
-    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"" ~port:0 () in
     confirm_code_workspace state;
     let initial, opened = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- initial;
@@ -316,7 +316,7 @@ let test_file_recovery_preserves_nested_readers () =
 ;;
 
 let test_full_hover_keeps_original_answer_and_source_ownership () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   let next, file = start_read ~equal:String.equal state.code_file "source.ml" in
   state.code_file <- next;
@@ -358,7 +358,7 @@ let test_full_hover_keeps_original_answer_and_source_ownership () =
 ;;
 
 let test_lsp_replies_belong_to_their_source_reading () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   let read path =
     let next, request = start_read ~equal:String.equal state.code_file path in
@@ -442,7 +442,7 @@ let test_lsp_replies_belong_to_their_source_reading () =
 ;;
 
 let test_interrupted_new_file_open_resets_old_readers () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
   state.code_file <- old;
   apply_file state old_request (Ok "let old = 1");
@@ -474,7 +474,7 @@ let test_interrupted_new_file_open_resets_old_readers () =
 ;;
 
 let finder_fixture () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   state.code_scope <- Code_scope_repo "example";
   state.code_dir <- "src";
@@ -1454,7 +1454,7 @@ let test_outside_location_is_an_address_without_a_workspace_read () =
      && not state.palette_open)
 
 let test_source_copy_preserves_response_bytes () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   let source = "\tlet label = \"한글🙂 cafe\204\129\"\r\n  (* \027[31m raw *)\r\n" in
   let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
@@ -1481,7 +1481,7 @@ let test_source_copy_preserves_response_bytes () =
 
 let test_source_copy_respects_read_ownership () =
   let fresh () =
-    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"" ~port:0 () in
     confirm_code_workspace state;
     let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- next;
@@ -1519,7 +1519,7 @@ let test_source_copy_respects_read_ownership () =
     (Ok ("empty.ml", "")) (Code_results.copy_file_source state)
 
 let test_revision_read_and_draft_reconciliation () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   confirm_code_workspace state;
   state.workspace_identity <- Workspace_identity_match;
   let source text character : Decode.workspace_file_source =

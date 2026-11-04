@@ -2,7 +2,7 @@
 """The Gate snapshot reads again when the server announces a Gate change, and
 again after a failed read (RFC-0480 L5).
 
-The refresh cadence is pushed out of the test's lifetime, so every Gate read
+The TUI reads nothing on a clock, so every Gate read
 after the workspace is admitted comes from an announcement, a failed read or
 an operator's refresh.
 """

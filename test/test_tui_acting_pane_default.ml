@@ -8,7 +8,7 @@ module Pane = Masc_tui_acting_pane
 let state_on view =
   let state =
     Masc_tui_types.create_state ~workspace:"test" ~port:8935
-      ~refresh_interval:2.0 ()
+ ()
   in
   state.view <- view;
   state

@@ -5,7 +5,7 @@ module Model = Masc_tui_fusion_model
 module Launch = Masc_tui_fusion_launch
 module Decode = Masc.Tui_decode_fusion
 
-let fresh () = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+let fresh () = Types.create_state ~workspace:"test" ~port:8935 ()
 let require = function Some value -> value | None -> Alcotest.fail "expected a new read"
 
 let empty_snapshot : Decode.fusion_snapshot =

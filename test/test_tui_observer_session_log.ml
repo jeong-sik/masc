@@ -3,7 +3,7 @@ open Masc_tui_types
 
 module Loader = Masc_tui_loader
 
-let make_state () = create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+let make_state () = create_state ~workspace:"" ~port:0 ()
 
 let refused status detail = Error (Http_refused { status; detail })
 

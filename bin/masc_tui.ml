@@ -491,7 +491,6 @@ let parse_args () =
      quoted [Port:] label split across the flag tuple's strings. *)
   let set_selected_port value = port := Some value in
   let workspace = ref "" in
-  let refresh = ref 2.0 in
   let base_path = ref "" in
   let reasoning_visibility = ref "folded" in
   let tool_visibility = ref "compact" in
@@ -507,7 +506,6 @@ let parse_args () =
     ( "--port", Arg.Int set_selected_port
     , "MASC server port (environment or saved workspace value when omitted)" );
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
-    ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ( "--base-path",
       Arg.Set_string base_path,
       "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH, then a cwd holding .masc/config, then the recorded default)" );
@@ -560,7 +558,6 @@ let parse_args () =
   ( base
   , r
   , resolved_port
-  , !refresh
   , reasoning_visibility
   , tool_visibility )
 
@@ -18796,6 +18793,9 @@ let schedule_observer_retry state ~mailbox owner =
    answer. *)
 let contact_retry_max_s = 30.0
 
+(* How often the screen's own clock ticks in the main loop. *)
+let local_clock_s = 2.0
+
 (* Two seconds after the first failure, doubling, up to [contact_retry_max_s]. *)
 let contact_retry_delay_s ~failures =
   Float.min contact_retry_max_s (stream_reconnect_s *. Float.pow 2.0 (Float.of_int failures))
@@ -28560,7 +28560,7 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
 
 (** Main loop *)
 let main
-    (base_path, workspace, port, refresh,
+    (base_path, workspace, port,
      reasoning_visibility, tool_visibility) () =
   (* The provider layer reports through [Llm_provider.Diag], whose default sink
      writes to stderr -- which here is the terminal this draws on. One INFO line
@@ -28598,8 +28598,7 @@ let main
   let observation_store=Masc_tui_observation_store.initialize ~base_path in
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
-      ~local_base_path:base_path ~port
-      ~refresh_interval:refresh ()
+      ~local_base_path:base_path ~port ()
   in
   state.observation_store <- Result.to_option observation_store;
   state.view <- Overview;
@@ -29299,9 +29298,10 @@ let main
   add_event state "system" "TUI started";
 
   (* Main loop *)
-  let refresh_interval_ns =
-    Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
-  in
+  (* The screen's own clock. It reads nothing the observer feed announces:
+     a consent deadline expires, This-TUI log lines and the "N s ago" text are
+     drawn again, and the browser lane mirror takes its frame (RFC-0482). *)
+  let local_clock_ns = Int64.of_float (local_clock_s *. nanoseconds_per_second) in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
   let msx_spectator_poll_seconds = 0.3 in
@@ -41511,7 +41511,7 @@ Use relative paths for resources already held in the package. -->
        | Masc_tui_emblem_screen.Absent ->
            if not state.about_open then state.emblem_frame <- -1);
       if
-        Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
+        Int64.compare (Int64.sub now_ns !last_check_ns) local_clock_ns >= 0
       then begin
         (* Consent expires even while authority is unread or a refresh is
            still in flight. The server's deadline owns this local wait. *)

@@ -653,7 +653,7 @@ let test_home_visit_stays_with_local_workspace () =
         Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1
             (Eio.Stdenv.domain_mgr env));
         let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
-            ~port:0 ~refresh_interval:0. () in
+            ~port:0 () in
         let admit keeper = State.remember_local_chat_visit state ~sw:(Some sw) keeper in
         Alcotest.(check bool) "unread workspace admits no visit" false (admit beta);
         let local = identity base_path in
@@ -794,7 +794,7 @@ let opening_cases =
                   (Eio.Stdenv.domain_mgr env));
               let startup = Config.prepare_startup_read ~sw:(Some sw) ~base_path in
               let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
-                  ~port:0 ~refresh_interval:0. () in
+                  ~port:0 () in
               let initial_settings = Eio.Promise.await_exn startup.result in
               let beta = match Keeper_id.Keeper_name.of_string "beta" with
                 | Ok keeper -> keeper | Error reason -> Alcotest.fail reason in

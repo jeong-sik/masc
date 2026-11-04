@@ -44,7 +44,7 @@ let foreign_document () =
 
 let comparison_survives_refresh () =
   let module T = Masc_tui_types in
-  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = T.create_state ~workspace:"test" ~port:8935 () in
   let workspace = ("/workspace", "/workspace/.masc") in
   let session = Edit.open_document initial |> Edit.edit draft |> Edit.observe newer |> ok in
   T.put_runtime_config_edit state ~workspace session;

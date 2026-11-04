@@ -2,8 +2,7 @@
 """A workspace dataset push reads only the surface that shows the dataset it
 names (RFC-0480 §3.4).
 
-The Repositories surface is on screen. The refresh cadence is pushed out of
-the test's lifetime, so every list read after arrival comes from a push.
+The Repositories surface is on screen. The TUI reads nothing on a clock, so every list read after arrival comes from a push.
 """
 
 import os

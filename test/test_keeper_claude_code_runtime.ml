@@ -2183,67 +2183,6 @@ let test_post_effect_transport_enters_recovery () =
        | _ -> fail "post-effect transport failure released the durable claim")
 ;;
 
-(* The same broken transport after a call whose producer declares the input
-   [Read_only]: the handler ran, but it cannot have changed the work, so the
-   fence must not report an attempted effect. What remains is the uncertainty
-   the sent prompt already carries. *)
-let test_read_only_call_does_not_record_an_effect () =
-  let base_path = temp_workspace () in
-  let call_count = ref 0 in
-  let marker_param : Agent_core.Types.tool_param =
-    { name = "marker"
-    ; description = "Fixture marker"
-    ; param_type = String
-    ; required = true
-    }
-  in
-  let tool =
-    Agent_core.Tool.create
-      ~descriptor:
-        (Agent_core.Tool.ordinary_descriptor
-           ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
-           Agent_core.Tool_contract.Serial)
-      ~name:"masc_probe"
-      ~description:"Read one deterministic fixture value"
-      ~parameters:[ marker_param ]
-      (fun _input ->
-        incr call_count;
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
-  in
-  Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
-    (fun () ->
-       with_fixture
-         [ Emit_and_read mcp_initialize
-         ; Emit_and_read mcp_initialized_notification
-         ; Emit_and_read mcp_list
-         ; Emit_and_read mcp_call
-         ; Close_transport
-         ]
-         (fun cli_path ->
-            match
-              run_keeper_turn
-                ~tools:[ tool ]
-                ~base_path
-                ~cli_path
-                ~goal:"USE_TOOL_ONCE"
-                ()
-            with
-            | Error error ->
-              (match Keeper_internal_error.classify_masc_internal_error error with
-               | Some
-                   (Keeper_internal_error.Provider_attempt_effect_fenced
-                      { effect_disposition; _ }) ->
-                 check
-                   string
-                   "a read-only call leaves only the sent prompt's uncertainty"
-                   "observation_unavailable"
-                   (Keeper_provider_attempt_effect.to_string effect_disposition)
-               | _ -> fail (Agent_core.Error.to_string error))
-            | Ok _ -> fail "the broken transport completed the Keeper turn");
-       check int "read-only handler ran" 1 !call_count)
-;;
-
 let test_operator_interrupt_preserves_previous_native_settlement () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -5613,22 +5552,104 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
-(* A real partial user-message write must retain uncertainty on timeout. *)
-let test_incomplete_user_write_timeout_fences_retry () =
-  let base_path = temp_workspace () in
-  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+let check_disposition label (expected : Keeper_provider_attempt_effect.t)
+    (attempt : Keeper_claude_code_runtime.attempt_outcome) =
+  check string label
+    (Keeper_provider_attempt_effect.to_string expected)
+    (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+  check bool (label ^ ": rotation follows the disposition")
+    (Keeper_provider_attempt_effect.allows_same_turn_retry expected)
+    (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)
+;;
+
+(* RFC-0390: under [full] the client's own built-ins may act once the prompt
+   is on its way, so a partial user-message write that times out keeps the
+   turn fenced. Under [none] the only effects are MASC handlers, none of which
+   ran, so the same timeout leaves the attempt free to rotate. *)
+let test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act () =
+  let run ?required_native_posture base_path =
     with_fixture ~block_user_write:true [] (fun cli_path ->
-      let attempt = run_direct_attempt ~admission_timeout_s:2.0
+      let attempt = run_direct_attempt ~admission_timeout_s:2.0 ?required_native_posture
           ~base_path ~cli_path ~goal:(String.make (512 * 1024) 'x') ~tools:[] () in
       (match attempt.result with
        | Error (Agent_core.Error.Api (Llm_provider.Retry.Timeout _)) -> ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "incomplete user-message write unexpectedly completed");
-      check string "unknown delivery is recorded without native task observers"
-        "observation_unavailable"
-        (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
-      check bool "the driver's effect admission forbids candidate rotation" false
-        (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
+      attempt)
+  in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
+      run ~required_native_posture:Runtime_native_tools.Native_full base_path
+      |> check_disposition "full: unknown delivery is recorded"
+           Keeper_provider_attempt_effect.Observation_unavailable));
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    run base_path
+    |> check_disposition "none: nothing outside MASC could act"
+         Keeper_provider_attempt_effect.No_effect_observed)
+;;
+
+(* Under [none] the stream decides. A read-only MASC call and the granted
+   schema lookup leave the attempt rotatable after the client goes away;
+   response text the operator already received, and a built-in the grant does
+   not name, keep it fenced. Under [full] the closed transport alone fences. *)
+let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
+  in
+  let read_only_calls = ref 0 in
+  let read_only_tool =
+    Agent_core.Tool.create
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor
+           ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+           Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe"
+      ~description:"Read one deterministic fixture value"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr read_only_calls;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  let attempt ?required_native_posture ~tools steps =
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture (steps @ [ Close_transport ]) (fun cli_path ->
+        let run () =
+          run_direct_attempt ?required_native_posture ~base_path ~cli_path
+            ~goal:"CLOSE_AFTER_STREAM" ~tools ()
+        in
+        let attempt =
+          match required_native_posture with
+          | Some Runtime_native_tools.Native_full ->
+            with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" run
+          | Some (Runtime_native_tools.Native_none | Runtime_native_tools.Native_read)
+          | None -> run ()
+        in
+        (match attempt.result with
+         | Error _ -> ()
+         | Ok _ -> fail "a closed transport completed the turn");
+        attempt))
+  in
+  attempt ~tools:[ read_only_tool ]
+    [ Emit_and_read mcp_initialize
+    ; Emit_and_read mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+  |> check_disposition "none: a read-only MASC call" Keeper_provider_attempt_effect.No_effect_observed;
+  check int "read-only handler ran" 1 !read_only_calls;
+  attempt ~tools:[]
+    [ Emit (native_tool_call_block ~turn_id:"lookup" ~call_id:"lookup-call" ~tool_name:"ToolSearch") ]
+  |> check_disposition "none: the granted schema lookup" Keeper_provider_attempt_effect.No_effect_observed;
+  attempt ~tools:[]
+    [ Emit (native_tool_call_block ~turn_id:"write" ~call_id:"write-call" ~tool_name:"Write") ]
+  |> check_disposition "none: a built-in outside the grant" Keeper_provider_attempt_effect.Observation_unavailable;
+  attempt ~tools:[] [ Emit (assistant ~turn_id:"partial" "PARTIAL_ANSWER") ]
+  |> check_disposition "none: response text already delivered" Keeper_provider_attempt_effect.Observation_unavailable;
+  attempt ~required_native_posture:Runtime_native_tools.Native_full ~tools:[] []
+  |> check_disposition "full: the closed transport alone" Keeper_provider_attempt_effect.Observation_unavailable
 ;;
 
 (* A one-shot walk over a two-candidate Claude Code lane: the first CLI, then
@@ -5740,8 +5761,10 @@ let test_cut_auth_probe_hands_the_turn_to_the_next_candidate () =
 (* #42212: when a Claude Code child exits before the turn prompt is sent
    ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
    stays [No_effect_observed] and the lane walk rotates to the next candidate.
-   Once the prompt is sent ([turn_admitted = true]), an exit before a terminal
-   result fences the turn with [Observation_unavailable]. *)
+   Under the default [none] posture an exit after the prompt is sent rotates
+   too: nothing outside MASC's handlers could act and none ran. Under [full]
+   the same exit is fenced
+   ([test_a_closed_transport_is_judged_by_what_the_stream_showed]). *)
 let test_exit_before_turn_admission_rotates_to_next_candidate () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -5799,8 +5822,8 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
     (fun () ->
        with_fixture [ Close_transport ] (fun post_admission_cli ->
          with_fixture
-           [ Emit (assistant ~turn_id:"turn-never" "NEVER_REACHED")
-           ; Emit (result ~turn_id:"turn-never" "NEVER_REACHED")
+           [ Emit (assistant ~turn_id:"turn-after-exit" "MASC_CLAUDE_POST_ADMISSION_OK")
+           ; Emit (result ~turn_id:"turn-after-exit" "MASC_CLAUDE_POST_ADMISSION_OK")
            ]
            (fun fallback_cli ->
               let attempted, outcome =
@@ -5810,21 +5833,17 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
                   ~second_cli:fallback_cli
               in
               check (list string)
-                "post-admission exit fences at first candidate"
-                [ "claude_first.claude" ]
+                "post-admission exit under none rotates to second candidate"
+                [ "claude_first.claude"; "claude_second.claude" ]
                 attempted;
               match outcome with
-              | Ok _ -> fail "post-admission exit rotated and completed"
-              | Error error ->
-                match Keeper_internal_error.classify_masc_internal_error error with
-                | Some
-                    (Keeper_internal_error.Provider_attempt_effect_fenced
-                       { runtime_id = "claude_first.claude"
-                       ; effect_disposition =
-                           Keeper_provider_attempt_effect.Observation_unavailable
-                       ; _
-                       }) -> ()
-                | _ -> fail (Agent_core.Error.to_string error))))
+              | Error error -> fail (Agent_core.Error.to_string error)
+              | Ok selected ->
+                check string "selected fallback candidate"
+                  "claude_second.claude" selected.selected_runtime_id;
+                check string "fallback answer"
+                  "MASC_CLAUDE_POST_ADMISSION_OK"
+                  (keeper_response_text selected.run_result))))
 ;;
 
 (* #39768: an exception nothing in the runtime expected -- here the refused
@@ -6873,8 +6892,6 @@ let () =
             "post-effect transport enters recovery"
             `Quick
             test_post_effect_transport_enters_recovery
-        ; test_case "a read-only call does not record an effect" `Quick
-            test_read_only_call_does_not_record_an_effect
         ; test_case "operator interruption preserves previous native settlement" `Quick
             test_operator_interrupt_preserves_previous_native_settlement
         ; test_case
@@ -7040,8 +7057,10 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
-        ; test_case "incomplete user write timeout fences retry" `Quick
-            test_incomplete_user_write_timeout_fences_retry
+        ; test_case "incomplete user write timeout is fenced only when built-ins can act" `Quick
+            test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act
+        ; test_case "a closed transport is judged by what the stream showed" `Quick
+            test_a_closed_transport_is_judged_by_what_the_stream_showed
         ; test_case
             "a process exit before turn admission rotates to the next lane candidate"
             `Quick

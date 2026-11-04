@@ -1159,6 +1159,8 @@ let () =
             test_a_return_with_no_start_held_has_no_duration
         ; test_case "a lane-named event is attributed by its trace" `Quick
             test_a_lane_named_event_is_attributed_by_its_trace
+        ; test_case "Lane dataset rows are server activity" `Quick
+            test_lane_dataset_rows_are_server_activity
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit
         ; test_case "turns fold the two planes into one row per turn" `Quick
             test_turns_fold_the_two_planes_into_one_row_per_turn

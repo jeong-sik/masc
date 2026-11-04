@@ -1558,6 +1558,12 @@
  (wrapped false)
  (modules masc_tui_fetched))
 
+(library
+ (name masc_tui_lane_read_decision)
+ (wrapped false)
+ (modules masc_tui_lane_read_decision)
+ (libraries masc))
+
 ;; What a surface owes its server reading after an announced change
 ;; (RFC-0480 section 3.1). Pure; the main loop decides when to read.
 (library

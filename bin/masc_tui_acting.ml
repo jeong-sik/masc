@@ -696,6 +696,10 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime probe landed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the runtime history took or dropped a row" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Lane inventory changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

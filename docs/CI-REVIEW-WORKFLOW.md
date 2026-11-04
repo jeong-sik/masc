@@ -289,6 +289,13 @@ Read the `.mli` before calling a transition a defect — a value the `.ml` disca
 is often one the interface documents as intentionally dropped, and a call that
 looks redundant can be the caller's mistake rather than the callee's.
 
+Search the whole repository before reporting a call site as missing. Grepping one
+file reported "schedules has no `Snapshot_read.settle`" from three hits in
+`bin/masc_tui.ml`, while the two real calls are in `bin/masc_tui_types.ml:17326`
+and `:17371` — a finding that became a P1 task with a repair instruction before it
+was refuted. Use `git grep -n SYMBOL` across the tree; a hit set from one file
+answers only what that file does, not what the module does.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

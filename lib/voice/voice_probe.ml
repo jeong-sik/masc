@@ -24,7 +24,12 @@ let transcript_of_stt_json = Voice_catalogue.transcript_of_stt_json
 
 (* The catalogue row type lives in {!Voice_catalogue}; aliasing it here keeps
    the record literals below in scope and the public surface unchanged. *)
-type catalogue_voice = Voice_catalogue.catalogue_voice
+type catalogue_voice = Voice_catalogue.catalogue_voice = {
+  voice_id : string;
+  voice_name : string option;
+  voice_language : string option;
+  voice_aliases : string list;
+}
 
 let list_voices_via_command_endpoint endpoint =
   let* output = list_voices_via_command endpoint in

@@ -44,9 +44,15 @@ module Policy_load = Connector_trigger_policy.Make (struct
   let default = default_trigger_policy
 end)
 
-type trigger_policy_toml_load = Policy_load.load
+type trigger_policy_toml_load = Policy_load.load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Gw.trigger_policy
 
-type trigger_policy_load_error = Connector_trigger_policy.load_error
+type trigger_policy_load_error = Connector_trigger_policy.load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
 
 let trigger_policy_load_error_to_string = function
   | Runtime_toml_unreadable { path; detail } ->

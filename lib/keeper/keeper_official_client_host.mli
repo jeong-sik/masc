@@ -49,13 +49,39 @@ type transmitted_model_input =
   | Whole_input_transmitted of Agent_core.Types.message list
   | Held_by_client_session
 
-type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
 
-type host_stop = Runtime_official_client_tool.host_stop
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
 
-type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
 
-type dynamic_tool = Runtime_official_client_tool.dynamic_tool
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
 
 (** What the Keeper tool bundle declares about each projected tool, for the
     official client to carry.

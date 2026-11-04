@@ -2,7 +2,7 @@ module B = Browser_lane
 module Peer = Browser_bidi_peer
 module Lease = Native_addon_lease
 module Requirement = Resource_requirement
-type identity = Requirement.identity
+type identity = Requirement.identity = { device:int; inode:int }
 type validation_phase = Idle | Validating
 type configuration = { firefox:string; profile:string; port:int; launcher:string;
   guardian:string; claim_directory:string; root:identity; slot:identity;

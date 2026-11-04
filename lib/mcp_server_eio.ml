@@ -16,7 +16,11 @@
 
 type server_state = Mcp_server.server_state
 
-type tool_profile = Mcp_server_eio_types.tool_profile
+type tool_profile = Mcp_server_eio_types.tool_profile =
+  | Full
+  | Managed_agent
+  | Operator_remote
+  | Seat
 
 type eio_net = [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
 

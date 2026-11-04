@@ -246,7 +246,10 @@ type change_mark = { count : int; incarnation : string }
    unchanged from a Stable mark, but a Running mark must wait for the final
    frame even when its count matches [since]. *)
 let change_count = ref 0
-type 'mark publication = 'mark Machine_live_publication.t
+type 'mark publication = 'mark Machine_live_publication.t =
+  | No_screen
+  | Stable of 'mark
+  | Running of 'mark
 type published_state = change_mark publication
 let published : published_state Atomic.t = Atomic.make No_screen
 

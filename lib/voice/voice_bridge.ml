@@ -11,7 +11,12 @@ open Result.Syntax
    owns the transport-side lister (E09 Phase 2a). *)
 let spoke_detail = Voice_catalogue.spoke_detail
 let transcript_of_stt_json = Voice_catalogue.transcript_of_stt_json
-type catalogue_voice = Voice_catalogue.catalogue_voice
+type catalogue_voice = Voice_catalogue.catalogue_voice = {
+  voice_id : string;
+  voice_name : string option;
+  voice_language : string option;
+  voice_aliases : string list;
+}
 let catalogue_voice_json = Voice_catalogue.catalogue_voice_json
 let say_catalogue_of_output = Voice_catalogue.say_catalogue_of_output
 let espeak_catalogue_of_output = Voice_catalogue.espeak_catalogue_of_output
@@ -51,9 +56,16 @@ type capture_status = Voice_probe.capture_status =
 let capture_status_to_string = Voice_probe.capture_status_to_string
 let capture_status_of_string = Voice_probe.capture_status_of_string
 let transcribe_audio = Voice_probe.transcribe_audio
-type probe_outcome = Voice_probe.probe_outcome
+type probe_outcome = Voice_probe.probe_outcome =
+  | Answered of string
+  | Refused of string
+  | Skipped of string
 
-type probe_attempt = Voice_probe.probe_attempt
+type probe_attempt = Voice_probe.probe_attempt = {
+  endpoint_id : string;
+  kind : Voice_config.endpoint_kind;
+  outcome : probe_outcome;
+}
 
 let probe_outcome_to_string = Voice_probe.probe_outcome_to_string
 let probe_attempt_json = Voice_probe.probe_attempt_json

@@ -35,7 +35,12 @@ type tool_result_receipt = Keeper_skill_activation_types.tool_result_receipt =
   ; content_sha256 : string
   }
 
-type action_identity = Runtime_native_tools.action_identity
+type action_identity = Runtime_native_tools.action_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
 
 type action =
   { identity : action_identity

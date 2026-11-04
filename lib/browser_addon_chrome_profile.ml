@@ -1,5 +1,5 @@
 module Requirement = Resource_requirement
-type identity = Requirement.identity
+type identity = Requirement.identity = { device:int; inode:int }
 type persistent = { path:string; root:identity; slot:identity; gate:identity;
   lease:identity; anchor:identity }
 type t = Private | Persistent of persistent

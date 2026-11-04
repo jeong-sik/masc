@@ -77,7 +77,13 @@ type conversation_mode =
     workspace state cannot select an earlier conversation. [Resume] names the
     exact durable conversation and never creates a project. *)
 
-type usage = Runtime_antigravity_protocol.usage
+type usage = Runtime_antigravity_protocol.usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; thinking_tokens : int
+  ; cache_read_tokens : int
+  ; total_tokens : int
+  }
 (** Counts exactly as the CLI reports them, which is an {b exclusive} prompt
     count: the parse accepts a frame only when
     [total_tokens = input_tokens + output_tokens], so [cache_read_tokens] is
@@ -89,7 +95,13 @@ type usage = Runtime_antigravity_protocol.usage
 (** A CLI-announced mode this tree does not model is carried rather than
     rejected: nothing branches on [permission_mode], and rejecting it ended
     the turn and parked the session. *)
-type permission_mode = Runtime_antigravity_protocol.permission_mode
+type permission_mode = Runtime_antigravity_protocol.permission_mode =
+  | Always_proceed
+  | Request_review
+  | Unrecognized_permission_mode of string
+      (** A mode the CLI announced that this tree does not model. Nothing
+          branches on [permission_mode], so an unseen member is carried rather
+          than rejected: rejecting it ended the turn and parked the session. *)
 
 type turn_result =
   { conversation_id : string
@@ -109,9 +121,14 @@ type turn_result =
   ; wall_duration_s : float
   }
 
-type response_ending = Runtime_antigravity_protocol.response_ending
+type response_ending = Runtime_antigravity_protocol.response_ending = Response_done | Response_error
 
-type noncompletion_status = Runtime_antigravity_protocol.noncompletion_status
+type noncompletion_status = Runtime_antigravity_protocol.noncompletion_status =
+  | Canceled
+  | Interrupted
+  | Invalid
+  | Waiting
+  | Running
 (** Documented result states that do not prove a completed turn. None grants
     replay or successful session settlement, even when a partial reply exists. *)
 

@@ -35,7 +35,7 @@ type trigger_policy_toml_load =
   | Trigger_policy_missing
   | Trigger_policy_loaded of Discord_gateway_client.trigger_policy
 
-type trigger_policy_load_error = Connector_trigger_policy.load_error =
+type trigger_policy_load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }

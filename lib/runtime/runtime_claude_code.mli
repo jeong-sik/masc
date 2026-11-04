@@ -160,13 +160,39 @@ type turn_result =
   ; usage : observed_usage
   }
 
-type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
 
-type host_stop = Runtime_official_client_tool.host_stop
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
 
-type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
 
-type dynamic_tool = Runtime_official_client_tool.dynamic_tool
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
 
 (** A partial block keeps the SDK message id and block index. A complete-only
     envelope has its own UUID and content ordinal; neither is a turn-wide text

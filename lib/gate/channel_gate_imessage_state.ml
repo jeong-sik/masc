@@ -12,7 +12,10 @@
 
 module Store = Channel_gate_binding_store
 
-type binding = Store.binding
+type binding = Store.binding =
+  { channel_id : string
+  ; keeper_name : string
+  }
 
 let connector_id = "imessage"
 let display_name = "iMessage"

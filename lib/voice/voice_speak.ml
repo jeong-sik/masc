@@ -344,9 +344,16 @@ let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
 let spoke_detail = Voice_catalogue.spoke_detail
 let check_command_voice = Voice_probe.check_command_voice
 
-type probe_outcome = Voice_probe.probe_outcome
+type probe_outcome = Voice_probe.probe_outcome =
+  | Answered of string
+  | Refused of string
+  | Skipped of string
 
-type probe_attempt = Voice_probe.probe_attempt
+type probe_attempt = Voice_probe.probe_attempt = {
+  endpoint_id : string;
+  kind : Voice_config.endpoint_kind;
+  outcome : probe_outcome;
+}
 
 let probe_tts ?(agent_id = "probe") ~message () =
   match Voice_config.load_detailed () with

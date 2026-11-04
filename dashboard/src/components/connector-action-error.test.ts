@@ -10,8 +10,8 @@ import {
 import { ToastContainer, _testGetToasts, _testResetToasts } from './common/toast'
 
 const RAW_SERVER_ERROR =
-  'POST /api/v1/sidecar/stop?name=discord: sidecar directory not found for discord; '
-  + 'looked under /Users/op/ws/sidecars/discord-bot. Set MASC_SIDECAR_ROOT=/path/to/masc.'
+  'POST /api/v1/example/action?name=discord: directory not found for discord; '
+  + 'looked under /Users/op/ws/example/discord. Set EXAMPLE_ROOT=/path/to/example.'
 
 describe('rawErrorText', () => {
   it('unwraps Error message', () => {
@@ -37,11 +37,11 @@ describe('showConnectorActionError', () => {
   })
 
   it('toast carries the headline only — server internals stay out', () => {
-    showConnectorActionError('discord sidecar 중지 실패', new Error(RAW_SERVER_ERROR))
+    showConnectorActionError('discord 중지 실패', new Error(RAW_SERVER_ERROR))
     const toasts = _testGetToasts()
     expect(toasts.length).toBe(1)
-    expect(toasts[0]!.message).toBe('discord sidecar 중지 실패')
-    expect(toasts[0]!.message).not.toContain('MASC_SIDECAR_ROOT')
+    expect(toasts[0]!.message).toBe('discord 중지 실패')
+    expect(toasts[0]!.message).not.toContain('EXAMPLE_ROOT')
     expect(toasts[0]!.message).not.toContain('/Users/')
     expect(toasts[0]!.type).toBe('error')
   })
@@ -69,7 +69,7 @@ describe('showConnectorActionError', () => {
     try {
       render(html`<${ConfirmDialogOverlay} />`, dialogHost)
       await Promise.resolve()
-      expect(dialogHost.textContent).toContain('MASC_SIDECAR_ROOT')
+      expect(dialogHost.textContent).toContain('EXAMPLE_ROOT')
       expect(dialogHost.textContent).toContain('바인딩 실패: 123 → luna')
       // Resolve the dialog so its module-level open state does not leak
       // into the next test.
@@ -124,10 +124,10 @@ describe('openConnectorErrorDetail — copy sits on confirm, never on dismiss', 
   // was the single failure in a 697-file parallel run — 5023ms against a 5s
   // limit — while passing every single-worker run. So wait for the thing.
   const dialogShown = () =>
-    waitFor(() => expect(dialogHost.textContent).toContain('MASC_SIDECAR_ROOT'))
+    waitFor(() => expect(dialogHost.textContent).toContain('EXAMPLE_ROOT'))
   const dialogGone = () =>
     waitFor(() =>
-      expect(dialogHost.textContent ?? '').not.toContain('MASC_SIDECAR_ROOT'))
+      expect(dialogHost.textContent ?? '').not.toContain('EXAMPLE_ROOT'))
 
   it('Escape dismiss closes WITHOUT copying (ESC/backdrop map to cancel)', async () => {
     const { openConnectorErrorDetail } = await import('./connector-action-error')
@@ -137,7 +137,7 @@ describe('openConnectorErrorDetail — copy sits on confirm, never on dismiss', 
     // dialog does nothing, so retrying until it closes removes the race.
     await waitFor(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-      expect(dialogHost.textContent ?? '').not.toContain('MASC_SIDECAR_ROOT')
+      expect(dialogHost.textContent ?? '').not.toContain('EXAMPLE_ROOT')
     })
     await pending
     expect(writeText).not.toHaveBeenCalled()

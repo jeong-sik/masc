@@ -1,11 +1,10 @@
 // BundleStalenessBanner — a long-lived tab keeps executing the bundle
 // it booted with, even after the server starts serving a newer build.
 // The stale tab then drives the server through code paths the current
-// source no longer has (2026-06-11: a pre-RFC-0203 tab fired
-// POST /api/v1/sidecar/stop?name=discord — an endpoint no current UI
-// calls — and the operator saw a ghost error). BuildIdentityBadge
-// shows the *server's* build; nothing compared it to the bundle the
-// tab itself is running. This banner closes that gap.
+// source no longer has, and the operator sees errors nothing in the
+// current UI explains. BuildIdentityBadge shows the *server's* build;
+// nothing compared it to the bundle the tab itself is running. This
+// banner closes that gap.
 //
 // Detection is purely client-side: Vite stamps a content hash into the
 // entry script name (/dashboard/assets/index-<hash>.js). The tab's own

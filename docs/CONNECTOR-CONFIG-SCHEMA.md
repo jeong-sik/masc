@@ -13,8 +13,7 @@ The dashboard exposes connection state, setup instructions and Keeper bindings.
 
 ### Discord (in-process gateway — RFC-0203 §Phase 3)
 
-The Discord connector runs **inside the server process**, not as an
-external sidecar (`sidecars/discord-bot/` was deleted in #19393).
+The Discord connector runs **inside the server process**.
 Module: `lib/server/server_discord_in_process_gateway.{ml,mli}` plus
 the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
 
@@ -57,11 +56,6 @@ Channel→keeper bindings live where they always did:
 `/api/v1/gate/connector/unbind?name=discord` remain functional and
 are how the dashboard mutates bindings.
 
-The pre-cutover env vars `DISCORD_KEEPER_MAP`, `DISCORD_ADMIN_ROLE_ID`,
-`DISCORD_BINDING_AUDIT_PATH`, `DISCORD_NAMES_PATH`,
-`STATUS_HEARTBEAT_SEC`, `GATE_MAX_RETRIES` were sidecar-only and
-no longer apply.
-
 Discord-specific setup (cannot be driven from dashboard — operator must do):
 
 1. https://discord.com/developers/applications → New Application.
@@ -72,8 +66,7 @@ Discord-specific setup (cannot be driven from dashboard — operator must do):
 
 ### iMessage (in-process gateway)
 
-The iMessage connector runs **inside the server process**, not as an external
-sidecar (`sidecars/imessage-bot/` was deleted in #30531). Modules:
+The iMessage connector runs **inside the server process**. Modules:
 `lib/server/server_imessage_in_process_gateway.{ml,mli}`, the gate-state module
 `lib/gate/channel_gate_imessage_state.{ml,mli}`, the chat.db reader
 `lib/gate/imessage_chat_db.{ml,mli}`, and the sender

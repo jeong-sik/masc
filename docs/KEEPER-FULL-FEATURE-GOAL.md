@@ -106,7 +106,7 @@ filesystem/network/process effect는 바깥 shell에서 실행한다. 유효한 
 
 ### 5.3 Sandbox 격리 및 Host 강등 금지
 
-- `local` 샌드박스 프로파일은 제거되었으며, Keeper는 `docker` (`docker_hardened` / `docker_with_git`), `microvm`, `remote_ssh` 프로파일만 사용한다.
+- Keeper는 `docker` (`docker_hardened` / `docker_with_git`), `microvm`, `remote_ssh` 프로파일만 사용한다.
 - 샌드박스 준비 실패 시 Host 실행으로 강등하지 않고 구체적인 typed tool failure로 끝난다.
 
 ### 5.4 Hidden reasoning 공개 저장

@@ -51,6 +51,11 @@ val observation_to_json : observation -> Yojson.Safe.t
 (** A single immutable admission/run capture shared by the standalone detail
     snapshot and the common inventory; never reparse rendered JSON. *)
 
+val observation_drawn_json : observation -> Yojson.Safe.t
+(** {!observation_to_json} without [generated_at] and [observed_at_unix]: two
+    captures that read the same registries and configuration give the same
+    value. *)
+
 type detail_lookup =
   | Detail_found of Yojson.Safe.t
   | Detail_not_found

@@ -274,6 +274,36 @@ let apply_fusion_historical_detail_load state generation reference result =
         state.fusion_detail_error <- Some "Fusion Board original returned a different reference"
     | Error error -> state.fusion_detail_error <- Some error
 
+(* A reading that settled while the subscription was opening is held back only
+   when it cannot be trusted yet: it failed, or it does not carry the run or
+   Board original that is open. Anything else is applied as it arrived. The
+   subscription outcome then costs no read of its own: a successful opening
+   revalidates, and a failed one only ends the wait of the readings above. *)
+let runs_payload_is_clean state = function
+  | Error _ -> false
+  | Ok (snapshot : Masc.Tui_decode_fusion.fusion_snapshot) ->
+      (match state.fusion_mode with
+       | Fusion_list -> true
+       | Fusion_detail run_id ->
+           List.exists
+             (fun (run : Masc.Tui_decode_fusion.fusion_run) ->
+                String.equal run.fur_run_id run_id)
+             snapshot.fus_runs
+       | Fusion_historical_detail reference ->
+           List.exists
+             (fun (entry : Masc.Tui_decode_fusion.fusion_historical_evidence) ->
+                String.equal entry.fhe_post_id reference.fhe_post_id)
+             snapshot.fus_historical_evidence)
+
+let detail_payload_is_clean ~run_id = function
+  | Ok detail ->
+      String.equal detail.Masc.Tui_decode_fusion.fud_run.fur_run_id run_id
+  | Error _ -> false
+
+let historical_payload_is_clean ~reference = function
+  | Ok detail -> detail.Masc.Tui_decode_fusion.fhd_reference = reference
+  | Error _ -> false
+
 let runs_loaded state request result =
   (* An answer the list has moved past is dropped here, before the cursor
      bookkeeping reads it. *)
@@ -281,7 +311,9 @@ let runs_loaded state request result =
   else
   let open_now = open_identity state in
   let selection_changed = Option.is_some open_now && open_now <> state.fusion_runs_open_at_start in
-  if state.fusion_runs_reread_pending || selection_changed || state.observer = Observer_opening then begin
+  if state.fusion_runs_reread_pending || selection_changed
+     || (state.observer = Observer_opening && not (runs_payload_is_clean state result))
+  then begin
     let reread = state.fusion_runs_reread_pending || selection_changed in
     state.fusion_runs_reread_pending <- false;
     (* Progress is still useful under a continuous event stream, but this
@@ -312,7 +344,9 @@ let detail_loaded state ~generation ~run_id result =
        state.fusion_detail_reread_pending <- false;
        if generation <> state.fusion_detail_generation
           || state.fusion_mode <> Fusion_detail run_id then Obsolete
-       else if reread || state.observer = Observer_opening then begin
+       else if reread
+            || (state.observer = Observer_opening
+                && not (detail_payload_is_clean ~run_id result)) then begin
          apply_fusion_detail_load state generation run_id result;
          mark_detail_stale state ~run_id;
          if reread then Reread else begin
@@ -339,7 +373,9 @@ let historical_detail_loaded state ~generation ~reference result =
        state.fusion_historical_reread_pending <- false;
        if generation <> state.fusion_detail_generation
           || state.fusion_mode <> Fusion_historical_detail reference then Obsolete
-       else if reread || state.observer = Observer_opening then begin
+       else if reread
+            || (state.observer = Observer_opening
+                && not (historical_payload_is_clean ~reference result)) then begin
          apply_fusion_historical_detail_load state generation reference result;
          mark_historical_stale state ~reference;
          if reread then Reread else begin

@@ -1159,18 +1159,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* ─────────────────────────────────────────────────────────────────────
          REST API
          ───────────────────────────────────────────────────────────────────── *)
-      | `GET, "/api/v1/dashboard" ->
-          h2_gate_state h2_reqd (fun _state ->
-            let json =
-              `Assoc
-                [
-                  ("error", `String "dashboard batch contract removed");
-                  ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
-                ]
-            in
-            h2_respond_json_value h2_reqd json
-              ~status:`Gone ~extra_headers:cors)
-
       | `GET, p when p = Server_dashboard_http_hitl_recover.uncertain_path ->
           with_h2_token_permission_auth h2_reqd
             ~permission:Server_dashboard_http_hitl_recover.permission (fun state _actor ->

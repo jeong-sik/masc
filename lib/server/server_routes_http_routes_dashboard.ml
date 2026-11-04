@@ -1839,17 +1839,6 @@ let add_routes ~sw ~clock router =
        "/api/v1/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
 
-  (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard" (fun _state req reqd ->
-         let json =
-           `Assoc
-             [
-               ("error", `String "dashboard batch contract removed");
-               ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
-             ]
-         in
-         Http.Response.json_value ~status:`Gone ~compress:true ~request:req json reqd
-       )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/shell" (fun state req reqd ->
          let light = Server_utils.bool_query_param req "light" ~default:false in
          let timing = Server_timing.create () in

@@ -46,7 +46,7 @@ keeper.md ### workspace                         ← 샌드박스 루트
 keeper.md ### world.frame.frame
 그 아래 층이 Keeper_context_layers.ordered 순서로:
   active_goals · current_task · approval_authority · connected_surfaces
-  namespace_state · repository_freshness · autonomous_trigger
+  namespace_state · autonomous_trigger
   scheduled_automation · completion_authority · task_cancellations
   pending_mentions · scope_messages · own_board_posts · board_activity
   own_recent_actions · fleet_messages

@@ -1937,6 +1937,54 @@ let test_frontier_without_held_context_does_not_load () =
     check bool "a frontier without held context is refused" true
       (Result.is_error (load ~base_path ~keeper_name)))
 
+(* A binding that holds a section no context layer names does not load, and
+   the deploy preflight counts it as refused: this store refuses boot, so such
+   a binding stops the install instead of failing its keeper's turns later. *)
+let test_a_held_section_no_layer_names_refuses_load_and_preflight () =
+  with_workspace "masc-held-unnamed-" (fun base_path ->
+    let keeper_name = "unnamed" in
+    let wiki = Keeper_context_layers.Layer Keeper_context_layers.Wiki in
+    let frontier = Some { message_count = 1; delivery = Held_by_vendor_session;
+      acknowledged_turn = None;
+      held_context = [ { context = Context_section wiki; sha256 = String.make 64 'f' } ] } in
+    let _claimed = claim_with_context_frontier ~context_frontier:frontier ~base_path
+      ~keeper_name ~expected:None ~client_kind:Claude_code ~owner_epoch
+      ~runtime_id:"claude.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    let state_path = path ~base_path ~keeper_name |> Result.get_ok in
+    let original = Yojson.Safe.from_file state_path in
+    let rec held_section_named name = function
+      | `Assoc fields ->
+        `Assoc (List.map (fun (field, value) -> match field, value with
+          | "section", `String section
+            when String.equal section (Keeper_context_layers.source_name wiki) ->
+            field, `String name
+          | _ -> field, held_section_named name value) fields)
+      | `List items -> `List (List.map (held_section_named name) items)
+      | json -> json in
+    let preflight () =
+      match Keeper_durable_store.preflight_scan Keeper_durable_store.Id.Official_client_session with
+      | None -> fail "the official-client session store has no preflight scan"
+      | Some scan -> Keeper_durable_store.run scan ~base_path |> Result.get_ok in
+    Yojson.Safe.to_file state_path
+      (held_section_named (Keeper_context_layers.source_name wiki) original);
+    check bool "the rewritten binding with its own section name still loads" true
+      (Result.is_ok (load ~base_path ~keeper_name));
+    check int "the preflight refuses nothing while every held section is named" 0
+      (preflight ()).Keeper_durable_store.refused;
+    Yojson.Safe.to_file state_path (held_section_named "no_layer_has_this_name" original);
+    check bool "a held section no layer names does not load" true
+      (match load ~base_path ~keeper_name with
+       | Error (Not_current _) -> true
+       | Ok _ | Error (Invalid_path _ | Unreadable _ | Invalid_json _) -> false);
+    check bool "this store refuses boot" true
+      (match Keeper_durable_store.reader Keeper_durable_store.Id.Official_client_session with
+       | Keeper_durable_store.Refuse_boot _ -> true
+       | Keeper_durable_store.Degrade_typed _ | Keeper_durable_store.Preflight_only _ -> false);
+    let report = preflight () in
+    check (pair int int) "the preflight counts the binding as refused" (1, 1)
+      (report.Keeper_durable_store.rows, report.Keeper_durable_store.refused))
+
 let test_changed_canonical_source_claims_a_fresh_session () =
   with_workspace "masc-context-fresh-" (fun base_path ->
     let keeper_name = "fresh" in
@@ -2493,6 +2541,8 @@ let () =
             test_held_section_rows_are_named_by_their_own_digest
         ; test_case "frontier without held context does not load" `Quick
             test_frontier_without_held_context_does_not_load
+        ; test_case "a held section no layer names refuses load and preflight" `Quick
+            test_a_held_section_no_layer_names_refuses_load_and_preflight
         ; test_case "retry previous keeps the guarded conversation" `Quick
             test_retry_previous_keeps_the_guarded_conversation
         ; test_case "retry previous from an in-flight turn keeps the conversation" `Quick

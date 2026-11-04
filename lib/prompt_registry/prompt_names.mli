@@ -192,17 +192,6 @@ val eval_calibration_few_shot_rejected_label : string
 (** The label a divergence example carries when the human rejected what the
     evaluator approved. *)
 
-(** Repository checkout freshness fragments. *)
-val keeper_context_checkouts_section : string
-val keeper_context_checkouts_row : string
-val keeper_context_checkouts_standing_current : string
-val keeper_context_checkouts_standing_stale_ref : string
-val keeper_context_checkouts_standing_ahead : string
-val keeper_context_checkouts_standing_behind : string
-val keeper_context_checkouts_standing_diverged : string
-val keeper_context_checkouts_standing_unavailable : string
-val keeper_context_checkouts_unmeasured : string
-
 (** Approval authority fragments. *)
 val keeper_context_approval_authority_heading : string
 val keeper_context_approval_authority_state_complete : string

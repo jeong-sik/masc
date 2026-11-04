@@ -496,30 +496,6 @@ let run_keeper_cycle
                in
                let {Keeper_turn_shared_inputs.lane_updates;workspace_memory;wiki_contents} =
                  Keeper_turn_shared_inputs.observe ~preview ~config ~keeper_name:meta.name () in
-               (* Repository freshness projection (context only, never a
-                  gate): where each playground checkout stands against its
-                  upstream default branch. A failed scan is logged and the
-                  layer stays absent. *)
-               let repository_freshness =
-                 match
-                   Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
-                 with
-                 | Ok rows -> rows
-                 (* A keeper that has never materialized its playground has no
-                    checkouts to report — absence, not a failure worth a warn
-                    on every turn. *)
-                 | Error (Keeper_playground_checkouts.Root_missing _) -> []
-                 | Error
-                     ((Keeper_playground_checkouts.Root_not_directory _
-                      | Keeper_playground_checkouts.Root_unreadable _
-                      | Keeper_playground_checkouts.Root_probe_unreachable _) as
-                      scan_error) ->
-                   Log.Keeper.warn
-                     "repository freshness scan unavailable keeper=%s: %s"
-                     meta.name
-                     (Keeper_playground_checkouts.scan_error_to_string scan_error);
-                   []
-               in
                let recent_work = Keeper_recent_work.collect ~config ~meta in
                let render_prompt,prompt_parts =
                  Keeper_turn_preview.with_preparation ~writer:(Some preview)
@@ -533,7 +509,6 @@ let run_keeper_cycle
                      ~workspace_memory
                      ~wiki_contents
                      ~lane_updates
-                     ~repository_freshness
                      ~observation
                      () in
                  let render_prompt ?workspace_memory_access own_recent_actions tools =

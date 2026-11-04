@@ -28,10 +28,6 @@ type layer_id =
   | Workspace_memory
   | Wiki
   | Lane_updates
-  | Repository_freshness
-      (** Where each playground checkout stands against its upstream default
-          branch — semi-stable standing context: it moves when the keeper
-          commits or upstream advances, not per cycle. *)
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority

@@ -1430,7 +1430,6 @@ let prepare_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(wiki_contents = Keeper_wiki_contents.Off)
-    ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ~(observation : Keeper_world_observation.world_observation)
     () : prepared_prompt
   =
@@ -1721,127 +1720,9 @@ let prepare_prompt_internal
             ^ "\n");
          Buffer.add_char ubuf '\n';
          Buffer.contents ubuf)
-    (* Repository freshness — semi-stable standing context: it moves when the
-       keeper commits or upstream advances, not per cycle. Projection only —
-       it states where each checkout stands so the keeper can choose to
-       fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     (* These four layers are assembled from the actual request projection. *)
     | Keeper_context_layers.Workspace_memory | Wiki | Own_recent_actions | Recent_work -> None
-    | Keeper_context_layers.Repository_freshness ->
-      (match repository_freshness with
-       | [] -> None
-       | rows ->
-         (* Measured rows render individually, drifted first — the layer
-            exists to surface drift, and a current checkout is the least
-            actionable line. Unmeasurable rows collapse into one count: a
-            live playground answered 19 of 32 rows with the same
-            budget-exhausted reason (2026-09-01 field probe), and repeating
-            an identical failure line 19 times per turn is noise. *)
-         let measured, unmeasured =
-           List.partition
-             (fun (row : Keeper_sandbox_control.freshness_row) ->
-               match row.Keeper_sandbox_control.row_freshness with
-               | Keeper_sandbox_control.Freshness_unavailable _ -> false
-               | Keeper_sandbox_control.Current _
-               | Keeper_sandbox_control.Stale_ref _
-               | Keeper_sandbox_control.Ahead _
-               | Keeper_sandbox_control.Behind _
-               | Keeper_sandbox_control.Diverged _ -> true)
-             rows
-         in
-         let drift_rank (row : Keeper_sandbox_control.freshness_row) =
-           match row.Keeper_sandbox_control.row_freshness with
-           | Keeper_sandbox_control.Diverged _ -> 0
-           | Keeper_sandbox_control.Behind _ -> 1
-           | Keeper_sandbox_control.Ahead _ -> 2
-           | Keeper_sandbox_control.Stale_ref _ -> 3
-           | Keeper_sandbox_control.Current _ -> 4
-           | Keeper_sandbox_control.Freshness_unavailable _ -> 5
-         in
-         let measured =
-           List.stable_sort
-             (fun left right -> compare (drift_rank left) (drift_rank right))
-             measured
-         in
-         let line (row : Keeper_sandbox_control.freshness_row) =
-           let branch_part =
-             match row.Keeper_sandbox_control.row_branch with
-             | Some branch -> " branch=" ^ branch
-             | None -> ""
-           in
-           let dirty_part =
-             match row.Keeper_sandbox_control.row_changed_files with
-             (* [Some 0] is a clean tree and [None] a failed status probe;
-                neither earns a line of the keeper's attention here — a
-                broken probe already surfaces as [Freshness_unavailable]. *)
-             | Some 0 | None -> ""
-             | Some changed -> Printf.sprintf " dirty_files=%d" changed
-           in
-           let standing =
-             match row.Keeper_sandbox_control.row_freshness with
-             | Keeper_sandbox_control.Current { target_ref; age_s; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_current
-                 [ "target", target_ref; "age", string_of_int age_s ]
-             | Keeper_sandbox_control.Stale_ref { target_ref; last_observed_at_unix; age_s; _ } ->
-               let age = match age_s with
-                 | Some seconds -> Printf.sprintf "%ds ago" seconds
-                 | None -> "age unknown" in
-               let as_of =
-                 match last_observed_at_unix with
-                 | None -> "unknown time"
-                 | Some timestamp ->
-                   let tm = Unix.gmtime (float_of_int timestamp) in
-                   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
-                     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                     tm.tm_hour tm.tm_min tm.tm_sec
-               in
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_stale_ref
-                 [ "target", target_ref; "as_of", as_of; "age", age ]
-             | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_ahead
-                 [ "target", target_ref; "ahead", string_of_int ahead ]
-             | Keeper_sandbox_control.Behind { target_ref; behind; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_behind
-                 [ "target", target_ref; "behind", string_of_int behind ]
-             | Keeper_sandbox_control.Diverged { target_ref; ahead; behind; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_diverged
-                 [ "target", target_ref
-                 ; "behind", string_of_int behind
-                 ; "ahead", string_of_int ahead
-                 ]
-             | Keeper_sandbox_control.Freshness_unavailable reason ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_unavailable
-                 [ "reason", reason ]
-           in
-           render_fragment Prompt_names.keeper_context_checkouts_row
-             [ "path", row.Keeper_sandbox_control.row_checkout_path
-             ; "branch", branch_part
-             ; "dirty", dirty_part
-             ; "standing", standing
-             ]
-         in
-         let unmeasured_line =
-           match List.length unmeasured with
-           | 0 -> []
-           | count ->
-             [ render_fragment Prompt_names.keeper_context_checkouts_unmeasured
-                 [ "count", string_of_int count ]
-             ]
-         in
-         Some
-           (render_fragment Prompt_names.keeper_context_checkouts_section
-              [ "count", string_of_int (List.length rows)
-              ; ( "rows"
-                , String.concat "\n" (List.map line measured @ unmeasured_line) )
-              ]
-            ^ "\n\n"))
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then
@@ -2008,7 +1889,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
     | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
     | Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
-    | Namespace_state | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
+    | Namespace_state | Lane_updates | Autonomous_trigger | Scheduled_automation
     | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
     | Own_board_posts | Board_activity | Fleet_messages ->
       (* Captured and assembled through the same immutable [ordered] keys. *)
@@ -2074,7 +1955,6 @@ let prepare_prompt
       ?workspace_memory
       ?wiki_contents
       ?lane_updates
-      ?repository_freshness
       ~observation
       ()
   =
@@ -2086,17 +1966,16 @@ let prepare_prompt
     ?workspace_memory
     ?wiki_contents
     ?lane_updates
-    ?repository_freshness
     ~observation
     ()
 ;;
 
 let build_prompt ~turn_decision ~current_task ?task_skill_surfaces
     ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
-    ?lane_updates ?repository_freshness ?recent_work ~observation () =
+    ?lane_updates ?recent_work ~observation () =
   let prepared = prepare_prompt ~turn_decision ~current_task
     ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
-    ?lane_updates ?repository_freshness ~observation () in
+    ?lane_updates ~observation () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()
 ;;
 
@@ -2108,7 +1987,6 @@ let build_prompt_preview
       ?workspace_memory_access
       ?wiki_contents
       ?lane_updates
-      ?repository_freshness
       ?recent_work
       ~observation
       ()
@@ -2121,7 +1999,6 @@ let build_prompt_preview
     ?workspace_memory
     ?wiki_contents
     ?lane_updates
-    ?repository_freshness
     ~observation
     () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()

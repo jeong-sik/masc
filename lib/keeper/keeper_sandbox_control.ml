@@ -558,9 +558,8 @@ let freshness_json = function
   | Freshness_unavailable error ->
     `Assoc [ "state", `String "unavailable"; "error", `String error ]
 
-(* One checkout's measured facts. [checkout_json] renders this to the tool
-   surface and [freshness_row_of_inspection] projects it into the turn
-   context, so the two surfaces read the same probe and can never disagree. *)
+(* One checkout's measured facts, as [checkout_json] renders them to the tool
+   surface. *)
 type checkout_inspection = {
   inspected : Keeper_playground_checkouts.checkout;
   catalog_resolution : catalog_resolution;
@@ -659,38 +658,6 @@ let checkout_json (inspection : checkout_inspection) =
     ; "inspection_errors", `List (List.map (fun error -> `String error) inspection_errors)
     ; "freshness", freshness_json inspection.freshness
     ]
-
-type freshness_row = {
-  row_checkout_path : string;
-  row_branch : string option;
-  row_changed_files : int option;
-  row_freshness : checkout_freshness;
-}
-
-(* The row is what an operator reads, and every field on it is already an
-   option. So the policy is: any git probe that did not answer shows as no
-   branch. It is one policy for every error the probe can return -- a detached
-   HEAD, a command that failed, a checkout that vanished mid-read -- because
-   the row has nowhere to put the difference and [row_freshness] is what says
-   the probe is not to be trusted. *)
-let row_branch_of_probe = function
-  | Ok branch -> Some branch
-  | Error (_ : string) -> None
-;;
-
-let freshness_row_of_inspection (inspection : checkout_inspection) =
-  (* [relative_path], not [name]: it is the cwd the keeper passes to its
-     tools, and basenames collide (a live playground held two [poc-repo]
-     checkouts at different paths, 2026-09-01 field probe). *)
-  { row_checkout_path =
-      inspection.inspected.Keeper_playground_checkouts.relative_path
-  ; row_branch = row_branch_of_probe inspection.branch
-  ; row_changed_files =
-      (match inspection.dirty with
-       | Ok (_, changed_files) -> Some changed_files
-       | Error _ -> None)
-  ; row_freshness = inspection.freshness
-  }
 
 let checkout_inspection_of_remote ~catalog (ic : Keeper_sandbox_remote_checkouts.inspected_checkout) : checkout_inspection =
   let catalog_resolution =
@@ -912,48 +879,6 @@ let checkout_identity_rows
     Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
   in
   List.map (inspect_checkout_identity ~budget ~catalog) checkouts
-;;
-
-let checkout_freshness_rows
-    ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ()
-  =
-  let catalog = Repo_store.load_all ~base_path:config.base_path in
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  | Shared_mount ->
-    let sandbox_abs =
-      Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path
-    in
-    (match Keeper_playground_checkouts.discover ~root:sandbox_abs with
-     | Error scan_error -> Error scan_error
-     | Ok discovery ->
-       let budget =
-         Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
-       in
-       Ok
-         (Keeper_playground_checkouts.found discovery
-          |> List.map (fun checkout ->
-            freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))))
-  | Endpoint_owned ->
-    match
-      Keeper_sandbox_remote_checkouts.discover_and_inspect
-        ~timeout_sec:inspection_budget_sec
-        ~config
-        ~meta
-        ~catalog
-        ()
-    with
-    | Error scan_err -> Error scan_err
-    | Ok (scan_res, remote_inspections) ->
-      (match scan_res with
-       | Error scan_err -> Error scan_err
-       | Ok _ ->
-         let inspections =
-           List.map (checkout_inspection_of_remote ~catalog) remote_inspections
-         in
-         Ok (List.map freshness_row_of_inspection inspections))
 ;;
 
 module For_testing = struct

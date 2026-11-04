@@ -37,10 +37,9 @@ let recedes = function
   | Off | Not_set_up | Unobserved -> true
   | Ready | Waiting | Changing | Failing -> false
 
-let counts standings =
+let count_items standings =
   List.filter_map (fun standing ->
       match List.length (List.filter (( = ) standing) standings) with
       | 0 -> None
       | count -> Some (Printf.sprintf "%d %s" count (word standing)))
     all
-  |> String.concat " · "

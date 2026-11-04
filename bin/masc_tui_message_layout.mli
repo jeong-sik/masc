@@ -581,6 +581,15 @@ val fit_width : string -> int -> string
     For a fixed column whose head carries the meaning. Where both ends carry
     -- an identifier, an address -- use {!fit_middle}. *)
 
+val join_fitting : sep:string -> cells:int -> string list -> string
+(** [join_fitting ~sep ~cells items] joins [items] with [sep] and leaves out
+    whole items from the back until the row takes at most [cells] cells. The
+    first item always stays, so the row is never empty and the frame can still
+    cut it.
+
+    For a row of readings that each carry a number. {!fit_width} would cut the
+    last one in the middle, and ["0 inactiv…"] reads as a count. *)
+
 val pad_left : string -> int -> string
 (** [pad_left text width] right-aligns [text] in [width] cells, cutting it
     with {!fit_width} when it does not fit. Printf's ["%*s"] counts bytes,

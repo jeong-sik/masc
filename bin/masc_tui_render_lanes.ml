@@ -743,12 +743,16 @@ let render_lanes_overview (state : state) =
     | None -> "  All features"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
-        let standings = Masc_tui_lane_standing.counts
+        let standings = Masc_tui_lane_standing.count_items
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
                snapshot.Masc.Tui_decode_lane_inventory.rows) in
-        Printf.sprintf "  All features · observed %02d:%02d:%02d%s"
-          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
-          (if standings = "" then "" else " · " ^ standings) in
+        (* A count that does not fit is left out whole: "4 not …" read as
+           a number with its word cut off. *)
+        Message_layout.join_fitting ~sep:" · " ~cells:inner
+          ("  All features"
+           :: Printf.sprintf "observed %02d:%02d:%02d"
+                observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+           :: standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     (Masc_tui_types.lane_inventory_notice_lines ~cols state);

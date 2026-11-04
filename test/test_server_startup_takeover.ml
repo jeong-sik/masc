@@ -316,6 +316,138 @@ let test_a_second_waiter_is_refused_while_one_waits () =
            | Some (_, _) | None ->
              Alcotest.fail "the first waiter did not take the lease after the owner"))
 
+(* A waiter that won the slot, committed the lease, and exec'd (as [masc
+   start] does between acquiring the lease and serving) re-enters this same
+   acquisition post-exec with the lease file already naming it. It must not
+   re-contend the single waiter slot: a contender that grabbed the slot in
+   the exec gap would otherwise kill the legitimate winner with
+   Another_replacement_waits after it already won (2026-11-04 live
+   incident). The winner re-enters in the same process here (no exec in
+   tests, so the in-process table answers Already_owned); the lease record,
+   not the process image, is what the bypass keys on. A contender holds the
+   slot during the re-entry, so without the bypass the winner is refused. *)
+let test_recorded_owner_is_not_refused_as_second_waiter () =
+  with_base_and_run "startup-takeover-base-path-winner-reentry"
+    (fun ~base_path ~run_dir ->
+    let owner_pid, release_owner = spawn_lease_owner ~run_dir base_path in
+    let waiting_read, waiting_write = Unix.pipe () in
+    let won_read, won_write = Unix.pipe () in
+    let go_read, go_write = Unix.pipe () in
+    match Unix.fork () with
+    | 0 ->
+      close_quietly waiting_read;
+      close_quietly won_read;
+      close_quietly go_write;
+      close_quietly release_owner;
+      let on_wait _ = ignore (Unix.write_substring waiting_write "W" 0 1 : int) in
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+           ~run_dir ~on_wait base_path
+       with
+       | Ok (Server_startup_takeover.Base_path_acquired lease) ->
+         ignore (Unix.write_substring won_write "1" 0 1 : int);
+         let buffer = Bytes.create 1 in
+         ignore (Unix.read go_read buffer 0 1 : int);
+         let waited = ref false in
+         let outcome =
+           match
+             Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+               ~run_dir
+               ~on_wait:(fun _ -> waited := true)
+               base_path
+           with
+           | Ok (Server_startup_takeover.Base_path_already_owned _) ->
+             if !waited then 6 else 0
+           | Ok
+               ( Server_startup_takeover.Base_path_acquired _
+               | Server_startup_takeover.Base_path_rejected _ ) -> 5
+           | Error (Server_startup_takeover.Another_replacement_waits _) -> 4
+         in
+         Server_startup_takeover.release_base_path_lease lease;
+         Unix._exit outcome
+       | Ok _ | Error _ -> Unix._exit 3)
+    | waiter_pid ->
+      close_quietly waiting_write;
+      close_quietly won_write;
+      close_quietly go_read;
+      let queued_read, queued_write = Unix.pipe () in
+      let buffer = Bytes.create 1 in
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly waiting_read;
+          close_quietly won_read;
+          close_quietly go_write;
+          close_quietly queued_read;
+          close_quietly queued_write;
+          close_quietly release_owner;
+          if process_alive waiter_pid then stop_process waiter_pid;
+          if process_alive owner_pid then stop_process owner_pid)
+        (fun () ->
+           Alcotest.(check int) "the winner is waiting" 1
+             (Unix.read waiting_read buffer 0 1);
+           ignore (Unix.write_substring release_owner "1" 0 1 : int);
+           Alcotest.(check int) "the winner committed the lease" 1
+             (Unix.read won_read buffer 0 1);
+           owner_exited_on_its_own owner_pid;
+           let contender_pid =
+             match Unix.fork () with
+             | 0 ->
+               (* Close only what is open here: the parent already closed
+                  waiting_write, won_write and go_read, so their numbers were
+                  recycled by the queued pipe itself; naming them would close
+                  the queued pipe out from under this child (EBADF). *)
+               close_quietly waiting_read;
+               close_quietly won_read;
+               close_quietly go_write;
+               close_quietly queued_read;
+               close_quietly release_owner;
+               let on_wait _ =
+                 ignore (Unix.write_substring queued_write "Q" 0 1 : int)
+               in
+               (* The contender must block on the winner's lease until the
+                  parent stops it; any return or crash is reported back so a
+                  failure names the outcome instead of hanging on EOF. *)
+               (match
+                  Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+                    ~run_dir ~on_wait base_path
+                with
+                | Ok _ ->
+                  ignore (Unix.write_substring queued_write "O" 0 1 : int);
+                  Unix._exit 7
+                | Error _ ->
+                  ignore (Unix.write_substring queued_write "E" 0 1 : int);
+                  Unix._exit 7
+                | exception _ ->
+                  (try ignore (Unix.write_substring queued_write "X" 0 1 : int)
+                   with Unix.Unix_error _ -> ());
+                  Unix._exit 9)
+             | contender_pid ->
+               close_quietly queued_write;
+               contender_pid
+           in
+           Fun.protect
+             ~finally:(fun () ->
+               if process_alive contender_pid then stop_process contender_pid)
+             (fun () ->
+                Alcotest.(check char)
+                  "the contender is waiting (Q), not returned (O), refused (E), or crashed (X)"
+                  'Q'
+                  (let got = Unix.read queued_read buffer 0 1 in
+                   if got <> 1
+                   then Alcotest.failf "contender exited early (%d bytes)" got
+                   else Bytes.get buffer 0);
+                ignore (Unix.write_substring go_write "1" 0 1 : int);
+                (match waitpid_nointr waiter_pid with
+                 | Some (_, Unix.WEXITED 0) -> ()
+                 | Some (_, Unix.WEXITED code) ->
+                   Alcotest.failf
+                     "winner re-entry exited %d (4 means refused as a second waiter)"
+                     code
+                 | Some (_, Unix.WSIGNALED signal) ->
+                   Alcotest.failf "winner re-entry died on signal %d" signal
+                 | Some (_, Unix.WSTOPPED _) | None ->
+                   Alcotest.fail "winner re-entry did not exit on its own"))))
+
 let test_base_path_lock_rejects_concurrent_lease () =
   with_base_and_run "startup-takeover-base-path-live"
     (fun ~base_path ~run_dir ->
@@ -1408,6 +1540,8 @@ let () =
             `Quick test_waiting_acquisition_takes_the_lease_when_the_owner_exits;
           Alcotest.test_case "a second waiter is refused while one waits"
             `Quick test_a_second_waiter_is_refused_while_one_waits;
+          Alcotest.test_case "a recorded owner is not refused as a second waiter"
+            `Quick test_recorded_owner_is_not_refused_as_second_waiter;
           Alcotest.test_case "a recorded owner that is gone is named as stale"
             `Quick test_base_path_lock_reports_a_recorded_owner_that_is_gone;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick

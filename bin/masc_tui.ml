@@ -17548,6 +17548,7 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
 let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
+  state.revalidation_discarded <- false;
   let previous_items = visible_item_revision state in
   let datasets = take_http_surface_datasets state results.http_scoped.http_surface_request in
   apply_server_identity_reading state ~mailbox results.http_server_identity;
@@ -17595,6 +17596,7 @@ let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_tick
 
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
+  state.revalidation_discarded <- true;
   (* The Candle surface says why it has no reading rather than looking
      unread. *)
   state.candle_observation <- Some (Error detail);
@@ -18667,23 +18669,12 @@ let contact_retry_max_s = 30.0
 let contact_retry_delay_s ~failures =
   Float.min contact_retry_max_s (stream_reconnect_s *. Float.pow 2.0 (Float.of_int failures))
 
-(* Whether nothing but a revalidation can bring the server back: it cannot be
-   reached or is booting, or the workspace it names is not yet confirmed (an
-   unconfirmed workspace withdraws the reading, and with it the feed). *)
-let contact_needed state =
-  (match state.connection_status with
-   | Disconnected | Connecting | Booting -> true
-   | Connected | Degraded -> false)
-  || (match state.workspace_identity with
-      | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> true
-      | Workspace_identity_match | Workspace_identity_mismatch _ -> false)
-
 (* Runs on every loop iteration. While a revalidation is needed and none is
    out, one timer waits and then revalidates; each attempt that ends the same
    way waits longer. A reached server opens the observer feed from the
    revalidation's answer, and the feed says what changes after that. *)
 let reconcile_contact_retry state ~mailbox ~refresh_inflight =
-  if not (contact_needed state) then begin
+  if not (Masc_tui_types.contact_needed state) then begin
     state.contact_failures <- 0;
     state.contact_retry_owner <- None
   end
@@ -23603,7 +23594,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.contact_retry_owner with
        | Some current when current == owner ->
            state.contact_retry_owner <- None;
-           if authority = state.workspace_authority && contact_needed state then
+           if authority = state.workspace_authority && Masc_tui_types.contact_needed state then
              start_http_refresh state ~host:server_peer_host ~port:state.port
                ~refresh_inflight:http_refresh_inflight
                ~scoped_refresh_inflight:http_scoped_refresh_inflight

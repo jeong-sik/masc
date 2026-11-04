@@ -51,8 +51,10 @@ let section_json ~configured ~outcomes =
       ; "status_reasons", `List []
       ; "destinations", `List []
       ]
-  | Ok destinations ->
-    let rows = List.map (fun destination -> destination, outcome_of outcomes destination) destinations in
+  | Ok (first, rest) ->
+    let rows =
+      List.map (fun destination -> destination, outcome_of outcomes destination) (first :: rest)
+    in
     let refusing =
       List.filter_map
         (fun ((destination : Client.destination_id), outcome) ->
@@ -79,7 +81,14 @@ let section_json ~configured ~outcomes =
         refusing
     in
     let asked = List.exists (fun (_, outcome) -> Option.is_some outcome) rows in
-    let every_one_refusing = List.length refusing = List.length rows in
+    let every_one_refusing =
+      List.for_all
+        (fun (_, outcome) ->
+           match outcome with
+           | Some (Client.Refusing _) -> true
+           | Some (Client.Answered _) | None -> false)
+        rows
+    in
     let status =
       if not asked then Health_status.Idle
       else if every_one_refusing then Health_status.Degraded
@@ -106,7 +115,7 @@ let section_json ~configured ~outcomes =
 
 let configured_destinations () =
   Typesafeai_config.lane_destinations ()
-  |> Result.map (fun (first, rest) -> List.map Client.identify (first :: rest))
+  |> Result.map (fun (first, rest) -> Client.identify first, List.map Client.identify rest)
 ;;
 
 let health_json () =

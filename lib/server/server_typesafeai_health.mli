@@ -10,12 +10,15 @@
 
 val section_json :
   configured:
-    (Typesafeai_client.destination_id list, Typesafeai_config.unavailable_reason) result ->
+    ( Typesafeai_client.destination_id * Typesafeai_client.destination_id list
+    , Typesafeai_config.unavailable_reason )
+    result ->
   outcomes:(Typesafeai_client.destination_id * Typesafeai_client.destination_outcome) list ->
   Yojson.Safe.t
 (** [Error] when the lane has no destination to ask: the status is
-    [disabled], a state name the operator rollup does not grade. [Ok]
-    destinations are graded by their outcomes: [idle] before any was asked,
+    [disabled], a state name the operator rollup does not grade. [Ok] holds
+    at least one destination, as {!Typesafeai_config.destinations} does, and
+    the destinations are graded by their outcomes: [idle] before any was asked,
     [degraded] when every one is refusing, [warning] when one refuses for
     payment or its key while another answers, [ok] otherwise. Outcomes of a
     destination the table no longer names are left out. *)

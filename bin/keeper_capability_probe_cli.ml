@@ -98,23 +98,7 @@ let rec parse_args argv index cfg =
 
 (* [{tool}] rather than [%s]: the template is operator-supplied, and a stray
    percent in a hand-written prompt would otherwise raise at format time. *)
-let render_prompt template ~tool =
-  let placeholder = "{tool}" in
-  let plen = String.length placeholder in
-  let buf = Buffer.create (String.length template + String.length tool) in
-  let rec go i =
-    if i >= String.length template
-    then ()
-    else if i + plen <= String.length template && String.sub template i plen = placeholder
-    then (
-      Buffer.add_string buf tool;
-      go (i + plen))
-    else (
-      Buffer.add_char buf template.[i];
-      go (i + 1))
-  in
-  go 0;
-  Buffer.contents buf
+let render_prompt template ~tool = String_util.replace_substring ~needle:"{tool}" ~by:tool template
 ;;
 
 let lane_label runtime_id =

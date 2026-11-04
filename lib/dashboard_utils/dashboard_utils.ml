@@ -4,8 +4,6 @@ let parse_iso_opt = function
 
 let first_some a b = match a with Some _ as v -> v | None -> b
 
-let string_contains = String_util.string_contains_substring
-
 module String_set = Set_util.StringSet
 
 let dedup_strings (xs : string list) : string list =

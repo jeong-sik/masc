@@ -22,24 +22,6 @@ let bind_workspace_getter f = Atomic.set workspace_getter f
    outside the [Multimodal] module would require new accessors;
    the JSON representation already carries every field we need. *)
 
-let lower (s : string) = String.lowercase_ascii s
-
-let case_contains ~(haystack : string) ~(needle : string) : bool =
-  if needle = "" then true
-  else
-    let h = lower haystack in
-    let n = lower needle in
-    let lh = String.length h in
-    let ln = String.length n in
-    if ln > lh then false
-    else
-      let rec loop i =
-        if i + ln > lh then false
-        else if String.sub h i ln = n then true
-        else loop (i + 1)
-      in
-      loop 0
-
 let json_string_field (json : Yojson.Safe.t) (field : string) : string =
   Json_util.get_string_with_default json ~key:field ~default:""
 
@@ -76,12 +58,11 @@ let artifact_passes
     | None -> true
     | Some "" -> true
     | Some q ->
-      case_contains ~haystack:(json_string_field json "id") ~needle:q
-      || case_contains ~haystack:(json_string_field json "kind") ~needle:q
-      || case_contains ~haystack:(json_created_by json) ~needle:q
-      || List.exists
-           (fun k -> case_contains ~haystack:k ~needle:q)
-           (json_metadata_keys json)
+      let mentions haystack = String_util.contains_substring_ci haystack q in
+      mentions (json_string_field json "id")
+      || mentions (json_string_field json "kind")
+      || mentions (json_created_by json)
+      || List.exists mentions (json_metadata_keys json)
   in
   kind_ok && created_by_ok && q_ok
 

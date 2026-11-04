@@ -1243,17 +1243,11 @@ let classify_masc_internal_error_of_string (raw : string) :
     masc_internal_error option =
   let prefix = masc_internal_error_prefix in
   let prefix_len = String.length prefix in
-  let raw_len = String.length raw in
-  let rec find_prefix start =
-    if start + prefix_len > raw_len then None
-    else if String.sub raw start prefix_len = prefix then Some start
-    else find_prefix (start + 1)
-  in
-  match find_prefix 0 with
+  match String_util.find_substring raw prefix with
   | None -> None
   | Some prefix_start ->
     let payload_start = prefix_start + prefix_len in
-    let payload = String.sub raw payload_start (raw_len - payload_start) in
+    let payload = String.sub raw payload_start (String.length raw - payload_start) in
     (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
      with Yojson.Json_error _ -> None)
 

@@ -428,22 +428,7 @@ let provider_error provider message =
     the request URL, so provider failure messages keep the useful curl detail
     without echoing search queries or other URL payloads. *)
 let redact_transport_error_detail message =
-  let len = String.length message in
-  let rec find_marker i =
-    if i + 5 > len then
-      None
-    else if
-      Char.equal message.[i] ' '
-      && Char.equal message.[i + 1] 'f'
-      && Char.equal message.[i + 2] 'o'
-      && Char.equal message.[i + 3] 'r'
-      && Char.equal message.[i + 4] ' '
-    then
-      Some i
-    else
-      find_marker (i + 1)
-  in
-  match find_marker 0 with
+  match String_util.find_substring message " for " with
   | Some idx -> String.sub message 0 idx
   | None -> message
 

@@ -274,6 +274,7 @@
   masc.tool_catalog_surfaces
   masc.masc_tool_surface
   masc_eio_context
+  masc_string_util
   unix
   yojson
   eio

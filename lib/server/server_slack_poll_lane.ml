@@ -276,17 +276,6 @@ let collect ~now ~cursor ~fetch ~save ~publish =
    app_mention is the subscribed event, and re-collecting a mention here
    would double it. *)
 
-let text_contains needle haystack =
-  let len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop i =
-    if i + len > hay_len then false
-    else if String.sub haystack i len = needle then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
 let pollable ~bot_user_id (m : Rest.history_message) : bool =
   m.Rest.subtype = None
   && m.Rest.bot_id = None
@@ -296,7 +285,7 @@ let pollable ~bot_user_id (m : Rest.history_message) : bool =
    | Some bot ->
      (* No trailing ">": the legacy rendered form [<@id|label>] shares the
         [<@id] prefix and must be excluded the same as [<@id>]. *)
-     not (text_contains ("<@" ^ bot) m.Rest.text)
+     not (String_util.contains_substring m.Rest.text ("<@" ^ bot))
    | None -> true)
 ;;
 

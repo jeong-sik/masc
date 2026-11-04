@@ -23,7 +23,6 @@ type wiki_source = Wiki_page.wiki_source =
 let source_to_string = Wiki_page.source_to_string
 let valid_source_strings = Wiki_page.valid_source_strings
 let source_of_string_opt = Wiki_page.source_of_string_opt
-let string_contains = String_util.string_contains_substring
 
 module Line = Wiki_page.Line
 module Tag = Wiki_page.Tag
@@ -161,7 +160,7 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
     let title_matches content =
       match parse_frontmatter content with
       | Ok fm ->
-        string_contains ~needle:topic_lc (String.lowercase_ascii (fm.title :> string))
+        String_util.contains_substring (String.lowercase_ascii (fm.title :> string)) topic_lc
       | Error _ -> false
     in
     let is_exact_name path =
@@ -175,7 +174,7 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
         List.find_map
           (fun path ->
             let base_lc = String.lowercase_ascii (Filename.basename path) in
-            if string_contains ~needle:topic_lc base_lc
+            if String_util.contains_substring base_lc topic_lc
             then Some (path, None)
             else (
               match In_channel.with_open_text path In_channel.input_all with

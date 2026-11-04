@@ -279,8 +279,6 @@ configured LLM with provenance.
 | `masc_board_curation_submit` | AI curation snapshot 제출: summary/order/highlights/tag suggestions/answer matches/provenance 기록. 게시글/댓글/투표는 수정하지 않음 |
 | `masc_board_delete` | 게시물 삭제 (연관 댓글/투표 포함) |
 
-agent core `Tool.t` 인터페이스도 `Tool_bridge.agent_core_tool_of_masc`로 제공.
-
 ---
 
 ## 11. SubBoard (하위 게시판)

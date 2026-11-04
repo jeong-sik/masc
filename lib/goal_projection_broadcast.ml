@@ -7,7 +7,7 @@ let changed ~base_path =
      still sees it. *)
   match
     let authority = Sse.runtime_authority_exn ~base_path in
-    Sse.broadcast_to (Sse.Runtime_observers authority)
+    Sse.broadcast_to_sse_runtime_observers authority
       (`Assoc [ "type", `String changed_event; "ts_unix", `Float (Time_compat.now ()) ])
   with
   | () -> ()

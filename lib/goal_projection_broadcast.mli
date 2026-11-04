@@ -1,7 +1,9 @@
 (** Says that a workspace's Goal projection changed (RFC-0480 §3.4).
 
     The event is [{"type":"goal_projection_changed","ts_unix":...}] and goes to
-    the observers of [base_path]'s runtime only. A reader that shows Goals
+    the observer sessions of [base_path]'s runtime only, not to external
+    subscribers: an external callback may wait, and this runs under the
+    writer's lock. A reader that shows Goals
     ([GET /api/v1/dashboard/planning], [GET /api/v1/dashboard/goals]) reads them
     again.
 

@@ -574,76 +574,6 @@ let test_string_of_task_status () =
   check string "alias works" "todo" (Masc_domain.string_of_task_status Masc_domain.Todo)
 
 (* ============================================================
-   tempo_mode Tests
-   ============================================================ *)
-
-let test_tempo_mode_to_string_normal () =
-  check string "normal" "normal" (Masc_domain.tempo_mode_to_string Masc_domain.Normal)
-
-let test_tempo_mode_to_string_slow () =
-  check string "slow" "slow" (Masc_domain.tempo_mode_to_string Masc_domain.Slow)
-
-let test_tempo_mode_to_string_fast () =
-  check string "fast" "fast" (Masc_domain.tempo_mode_to_string Masc_domain.Fast)
-
-let test_tempo_mode_to_string_paused () =
-  check string "paused" "paused" (Masc_domain.tempo_mode_to_string Masc_domain.Paused)
-
-let test_string_of_tempo_mode () =
-  (* Alias for tempo_mode_to_string *)
-  check string "alias" "normal" (Masc_domain.string_of_tempo_mode Masc_domain.Normal)
-
-let test_tempo_mode_of_string_normal () =
-  match Masc_domain.tempo_mode_of_string "normal" with
-  | Ok Masc_domain.Normal -> ()
-  | _ -> fail "expected Ok Normal"
-
-let test_tempo_mode_of_string_slow () =
-  match Masc_domain.tempo_mode_of_string "slow" with
-  | Ok Masc_domain.Slow -> ()
-  | _ -> fail "expected Ok Slow"
-
-let test_tempo_mode_of_string_fast () =
-  match Masc_domain.tempo_mode_of_string "fast" with
-  | Ok Masc_domain.Fast -> ()
-  | _ -> fail "expected Ok Fast"
-
-let test_tempo_mode_of_string_paused () =
-  match Masc_domain.tempo_mode_of_string "paused" with
-  | Ok Masc_domain.Paused -> ()
-  | _ -> fail "expected Ok Paused"
-
-let test_tempo_mode_of_string_unknown () =
-  match Masc_domain.tempo_mode_of_string "invalid" with
-  | Error e -> check bool "has error msg" true (String.length e > 0)
-  | Ok _ -> fail "expected Error"
-
-let test_tempo_mode_to_yojson_normal () =
-  match Masc_domain.tempo_mode_to_yojson Masc_domain.Normal with
-  | `String "normal" -> ()
-  | _ -> fail "expected String normal"
-
-let test_tempo_mode_to_yojson_paused () =
-  match Masc_domain.tempo_mode_to_yojson Masc_domain.Paused with
-  | `String "paused" -> ()
-  | _ -> fail "expected String paused"
-
-let test_tempo_mode_of_yojson_ok () =
-  match Masc_domain.tempo_mode_of_yojson (`String "slow") with
-  | Ok Masc_domain.Slow -> ()
-  | _ -> fail "expected Ok Slow"
-
-let test_tempo_mode_of_yojson_unknown () =
-  match Masc_domain.tempo_mode_of_yojson (`String "xyz") with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error"
-
-let test_tempo_mode_of_yojson_wrong_type () =
-  match Masc_domain.tempo_mode_of_yojson (`Int 42) with
-  | Error e -> check bool "has error" true (String.length e > 0)
-  | Ok _ -> fail "expected Error"
-
-(* ============================================================
    backlog Tests
    ============================================================ *)
 
@@ -1524,61 +1454,6 @@ let test_masc_error_invalid_token () =
   check bool "nonempty" true (String.length s > 0)
 
 (* ============================================================
-   default_tempo_config Tests
-   ============================================================ *)
-
-let test_default_tempo_config_mode () =
-  let c = Masc_domain.default_tempo_config in
-  check string "mode normal" "normal" (Masc_domain.tempo_mode_to_string c.mode)
-
-let test_default_tempo_config_delay () =
-  let c = Masc_domain.default_tempo_config in
-  check int "delay_ms" 0 c.delay_ms
-
-let test_default_tempo_config_reason () =
-  let c = Masc_domain.default_tempo_config in
-  check (option string) "reason none" None c.reason
-
-(* ============================================================
-   tempo_config_to/of_yojson Tests
-   ============================================================ *)
-
-let test_tempo_config_to_yojson () =
-  let c : Masc_domain.tempo_config = {
-    mode = Masc_domain.Slow;
-    delay_ms = 100;
-    reason = Some "testing";
-    set_by = Some "claude";
-    set_at = Some "2024-01-15T12:00:00Z";
-  } in
-  let json = Masc_domain.tempo_config_to_yojson c in
-  match json with
-  | `Assoc fields ->
-    check bool "has mode" true (List.mem_assoc "mode" fields);
-    check bool "has delay_ms" true (List.mem_assoc "delay_ms" fields)
-  | _ -> fail "expected Assoc"
-
-let test_tempo_config_of_yojson_ok () =
-  let json = `Assoc [
-    ("mode", `String "fast");
-    ("delay_ms", `Int 50);
-    ("reason", `String "quick work");
-    ("set_by", `Null);
-    ("set_at", `Null);
-  ] in
-  match Masc_domain.tempo_config_of_yojson json with
-  | Ok c ->
-    check string "mode" "fast" (Masc_domain.tempo_mode_to_string c.mode);
-    check int "delay_ms" 50 c.delay_ms
-  | Error e -> fail ("expected Ok: " ^ e)
-
-let test_tempo_config_of_yojson_error () =
-  let json = `Assoc [("mode", `String "invalid_mode")] in
-  match Masc_domain.tempo_config_of_yojson json with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error"
-
-(* ============================================================
    default_rate_limit Tests
    ============================================================ *)
 
@@ -1918,31 +1793,6 @@ let () =
       test_case "string_of_agent_status" `Quick test_string_of_agent_status;
       test_case "string_of_task_status" `Quick test_string_of_task_status;
     ];
-    "tempo_mode_to_string", [
-      test_case "normal" `Quick test_tempo_mode_to_string_normal;
-      test_case "slow" `Quick test_tempo_mode_to_string_slow;
-      test_case "fast" `Quick test_tempo_mode_to_string_fast;
-      test_case "paused" `Quick test_tempo_mode_to_string_paused;
-    ];
-    "string_of_tempo_mode", [
-      test_case "alias" `Quick test_string_of_tempo_mode;
-    ];
-    "tempo_mode_of_string", [
-      test_case "normal" `Quick test_tempo_mode_of_string_normal;
-      test_case "slow" `Quick test_tempo_mode_of_string_slow;
-      test_case "fast" `Quick test_tempo_mode_of_string_fast;
-      test_case "paused" `Quick test_tempo_mode_of_string_paused;
-      test_case "unknown" `Quick test_tempo_mode_of_string_unknown;
-    ];
-    "tempo_mode_to_yojson", [
-      test_case "normal" `Quick test_tempo_mode_to_yojson_normal;
-      test_case "paused" `Quick test_tempo_mode_to_yojson_paused;
-    ];
-    "tempo_mode_of_yojson", [
-      test_case "ok" `Quick test_tempo_mode_of_yojson_ok;
-      test_case "unknown" `Quick test_tempo_mode_of_yojson_unknown;
-      test_case "wrong type" `Quick test_tempo_mode_of_yojson_wrong_type;
-    ];
     "backlog_to_yojson", [
       test_case "empty" `Quick test_backlog_to_yojson_empty;
       test_case "with tasks" `Quick test_backlog_to_yojson_with_tasks;
@@ -2064,16 +1914,6 @@ let () =
       test_case "forbidden" `Quick test_masc_error_forbidden;
       test_case "token expired" `Quick test_masc_error_token_expired;
       test_case "invalid token" `Quick test_masc_error_invalid_token;
-    ];
-    "default_tempo_config", [
-      test_case "mode" `Quick test_default_tempo_config_mode;
-      test_case "delay" `Quick test_default_tempo_config_delay;
-      test_case "reason" `Quick test_default_tempo_config_reason;
-    ];
-    "tempo_config_yojson", [
-      test_case "to_yojson" `Quick test_tempo_config_to_yojson;
-      test_case "of_yojson ok" `Quick test_tempo_config_of_yojson_ok;
-      test_case "of_yojson error" `Quick test_tempo_config_of_yojson_error;
     ];
     "default_rate_limit", [
       test_case "per_minute" `Quick test_default_rate_limit_per_minute;

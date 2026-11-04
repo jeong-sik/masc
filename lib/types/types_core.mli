@@ -368,32 +368,6 @@ type workspace_state =
   }
 [@@deriving yojson { strict = false }, show]
 
-type tempo_mode =
-  | Normal
-  | Slow
-  | Fast
-  | Paused
-[@@deriving show { with_path = false }]
-
-val tempo_mode_to_string : tempo_mode -> string
-val string_of_tempo_mode : tempo_mode -> string
-val tempo_mode_of_string : string -> (tempo_mode, string) result
-val tempo_mode_to_yojson : tempo_mode -> Yojson.Safe.t
-val tempo_mode_of_yojson : Yojson.Safe.t -> (tempo_mode, string) result
-
-type tempo_config =
-  { mode : tempo_mode
-  ; delay_ms : int
-  ; reason : string option
-  ; set_by : string option
-  ; set_at : string option
-  }
-[@@deriving show]
-
-val default_tempo_config : tempo_config
-val tempo_config_to_yojson : tempo_config -> Yojson.Safe.t
-val tempo_config_of_yojson : Yojson.Safe.t -> (tempo_config, string) result
-
 (** A delivery obligation owned by the same commit as its rejected verdict. *)
 type pending_completion_rejection =
   { task_id : string

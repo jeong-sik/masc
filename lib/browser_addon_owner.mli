@@ -60,7 +60,12 @@ val attach_extensions : t ->
     (Yojson.Safe.t, Browser_extension_protocol.error) result) -> (unit, string) result
 (** One private executor attached to the already owned Chrome backend. Admission
     is revoked before cleanup. The admission lock is never held during execution. *)
-val attach_live : ?ego_input:Browser_ego_operator.recovery -> t -> client_id:Browser_lane.client_id ->
+type ego_space = {
+  space_observation : unit -> Browser_ego_space_observation.t option;
+  space_presence : unit -> Browser_ego_space_observation.presence;
+}
+(** The ego connection's dated Space reads, published with its client row. *)
+val attach_live : ?ego_space:ego_space -> t -> client_id:Browser_lane.client_id ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Bind cleanup of an already registered exact live client this worker runs,
     a BiDi or an ego connection, one of each at most. Retire revokes its input
@@ -68,11 +73,6 @@ val attach_live : ?ego_input:Browser_ego_operator.recovery -> t -> client_id:Bro
     task space. Existing extension clients grant no browser-process ownership.
     Once attached, the lane holds the client instead of timing its polls; it
     ends only through [disconnect_live] or [revoke]. *)
-val operator_schema : Yojson.Safe.t
-val operator : t -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
-(** Private [lane_operator] port, never exported to models. Its host caller
-    must use the existing operator-credential/incarnation boundary. Only the
-    original connected Ego peer's exact pending generation can be asserted. *)
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)

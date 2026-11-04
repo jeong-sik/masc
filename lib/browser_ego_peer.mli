@@ -109,8 +109,7 @@ type downloads = { root : string; publish : string -> (Yojson.Safe.t, string) re
     serial SDK process, without a cumulative reply window: SDK operations own
     their waits and explicit cancellation still stops the process. *)
 val open_space
-  :  input:(space_id:int -> (Browser_ego_input.t, string) result)
-  -> run:runner
+  :  run:runner
   -> run_native:(string -> (string, run_failure) result)
   -> now:(unit -> float)
   -> space:Browser_configuration.ego_space
@@ -118,10 +117,9 @@ val open_space
   -> capture_directory:string
   -> downloads:downloads
   -> (t, string) result
-(** [input] receives only the validated native Space ID, before this peer can
-    be published. Production restores its retained Input; fixtures explicitly
-    supply volatile state. Stored tab numbers are original-command history,
-    never current Page authority. *)
+(** Input readiness starts as [command_settled] for the validated native Space
+    and lives with this connection. Stored tab numbers are original-command
+    history, never current Page authority. *)
 
 
 val space_id : t -> int
@@ -136,10 +134,7 @@ val space_presence : t -> Browser_ego_space_observation.presence
 (** Last native inventory observation for the original numeric Space. It is
     separate from transport connectivity and ownership metadata. *)
 val input_status : t -> Browser_ego_input.status
-val input_busy : t -> bool
-val assert_input_reset : t -> generation:string -> (unit, string) result
-(** An assertion from the worker's private operator port only; not a browser
-    verb, SDK cleanup acknowledgement, takeover, or login receipt. *)
+(** Where the last input-holding command stands; an observation, never admission. *)
 
 (** Answers one live verb the way the BiDi peer answers it. [hand_off] returns
     [action], [spaceId] and [spaceName], captured from the same TaskSpace before
@@ -229,23 +224,18 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     is unconfirmed, and the Host independently checks it. Native event captures
     remain private; public results contain only a safe [nativeCompletion].
     Typing consumes this SDK process's Page event buffer for that check.
-    A proven unentered holding call can restore previous input readiness,
-    including operator provenance, without asserting that observation setup
-    had no effects. A workflow judges its complete entered holding prefix.
+    A proven unentered holding call restores the previous input readiness
+    without asserting that observation setup had no effects. A workflow judges its complete entered holding prefix.
     Coordinate, waypoint and scene-node raw drags are refused before input;
     selector-to-selector native [dragAndDrop] remains receipt-backed.
-    Unconfirmed release blocks further input on this peer; read/finish remain
-    available. The private operator controls can record an explicit human
-    check/reset assertion for this pending input generation and resume the
-    same peer. This remains [operator_asserted], not native release proof.
-    Answering a dialog, handing off or taking over alone does not reset it.
+    An input whose release the SDK did not declare is reported as
+    [release_uncertain]; it does not refuse later input.
     A click, double click or selector drag whose SDK error declares that its
     target was not resolved ([Browser_ego_release.Refused_before_press]) holds
     nothing: the input keeps its readiness and the failure, still of uncertain
     effect, carries [refusedBeforePress] with the SDK's [kind].
     Every result that is a JSON object, and every partial-failure receipt that
-    is one, carries [inputReadiness]: [command_settled], [operator_asserted], [keeper_asserted] or
-    [release_uncertain]. The tab list is a JSON array when every tab was read,
+    is one, carries [inputReadiness]: [command_settled] or [release_uncertain]. The tab list is a JSON array when every tab was read,
     and then carries nothing.
     Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click
@@ -256,10 +246,10 @@ val assert_input_reset : t -> generation:string -> (unit, string) result
     [adopt_tab] explicitly gives an observed unmanaged tab to the native Page
     lifecycle, optionally with [pageLabel] as the SDK's [as] option.
     [release_tab] unmanages an unknown-origin Page without closing its tab.
-    Both require this agent-controlled Space, preserve origin and tab number,
-    and refuse while input release is uncertain. Reads and explicit Page
-    effects support an adopted Page through the same native SDK authority.
-    Adoption does not grant Space takeover or clear uncertain input.
+    Both require this agent-controlled Space and preserve origin and tab
+    number. Reads and explicit Page effects support an adopted Page through
+    the same native SDK authority. Adoption does not grant Space takeover or
+    change input readiness.
     Lost lifecycle receipts require inventory reconciliation, never replay.
     [page.act] [stop_loading] recovers the exact cached managed Page through
     native Page.stopLoading, without Page observation or URL preflight. It

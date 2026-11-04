@@ -917,7 +917,10 @@ let test_a_verification_or_run_push_reads_the_requests () =
          | Observer.Event event ->
              (match Observer.dataset_owed event with
               | Some Masc.Workspace_dataset_event.Verification_requests -> true
-              | Some Masc.Workspace_dataset_event.Repositories | None -> false)
+              | Some
+                  ( Masc.Workspace_dataset_event.Repositories
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
+              | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
@@ -976,7 +979,10 @@ let test_a_repository_push_reads_the_list () =
          | Observer.Event event ->
              (match Observer.dataset_owed event with
               | Some Masc.Workspace_dataset_event.Repositories -> true
-              | Some Masc.Workspace_dataset_event.Verification_requests | None -> false)
+              | Some
+                  ( Masc.Workspace_dataset_event.Verification_requests
+                  | Masc.Workspace_dataset_event.Harness_verdicts )
+              | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
@@ -986,7 +992,10 @@ let test_a_repository_push_reads_the_list () =
      | [ Observer.Event event ] ->
          (match Observer.dataset_owed event with
           | Some Masc.Workspace_dataset_event.Verification_requests -> false
-          | Some Masc.Workspace_dataset_event.Repositories | None -> true)
+          | Some
+              ( Masc.Workspace_dataset_event.Repositories
+              | Masc.Workspace_dataset_event.Harness_verdicts )
+          | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
   List.iter
@@ -999,7 +1008,12 @@ let test_a_repository_push_reads_the_list () =
               ^ String.concat ", " (List.map summary decoded)))
     [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
-    ]
+    ];
+  check (list string) "a harness push decodes by name"
+    [ "dataset(harness_verdicts)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]))
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

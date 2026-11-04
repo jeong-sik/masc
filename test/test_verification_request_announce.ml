@@ -19,18 +19,15 @@ let test_writes_and_removals_announce () =
     let id = "verification-request-announce" in
     Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
       ~callback:(fun (event : Sse.external_event) ->
-        match
-          ( Json_util.assoc_string_opt "type" event.ext_payload
-          , Json_util.assoc_string_opt "dataset" event.ext_payload )
-        with
-        | Some kind, Some wire
-          when String.equal kind Workspace_dataset_event.event_type
-               && Option.equal
-                    (fun (a : Workspace_dataset_event.dataset) b -> a = b)
-                    (Workspace_dataset_event.dataset_of_wire wire)
-                    (Some Workspace_dataset_event.Verification_requests) ->
-          incr heard
-        | (Some _ | None), (Some _ | None) -> ())
+        match event.ext_payload with
+        | `Assoc fields
+          when Option.equal String.equal
+                 (Json_util.assoc_string_opt "type" event.ext_payload)
+                 (Some Workspace_dataset_event.event_type) ->
+          (match Workspace_dataset_event.of_fields fields with
+           | Ok Workspace_dataset_event.Verification_requests -> incr heard
+           | Ok _ | Error _ -> ())
+        | _ -> ())
       ();
     Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
       let request =

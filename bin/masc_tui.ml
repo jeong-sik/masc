@@ -7942,11 +7942,21 @@ let owe_verification_read state =
 let owe_repositories_read state =
   state.repositories_owed <- Masc_tui_owed_read.changed state.repositories_owed
 
+(* The Keeper logs view and Info read the selected Keeper's metrics tail
+   again when the server says that Keeper's ledger took a row, and after a
+   failed read (RFC-0480 §3.4). A row of another Keeper owes nothing. *)
+let owe_keeper_log_read state keeper =
+  match keeper_log_target state with
+  | Some selected when String.equal selected.k_name keeper ->
+      state.keeper_log_owed <- Masc_tui_owed_read.changed state.keeper_log_owed
+  | Some _ | None -> ()
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
+  | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> owe_keeper_log_read state keeper
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -17385,6 +17395,28 @@ let launch_current_keeper_logs state ~mailbox ~intent =
   match keeper_log_target state with
   | Some keeper -> launch_keeper_log_read state ~mailbox ~intent keeper
   | None -> false
+
+(* Runs on every loop iteration. With no Keeper on a logs view, or a
+   workspace this TUI cannot read locally, nothing is owed: arriving reads
+   the tail. A read in flight is let finish first. *)
+let launch_owed_keeper_logs state ~mailbox =
+  match keeper_log_target state, state.workspace_identity with
+  | Some _, Workspace_identity_match ->
+      let reading = Masc_tui_fetched.in_flight state.keeper_logs in
+      let read =
+        if reading then state.keeper_log_owed
+        else Masc_tui_owed_read.abandoned state.keeper_log_owed
+      in
+      state.keeper_log_owed <- read;
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then begin
+        state.keeper_log_owed <- Masc_tui_owed_read.started read;
+        ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Refresh)
+      end
+  | None, (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+          | Workspace_identity_match_unconfirmed _)
+  | Some _, (Workspace_identity_unread | Workspace_identity_mismatch _
+            | Workspace_identity_match_unconfirmed _) ->
+      state.keeper_log_owed <- Masc_tui_owed_read.settled
 
 let reconcile_keeper_logs state ~mailbox =
   (* Leaving the Terminal tab, or moving to another Keeper, ends what it held
@@ -27089,6 +27121,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~outcome:(if Option.is_none admission then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed");
       Option.iter (fun admitted ->
+        state.keeper_log_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.keeper_log_owed
+           | Error _ -> failed_read state.keeper_log_owed);
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
         if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission
@@ -32069,6 +32105,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
+      launch_owed_keeper_logs state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40685,11 +40722,11 @@ Use relative paths for resources already held in the package. -->
             [keeper_async_requests_changed] and retry a failed read
             ([launch_owed_async_requests]). *)
          | Keepers Keeper_list -> ()
-         | Keepers (Keeper_logs | Keeper_detail) ->
-             (* Info's execution facts and Secrets re-read on
-                [keeper_composite_changed] and retry a failed read
-                ([launch_owed_keeper_composite]). *)
-             ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
+         (* Info's execution facts and Secrets re-read on
+            [keeper_composite_changed] ([launch_owed_keeper_composite]); the
+            metrics tail re-reads when the Keeper's ledger takes a row
+            ([launch_owed_keeper_logs]). Both retry a failed read. *)
+         | Keepers (Keeper_logs | Keeper_detail) -> ()
          (* Calls re-read on [keeper_tool_call] and retry a failed read
             ([launch_owed_keeper_calls]). *)
          | Keepers Keeper_calls -> ()

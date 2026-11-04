@@ -2,7 +2,8 @@
     and JSONL append/rotation helpers.
 
     Extracted from keeper_types.ml to reduce file size.
-    Depends only on Keeper_config (no Keeper_types dependency). *)
+    Depends on Keeper_config and, for the metrics ledger's write
+    announcement, Workspace_dataset_event (no Keeper_types dependency). *)
 
 include Keeper_config
 
@@ -44,8 +45,10 @@ let keeper_metrics_storage config name =
 let keeper_metrics_store config name : Dated_jsonl.t =
   Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
 
-let append_keeper_metrics config name json =
-  Keeper_metrics_storage.append (keeper_metrics_storage config name) json
+let append_keeper_metrics (config : Workspace.config) name json =
+  Keeper_metrics_storage.append (keeper_metrics_storage config name) json;
+  Workspace_dataset_event.announce ~base_path:config.base_path
+    (Workspace_dataset_event.Keeper_metrics { keeper = name })
 
 let keeper_metrics_dir config name =
   Dated_jsonl.base_dir (keeper_metrics_store config name)

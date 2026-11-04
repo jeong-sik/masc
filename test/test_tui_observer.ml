@@ -140,7 +140,12 @@ let summary = function
   | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
   | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
   | Observer.Event (Observer.Dataset_changed dataset) ->
-      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
+      "dataset(" ^ Masc.Workspace_dataset_event.dataset_name dataset
+      ^ (match dataset with
+         | Masc.Workspace_dataset_event.Keeper_metrics { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Repositories
+         | Masc.Workspace_dataset_event.Verification_requests -> "")
+      ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
   | Observer.Event (Observer.Approval_change change) ->
@@ -915,7 +920,14 @@ let test_a_repository_push_reads_the_list () =
               ^ String.concat ", " (List.map summary decoded)))
     [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
-    ]
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"\"}\n\n"
+    ];
+  check (list string) "a Keeper's metrics push names its Keeper"
+    [ "dataset(keeper_metrics:alpha)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]))
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

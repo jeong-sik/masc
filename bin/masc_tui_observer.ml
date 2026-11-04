@@ -870,12 +870,9 @@ let reading_of_type type_name =
   | type_name when String.equal type_name Masc.Workspace_dataset_event.event_type ->
       From_fields
         (fun fields ->
-          match required string_field fields "dataset" ~event:type_name with
-          | Error detail -> Error detail
-          | Ok wire ->
-              (match Masc.Workspace_dataset_event.dataset_of_wire wire with
-               | Some dataset -> Ok (Dataset_changed dataset)
-               | None -> Error (type_name ^ " names an unknown dataset " ^ wire)))
+          Result.map
+            (fun dataset -> Dataset_changed dataset)
+            (Masc.Workspace_dataset_event.of_fields fields))
   | type_name when String.equal type_name Masc.Keeper_event_queue_changed_event.event_type ->
       From_fields
         (fun fields ->

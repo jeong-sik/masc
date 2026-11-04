@@ -10167,6 +10167,9 @@ type state = {
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
+  (* The read the selected Keeper's metrics tail owes while a logs view
+     shows it. *)
+  mutable keeper_log_owed: Masc_tui_owed_read.t;
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
@@ -12217,6 +12220,7 @@ let clear_keeper_logs state =
   state.keeper_execute_output <- Masc_tui_fetched.clear state.keeper_execute_output;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
+  state.keeper_log_owed <- Masc_tui_owed_read.settled;
   supersede_keeper_log_read state None
 
 let suspend_keeper_logs state =
@@ -12224,6 +12228,7 @@ let suspend_keeper_logs state =
   state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
+  state.keeper_log_owed <- Masc_tui_owed_read.settled;
   supersede_keeper_log_read state None
 
 let keeper_logs_view state =
@@ -19556,6 +19561,7 @@ let create_state
   keeper_log_read = None;
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
+  keeper_log_owed = Masc_tui_owed_read.settled;
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;

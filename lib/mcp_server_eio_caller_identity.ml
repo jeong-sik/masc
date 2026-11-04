@@ -173,20 +173,6 @@ let resolve_auth_fallback_agent_name
             Otel_metric_store.metric_silent_auth_token_resolve_error
             ~labels:[ "error_kind", error_kind; "agent", agent_name ]
             ();
-          let mode = Auth_strict_mode.current () in
-          let mode_label = Auth_strict_mode.to_label mode in
-          (match mode with
-          | Auth_strict_mode.Off -> ()
-          | Auth_strict_mode.Dry_run | Auth_strict_mode.Strict ->
-              Log.Auth.warn
-                "[would_reject:auth_token_resolve_error] mode=%s agent=%s error_kind=%s \
-                 - Phase B PR-2 will reject this request"
-                mode_label agent_name error_kind;
-              Otel_metric_store.inc_counter
-                Otel_metric_store.metric_auth_strict_would_reject
-                ~labels:
-                  [ "mode", mode_label; "error_kind", error_kind; "agent", agent_name ]
-                ());
           (* Token resolve failed: keep the caller alias unchanged,
              preserving its origin tag. *)
           minted)

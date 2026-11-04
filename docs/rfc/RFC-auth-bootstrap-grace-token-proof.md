@@ -116,9 +116,9 @@ domain logic, not to authorize a request.
   is only one copy of `check_permission`/`resolve_role_with_auth_config` to
   fix.
 - Per-tool permission granularity (`tool_catalog` `requiredPermission` not
-  being consulted by `authorize_tool_for_role`) and `Auth_strict_mode`'s
-  Phase B (reject, not just count) are real, separately-scoped gaps found in
-  the same audit — not addressed by this RFC.
+  being consulted by `authorize_tool_for_role`) and the MCP caller
+  keeping its alias after a failed token resolve (counted, not rejected) are
+  real, separately-scoped gaps found in the same audit — not addressed by this RFC.
 
 ## 4. Verification
 

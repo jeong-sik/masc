@@ -238,7 +238,6 @@
 - goal-1790663276268-59ef0a2d 의 due_date 가 '2026-09-29T21:00:00Z' 라 Goal_due 가 읽지 못한다. TUI 에 overdue 표시가 없고, 빈 값은 '안 보냄'으로 취급돼(tool_args.ml:32-35) 지울 수 없다. 읽을 수 있는 날짜로 덮어쓰면 된다(DM-GT-06 일부).
 - goal_events 를 쓰는 raw emit_goal_event 호출이 7곳(workspace_goals.ml:736,776,925,949,1034,1051,1107)이고 upsert 3곳만 record_committed_goal_event 로 감싸졌다.
 - keeper_ask_store.load_events 는 해독 실패를 경고만 하고 [] 를 돌려줘 질문이 목록에서 사라지고, answer 는 읽기와 추가 사이에 잠금이 없어 두 화면이 동시에 답하면 둘 다 Ok 를 받는다(keeper_ask_store.ml).
-- Auth_strict_mode 는 2026-04 'Phase B 에서 거절 예정' 소크 카운터인데 09-30 로그에 would_reject 0건이다. 계획 문구를 지우거나 strict 로 올린다(mcp_server_eio_caller_identity.ml:167-180).
 - audit-approvals: always_allow 라 도구 호출마다 gate_allowed 행 하나. 09-30 20,670행 9.7MB(행 약 467바이트, 대부분 null), 09-29 33,517행, 디렉터리 전체 178MB, 회전 없음.
 - credential 정리: 만료 9개(admin 6, worker 2, player 1)와 raw 토큰 파일이 남아 있다. 만료 없는 Worker 65개. 정리 PR #40174·#40182 가 열려 있다.
 - Goal verdict 공지가 28명 대화에 285행 369KB(행당 약 1.3KB)로 쌓였다. 검증은 13번이라 비용은 작다.
@@ -628,7 +627,6 @@
 
 작은 것들(P3)
 
-- W2-04 MASC_AUTH_STRICT=strict 는 요청을 거절하지 않는다. 2026-04 부터 '다음 단계'로 미룬 로그 전용 설정이다
 - W2-05 보존 기간이 환경변수 6개와 리터럴 3개로 흩어져 있고 기본값이 서로 다르다. 둘은 기본이 '영원히'다
 - W2-07 운영자가 조절해야 하는 한도가 환경변수로만 바뀌고, 환경변수 카탈로그에는 82개가 빠져 있다 (env_var_sprawl)
 - provider-name 과 model-name 별칭(runtime_toml.ml:787,1345,1395, runtime_account_declaration.ml:142)을 받지만 라이브와 저장소 runtime.toml 에서 쓰는 곳이 0이다(legacy_residue).

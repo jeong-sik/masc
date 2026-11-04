@@ -11825,6 +11825,20 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+(* Read once: these variables describe where this process started and do not
+   change under it. An operator who attaches to its tmux pane from elsewhere
+   later is why a tmux session also sends the text to the terminal. *)
+let copy_session = Masc_tui_clipboard.copy_session Sys.getenv_opt
+
+(* Copied text goes to the desktop clipboard when a tool here can take it, and
+   to the terminal as OSC 52 when none can or the session needs both. Only the
+   OSC 52 write lands on the terminal, so only it marks the presented frame as
+   damaged. *)
+let copy_text_out text =
+  Masc_tui_clipboard.copy_text copy_session text ~write_osc52:(fun text ->
+    Terminal_write_repair.note ();
+    write_to_terminal (Link.osc52_copy text))
+
 (* Cursor movement, SGR and text belong to the tmux pane itself, so they
    must not be wrapped in the passthrough used by the helper above. *)
 let write_terminal_text payload =
@@ -26020,13 +26034,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     Printf.sprintf "; %d saved row(s) could not be read" dropped
                   else ""
                 in
-                Terminal_write_repair.note ();
-                write_to_terminal (Link.osc52_copy row.text);
+                let outcome = copy_text_out row.text in
                 notice ~kind:Notice_reply
-                  (Printf.sprintf
-                     "Sent %s's %s (%d characters, %d bytes) via OSC 52 (terminal support unconfirmed)%s"
+                  (Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
                      keeper_name assessment characters (String.length row.text)
-                     unreadable)))
+                     (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)))
   | Keeper_chat_history_loaded (request, source, result) ->
       (* The current refresh owns both slots until each has been admitted.
          A collected old result cannot settle a replacement request. *)
@@ -27354,11 +27366,11 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     else begin
       state.resource_copy_ready <- None;
       resource_copy_sweep := None;
-      Terminal_write_repair.note ();
-      write_to_terminal (Link.osc52_copy copy.public_copy_url);
+      let outcome = copy_text_out copy.public_copy_url in
       Terminal_write_repair.request_repaint render_schedule;
       report_action state "system"
-        "Public link sent via OSC 52 (terminal support and origin reachability unconfirmed)";
+        ("Public link " ^ Masc_tui_clipboard.copy_outcome_text outcome
+         ^ "; origin reachability unconfirmed");
       true
     end
   | Some _ | None -> changed
@@ -27383,10 +27395,10 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
 
-let copy_reference_to_terminal render_schedule reference =
-  Terminal_write_repair.note ();
-  write_to_terminal (Link.osc52_copy reference);
-  request_console_write_repair render_schedule
+let copy_reference render_schedule reference =
+  let outcome = copy_text_out reference in
+  request_console_write_repair render_schedule;
+  outcome
 
 let session_quit_notice (state : state) ~key =
   let queued =
@@ -31110,7 +31122,10 @@ Use relative paths for resources already held in the package. -->
             true
         | Some (Image_cells {ic_copy_path=Some path;_}), Some (Key ("y" | "Y"))
             when state.image_open && not state.msx_open ->
-            if keep_pending_image_copy path then copy_reference_to_terminal render_schedule path
+            if keep_pending_image_copy path then
+              report_action state "system"
+                ("Saved image path "
+                 ^ Masc_tui_clipboard.copy_outcome_text (copy_reference render_schedule path))
             else update_image_link_card state ~path "The saved copy is no longer available";
             true
         | Some (Image_cells ({ic_copy_path=Some path;ic_copy_page=Some url;
@@ -31487,13 +31502,13 @@ Use relative paths for resources already held in the package. -->
                (Masc_tui_pane_selection.text selection)
            with
            | Some text ->
-               copy_reference_to_terminal render_schedule text;
+               let outcome = copy_reference render_schedule text in
                report_action state "system"
-                 (Printf.sprintf
-                    "Asked the terminal to copy %s (OSC 52, unconfirmed)"
+                 (Printf.sprintf "Selection of %s %s"
                     (Masc_tui_message_layout.count_noun
                        (List.length (Masc_tui_pane_selection.spans selection))
-                       "line"))
+                       "line")
+                    (Masc_tui_clipboard.copy_outcome_text outcome))
            | None -> ())
        | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
       let presented_play = play_card_of_reader (!presented).reader in
@@ -33018,10 +33033,10 @@ Use relative paths for resources already held in the package. -->
                 state.quit_armed <- None;
                 state.play_invite <- { state.play_invite with shown_name = None }
             | ("y" | "Y"), Some card ->
-                copy_reference_to_terminal render_schedule
-                  (Masc_tui_play_card.link card);
+                let outcome =
+                  copy_reference render_schedule (Masc_tui_play_card.link card) in
                 report_action state "system"
-                  "Asked the terminal to copy the invite link (OSC 52, unconfirmed)"
+                  ("Invite link " ^ Masc_tui_clipboard.copy_outcome_text outcome)
             | ("j" | "down"), Some _ ->
                 state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
             | ("k" | "up"), Some _ ->
@@ -33713,9 +33728,10 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_account_form <- None; state.runtime_form_save_focus <- None
               | Masc_tui_runtime_account_form.Copy (form, command) ->
                   state.runtime_account_form <- Some form;
-                  copy_reference_to_terminal render_schedule command;
                   report_action state "system"
-                    "로그인 명령을 OSC 52로 보냈습니다 (터미널 지원은 확인 못 함)"
+                    ("로그인 명령을 "
+                     ^ Masc_tui_clipboard.copy_outcome_text_korean
+                         (copy_reference render_schedule command))
               | Masc_tui_runtime_account_form.Submitted form ->
                   (match begin_runtime_form_save state ~draft:(Account_form_draft form)
                       ~started_ns:(Mtime_clock.elapsed_ns ()) with
@@ -34089,8 +34105,9 @@ Use relative paths for resources already held in the package. -->
                 state.board_reader <- Masc_tui_board_reader.select
                   (match k with "m" -> Markdown | "h" -> Html | _ -> Source) reader
             | "y" -> (match Masc_tui_board_reader.source reader with
-                | Ok source -> copy_reference_to_terminal render_schedule source;
-                    report_action state "system" "Original attachment sent to terminal clipboard"
+                | Ok source ->
+                    let outcome = copy_reference render_schedule source in
+                    report_action state "system" ("Original attachment " ^ Masc_tui_clipboard.copy_outcome_text outcome)
                 | Error error -> report_action state "error" error)
             | "s" -> use_board_read state ~mailbox:async_messages ~action:Save_board_original
             | "o" ->
@@ -34382,8 +34399,8 @@ Use relative paths for resources already held in the package. -->
             | "y" | "Y" ->
                 (match state.link_modal_url with
                  | Some url ->
-                     copy_reference_to_terminal render_schedule url;
-                     report_action state "system" ("Copied URL to clipboard: " ^ url)
+                     let outcome = copy_reference render_schedule url in
+                     report_action state "system" ("URL " ^ Masc_tui_clipboard.copy_outcome_text outcome ^ ": " ^ url)
                  | None -> ())
             | "r" | "R" ->
                 (match state.link_modal_url with
@@ -35474,7 +35491,12 @@ Use relative paths for resources already held in the package. -->
                  | "r" ->
                      state.browser_history <- Some (Browser_history.create history.keeper_name);
                      launch_browser_history state ~mailbox:async_messages ~reload:true
-                 | "y" -> Option.iter (copy_reference_to_terminal render_schedule) (Browser_history.context history)
+                 | "y" ->
+                     Option.iter
+                       (fun context ->
+                         let outcome = copy_reference render_schedule context in
+                         report_action state "system" ("Browser history context " ^ Masc_tui_clipboard.copy_outcome_text outcome))
+                       (Browser_history.context history)
                  | "j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" ->
                      let terminal_rows, cols = get_terminal_size () in
                      let limit = Masc_tui_render.browser_history_scroll_limit state ~terminal_rows ~cols history in
@@ -35624,8 +35646,9 @@ Use relative paths for resources already held in the package. -->
                      reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
                      (match scene_context view with
-                      | Some context -> copy_reference_to_terminal render_schedule context;
-                          report_action state "system" "Browser element context sent to terminal clipboard"
+                      | Some context ->
+                          let outcome = copy_reference render_schedule context in
+                          report_action state "system" ("Browser element context " ^ Masc_tui_clipboard.copy_outcome_text outcome)
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
@@ -37425,8 +37448,8 @@ Use relative paths for resources already held in the package. -->
        | Some "Y" ->
            (match presented_surface_reference () with
             | Some reference ->
-                copy_reference_to_terminal render_schedule reference;
-                report_action state "system" ("copied " ^ reference)
+                let outcome = copy_reference render_schedule reference in
+                report_action state "system" (reference ^ " " ^ Masc_tui_clipboard.copy_outcome_text outcome)
             | None when state.view = Approvals ->
                 answer_presented_approval Confirm
             | None -> report_action state "system" "nothing on this surface has a link")
@@ -37438,18 +37461,18 @@ Use relative paths for resources already held in the package. -->
                 (match Masc_tui_resource_document.copy_source state with
                  | Error detail -> report_action state "error" detail
                  | Ok (label, source) ->
-                     copy_reference_to_terminal render_schedule source;
+                     let outcome = copy_reference render_schedule source in
                      report_action state "system"
-                       (Printf.sprintf "Sent %s source (%d bytes) via OSC 52 (terminal support unconfirmed)"
-                          label (String.length source)))
+                       (Printf.sprintf "%s source (%d bytes) %s"
+                          label (String.length source) (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Code ->
                 (match Masc_tui_code_results.copy_file_source state with
                  | Error detail -> report_action state "error" detail
                  | Ok (path, source) ->
-                     copy_reference_to_terminal render_schedule source;
+                     let outcome = copy_reference render_schedule source in
                      report_action state "system"
-                       (Printf.sprintf "Sent %s source (%d bytes) via OSC 52 (terminal support unconfirmed)"
-                          path (String.length source)))
+                       (Printf.sprintf "%s source (%d bytes) %s"
+                          path (String.length source) (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
             | Verification | Fusion | Repositories | Changes | Connectors | Runtime | Config
             | Tools | System_logs | Keepers _ -> ())
@@ -37925,14 +37948,18 @@ Use relative paths for resources already held in the package. -->
             | commands ->
               let index = state.preset_save_copy_cursor mod List.length commands in
               let name, input = List.nth commands index in
-              copy_reference_to_terminal render_schedule input;
+              let outcome = copy_reference render_schedule input in
               state.preset_save_copy_cursor <- (index + 1) mod List.length commands;
               report_action state "system"
-                (Printf.sprintf
-                   (if state.ui_language = Lang_ko
-                    then "%s 명령 복사 요청 · 터미널 지원 여부는 미확인"
-                    else "Requested copy of %s command · terminal support unconfirmed")
-                   (Terminal_text.single_line name)))
+                (match state.ui_language with
+                 | Lang_ko ->
+                     Printf.sprintf "%s 명령을 %s"
+                       (Terminal_text.single_line name)
+                       (Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                 | Lang_en ->
+                     Printf.sprintf "%s command %s"
+                       (Terminal_text.single_line name)
+                       (Masc_tui_clipboard.copy_outcome_text outcome)))
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_presets ->
            if visible_preset_save_receipts state <> [] then begin

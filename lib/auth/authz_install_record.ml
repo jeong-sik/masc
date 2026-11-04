@@ -83,6 +83,7 @@ type corruption =
   | Wrong_members
   | Base_path_differs of { recorded : string }
   | Store_path_not_absolute
+  | Store_path_not_normal
 
 type read_error =
   | Unreadable of
@@ -104,6 +105,8 @@ let corruption_to_string = function
   | Base_path_differs { recorded } ->
     Printf.sprintf "the record was written for the base path %s" recorded
   | Store_path_not_absolute -> "the path of the external store is not absolute"
+  | Store_path_not_normal ->
+    "the path of the external store holds a NUL byte, an empty segment, a . or a .., or ends in /"
 ;;
 
 let read_error_to_string = function
@@ -115,6 +118,19 @@ let read_error_to_string = function
 
 (* Both members, nothing else. With exactly two members that carry the two
    names, no name can repeat. *)
+(* An absolute path without an empty segment, a [.] or a [..], and without a
+   separator at the end. The install record keeps the spelling that is given
+   and a boot opens the store by it, so the spelling must leave no doubt about
+   the file. *)
+let normal_form path =
+  match String.split_on_char '/' path with
+  | "" :: (_ :: _ as segments) ->
+    List.for_all
+      (fun segment -> (not (String.equal segment "")) && segment <> "." && segment <> "..")
+      segments
+  | "" :: [] | _ :: _ | [] -> false
+;;
+
 let members_of_json = function
   | `Assoc [ (first_name, `String first); (second_name, `String second) ] ->
     if String.equal first_name base_path_member && String.equal second_name external_store_member
@@ -137,6 +153,8 @@ let decode ~path ~canonical_base_path text =
        then Error (Corrupt { path; reason = Base_path_differs { recorded } })
        else if String.equal external_store "" || Filename.is_relative external_store
        then Error (Corrupt { path; reason = Store_path_not_absolute })
+       else if String.contains external_store '\000' || not (normal_form external_store)
+       then Error (Corrupt { path; reason = Store_path_not_normal })
        else Ok (Some external_store))
 ;;
 
@@ -270,6 +288,8 @@ let write located ~external_store =
   | Located t ->
     if String.equal external_store ""
        || Filename.is_relative external_store
+       || String.contains external_store '\000'
+       || (not (normal_form external_store))
        || not (String.is_valid_utf_8 external_store)
     then Error (Store_path_invalid { external_store })
     else (

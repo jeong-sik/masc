@@ -464,15 +464,20 @@ let test_not_a_file_where_the_log_is () =
     check_refused_by "a dangling link" log_unreadable dirs)
 ;;
 
+(* The store is judged against the log, so a log that cannot be read leaves the
+   store unjudged as well. The decision stops at the log first, so the column is
+   checked on the input. *)
 let test_corrupt_log_beside_a_store () =
   with_dirs (fun dirs ->
     bootstrap dirs;
     write_log_line dirs "not a record";
-    check_refused_by "the log is unreadable" log_unreadable dirs)
+    check_refused_by "the log is unreadable" log_unreadable dirs;
+    match (input dirs).B.high_water with
+    | B.Store_unreadable _ -> ()
+    | B.Judged _ -> Alcotest.fail "a store was judged against a log that cannot be read")
 ;;
 
-(* A bootstrap creates the log empty before its first append. A log of no bytes
-   has no mode event. *)
+(* A log with no lines has no mode event (design 5.1). *)
 let test_empty_log () =
   with_dirs (fun dirs ->
     write_file (L.path_of_base_path ~base_path:dirs.base) "";

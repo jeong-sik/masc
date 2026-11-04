@@ -65,6 +65,7 @@ let describe_corruption = function
   | I.Wrong_members -> "wrong_members"
   | I.Base_path_differs _ -> "base_path_differs"
   | I.Store_path_not_absolute -> "store_path_not_absolute"
+  | I.Store_path_not_normal -> "store_path_not_normal"
 ;;
 
 let describe_read_error = function
@@ -420,6 +421,18 @@ let corrupt_records () =
       ; "null store", object_of [ base_path; member "external_store" "null" ], "corrupt:wrong_members"
       ; "relative store", object_of [ base_path; member "external_store" "\"stores/one\"" ], "corrupt:store_path_not_absolute"
       ; "empty store", object_of [ base_path; member "external_store" "\"\"" ], "corrupt:store_path_not_absolute"
+      ; ( "a store that ends in a separator"
+        , object_of [ base_path; member "external_store" "\"/stores/one/\"" ]
+        , "corrupt:store_path_not_normal" )
+      ; ( "a store with a NUL byte"
+        , object_of [ base_path; member "external_store" "\"/stores/o\\u0000ne\"" ]
+        , "corrupt:store_path_not_normal" )
+      ; ( "a store with a .."
+        , object_of [ base_path; member "external_store" "\"/stores/../one\"" ]
+        , "corrupt:store_path_not_normal" )
+      ; ( "a store with an empty segment"
+        , object_of [ base_path; member "external_store" "\"/stores//one\"" ]
+        , "corrupt:store_path_not_normal" )
       ; ( "another base path"
         , object_of [ member "base_path" "\"/somewhere/else\""; store ]
         , "corrupt:base_path_differs" )
@@ -446,7 +459,14 @@ let store_path_must_be_absolute_utf8 () =
     List.iter
       (fun (label, external_store) ->
         check_write_error label "store_path_invalid" located ~external_store)
-      [ "relative", "stores/one"; "empty", ""; "not UTF-8", "/stores/\xff" ];
+      [ "relative", "stores/one"
+      ; "empty", ""
+      ; "not UTF-8", "/stores/\xff"
+      ; "a separator at the end", "/stores/one/"
+      ; "a NUL byte", "/stores/o\000ne"
+      ; "a ..", "/stores/../one"
+      ; "an empty segment", "/stores//one"
+      ];
     Alcotest.(check bool) "nothing was created" false (Sys.file_exists dirs.config))
 ;;
 

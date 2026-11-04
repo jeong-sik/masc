@@ -99,6 +99,11 @@ val locate_error_to_string : locate_error -> string
     was given. *)
 val file_path : t -> string
 
+(** An absolute path without an empty segment, a [.] or a [..], and without a
+    separator at the end. {!write} writes and {!read} accepts only such a path
+    of the external store. *)
+val normal_form : string -> bool
+
 type corruption =
   | Not_json
   | Wrong_members
@@ -106,6 +111,10 @@ type corruption =
           members, both strings. *)
   | Base_path_differs of { recorded : string }
   | Store_path_not_absolute
+  | Store_path_not_normal
+      (** The path holds a NUL byte, an empty segment, a [.] or a [..], or ends
+          in a separator: it does not name one file without doubt, and a
+          dangling link behind a last separator would read as no store. *)
 
 type read_error =
   | Unreadable of
@@ -126,7 +135,8 @@ val read_error_to_string : read_error -> string
 type write_error =
   | No_config_dir_to_write
   | Store_path_invalid of { external_store : string }
-      (** The path is not absolute, or is not valid UTF-8. *)
+      (** The path is not absolute, is not in {!normal_form}, holds a NUL
+          byte, or is not valid UTF-8. *)
   | Config_dir_unusable of
       { dir : string
       ; detail : string

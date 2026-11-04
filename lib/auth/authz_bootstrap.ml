@@ -174,26 +174,13 @@ let inspect path =
     Error (Path_not_inspected { path; detail = Unix.error_message error })
 ;;
 
-(* An absolute path without an empty segment, a [.] or a [..], and without a
-   separator at the end. The install record keeps the spelling that is given
-   and a boot opens the store by it, so the spelling must leave no doubt about
-   the file. *)
-let normal_form path =
-  match String.split_on_char '/' path with
-  | "" :: (_ :: _ as segments) ->
-    List.for_all
-      (fun segment -> (not (String.equal segment "")) && segment <> "." && segment <> "..")
-      segments
-  | "" :: [] | _ :: _ | [] -> false
-;;
-
 let valid_store_path path =
   let invalid problem = Error (External_store_path_invalid { path; problem }) in
   if Filename.is_relative path
   then invalid Not_absolute
   else if String.contains path '\000'
   then invalid Holds_nul
-  else if not (normal_form path)
+  else if not (Install_record.normal_form path)
   then invalid Not_normal
   else Ok ()
 ;;

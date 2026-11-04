@@ -65,10 +65,11 @@ let error_of_body ~status body =
        Printf.sprintf "The server refused the save (HTTP %d)." status)
   | exception Yojson.Json_error _ -> Printf.sprintf "The server refused the save (HTTP %d)." status
 
-(* Read the text the server reads, edit it, and save it with the revision and
-   path it was read at. A save that finds the file changed since is refused by
-   the server (409); the command says so rather than retrying a stale edit. *)
-let save ~clock server ~edit =
+(* The runtime.toml text the server reads, with the revision and path it read
+   it at. *)
+type source = { text : string; revision : string; path : string }
+
+let fetch ~clock server =
   let open Result.Syntax in
   let* status, body =
     Result.map_error
@@ -82,18 +83,23 @@ let save ~clock server ~edit =
       | exception Yojson.Json_error detail -> Error ("The server's runtime.toml answer is not JSON: " ^ detail)
     else Error (error_of_body ~status body)
   in
-  let* source_text = string_field json "source_text" in
+  let* text = string_field json "source_text" in
   let* revision = string_field json "source_revision" in
   let* path = string_field json "path" in
-  let* edited = edit source_text in
-  if String.equal edited source_text then Ok Unchanged
+  Ok { text; revision; path }
+
+(* Save [edited] over [source] with the revision and path it was read at. A
+   save that finds the file changed since is refused by the server (409); the
+   command says so rather than retrying a stale edit. *)
+let store ~clock server source ~edited =
+  if String.equal edited source.text then Ok Unchanged
   else
     let request =
       Yojson.Safe.to_string
         (`Assoc
            [ "source_text", `String edited
-           ; "expected_source_revision", `String revision
-           ; "expected_source_path", `String path
+           ; "expected_source_revision", `String source.revision
+           ; "expected_source_path", `String source.path
            ])
     in
     match
@@ -101,9 +107,15 @@ let save ~clock server ~edit =
     with
     | Error detail ->
       Error ("The save was sent, and the server's answer did not arrive, so whether it was stored is unknown: " ^ detail)
-    | Ok (200, _) -> Ok (Saved { path })
+    | Ok (200, _) -> Ok (Saved { path = source.path })
     | Ok (409, _) -> Error "runtime.toml changed on the server while this command ran. Nothing was saved; run it again."
     | Ok (status, body) -> Error (error_of_body ~status body)
+
+let save ~clock server ~edit =
+  let open Result.Syntax in
+  let* source = fetch ~clock server in
+  let* edited = edit source.text in
+  store ~clock server source ~edited
 
 (* The Eio context the HTTP client needs, for a command that otherwise runs
    without one. *)

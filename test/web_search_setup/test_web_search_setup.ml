@@ -177,6 +177,32 @@ let test_the_same_change_twice_writes_the_same_file () =
     applied path changes;
     Alcotest.(check string) "a second run is a no-op on the bytes" once (read path))
 
+(* RFC-0482 §3.2: a command that saves through the running server edits the
+   text the server answered by the same rules, and observes that text the way
+   it would observe the file. *)
+let test_the_text_edit_writes_what_apply_writes () =
+  with_config with_section (fun path ->
+    let changes = [ Web_search_setup.Set_timeout_sec 30 ] in
+    let edited =
+      match Web_search_setup.edit_text changes with_section with
+      | Ok edited -> edited
+      | Error error -> Alcotest.fail (Web_search_setup.error_message error)
+    in
+    applied path changes;
+    Alcotest.(check string) "the text edit is the file apply writes" (read path) edited;
+    (match Web_search_setup.observe_text ~runtime_config_path:path edited with
+     | Error error -> Alcotest.fail (Web_search_setup.error_message error)
+     | Ok { Web_search_setup.settings; revision; _ } ->
+       Alcotest.(check (option int)) "observed timeout" (Some 30) settings.Web_search_setup.timeout_sec;
+       Alcotest.(check string) "the revision is the file's" (observe path).Web_search_setup.revision revision);
+    match
+      Web_search_setup.edit_text
+        [ Web_search_setup.Set_timeout_sec 30; Web_search_setup.Set_timeout_sec 40 ] with_section
+    with
+    | Ok _ -> Alcotest.fail "a key given twice was edited"
+    | Error (Web_search_setup.Conflicting_changes _) -> ()
+    | Error error -> Alcotest.fail ("refused for another reason: " ^ Web_search_setup.error_message error))
+
 let test_a_provider_list_is_written_in_order_without_repeats () =
   with_config runtime_base (fun path ->
     applied
@@ -518,6 +544,8 @@ let () =
             test_an_edit_keeps_the_notes_and_the_other_tables
         ; Alcotest.test_case "the same change twice writes the same file" `Quick
             test_the_same_change_twice_writes_the_same_file
+        ; Alcotest.test_case "the text edit writes what apply writes" `Quick
+            test_the_text_edit_writes_what_apply_writes
         ; Alcotest.test_case "a provider list keeps order and drops repeats" `Quick
             test_a_provider_list_is_written_in_order_without_repeats
         ; Alcotest.test_case "a float is written as a float" `Quick

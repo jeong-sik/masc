@@ -40,10 +40,14 @@ default = "deepseek.chat"
 """
 
 
-def masc(root, *args):
+def masc_command(root, *args):
     environment = {"HOME": str(root / "home"), "PATH": "/usr/bin:/bin"}
-    return subprocess.run([str(MASC), "config", "set", *args], env=environment,
+    return subprocess.run([str(MASC), *args], env=environment,
                           capture_output=True, text=True)
+
+
+def masc(root, *args):
+    return masc_command(root, "config", "set", *args)
 
 
 def runtime_toml(base):
@@ -249,6 +253,22 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("masc login", result.stderr)
         self.assertEqual(server.saves, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # web-search-setup saves through the same client: the state it prints is
+    # the text the server holds after the save.
+    def test_web_search_setup_saves_through_a_running_server(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(base)
+        result = masc_command(root, "web-search-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--timeout-sec", "30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("through the running server", result.stdout)
+        self.assertEqual(len(server.saves), 1)
+        self.assertIn("timeout_sec = 30", server.saves[0]["source_text"])
+        self.assertEqual(server.saves[0]["expected_source_revision"], REVISION)
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
 
     def test_a_file_changed_on_the_server_is_not_overwritten(self):

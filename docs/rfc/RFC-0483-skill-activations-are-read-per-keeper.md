@@ -75,6 +75,10 @@ skill 을 한 번 부르면 `Activation_recorded` 1번, 결과가 다음 요청�
 
 장부는 Keeper 를 모른다. 장부의 `t` 와 header 에는 `workspace_key` 와 trace(`session_id`)만 있다. 공개 함수도 `~config ~trace_id` 만 받는다. Keeper 에서 trace 로는 `meta.runtime.trace_id` 로 가지만, trace 에서 Keeper 로 가는 표는 없다.
 
+trace 는 Keeper 를 만들 때 한 번 정해진다. trace id 를 만드는 곳은 `Keeper_input_birth.generate` 하나다. 그래서 Keeper 가 살아 있는 동안 장부 파일은 하나다. 같은 이름의 Keeper 를 지우고 다시 만들면 새 trace 와 새 장부가 생긴다.
+
+2026-11-04 운영 workspace 에서 비어 있지 않은 장부는 34개였고, 모두 지금 Keeper 의 trace 였다. 가장 큰 장부는 948KB(1,875줄, ocaml-agent-ic)였고, 10개가 327KB 를 넘었다.
+
 Keeper 이름은 쓰는 쪽에 있다.
 
 - recorder 는 `keeper_run_tools_setup.ml:447` 에서 만든다. 그 자리에 `meta.name` 이 있다.
@@ -116,6 +120,7 @@ Keeper 이름은 쓰는 쪽에 있다.
 
 - Keeper 마다 `Masc_tui_owed_read` 하나를 둔다. 읽는 동안 온 알림은 다음 읽기 한 번으로 합쳐진다. 그래서 Keeper 하나당 진행 중인 읽기 하나와 밀린 읽기 하나를 넘지 않는다. 이건 횟수 제한이 아니라 읽기 빚 모델이 원래 하는 일이다.
 - 바쁜 Keeper 가 계속 쓰면 그 Keeper 를 연달아 읽을 수 있다. 하지만 한 번 읽을 때 장부 하나만 읽고, 다른 Keeper 와 도구 목록은 읽지 않는다.
+- Keeper 를 새로 만들거나 지우면 그 Keeper 의 활성화 읽기도 빚이 된다. 다시 만든 Keeper 는 새 trace 를 가지므로, 첫 기록 전에도 옛 장부를 보여 주지 않는다.
 - observer 연결이 끊겼다가 다시 열리면, 지금처럼 보이는 pane 을 다시 읽는다(RFC-0480 §3.3).
 
 ### 4.4 고르지 않은 길
@@ -142,6 +147,5 @@ L4 는 L1~L3 과 #48059·#48060·#48036 뒤에만 들어간다. Tools 화면의 
 
 ## 6. 열린 질문
 
-1. 활성화 읽기는 지금 trace 장부 전체를 돌려준다. 세션이 길면 응답도 계속 커진다. revision 이후의 기록만 받을지는 Keeper 별 응답 크기를 재 본 뒤 정한다. 아직 재지 않았다.
-2. `meta.runtime.trace_id` 가 Keeper 가 사는 동안 바뀌는지 확인하지 못했다. trace 를 바꾸는 함수를 찾지 못했다. 바뀐다면 새 trace 의 첫 기록 전까지 TUI 는 옛 trace 를 보여 준다. 그때 알릴 곳을 정해야 한다.
-3. `/api/v1/skills` 본문(config, sources, rejections, shadows, profile)이 skill catalog 발행 말고 다른 원천에서도 바뀌는지 L3 에서 필드마다 확인해야 한다.
+1. 활성화 읽기는 그 Keeper 장부 전체를 돌려준다. 장부는 Keeper 가 사는 동안 계속 자라고, 지금 가장 큰 것이 948KB 다(2장). 바쁜 Keeper 를 기록마다 다시 읽으면 매번 이 크기를 받는다. 알림에 새 revision 을 싣고 그 뒤 기록만 받을지 정해야 한다. 서버 응답(`skill_activations`) 크기는 서버가 꺼져 있어 아직 재지 않았다.
+2. `/api/v1/skills` 본문(config, sources, rejections, shadows, profile)이 skill catalog 발행 말고 다른 원천에서도 바뀌는지 L3 에서 필드마다 확인해야 한다.

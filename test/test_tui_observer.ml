@@ -1066,6 +1066,14 @@ let test_a_connector_push_names_its_connector () =
       fail
         ("a connector push without a connector was read: "
          ^ String.concat ", " (List.map summary decoded))
+  check (list string) "Clients and provider usage pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
+          ]));
+
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

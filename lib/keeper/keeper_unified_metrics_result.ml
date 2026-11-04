@@ -87,16 +87,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     is_autonomous_turn
     && is_scheduled_autonomous_cycle_of_observation observation
   in
-  let is_board_reactive =
-    Keeper_world_observation.has_pending_board_activity observation
-  in
-  let is_mention_reactive =
-    Keeper_world_observation_message_scope.has_kind
-      Keeper_world_observation_message_scope.Mention observation.pending_messages
-  in
-  let has_meaningful_work =
-    has_text || has_substantive_tools || has_validated_evidence
-  in
   let rt = meta.runtime in
   (* #10474: proactive outcome counter for successful cycles. *)
   if is_scheduled_autonomous_cycle then begin
@@ -141,11 +131,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.count_total
           + (if is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if is_scheduled_autonomous_cycle
-              || ((is_board_reactive || is_mention_reactive)
-                  && has_meaningful_work)
-           then now_ts
-           else rt.proactive_rt.last_ts);
+          (if is_scheduled_autonomous_cycle then now_ts else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total
           + (if is_scheduled_autonomous_cycle

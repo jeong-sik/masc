@@ -25403,6 +25403,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (Snapshot_read.request_id ticket)
         (Result.is_ok result) current (diag_owed_string state.schedules_agenda_owed)
         stream_reconnect_s (monotonic_now_s ())
+        ;
+      (match result with
+       | Error message -> diag_task_3231 "Schedule_agenda_read error: %s" message
+       | Ok _ -> ())
   | Schedules_loaded (Schedule_page_read request, result) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
@@ -25417,7 +25421,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         "Schedule_page_read answered ok=%b current_page=%b current_agenda=%b page_owed=%s agenda_owed=%s now=%.3f"
         (Result.is_ok result) current_page current_agenda
         (diag_owed_string state.schedules_page_owed)
-        (diag_owed_string state.schedules_agenda_owed) (monotonic_now_s ())
+        (diag_owed_string state.schedules_agenda_owed) (monotonic_now_s ());
+      (match result with
+       | Error message -> diag_task_3231 "Schedule_page_read error: %s" message
+       | Ok _ -> ())
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from

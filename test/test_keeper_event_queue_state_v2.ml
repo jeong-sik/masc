@@ -339,22 +339,21 @@ let test_changed_selected_snapshot_fails_closed () =
     (post_ids (State.pending changed))
 ;;
 
-let test_turn_attempt_terminal_receipt_preserves_exact_source () =
-  let source = stimulus "failed-turn-source" 1.0 in
+let test_turn_completed_receipt_preserves_exact_source () =
+  let source = stimulus "completed-turn-source-exact" 1.0 in
   let initial = State.with_pending (queue [ source ]) State.empty in
   let selection = select initial in
   let staged, receipt =
     match
-      State.terminalize_pending_turn_attempt
+      State.terminalize_pending_turn_completed
         ~applied_at:2.0
         ~selection
-        ~detail:""
         initial
-      |> require_ok "terminalize failed turn source"
+      |> require_ok "terminalize turn source"
     with
     | state, State.Transition_applied receipt -> state, receipt
     | _, State.Transition_already_applied _ ->
-      Alcotest.fail "first turn-attempt terminalization was replayed"
+      Alcotest.fail "first turn-completed terminalization was replayed"
   in
   Alcotest.(check (list string))
     "terminal source leaves runnable pending"
@@ -370,13 +369,13 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
        "exact source survives in the durable receipt"
        true
        (retained = source)
-   | _ -> Alcotest.fail "turn-attempt terminal receipt did not retain one source");
+   | _ -> Alcotest.fail "turn-completed receipt did not retain one source");
   let projected =
     State.mark_transition_projected
       ~retain_previous:(fun _ -> true)
       ~transition_id:receipt.transition_id
       staged
-    |> require_ok "project turn-attempt terminal receipt"
+    |> require_ok "project turn-completed receipt"
   in
   let later_source = stimulus "later-terminal-source" 2.5 in
   let with_later =
@@ -402,7 +401,7 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
       ~retain_previous:(fun _ -> true)
       ~transition_id:later_receipt.transition_id
       later_staged
-    |> require_ok "displace turn-attempt receipt into compact history"
+    |> require_ok "displace turn-completed receipt into compact history"
   in
   (match
      State.projected_dispositions projected
@@ -413,14 +412,13 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
    with
    | Some (State.Projected_witness _) -> ()
    | Some (State.Current_receipt _) | None ->
-     Alcotest.fail "turn-attempt terminal did not become a compact witness");
+     Alcotest.fail "turn-completed receipt did not become a compact witness");
   (match
-     State.terminalize_pending_turn_attempt
+     State.terminalize_pending_turn_completed
        ~applied_at:3.0
        ~selection
-       ~detail:"different diagnostic"
        projected
-     |> require_ok "replay projected turn-attempt terminal receipt"
+     |> require_ok "replay projected turn-completed receipt"
    with
    | replayed, State.Transition_already_applied actual ->
      Alcotest.(check string)
@@ -432,7 +430,7 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
        (State.revision projected)
        (State.revision replayed)
    | _, State.Transition_applied _ ->
-     Alcotest.fail "projected turn-attempt terminal receipt applied twice");
+     Alcotest.fail "projected turn-completed receipt applied twice");
   let requeued =
     projected
     |> State.with_revision (Int64.succ (State.revision projected))
@@ -440,10 +438,9 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
   in
   let next_selection = select requeued in
   (match
-     State.terminalize_pending_turn_attempt
+     State.terminalize_pending_turn_completed
        ~applied_at:4.0
        ~selection:next_selection
-       ~detail:"later attempt"
        requeued
      |> require_ok "terminalize re-enqueued identical source"
    with
@@ -460,11 +457,11 @@ let test_turn_attempt_terminal_receipt_preserves_exact_source () =
      Alcotest.fail "later identical source was mistaken for the prior attempt");
   State.to_yojson projected
   |> State.of_yojson
-  |> require_ok "turn-attempt terminal receipt round trip"
+  |> require_ok "turn-completed receipt round trip"
   |> ignore
 ;;
 
-let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
+let test_turn_completed_receipt_is_terminal_and_replays () =
   let source = stimulus "completed-turn-source" 1.0 in
   let initial = State.with_pending (queue [ source ]) State.empty in
   let selection = select initial in
@@ -510,16 +507,7 @@ let test_turn_completed_receipt_is_terminal_and_conflict_fenced () =
        receipt.transition_id
        replayed.transition_id
    | _, State.Transition_applied _ ->
-     Alcotest.fail "completed turn was applied twice");
-  (match
-     State.terminalize_pending_turn_attempt
-       ~applied_at:4.0
-       ~selection
-       ~detail:"late contradictory failure"
-       projected
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "failure replaced an already-completed turn")
+     Alcotest.fail "completed turn was applied twice")
 ;;
 
 (* #38527: retirement is the moment an un-re-askable receipt is dropped. A
@@ -720,7 +708,6 @@ let occurrence_summary (occurrence : State.schedule_occurrence) =
     | State.Occurrence_transfer_projecting_to target -> "transfer-projecting:" ^ target
     | State.Occurrence_transferred_to target -> "transferred:" ^ target
     | State.Occurrence_completed e -> "completed:" ^ evidence e
-    | State.Occurrence_failed (reason, e) -> "failed:" ^ reason ^ ":" ^ evidence e
     | State.Occurrence_cancelled (reason, e) -> "cancelled:" ^ reason ^ ":" ^ evidence e
   in
   String.concat "|" [ occurrence.occurrence_id; source; state ]
@@ -1848,34 +1835,33 @@ let test_durable_reprioritize_is_source_incarnation_fenced () =
     | Ok _ -> Alcotest.fail "stale priority source incarnation was accepted")
 ;;
 
-let test_durable_turn_attempt_terminal_restart () =
-  with_temp_dir "keeper-turn-attempt-terminal" (fun base_path ->
-    let keeper_name = "failed-turn-keeper" in
+let test_durable_turn_terminal_restart () =
+  with_temp_dir "keeper-turn-terminal-restart" (fun base_path ->
+    let keeper_name = "turn-terminal-keeper" in
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      let pending = Queue.enqueue pending (stimulus "failed" 1.0) in
+      let pending = Queue.enqueue pending (stimulus "terminal" 1.0) in
       Queue.enqueue pending (stimulus "unrelated" 2.0))
-    |> require_ok "seed failed turn pending";
+    |> require_ok "seed turn pending";
     let selection =
       select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
         ~ready:(fun _ -> true)
-      |> require_ok "peek failed turn source"
-      |> require_some "failed turn selection"
+      |> require_ok "peek turn source"
+      |> require_some "turn selection"
     in
-    Persistence.terminalize_pending_turn_attempt_result
+    Persistence.terminalize_pending_turn_completed_result
       ~base_path
       ~keeper_name
       ~applied_at:3.0
       ~selection
-      ~detail:""
       ()
-    |> require_ok "commit failed turn terminal receipt"
+    |> require_ok "commit turn terminal receipt"
     |> ignore;
     let restarted =
       Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "restart failed turn state"
+      |> require_ok "restart turn state"
     in
     Alcotest.(check (list string))
       "only unrelated source remains runnable"
@@ -1889,28 +1875,27 @@ let test_durable_turn_attempt_terminal_restart () =
          (retained = selection.source)
      | _ ->
        Alcotest.fail
-         "restart did not retain exactly one source-bearing failed turn receipt");
+         "restart did not retain exactly one source-bearing turn receipt");
     Persistence.project_transition_outbox_result
       ~append_before_retire:(fun _ _ -> Ok ())
       ~retain_previous:(fun _ -> true)
       ~base_path
       ~keeper_name
-    |> require_ok "project failed turn terminal receipt";
+    |> require_ok "project turn terminal receipt";
     (match
-       Persistence.terminalize_pending_turn_attempt_result
+       Persistence.terminalize_pending_turn_completed_result
          ~base_path
          ~keeper_name
          ~applied_at:4.0
          ~selection
-         ~detail:"replayed after projection"
          ()
-       |> require_ok "replay projected failed turn after restart"
+       |> require_ok "replay projected turn after restart"
      with
      | Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _) -> ()
      | Persistence.Turn_terminal_committed
          ( Persistence.Transition_applied _
          | Persistence.Transition_committed_followup_failed _ ) ->
-       Alcotest.fail "projected failed turn replay committed twice"
+       Alcotest.fail "projected turn replay committed twice"
      | Persistence.Turn_selection_withdrawn ->
        Alcotest.fail "turn terminal unexpectedly found its selection withdrawn");
     Persistence.update_result ~base_path ~keeper_name (fun pending ->
@@ -1927,12 +1912,11 @@ let test_durable_turn_attempt_terminal_restart () =
      | Ok () ->
        Alcotest.fail "old successful-turn selection ACKed a later incarnation");
     (match
-       Persistence.terminalize_pending_turn_attempt_result
+       Persistence.terminalize_pending_turn_completed_result
          ~base_path
          ~keeper_name
          ~applied_at:4.5
          ~selection
-         ~detail:"stale in-flight attempt"
          ()
      with
      | Ok (Persistence.Turn_terminal_committed (Persistence.Transition_already_applied _)) ->
@@ -1955,12 +1939,11 @@ let test_durable_turn_attempt_terminal_restart () =
       |> require_some "later identical selection"
     in
     (match
-       Persistence.terminalize_pending_turn_attempt_result
+       Persistence.terminalize_pending_turn_completed_result
          ~base_path
          ~keeper_name
          ~applied_at:5.0
          ~selection:later_selection
-         ~detail:"later attempt"
          ()
        |> require_ok "terminalize later identical source"
      with
@@ -2016,12 +1999,11 @@ let test_durable_inflight_selection_rejects_reinserted_source () =
      | Error _ -> ()
      | Ok () -> Alcotest.fail "stale selection ACKed reinserted source");
     (match
-       Persistence.terminalize_pending_turn_attempt_result
+       Persistence.terminalize_pending_turn_completed_result
          ~base_path
          ~keeper_name
          ~applied_at:3.0
          ~selection:stale_selection
-         ~detail:"old in-flight turn"
          ()
      with
      | Error _ -> ()
@@ -2819,13 +2801,13 @@ let () =
             `Quick
             test_changed_selected_snapshot_fails_closed
         ; Alcotest.test_case
-            "turn-attempt terminal receipt preserves exact source"
+            "turn completed receipt preserves exact source"
             `Quick
-            test_turn_attempt_terminal_receipt_preserves_exact_source
+            test_turn_completed_receipt_preserves_exact_source
         ; Alcotest.test_case
-            "turn completion is terminal and conflict fenced"
+            "turn completion is terminal and replays"
             `Quick
-            test_turn_completed_receipt_is_terminal_and_conflict_fenced
+            test_turn_completed_receipt_is_terminal_and_replays
         ; Alcotest.test_case
             "older projected disposition replays"
             `Quick
@@ -2876,9 +2858,9 @@ let () =
             `Quick
             test_durable_reprioritize_is_source_incarnation_fenced
         ; Alcotest.test_case
-            "durable failed turn receipt restart"
+            "durable turn terminal receipt restart"
             `Quick
-            test_durable_turn_attempt_terminal_restart
+            test_durable_turn_terminal_restart
         ; Alcotest.test_case
             "durable completed turn projects reaction ACK"
             `Quick

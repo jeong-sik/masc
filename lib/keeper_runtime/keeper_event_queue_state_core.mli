@@ -31,13 +31,10 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 (** Closed terminal source evidence. Fusion and HITL completion are intrinsically
     represented by their durable event payload. [Turn_completed] records a
-    successful admitted turn; [Turn_attempt_terminal] records that one admitted
-    turn ended without a successful result. In both cases the exact
-    source remains in the transition receipt instead of being discarded by a
-    raw ACK. [detail] is diagnostic only and carries no transition authority. *)
+    successful admitted turn; the exact source remains in the transition
+    receipt instead of being discarded by a raw ACK. *)
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -70,7 +67,6 @@ type projected_disposition_kind =
   | Projected_fusion_terminal
   | Projected_hitl_terminal
   | Projected_turn_completed
-  | Projected_turn_attempt_terminal
 
 type projected_source_kind =
   | Source_board_signal
@@ -339,31 +335,19 @@ val ack_pending_source_terminal :
   t ->
   (t * transition_result, string) result
 (** ACK one exact pending event. Intrinsic product-terminal receipts must match
-    the source payload exactly. A turn-attempt terminal receipt carries the
-    exact source itself; its detail is diagnostic and never admission
-    authority. *)
-
-val terminalize_pending_turn_attempt :
-  applied_at:float ->
-  selection:pending_selection ->
-  detail:string ->
-  t ->
-  (t * transition_result, string) result
-(** End one admitted turn attempt with a deterministic operation identity
-    derived from the exact selected queue snapshot and owner generation.
-    Repeating the same request after WAL projection returns its original
-    receipt, while a later selection of the same source is a new attempt;
-    diagnostic [detail] never participates in admission or idempotency. *)
+    the source payload exactly. A turn-completed receipt carries the exact
+    source itself. *)
 
 val terminalize_pending_turn_completed :
   applied_at:float ->
   selection:pending_selection ->
   t ->
   (t * transition_result, string) result
-(** Commit typed completion evidence for one admitted turn. Completion and
-    failure share one deterministic per-attempt operation identity, so a stale
-    contradictory settlement fails closed instead of replacing the first
-    durable outcome. *)
+(** Commit typed completion evidence for one admitted turn with a
+    deterministic operation identity derived from the exact selected queue
+    snapshot. Repeating the same request after WAL projection returns its
+    original receipt; a different prior disposition under that identity fails
+    closed instead of replacing the first durable outcome. *)
 
 val pending_turn_selection_withdrawn : selection:pending_selection -> t -> bool
 (** [true] when the entry an admitted turn was given is no longer pending

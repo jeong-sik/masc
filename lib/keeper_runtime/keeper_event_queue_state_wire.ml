@@ -112,10 +112,6 @@ let transition_to_yojson = function
         [ "source_receipt_kind", `String "hitl_terminal" ]
       | Turn_completed ->
         [ "source_receipt_kind", `String "turn_completed" ]
-      | Turn_attempt_terminal { detail } ->
-        [ "source_receipt_kind", `String "turn_attempt_terminal"
-        ; "detail", `String detail
-        ]
     in
     `Assoc (fields @ receipt_fields)
 ;;
@@ -213,15 +209,6 @@ let transition_of_yojson json =
       | "turn_completed" ->
         let* () = exact_fields ~context ~expected:common_fields fields in
         Ok Turn_completed
-      | "turn_attempt_terminal" ->
-        let* () =
-          exact_fields
-            ~context
-            ~expected:("detail" :: common_fields)
-            fields
-        in
-        let* detail = string_field ~context "detail" fields in
-        Ok (Turn_attempt_terminal { detail })
       | ("fusion_terminal" | "hitl_terminal") as expected_kind ->
         let* () = exact_fields ~context ~expected:common_fields fields in
         let* source_receipt = source_terminal_receipt_of_stimulus source in
@@ -229,8 +216,7 @@ let transition_of_yojson json =
           match source_receipt with
           | Fusion_terminal _ -> Ok "fusion_terminal"
           | Hitl_terminal _ -> Ok "hitl_terminal"
-          | Turn_completed
-          | Turn_attempt_terminal _ ->
+          | Turn_completed ->
             Error "source payload produced a non-intrinsic terminal receipt"
         in
         if String.equal expected_kind actual_kind
@@ -375,8 +361,6 @@ let projected_kind_to_yojson = function
     `Assoc [ "kind", `String "hitl_terminal" ]
   | Projected_turn_completed ->
     `Assoc [ "kind", `String "turn_completed" ]
-  | Projected_turn_attempt_terminal ->
-    `Assoc [ "kind", `String "turn_attempt_terminal" ]
 ;;
 
 let projected_kind_of_yojson json =
@@ -410,15 +394,13 @@ let projected_kind_of_yojson json =
     else if String.equal from_keeper to_keeper
     then Error "projected transfer endpoints must differ"
     else Ok (Projected_transfer { from_keeper; to_keeper; target_trace_id })
-  | "fusion_terminal" | "hitl_terminal" | "turn_completed"
-  | "turn_attempt_terminal" ->
+  | "fusion_terminal" | "hitl_terminal" | "turn_completed" ->
     let* () = exact_fields ~context ~expected:[ "kind" ] fields in
     Ok
       (match kind with
        | "fusion_terminal" -> Projected_fusion_terminal
        | "hitl_terminal" -> Projected_hitl_terminal
        | "turn_completed" -> Projected_turn_completed
-       | "turn_attempt_terminal" -> Projected_turn_attempt_terminal
        | _ -> assert false)
   | other -> Error (Printf.sprintf "unknown projected disposition kind: %s" other)
 ;;
@@ -486,8 +468,7 @@ let witness_of_yojson json =
     | Projected_transfer _ -> "pending-transfer:" ^ operator_operation_id
     | Projected_fusion_terminal
     | Projected_hitl_terminal
-    | Projected_turn_completed
-    | Projected_turn_attempt_terminal ->
+    | Projected_turn_completed ->
       "pending-source-terminal-ack:" ^ operator_operation_id
   in
   if not (Float.is_finite applied_at)
@@ -528,8 +509,7 @@ let witness_of_yojson json =
     | (Projected_fusion_terminal, Source_composition_completed) -> true
     | Projected_cancel _, _
     | Projected_transfer _, _
-    | Projected_turn_completed, _
-    | Projected_turn_attempt_terminal, _ -> false
+    | Projected_turn_completed, _ -> false
   then Error "projected intrinsic terminal kind conflicts with source kind"
   else
     Ok

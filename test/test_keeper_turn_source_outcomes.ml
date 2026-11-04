@@ -62,14 +62,12 @@ let project_transition config = function
       ~expected_transition_id:receipt.State.transition_id |> ok
   | Transition_committed_followup_failed {detail;_} -> fail detail
 
-let terminalize config selection ~successful =
-  let result = if successful then
-      Persistence.terminalize_pending_turn_completed_result ~base_path:config.Workspace.base_path
-        ~keeper_name ~applied_at:(Unix.gettimeofday ()) ~selection ()
-    else
-      Persistence.terminalize_pending_turn_attempt_result ~base_path:config.Workspace.base_path
-        ~keeper_name ~applied_at:(Unix.gettimeofday ()) ~selection ~detail:"private diagnostic" () in
-  match result |> ok with
+let terminalize config selection =
+  match
+    Persistence.terminalize_pending_turn_completed_result ~base_path:config.Workspace.base_path
+      ~keeper_name ~applied_at:(Unix.gettimeofday ()) ~selection ()
+    |> ok
+  with
   | Persistence.Turn_terminal_committed transition -> project_transition config transition
   | Turn_selection_withdrawn -> fail "selected source was withdrawn"
 
@@ -77,7 +75,7 @@ let exact_source_incarnation () = with_source (fun config ->
   let original = enqueue config in
   start config 7 original;
   check int "selection is not an invented terminal receipt" 0 (List.length (receipts (project config ())));
-  terminalize config original ~successful:true;
+  terminalize config original;
   let first = receipts (project config ()) in
   check int "actual durable terminal projects exactly once" 1 (List.length first);
   check string "typed completed receipt" "ack_turn_completed" (List.hd first |> member "kind" |> to_string);
@@ -95,10 +93,10 @@ let exact_source_incarnation () = with_source (fun config ->
     ~selection:replacement ~urgency:Immediate () |> ok);
   let reprioritized = select config in
   start config 9 reprioritized;
-  terminalize config reprioritized ~successful:false;
+  terminalize config reprioritized;
   check int "changed priority and revision cannot settle the earlier selection" 0
     (List.length (receipts (project config ~turn:8 ())));
-  check string "attempt terminal is not relabeled successful" "ack_turn_attempt_terminal"
+  check string "the changed incarnation projects its own receipt" "ack_turn_completed"
     (receipts (project config ~turn:9 ()) |> List.hd |> member "kind" |> to_string);
   check (list string) "only public terminal reference fields are returned"
     ["applied_at";"event_id";"kind";"transition_id"]
@@ -109,7 +107,7 @@ let exact_source_incarnation () = with_source (fun config ->
 let partial_ledger_and_manifest () = with_source (fun config ->
   let selection = enqueue config in
   start config 7 selection;
-  terminalize config selection ~successful:true;
+  terminalize config selection;
   let store = Dated_jsonl.open_store (Ledger.location ~base_path:config.base_path ~keeper_name) in
   Dated_jsonl.append store (`Assoc []);
   let month = Dated_jsonl.month_dir_paths_newest_first_result store |> Result.get_ok |> List.hd in

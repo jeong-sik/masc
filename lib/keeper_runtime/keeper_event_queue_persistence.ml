@@ -61,7 +61,6 @@ type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -1822,28 +1821,6 @@ let terminalize_pending_turn_result
             "event queue pending turn terminalization raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
-;;
-
-let terminalize_pending_turn_attempt_result
-      ?after_commit
-      ~base_path
-      ~keeper_name
-      ~applied_at
-      ~selection
-      ~detail
-      ()
-  =
-  terminalize_pending_turn_result
-    ?after_commit
-    ~base_path
-    ~keeper_name
-    ~selection
-    ~transition:
-      (State.terminalize_pending_turn_attempt
-         ~applied_at
-         ~selection
-         ~detail)
-    ()
 ;;
 
 let terminalize_pending_turn_completed_result

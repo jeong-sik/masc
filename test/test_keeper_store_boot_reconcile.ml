@@ -1548,7 +1548,7 @@ let valid_transition_row ~base_path ~keeper_name =
     | None -> fail "no pending selection for the durable transition"
   in
   let staged =
-    match State.terminalize_pending_turn_attempt ~applied_at:2.0 ~selection ~detail:"" initial with
+    match State.terminalize_pending_turn_completed ~applied_at:2.0 ~selection initial with
     | Error detail -> fail detail
     | Ok (staged, State.Transition_applied _) -> staged
     | Ok (_, State.Transition_already_applied _) -> fail "first terminalization replayed"

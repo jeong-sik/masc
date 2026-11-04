@@ -9,7 +9,6 @@ type stage =
   | Turn_ended
   | Consumed
   | Completed
-  | Failed of string option
   | Cancelled of string option
   | Settling of string
   | Transferring of { owner : string; target : string }
@@ -203,7 +202,7 @@ let decode row_json =
                            | Unobserved -> false
                            | Observed (Cancelled _) ->
                                (match result with
-                                | Completed | Failed _ -> true
+                                | Completed -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
                                 | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling _
                                 | Transferring _ | Unknown _ -> false)
@@ -211,10 +210,10 @@ let decode row_json =
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Completed | Failed _
+                                | Turn_started | Turn_ended | Consumed | Completed
                                 | Settling _ | Transferring _ | Unknown _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                      | Turn_started | Turn_ended | Completed | Failed _ | Settling _
+                                      | Turn_started | Turn_ended | Completed | Settling _
                                       | Transferring _ | Unknown _) -> false in
                          matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
                        match reaction_observation with
@@ -229,10 +228,9 @@ let decode row_json =
                                | Observed (Unknown _ | Queued | Turn_started | Turn_ended as stage) -> matched stage
                                | Unobserved -> matched Queued
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
-                               | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
+                               | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed
                                           | Missing | Queued_at _ | Settling _ | Transferring _) -> matched (Unknown "예약 반응 재확인 필요"))
                           | "matched_terminal_completed" -> terminal "completed" (fun _ -> Completed)
-                          | "matched_terminal_failed" -> terminal "failed" (fun reason -> Failed reason)
                           | "matched_terminal_cancelled" -> terminal "cancelled" (fun reason -> Cancelled reason)
                           | "terminal_projection_pending" ->
                               let* owner = text "resolved_owner" queue in
@@ -244,7 +242,7 @@ let decode row_json =
                           | "not_found" ->
                               (match reaction_observation with
                                | Unobserved | Observed Queued -> matched Missing
-                               | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed | Failed _
+                               | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed
                                           | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
                                           | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
@@ -257,5 +255,5 @@ let decode row_json =
 
 let needs_attention = function
   | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended
-  | Consumed | Failed _ | Settling _ | Transferring _ | Unknown _ -> true
+  | Consumed | Settling _ | Transferring _ | Unknown _ -> true
   | No_occurrence | Completed | Cancelled _ -> false

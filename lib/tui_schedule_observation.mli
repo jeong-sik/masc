@@ -12,7 +12,6 @@ type stage =
   | Turn_ended
   | Consumed
   | Completed
-  | Failed of string option
   | Cancelled of string option
   | Settling of string
       (** The terminal result is recorded but not yet projected into the

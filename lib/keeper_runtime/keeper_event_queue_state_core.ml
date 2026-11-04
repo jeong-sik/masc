@@ -18,7 +18,6 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -49,7 +48,6 @@ type projected_disposition_kind =
   | Projected_fusion_terminal
   | Projected_hitl_terminal
   | Projected_turn_completed
-  | Projected_turn_attempt_terminal
 
 type projected_source_kind =
   | Source_board_signal
@@ -172,8 +170,7 @@ let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
   match witness.kind with
   | Projected_fusion_terminal
   | Projected_hitl_terminal
-  | Projected_turn_completed
-  | Projected_turn_attempt_terminal ->
+  | Projected_turn_completed ->
     non_immediate_urgency witness.urgency
   | Projected_cancel _ | Projected_transfer _ -> None
 ;;
@@ -307,8 +304,6 @@ let projected_kind_of_transition = function
     Projected_hitl_terminal
   | Ack_source_terminal { source_receipt = Turn_completed; _ } ->
     Projected_turn_completed
-  | Ack_source_terminal { source_receipt = Turn_attempt_terminal _; _ } ->
-    Projected_turn_attempt_terminal
 ;;
 
 let projected_source_kind = function
@@ -358,12 +353,6 @@ let transition_ref transition =
         | Fusion_terminal _ -> [ "source_receipt_kind", `String "fusion" ]
         | Hitl_terminal _ -> [ "source_receipt_kind", `String "hitl" ]
         | Turn_completed -> [ "source_receipt_kind", `String "turn_completed" ]
-        | Turn_attempt_terminal _ ->
-          (* [detail] is diagnostic rather than operation authority: both the
-             full-receipt replay contract and retry callers may supply a newer
-             rendering for the same admitted attempt. Keep the compact
-             fingerprint aligned with that typed replay identity. *)
-          [ "source_receipt_kind", `String "turn_attempt_terminal" ]
       in
       [ "kind", `String "source_terminal"
       ; "source_ref", `String source_ref
@@ -936,7 +925,7 @@ let validate_accepted_source_terminal
   then Error "source-terminal ACK operation id must not be empty"
   else (
     match source_terminal.source_receipt with
-    | Turn_completed | Turn_attempt_terminal _ -> Ok ()
+    | Turn_completed -> Ok ()
     | (Fusion_terminal _ | Hitl_terminal _) as expected ->
       let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
       if receipt = expected
@@ -1193,7 +1182,9 @@ let accepted_pending_source_terminal_ack_replay source_terminal state =
          source_terminal.operator_operation_id)
 ;;
 
-let turn_attempt_terminal_operation_id
+(* The prefix is part of every durable turn-terminal ACK operation id, so a
+   replayed ACK finds its receipt by the same id. *)
+let turn_terminal_operation_id
       ~admitted_revision
       source
   =
@@ -1256,29 +1247,23 @@ let ack_pending_source_terminal
        state)
 ;;
 
-let turn_terminal_receipt_matches_replay left right =
-  match left, right with
-  | Turn_completed, Turn_completed
-  | Turn_attempt_terminal _, Turn_attempt_terminal _ ->
-    true
-  | Fusion_terminal _, _
-  | Hitl_terminal _, _
-  | Turn_completed, _
-  | Turn_attempt_terminal _, _ ->
-    false
-;;
-
-let terminalize_pending_turn
+let terminalize_pending_turn_completed
       ~applied_at
       ~selection
-      ~source_receipt
       state
   =
   let { source; admitted_revision } = selection in
   let operator_operation_id =
-    turn_attempt_terminal_operation_id
+    turn_terminal_operation_id
       ~admitted_revision
       source
+  in
+  let source_terminal =
+    { source
+    ; source_incarnation = admitted_revision
+    ; operator_operation_id
+    ; source_receipt = Turn_completed
+    }
   in
   match prior_disposition_by_operation_id operator_operation_id state with
   | Some
@@ -1286,54 +1271,21 @@ let terminalize_pending_turn
         ({ transition =
              Ack_source_terminal
                { source = prior_source
-               ; source_receipt = prior_source_receipt
+               ; source_receipt = Turn_completed
                ; _
                }
          ; _
          } as receipt))
-    when prior_source = source
-         && turn_terminal_receipt_matches_replay
-              prior_source_receipt
-              source_receipt ->
+    when prior_source = source ->
     Ok (state, Transition_already_applied receipt)
-  | Some (Projected_witness witness)
+  | Some (Projected_witness ({ kind = Projected_turn_completed; _ } as witness))
     when String.equal witness.source_ref (source_snapshot_ref source)
-         && Int64.equal witness.source_incarnation admitted_revision
-         && (match witness.kind, source_receipt with
-             | Projected_turn_completed, Turn_completed
-             | Projected_turn_attempt_terminal, Turn_attempt_terminal _ -> true
-             | Projected_fusion_terminal, Fusion_terminal _
-             | Projected_hitl_terminal, Hitl_terminal _ ->
-               String.equal witness.transition_ref (transition_ref (Ack_source_terminal
-                 { source
-                 ; source_incarnation = admitted_revision
-                 ; operator_operation_id
-                 ; source_receipt
-                 }))
-             | ( (Projected_cancel _ | Projected_transfer _)
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed
-                 | Turn_attempt_terminal _) )
-             | Projected_fusion_terminal
-               , (Hitl_terminal _ | Turn_completed | Turn_attempt_terminal _)
-             | Projected_hitl_terminal
-               , (Fusion_terminal _ | Turn_completed | Turn_attempt_terminal _)
-             | Projected_turn_completed
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_attempt_terminal _)
-             | Projected_turn_attempt_terminal
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed) -> false) ->
-    let transition =
-      Ack_source_terminal
-        { source
-        ; source_incarnation = admitted_revision
-        ; operator_operation_id
-        ; source_receipt
-        }
-    in
+         && Int64.equal witness.source_incarnation admitted_revision ->
     let receipt =
       { transition_id = witness.transition_id
       ; event_id = witness.event_id
       ; applied_at = witness.applied_at
-      ; transition
+      ; transition = Ack_source_terminal source_terminal
       }
     in
     Ok (state, Transition_already_applied receipt)
@@ -1346,46 +1298,14 @@ let terminalize_pending_turn
       | Projected_witness _) ->
     Error
       (Printf.sprintf
-         "turn-attempt terminal operation conflict: %s"
+         "turn terminal operation conflict: %s"
          operator_operation_id)
   | None ->
     let* () = validate_pending_selection ~selection state in
-    let source_terminal =
-      { source
-      ; source_incarnation = admitted_revision
-      ; operator_operation_id
-      ; source_receipt
-      }
-    in
     ack_pending_source_terminal
       ~applied_at
       ~source_terminal
       state
-;;
-
-let terminalize_pending_turn_attempt
-      ~applied_at
-      ~selection
-      ~detail
-      state
-  =
-  terminalize_pending_turn
-    ~applied_at
-    ~selection
-    ~source_receipt:(Turn_attempt_terminal { detail })
-    state
-;;
-
-let terminalize_pending_turn_completed
-      ~applied_at
-      ~selection
-      state
-  =
-  terminalize_pending_turn
-    ~applied_at
-    ~selection
-    ~source_receipt:Turn_completed
-    state
 ;;
 
 (* A turn leaves its batch pending until its terminal receipt, and a
@@ -1406,7 +1326,7 @@ let pending_source_left ~operator_operation_id ~source state =
 let pending_turn_selection_withdrawn ~(selection : pending_selection) state =
   pending_source_left
     ~operator_operation_id:
-      (turn_attempt_terminal_operation_id
+      (turn_terminal_operation_id
          ~admitted_revision:selection.admitted_revision
          selection.source)
     ~source:selection.source

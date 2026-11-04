@@ -80,7 +80,6 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -513,22 +512,6 @@ val ack_pending_source_terminal_result :
 (** Append and fsync the canonical source-bearing ACK transition before
     checkpointing removal of the exact pending source. *)
 
-val terminalize_pending_turn_attempt_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  applied_at:float ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  detail:string ->
-  unit ->
-  (pending_turn_terminal_result, string) result
-(** Atomically construct and commit a source-bearing terminal receipt for one
-    failed admitted turn. The selection carries the exact source incarnation;
-    no caller-provided prose or counter controls admission. An entry another
-    transition removed while the turn ran answers [Turn_selection_withdrawn]
-    under the same lock, and nothing is written
-    ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
-
 val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -538,8 +521,10 @@ val terminalize_pending_turn_completed_result :
   unit ->
   (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing completion receipt for one
-    successful admitted turn, or answer [Turn_selection_withdrawn] like
-    {!terminalize_pending_turn_attempt_result}. *)
+    successful admitted turn. The selection carries the exact source
+    incarnation. An entry another transition removed while the turn ran
+    answers [Turn_selection_withdrawn] under the same lock, and nothing is
+    written ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
 
 val project_transition_outbox_result :
   append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->

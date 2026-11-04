@@ -76,7 +76,7 @@ let test_real_cli ~root ~base ~lease_root =
   check int "actual CLI bootstrap completed" 0 code;
   check string "actual command response records its operation" "bootstrap"
     Yojson.Safe.Util.(json |> member "operation" |> to_string);
-  check bool "CLI reports the current live guard requirement" true
+  check bool "CLI reports that live loads do not read the guard" false
     Yojson.Safe.Util.(json |> member "live_posts_guard_enforced" |> to_bool);
   check string "actual CLI created empty persisted posts" ""
     (read (Filename.concat base ".masc/board_posts.jsonl"));

@@ -41,9 +41,9 @@ val create_store : base_path:string -> unit -> store
 
 val create_store_with_source_io_for_testing :
   base_path:string -> io:posts_source_io -> unit -> store
-(** Same production store with immutable, distinct guard/posts transaction IO.
-    Each None slot uses production IO. Faults must be armed after explicit
-    initialization; the constructor itself creates and admits nothing. *)
+(** Same production store with an immutable posts transaction IO seam.
+    A None slot uses production IO. Faults must be armed after an explicit
+    load; the constructor itself creates and admits nothing. *)
 
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
@@ -77,8 +77,10 @@ val reactions_path : store -> string
 val sub_boards_path : store -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : where:string -> store -> (unit, board_error) result
-(** Real initialized-guard precondition inside a persistence-protected writer.
-    This does not load posts, clear a posts refusal or bootstrap missing data.
+(** Workspace precondition inside a persistence-protected writer: check the
+    store's workspace binding, create the workspace directory and observe it
+    present. This does not load posts, clear a posts refusal or bootstrap
+    missing data.
     [where] retains the requested operation in its one error/log diagnostic.
     Reserved precondition failures use the existing deferred settlement carrier. *)
 
@@ -109,9 +111,10 @@ val read_posts_source : store -> posts_source_read
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
 val settle_posts_source : store -> posts_settle_outcome
 (** Settle the retained unknown write of an unsettled store. Caller holds
-    persistence; performs locked guard/posts reads and at most one durable
-    proof rewrite, and never touches the in-memory post tables. A store that
-    is not unsettled yields [Posts_settle_nothing_to_settle] with no IO. *)
+    persistence; revalidates the workspace of the pre-write observation,
+    performs one locked posts read and at most one durable proof rewrite, and
+    never touches the in-memory post tables. A store that is not unsettled
+    yields [Posts_settle_nothing_to_settle] with no IO. *)
 val settle_posts_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
 type settle_direction = Board_posts_source.settle_direction =
   | Direction_landed
@@ -226,7 +229,7 @@ val create_post_once_by_fusion_run_id :
 (** Serialize exact-origin create attempts with a fiber-aware store mutex.
     An exact normalized payload replay for the same typed Fusion run returns
     the matching observed post instead of appending another row. This positive
-    recognition can use best-effort display rows after guard refusal. Matching
+    recognition can use rows a partial read kept in memory. Matching
     the row neither directly accesses source files nor publishes a new row, and
     grants no posts write authority, operation receipt or durability guarantee.
     The call still runs ordinary maintenance scheduling before lookup; a

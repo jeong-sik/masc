@@ -35,7 +35,7 @@ type board_error =
         alias. The write is refused and nothing is stored. *)
   [@@deriving show]
 
-(* An evidence read can also refuse a partial or unadmitted posts source. *)
+(* An evidence read can also refuse a partial posts source. *)
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
@@ -798,32 +798,24 @@ type flusher_msg =
   | Flush
   | Sweep
 
-type posts_guard_observation = {
-  guard_path : string;
-  snapshot : Fs_compat.private_jsonl_snapshot;
-  value : Board_posts_guard_json.t;
-  workspace_observation : Board_workspace_binding.observation;
-}
-
 type posts_source_observation = {
   source_path : string;
   snapshot : Fs_compat.private_jsonl_snapshot;
-  initialization : posts_guard_observation;
+  workspace_observation : Board_workspace_binding.observation;
 }
 
 type posts_source_history =
-  | No_initialization
-  | Guard_observed of posts_guard_observation
+  | No_observation
   | Posts_observed of posts_source_observation
 
 type posts_row_error =
   | Invalid_posts_json of { line : int; detail : string }
   | Invalid_posts_row of { line : int }
 
-type posts_source_file = Guard_file | Posts_file
+type posts_source_file = Posts_file
 
 type posts_source_stage =
-  | Read_guard | Validate_guard | Read_posts | Decode_posts | Encode_posts
+  | Read_posts | Decode_posts | Encode_posts
   | Write_posts | Project_posts | Report_source
 
 type posts_source_diagnostic =
@@ -845,11 +837,6 @@ type posts_source_failure =
   | Posts_rows_rejected of posts_row_error list
   | Posts_transaction_failed of Fs_compat.private_jsonl_transaction_error
   | Posts_missing
-  | Posts_guard_missing
-  | Posts_guard_torn
-  | Posts_guard_row_count_rejected of int
-  | Posts_guard_row_rejected of Board_posts_guard_json.rejection
-  | Posts_guard_changed
   | Posts_source_binding_mismatch
   | Posts_snapshot_stale
   | Posts_workspace_binding_refused of Board_workspace_binding.rejection
@@ -867,10 +854,6 @@ type posts_unsettled_write = {
 
 type posts_source_state =
   | Posts_unobserved
-  | Posts_guard_observed of {
-      initialization : posts_guard_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
   | Posts_readable of {
       observation : posts_source_observation;
       diagnostics : posts_source_diagnostic list;
@@ -917,10 +900,6 @@ type posts_settle_outcome =
     }
   | Posts_settle_nothing_to_settle
 
-type posts_source_display =
-  | Complete_display of post list
-  | Partial_display of { posts : post list; errors : posts_row_error list }
-
 type posts_source_read =
   | Posts_complete of {
       observation : posts_source_observation;
@@ -933,26 +912,16 @@ type posts_source_read =
       errors : posts_row_error list;
       diagnostics : posts_source_diagnostic list;
     }
-  | Posts_unadmitted of {
-      source_path : string;
-      snapshot : Fs_compat.private_jsonl_snapshot;
-      display : posts_source_display;
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
   | Posts_unavailable of {
       failure : posts_source_failure;
       diagnostics : posts_source_diagnostic list;
     }
-(** Unadmitted rows are display evidence only. Their genuine snapshot never
-    replaces accepted initialization history or grants negative/write authority. *)
 
 type posts_source_io = {
-  guard : Fs_compat.private_jsonl_transaction_io_for_testing option;
   posts : Fs_compat.private_jsonl_transaction_io_for_testing option;
 }
-(** Immutable, distinct real-transaction seams. None selects production IO for
-    that file; guard descriptor closes never pass through the posts callback. *)
+(** Immutable real-transaction seam for the posts file. None selects
+    production IO. *)
 
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.

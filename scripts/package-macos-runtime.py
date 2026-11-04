@@ -11,15 +11,36 @@ import subprocess
 import tarfile
 import tempfile
 import urllib.request
+import zipfile
 
 NAMES = ('masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
          'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap')
 MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'}
 
+# The interpreter's OpenSSL reads only /private/etc/ssl, the operating system's
+# static certificate file, so its trust ages with the macOS release. The
+# runtime ships the pinned Mozilla bundle and makes it the default, unless the
+# user names a certificate file or directory.
+CA_BUNDLE = PurePosixPath('python/ssl/cacert.pem')
+SITECUSTOMIZE = '''"""MASC portable runtime: trust the CA bundle shipped with this Python.
+
+The interpreter's OpenSSL otherwise reads only the operating system's static
+certificate file. SSL_CERT_FILE or SSL_CERT_DIR set by the user keeps its
+meaning; child processes inherit the same default.
+"""
+import os
+import sys
+
+if "SSL_CERT_FILE" not in os.environ and "SSL_CERT_DIR" not in os.environ:
+    os.environ["SSL_CERT_FILE"] = os.path.join(sys.base_prefix, "ssl", "cacert.pem")
+'''
+
 # Run inside the staged interpreter. HTTP rejection is still a response over
 # validated TLS; certificate, proxy CONNECT and network errors must propagate.
 PYTHON_HTTPS_PROBE = '''
-import json, tarfile, ssl, urllib.request, urllib.error, urllib.parse
+import os, sys, json, tarfile, ssl, urllib.request, urllib.error, urllib.parse
+if os.environ.get("SSL_CERT_FILE") != os.path.join(sys.base_prefix, "ssl", "cacert.pem"):
+    raise ValueError("staged Python does not default to its shipped CA bundle")
 try:
     response = urllib.request.urlopen("https://example.com", timeout=30)
 except urllib.error.HTTPError as error:
@@ -98,6 +119,27 @@ def unpack_python(archive, target):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             dest.chmod(0o755 if mode & 0o111 else 0o644)
+
+
+def stage_ca_bundle(stage, pinned):
+    # Same rule as the interpreter: exact reviewed bytes before any extraction.
+    wheel = fetch(pinned['browser_download_url'])
+    if len(wheel) != pinned['size'] or 'sha256:' + hashlib.sha256(wheel).hexdigest() != pinned['digest']:
+        raise ValueError('CA bundle archive checksum differs from pin')
+    with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+        bundle = archive.read(pinned['member'])
+        notice = archive.read(pinned['license_member'])
+    sites = sorted((stage / 'python/lib').glob('python3.*/site-packages'))
+    if len(sites) != 1:
+        raise ValueError('staged Python needs exactly one site-packages directory')
+    for path, data in ((stage / CA_BUNDLE, bundle),
+                       (sites[0] / 'sitecustomize.py', SITECUSTOMIZE.encode()),
+                       (stage / 'licenses/certifi' / PurePosixPath(pinned['license_member']).name, notice)):
+        if path.exists():
+            raise ValueError('staged Python already has ' + path.relative_to(stage).as_posix())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        path.chmod(0o644)
 
 
 def audit_macho_tree(stage):
@@ -185,6 +227,8 @@ def package(dist, stage, platform, commit, lock_path):
         archive.write(python_bytes)
         archive.flush()
         unpack_python(Path(archive.name), stage)
+    ca_pinned = lock['ca_bundle']
+    stage_ca_bundle(stage, ca_pinned)
     sources = {}
     for name in NAMES:
         shutil.copy2(dist / (name + '-' + platform), stage / name)
@@ -238,11 +282,12 @@ def package(dist, stage, platform, commit, lock_path):
     if run(str(stage.resolve() / 'masc'), 'build-commit').strip() != commit:
         raise ValueError('rewritten executable source commit differs')
     # Test actual staged bytes with both Homebrew roots unreadable, including
-    # urllib TLS discovery. User-supplied certificate settings remain honored.
+    # urllib TLS discovery. Certificate settings of the build environment are
+    # dropped so the probe checks the runtime's own default, the shipped bundle.
     profile = '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))'
     clean = dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin')
-    clean.pop('PYTHONHOME', None)
-    clean.pop('PYTHONPATH', None)
+    for name in ('PYTHONHOME', 'PYTHONPATH', 'SSL_CERT_FILE', 'SSL_CERT_DIR'):
+        clean.pop(name, None)
     for command in ([str(stage.resolve() / 'masc'), 'build-commit'],
                     [str(stage.resolve() / 'masc-tui'), '--help'],
                     [str(stage.resolve() / 'masc-deployment-preflight-helper'), '--help'],
@@ -254,6 +299,7 @@ def package(dist, stage, platform, commit, lock_path):
     provenance = {'schema': 'masc.macos-runtime.v1', 'source_commit': commit, 'platform': platform,
                   'minimum_macos': '14.0' if platform == 'macos-arm64' else '15.0',
                   'python': dict(pinned, release=lock['release'], upstream=lock['upstream']),
+                  'ca_bundle': dict(ca_pinned),
                   'libraries': [{'name': name, 'upstream_sha256': sha(source)} for name, source in sorted(sources.items())]}
     (stage / 'runtime-provenance.json').write_text(json.dumps(provenance, indent=2, sort_keys=True) + '\n')
     archive = dist / ('masc-runtime-' + platform + '.tar.gz')

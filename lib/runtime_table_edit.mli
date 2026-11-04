@@ -34,15 +34,30 @@ type 'e commit_error =
           written. *)
   | Edit_refused of 'e
   | Not_written of string
+  | Outcome_unknown of string
+      (** The edit was sent to the workspace's running server, and whether it
+          landed could not be told: the answer was lost and the text could
+          not be read again, or changed since. *)
 
-(** Commits the edit under the configuration write lock. The text [edit] is
-    given is the one on disk at that moment: the revision the plan was made
-    from is compared again first, so a write that landed since is not
-    overwritten. *)
-val commit
-  :  runtime_config_path:string
-  -> revision:string
-  -> edit:(string -> (string, 'e) result)
-  -> (unit, 'e commit_error) result
+type observe_error =
+  | Missing of string  (** No runtime.toml at this path. *)
+  | Unreadable of { path : string; reason : string }
+
+(** Where a table edit reads runtime.toml and commits it: the file itself
+    ({!file_store}), or the workspace's running server, which is the one
+    writer of the file while it runs (RFC-0482 §3.2). *)
+type store =
+  { path : string  (** The file the store reads and writes, for messages. *)
+  ; observe : unit -> (Runtime.config_observation, observe_error) result
+  ; commit :
+      'e. revision:string -> edit:(string -> (string, 'e) result) -> (unit, 'e commit_error) result
+        (** Commits [edit] of the text as it is at that moment. The revision
+            the plan was made from is compared first, so a write that landed
+            since is not overwritten. *)
+  }
+
+val file_store : runtime_config_path:string -> store
+(** The file itself: [commit] edits it under the configuration write lock,
+    through {!Runtime.edit_config_text}. *)
 
 val revision_of_observation : Runtime.config_observation -> string

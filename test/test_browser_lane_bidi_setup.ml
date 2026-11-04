@@ -99,7 +99,7 @@ let with_fixture ?(with_table = false) ?config f =
     f { root; runtime; home; firefox; operator_firefox; operator_profile })
 
 let request ?firefox ?profile ?port fixture =
-  { B.runtime_config_path = fixture.runtime
+  { B.store = Masc.Runtime_table_edit.file_store ~runtime_config_path:fixture.runtime
   ; home = Some fixture.home
   ; firefox
   ; profile
@@ -191,6 +191,41 @@ let test_named_values_are_written_and_a_port_only_when_named () =
     check (triple string string int) "what the loader reads" (fixture.firefox, profile, 9333)
       (values (configured fixture));
     check bool "the named profile was made" true (Sys.is_directory profile))
+
+(* The store decides where runtime.toml is read and committed (RFC-0482
+   §3.2). One that holds the text elsewhere, as the running server does, is
+   planned against and committed through, and the file is left alone. *)
+let test_a_store_that_holds_the_text_is_read_and_committed () =
+  with_fixture (fun fixture ->
+    let held = ref runtime_base and commits = ref 0 in
+    let observation () = Runtime.config_observation ~path:fixture.runtime !held in
+    let store =
+      { Masc.Runtime_table_edit.path = fixture.runtime
+      ; observe = (fun () -> Ok (observation ()))
+      ; commit =
+          (fun ~revision ~edit ->
+            if not
+                 (String.equal
+                    (Masc.Runtime_table_edit.revision_of_observation (observation ()))
+                    revision)
+            then Error Masc.Runtime_table_edit.Changed_meanwhile
+            else
+              match edit !held with
+              | Error error -> Error (Masc.Runtime_table_edit.Edit_refused error)
+              | Ok text ->
+                incr commits;
+                held := text;
+                Ok ())
+      }
+    in
+    let profile = Filename.concat fixture.root "chosen profile" in
+    let plan =
+      plan_ok { (request ~firefox:fixture.firefox ~profile ~port:9333 fixture) with B.store }
+    in
+    ignore (apply_ok plan);
+    check int "one commit through the store" 1 !commits;
+    check bool "the store holds the table" true (contains !held "[browser.live.bidi]");
+    check string "the file is as it was" runtime_base (read fixture.runtime))
 
 let test_applying_twice_writes_the_same_file () =
   with_fixture (fun fixture ->
@@ -557,6 +592,8 @@ let () =
             test_a_table_is_written_with_the_found_firefox_and_the_default_profile
         ; test_case "named values, and a port only when named" `Quick
             test_named_values_are_written_and_a_port_only_when_named
+        ; test_case "a store that holds the text is read and committed" `Quick
+            test_a_store_that_holds_the_text_is_read_and_committed
         ; test_case "applying twice writes the same file" `Quick
             test_applying_twice_writes_the_same_file
         ] )

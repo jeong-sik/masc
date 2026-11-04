@@ -40,7 +40,7 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 
 ### 1.3 CLI 프로세스
 
-앞의 네 명령은 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2). 뒤의 두 명령은 서버가 있어도 직접 쓴다.
+앞의 다섯 명령은 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2). 마지막 명령은 서버가 있어도 직접 쓴다.
 
 | 명령 | 서버가 있을 때 | 서버가 없을 때 |
 |---|---|---|
@@ -48,8 +48,8 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 | `masc web-search-setup` | 원문 route (`Masc_cli_runtime_config_remote.save`) | `Web_search_setup.apply` |
 | `masc voice-local-setup` | voice setup route (`Masc_cli_runtime_config_remote.apply_voice_setup`) | `Voice_setup.apply` |
 | `masc runtime-default-set` | 원문 route (`Runtime.runtime_default_text`, `--setup-lanes` 면 `Runtime.first_run_runtime_text`) | `Runtime.set_runtime_default`, `Runtime.set_first_run_runtime` |
+| `masc browser-lane-setup` | 원문 route. bidi·automation·ego 표를 서버 원문에 계획하고 저장한다(`Masc_cli_runtime_config_remote.table_store`) | 같은 계획을 파일에 쓴다(`Runtime_table_edit.file_store`) |
 | `masc runtime-setup-batch` | 직접 쓴다 (L3d) | `Runtime_setup_batch.configure`. 임시 사본에 `runtime-default-set` 을 돌려 검증한 뒤 원래 파일에 쓴다 |
-| `masc browser-lane-setup` | 직접 쓴다 (L3d) | bidi·automation·ego setup 이 `Runtime_table_edit.commit` 으로 쓴다 |
 
 `runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 부른다. 처음 설치할 때는 서버가 없지만, 서버가 떠 있는 워크스페이스에서 다시 돌리면 서버 몰래 쓴다. batch 가 임시 사본에 부르는 `runtime-default-set` 은 그 사본의 서버를 찾지 못해서 사본에 직접 쓴다.
 

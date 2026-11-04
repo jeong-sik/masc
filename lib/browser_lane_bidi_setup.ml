@@ -1,5 +1,5 @@
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; home : string option
   ; firefox : string option
   ; profile : string option
@@ -31,6 +31,7 @@ type error =
   | Table_refused of string
   | Configuration_changed
   | Not_written of string
+  | Outcome_unknown of string
 
 let table_path = "browser.live.bidi"
 let default_profile_name = "masc-keeper-firefox-profile"
@@ -68,6 +69,8 @@ let error_message = function
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
   | Not_written reason -> Printf.sprintf "[%s] was not written to runtime.toml: %s." table_path reason
+  | Outcome_unknown reason ->
+    Printf.sprintf "[%s] may have been written to runtime.toml: %s. Run the command again to see what it holds." table_path reason
 
 open Result.Syntax
 
@@ -258,7 +261,7 @@ let port_answers_now port =
        | exception Unix.Unix_error _ -> false)
 
 type plan =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
   ; revision : string
   ; existing : Browser_configuration.live_bidi option
   ; table : Browser_configuration.live_bidi
@@ -275,15 +278,15 @@ let firefox_note plan = plan.firefox_note
 
 let revision_of = Runtime_table_edit.revision_of_observation
 
+let observed (store : Runtime_table_edit.store) =
+  store.observe ()
+  |> Result.map_error (function
+    | Runtime_table_edit.Missing path -> Configuration_missing path
+    | Runtime_table_edit.Unreadable { path; reason } -> Configuration_unreadable { path; reason })
+
 let plan ~find_firefox (request : request) =
-  let path = request.runtime_config_path in
-  if not (Sys.file_exists path)
-  then Error (Configuration_missing path)
-  else
-    let* observation =
-      Runtime.load_config_observation ~runtime_config_path:path ()
-      |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
-    in
+  let path = request.store.path in
+  let* observation = observed request.store in
     let text = observation.source_text in
     let* configuration =
       configuration_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
@@ -304,7 +307,7 @@ let plan ~find_firefox (request : request) =
         Ok note
     in
     Ok
-      { runtime_config_path = path
+      { store = request.store
       ; revision = revision_of observation
       ; existing
       ; table
@@ -332,13 +335,12 @@ let ensure_profile profile =
        Error (Profile_not_created { path = profile; reason = Unix.error_message code })
      | exception Sys_error reason -> Error (Profile_not_created { path = profile; reason }))
 
-(* Under the configuration lock the text is the one on disk now: the revision
-   the plan was made from is compared again, and what the edit produces is read
-   back before it is committed. *)
+(* The store commits the text as it is at that moment: the revision the plan
+   was made from is compared again, and what the edit produces is read back
+   before it is committed. *)
 let commit plan =
   match
-    Runtime_table_edit.commit
-      ~runtime_config_path:plan.runtime_config_path
+    plan.store.commit
       ~revision:plan.revision
       ~edit:(edited ~existing:plan.existing ~table:plan.table ~set:plan.set)
   with
@@ -346,6 +348,7 @@ let commit plan =
   | Error Runtime_table_edit.Changed_meanwhile -> Error Configuration_changed
   | Error (Runtime_table_edit.Edit_refused error) -> Error error
   | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason)
+  | Error (Runtime_table_edit.Outcome_unknown reason) -> Error (Outcome_unknown reason)
 
 let apply plan =
   let* profile_created = ensure_profile plan.table.profile in

@@ -12,7 +12,9 @@
     before it is committed. *)
 
 type request =
-  { runtime_config_path : string
+  { store : Runtime_table_edit.store
+        (** Where runtime.toml is read and the table committed: the file, or
+            the workspace's running server (RFC-0482 §3.2). *)
   ; command : string option
         (** An absolute path. Without one, the first [ego-browser] that
             answers [--version]
@@ -70,6 +72,9 @@ type error =
       (** [runtime.toml] changed after the plan was made, or, for a plan
           made again, this table changed. The table was not written. *)
   | Not_written of string
+  | Outcome_unknown of string
+      (** The table was sent to the workspace's running server and whether it
+          landed could not be told. *)
 
 val error_message : error -> string
 

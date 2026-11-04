@@ -29300,7 +29300,7 @@ let main
   (* Main loop *)
   (* The screen's own clock. It reads nothing the observer feed announces:
      a consent deadline expires, This-TUI log lines and the "N s ago" text are
-     drawn again, and the browser lane mirror takes its frame (RFC-0482). *)
+     drawn again, and the browser lane mirror takes its frame (RFC-0486). *)
   let local_clock_ns = Int64.of_float (local_clock_s *. nanoseconds_per_second) in
   (* Spectator cadence (RFC-0439 §3.7): ~3 Hz. Fast enough that a keeper's play
      reads as motion, slow enough that the 147 KB frame poll stays cheap. *)
@@ -41524,7 +41524,7 @@ Use relative paths for resources already held in the package. -->
         end;
         (* The browser lane mirror is the one read left on this clock: while
            it is on screen it pulls a frame every [local_clock_s], until the
-           server sends frames (RFC-0482). Every other surface reads when the
+           server sends frames (RFC-0486). Every other surface reads when the
            server announces its change. *)
         if state.view = Connectors then
           (match browser_lane_on_screen state with

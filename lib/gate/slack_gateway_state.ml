@@ -78,6 +78,17 @@ type connection_state =
   | Reconnect_pending of { backoff_until_mono : float; reason : string }
   | Failed of string
 
+let same_phase previous next =
+  match previous, next with
+  | Disconnected, Disconnected
+  | Awaiting_hello, Awaiting_hello
+  | Connected, Connected
+  | Reconnect_pending _, Reconnect_pending _ ->
+    true
+  | Failed previous, Failed next -> String.equal previous next
+  | (Disconnected | Awaiting_hello | Connected | Reconnect_pending _ | Failed _),
+    (Disconnected | Awaiting_hello | Connected | Reconnect_pending _ | Failed _) -> false
+
 type input =
   | Connect_requested
   | Apps_connections_open_succeeded of { url : string }

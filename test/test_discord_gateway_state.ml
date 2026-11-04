@@ -2515,6 +2515,16 @@ let test_step_thread_delete_unknown_is_noop () =
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
+(* A reader is told about a phase change, not about every gateway event that
+   moves the sequence number (RFC-0480 §3.4). *)
+let test_same_phase_ignores_sequence_numbers () =
+  let connected last_seq = S.Connected { session_id = "fixture"; last_seq } in
+  check bool "a new sequence number is the same phase" true
+    (S.same_phase (connected (Some 1)) (connected (Some 2)));
+  check bool "resuming is another phase" false (S.same_phase S.Resuming (connected None));
+  check bool "another failure reason is another phase" false
+    (S.same_phase (S.Failed "first") (S.Failed "second"))
+
 let () =
   run "discord_gateway_state"
     [ ( "primitives"
@@ -2784,5 +2794,9 @@ let () =
         ; test_case
             "THREAD_DELETE for unknown thread is a no-op"
             `Quick test_step_thread_delete_unknown_is_noop
+        ] )
+    ; ( "same phase"
+      , [ test_case "a new sequence number is the same phase" `Quick
+            test_same_phase_ignores_sequence_numbers
         ] )
     ]

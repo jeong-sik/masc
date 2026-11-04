@@ -165,7 +165,7 @@ let deliver ~admit ~send_ack (delivery : Slack_gateway_state.delivery) =
 ;;
 
 let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
-    () =
+    ~on_phase_change () =
   if String.equal app_token "" then
     (* No-op: a server without Slack configured must be unaffected. *)
     Log.Slack.info "slack socket mode disabled (empty app token)"
@@ -329,7 +329,9 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
         step_with_current_policy !state ~trigger_policy ~now_mono:now input
       in
       state := s';
-      Atomic.set published_connection_state (Slack_gateway_state.state s');
+      let next = Slack_gateway_state.state s' in
+      let previous = Atomic.exchange published_connection_state next in
+      if not (Slack_gateway_state.same_phase previous next) then on_phase_change ();
       List.iter run_effect effects
     in
 

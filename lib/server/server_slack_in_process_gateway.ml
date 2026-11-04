@@ -852,6 +852,8 @@ let start ~sw ~env ~state =
          try
            Slack_socket_client.run ~sw ~env ~bot_user_id ~app_token
              ~trigger_policy:current_trigger_policy
+             ~on_phase_change:(fun () ->
+               Gate_connector_announce.changed ~connector_id:State.connector_id)
              ~on_event:(fun ev ->
                let config = Mcp_server.workspace_config state in
                if not (String.equal config.Workspace.base_path gateway_base_path) then

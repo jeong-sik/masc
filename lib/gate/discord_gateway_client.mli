@@ -96,6 +96,7 @@ val run :
   trigger_policy:(unit -> trigger_policy) ->
   on_event:(gateway_event -> unit) ->
   on_ambient:(gateway_event -> unit) ->
+  on_phase_change:(unit -> unit) ->
   unit ->
   unit
 (** Connect to Discord Gateway, identify with [intents], dispatch
@@ -106,6 +107,11 @@ val run :
     [trigger_policy] but are not the bot's own echo (RFC-0226):
     record-only delivery — the handler persists the line to the bound
     keeper's lane history and must not start a turn.
+
+    [on_phase_change] runs after the published connection state moves to
+    another phase ({!Discord_gateway_state.same_phase}), inside the step that
+    moved it. A new sequence number alone does not run it. It must not yield
+    and must not raise.
 
     Internally:
     1. Create {!Discord_gateway_state.t} with [trigger_policy]. [trigger_policy] is read

@@ -160,7 +160,7 @@ module For_testing = struct
   let step_with_current_policy = step_with_current_policy
 end
 
-let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
+let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient ~on_phase_change () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy = trigger_policy ();
   } in
@@ -447,7 +447,9 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
       step_with_current_policy !state ~trigger_policy ~now_mono:now input
     in
     state := s';
-    Atomic.set published_connection_state (Discord_gateway_state.state s');
+    let next = Discord_gateway_state.state s' in
+    let previous = Atomic.exchange published_connection_state next in
+    if not (Discord_gateway_state.same_phase previous next) then on_phase_change ();
     List.iter run_effect effects
   in
 

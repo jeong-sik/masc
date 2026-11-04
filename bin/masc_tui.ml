@@ -18236,14 +18236,12 @@ let owe_ask_followup_read state =
 
 (* Runs on every loop iteration. Only the Approvals surface reads a
    follow-up; one owed while another surface is open waits for the return.
-   An answer with nothing to follow owes nothing. *)
+   An answer with nothing to follow, or a follow-up already completed, owes
+   nothing. *)
 let launch_owed_ask_followup state ~mailbox =
-  match Masc_tui_types.ask_followup_target state with
-  | None -> state.ask_followup_owed <- Masc_tui_owed_read.settled
-  | Some _ ->
-      if state.view = Approvals && server_authority_ready state
-         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.ask_followup_owed
-      then launch_ask_followup_load state ~mailbox
+  if Masc_tui_types.ask_followup_read_due state ~now:(monotonic_now_s ())
+     && state.view = Approvals && server_authority_ready state
+  then launch_ask_followup_load state ~mailbox
 
 (* An operator who consented in a browser is standing in front of a tab that
    does not know it happened: the callback lands on the server, not here. So

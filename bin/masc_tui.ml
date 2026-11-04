@@ -8958,26 +8958,26 @@ let launch_owed_connectors state ~mailbox =
       launch_connectors_load state ~mailbox
   end
 
-(* Runs on every loop iteration. Off the panes that draw runtime.toml nothing
-   is owed: arriving on one reads it. A read already in flight is let finish
+(* Runs on every loop iteration. Off the panes that draw runtime.toml a change
+   stays owed, so a pane reached without [launch_surface_reads] still reads
+   it: the Config strip moves between panes inside one view, and Lanes [e]
+   opens Config_runtime itself. A read already in flight is let finish
    first. *)
 let launch_owed_runtime_config state ~mailbox =
-  if not (runtime_config_on_screen state) then
-    state.runtime_config_owed <- Masc_tui_owed_read.settled
-  else begin
-    let reading =
-      match state.runtime_config_read with
-      | `Loading _ -> true
-      | `Idle -> false
-    in
-    let read =
-      if reading then state.runtime_config_owed
-      else Masc_tui_owed_read.abandoned state.runtime_config_owed
-    in
-    state.runtime_config_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
-      launch_runtime_config_load state ~mailbox
-  end
+  let reading =
+    match state.runtime_config_read with
+    | `Loading _ -> true
+    | `Idle -> false
+  in
+  let read =
+    if reading then state.runtime_config_owed
+    else Masc_tui_owed_read.abandoned state.runtime_config_owed
+  in
+  state.runtime_config_owed <- read;
+  if runtime_config_on_screen state
+     && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && not reading
+  then launch_runtime_config_load state ~mailbox
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
@@ -17859,7 +17859,12 @@ let enter_keeper_detail_tab state ~mailbox tab =
 let enter_config_pane state ~mailbox pane =
   state.runtime_model_jump <- None;
   state.runtime_config_jump_section <- None;
+  let arriving = not (runtime_config_on_screen state) in
   state.config_pane <- pane;
+  (* Moving between panes stays inside the Config view, so
+     [launch_surface_reads] never sees it. Arriving on a pane that draws
+     runtime.toml owes it a read here instead. *)
+  if arriving && runtime_config_on_screen state then owe_runtime_config_read state;
   state.prompts_cursor <- 0;
   state.config_scroll <- 0;
   state.runtime_config_cursor <- 0;
@@ -18602,6 +18607,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_verification_read state;
        owe_repositories_read state;
        owe_connectors_read state;
+       owe_runtime_config_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -40609,19 +40615,33 @@ Use relative paths for resources already held in the package. -->
                   (* The answer to [e] is Config opening on the table, so
                      these notes stay in the session log. On the footer
                      they named the table before the pane had drawn it. *)
-                  (match state.runtime_config_view with
-                   | None ->
-                     add_event state "info"
-                       (Printf.sprintf "loading runtime.toml for [%s]" section);
-                     launch_runtime_config_load state ~mailbox:async_messages
-                   | Some _ ->
+                  (* A change the server announced while Lanes was on screen
+                     is still owed, and the table may be the one it added, so
+                     the jump waits for that read instead of searching the
+                     reading on hand. *)
+                  let read_first () =
+                    add_event state "info"
+                      (Printf.sprintf "loading runtime.toml for [%s]" section);
+                    launch_runtime_config_load state ~mailbox:async_messages
+                  in
+                  (match state.runtime_config_view, state.runtime_config_owed with
+                   | None, _
+                   | Some _,
+                     ( Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Reading _
+                     | Masc_tui_owed_read.Waiting _ ) ->
+                     read_first ()
+                   | Some _, Masc_tui_owed_read.Settled ->
                      (match apply_runtime_config_jump state with
                       | Some (_, true) ->
                         add_event state "info"
                           (Printf.sprintf
                              "runtime.toml at [%s] - e to edit" section)
                       | Some (_, false) -> report_action state "error" (missing section)
-                      | None -> ()))
+                      | None -> ());
+                     (* Lanes [e] opens Config_runtime without
+                        [launch_surface_reads], so the arrival owes its read
+                        here. [read_first] above is that read already. *)
+                     owe_runtime_config_read state)
                 in
                 (match state.lanes_mode, selected_standalone_lane state with
                  | Lanes_overview, Some lane ->

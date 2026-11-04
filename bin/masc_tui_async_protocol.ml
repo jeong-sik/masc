@@ -252,6 +252,11 @@ type tools_read =
       ; keeper : string
       ; result : (Masc.Tui_decode_tools.skill_activation_projection, string) result
       }
+  | Tools_usage_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
+      }
 
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan

@@ -465,20 +465,26 @@ let decode_skill_activation_projection json =
    while the ledger side is warming. A valid instruction/composition surface
    always carries its profile; only an unavailable surface has none. *)
 
-type skill_usage_row =
-  { su_keeper : string
-  ; su_invocations : int
-  ; su_deliveries : int
-  ; su_actions : int
-  ; su_last_used_at : string option
-  }
-
 type skills_catalog_surface =
-  { scs_name : string
+  { scs_reference : Skill_reference.t
+  ; scs_name : string
   ; scs_kind : string
-  ; scs_usage : skill_usage_row list
   ; scs_flow : skill_flow option
   }
+
+type keeper_skill_usage_row =
+  { ksu_reference : Skill_reference.t
+  ; ksu_invocations : int
+  ; ksu_deliveries : int
+  ; ksu_actions : int
+  ; ksu_last_used_at : string
+  }
+
+type keeper_skill_usage =
+  | Keeper_usage_ready of keeper_skill_usage_row list
+  | Keeper_usage_no_session
+  | Keeper_usage_unavailable of { kua_reason : string; kua_detail : string }
+  | Keeper_usage_no_catalog
 
 module Skill_document = Agent_core.Skill_document
 
@@ -533,11 +539,6 @@ type skill_catalog_config =
       }
   | Skill_config_unreadable
 
-type skill_usage_coverage = {
-  suc_ledgers_loaded : int;
-  suc_unavailable : string list;
-}
-
 type skill_catalog_shadow = {
   scsh_winner : Skill_reference.identity;
   scsh_shadowed : Skill_reference.identity;
@@ -550,7 +551,6 @@ type skills_catalog =
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
   ; sc_shadows : skill_catalog_shadow list
-  ; sc_usage_coverage : skill_usage_coverage option
   }
 
 let skills_catalog_state_to_string = function
@@ -762,21 +762,14 @@ let decode_skill_rejection_diagnostic json =
   in
   Ok { srd_diagnostic; srd_message }
 
-let decode_skill_usage_row json =
-  let* su_keeper = required_string_field json "keeper" in
-  let* su_invocations = required_int_field json "invocations" in
-  let* su_deliveries = required_int_field json "deliveries" in
-  let* su_actions = required_int_field json "actions" in
-  let* su_last_used_at = optional_string_field json "last_used_at" in
-  Ok { su_keeper; su_invocations; su_deliveries; su_actions; su_last_used_at }
-
 let decode_skills_catalog_surface json =
   let* reference = required_object_field json "reference" in
-  let* identity = required_object_field reference "identity" in
-  let* scs_name = required_string_field identity "name" in
+  let* scs_reference =
+    Skill_reference.of_yojson reference
+    |> Result.map_error (fun _ -> "skills surface reference is invalid")
+  in
+  let scs_name = Skill_reference.(scs_reference.identity.name) in
   let* scs_kind = required_string_field json "kind" in
-  let* usage_json = optional_list_field json "usage" in
-  let* scs_usage = decode_list "usage" decode_skill_usage_row usage_json in
   let* scs_flow =
     match scs_kind, member "profile" json with
     | ("instruction" | "composition"), (`Assoc _ as profile) ->
@@ -793,7 +786,7 @@ let decode_skills_catalog_surface json =
     | unknown, _ ->
       Error (Printf.sprintf "skills surface kind has unknown value %S" unknown)
   in
-  Ok { scs_name; scs_kind; scs_usage; scs_flow }
+  Ok { scs_reference; scs_name; scs_kind; scs_flow }
 
 let decode_skill_catalog_rejection json =
   let* () =
@@ -1024,21 +1017,6 @@ let decode_skill_catalog_config json =
   | unknown ->
     Error (Printf.sprintf "skill snapshot config has unknown kind %S" unknown)
 
-let decode_skill_usage_coverage json =
-  let* coverage = required_object_field json "usage_coverage" in
-  let* suc_ledgers_loaded =
-    required_nonnegative_int_field coverage "ledgers_loaded"
-  in
-  let* unavailable = required_list_field coverage "unavailable" in
-  let* suc_unavailable =
-    decode_list "usage_coverage.unavailable"
-      (function
-        | `String detail -> Ok detail
-        | bad -> field_type_error "usage_coverage.unavailable" "a string" bad)
-      unavailable
-  in
-  Ok { suc_ledgers_loaded; suc_unavailable }
-
 let decode_skills_catalog json =
   let* schema = required_string_field json "schema" in
   if not (String.equal schema "masc.skill-snapshot/v1")
@@ -1050,10 +1028,9 @@ let decode_skills_catalog json =
       let* () =
         validate_closed_object
           ~label:"response"
-          ~allowed:[ "schema"; "state"; "snapshot"; "surfaces"; "usage_coverage" ]
+          ~allowed:[ "schema"; "state"; "snapshot"; "surfaces" ]
           json
       in
-      let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
       let* sc_shadows, sc_rejections =
         decode_skill_snapshot_shadows_and_rejections snapshot
@@ -1075,7 +1052,6 @@ let decode_skills_catalog json =
         ; sc_surfaces
         ; sc_rejections
         ; sc_shadows
-        ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
       let* () =
@@ -1091,7 +1067,6 @@ let decode_skills_catalog json =
         ; sc_surfaces = []
         ; sc_rejections = []
         ; sc_shadows = []
-        ; sc_usage_coverage = None
         }
     | "uninitialized" ->
       let* () =
@@ -1107,7 +1082,6 @@ let decode_skills_catalog json =
         ; sc_surfaces = []
         ; sc_rejections = []
         ; sc_shadows = []
-        ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
       let* () =
@@ -1134,8 +1108,7 @@ let decode_skills_catalog json =
           ; sc_surfaces = []
           ; sc_rejections = []
           ; sc_shadows = []
-          ; sc_usage_coverage = None
-          }
+            }
     | unknown ->
       Error (Printf.sprintf "unknown state %S" unknown)
 
@@ -1190,6 +1163,43 @@ let decode_keeper_skill_activations ~keeper json =
   else
     let* projection = required_object_field json "skill_activations" in
     decode_skill_activation_projection projection
+
+let keeper_skill_usage_schema = "masc.keeper-skill-usage/v1"
+
+let decode_keeper_skill_usage_row json =
+  let* reference = required_object_field json "reference" in
+  let* ksu_reference =
+    Skill_reference.of_yojson reference
+    |> Result.map_error (fun _ -> "skill usage row reference is invalid")
+  in
+  let* ksu_invocations = required_nonnegative_int_field json "invocations" in
+  let* ksu_deliveries = required_nonnegative_int_field json "deliveries" in
+  let* ksu_actions = required_nonnegative_int_field json "actions" in
+  let* ksu_last_used_at = required_nonempty_string_field json "last_used_at" in
+  Ok { ksu_reference; ksu_invocations; ksu_deliveries; ksu_actions; ksu_last_used_at }
+
+let decode_keeper_skill_usage ~keeper json =
+  let* schema = required_string_field json "schema" in
+  let* answered = required_string_field json "keeper" in
+  if not (String.equal schema keeper_skill_usage_schema) then
+    Error (Printf.sprintf "skill usage schema %S is not %S" schema keeper_skill_usage_schema)
+  else if not (String.equal answered keeper) then
+    Error (Printf.sprintf "skill usage answered for %S, not %S" answered keeper)
+  else
+    let* usage = required_object_field json "usage" in
+    let* state = required_string_field usage "state" in
+    match state with
+    | "ready" ->
+        let* rows = required_list_field usage "rows" in
+        let* rows = decode_list "usage.rows" decode_keeper_skill_usage_row rows in
+        Ok (Keeper_usage_ready rows)
+    | "no_session" -> Ok Keeper_usage_no_session
+    | "unavailable" ->
+        let* kua_reason = required_string_field usage "reason" in
+        let* kua_detail = required_string_field usage "detail" in
+        Ok (Keeper_usage_unavailable { kua_reason; kua_detail })
+    | "no_catalog" -> Ok Keeper_usage_no_catalog
+    | unknown -> Error (Printf.sprintf "skill usage state has unknown value %S" unknown)
 
 let skill_flow_mermaid flow =
   let module Nodes = Map.Make (String) in

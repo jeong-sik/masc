@@ -398,7 +398,6 @@ export type AsyncRequestObservation =
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
-  usage?: readonly SkillUsage[]
 }
 
 export type SkillSurface =
@@ -421,10 +420,6 @@ export type SkillsResponse =
       state: 'ready'
       snapshot: SkillSnapshot
       surfaces: readonly SkillSurface[]
-      usage_coverage?: {
-        ledgers_loaded: number
-        unavailable: readonly string[]
-      }
     }
   | { schema: string; state: 'not_registered' | 'uninitialized' }
   | {
@@ -477,14 +472,6 @@ const SkillIdentitySchema = Schema.Struct({
 const SkillReferenceSchema = Schema.Struct({
   identity: SkillIdentitySchema,
   content_revision: Schema.NonEmptyString,
-})
-
-const SkillUsageSchema = Schema.Struct({
-  keeper: Schema.NonEmptyString,
-  invocations: NonNegativeSafeIntegerSchema,
-  deliveries: NonNegativeSafeIntegerSchema,
-  actions: NonNegativeSafeIntegerSchema,
-  last_used_at: Schema.String,
 })
 
 const SkillFlowSchema = Schema.Struct({
@@ -928,29 +915,24 @@ const SkillEditorSaveReceiptSchema = Schema.Union(
   }),
 )
 
-const OptionalUsageSchema = Schema.optional(Schema.Array(SkillUsageSchema))
-
 const SkillSurfaceSchema = Schema.Union(
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('instruction'),
     diagnostics: OptionalDiagnosticsSchema,
     profile: SkillSurfaceProfileSchema,
-    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('composition'),
     diagnostics: OptionalDiagnosticsSchema,
     profile: SkillSurfaceProfileSchema,
-    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('unavailable'),
     error: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    usage: OptionalUsageSchema,
   }),
 )
 
@@ -1096,10 +1078,6 @@ const ReadySkillsResponseSchema = Schema.Struct({
   state: Schema.Literal('ready'),
   snapshot: SkillSnapshotSchema,
   surfaces: Schema.Array(SkillSurfaceSchema),
-  usage_coverage: Schema.optional(Schema.Struct({
-    ledgers_loaded: NonNegativeSafeIntegerSchema,
-    unavailable: Schema.Array(Schema.String),
-  })),
 })
 
 const UnreadySkillsResponseSchema = Schema.Union(

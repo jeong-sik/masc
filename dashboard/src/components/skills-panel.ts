@@ -40,7 +40,12 @@ import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
 import { currentStoredTokenRevision } from '../api/core'
 import { storedTokenRevision } from '../api/token-revision'
-import { executionWorkspaceAuthority, keepers, type ExecutionWorkspaceAuthority } from '../store'
+import {
+  executionLoaded,
+  executionWorkspaceAuthority,
+  keepers,
+  type ExecutionWorkspaceAuthority,
+} from '../store'
 
 const POLL_INTERVAL_MS = 30_000
 
@@ -175,8 +180,9 @@ export interface KeeperUsageReading {
   unavailable: readonly string[]
 }
 
-export function referenceKey(reference: SkillReference): string {
-  return `${identityKey(reference.identity)}@${reference.content_revision}`
+/** The Keepers' usage rows for one exact Skill reference. */
+export function usageFor(reading: KeeperUsageReading, reference: SkillReference): readonly SkillUsage[] {
+  return reading.byReference.get(referenceKey(reference.identity, reference.content_revision)) ?? []
 }
 
 /** Joins each Keeper's `skill-usage` answer, in Keeper name order. A Keeper
@@ -200,7 +206,7 @@ export function keeperUsageReading(
       case 'ready':
         ledgersRead += 1
         for (const row of usage.rows) {
-          const key = referenceKey(row.reference)
+          const key = referenceKey(row.reference.identity, row.reference.content_revision)
           const rows = byReference.get(key) ?? []
           rows.push({
             keeper,
@@ -220,6 +226,10 @@ export function keeperUsageReading(
       case 'unavailable':
         unavailable.push(`${keeper}: ${usage.reason} (${usage.detail})`)
         break
+      default: {
+        const unread: never = usage
+        return unread
+      }
     }
   }
   return { byReference, ledgersRead, unavailable }
@@ -839,6 +849,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
 }) {
   const response = useSignal<SkillsResponse | null>(null)
   const keeperUsage = useSignal<KeeperUsageReading | null>(null)
+  const usageController = useRef<AbortController | null>(null)
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
@@ -873,6 +884,31 @@ function SkillsObservationPanel({ owner, onMutation }: {
       request_id: identity.request_id, keeper_name: identity.keeper_name }, visit: ++asyncVisits.current }
   }
 
+  // Each Keeper's usage is its own read (RFC-0483), so reading every Keeper
+  // does not carry every ledger. The catalog read does not wait for them, and
+  // a newer round cancels the older one.
+  const loadUsage = async () => {
+    if (!current()) return
+    usageController.current?.abort()
+    usageController.current = null
+    if (!executionLoaded.peek()) {
+      // The roster is not read yet: an empty answer would read as "no Keeper
+      // used it" when no Keeper was asked.
+      keeperUsage.value = null
+      return
+    }
+    const controller = new AbortController()
+    usageController.current = controller
+    const names = keepers.peek().map(keeper => keeper.name)
+    const settled = await Promise.allSettled(
+      names.map(name => fetchKeeperSkillUsage(name, { signal: controller.signal })),
+    )
+    if (!current() || controller.signal.aborted) return
+    keeperUsage.value = keeperUsageReading(
+      names.map((keeper, index) => ({ keeper, result: settled[index]! })),
+    )
+  }
+
   const load = async (signal?: AbortSignal) => {
     if (!current()) return
     const generation = ++catalogGeneration.current
@@ -881,18 +917,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
       if (!current() || generation !== catalogGeneration.current) return
       response.value = res
       error.value = null
-      if (res.state === 'ready') {
-        // Each Keeper's usage is its own read (RFC-0483), so reading every
-        // Keeper does not carry every ledger.
-        const names = keepers.peek().map(keeper => keeper.name)
-        const settled = await Promise.allSettled(
-          names.map(name => fetchKeeperSkillUsage(name, { signal })),
-        )
-        if (!current() || generation !== catalogGeneration.current) return
-        keeperUsage.value = keeperUsageReading(
-          names.map((keeper, index) => ({ keeper, result: settled[index]! })),
-        )
-      }
+      if (res.state === 'ready') void loadUsage()
     } catch (cause) {
       if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
       error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
@@ -924,9 +949,16 @@ function SkillsObservationPanel({ owner, onMutation }: {
     return () => {
       active.current = false
       ctl.abort()
+      usageController.current?.abort()
       window.clearInterval(iv)
     }
   }, [])
+
+  // The roster can arrive after the catalog; its arrival reads the usage.
+  const rosterLoaded = executionLoaded.value
+  useEffect(() => {
+    if (rosterLoaded && response.peek()?.state === 'ready') void loadUsage()
+  }, [rosterLoaded])
 
   if (loading.value && !response.value) {
     return html`<${LoadingState}>Loading skills...<//>`
@@ -1057,7 +1089,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
                 </td>
                 <td>${contextLabel(row.surface, row.body_bytes)}</td>
                 <td>${usageLabel(row.surface && keeperUsage.value
-                  ? keeperUsage.value.byReference.get(referenceKey(row.surface.reference)) ?? []
+                  ? usageFor(keeperUsage.value, row.surface.reference)
                   : null)}</td>
                 <td class="mono">${row.source}</td>
               </tr>

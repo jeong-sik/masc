@@ -10,8 +10,8 @@
     mark ({!Authz_high_water}). Every reason to refuse is returned, not only the
     first.
 
-    It reads no file and writes none. The boot code reads the files, builds an
-    {!input}, and acts on the answer. In particular {!Activation_requested} is
+    It reads no file and writes none. {!Authz_boot_mode_read} reads the files,
+    builds an {!input}, and says what the boot does with the answer. In particular {!Activation_requested} is
     an answer, not a permission: it says that a [Fresh_bootstrap] is the only
     thing this installation may do. *)
 
@@ -30,7 +30,9 @@ type log_mode =
   | Log_unreadable of string
       (** The log exists and cannot be opened or checked. A last line that never
           ended is not this: it is cut when the log is opened. *)
-  | No_mode_event  (** No log, an empty log, or a log without a mode event. *)
+  | No_mode_event
+      (** No log, or a log with no lines. A log that holds records and no mode
+          event is {!Log_unreadable}: a [Fresh_bootstrap] is its first record. *)
   | Made_multi_account  (** The last mode event is [Fresh_bootstrap] or [Reactivate]. *)
   | Made_off  (** The last mode event is [Off]. *)
 
@@ -92,6 +94,10 @@ type refusal =
   | Rewound_after_off
       (** The log made [Off] and the external store does not match it: the base
           path may have been restored to before a later reactivation. *)
+  | External_store_unreadable of string
+      (** The install record or the external store cannot be read, where the
+          table needs to know whether the store holds an installation: with no
+          mode event (rows 2 and 6) and after [Off] (row 10). *)
   | Auth_disabled_in_multi_account
   | Token_not_required_in_multi_account
   | Anonymous_mutations_in_multi_account

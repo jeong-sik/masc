@@ -17,11 +17,13 @@ let secure = B.Settings_read { enabled = true; require_token = true }
 let some_hash = Option.get (Authz_record.Hash.of_hex (String.make 64 'a'))
 
 (* The three values of the high-water column. A mismatch and a store that cannot
-   be read are the same column; both are used below. *)
+   be read are one cell of the table; a refusal over a store that cannot be read
+   says so instead of calling it a rewind. *)
 let absent = B.Judged H.Absent
 let matches = B.Judged H.Matches
 let mismatch = B.Judged (H.Mismatch (H.Commit_not_in_log some_hash, []))
 let unreadable_store = B.Store_unreadable "install record corrupt"
+let store_unreadable = B.External_store_unreadable "install record corrupt"
 
 let input ?(settings = secure) ?(anonymous_mutations = false) requested log_mode high_water =
   { B.requested; log_mode; high_water; settings; anonymous_mutations }
@@ -50,7 +52,8 @@ let test_rows () =
   (* Row 2: the store says something was answered, the log has no mode event. *)
   List.iter
     (fun hw -> expect_refused "row 2" [ B.Rewound_before_bootstrap ] (input su B.No_mode_event hw))
-    [ matches; mismatch; unreadable_store ];
+    [ matches; mismatch ];
+  expect_refused "row 2, store unreadable" [ store_unreadable ] (input su B.No_mode_event unreadable_store);
   (* Row 3: lowering the config alone. *)
   List.iter
     (fun hw ->
@@ -63,7 +66,8 @@ let test_rows () =
   (* Row 6: a rewind, not a new installation. *)
   List.iter
     (fun hw -> expect_refused "row 6" [ B.Rewound_before_bootstrap ] (input ma B.No_mode_event hw))
-    [ matches; mismatch; unreadable_store ];
+    [ matches; mismatch ];
+  expect_refused "row 6, store unreadable" [ store_unreadable ] (input ma B.No_mode_event unreadable_store);
   (* Rows 7 and 8. *)
   expect_mode "row 7" B.Multi_account (input ma B.Made_multi_account matches);
   List.iter
@@ -76,13 +80,19 @@ let test_rows () =
     (fun requested ->
        List.iter
          (fun hw -> expect_refused "row 10" [ B.Rewound_after_off ] (input requested B.Made_off hw))
-         [ absent; mismatch; unreadable_store ])
+         [ absent; mismatch ];
+       expect_refused "row 10, store unreadable" [ store_unreadable ] (input requested B.Made_off unreadable_store))
     [ B.Not_set; su; ma ];
   (* Row 11: an unknown value, whatever the log and the store say. *)
   List.iter
     (fun (log, hw) ->
        expect_refused "row 11" [ B.Unknown_account_mode "null" ] (input (B.Unknown_value "null") log hw))
-    [ B.No_mode_event, absent; B.Made_multi_account, matches; B.Made_off, matches ]
+    [ B.No_mode_event, absent; B.Made_multi_account, matches; B.Made_off, matches ];
+  (* The rewind does not depend on the config, so it comes with the unknown value. *)
+  expect_refused
+    "row 11 over a rewind"
+    [ B.Unknown_account_mode "null"; B.Rewound_before_bootstrap ]
+    (input (B.Unknown_value "null") B.No_mode_event matches)
 ;;
 
 let test_unreadable_log_refuses_every_config () =
@@ -141,7 +151,39 @@ let test_multi_account_refuses_insecure_settings () =
   expect_refused
     "activation with auth disabled"
     [ B.Auth_disabled_in_multi_account ]
-    (input ~settings:(B.Settings_read { enabled = false; require_token = true }) ma B.No_mode_event absent)
+    (input ~settings:(B.Settings_read { enabled = false; require_token = true }) ma B.No_mode_event absent);
+  expect_refused
+    "activation with token not required"
+    [ B.Token_not_required_in_multi_account ]
+    (input ~settings:(B.Settings_read { enabled = true; require_token = false }) ma B.No_mode_event absent);
+  expect_refused
+    "activation with anonymous mutations"
+    [ B.Anonymous_mutations_in_multi_account ]
+    (input ~anonymous_mutations:true ma B.No_mode_event absent);
+  (* An uncertain multi-account boot is a multi-account boot. *)
+  expect_refused
+    "uncertain with auth disabled"
+    [ B.Auth_disabled_in_multi_account; B.Anonymous_mutations_in_multi_account ]
+    (input
+       ~settings:(B.Settings_read { enabled = false; require_token = true })
+       ~anonymous_mutations:true
+       ma
+       B.Made_multi_account
+       mismatch)
+;;
+
+let test_unknown_value_does_not_judge_settings () =
+  (* The value is refused for itself; the settings of a mode nobody asked for
+     are not reasons. *)
+  expect_refused
+    "unknown value"
+    [ B.Unknown_account_mode "1" ]
+    (input
+       ~settings:(B.Settings_read { enabled = false; require_token = false })
+       ~anonymous_mutations:true
+       (B.Unknown_value "1")
+       B.No_mode_event
+       absent)
 ;;
 
 let test_single_user_keeps_its_settings () =
@@ -223,6 +265,7 @@ let () =
     ; ( "settings"
       , [ Alcotest.test_case "multi-account refuses" `Quick test_multi_account_refuses_insecure_settings
         ; Alcotest.test_case "single user unchanged" `Quick test_single_user_keeps_its_settings
+        ; Alcotest.test_case "unknown value" `Quick test_unknown_value_does_not_judge_settings
         ] )
     ; ( "config member"
       , [ Alcotest.test_case "optional" `Quick test_config_member_is_optional

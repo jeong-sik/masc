@@ -51,21 +51,26 @@ type refusal =
   | Off_mode_not_supported
   | Reactivation_not_ready
   | Rewound_after_off
+  | External_store_unreadable of string
   | Auth_disabled_in_multi_account
   | Token_not_required_in_multi_account
   | Anonymous_mutations_in_multi_account
   | Auth_settings_unreadable_in_multi_account of string
 
-(* The three values of the high-water column of the table in design 5.1. *)
+(* The high-water column of the table in design 5.1. The table puts a store
+   that cannot be read in one cell with a mismatch; it is kept apart here so
+   that a refusal says which of the two it was. *)
 type high_water_column =
   | Absent
   | Matches
-  | Present_not_matching
+  | Mismatch_found
+  | Unreadable of string
 
 let column = function
   | Judged Authz_high_water.Absent -> Absent
   | Judged Authz_high_water.Matches -> Matches
-  | Judged (Authz_high_water.Mismatch _) | Store_unreadable _ -> Present_not_matching
+  | Judged (Authz_high_water.Mismatch _) -> Mismatch_found
+  | Store_unreadable detail -> Unreadable detail
 ;;
 
 (* The config column of the table: no member and [Single_user] are one row. *)
@@ -80,43 +85,43 @@ let config_column = function
   | Unknown_value text -> Asks_unknown text
 ;;
 
-(* The log as the rows read it, once the cases that the log decides alone are
-   taken out: a log that cannot be read, and [Off] with a store that does not
-   match it, are refused whatever the config asks (design 5.1, the paragraph
-   after the table, and row 10). *)
+(* The log as the rows read it, once the cases that the log and the store decide
+   whatever the config asks are taken out (design 5.1): a log that cannot be
+   read (the paragraph after the table), no mode event over a store that has
+   one (rows 2 and 6), and [Off] over a store that does not match it (row 10).
+   [No_event] is left only with an absent store, and [Off_matched] only with a
+   matching one. *)
 type readable_log =
   | No_event
-  | Made_multi
+  | Made_multi of high_water_column
   | Off_matched
 
 let readable_log log high_water : (readable_log, refusal) result =
   match log, high_water with
-  | Log_unreadable detail, (Absent | Matches | Present_not_matching) ->
+  | Log_unreadable detail, (Absent | Matches | Mismatch_found | Unreadable _) ->
     Error (Authorization_log_unreadable detail)
-  | Made_off, (Absent | Present_not_matching) -> Error Rewound_after_off
+  | No_mode_event, Absent -> Ok No_event
+  | No_mode_event, (Matches | Mismatch_found) -> Error Rewound_before_bootstrap
+  | No_mode_event, Unreadable detail -> Error (External_store_unreadable detail)
   | Made_off, Matches -> Ok Off_matched
-  | No_mode_event, (Absent | Matches | Present_not_matching) -> Ok No_event
-  | Made_multi_account, (Absent | Matches | Present_not_matching) -> Ok Made_multi
+  | Made_off, (Absent | Mismatch_found) -> Error Rewound_after_off
+  | Made_off, Unreadable detail -> Error (External_store_unreadable detail)
+  | Made_multi_account, high_water -> Ok (Made_multi high_water)
 ;;
 
-(* Rows 1 to 4 of the table. *)
-let single_user_row log high_water : (mode, refusal * refusal list) result =
-  match log, high_water with
-  | No_event, Absent -> Ok Single_user
-  | No_event, (Matches | Present_not_matching) -> Error (Rewound_before_bootstrap, [])
-  | Made_multi, (Absent | Matches | Present_not_matching) ->
-    Error (Downgraded_from_multi_account, [])
-  | Off_matched, (Absent | Matches | Present_not_matching) -> Error (Off_mode_not_supported, [])
+(* Rows 1, 3 and 4 of the table. *)
+let single_user_row : readable_log -> (mode, refusal * refusal list) result = function
+  | No_event -> Ok Single_user
+  | Made_multi _ -> Error (Downgraded_from_multi_account, [])
+  | Off_matched -> Error (Off_mode_not_supported, [])
 ;;
 
-(* Rows 5 to 9 of the table. *)
-let multi_account_row log high_water : (mode, refusal * refusal list) result =
-  match log, high_water with
-  | No_event, Absent -> Ok Activation_requested
-  | No_event, (Matches | Present_not_matching) -> Error (Rewound_before_bootstrap, [])
-  | Made_multi, Matches -> Ok Multi_account
-  | Made_multi, (Absent | Present_not_matching) -> Ok Multi_account_uncertain
-  | Off_matched, (Absent | Matches | Present_not_matching) -> Error (Reactivation_not_ready, [])
+(* Rows 5, 7, 8 and 9 of the table. *)
+let multi_account_row : readable_log -> (mode, refusal * refusal list) result = function
+  | No_event -> Ok Activation_requested
+  | Made_multi Matches -> Ok Multi_account
+  | Made_multi (Absent | Mismatch_found | Unreadable _) -> Ok Multi_account_uncertain
+  | Off_matched -> Error (Reactivation_not_ready, [])
 ;;
 
 let settings_reasons config input =
@@ -139,12 +144,12 @@ let judge input =
   let high_water = column input.high_water in
   let by_table =
     match config, readable_log input.log_mode high_water with
-    | Asks_unknown text, Ok (No_event | Made_multi | Off_matched) ->
+    | Asks_unknown text, Ok (No_event | Made_multi _ | Off_matched) ->
       Error (Unknown_account_mode text, [])
     | Asks_unknown text, Error by_log -> Error (Unknown_account_mode text, [ by_log ])
     | (Asks_single_user | Asks_multi_account), Error by_log -> Error (by_log, [])
-    | Asks_single_user, Ok log -> single_user_row log high_water
-    | Asks_multi_account, Ok log -> multi_account_row log high_water
+    | Asks_single_user, Ok log -> single_user_row log
+    | Asks_multi_account, Ok log -> multi_account_row log
   in
   match by_table, settings_reasons config input with
   | Ok mode, [] -> Ok mode
@@ -179,6 +184,9 @@ let refusal_to_string = function
      recovery procedure, which this server does not have yet"
   | Rewound_after_off ->
     "the last mode event is Off and the external store does not match the authorization log"
+  | External_store_unreadable detail ->
+    "the external store cannot be read, so the boot cannot tell whether the base path was \
+     restored to an earlier point: " ^ detail
   | Auth_disabled_in_multi_account -> "Multi_account needs auth enabled (config.json enabled=true)"
   | Token_not_required_in_multi_account ->
     "Multi_account needs require_token=true in config.json"

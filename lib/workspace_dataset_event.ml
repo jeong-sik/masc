@@ -9,6 +9,7 @@ type dataset =
   | Provider_usage
   | Provider_standing
   | Keeper_costs
+  | Workspace_health
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
@@ -24,6 +25,7 @@ let clients_name = "clients"
 let provider_usage_name = "provider_usage"
 let provider_standing_name = "provider_standing"
 let keeper_costs_name = "keeper_costs"
+let workspace_health_name = "workspace_health"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -35,9 +37,11 @@ let dataset_name = function
   | Provider_usage -> provider_usage_name
   | Provider_standing -> provider_standing_name
   | Keeper_costs -> keeper_costs_name
+  | Workspace_health -> workspace_health_name
 ;;
 
 let keeper_field = function
+  | Workspace_health -> []
     [ "keeper", `String keeper ]
 ;;
 
@@ -67,6 +71,7 @@ let of_fields fields =
   | Some (`String name) when String.equal name provider_usage_name -> Ok Provider_usage
   | Some (`String name) when String.equal name provider_standing_name -> Ok Provider_standing
   | Some (`String name) when String.equal name keeper_costs_name -> Ok Keeper_costs
+  | Some (`String name) when String.equal name workspace_health_name -> Ok Workspace_health
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)

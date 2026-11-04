@@ -40,6 +40,11 @@ type dataset =
       (** What [GET /api/v1/dashboard/keeper-costs] answers for its default
           window: a Keeper metrics row other than a heartbeat was written, or
           a kept row or day file left the window. *)
+  | Workspace_health
+      (** The Home Health line, [GET /api/v1/dashboard/health-line]: a
+          recomputation of the mission briefing moved the workspace health,
+          the Keeper listing or the count of Keepers whose state no one can
+          read. *)
 
 val event_type : string
 

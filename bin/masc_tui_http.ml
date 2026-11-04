@@ -2716,9 +2716,9 @@ let post_keeper_deletion_retry ~(host : string) ~(port : int) ~(path : string)
       (Masc_tui_keeper_control.deletion_retry_body
          ~expected_workspace ~keeper_name ~operation_id)
 
-(** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
-let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/briefing"
+(** Fetch /api/v1/dashboard/health-line (the Home Health line). *)
+let fetch_dashboard_health_line ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/health-line"
 
 (** Fetch /api/v1/dashboard/transport-health (delivery-path summary). *)
 let fetch_transport_health ~(host : string) ~(port : int) :

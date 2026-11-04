@@ -3862,26 +3862,6 @@ let acting_retained_entries = 1000
    screens at the row heights this TUI draws. *)
 let acting_retained_quiet = 200
 
-(** How many Keepers stand in each state the control plane names, counted off
-    [keeper_briefs]. The briefing carries a liveness word per Keeper and the
-    Overview row used to carry only their number, so a fleet with two Keepers
-    that had stopped doing anything and one an operator had paused read the
-    same as nine running ones.
-
-    [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary, and the Keepers the briefing lists under [keepers_unread]
-    because the server could not build their row. They are not folded into
-    any state: a Keeper whose liveness this build cannot name is a different
-    fact from an idle one, and the row says so rather than picking the
-    convenient neighbour. *)
-type keeper_liveness_counts = {
-  klc_active: int;
-  klc_offline: int;
-  klc_idle: int;
-  klc_paused: int;
-  klc_unreadable: int;
-}
-
 (** The Overview's reading of the runtime catalogue's quota windows. A failed
     read is kept apart from one not made yet, and neither is drawn as "no
     window is shut". *)
@@ -3928,10 +3908,13 @@ type provider_history_reading =
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
-      (** The briefing's [keepers_listing]. [Unreadable] means the server
-          could not list the Keeper directory, so the liveness counts hold
-          nothing it read rather than an empty fleet (#38120). *)
-  ov_keeper_liveness: keeper_liveness_counts;
+      (** [Unreadable] means the server could not list the Keeper directory,
+          so [ov_unreadable_keepers] holds nothing it read rather than an
+          empty fleet (#38120). *)
+  ov_unreadable_keepers: int;
+      (** Keepers the server listed whose state no one can read: a Keeper it
+          could not build a row for, or one whose liveness word this build
+          cannot name. The server counts them with the same vocabulary. *)
 }
 
 (** Planning projections from [Tui_decode], which owns the current wire

@@ -158,7 +158,8 @@ let summary = function
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
          | Masc.Workspace_dataset_event.Provider_usage
          | Masc.Workspace_dataset_event.Provider_standing
-         | Masc.Workspace_dataset_event.Keeper_costs -> "")
+         | Masc.Workspace_dataset_event.Keeper_costs
+         | Masc.Workspace_dataset_event.Workspace_health -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -952,6 +953,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
+                  | Masc.Workspace_dataset_event.Workspace_health
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1021,6 +1023,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
+                  | Masc.Workspace_dataset_event.Workspace_health
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
               | None -> false)
@@ -1041,6 +1044,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
               | Masc.Workspace_dataset_event.Keeper_costs
+              | Masc.Workspace_dataset_event.Workspace_health
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Runtime_config
           | None -> true)

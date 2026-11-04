@@ -1248,40 +1248,6 @@ let load_transport_health ~(host : string) ~(port : int) :
       decode_offloaded memo_transport ~name:"transport.decode_wait"
         Tui_decode.decode_transport_health json
 
-(* The briefing gives each Keeper the control plane's own liveness word, and
-   [Keeper_status_runtime] owns both ends of that vocabulary -- the producer
-   writes through its printer, so parsing through its strict reader is what
-   keeps the two from drifting apart. A word this build does not know counts
-   as unreadable rather than as the nearest state: the Overview row would
-   otherwise report a Keeper as idle on no evidence at all. *)
-let keeper_liveness_of_briefs briefs =
-  let empty =
-    { klc_active = 0
-    ; klc_offline = 0
-    ; klc_idle = 0
-    ; klc_paused = 0
-    ; klc_unreadable = 0
-    }
-  in
-  List.fold_left
-    (fun counts brief ->
-      match Yojson.Safe.Util.member "status" brief with
-      | `String status -> (
-          match Keeper_status_runtime.control_plane_status_of_string_opt status with
-          | Some Keeper_status_runtime.Cp_paused ->
-              { counts with klc_paused = counts.klc_paused + 1 }
-          | Some (Keeper_status_runtime.Cp_surface surface) -> (
-              match surface with
-              | Keeper_status_runtime.Surface_active ->
-                  { counts with klc_active = counts.klc_active + 1 }
-              | Keeper_status_runtime.Surface_offline ->
-                  { counts with klc_offline = counts.klc_offline + 1 }
-              | Keeper_status_runtime.Surface_idle ->
-                  { counts with klc_idle = counts.klc_idle + 1 })
-          | None -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
-      | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
-    empty briefs
-
 let memo_account_emails = json_memo ()
 
 (* Plan usage on Usage names each account's email. The route needs Admin,
@@ -1314,40 +1280,35 @@ let load_overview_goals ~(host : string) ~(port : int) :
 
 let memo_overview = json_memo ()
 
-(** Load overview snapshot from /api/v1/dashboard/briefing *)
+(** The Home Health line as [GET /api/v1/dashboard/health-line] answers it.
+    An answer that names an error is a failed read, said as the server said
+    it. *)
+let decode_health_line json : (overview_snapshot, string) result =
+  let* error = Masc.Tui_decode_fields.optional_string_field json "error" in
+  match error with
+  | Some detail -> Error ("overview unavailable: " ^ detail)
+  | None ->
+      let* ov_keeper_listing =
+        let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
+        Keeper_snapshot_unread.listing_of_json listing
+      in
+      let* ov_workspace_health =
+        let* workspace_health =
+          Masc.Tui_decode_fields.required_string_field json "workspace_health"
+        in
+        decode_workspace_health workspace_health
+      in
+      let* ov_unreadable_keepers =
+        Masc.Tui_decode_fields.required_nonnegative_int_field json "unreadable_keepers"
+      in
+      Ok { ov_workspace_health; ov_keeper_listing; ov_unreadable_keepers }
+
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
-  match fetch_dashboard_briefing ~host ~port with
+  match fetch_dashboard_health_line ~host ~port with
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      decode_offloaded memo_overview ~name:"overview.decode_wait" (fun json ->
-        let* summary = Masc.Tui_decode_fields.required_object_field json "summary" in
-        let* keeper_briefs = Masc.Tui_decode_fields.optional_list_field json "keeper_briefs" in
-        (* Keepers the server listed but could not build a row for. They are
-           not in [keeper_briefs]; before #38090 they were in neither, and the
-           Overview counted a fleet that had lost a Keeper as a smaller one. *)
-        let* keepers_unread =
-          let* items = Masc.Tui_decode_fields.required_list_field json "keepers_unread" in
-          Keeper_snapshot_unread.list_of_json (`List items)
-        in
-        let* ov_keeper_listing =
-          let* listing = Masc.Tui_decode_fields.required_object_field json "keepers_listing" in
-          Keeper_snapshot_unread.listing_of_json listing
-        in
-        let* ov_workspace_health =
-          let* workspace_health = Masc.Tui_decode_fields.required_string_field summary "workspace_health" in
-          decode_workspace_health workspace_health
-        in
-        (* An unread Keeper is still a Keeper -- the server listed its name --
-           so it is among the unreadable, the same as a brief whose liveness
-           word this build cannot name. What is missing is the Keeper's state,
-           not the Keeper. *)
-        let ov_keeper_liveness =
-          let counts = keeper_liveness_of_briefs keeper_briefs in
-          { counts with klc_unreadable = counts.klc_unreadable + List.length keepers_unread }
-        in
-        Ok { ov_workspace_health; ov_keeper_listing; ov_keeper_liveness })
-        json
+      decode_offloaded memo_overview ~name:"overview.decode_wait" decode_health_line json
 
 let memo_tools_inventory = json_memo ()
 

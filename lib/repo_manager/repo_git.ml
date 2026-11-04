@@ -621,3 +621,11 @@ let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
        | "" :: records when not (List.exists (String.equal "") records) ->
            Stdlib.Ok (List.sort_uniq String.compare records)
        | _ -> Stdlib.Error "git ls-files returned malformed NUL-delimited paths")
+
+let status_snapshot_at ?timeout_sec ~local_path () =
+  match
+    ( status_files_at ?timeout_sec ~local_path ()
+    , branch_status_at ?timeout_sec ~local_path () )
+  with
+  | Stdlib.Error msg, _ | _, Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok files, Stdlib.Ok branch -> Stdlib.Ok (files, branch)

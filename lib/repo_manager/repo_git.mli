@@ -191,3 +191,14 @@ val file_paths_at :
     repeated index stages produce one path. Deleted tracked paths may still
     appear: the caller checks availability and its own file access policy.
     The caller must establish that [local_path] is its authorised Git root. *)
+
+val status_snapshot_at :
+  ?timeout_sec:float ->
+  local_path:string ->
+  unit ->
+  (status_file list * branch_status, string) result
+(** [status_snapshot_at ~local_path] is {!status_files_at} and
+    {!branch_status_at} together. Two read-only Git calls, so a concurrent Git
+    command can land between them; either failing is an [Error _]. Every route
+    that answers a Git changes request reads through this, so none of them can
+    answer without the branch. *)

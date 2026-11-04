@@ -1329,6 +1329,7 @@ type waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 

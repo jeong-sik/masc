@@ -199,6 +199,22 @@ let test_streaming_keeps_async_and_schedule_badges () =
   Alcotest.(check bool) "an observation failure stays a secondary badge" true
     (List.mem Model.Badge_read_error badges)
 
+let test_quota_spent_wait_has_its_own_badge () =
+  let value =
+    row
+      ~waiting:(waiting
+        ~items:[ waiting_item ~source:Model.Waiting_source_runtime_quota_spent ~producer:Model.Wake_keeper_supervisor () ]
+        "row")
+      "row"
+  in
+  let badges = Model.badges_of_row value in
+  Alcotest.(check bool) "a Keeper whose every candidate spent its quota is marked" true
+    (List.mem Model.Badge_quota_spent badges);
+  Alcotest.(check bool) "the wait is not read as a read error" false
+    (List.mem Model.Badge_read_error badges);
+  Alcotest.(check bool) "the wait is not read as a schedule" false
+    (List.mem Model.Badge_schedule badges)
+
 let test_delegate_and_verification_remain_distinct_badges () =
   let value =
     row ~awaiting_verification:true
@@ -362,6 +378,7 @@ let () =
         ; Alcotest.test_case "priority order" `Quick test_priority_orders_attention_activity_waiting_then_inactive
         ; Alcotest.test_case "recent and name ordering" `Quick test_recent_and_name_have_deterministic_ties
         ; Alcotest.test_case "streaming keeps async and schedule badges" `Quick test_streaming_keeps_async_and_schedule_badges
+        ; Alcotest.test_case "quota spent wait badge" `Quick test_quota_spent_wait_has_its_own_badge
         ; Alcotest.test_case "delegate and verification badges" `Quick test_delegate_and_verification_remain_distinct_badges
         ; Alcotest.test_case "unobserved is not idle" `Quick test_unobserved_is_not_idle
         ; Alcotest.test_case "paused and offline hide stale activity" `Quick test_paused_and_offline_hide_stale_activity

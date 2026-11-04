@@ -44,6 +44,7 @@ let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
   | Badge_delegate -> "\xe2\x86\xa9" (* ↩ *)
   | Badge_verification -> "\xe2\x97\x87" (* ◇ *)
   | Badge_schedule -> "\xe2\x97\xb7" (* ◷ *)
+  | Badge_quota_spent -> "\xe2\x8a\x98" (* ⊘ *)
 
 type open_turn = Worked | Worked_while_failing | Left_open
 

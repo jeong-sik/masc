@@ -239,6 +239,14 @@ last one, not the test function's own line. A failing
 `:143` names the caller and the same number in a sibling file can mean something
 else entirely. Cite the innermost frame with its file name.
 
+The innermost frame is often not the line that reads like the cause. A `step(...)`
+wait that timed out ended at `test_tui_schedules_signal.py:128` (`step(`), then
+`test_tui_chat_owed_history.py:230` (`wait_until`), then `:220` (`self.fail`).
+The label string sits on the line after `step(` and is not a frame at all —
+citing `:131` named an argument, not a frame. Quote the call's first line and say
+which frame you mean when the traceback crosses into a helper: the test's own
+line shows the wait that was asked for, the helper's line shows where it failed.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

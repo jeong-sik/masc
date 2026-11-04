@@ -224,7 +224,7 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     for line in log.read_text(errors="replace").splitlines():
                         if "[diag task-3231]" in line:
                             diag_lines.append(line)
-                for line in diag_lines[-300:]:
+                for line in diag_lines[-4000:]:
                     print(line, file=sys.stderr, flush=True)
                 self.fail(f"{label}; exit={process.poll()}, requests={server.requests!r}")
 

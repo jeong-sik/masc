@@ -9345,8 +9345,6 @@ let diag_owed_string = function
   | Masc_tui_owed_read.Waiting { failures; retry_at } ->
       Printf.sprintf "Waiting{failures=%d;retry_at=%.3f}" failures retry_at
 
-let diag_schedules_last_key = ref ""
-
 let owe_schedules_read state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.changed state.schedules_agenda_owed;
   state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed;
@@ -9394,12 +9392,7 @@ let launch_owed_schedules state ~mailbox =
        (diag_owed_string state.schedules_page_owed) page_reading
        (Masc_tui_owed_read.due ~now state.schedules_page_owed)
    in
-   if not (String.equal key !diag_schedules_last_key) then begin
-     diag_schedules_last_key := key;
-     if state.schedules_agenda_owed <> Masc_tui_owed_read.Settled
-        || state.schedules_page_owed <> Masc_tui_owed_read.Settled
-     then diag_task_3231 "launch_owed_schedules now=%.3f %s" now key
-   end);
+   diag_task_3231 "launch_owed_schedules now=%.3f %s" now key);
   if server_authority_ready state then begin
     let now = monotonic_now_s () in
     let intent = Snapshot_read.Refresh in
@@ -25405,7 +25398,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       apply_schedule_agenda_read state ticket result;
       if current then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result;
-      diag_task_3231 "Schedule_agenda_read answered ok=%b current=%b agenda_owed=%s retry_s=%.3f now=%.3f"
+      diag_task_3231
+        "Schedule_agenda_read answered ticket=%d ok=%b current=%b agenda_owed=%s retry_s=%.3f now=%.3f"
+        (Snapshot_read.request_id ticket)
         (Result.is_ok result) current (diag_owed_string state.schedules_agenda_owed)
         stream_reconnect_s (monotonic_now_s ())
   | Schedules_loaded (Schedule_page_read request, result) ->

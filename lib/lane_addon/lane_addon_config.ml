@@ -18,6 +18,8 @@ type snapshot = {
   complete : bool;
 }
 
+type manifest_scope = Operator_declared | Within_workspace of string
+
 type failure = { issue : issue; unreadable : bool }
 open Result.Syntax
 
@@ -118,7 +120,7 @@ let select_exact_outputs declared = function
         List.mem output.name selected) declared)
   | _ -> Error "exact_outputs requires an array of declared output names"
 
-let decode ~source_path ~source_revision ~id fields =
+let decode ~manifest_scope ~source_path ~source_revision ~id fields =
   let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
@@ -133,6 +135,11 @@ let decode ~source_path ~source_revision ~id fields =
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
   let manifest_path = absolute_from ~directory manifest_path in
+  let* manifest_path = match manifest_scope with
+    | Operator_declared -> Ok manifest_path
+    | Within_workspace workspace ->
+        Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
+        |> Option.to_result ~none:Lane_addon_manifest.outside_workspace in
   let* package = Lane_addon_manifest.load ~path:manifest_path
     |> Result.map_error Lane_addon_manifest.error_to_string in
   let* package = match List.assoc_opt "tool_hooks" fields with
@@ -173,7 +180,7 @@ let decode ~source_path ~source_revision ~id fields =
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
   Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path }
 
-let parse_declaration ~source_path bytes =
+let parse_declaration ~manifest_scope ~source_path bytes =
   let failure ?id ~unreadable message =
     Error { issue = {source_path; id; message}; unreadable } in
   try
@@ -185,7 +192,7 @@ let parse_declaration ~source_path bytes =
             | Ok id ->
                 try
                   let source_revision = Agent_core_sha256.(to_hex (digest_string bytes)) in
-                  match decode ~source_path ~source_revision ~id fields with
+                  match decode ~manifest_scope ~source_path ~source_revision ~id fields with
                   | Ok declaration -> Ok declaration
                   | Error message -> failure ~id ~unreadable:false message
                 with (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -196,15 +203,15 @@ let parse_declaration ~source_path bytes =
        | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> failure ~unreadable:false "declaration requires a TOML table")
   with Otoml.Duplicate_key message -> failure ~unreadable:false message
 
-let load_source ~source_path ~source_text =
-  parse_declaration ~source_path:(absolute source_path) source_text
+let load_source ~manifest_scope ~source_path ~source_text =
+  parse_declaration ~manifest_scope ~source_path:(absolute source_path) source_text
   |> Result.map_error (fun failure -> failure.issue.message)
 
 let read_declaration ~path =
   let source_path = absolute path in
   match read_document source_path with
   | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
-  | Ok bytes -> parse_declaration ~source_path bytes
+  | Ok bytes -> parse_declaration ~manifest_scope:Operator_declared ~source_path bytes
 
 let load_file ~path =
   read_declaration ~path |> Result.map_error (fun failure -> failure.issue.message)

@@ -1111,7 +1111,7 @@ let test_disable_keeps_configuration_evidence_and_manual_workers () =
     let initial = Lane_addon_config.load_file ~path |> unwrap in
     check bool "accepting deployment keeps omitted enabled on" true initial.enabled;
     check bool "nonboolean activity is rejected" true
-      (Result.is_error (Lane_addon_config.load_source ~source_path:path
+      (Result.is_error (Lane_addon_config.load_source ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:path
         ~source_text:("enabled = \"false\"\n" ^ source)));
     ignore (reconcile config directory);
     let id = declared_instance config "observer" |> text "instance_id" in

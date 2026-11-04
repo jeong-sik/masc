@@ -2543,15 +2543,17 @@ let commit_config_text_locked
   let previous_view = exact_output_report_view () in
   let committed = record_exact_output_commit ~path ~previous_view in
   (* Every branch below that leaves the new text visible calls this, a
-     failure after the rename included. *)
+     failure after the rename included. The text is on disk before the
+     catalogue is published, so it is noted first: a raise from [set_loaded]
+     cannot leave a visible text unannounced. *)
   let publish_runtimes () =
+    note_config_text_visible ();
     set_loaded
       ?startup_degradation
       ~declared_media_failover
       ~config_path:path
       ~exact_output_lane_decls:exact_output_lanes
-      loaded;
-    note_config_text_visible ()
+      loaded
   in
   let* plan =
     plan_exact_output_commit

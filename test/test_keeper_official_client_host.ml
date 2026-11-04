@@ -361,14 +361,13 @@ let test_scoped_boundary_spans_official_attempts () =
       Scope.Execution.observe execution ~target:previous_target scoped_observation;
       Scope.Execution.observe execution ~target:previous_target scoped_observation;
       let target = Agent_core.Context.create_sync () in
-      let calls = ref (match Scope.Execution.prepare execution ~source ~target with
-        | Ok calls -> calls | Error _ -> fail "next attempt lost scope") in
+      (match Scope.Execution.prepare execution ~source ~target with
+       | Ok () -> () | Error _ -> fail "next attempt lost scope");
       let executions = ref 0 in
       let boundary_calls = ref 0 in
       let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
         ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
-          Scope.Execution.observe execution ~target scoped_observation;
-          calls := scoped_observation :: !calls)
+          Scope.Execution.observe execution ~target scoped_observation)
         ~on_tool_boundary:(fun ~tool_name ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary

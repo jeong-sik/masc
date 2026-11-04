@@ -1415,12 +1415,14 @@ let test_the_peer_serves_what_the_lane_table_says () =
    renderer. With [same_url] both entries have one URL, as a pushState to the
    same address makes; [load] is what the load wait does after it notes the
    call. The stand-in prints the CDP calls and waits the script made. *)
-let stand_in ~current ~navigation ~detaches ~same_url ~load = Printf.sprintf {js|
+let stand_in ~current ~navigation ~detaches ~same_url ~load ~stops_in_ms = Printf.sprintf {js|
+const runStopsAt = Date.now() + %d;
 const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "%s", title: "B"}];
 let current = %d;
 let detached = false;
 const seen = [];
-process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const loads = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen) + "\nloads " + JSON.stringify(loads)));
 const page = {
   cdp: async (method, params) => {
     seen.push(method);
@@ -1436,14 +1438,14 @@ const page = {
   reload: async () => { seen.push("reload"); },
   info: async () => ({url: entries[current].url, title: entries[current].title, w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
   waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  waitForLoadState: async () => { seen.push("load at " + current); %s },
+  waitForLoadState: async (state, options) => { seen.push("load at " + current); loads.push({state: state ?? null, options: options ?? null}); %s },
 };
 const taskSpace = async () => ({
   ownership: "agent",
   tabs: async () => [{label: "p1", targetId: "T1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
   page: () => page,
 });
-|js} (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
+|js} stops_in_ms (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
 
 let in_node script =
   let directory = capture_directory () in
@@ -2116,7 +2118,8 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "a space the operator made does not" true (Result.is_error (open_owned_by "user"))
 
 let test_history_moves_one_entry () =
-  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
+  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref ""
+  and stops_in_ms = ref 10_000 in
   let output = ref "" and steps = ref [] in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
@@ -2128,7 +2131,7 @@ let test_history_moves_one_entry () =
     | "page.history" | "page.reload" ->
       steps := sent :: !steps;
       output := in_node (stand_in ~current:!current ~navigation:!navigation ~detaches:!detaches
-        ~same_url:!same_url ~load:!load ^ script);
+        ~same_url:!same_url ~load:!load ~stops_in_ms:!stops_in_ms ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
   let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
@@ -2145,6 +2148,28 @@ let test_history_moves_one_entry () =
   check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
   check bool "back runs within the action window" true ((List.hd !steps).window_s
     < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})));
+  let load_timeout () = match List.find_opt (String.starts_with ~prefix:"loads ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(Yojson.Safe.from_string (after ~prefix:"loads " line)
+        |> to_list |> List.hd |> member "options" |> member "timeout" |> to_int)
+    | None -> fail "the stand-in did not say how it waited for the load" in
+  let margin = Yojson.Safe.Util.(member "answerMarginMs" (List.hd !steps).args |> to_int) in
+  let timeout = load_timeout () in
+  check bool "the load wait ends an answer margin before the run is stopped" true
+    (timeout >= 1 && timeout <= !stops_in_ms - margin);
+  stops_in_ms := margin;
+  ignore (on_tab Lane.Action.Back);
+  check int "with no time left it waits a millisecond, never without a bound" 1 (load_timeout ());
+  stops_in_ms := margin + 200;
+  navigation := "return {};";
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {tab_id; receipt; _}) ->
+     check int "a move that never lands answers for its tab" 1 tab_id;
+     check string "before its run is stopped, with where the tab still is"
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://b.test/","title":"B"}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a move that never landed was %s" (failure_kind other));
+  navigation := "";
+  stops_in_ms := 10_000;
   current := 0;
   check string "no earlier page" "tab 1 has no earlier page in its history"
     (before_effect "back from the first entry" (on_tab Lane.Action.Back));

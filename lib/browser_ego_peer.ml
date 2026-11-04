@@ -872,13 +872,18 @@ let reload t id =
    while waiting can fail as the page changes renderer (ego lite 0.6.0.16
    answered "Not attached to an active page" once on a move back to
    chrome://new-tab-page/, and the next read was on the entry); such a
-   failure says nothing about the move, so the wait goes on, within the
-   run's window. *)
+   failure says nothing about the move, so the wait goes on. Both waits, for
+   the entry and for its load, end a delivery margin before the run is
+   stopped ([runStopsAt]), so a move that does not land or a load that
+   outlasts the window still answers where the tab is instead of losing the
+   run. The load wait names at least a millisecond, because ego documents its
+   timeout only as a maximum duration and does not say what 0 means. *)
 let history_poll_ms = 50
 let traverse t id ~action ~delta ~side interaction =
   let* label = label_of t id in
   settled ~id ~action (run_step t ~window_s:(tab_window id interaction)
-    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
+    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms;
+      "answerMarginMs",`Int (Float.to_int (delivery_margin_s *. 1000.))])
     (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
@@ -895,8 +900,12 @@ let traverse t id ~action ~delta ~side interaction =
       "      try {";
       "        await page.cdp(\"Page.navigateToHistoryEntry\", {entryId: entry.id});";
       "        const landed = async () => { try { return (await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex === target; } catch (error) { return false; } };";
-      "        while (!(await landed())) await page.waitForTimeout(args.pollMs);";
-      "        await page.waitForLoadState();";
+      "        const answerBy = runStopsAt - args.answerMarginMs;";
+      "        while (!(await landed())) {";
+      "          if (Date.now() >= answerBy) throw new Error(\"tab \" + args.tabId + \" did not reach the \" + args.side + \" history entry within its run's window\");";
+      "          await page.waitForTimeout(args.pollMs);";
+      "        }";
+      "        await page.waitForLoadState(undefined, {timeout: Math.max(1, answerBy - Date.now())});";
       "      } catch (error) { failure = reason(error); }";
       moved_page_answer;
       "    }";

@@ -3871,6 +3871,7 @@ let close_tools_async_task state =
     state.tools_async_task_history_request;
   suspend_tools_async_task state;
   state.tools_async_task_source <- None;
+  state.tools_async_task_owed <- Masc_tui_owed_read.settled;
   tools_task_user_scroll state 0
 
 let reconcile_task_documents state ~mailbox =
@@ -3915,6 +3916,8 @@ let close_tools_async_detail state =
     state.tools_async_detail_request;
   suspend_tools_async_detail state;
   state.tools_async_detail_open <- false;
+  (* The next detail opened is another request; it owes nothing yet. *)
+  state.tools_async_detail_owed <- Masc_tui_owed_read.settled;
   tools_task_user_scroll state 0
 
 let launch_tools_async_detail ?(force=false) state ~mailbox =
@@ -9138,15 +9141,13 @@ let owe_selected_tools_async_detail_read state =
       owe_tools_async_detail_read state target.keeper_name)
     state.tools_async_selection
 
-(* Runs on every loop iteration. Only an open request detail owes a read:
-   opening it, or moving the selection, reads it. *)
+(* Runs on every loop iteration. Only an open request detail owes a read;
+   opening it reads it. A detail left open under another view keeps what it
+   owes, so a push that came meanwhile reads it on return. *)
 let launch_owed_tools_async_detail state ~mailbox =
-  let open_detail =
-    state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open
-    && Option.is_none state.tools_async_task_source
-  in
-  if not open_detail then state.tools_async_detail_owed <- Masc_tui_owed_read.settled
-  else begin
+  if not (state.tools_async_detail_open && Option.is_none state.tools_async_task_source) then
+    state.tools_async_detail_owed <- Masc_tui_owed_read.settled
+  else if state.view = Tools && state.tools_pane = Tools_async then begin
     let reading = Option.is_some state.tools_async_detail_request in
     let read =
       if reading then state.tools_async_detail_owed
@@ -9163,14 +9164,12 @@ let launch_owed_tools_async_detail state ~mailbox =
 let owe_tools_async_task_read state =
   state.tools_async_task_owed <- Masc_tui_owed_read.changed state.tools_async_task_owed
 
-(* Runs on every loop iteration. Only an open source Task owes a read. *)
+(* Runs on every loop iteration. Only an open source Task owes a read. A
+   Task left open under another view keeps what it owes. *)
 let launch_owed_tools_async_task state ~mailbox =
-  let open_task =
-    state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open
-    && Option.is_some state.tools_async_task_source
-  in
-  if not open_task then state.tools_async_task_owed <- Masc_tui_owed_read.settled
-  else begin
+  if not (state.tools_async_detail_open && Option.is_some state.tools_async_task_source) then
+    state.tools_async_task_owed <- Masc_tui_owed_read.settled
+  else if state.view = Tools && state.tools_pane = Tools_async then begin
     let reading = Option.is_some state.tools_async_task_body_request in
     let read =
       if reading then state.tools_async_task_owed

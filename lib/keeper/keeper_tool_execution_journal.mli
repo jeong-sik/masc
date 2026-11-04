@@ -120,7 +120,9 @@ val prepare : ?observation:source_observation -> base_path:string -> source -> (
     journal lives in the already-retained [keeper_msg_requests] owned tree.
     Only new creation can capture [observation], in the same durable write.
     Existing journals retain their first observation or its absence; replay
-    cannot populate or replace it with current input. *)
+    cannot populate or replace it with current input. Creating the journal,
+    like every journal update, announces [keeper_async_requests_changed] for
+    the source's Keeper; confirming an existing one announces nothing. *)
 
 val load
   : base_path:string

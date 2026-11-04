@@ -950,10 +950,22 @@ let cleanup_warning path failure =
   | Sys_error _ | Unix.Unix_error _ -> ()
 
 (* The async request detail reads this journal (run, owner, generation,
-   resolution), so a write it attempted -- landed or uncertain -- is a change
-   of the Keeper's async requests. *)
+   resolution), so a write the journal decided to make is announced as a
+   change of the Keeper's async requests, whatever its outcome. A write that
+   did not land costs a reader one read of an unchanged journal. *)
 let announce_written ~wrote (source : source) =
   if wrote then Keeper_msg_async_broadcast.requests_changed ~keeper_name:source.keeper_name
+
+(* Runs a journal file transaction and then announces [source]'s Keeper if
+   the transaction decided to write, also when it raised after deciding:
+   the bytes may have landed before the raise. *)
+let announcing ~wrote (source : source) transaction =
+  match transaction () with
+  | outcome -> announce_written ~wrote:!wrote source; outcome
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    announce_written ~wrote:!wrote source;
+    Printexc.raise_with_backtrace exn backtrace
 
 let update_existing_with_bytes journal decide = filesystem (fun () ->
   let* () = validate_owned_path ~root:journal.root ~path:journal.path ~create:false in
@@ -972,16 +984,14 @@ let update_existing_with_bytes journal decide = filesystem (fun () ->
           wrote := Option.is_some next;
           decided in
   let unpack = function None -> Error Missing_journal | Some result -> result in
-  let result =
-    match Fs_compat.update_existing_private_file_durable_locked_result journal.path callback with
-    | Fs_compat.Private_file_succeeded value -> unpack value
-    | Private_file_succeeded_with_cleanup_failure {value; cleanup_failure} ->
-      cleanup_warning journal.path cleanup_failure; unpack value
-    | Private_file_failed error -> Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error))
-    | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
-      Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)) in
-  announce_written ~wrote:!wrote journal.immutable_source;
-  result)
+  match announcing ~wrote journal.immutable_source (fun () ->
+      Fs_compat.update_existing_private_file_durable_locked_result journal.path callback) with
+  | Fs_compat.Private_file_succeeded value -> unpack value
+  | Private_file_succeeded_with_cleanup_failure {value; cleanup_failure} ->
+    cleanup_warning journal.path cleanup_failure; unpack value
+  | Private_file_failed error -> Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error))
+  | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
+    Error (Persistence_failed (Fs_compat.private_jsonl_transaction_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 
 let update_existing journal decide = update_existing_with_bytes journal (fun _ state -> decide state)
 
@@ -1026,15 +1036,13 @@ let prepare ?observation ~base_path immutable_source = filesystem (fun () ->
         | Ok state ->
             let journal = {journal with immutable_observation=state.source_observation} in
             None, Result.map (fun () -> journal) (check_source journal state) in
-  let result =
-    match Fs_compat.update_private_file_durable_locked_result path callback with
-    | Fs_compat.Private_file_succeeded value -> value
-    | Private_file_succeeded_with_cleanup_failure {value; cleanup_failure} -> cleanup_warning path cleanup_failure; value
-    | Private_file_failed error -> Error (Persistence_failed (Fs_compat.durable_append_error_to_string error))
-    | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
-      Error (Persistence_failed (Fs_compat.durable_append_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)) in
-  announce_written ~wrote:!wrote immutable_source;
-  result)
+  match announcing ~wrote immutable_source (fun () ->
+      Fs_compat.update_private_file_durable_locked_result path callback) with
+  | Fs_compat.Private_file_succeeded value -> value
+  | Private_file_succeeded_with_cleanup_failure {value; cleanup_failure} -> cleanup_warning path cleanup_failure; value
+  | Private_file_failed error -> Error (Persistence_failed (Fs_compat.durable_append_error_to_string error))
+  | Private_file_failed_with_cleanup_failure {error; cleanup_failure} ->
+    Error (Persistence_failed (Fs_compat.durable_append_error_to_string error ^ "; cleanup=" ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 
 let load_authority_state ~base_path ~keeper_name ~composition_run_id = filesystem (fun () ->
   if not (exact_name keeper_name) then Error (Invalid_source "invalid keeper name") else

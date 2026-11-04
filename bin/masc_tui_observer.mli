@@ -284,8 +284,9 @@ type event =
           [keeper_name], not [name]. *)
   | Keeper_async_requests_changed of { keeper : string }
       (** [keeper_async_requests_changed]: the Keeper's durable async message
-          requests changed. A server push: the reader re-fetches
-          [/api/v1/async-requests]. *)
+          requests, or one of its composition execution journals, changed. A
+          server push: the reader re-fetches [/api/v1/async-requests] and an
+          open request detail of that Keeper. *)
   | Keeper_skill_activations_changed of { keeper : string }
       (** [keeper_skill_activations_changed]: the Keeper's skill activation
           ledger changed ({!Masc.Keeper_skill_activations_changed_event}). A

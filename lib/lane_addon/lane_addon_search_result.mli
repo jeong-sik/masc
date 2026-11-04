@@ -12,9 +12,9 @@
 
     Cache identity follows the host tool: a repeated (query, limit,
     provider plan) request inside the host cache window is answered
-    from the cache, visibly marked with [cache_hit = true]. The host
-    cancellation policy is the tool's; an abandoned request is retried
-    at the next cycle, at most once per cycle. *)
+    from the cache with the same result. The host cancellation policy
+    is the tool's; an abandoned request is retried at the next cycle,
+    at most once per cycle. *)
 
 type request = {
   request_id : string;

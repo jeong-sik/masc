@@ -1027,6 +1027,54 @@ let () = test "dispatch_web_search_grounded_empty_answer_is_cached" (fun () ->
     assert (Tool_result.is_success cached);
     assert (Tool_result.data cached = data))))
 
+(* The Lane Add-on port reads the same cached answer the tool does. The first
+   request recovers from a failed provider. The repeat is served from the cache
+   although every provider would now fail, and delivers the same envelope: the
+   serving provider, the failed provider as a (provider, detail) pair, and the
+   search data. *)
+let () = test "web_search_addon_runner_cache_hit_matches_fresh_answer" (fun () ->
+  with_boot_override "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+  with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "900") (fun () ->
+    let run outcomes =
+      Tool_misc.with_web_search_simulation_for_test ~outcomes (fun () ->
+        Tool_misc_web_search.addon_search_runner
+          ~query:"addon cache parity contract" ~limit:(Some 3))
+    in
+    let delivered = function
+      | Ok envelope -> envelope
+      | Error message -> failwith ("addon runner refused: " ^ message)
+    in
+    let fresh = delivered (run
+        [ "searxng", `Error "search engines unavailable"
+        ; "exa", `Hits ["OCaml", "https://ocaml.org", "Language"] ]) in
+    assert (fresh.Lane_addon_search_result.serving_provider = Some "exa");
+    assert (fresh.provider_errors = ["searxng", "search engines unavailable"]);
+    let open Yojson.Safe.Util in
+    assert (fresh.search |> member "engine" |> to_string = "exa");
+    assert (fresh.search |> member "result_count" |> to_int = 1);
+    let cached = delivered (run ["exa", `Error "provider now unavailable"]) in
+    assert (cached = fresh))))
+
+let () = test "web_search_addon_runner_names_the_grounded_provider" (fun () ->
+  let envelope =
+    Tool_misc.with_web_search_simulation_for_test
+      ~outcomes:["brave_llm_context",
+                 `Grounded ["https://example.com/a", "Example A", ["first snippet"]]]
+      (fun () ->
+        Tool_misc_web_search.addon_search_runner
+          ~query:"addon grounded provider contract" ~limit:None)
+  in
+  match envelope with
+  | Error message -> failwith ("addon runner refused: " ^ message)
+  | Ok envelope ->
+    assert (envelope.Lane_addon_search_result.serving_provider
+            = Some "brave_llm_context");
+    assert (envelope.provider_errors = []);
+    let open Yojson.Safe.Util in
+    assert (envelope.search |> member "grounded" |> to_bool);
+    assert (envelope.search |> member "result_count" |> to_int = 1)
+)
+
 let () = test "web_search_empty_array_is_distinct_from_invalid_response" (fun () ->
   List.iter (fun (parse, empty) ->
     assert (parse empty = Ok []);

@@ -34,8 +34,8 @@
     behind the per-provider parsers), [provider_to_string] /
     [provider_of_string] / [parse_provider_csv] /
     [default_provider_order] / [provider_order],
-    [take_results], [normalize_hits], [provider_error],
-    [result_data], the per-provider \[fetch_*\] HTTP fetchers,
+    [take_results], [normalize_hits], [provider_failure],
+    [result_object], the per-provider \[fetch_*\] HTTP fetchers,
     [fetch_provider], the atomic immutable [cache_entries] map,
     [cache_key], [cache_lookup], [cache_store],
     and [search_impl].  All consumed

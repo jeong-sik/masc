@@ -350,7 +350,7 @@ let normalize_hits ~source tuples =
            published_at = None;
          })
 
-let result_data ~query ~search_url ~engine hits =
+let result_object ~query ~search_url ~engine hits =
   let results =
     hits
     |> List.map (fun hit ->
@@ -364,17 +364,13 @@ let result_data ~query ~search_url ~engine hits =
                ("published_at", Json_util.string_opt_to_json hit.published_at);
              ])
   in
-  Tool_args.ok_assoc
+  `Assoc
     [
-      ( "result",
-        `Assoc
-          [
-            ("query", `String query);
-            ("engine", `String engine);
-            ("search_url", `String search_url);
-            ("result_count", `Int (List.length hits));
-            ("results", `List results);
-          ] );
+      ("query", `String query);
+      ("engine", `String engine);
+      ("search_url", `String search_url);
+      ("result_count", `Int (List.length hits));
+      ("results", `List results);
     ]
 
 (* Grounded envelope: the fetched content lives once in [context_text];
@@ -395,7 +391,7 @@ let render_grounded_context_text ~query items =
     ; String.concat "\n\n---\n\n" (List.mapi render_item items)
     ]
 
-let grounded_result_data ~query context =
+let grounded_result_object ~query context =
   let sources =
     context.items
     |> List.map (fun item ->
@@ -406,23 +402,23 @@ let grounded_result_data ~query context =
                ("snippet_count", `Int (List.length item.snippets));
              ])
   in
-  Tool_args.ok_assoc
+  `Assoc
     [
-      ( "result",
-        `Assoc
-          [
-            ("query", `String query);
-            ("engine", `String (provider_to_string Brave_llm_context));
-            ("search_url", `String context.context_search_url);
-            ("grounded", `Bool true);
-            ("result_count", `Int (List.length context.items));
-            ("context_text", `String (render_grounded_context_text ~query context.items));
-            ("sources", `List sources);
-          ] );
+      ("query", `String query);
+      ("engine", `String (provider_to_string Brave_llm_context));
+      ("search_url", `String context.context_search_url);
+      ("grounded", `Bool true);
+      ("result_count", `Int (List.length context.items));
+      ("context_text", `String (render_grounded_context_text ~query context.items));
+      ("sources", `List sources);
     ]
 
-let provider_error provider message =
-  Printf.sprintf "%s: %s" (provider_to_string provider) message
+(* One provider's failed attempt in the chain. [provider] is the provider
+   name and [detail] its classified failure, e.g. "transport: ...". *)
+type provider_failure = { provider : string; detail : string }
+
+let provider_failure_to_string failure =
+  Printf.sprintf "%s: %s" failure.provider failure.detail
 
 (** Truncate transport errors before the " for " suffix that usually prefixes
     the request URL, so provider failure messages keep the useful curl detail
@@ -842,8 +838,46 @@ let cache_key ~query ~limit =
   String.concat "|"
     [ query; Int.to_string limit; String.concat "," (provider_plan ()) ]
 
+(* One answered search, shaped once for both callers. [data] is the tool
+   envelope [handle] returns. The Lane Add-on port reads the other fields, so
+   a cache hit and a fresh answer carry the same serving provider, failures
+   and search data. *)
+type answer = {
+  data : Yojson.Safe.t;
+  serving_provider : string;
+  failures : provider_failure list;
+  search : Yojson.Safe.t;
+}
+
+let answer_of ~query (payload, failures) =
+  let serving_provider, search =
+    match payload with
+    | Hits response ->
+        ( response.engine,
+          result_object ~query ~search_url:response.search_url
+            ~engine:response.engine response.hits )
+    | Grounded context ->
+        ( provider_to_string Brave_llm_context,
+          grounded_result_object ~query context )
+  in
+  let envelope = Tool_args.ok_assoc [ ("result", search) ] in
+  let data =
+    match envelope, failures with
+    | `Assoc fields, _ :: _ ->
+        `Assoc
+          (( "provider_errors",
+             `List
+               (List.map
+                  (fun failure -> `String (provider_failure_to_string failure))
+                  failures) )
+           :: fields)
+    | _, [] -> envelope
+    | _, _ :: _ -> envelope
+  in
+  { data; serving_provider; failures; search }
+
 type cache_entry = {
-  response : Yojson.Safe.t;
+  answer : answer;
   expires_at : float;
 }
 
@@ -863,21 +897,21 @@ let cache_lookup key now =
           (fun _ entry -> Stdlib.Float.compare entry.expires_at now > 0)
           current
       in
-      let response =
-        Option.map (fun entry -> entry.response) (Cache_by_key.find_opt key next)
+      let answer =
+        Option.map (fun entry -> entry.answer) (Cache_by_key.find_opt key next)
       in
       if Atomic.compare_and_set cache_entries current next
-      then response
+      then answer
       else publish_pruned_snapshot ()
     in
     publish_pruned_snapshot ())
 
-let cache_store key response now =
+let cache_store key answer now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
   if Stdlib.Float.compare ttl 0.0 > 0
   then
     Atomic_util.update cache_entries (fun current ->
-      Cache_by_key.add key { response; expires_at = now +. ttl } current)
+      Cache_by_key.add key { answer; expires_at = now +. ttl } current)
 
 (* Rendered when the provider chain is empty — the operator-facing
    remedy travels with the failure instead of a bare symptom. Shared
@@ -905,28 +939,29 @@ let no_provider_configured_message =
    Failed providers remain visible in the result instead of turning that
    answer into a runtime failure. Production and simulation share this loop. *)
 let search_chain ~fetch providers =
-  let rec loop first_empty errors = function
+  let rec loop first_empty failures = function
     | [] ->
-        (match first_empty, errors with
-         | Some payload, _ -> Ok (payload, List.rev errors)
+        (match first_empty, failures with
+         | Some payload, _ -> Ok (payload, List.rev failures)
          | None, [] -> Error No_provider_configured
          | None, _ :: _ ->
              Error (All_providers_failed
                ("all web search providers failed: "
-                ^ String.concat "; " (List.rev errors))))
+                ^ String.concat "; "
+                    (List.rev_map provider_failure_to_string failures))))
     | provider :: rest ->
         match fetch provider with
         | Ok (Hits { hits = _ :: _; _ } as payload)
         | Ok (Grounded { items = _ :: _; _ } as payload) ->
-            Ok (payload, List.rev errors)
+            Ok (payload, List.rev failures)
         | Ok (Hits _ | Grounded _ as payload) ->
             let first_empty =
               match first_empty with
               | Some _ -> first_empty
               | None -> Some payload
             in
-            loop first_empty errors rest
-        | Error error -> loop first_empty (error :: errors) rest
+            loop first_empty failures rest
+        | Error failure -> loop first_empty (failure :: failures) rest
   in
   loop None [] providers
 
@@ -935,7 +970,8 @@ let search_impl ~query ~limit =
     ~fetch:(fun provider ->
       fetch_provider ~query ~limit provider
       |> Result.map_error (fun error ->
-          provider_error provider (provider_error_to_string error)))
+          { provider = provider_to_string provider
+          ; detail = provider_error_to_string error }))
 
 let search_impl_cell = Atomic.make search_impl
 
@@ -969,8 +1005,8 @@ let simulated_search_impl ~outcomes ~query:_ ~limit =
         brave_response_of_body ~search_url:("test://" ^ provider_name) ~limit body
         |> Result.map (fun response -> Hits response)
         |> Result.map_error (fun error ->
-            provider_name ^ ": " ^ provider_error_to_string error)
-    | `Error message -> Error (provider_name ^ ": " ^ message))
+            { provider = provider_name; detail = provider_error_to_string error })
+    | `Error message -> Error { provider = provider_name; detail = message })
 
 let with_simulated_search_for_test ~outcomes f =
   with_search_impl_for_test (simulated_search_impl ~outcomes) f
@@ -1010,21 +1046,6 @@ let dependency_err ~tool_name ~start_time message =
   Tool_result.error ~failure_class:Tool_result.Dependency_unavailable ~tool_name
     ~start_time message
 
-let search_data ~query (payload, provider_errors) =
-  let data =
-    match payload with
-    | Hits response ->
-        result_data ~query ~search_url:response.search_url
-          ~engine:response.engine response.hits
-    | Grounded context -> grounded_result_data ~query context
-  in
-  match data, provider_errors with
-  | `Assoc fields, _ :: _ ->
-      `Assoc (("provider_errors", `List (List.map (fun error -> `String error) provider_errors))
-              :: fields)
-  | _, [] -> data
-  | _, _ :: _ -> data
-
 let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   match validate_query query with
@@ -1034,13 +1055,13 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       let now = Unix.gettimeofday () in
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
-      | Some cached -> data_ok ~tool_name ~start_time cached
+      | Some cached -> data_ok ~tool_name ~start_time cached.data
       | None ->
         (match (current_search_impl ()) ~query ~limit with
          | Ok response ->
-           let data = search_data ~query response in
-           cache_store key data now;
-           data_ok ~tool_name ~start_time data
+           let answer = answer_of ~query response in
+           cache_store key answer now;
+           data_ok ~tool_name ~start_time answer.data
          | Error No_provider_configured ->
              dependency_err ~tool_name ~start_time no_provider_configured_message
          | Error (All_providers_failed detail) ->
@@ -1052,38 +1073,6 @@ let handle ~tool_name ~start_time args : Tool_result.result =
    parity — and the envelope carries the serving provider's own typed result
    data, its name and the per-provider errors the chain kept. No credential,
    key or cache key crosses into the envelope. *)
-let addon_error_pair error =
-  (* The chain's error strings are "provider: class: detail"; the provider
-     name rides as the prefix. *)
-  match String.index_opt error ':' with
-  | Some idx when idx > 0 ->
-      (String.trim (String.sub error 0 idx),
-       String.trim (String.sub error (idx + 1) (String.length error - idx - 1)))
-  | _ -> ("unknown", error)
-
-let addon_search_envelope data =
-  (* The tool envelope wraps the provider's typed result under [result];
-     [provider_errors] rides at the top level only when errors exist. *)
-  let fields = match data with `Assoc fields -> fields | _ -> [] in
-  let provider_errors = match List.assoc_opt "provider_errors" fields with
-    | Some (`List entries) ->
-        List.filter_map (fun entry -> match entry with
-          | `String error -> Some (addon_error_pair error)
-          | _ -> None) entries
-    | _ -> [] in
-  let serving_provider = match List.assoc_opt "result" fields with
-    | Some `Assoc _ -> Option.bind (List.assoc_opt "result" fields)
-        (fun result -> match result with
-           | `Assoc inner -> (match List.assoc_opt "engine" inner with
-              | Some (`String engine) -> Some engine
-              | _ -> None)
-           | _ -> None)
-    | _ -> None in
-  let search = match List.assoc_opt "result" fields with
-    | Some result -> result
-    | None -> data in
-  { Lane_addon_search_result.serving_provider; provider_errors; search }
-
 let addon_search_runner ~query ~limit =
   match validate_query query with
   | Error message -> Error message
@@ -1091,35 +1080,21 @@ let addon_search_runner ~query ~limit =
     let limit = max 1 (min 10 (match limit with Some limit -> limit | None -> 5)) in
     let now = Unix.gettimeofday () in
     let key = cache_key ~query ~limit in
-    let envelope payload provider_errors =
-      let serving_provider, search = match payload with
-        | Hits response ->
-            (Some response.engine,
-             result_data ~query ~search_url:response.search_url
-               ~engine:response.engine response.hits)
-        | Grounded context ->
-            (Some (provider_to_string Brave_llm_context),
-             grounded_result_data ~query context) in
-      let data = match search, provider_errors with
-        | `Assoc fields, _ :: _ ->
-            `Assoc (("provider_errors",
-                     `List (List.map (fun error -> `String error) provider_errors))
-                    :: fields)
-        | _, [] -> search
-        | _, _ :: _ -> search in
-      cache_store key data now;
-      { Lane_addon_search_result.serving_provider;
-        provider_errors = List.map addon_error_pair provider_errors;
-        search = (match data with
-          | `Assoc fields -> (match List.assoc_opt "result" fields with
-              | Some result -> result
-              | None -> data)
-          | other -> other) } in
+    let envelope answer =
+      { Lane_addon_search_result.serving_provider = Some answer.serving_provider;
+        provider_errors =
+          List.map
+            (fun failure -> (failure.provider, String.trim failure.detail))
+            answer.failures;
+        search = answer.search } in
     match cache_lookup key now with
-    | Some cached -> Ok (addon_search_envelope cached)
+    | Some cached -> Ok (envelope cached)
     | None ->
         (match (current_search_impl ()) ~query ~limit with
-         | Ok (payload, provider_errors) -> Ok (envelope payload provider_errors)
+         | Ok response ->
+             let answer = answer_of ~query response in
+             cache_store key answer now;
+             Ok (envelope answer)
          | Error No_provider_configured -> Error no_provider_configured_message
          | Error (All_providers_failed detail) -> Error detail)
 
@@ -1127,7 +1102,7 @@ let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   let start_time = Tool_timing.start () in
   match simulated_search_impl ~outcomes ~query ~limit with
   | Ok response ->
-      data_ok ~tool_name:"masc_web_search" ~start_time (search_data ~query response)
+      data_ok ~tool_name:"masc_web_search" ~start_time (answer_of ~query response).data
   | Error No_provider_configured ->
       dependency_err ~tool_name:"masc_web_search" ~start_time
         no_provider_configured_message

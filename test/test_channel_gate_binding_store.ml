@@ -270,10 +270,12 @@ let test_committed_mutations_announce_their_connector () =
    | Ok _ -> ()
    | Error error -> fail (Store.mutation_error_to_string error));
   check (list string) "a committed bind announces" [ "fixture" ] !heard;
-  (match Store.bind store ~channel_id:"" ~keeper_name:"luna" ~actor_name:"dashboard" with
-   | Ok _ -> fail "an empty channel id was bound"
+  (* Unbinding a channel that has no binding is refused inside the durable
+     mutation, after the store was read. *)
+  (match Store.unbind store ~channel_id:"missing" ~actor_name:"dashboard" () with
+   | Ok () -> fail "a missing binding was removed"
    | Error _ -> ());
-  check (list string) "a rejected bind announces nothing" [ "fixture" ] !heard;
+  check (list string) "a refused change announces nothing" [ "fixture" ] !heard;
   (match Store.unbind store ~channel_id:"channel-1" ~actor_name:"dashboard" () with
    | Ok () -> ()
    | Error error -> fail (Store.mutation_error_to_string error));

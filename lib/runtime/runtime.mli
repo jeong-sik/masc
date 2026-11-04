@@ -240,7 +240,7 @@ val exact_output_target_source :
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
 
-type missing_catalog_model =
+type missing_catalog_model = Runtime_config_projection.missing_catalog_model =
   { runtime_id : string
   ; provider_id : string
   ; provider_label : string
@@ -258,7 +258,7 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
-type unavailable_runtime_assignment =
+type unavailable_runtime_assignment = Runtime_config_projection.unavailable_runtime_assignment =
   { keeper_name : string
   ; runtime_id : string
   }

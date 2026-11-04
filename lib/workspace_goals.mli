@@ -78,20 +78,6 @@ val handle_goal_transition
     active dispatch grants no retry. Publication failure is reported, rather
     than treating the scheduling wake as durable retry authority. *)
 
-module For_testing : sig
-  val answer_verifying_repeat :
-    ?evidence_refs:string list ->
-    Workspace_types.context -> goal_id:string -> Tool_result.result
-  (** Enter the retry path as if an earlier read observed Verifying. The
-      current Goal and proof are still read through the production path. *)
-
-  val finish_goal_request_complete :
-    ?evidence_refs:string list ->
-    Workspace_types.context -> goal_id:string -> Tool_result.result
-  (** Enter the initial request path as if an earlier read observed Executing.
-      The current Goal and proof are still read through the production path. *)
-end
-
 type verifier_decision =
   | Proof_proven
   | Proof_refuted of { reason : string }

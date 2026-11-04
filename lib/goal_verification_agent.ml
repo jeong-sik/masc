@@ -53,9 +53,8 @@ type process_outcome =
   | Superseded
   | Deferred of deferral
 
-(* The Board notice keys its repeat check on [gate], as a Task stall does: a
-   review the evaluator declined keeps the evaluator's gate name, every other
-   stop is keyed by its constructor. *)
+(* A review the evaluator declined keeps the evaluator's gate name; every
+   other stop is named by its constructor. *)
 let deferral_gate = function
   | Review_not_bound _ -> "Review_not_bound"
   | Proof_lookup_unavailable _ -> "Proof_lookup_unavailable"
@@ -63,10 +62,6 @@ let deferral_gate = function
   | Verdict_without_reason -> "Verdict_without_reason"
   | Commit_refused _ -> "Commit_refused"
 ;;
-
-(* A review that raised is keyed the same way, by its own name, and is the
-   gate the Task verifier's notice uses for the same event. *)
-let raised_gate = "Raised"
 
 let deferral_detail = function
   | Not_reviewed { detail; model_absent_runtimes; _ } ->
@@ -324,44 +319,6 @@ let defer ~goal_id deferral =
   Deferred deferral
 ;;
 
-(* Report the scheduling owner's actual disposition. The Board neither arms
-   retries nor supplies their authority. *)
-let announce_stall ~goal_id ~request_id ~disposition ~gate ~detail ~evaluator_runtime =
-  match
-    Verification_protocol.notify_stalled_verification_with_runtime
-      ~authority:Workspace_goals.verifier_authority
-      ~subject:(Verification_protocol.Goal_review { goal_id; request_id; disposition })
-      ~gate
-      ~detail
-      ~evaluator_runtime
-  with
-  | () -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Misc.error
-      "goal verifier stall notice did not reach the Board; the line above \
-       stands goal_id=%s request_id=%s error=%s"
-      goal_id
-      request_id
-      (Printexc.to_string exn)
-;;
-
-let announce_deferral ~goal_id ~request_id ~disposition deferral =
-  let evaluator_runtime =
-    match deferral with
-    | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
-    | Review_not_bound _ | Proof_lookup_unavailable _ | Verdict_without_reason
-    | Commit_refused _ -> None
-  in
-  announce_stall
-    ~goal_id
-    ~request_id
-    ~disposition
-    ~gate:(deferral_gate deferral)
-    ~detail:(deferral_detail deferral)
-    ~evaluator_runtime
-;;
-
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
 let bind_review config ~goal_id =
@@ -383,46 +340,10 @@ let observe_original_read config ~goal_id read =
       Option.iter (fun observed -> ignore (finish_original_read observed None)) observed;
       result
     | Error error as result ->
-      Option.iter (fun observed ->
-        (* Keep the failure even if the binding cannot be reread. Unknown
-           authority is not a successful original read. Projection checks the
-           current binding; only its Board notification needs this reread. *)
-        if finish_original_read observed (Some error) then
-          match original_read_binding config ~goal_id with
-          | Some current when same_original_binding observed.binding current ->
-            announce_deferral ~goal_id ~request_id:current.request_id
-              ~disposition:Verification_protocol.No_retry_armed
-              (Proof_lookup_unavailable {detail=worker_detail error})
-          | Some _ | None -> ()) observed;
+      (* Keep the failure. Unknown authority is not a successful original
+         read. Projection checks the current binding. *)
+      Option.iter (fun observed -> ignore (finish_original_read observed (Some error))) observed;
       result)
-
-(* A review that raised stalls the request the way a deferral does, under the
-   gate the Task verifier uses for the same event. Nothing arms a retry: the
-   scheduling owner isolates the exception and the Goal waits in Verifying for
-   the next request_complete. Only a request that still stands is announced.
-   An exception while reading it is logged, not raised over the review's own
-   exception; a Goal that has left Verifying, or a read that returns an error,
-   posts nothing. *)
-let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
-  match bind_review config ~goal_id with
-  | Ok (_, (current, _, _)) when String.equal current request_id ->
-    announce_stall
-      ~goal_id
-      ~request_id
-      ~disposition:Verification_protocol.No_retry_armed
-      ~gate:raised_gate
-      ~detail
-      ~evaluator_runtime
-  | Ok _ | Error _ -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Misc.error
-      "goal verifier could not read the request to announce a raised review \
-       goal_id=%s request_id=%s error=%s"
-      goal_id
-      request_id
-      (Printexc.to_string exn)
-;;
 
 let new_run () : Worker.run_identity =
   {run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()}
@@ -463,7 +384,7 @@ let retained_recovery_work config (work : pending_work list) =
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None)
-    ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> Verification_protocol.No_retry_armed)
+    ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> ())
     config (work : pending_work) : process_outcome =
   let store = owner_store config in
   let registry = Registry.global () in
@@ -597,8 +518,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
          | Deferred deferral ->
            (match bind_review config ~goal_id:work.goal_id with
             | Ok (_, (current,_,_)) when current=request_id ->
-              let disposition = schedule_retry ~goal_id:work.goal_id ~request_id deferral in
-              announce_deferral ~goal_id:work.goal_id ~request_id ~disposition deferral
+              schedule_retry ~goal_id:work.goal_id ~request_id deferral
             | Ok _ | Error _ -> ())
          | Committed | Superseded -> ());
         Ok outcome in
@@ -628,9 +548,6 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
     (match !active with
      | None -> ()
      | Some retained ->
-       let subject = Original.subject (Worker.original retained) in
-       announce_raised ~config ~goal_id:work.goal_id ~request_id:subject.request_id
-         ~evaluator_runtime:None ~detail:(Printexc.to_string exn);
        match reload_original store retained with
        | Error detail -> Log.Misc.error "raised Goal original read failed: %s" detail
        | Ok saved ->
@@ -806,8 +723,7 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
       else admit ()
     in
     (match admit () with
-    | `Wake_retained -> Verification_protocol.No_retry_armed
-    | `Already_armed -> Verification_protocol.Retry_scheduled {delay=Shared_timer}
+    | `Wake_retained | `Already_armed -> ()
     | `Admitted ->
       let seconds = Verification_retry.delay
           ~retry_interval_sec:Env_config.Timeouts.maintenance_pulse_interval_sec
@@ -829,10 +745,9 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
                 reread_after Env_config.Timeouts.maintenance_pulse_interval_sec
         in
         reread_after seconds;
-        `Stop_daemon);
-      Verification_protocol.Retry_scheduled {delay=Full_interval {seconds}})
+        `Stop_daemon))
   | Not_reviewed _ | Review_not_bound _ | Proof_lookup_unavailable _
-  | Verdict_without_reason | Commit_refused _ -> Verification_protocol.No_retry_armed
+  | Verdict_without_reason | Commit_refused _ -> ()
 ;;
 
 (* Resolve the abandon promise of the Goal's claimed review, if one runs.

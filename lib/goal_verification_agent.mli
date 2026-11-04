@@ -95,17 +95,15 @@ module For_testing : sig
     | Commit_refused of { detail : string }
 
   (** How one review ended. [Deferred] carries why no verdict was committed;
-      the pending row it names is still durable. A deferral of a request
-      that still stands is posted once per (Goal, request, gate) through
-      {!Verification_protocol.notify_stalled_verification}. *)
+      the pending row it names is still durable. *)
   type process_outcome =
     | Committed
     | Superseded
     | Deferred of deferral
 
   val deferral_gate : deferral -> string
-  (** The [gate] the Board notice keys its repeat check on: the evaluator's
-      gate name for [Not_reviewed], the constructor name otherwise. *)
+  (** The evaluator's gate name for [Not_reviewed], the constructor name
+      otherwise. *)
 
   val deferral_detail : deferral -> string
 

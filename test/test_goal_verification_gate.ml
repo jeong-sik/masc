@@ -1439,14 +1439,26 @@ let test_bound_retry_does_not_create_or_replace_a_request () =
   check string "the replacement remains untouched" replacement observed
 ;;
 
-(* Enter the same retry function the public handler selects after seeing a
-   Verifying Goal, but first make the intervening transition. *)
+(* [request_complete] as a client sends it after reading the Goal: the
+   expected binding names the phase, revision and request it read. *)
+let request_complete_bound ctx ~goal_id ?evidence_refs expected =
+  dispatch ctx ~name:"masc_goal_transition"
+    ([ "goal_id", `String goal_id; "action", `String "request_complete";
+       "expected_verification", `Assoc expected ]
+     @ match evidence_refs with
+       | None -> []
+       | Some refs -> [ "evidence_refs", `List (List.map (fun r -> `String r) refs) ])
+;;
+
+(* A retry bound to the Verifying Goal it read is refused once another
+   transition has moved that Goal. *)
 let test_verifying_repeat_refuses_changed_goal () =
   List.iter (fun action ->
     with_workspace @@ fun config ->
     let ctx = workspace_ctx config in
     let goal_id = create_goal ctx ("Retry races " ^ action) in
     ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+    let request_id, Goal_store.Criterion { revision; _ } = proof_identity config goal_id in
     ignore (must_succeed "intervening Goal transition" (transition ctx goal_id action));
     let goal_path = Goal_store.goals_path config in
     let ledger_path = Goal_verification.verifications_path config in
@@ -1458,8 +1470,9 @@ let test_verifying_repeat_refuses_changed_goal () =
     Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
       (fun () ->
         List.iter (fun evidence_refs ->
-          let answer = Workspace_goals.For_testing.answer_verifying_repeat
-            ?evidence_refs ctx ~goal_id in
+          let answer = request_complete_bound ctx ~goal_id ?evidence_refs
+              [ "phase", `String "verifying"; "criterion_revision", `String revision
+              ; "request_id", `String request_id ] in
           let error = must_fail ("retry after " ^ action) answer in
           check string "current phase is a conflict" "conflict" (json_state error ["error_code"]);
           check string "rejected retry leaves Goal unchanged" before_goal (Fs_compat.load_file goal_path);
@@ -1469,13 +1482,15 @@ let test_verifying_repeat_refuses_changed_goal () =
     ["reopen"; "drop"; "pause"; "block"]
 ;;
 
-(* Model an initial request that observed Executing before another actor
-   created a proof request, including a verdict whose phase write is pending. *)
+(* An initial request bound to the Executing Goal it read is refused once
+   another actor created a proof request, including a verdict whose phase
+   write is pending. *)
 let test_initial_request_refuses_a_new_verifying_goal () =
   List.iter (fun outcome ->
     with_workspace @@ fun config ->
     let ctx = workspace_ctx config in
     let goal_id = create_goal ctx "Initial request races verification" in
+    let Goal_store.Criterion { revision; _ } = current_criterion config goal_id in
     ignore (must_succeed "another actor requests completion"
       (transition ctx goal_id "request_complete"));
     (match outcome with
@@ -1497,8 +1512,8 @@ let test_initial_request_refuses_a_new_verifying_goal () =
     Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
       (fun () ->
         List.iter (fun evidence_refs ->
-          let answer = Workspace_goals.For_testing.finish_goal_request_complete
-            ?evidence_refs ctx ~goal_id in
+          let answer = request_complete_bound ctx ~goal_id ?evidence_refs
+              [ "phase", `String "executing"; "criterion_revision", `String revision ] in
           let error = must_fail "stale initial request" answer in
           check string "current verifying phase is a conflict" "conflict" (json_state error ["error_code"]);
           check string "Goal is unchanged" before_goal (Fs_compat.load_file goal_path);
@@ -1540,14 +1555,15 @@ let test_verifying_repeat_preserves_terminal_evidence_contract () =
       (fun _ ~goal_id:_ -> incr wakes) in
     Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.goal_verification_pending_fn old)
       (fun () ->
-        let rejected = Workspace_goals.For_testing.answer_verifying_repeat
-            ~evidence_refs:["task:retry-evidence"] ctx ~goal_id
+        let rejected = dispatch ctx ~name:"masc_goal_transition"
+            [ "goal_id", `String goal_id; "action", `String "request_complete"
+            ; "evidence_refs", `List [ `String "task:retry-evidence" ] ]
           |> must_fail "terminal Goal rejects unconsumed evidence" in
         check string "evidence cannot be silently dropped" "precondition_failed"
           (json_state rejected ["error_code"]);
         check string "evidence refusal preserves Goal" before_goal (Fs_compat.load_file goal_path);
         check string "evidence refusal preserves proof" before_ledger (Fs_compat.load_file ledger_path);
-        let accepted = Workspace_goals.For_testing.answer_verifying_repeat ctx ~goal_id
+        let accepted = transition ctx goal_id "request_complete"
           |> must_succeed "terminal Goal remains a no-op" in
         check bool "no evidence permits an already-complete response" true (json_bool accepted ["noop"]);
         check string "response uses the current Goal phase"

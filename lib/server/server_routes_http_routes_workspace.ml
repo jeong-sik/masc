@@ -881,8 +881,9 @@ let checkout_of_directory ~base ~path =
    as Git prints it; the result is the same file as a [base]-relative path, or
    [None] when the file reader would refuse it (confidential component, path
    escape, symlink out of the workspace), when it is not a regular file, or when
-   it no longer exists. *)
-let vetted_regular_file ~base ~root repo_relative =
+   it no longer exists. With [max_bytes], a file larger than that is refused
+   too, the way the file reader refuses it. *)
+let vetted_regular_file ?max_bytes ~base ~root repo_relative =
   let lexical_path = Filename.concat root repo_relative in
   let relative = rel_under base lexical_path in
   match resolve_workspace_file base relative with
@@ -893,9 +894,12 @@ let vetted_regular_file ~base ~root repo_relative =
          opens the selection. *)
       if not (String.equal file.lexical_path lexical_path) then None
       else
-        match (Unix.stat file.resolved_path).Unix.st_kind = Unix.S_REG with
-        | true -> Some relative
-        | false -> None
+        match Unix.stat file.resolved_path with
+        | { Unix.st_kind = Unix.S_REG; st_size; _ } ->
+            (match max_bytes with
+             | Some limit when st_size > limit -> None
+             | Some _ | None -> Some relative)
+        | { Unix.st_kind = _; _ } -> None
         | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
 
 let workspace_file_catalog ~base ~path =
@@ -1118,7 +1122,10 @@ let workspace_search ~base ~path ~query ~ignore_case =
               match Hashtbl.find_opt vetted repo_relative with
               | Some answer -> answer
               | None ->
-                  let answer = vetted_regular_file ~base ~root repo_relative in
+                  let answer =
+                    vetted_regular_file ~max_bytes:workspace_file_read_max_bytes ~base ~root
+                      repo_relative
+                  in
                   Hashtbl.add vetted repo_relative answer;
                   answer
             in

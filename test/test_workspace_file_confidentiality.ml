@@ -715,6 +715,11 @@ let test_search_reports_only_files_the_reader_serves () =
       catalog_git ~cwd:base [ "init"; "-b"; "main" ];
       write_file (Filename.concat base "src/selected.ml") "let needle = 1\n";
       write_file (Filename.concat base "elsewhere/other.ml") "let needle = 2\n";
+      (* Git prints the name verbatim, newline included. *)
+      write_file (Filename.concat base "elsewhere/new\nline.ml") "let needle = 3\n";
+      (* The file reader refuses this one as too large, so the search must too. *)
+      write_file (Filename.concat base "big.log")
+        ("needle\n" ^ String.make (4 * 1024 * 1024) 'x' ^ "\n");
       write_file (Filename.concat base ".gitignore") "*.ignored\n";
       write_file (Filename.concat base "hidden.ignored") "needle ignored\n";
       write_file (Filename.concat base "tracked.ignored") "needle tracked\n";
@@ -729,8 +734,14 @@ let test_search_reports_only_files_the_reader_serves () =
       let found = search_or_fail ~base ~path:"" "needle" in
       check string "root stays workspace relative" "" found.search_root;
       check (list string) "only files the file reader serves"
-        [ "elsewhere/other.ml"; "src/selected.ml"; "tracked.ignored" ]
+        [ "elsewhere/new\nline.ml"; "elsewhere/other.ml"; "src/selected.ml"
+        ; "tracked.ignored" ]
         (search_paths found);
+      (match W.For_testing.resolve_workspace_file base "big.log" with
+       | Error _ -> Alcotest.fail "big.log should resolve"
+       | Ok file ->
+           check bool "the reader does refuse big.log" true
+             (Result.is_error (W.For_testing.load_workspace_file_content file)));
       check bool "not truncated" false found.search_truncated;
       List.iter
         (fun (m : W.workspace_search_match) ->
@@ -835,6 +846,15 @@ let test_search_lines_are_valid_utf8_within_the_byte_limit () =
       (fun (m : W.workspace_search_match) ->
         check bool (m.sm_path ^ " is valid UTF-8") true (String.is_valid_utf_8 m.sm_text))
       found.search_matches)
+
+let test_search_says_so_when_one_file_hit_the_per_file_cap () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    write_file (Filename.concat base "many.txt")
+      (String.concat "" (List.init 25 (fun line -> Printf.sprintf "needle %d\n" line)));
+    let found = search_or_fail ~base ~path:"" "needle" in
+    check int "git stops reading the file at 20 rows" 20 (List.length found.search_matches);
+    check bool "the per-file cap is reported" true found.search_truncated)
 
 let test_search_caps_the_answer_and_says_so () =
   with_temp_dir (fun base ->
@@ -1373,6 +1393,8 @@ let () =
             test_search_is_fixed_string_and_honours_ignore_case
         ; test_case "lines are valid UTF-8 within the byte limit" `Quick
             test_search_lines_are_valid_utf8_within_the_byte_limit
+        ; test_case "reports the per-file cap" `Quick
+            test_search_says_so_when_one_file_hit_the_per_file_cap
         ; test_case "caps the answer and says so" `Quick
             test_search_caps_the_answer_and_says_so
         ] )

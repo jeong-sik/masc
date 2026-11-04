@@ -171,7 +171,9 @@ type workspace_search_match = {
 type workspace_search = {
   search_root : string;
   search_matches : workspace_search_match list;  (** At most 200. *)
-  search_truncated : bool;  (** More readable matches existed than returned. *)
+  search_truncated : bool;
+      (** More readable matches may exist: past the 200 returned, or a file
+          that reached git's per-file cap of 20 rows. *)
 }
 
 type workspace_search_error =
@@ -270,7 +272,7 @@ module For_testing : sig
     (workspace_search, workspace_search_error) result
   (** Fixed-string search of the checkout containing directory [path],
       stopping at [base]. Only files the file reader would serve are
-      reported; a [query] with a line break or control character, outside 2
+      reported, including its size limit; a [query] with a line break or control character, outside 2
       to 200 bytes, or not valid UTF-8 is [Search_invalid_query]. *)
 
   val workspace_file_catalog :

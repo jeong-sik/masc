@@ -9,14 +9,6 @@ val code_history_viewport : Masc_tui_types.state -> int * int
 (** Physical history row count and visible row budget at the file-pane width. *)
 val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
 (** The record owning the top visible row; coverage and failure rows have no owner. *)
-(** The commit diff a [d] on the selected history entry opens: only a commit
-    row, and only while a file is open to name the path. A Keeper record, no
-    selection or no open file answer [None]. *)
-val history_commit_diff_target :
-  file_path:string option ->
-  Masc_tui_types.code_history_entry option ->
-  Masc_tui_types.code_diff_target option
-
 val toggle_history_change : Masc_tui_types.state -> bool
 (** Expand or collapse the selected Keeper record's recorded text. Returns false
     for commits and unowned rows. The cursor remains on that listing occurrence,

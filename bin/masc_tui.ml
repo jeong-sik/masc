@@ -37896,7 +37896,7 @@ Use relative paths for resources already held in the package. -->
               the same overlay the working-tree diff uses; a Keeper record
               expands its recorded text in place. *)
            (match
-              Masc_tui_render_code.history_commit_diff_target
+              history_commit_diff_target
                 ~file_path:(Masc_tui_fetched.current_key state.code_file)
                 (Masc_tui_render_code.code_history_selected state)
             with
@@ -37904,8 +37904,12 @@ Use relative paths for resources already held in the package. -->
                 state.code_diff_open <- true;
                 state.code_history_open <- false;
                 state.code_notes_open <- false;
+                (* A failed or stale read starts again, so an ambiguous
+                   abbreviation or a refused read can be retried by pressing
+                   d once more. *)
                 (match Masc_tui_fetched.current state.code_diff with
-                 | Some (loaded, _) when code_diff_target_equal loaded target -> ()
+                 | Some (loaded, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Loading))
+                   when code_diff_target_equal loaded target -> ()
                  | Some _ | None ->
                      Masc_tui_code_requests.launch_diff_load state
                        ~host:server_peer_host
@@ -37923,7 +37927,7 @@ Use relative paths for resources already held in the package. -->
            (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
             | Some path ->
-                if state.code_diff_open then state.code_diff_open <- false
+                if state.code_diff_open then close_code_diff state
                 else begin
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
@@ -39006,7 +39010,7 @@ Use relative paths for resources already held in the package. -->
                 cancel_theme_preview state
             | Code ->
                 if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_diff_open then close_code_diff state
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file = Right_pane then
@@ -39229,7 +39233,7 @@ Use relative paths for resources already held in the package. -->
            (match state.view with
             | Code ->
                 if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_diff_open then close_code_diff state
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file = Right_pane then

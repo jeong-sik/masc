@@ -11267,6 +11267,26 @@ let diff_target_for_refresh state ~base_ref ~path =
   | Some (Diff_commit _ | Diff_worktree _) | None -> Diff_worktree { path; base_ref }
 ;;
 
+(* The commit diff a [d] on the selected history entry opens: only a commit
+   row, and only while a file is open to name the path. A Keeper record, no
+   selection or no open file answer [None]. *)
+let history_commit_diff_target ~file_path entry =
+  match entry, file_path with
+  | Some (Hist_commit row), Some path ->
+    Some (Diff_commit { path; commit = row.Tui_decode.gl_hash })
+  | Some (Hist_commit _), None | Some (Hist_keeper_change _), _ | None, _ -> None
+;;
+
+(* Leaving a commit diff returns to the history it was opened from, at the
+   position it was left, the way the Task view does. Any other diff just
+   closes. *)
+let close_code_diff state =
+  state.code_diff_open <- false;
+  match Masc_tui_fetched.current_key state.code_diff with
+  | Some (Diff_commit _) -> state.code_history_open <- true
+  | Some (Diff_worktree _) | None -> ()
+;;
+
 let clear_goal_action_error state ~goal_id =
   state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
 

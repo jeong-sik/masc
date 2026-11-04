@@ -271,12 +271,6 @@ let code_history_selected_occurrence (state : state) =
 let code_history_selected state =
   Option.map snd (code_history_selected_occurrence state)
 
-let history_commit_diff_target ~file_path entry =
-  match entry, file_path with
-  | Some (Hist_commit row), Some path ->
-      Some (Diff_commit { path; commit = row.Masc.Tui_decode.gl_hash })
-  | Some (Hist_commit _), None | Some (Hist_keeper_change _), _ | None, _ -> None
-
 let toggle_history_change state =
   match code_history_selected_occurrence state with
   | Some (index, Hist_keeper_change _) ->

@@ -198,7 +198,7 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 
 ### 4.1 데이터별 층과 결정 (2026-11-04)
 
-모든 알림은 `workspace_dataset_changed {dataset[, keeper]}`(`lib/workspace_dataset_event.ml`) 하나로 낸다. 새 데이터는 닫힌 타입에 생성자를 하나 더하고, TUI 는 그 생성자마다 읽기 빚을 하나 더한다. 데이터 종류를 문자열로 가르지 않는다.
+모든 알림은 `workspace_dataset_changed {dataset[, keeper | instance_id]}`(`lib/workspace_dataset_event.ml`) 하나로 낸다. 새 데이터는 닫힌 타입에 생성자를 하나 더하고, TUI 는 그 생성자마다 읽기 빚을 하나 더한다. 데이터 종류를 문자열로 가르지 않는다.
 
 | 데이터 | 쓰는 곳에서 내는 알림 | TUI | PR |
 |---|---|---|---|
@@ -223,16 +223,17 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 | runtime probe | 서버 probe 루프. 요청한 probe 는 늘, 주기 probe 는 찾은 값이 바뀔 때 `runtime_probe` | Runtime 화면 빚 | #48119 |
 | runtime 실행 기록 | 결정·비용 줄이 쓰일 때, 행이 24시간 창을 벗어날 때 `runtime_metrics`. 파일마다 늘어난 줄만 읽는다 | Runtime 화면 빚 | #48122 |
 | 답변 follow-up | (스트림) | 완료에서 끝, 실패는 백오프, Approvals 에서만 | #48125 |
-| 2초 Cadence | — | 전체 읽기는 Revalidate 로만. 서버에 닿지 않으면 2초부터 두 배씩 최대 30초 간격으로 다시 확인 | #48129 |
+| 2초 Cadence | — | 전체 읽기는 Revalidate 로만. 서버에 닿지 않거나, workspace 가 확인되지 않거나, 재확인 묶음이 버려지면 2초부터 두 배씩 최대 30초 간격으로 다시 확인 | #48129 |
+| Lanes 목록 | 서버가 2초마다 inventory 를 만들어 만든 시각을 뺀 값을 이전 값과 비교하고, 다를 때만 식별자 없이 `lanes` | Lanes 화면에 있을 때 빚. 들어올 때도 빚 | #48148 |
+| Lane Add-ons 창 | 서버가 2초마다 운영자 Inspect 를 instance 별로(action receipt 포함) 비교해, 바뀌거나 생기거나 사라진 instance 마다 `lane_addon_instance {instance_id}`, 선언 적용 상태가 바뀌면 `lane_addon_configuration` | 창이 그 instance 를 보여 줄 때 빚(Overview 는 전부). 창이 막혀 있으면 configuration 만 | #48158 |
+| Skill 사용 집계(`/api/v1/skills`) | (알림은 `skill_activations {keeper}` 그대로) | 서버가 Keeper 별 집계를 원장 revision 이 바뀔 때까지 들고 있어 바뀐 Keeper 만 다시 센다 | #48162 |
 
 아직 옮기지 않은 것과 정한 방향이다.
 
 | 데이터 | 방향 | 먼저 할 일 |
 |---|---|---|
-| Lanes 목록 | 그리는 값(instance phase·presence·revision, application, browser·machine 요약)을 계산해 이전 값과 다를 때만, 식별자 없이 알린다. worker 커밋은 1시간 727건인데 같은 시간 Lanes 가 그리는 값은 한 번도 바뀌지 않았다(11-04 실측) | `lane_addon_runtime` 의 상태 쓰기 14곳과 그 밖의 쓰기를 setter 하나로 모은다 |
-| Lane Add-ons Inspect | 열린 instance 의 커밋 알림을 받는다. `seq` 를 그리므로 커밋 하나가 변화 하나다 | 위와 같다. instance id 는 visibility 를 거른 독자에게만 보낸다 |
 | Memory health | 서버가 Keeper 별 health 를 저장할 때 증분으로 들고 그 Keeper 만 알린다. TUI 는 바뀐 Keeper 행만 읽는다 | 입력 저장소 10곳 넘는 쓰기 자리 정리, 저널을 처음부터 읽는 계산 제거 |
-| Skill 사용 집계(`/api/v1/skills`) | 서버가 증분으로 집계한다. 지금은 사용 집계 창을 보는 동안 원장 줄마다 모든 Keeper 원장을 다시 읽는다(#48062) | 집계 상태를 어디에 둘지 |
+| 재확인 묶음 안의 읽기 하나가 실패한 경우 | 연결 표시가 다음 재확인까지 Degraded 로 남는다. 알림이 없는 묶음 출처는 실패해도 다시 읽지 않는다(2초 Cadence 가 가리던 빈틈) | 출처별 실패를 들고 표시를 그 집합에서 계산 |
 | 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0486 | RFC-0486 |
 
 화면에 "N초 전"을 다시 그리는 타이머는 데이터를 읽지 않으므로 남긴다. Lz 가 지우는 것은 읽기를 일으키는 2초 블록과 `--refresh` 다.
@@ -256,6 +257,7 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 
 ## 7. 트레이드오프와 한계
 
+- Lanes 와 Add-ons 는 쓰는 곳에서 알리지 않고 서버가 2초마다 비교한다. 그리는 값을 바꾸는 쓰기가 `lane_addon_runtime.ml` 안에서만 필드 약 15개, 약 70곳이고, 실행 레지스트리·선언 디렉터리·binding 파일·runtime.toml 도 입력이라, 한 곳만 빠뜨려도 화면이 조용히 멈추기 때문이다. 대신 서버는 보는 사람이 없어도 2초마다 inventory 와 Inspect 를 만든다(예전 TUI 하나의 폴링과 같은 양). Add-ons 는 host cycle 처럼 자주 바뀌는 값도 비교해서 바쁜 instance 는 2초마다 알릴 수 있다.
 - 알림이 빠진 쓰기 경로가 있으면 그 화면이 멈춘다. 지금은 2초 읽기가 이 빈틈을 가린다. 그래서 층마다 쓰는 곳을 전수로 확인해야 한다.
 - 알림이 아주 잦은 데이터는 알림 → 다시 읽기가 폴링보다 요청이 많을 수 있다. 예를 들어 `keeper_composite_changed` 는 키퍼의 턴 단계가 바뀔 때마다 나가고, `keeper_tool_call` 은 도구 호출마다 나간다. single-flight 는 읽기 사이에 간격을 두지 않아서, 알림이 계속 오면 응답 시간마다 한 번씩 읽는다. 대상 이름으로 거르는 것이 먼저다. 층마다 키퍼 40명 workspace 에서 그 화면의 초당 요청 수를 잰다. 지금의 2초 읽기(초당 0.5번)보다 많으면, 그 데이터는 이 층에서 신호 → 다시 읽기를 쓰지 않고 타입 스트림(§3.1)으로 옮긴다. 이 비교는 설계를 고르는 기준이다. 런타임에 읽기를 막는 숫자 게이트를 만들지 않는다.
 - 알림이 없는 옛 서버에 새 TUI 를 붙이면, 해당 데이터는 화면을 열 때 한 번만 읽는다.
@@ -265,4 +267,4 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
 
-정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0486 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.
+정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0486 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 와 Add-ons 는 서버가 2초마다 그리는 값을 비교한다(§7). Add-ons 알림은 instance id 를 싣고, TUI 는 그 instance 를 보여 줄 때만 읽는다. Skill 원장 쓰기는 Keeper 이름을 받는다. Home Health 줄은 서버가 정한 간격으로 다시 계산해 바뀔 때만 알린다. Runtime probe 는 서버가 루프를 갖고 결과가 바뀔 때 알린다. ask follow-up 은 완료에서 끝나고 실패는 백오프로 다시 읽으며 Approvals 를 떠나면 멈춘다.

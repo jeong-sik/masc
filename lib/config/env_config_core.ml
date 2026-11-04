@@ -431,16 +431,20 @@ let base_path_env_key = "MASC_BASE_PATH"
    `masc` can find it. It cannot live inside the workspace: a caller that does
    not know the base path yet cannot read a file under it. The user-level
    config dir is the one place both sides can name without being told. *)
+let masc_config_dir_of ~xdg_config_home ~home =
+  let absolute dir = if Filename.is_relative dir then None else Some dir in
+  match Option.bind (trim_opt xdg_config_home) absolute, trim_opt home with
+  | Some dir, (Some _ | None) -> Some (Filename.concat dir "masc")
+  | None, Some home -> Some (Filename.concat (Filename.concat home ".config") "masc")
+  | None, None -> None
+
+let masc_config_dir_opt () =
+  masc_config_dir_of
+    ~xdg_config_home:(raw_value_opt "XDG_CONFIG_HOME")
+    ~home:(raw_value_opt "HOME")
+
 let default_base_path_record_path_opt () =
-  let masc_config_dir =
-    match raw_value_opt "XDG_CONFIG_HOME" |> trim_opt with
-    | Some dir -> Some (Filename.concat dir "masc")
-    | None ->
-      Option.map
-        (fun home -> Filename.concat (Filename.concat home ".config") "masc")
-        (home_dir_opt ())
-  in
-  Option.map (fun dir -> Filename.concat dir "default-base-path") masc_config_dir
+  Option.map (fun dir -> Filename.concat dir "default-base-path") (masc_config_dir_opt ())
 
 (** [running_under_test_executable ()] mirrors the convention in
     {!Config_dir_resolver}: the process's [Sys.executable_name]

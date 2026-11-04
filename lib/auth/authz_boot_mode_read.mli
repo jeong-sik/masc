@@ -12,21 +12,22 @@
     boot, so a base path that was restored to before its bootstrap is noticed
     even when the config no longer asks for [Multi_account] (design 5.1, row 2).
 
-    Opening the log and the store cuts a last line that never ended, as
-    {!Authz_log.open_at_start} and {!Authz_external_store.open_at_start} do.
-    Nothing else is written. A pending intent of the store is judged, not
+    The log and the store are opened only when their file is there. Opening one
+    ({!Authz_log.open_at_start}, {!Authz_external_store.open_at_start}) cuts a
+    last line that never ended and keeps a lock file next to it; a base path
+    that has neither file gets no directory and no lock file. A missing store
+    is absent (design 8.4). A pending intent of the store is judged, not
     settled: {!Authz_high_water.judge} reads a promotion and an abort the same
     way whether their entries were written or not (design 8.2-2, 8.2-3).
 
-    The boot calls {!input} once, after it holds the BasePath lease and inside
-    an Eio event loop, because the zones of the log and the store are
-    [Eio.Mutex]es. *)
+    The install record is read on every boot, and a config directory that fails
+    its owner test ({!Authz_install_record}) refuses the boot even when no
+    record is there: whoever can write that directory could have removed the
+    record of a base path that was then restored to before its bootstrap.
 
-(** The [masc] directory of the config home of the user, as
-    {!Authz_install_record.locate} takes it. [XDG_CONFIG_HOME] counts only when
-    it is an absolute path; otherwise [HOME/.config], as the XDG Base Directory
-    Specification asks. [None] when neither gives one. *)
-val config_dir : xdg_config_home:string option -> home:string option -> string option
+    The boot calls {!boot} once, after it holds the BasePath lease and inside an
+    Eio event loop, because the zones of the log and the store are
+    [Eio.Mutex]es. [config_dir] is {!Env_config_core.masc_config_dir_opt}. *)
 
 (** The [account_mode] member of a [config.json] that parsed as JSON. A value
     that is not an object has no member. A member that appears twice is
@@ -68,6 +69,14 @@ type decision =
 val decide : Authz_boot_mode.input -> decision
 
 (** One line per reason, for a refusal; none for {!Boot_single_user}. A
-    refusal over an external store that could not be read also says why it
-    could not be read, since the reasons of the table name only the column. *)
+    {!Multi_account_not_served} boot also says what the high-water mark found
+    when it is not a match. *)
 val messages : Authz_boot_mode.input -> decision -> string list
+
+(** {!input}, {!decide} and {!messages} in one call: [Ok ()] for a single-user
+    boot, and the messages of the refusal otherwise. *)
+val boot
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> (unit, string list) result

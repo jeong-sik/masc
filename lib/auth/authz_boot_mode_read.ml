@@ -10,20 +10,21 @@ module M = Authz_mode_event
 module R = Authz_record
 module S = Authz_external_store
 
-(* The directory under the config home, and the member of config.json. *)
-let config_subdir = "masc"
 let member_name = "account_mode"
 
-let config_dir ~xdg_config_home ~home =
-  let absolute = function
-    | Some dir when (not (String.equal dir "")) && not (Filename.is_relative dir) -> Some dir
-    | Some _ | None -> None
-  in
-  match absolute xdg_config_home, home with
-  | Some dir, (Some _ | None) -> Some (Filename.concat dir config_subdir)
-  | None, Some home when not (String.equal home "") ->
-    Some (Filename.concat (Filename.concat home ".config") config_subdir)
-  | None, (Some _ | None) -> None
+(* Whether a file is there, without opening it. Opening the log or the store
+   creates its directory and a lock file next to it, which a boot of a base path
+   that has neither must not do (design 8.4: a missing store is absent). *)
+type presence =
+  | Not_there
+  | There
+  | Cannot_check of string
+
+let presence path =
+  match Auth_credential_base.credential_path_exists path with
+  | Ok false -> Not_there
+  | Ok true -> There
+  | Error error -> Cannot_check (Masc_domain.masc_error_to_string error)
 ;;
 
 let requested_of_json : Yojson.Safe.t -> B.requested = function
@@ -115,10 +116,33 @@ let store_state ~config_dir ~base_path : (S.State.t option, string) result =
      | Error error -> Error (I.read_error_to_string error)
      | Ok None -> Ok None
      | Ok (Some path) ->
-       (match S.open_at_start ~path ~init:S.State.empty ~step:S.apply with
-        | Error error -> Error (S.open_error_to_string S.violation_to_string error)
-        | Ok (_store, _state, { S.contents = S.Missing; _ }) -> Ok None
-        | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) -> Ok (Some state)))
+       (match presence path with
+        | Not_there -> Ok None
+        | Cannot_check detail -> Error (Printf.sprintf "the external store %s: %s" path detail)
+        | There ->
+          (match S.open_at_start ~path ~init:S.State.empty ~step:S.apply with
+           | Error error -> Error (S.open_error_to_string S.violation_to_string error)
+           | Ok (_store, _state, { S.contents = S.Missing; _ }) -> Ok None
+           | Ok (_store, state, { S.contents = S.Empty | S.Lines _; _ }) -> Ok (Some state))))
+;;
+
+(* The log as the boot found it. *)
+type log_read =
+  | Log_not_there
+  | Log_cannot_check of string
+  | Log_opened of (fold, string) result
+
+let read_log ~base_path ~state =
+  let path = L.path_of_base_path ~base_path in
+  match presence path with
+  | Not_there -> Log_not_there
+  | Cannot_check detail -> Log_cannot_check (Printf.sprintf "%s: %s" path detail)
+  | There ->
+    (match
+       L.open_at_start ~path ~init:{ probe = H.Probe.create state; last = None; records = 0 } ~step
+     with
+     | Error error -> Log_opened (Error (L.open_error_to_string M.error_to_string error))
+     | Ok (_log, fold, _recovered) -> Log_opened (Ok fold))
 ;;
 
 let read_log_and_store ~base_path ~config_dir =
@@ -128,28 +152,25 @@ let read_log_and_store ~base_path ~config_dir =
     | Ok (Some state) -> state
     | Ok None | Error _ -> S.State.empty
   in
-  let log =
-    L.open_at_start
-      ~path:(L.path_of_base_path ~base_path)
-      ~init:{ probe = H.Probe.create state; last = None; records = 0 }
-      ~step
-  in
+  let log = read_log ~base_path ~state in
   let log_mode =
     match log with
-    | Error error -> B.Log_unreadable (L.open_error_to_string M.error_to_string error)
-    | Ok (_log, { last = Some event; _ }, _recovered) -> B.made_by event
-    | Ok (_log, { last = None; records = 0; _ }, _recovered) -> B.No_mode_event
-    | Ok (_log, { last = None; records; _ }, _recovered) ->
+    | Log_not_there -> B.No_mode_event
+    | Log_cannot_check detail | Log_opened (Error detail) -> B.Log_unreadable detail
+    | Log_opened (Ok { last = Some event; _ }) -> B.made_by event
+    | Log_opened (Ok { last = None; records = 0; _ }) -> B.No_mode_event
+    | Log_opened (Ok { last = None; records; _ }) ->
       (* A Fresh_bootstrap is the first record of every log (design 5.1). *)
       B.Log_unreadable
         (Printf.sprintf "it holds %d records and no mode event, and only a mode event starts it" records)
   in
   let high_water =
     match store, log with
-    | Error detail, (Ok _ | Error _) -> B.Store_unreadable detail
-    | Ok None, (Ok _ | Error _) -> B.Judged H.Absent
-    | Ok (Some _), Ok (_log, fold, _recovered) -> B.Judged (H.judge fold.probe)
-    | Ok (Some _), Error _ ->
+    | Error detail, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Store_unreadable detail
+    | Ok None, (Log_not_there | Log_cannot_check _ | Log_opened _) -> B.Judged H.Absent
+    | Ok (Some _), Log_opened (Ok fold) -> B.Judged (H.judge fold.probe)
+    | Ok (Some state), Log_not_there -> B.Judged (H.judge (H.Probe.create state))
+    | Ok (Some _), (Log_cannot_check _ | Log_opened (Error _)) ->
       B.Store_unreadable "it was not judged, because the authorization log cannot be read"
   in
   log_mode, high_water
@@ -198,4 +219,12 @@ let messages (input : B.input) = function
        layers that serve it"
       (B.mode_to_string mode)
     :: high_water_detail input.high_water
+;;
+
+let boot ~base_path ~config_dir ~anonymous_mutations =
+  let input = input ~base_path ~config_dir ~anonymous_mutations in
+  match decide input with
+  | Boot_single_user -> Ok ()
+  | (Refuse _ | Multi_account_not_activatable | Multi_account_not_served _) as decision ->
+    Error (messages input decision)
 ;;

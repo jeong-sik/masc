@@ -207,7 +207,17 @@ type persisted_default =
   | Stale of { record : string; recorded_path : string }
   | Unread_under_test of { record : string }
 
-(** Shared user configuration location, derived from XDG_CONFIG_HOME or HOME. *)
+(** The [masc] directory of the config home of the user. [XDG_CONFIG_HOME]
+    counts only when it is an absolute path, as the XDG Base Directory
+    Specification asks; otherwise [HOME/.config]. Both values are trimmed, and
+    an empty one is not set. [None] when neither gives one. *)
+val masc_config_dir_of : xdg_config_home:string option -> home:string option -> string option
+
+(** {!masc_config_dir_of} over [XDG_CONFIG_HOME] and [HOME]. The default base
+    path record and the install record of the authorization store live here. *)
+val masc_config_dir_opt : unit -> string option
+
+(** [default-base-path] in {!masc_config_dir_opt}. *)
 val default_base_path_record_path_opt : unit -> string option
 
 

@@ -2613,9 +2613,9 @@ let commit_config_text_locked_attempt
 (* A failed commit can still have replaced the file (an atomic rename that
    lands before a later stage fails), so every attempt is reported. *)
 let commit_config_text_locked ?replace_file ~runtime_config_path content =
-  let result = commit_config_text_locked_attempt ?replace_file ~runtime_config_path content in
-  (Atomic.get config_commit_observer) ~runtime_config_path;
-  result
+  Fun.protect
+    ~finally:(fun () -> (Atomic.get config_commit_observer) ~runtime_config_path)
+    (fun () -> commit_config_text_locked_attempt ?replace_file ~runtime_config_path content)
 ;;
 
 let commit_runtime_config_text ?replace_file ~path content =

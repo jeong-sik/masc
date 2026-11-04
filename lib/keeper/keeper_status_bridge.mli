@@ -62,6 +62,19 @@ val runtime_keepalive_running :
 val runtime_keepalive_started_at :
   Workspace_utils.config -> keeper_meta -> float option
 
+type runtime_blocker_observation =
+  { surface : runtime_blocker_surface
+  ; failed_at_unix : float option
+      (** When the registry recorded the failure behind the blocker, read from
+          the same registry entry. [None] when that entry holds the reason
+          without a time. *)
+  }
+
+val runtime_blocker_observation_opt :
+  Workspace_utils.config -> keeper_meta -> runtime_blocker_observation option
+(** The blocker the registry holds for this Keeper and when its failure was
+    recorded, read from one registry entry. *)
+
 val runtime_blocker_surface_opt :
   Workspace_utils.config -> keeper_meta -> runtime_blocker_surface option
 (** The blocker the registry holds for this Keeper, read once. A reader that

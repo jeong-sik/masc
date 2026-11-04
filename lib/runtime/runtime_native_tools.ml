@@ -287,14 +287,22 @@ let degrade_on_admission ~posture ~none_supported () =
    without this name, 8,926 with it. *)
 let claude_code_schema_lookup_tool_name = "ToolSearch"
 
-let claude_code_tools_arg = function
-  | Native_none -> claude_code_schema_lookup_tool_name
+type claude_code_built_ins =
+  | Granted of string list
+  | Client_default
+
+let claude_code_built_ins = function
+  | Native_none -> Granted [ claude_code_schema_lookup_tool_name ]
   | Native_read ->
-    String.concat
-      ","
-      (claude_code_read_tool_names @ [ claude_code_schema_lookup_tool_name ])
+    Granted (claude_code_read_tool_names @ [ claude_code_schema_lookup_tool_name ])
+  | Native_full -> Client_default
+;;
+
+let claude_code_tools_arg posture =
+  match claude_code_built_ins posture with
+  | Granted names -> String.concat "," names
   (* [default] is the whole built-in set, which already carries the lookup. *)
-  | Native_full -> "default"
+  | Client_default -> "default"
 ;;
 
 let claude_setting_sources_arg = "--setting-sources="

@@ -157,9 +157,23 @@ val degrade_on_admission : posture:posture -> none_supported:bool -> unit -> pos
     to [read]. Used with a typed event, never silently — see
     RFC-0390 admission review. *)
 
+type claude_code_built_ins =
+  | Granted of string list
+      (** Exactly these built-ins may run. Every posture that grants a list
+          grants only built-ins that leave the work unchanged (RFC-0390), so
+          the turn's effects all pass through MASC tool handlers. *)
+  | Client_default
+      (** The client's own default set, which MASC does not enumerate and
+          whose effects it cannot observe. *)
+
+val claude_code_built_ins : posture -> claude_code_built_ins
+(** The built-ins [--tools] lets Claude Code run under [posture]. The argv
+    and the effect fence both read this one value. *)
+
 val claude_code_tools_arg : posture -> string
-(** Value for the [--tools] flag: [""] disables the built-in set,
-    ["default"] enables all of it, otherwise a comma-separated allowlist. *)
+(** Value for the [--tools] flag, rendered from {!claude_code_built_ins}:
+    ["default"] for the client's whole set, otherwise a comma-separated
+    allowlist. *)
 
 val claude_setting_sources_arg : string
 (** The [--setting-sources=] argv token naming no settings layer: the CLI

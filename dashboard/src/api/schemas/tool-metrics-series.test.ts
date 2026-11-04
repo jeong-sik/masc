@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseToolMetricsSeriesResponse } from './tool-metrics-series'
+import {
+  parseToolMetricsSeriesResponse,
+  seriesAnswerMismatch,
+  toolMetricsSeriesQuery,
+  type ToolMetricsSeriesRequest,
+} from './tool-metrics-series'
 
 const busy = {
   call_count: 2,
@@ -96,5 +101,49 @@ describe('parseToolMetricsSeriesResponse', () => {
   it('ignores fields it does not know, so the server can add them first', () => {
     const out = parseToolMetricsSeriesResponse(validResponse({ extra: true }))
     expect('extra' in out).toBe(false)
+  })
+})
+
+describe('toolMetricsSeriesQuery', () => {
+  it('names the parameters the server reads', () => {
+    expect(toolMetricsSeriesQuery({ sinceHours: 168, bucket: 'hour', utcOffsetMin: -300, tool: null })).toBe(
+      'since_hours=168&bucket=hour&utc_offset_min=-300',
+    )
+  })
+
+  it('adds the tool filter, encoded', () => {
+    expect(toolMetricsSeriesQuery({ sinceHours: 24, bucket: 'day', utcOffsetMin: 540, tool: 'a b&c' })).toBe(
+      'since_hours=24&bucket=day&utc_offset_min=540&tool=a+b%26c',
+    )
+  })
+})
+
+// The server ignores a parameter it does not know and fills in a default. A
+// response for another window than the one asked must not be charted under the
+// asked window's label.
+describe('seriesAnswerMismatch', () => {
+  const asked: ToolMetricsSeriesRequest = { sinceHours: 24, bucket: 'hour', utcOffsetMin: 540, tool: null }
+  const answer = (overrides: Record<string, unknown> = {}) =>
+    parseToolMetricsSeriesResponse(validResponse(overrides))
+
+  it('accepts the response for the request', () => {
+    expect(seriesAnswerMismatch(asked, answer())).toBeNull()
+  })
+
+  it('accepts a window length that differs by float rounding only', () => {
+    const response = answer()
+    const rounded = { ...response, window: { ...response.window, since: response.window.since + 0.4 } }
+    expect(seriesAnswerMismatch(asked, rounded)).toBeNull()
+  })
+
+  it('names a window of another length', () => {
+    expect(seriesAnswerMismatch({ ...asked, sinceHours: 168 }, answer())).toContain('168')
+  })
+
+  it('names another bucket width, another offset and another tool', () => {
+    expect(seriesAnswerMismatch({ ...asked, bucket: 'day' }, answer())).toContain('day')
+    expect(seriesAnswerMismatch({ ...asked, utcOffsetMin: 0 }, answer())).toContain('UTC')
+    expect(seriesAnswerMismatch({ ...asked, tool: 'tool_execute' }, answer())).toContain('tool_execute')
+    expect(seriesAnswerMismatch(asked, answer({ tool: 'tool_execute' }))).toContain('tool_execute')
   })
 })

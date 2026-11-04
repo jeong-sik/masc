@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
 import {
   ToolSeriesView,
@@ -12,6 +12,9 @@ import {
 import { SERIES_WINDOW_ORDER } from './tool-series-state'
 
 const container = document.createElement('div')
+// A focused element is `document.activeElement` only while it is in the document.
+beforeAll(() => document.body.append(container))
+afterAll(() => container.remove())
 afterEach(() => render(null, container))
 
 const busy = {
@@ -68,6 +71,36 @@ function mount(props: ToolSeriesViewProps): void {
 function toolButtons(): HTMLButtonElement[] {
   return Array.from(container.querySelectorAll<HTMLButtonElement>('tbody button'))
 }
+
+describe('picking a tool', () => {
+  // The second row: without row keys the filtered table would reuse the first
+  // row's element and drop the pressed one.
+  const picked = 'tool_read_file'
+  const pickedOnly: ToolMetricsSeriesResponse = {
+    ...series,
+    tool: picked,
+    top_by_time: series.top_by_time.filter(row => row.name === picked),
+  }
+
+  // A keyboard user pressed the button. Rebuilding the table while the filtered
+  // series loads would remove it and send the focus to the page.
+  it('keeps the pressed button, with its focus, while the filtered series loads and after', () => {
+    mount(view())
+    const pressed = toolButtons().find(button => button.textContent === picked)
+    expect(pressed).toBeDefined()
+    pressed?.focus()
+
+    mount(view({ tool: picked, loading: true }))
+    expect(toolButtons().find(button => button.textContent === picked)).toBe(pressed)
+    expect(document.activeElement).toBe(pressed)
+    expect(container.querySelector('[aria-busy]')?.getAttribute('aria-busy')).toBe('true')
+
+    mount(view({ tool: picked, series: pickedOnly }))
+    expect(toolButtons()).toEqual([pressed])
+    expect(document.activeElement).toBe(pressed)
+    expect(container.querySelector('[aria-busy]')?.getAttribute('aria-busy')).toBe('false')
+  })
+})
 
 describe('chart series', () => {
   it('draws failures beside calls, from the same buckets', () => {

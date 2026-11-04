@@ -161,6 +161,48 @@ describe('loading the picked window', () => {
     await vi.waitFor(() => expect(state.visibleSeries.value).toEqual(month))
   })
 
+  // Rebuilding the table when a tool button is pressed drops the keyboard
+  // focus with the button, so the previous filter's answer stays until the
+  // picked tool's answer arrives.
+  it('keeps the previous filter\'s answer on screen until the picked tool\'s answer arrives', async () => {
+    const all = series()
+    const execute = series({ tool: 'tool_execute', total: { ...busy, call_count: 9 } })
+    fetchToolMetricsSeries.mockResolvedValueOnce(all)
+    await state.loadToolSeries()
+
+    let finishExecute: () => void = () => {}
+    fetchToolMetricsSeries.mockImplementation(
+      () => new Promise<ToolMetricsSeriesResponse>(resolve => { finishExecute = () => resolve(execute) }),
+    )
+    state.selectTool('tool_execute')
+    expect(state.visibleSeries.value).toEqual(all)
+    expect(state.seriesLoading.value).toBe(true)
+
+    finishExecute()
+    await vi.waitFor(() => expect(state.visibleSeries.value).toEqual(execute))
+  })
+
+  it('drops an answer that arrives after a later pick was answered', async () => {
+    const week = series({ total: { ...busy, call_count: 7 } })
+    const month = series({ total: { ...busy, call_count: 30 } })
+    const finish: Array<() => void> = []
+    fetchToolMetricsSeries.mockImplementation(
+      (request: { bucket: string }) =>
+        new Promise<ToolMetricsSeriesResponse>(resolve => {
+          finish.push(() => resolve(request.bucket === 'day' ? month : week))
+        }),
+    )
+    state.selectWindow('week')
+    state.selectWindow('month')
+    expect(finish).toHaveLength(2)
+
+    finish[1]?.()
+    await vi.waitFor(() => expect(state.visibleSeries.value).toEqual(month))
+    finish[0]?.()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(state.visibleSeries.value).toEqual(month)
+  })
+
   it('reloads when a tool is picked and when the filter is cleared', async () => {
     fetchToolMetricsSeries.mockResolvedValue(series())
     state.selectTool('tool_execute')

@@ -1,9 +1,11 @@
 // Tool call series — which window the Tools page charts, and the load of it.
 //
 // The window and the tool filter are what the viewer picked. A loaded series
-// is kept with the request it answered, and it is shown only while that
-// request is still the picked one: a 30-day answer is not an answer for the
-// 24-hour window the viewer has switched to.
+// is kept with the request it answered. It is shown only while its window is
+// still the picked one: a 30-day answer is not an answer for the 24-hour
+// window the viewer has switched to. After the tool filter alone changes, the
+// series of the previous filter stays until the new one arrives, so the table
+// and the button the viewer pressed are not torn down and rebuilt.
 
 import { computed, signal } from '@preact/signals'
 import { fetchToolMetricsSeries, type ToolMetricsSeriesRequest } from '../../api'
@@ -47,8 +49,8 @@ export function seriesRequest(
   return { sinceHours: window.sinceHours, bucket: window.bucket, utcOffsetMin, tool }
 }
 
-export function seriesKey(request: ToolMetricsSeriesRequest): string {
-  return JSON.stringify([request.sinceHours, request.bucket, request.utcOffsetMin, request.tool])
+function sameWindow(a: ToolMetricsSeriesRequest, b: ToolMetricsSeriesRequest): boolean {
+  return a.sinceHours === b.sinceHours && a.bucket === b.bucket && a.utcOffsetMin === b.utcOffsetMin
 }
 
 function pickedRequest(): ToolMetricsSeriesRequest {
@@ -56,25 +58,28 @@ function pickedRequest(): ToolMetricsSeriesRequest {
 }
 
 interface LoadedSeries {
-  readonly key: string
+  readonly request: ToolMetricsSeriesRequest
   readonly series: ToolMetricsSeriesResponse
 }
 
 const seriesResource = createManagedAsyncResource<LoadedSeries>()
 
-/** The loaded series, only while it answers the window and tool now picked. */
+/**
+ * The loaded series, only while it answers the window now picked. Its `tool`
+ * field names the filter it answered; it differs from the picked tool until
+ * the series of the picked tool arrives.
+ */
 export const visibleSeries = computed<ToolMetricsSeriesResponse | null>(() => {
   const loaded = seriesResource.state.value.data
-  return loaded !== null && loaded.key === seriesKey(pickedRequest()) ? loaded.series : null
+  return loaded !== null && sameWindow(loaded.request, pickedRequest()) ? loaded.series : null
 })
 export const seriesLoading = computed(() => seriesResource.state.value.loading)
 export const seriesError = computed<string | null>(() => seriesResource.state.value.error)
 
 export async function loadToolSeries(): Promise<void> {
   const request = pickedRequest()
-  const key = seriesKey(request)
   await seriesResource.load(async signal => ({
-    key,
+    request,
     series: await fetchToolMetricsSeries(request, { signal }),
   }))
 }

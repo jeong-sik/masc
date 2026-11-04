@@ -158,6 +158,9 @@ function ToolSeriesTable({ series, tool, onTool }: {
 }
 
 export function ToolSeriesView({ series, loading, error, windowKey, tool, onWindow, onTool }: ToolSeriesViewProps) {
+  // The series of the previous tool filter stays on screen, dimmed, until the
+  // series of the picked one arrives.
+  const settling = series !== null && series.tool !== tool
   return html`
     <div class="flex flex-col gap-3">
       <${FilterChips} chips=${WINDOW_CHIPS} value=${windowKey} onChange=${onWindow} />
@@ -171,8 +174,10 @@ export function ToolSeriesView({ series, loading, error, windowKey, tool, onWind
       ${series === null
         ? (loading && error === null ? html`<p class="muted">통계를 불러오는 중입니다.</p>` : null)
         : html`
-            <${ToolSeriesCharts} series=${series} />
-            <${ToolSeriesTable} series=${series} tool=${tool} onTool=${onTool} />
+            <div class="flex flex-col gap-3 ${settling ? 'opacity-60' : ''}" aria-busy=${settling}>
+              <${ToolSeriesCharts} series=${series} />
+              <${ToolSeriesTable} series=${series} tool=${tool} onTool=${onTool} />
+            </div>
           `}
     </div>
   `

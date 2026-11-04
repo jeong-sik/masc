@@ -98,24 +98,27 @@ let refused ~start_time ~class_ detail = result ~start_time ~failure:(Some (clas
 let selection_failure_class = function
   | B.Activity_rejected _ | No_live_client | Selected_client_disconnected _ -> Tool_result.Dependency_unavailable
   | Ambiguous_clients _ | Transport_unsupported _ -> Tool_result.Workflow_rejection
-(* What the reply says happened. A refusal before any effect is the request
-   the current state does not admit. A browser that acted and did not finish,
-   answered no outcome, or did not answer is the dependency that could not
-   fulfil it. A reply this tool cannot read is its own failure. *)
+(* What the reply says happened. A failure the browser or its executor
+   answered names its cause only in words, which the model reads, so it stays
+   the request the page did not admit, with the effect its phase states. A
+   refusal before any effect is the same. A browser that is not here, or
+   that did not answer, is the dependency that could not fulfil it. A reply
+   this tool cannot read is its own failure. *)
 let failure_of_reply = function
   | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->
       (match List.assoc_opt "ok" fields with
        | Some (`Bool true) -> None
-       | Some (`Bool false) -> Some (match List.assoc_opt "effectPhase" fields with
-           | Some (`String "not_started") -> Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect
-           | Some (`String "partial") -> Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect
-           | Some _|None -> Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown)
+       | Some (`Bool false) -> Some (Tool_result.Workflow_rejection,match List.assoc_opt "effectPhase" fields with
+           | Some (`String "not_started") -> Tool_result.Proven_pre_effect
+           | Some (`String "partial") -> Tool_result.Proven_post_effect
+           | Some _|None -> Tool_result.Effect_outcome_unknown)
        | Some _|None -> Some (Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown))
   | Issue_result (Error selection) -> Some (selection_failure_class selection,Tool_result.Proven_pre_effect)
   | Service_refusal {disposition=W.Not_started;_} | Issue_result (Ok (B.Rejected_before_effect _)) ->
       Some (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect)
+  | Issue_result (Ok (B.Refused _)) -> Some (Tool_result.Workflow_rejection,Tool_result.Effect_outcome_unknown)
   | Issue_result (Ok B.Lane_absent) -> Some (Tool_result.Dependency_unavailable,Tool_result.Proven_pre_effect)
-  | Service_refusal {disposition=W.Outcome_unknown;_} | Issue_result (Ok (B.Timed_out|Refused _)) ->
+  | Service_refusal {disposition=W.Outcome_unknown;_} | Issue_result (Ok B.Timed_out) ->
       Some (Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown)
   | Issue_result (Ok (B.Answered _))
   | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt ->

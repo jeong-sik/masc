@@ -178,8 +178,8 @@ let scenario () = Eio_main.run (fun env ->
     check bool "partial payload is retained" true
       (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)
         result.structured_content);
-    check bool "partial metadata forbids pre-effect replay and names the browser that did not finish" true
-      (Lane_addon_tool_result.failure result=(Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect));
+    check bool "partial metadata forbids pre-effect replay" true
+      (Lane_addon_tool_result.failure result=(Tool_result.Workflow_rejection,Tool_result.Proven_post_effect));
     let no_more=send (W.Poll {client;window_sec=0.001}) in
     check bool "anonymous and partial calls have no hidden replay" true
       (match no_more with W.Poll_result {command=None;_} -> true | _ -> false);
@@ -202,8 +202,8 @@ let scenario () = Eio_main.run (fun env ->
           result.structured_content);
       check bool (label ^ ": read retains receipt class and effect disposition") true
         (Lane_addon_tool_result.failure result=(expected_class,expected)))
-      ["partial read",Some "partial",Tool_result.Dependency_unavailable,Tool_result.Proven_post_effect;
-       "uncertain read",None,Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown;
+      ["partial read",Some "partial",Tool_result.Workflow_rejection,Tool_result.Proven_post_effect;
+       "uncertain read",None,Tool_result.Workflow_rejection,Tool_result.Effect_outcome_unknown;
        "unstarted read",Some "not_started",Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect];
     check bool "failed reads are not silently replayed" true
       (match send (W.Poll {client;window_sec=0.001}) with

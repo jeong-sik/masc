@@ -33,27 +33,36 @@ let fresh_test_base_path () =
    [Sys_error] (ENOTDIR). Same fixture as
    [test_board_vote_persistence.ml]; duplicated locally per that
    suite's per-file fixture convention. *)
+(* Deny board writes through permissions instead of breaking the workspace
+   boundary: the store files lose their write bits (append fails) and the
+   workspace directory loses create/rename rights (the rewrite stage fails),
+   while reads and workspace observation keep working. The earlier fixture
+   replaced .masc with a regular file, which made the posts source re-observe
+   a refused workspace and latch Posts_refused — every write then stayed
+   refused even after the fixture restored the directory (#47727). *)
 let with_blocked_board_masc_dir f =
   let store = Board.global () in
   let masc_dir = (Board.workspace_masc_dir store) in
-  let backup = masc_dir ^ ".fixture-backup" in
-  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
-  Fs_compat.mkdir_p (Filename.dirname masc_dir);
   let paths =
     [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
     ; Board.reactions_path store; Board.sub_boards_path store ]
   in
   List.iter Fs_compat.invalidate_cached_writer paths;
-  let existed = Sys.file_exists masc_dir in
-  if existed then Unix.rename masc_dir backup;
+  let file_modes =
+    List.filter_map
+      (fun path ->
+         if Sys.file_exists path then Some (path, (Unix.stat path).Unix.st_perm) else None)
+      paths
+  in
+  let dir_mode = (Unix.stat masc_dir).Unix.st_perm in
+  List.iter (fun (path, _) -> Unix.chmod path 0o444) file_modes;
+  Unix.chmod masc_dir 0o555;
   Fun.protect
     ~finally:(fun () ->
-      List.iter Fs_compat.invalidate_cached_writer paths;
-      if Sys.file_exists masc_dir then Sys.remove masc_dir;
-      if existed then Unix.rename backup masc_dir)
-    (fun () ->
-      Fs_compat.save_file masc_dir "not a directory";
-      f ())
+      Unix.chmod masc_dir dir_mode;
+      List.iter (fun (path, mode) -> Unix.chmod path mode) file_modes;
+      List.iter Fs_compat.invalidate_cached_writer paths)
+    f
 
 let with_eio f () =
   Eio_main.run @@ fun env ->

@@ -12424,17 +12424,6 @@ let keeper_reading (state : state) (keeper : keeper) :
          Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
   }
 
-let keeper_open_question_count state keeper_name =
-  match state.asks_snapshot with
-  | None -> 0
-  | Some snapshot ->
-      List.fold_left
-        (fun count row ->
-          match row.Masc.Tui_decode_asks.ar_asker with
-          | Masc.Tui_decode_asks.Ask_keeper name when String.equal name keeper_name -> count + 1
-          | Masc.Tui_decode_asks.Ask_keeper _ | Masc.Tui_decode_asks.Ask_installation _ -> count)
-        0 snapshot.Masc.Tui_decode_asks.asn_rows
-
 let keeper_last_turn_at (keeper : keeper) =
   Option.bind keeper.k_activity (fun activity ->
     Masc_domain.parse_iso8601_opt activity.Tui_decode.k_last_turn_ts)
@@ -12458,21 +12447,92 @@ let keeper_activity_at ~turn ~waiting (keeper : keeper) =
          | Some { Tui_decode.kwr_since; _ } -> kwr_since
          | None -> None)
 
+module Name_table = Hashtbl.Make (String)
+
+(* The first row each name has, as a scan from the front would find it. *)
+let first_row_by_name ~name rows =
+  let table = Name_table.create 64 in
+  List.iter
+    (fun row ->
+      let key = name row in
+      if not (Name_table.mem table key) then Name_table.add table key row)
+    rows;
+  table
+
+(* Every row each name has, in list order. *)
+let rows_by_name ~name rows =
+  let table = Name_table.create 64 in
+  List.iter
+    (fun row ->
+      let key = name row in
+      Name_table.replace table key
+        (row :: Option.value ~default:[] (Name_table.find_opt table key)))
+    (List.rev rows);
+  table
+
+(* The roster is read several times a frame -- the list, the title, the
+   Activity pane, the footer -- so each source is indexed by name once here.
+   Searching every source again for every keeper cost keepers x tasks
+   comparisons per read, which a held arrow key paid many times a second. *)
 let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+  let turns =
+    first_row_by_name state.keeper_turns
+      ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
+  in
+  let waiting_rows =
+    first_row_by_name state.keeper_waiting
+      ~name:(fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name)
+  in
+  let approvals =
+    first_row_by_name state.keeper_tool_approvals
+      ~name:(fun (row : Tui_decode.keeper_tool_approval) -> row.kta_keeper)
+  in
+  let current_tasks =
+    let wanted = Name_table.create 64 in
+    List.iter
+      (fun (keeper : keeper) ->
+        match keeper.k_activity with
+        | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
+            Name_table.replace wanted task_id ()
+        | Some { Tui_decode.k_current_task_id = None; _ } | None -> ())
+      state.keepers;
+    if Name_table.length wanted = 0 then Name_table.create 1
+    else
+      first_row_by_name
+        (List.filter (fun (task : Tui_decode.task) -> Name_table.mem wanted task.id) state.tasks)
+        ~name:(fun (task : Tui_decode.task) -> task.id)
+  in
+  let async_rows =
+    match state.tools_async_observation with
+    | Some (Tui_decode.Async_ready { requests; _ }) ->
+        rows_by_name requests
+          ~name:(fun (row : Tui_decode.async_request_row) -> row.ar_keeper_name)
+    | Some (Tui_decode.Async_unavailable _) | None -> Name_table.create 1
+  in
+  let question_counts = Name_table.create 16 in
+  (match state.asks_snapshot with
+   | None -> ()
+   | Some snapshot ->
+       List.iter
+         (fun row ->
+           match row.Masc.Tui_decode_asks.ar_asker with
+           | Masc.Tui_decode_asks.Ask_keeper name ->
+               Name_table.replace question_counts name
+                 (1 + Option.value ~default:0 (Name_table.find_opt question_counts name))
+           | Masc.Tui_decode_asks.Ask_installation _ -> ())
+         snapshot.Masc.Tui_decode_asks.asn_rows);
+  let verification_holders =
+    Masc_tui_keeper_list_model.verification_holders state.tasks
+  in
   List.map
     (fun (keeper : keeper) ->
       let name = keeper.k_name in
       let turn =
-        List.find_map
-          (fun (row : Tui_decode.keeper_turn_row) ->
-            if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
-          state.keeper_turns
+        Option.map
+          (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_state)
+          (Name_table.find_opt turns name)
       in
-      let observed_waiting =
-        List.find_opt
-          (fun (row : Tui_decode.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
-          state.keeper_waiting
-      in
+      let observed_waiting = Name_table.find_opt waiting_rows name in
       let waiting, activity_waiting =
         match List.mem name state.keeper_waiting_unverified,
               state.keeper_waiting_failure, observed_waiting with
@@ -12480,24 +12540,15 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
         | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
         | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
-      let approval =
-        List.find_opt
-          (fun (row : Tui_decode.keeper_tool_approval) -> String.equal row.kta_keeper name)
-          state.keeper_tool_approvals
-      in
+      let approval = Name_table.find_opt approvals name in
       let task =
         match keeper.k_activity with
         | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
-            List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks
+            Name_table.find_opt current_tasks task_id
         | Some { Tui_decode.k_current_task_id = None; _ } | None -> None
       in
       let async_requests =
-        match state.tools_async_observation with
-        | Some (Tui_decode.Async_ready { requests; _ }) ->
-            List.filter
-              (fun (row : Tui_decode.async_request_row) -> String.equal row.ar_keeper_name name)
-              requests
-        | Some (Tui_decode.Async_unavailable _) | None -> []
+        Option.value ~default:[] (Name_table.find_opt async_rows name)
       in
       { Masc_tui_keeper_list_model.keeper
       ; reading = keeper_reading state keeper
@@ -12506,8 +12557,10 @@ let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
       ; approval
       ; task
       ; awaiting_verification =
-          Masc_tui_keeper_list_model.holds_awaiting_verification ~keeper_name:name state.tasks
-      ; open_questions = keeper_open_question_count state name
+          Masc_tui_keeper_list_model.holds_awaiting_verification verification_holders
+            ~keeper_name:name
+      ; open_questions =
+          Option.value ~default:0 (Name_table.find_opt question_counts name)
       ; async_requests
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })

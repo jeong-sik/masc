@@ -6527,6 +6527,61 @@ let test_waiting_event_does_not_hide_turns () =
     (row.waiting = Masc_tui_keeper_list_model.Waiting_observed waiting)
 ;;
 
+(* Each Keeper's readings are joined by name: the first turn, waiting row and
+   held call a name has, its async requests in the order they were read, the
+   questions it asked, and the task it is on. *)
+let test_roster_rows_join_each_reading_by_keeper_name () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let activity task_id = Tui_decode.{ k_current_task_id = task_id; k_total_turns = 0;
+    k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_ts = "";
+    k_last_proactive_outcome = None } in
+  let alpha = { alpha with Tui_decode.k_activity = Some (activity (Some "task-alpha")) } in
+  let beta = { alpha with Tui_decode.k_name = "beta"; k_activity = Some (activity None) } in
+  let turn name ktr_state = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                                         ktr_state } in
+  let running = Tui_decode.Keeper_turn_running { lane = Turn_lane_autonomous;
+    started_at_unix = 1.; interrupt_token = "alpha-turn"; turn_ref = None; preview = None } in
+  let approval keeper id = Tui_decode.{ kta_keeper = keeper; kta_tool_call_id = id;
+    kta_approval_id = id; kta_tool = "tool"; kta_args = "{}"; kta_question = "?";
+    kta_because = None; kta_asked_at = 1.; kta_timeout_sec = 60. } in
+  let request keeper id = Tui_decode.{ ar_request_id = id; ar_submitted_by = "test";
+    ar_keeper_name = keeper; ar_phase = Async_running; ar_submitted_at = 1.;
+    ar_ownership = Async_runtime_owned } in
+  let ask asker id = Masc.Tui_decode_asks.{ ar_asker = asker; ar_id = id; ar_asked_at = 1.;
+    ar_source_turn_ref = None; ar_context = None; ar_questions = []; ar_resolution = Ask_open } in
+  let task id status : Tui_decode.task = { id; title = id; status; priority = 3; goal_ids = [] } in
+  state.keepers <- [alpha; beta];
+  state.keeper_turns <- [turn "alpha" running; turn "beta" Keeper_turn_idle; turn "alpha" Keeper_turn_idle];
+  state.keeper_tool_approvals <- [approval "beta" "first"; approval "beta" "second"];
+  state.tools_async_observation <- Some (Tui_decode.Async_ready {
+    summary = Tui_decode.{ ars_active = 3; ars_runtime_owned = 3; ars_ownership_unknown = 0;
+                           ars_record_errors = 0 };
+    requests = [request "alpha" "a1"; request "beta" "b1"; request "alpha" "a2"];
+    recovery = None });
+  state.asks_snapshot <- Some Masc.Tui_decode_asks.{ asn_keeper = None; asn_open_count = 3;
+    asn_rows = [ask (Ask_keeper "beta") "q1"; ask (Ask_installation
+      { ai_declaration_id = "beta"; ai_title = "beta" }) "q2"; ask (Ask_keeper "beta") "q3"] };
+  state.tasks <- [ task "task-other" Masc_domain.Todo
+                 ; task "task-alpha" (Masc_domain.InProgress { assignee = "alpha"; started_at = "1" })
+                 ; task "task-beta" (Masc_domain.AwaitingVerification { assignee = "beta";
+                     started_at = "1"; submitted_at = "2"; verification_id = "v" }) ];
+  let rows = keeper_list_rows state in
+  let find name = List.find (fun row -> row.Masc_tui_keeper_list_model.keeper.k_name = name) rows in
+  let alpha_row = find "alpha" and beta_row = find "beta" in
+  Alcotest.(check bool) "a name's first turn row is its turn" true (alpha_row.turn = Some running);
+  Alcotest.(check (option string)) "a name's first held call is its held call" (Some "first")
+    (Option.map (fun (row : Tui_decode.keeper_tool_approval) -> row.kta_approval_id) beta_row.approval);
+  Alcotest.(check (list string)) "async requests keep their read order" ["a1"; "a2"]
+    (List.map (fun (row : Tui_decode.async_request_row) -> row.ar_request_id) alpha_row.async_requests);
+  Alcotest.(check int) "only the Keeper's own questions count" 2 beta_row.open_questions;
+  Alcotest.(check int) "a Keeper that asked nothing has none" 0 alpha_row.open_questions;
+  Alcotest.(check (option string)) "the current task is found by id" (Some "task-alpha")
+    (Option.map (fun (task : Tui_decode.task) -> task.id) alpha_row.task);
+  Alcotest.(check bool) "a task awaiting its verdict is held by its assignee" true
+    (beta_row.awaiting_verification && not alpha_row.awaiting_verification)
+;;
+
 let test_continuous_waiting_events_preserve_turn_controls () =
   let open Masc_tui_types in
   let state, _, _ = local_keeper_source_fixture () in
@@ -6584,6 +6639,8 @@ let () =
             test_partial_waiting_only_hides_missing_keepers
         ; Alcotest.test_case "waiting refresh preserves turns" `Quick
             test_waiting_event_does_not_hide_turns
+        ; Alcotest.test_case "roster rows join each reading by Keeper name" `Quick
+            test_roster_rows_join_each_reading_by_keeper_name
         ; Alcotest.test_case "continuous waiting events preserve turn controls" `Quick
             test_continuous_waiting_events_preserve_turn_controls
         ] )

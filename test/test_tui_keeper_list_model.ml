@@ -309,16 +309,17 @@ let test_a_submitter_is_found_by_assignee () =
     ; task_with_status "task-open" Masc_domain.Todo
     ]
   in
+  let holders = Model.verification_holders tasks in
   Alcotest.(check bool) "the assignee of an awaiting task holds one" true
-    (Model.holds_awaiting_verification ~keeper_name:"alpha" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"alpha");
   Alcotest.(check bool) "an assignee whose task is still in progress does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"beta" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"beta");
   Alcotest.(check bool) "an assignee whose task is done does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"gamma" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"gamma");
   Alcotest.(check bool) "a Keeper without a task does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"delta" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"delta");
   Alcotest.(check bool) "an empty task list holds none" false
-    (Model.holds_awaiting_verification ~keeper_name:"alpha" [])
+    (Model.holds_awaiting_verification (Model.verification_holders []) ~keeper_name:"alpha")
 
 let test_a_submitter_without_a_current_task_waits_for_its_verdict () =
   let submitter =

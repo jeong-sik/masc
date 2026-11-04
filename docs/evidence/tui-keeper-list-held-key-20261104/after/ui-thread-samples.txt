@@ -1,0 +1,27 @@
+smp-new-1793758197.txt main total 1101 busy 729 idle 372
+    60 caml_c_call
+    51 caml_string_hash
+    44 camlStdlib__Bytes$loop_504
+    42 readv
+    32 _tlv_get_addr
+    27 write
+    19 camlMasc_tui_types$current_task_inspector_18077
+    18 camlStdlib__List$fold_left_387
+    16 camlStdlib__Hashtbl$mem_in_bucket_1263
+    15 _platform_memcmp
+    15 camlStdlib__Hashtbl$mem_1268
+    14 _platform_memmove
+smp-old-1793758222.txt main total 518 busy 488 idle 30
+    94 camlStdlib__List$exists_458
+    85 camlMasc_tui_keeper_list_model$fun_3368
+    69 caml_string_equal
+    32 camlStdlib__List$find_opt_540
+    29 camlMasc_tui_keeper_list_model$primary_activity_of_row_3059
+    19 caml_c_call
+    18 camlPtime$of_rfc3339_inner_2093
+    12 write
+    10 compare_val
+    8 camlStdlib__Buffer$add_substring_592
+    7 __ultoa
+    6 caml_alloc_string
+    5 camlStdlib__List$fold_left_387

@@ -1,0 +1,160 @@
+(* Temporary component bench, not committed. Compares main's keeper_list_rows
+   (copied verbatim below as [old_rows]) with the worktree's
+   [Masc_tui_types.keeper_list_rows] on one state shaped like the live
+   workspace of 2026-11-04: 43 keepers, 375 active tasks (todo 337,
+   in_progress 31, awaiting_verification 6, claimed 1). *)
+open Masc_tui_types
+module Model = Masc_tui_keeper_list_model
+module D = Masc.Tui_decode
+
+let keepers_n = int_of_string (Sys.getenv_opt "K" |> Option.value ~default:"43")
+let todo_n = int_of_string (Sys.getenv_opt "TODO" |> Option.value ~default:"337")
+let name i = Printf.sprintf "keeper-%02d" i
+
+let state () =
+  let state = create_state ~workspace:"bench" ~local_base_path:"/tmp/bench" ~port:0
+      ~refresh_interval:0. () in
+  let activity i = { D.k_current_task_id = (if i mod 2 = 0 then Some (Printf.sprintf "task-ip-%02d" (i mod 31)) else None)
+                   ; k_total_turns = 0; k_total_tokens = 0
+                   ; k_total_cost_usd = Keeper_cost_coverage.empty
+                   ; k_last_turn_ts = "2026-11-04T01:00:00Z"; k_last_proactive_outcome = None } in
+  state.keepers <- List.init keepers_n (fun i ->
+      { D.k_origin = D.Persisted_keeper; k_name = name i; k_paused = i mod 7 = 0
+      ; k_identity = Error "bench"; k_activity = Some (activity i) });
+  state.keeper_turns <- List.init keepers_n (fun i ->
+      { D.ktr_keeper_name = name i; ktr_chat_control_token = None
+      ; ktr_state = if i mod 4 = 0 then D.Keeper_turn_running { lane = D.Turn_lane_autonomous;
+            started_at_unix = float_of_int i; interrupt_token = "t"; turn_ref = None; preview = None }
+          else D.Keeper_turn_idle });
+  state.keeper_waiting <- List.init keepers_n (fun i ->
+      { D.kwr_keeper_name = name i; kwr_state = (if i mod 3 = 0 then D.Keeper_waiting_blocked else D.Keeper_waiting_idle)
+      ; kwr_waiting_count = 0; kwr_since = Some (float_of_int (1000 - i)); kwr_due_at = None; kwr_waiting_on = [] });
+  let task id status : D.task = { id; title = id; status; priority = 3; goal_ids = [] } in
+  state.tasks <-
+    List.init todo_n (fun i -> task (Printf.sprintf "task-todo-%03d" i) Masc_domain.Todo)
+    @ List.init 31 (fun i -> task (Printf.sprintf "task-ip-%02d" i)
+                      (Masc_domain.InProgress { assignee = name (i mod keepers_n); started_at = "1" }))
+    @ List.init 6 (fun i -> task (Printf.sprintf "task-av-%d" i)
+                     (Masc_domain.AwaitingVerification { assignee = name (i * 5 mod keepers_n);
+                        started_at = "1"; submitted_at = "2"; verification_id = "v" }))
+    @ [ task "task-claimed" (Masc_domain.Claimed { assignee = name 1; claimed_at = "1" }) ];
+  state.asks_snapshot <- Some Masc.Tui_decode_asks.{ asn_keeper = None; asn_open_count = 8;
+    asn_rows = List.init 8 (fun i -> { ar_asker = Ask_keeper (name (i * 3 mod keepers_n)); ar_id = string_of_int i;
+      ar_asked_at = 1.; ar_source_turn_ref = None; ar_context = None; ar_questions = [];
+      ar_resolution = Ask_open }) };
+  state.tools_async_observation <- Some (D.Async_ready {
+      summary = D.{ ars_active = 6; ars_runtime_owned = 6; ars_ownership_unknown = 0; ars_record_errors = 0 };
+      requests = List.init 6 (fun i -> D.{ ar_request_id = string_of_int i; ar_submitted_by = "b";
+        ar_keeper_name = name (i * 7 mod keepers_n); ar_phase = Async_running; ar_submitted_at = 1.;
+        ar_ownership = Async_runtime_owned });
+      recovery = None });
+  state.keeper_list_layout <- Model.Grouped;
+  state.keeper_list_sort <- Model.Recent;
+  state
+
+(* ---- main's implementation, verbatim apart from local copies of helpers it called ---- *)
+let old_holds ~keeper_name tasks =
+  List.exists
+    (fun { D.status; _ } ->
+      match status with
+      | Masc_domain.AwaitingVerification { assignee; _ } -> String.equal assignee keeper_name
+      | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false)
+    tasks
+
+let old_question_count state keeper_name =
+  match state.asks_snapshot with
+  | None -> 0
+  | Some snapshot ->
+      List.fold_left
+        (fun count row ->
+          match row.Masc.Tui_decode_asks.ar_asker with
+          | Masc.Tui_decode_asks.Ask_keeper name when String.equal name keeper_name -> count + 1
+          | Masc.Tui_decode_asks.Ask_keeper _ | Masc.Tui_decode_asks.Ask_installation _ -> count)
+        0 snapshot.Masc.Tui_decode_asks.asn_rows
+
+let compare_name (l : Model.row) (r : Model.row) = String.compare l.keeper.D.k_name r.keeper.D.k_name
+let compare_recent (l : Model.row) (r : Model.row) =
+  match l.last_activity_at, r.last_activity_at with
+  | Some a, Some b -> let o = Float.compare b a in if o = 0 then compare_name l r else o
+  | Some _, None -> -1 | None, Some _ -> 1 | None, None -> compare_name l r
+let attention_rank = function
+  | Model.Attention -> 0 | Active -> 1 | Waiting -> 2 | Inactive -> 3 | Unobserved -> 4
+
+let old_order rows =
+  List.stable_sort (fun l r ->
+      let g = Int.compare (attention_rank (Model.group_of_row l)) (attention_rank (Model.group_of_row r)) in
+      if g <> 0 then g else compare_recent l r) rows
+
+let old_rows (state : state) : Model.row list =
+  List.map
+    (fun (keeper : keeper) ->
+      let name = keeper.k_name in
+      let turn =
+        List.find_map
+          (fun (row : D.keeper_turn_row) ->
+            if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
+          state.keeper_turns
+      in
+      let observed_waiting =
+        List.find_opt (fun (row : D.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
+          state.keeper_waiting
+      in
+      let waiting, activity_waiting =
+        match List.mem name state.keeper_waiting_unverified,
+              state.keeper_waiting_failure, observed_waiting with
+        | true, _, _ | false, Some _, _ -> Model.Waiting_unavailable, None
+        | false, None, Some row -> Model.Waiting_observed row, Some row
+        | false, None, None -> Model.Waiting_unobserved, None
+      in
+      let approval =
+        List.find_opt (fun (row : D.keeper_tool_approval) -> String.equal row.kta_keeper name)
+          state.keeper_tool_approvals
+      in
+      let task =
+        match keeper.k_activity with
+        | Some { D.k_current_task_id = Some task_id; _ } ->
+            List.find_opt (fun (task : D.task) -> String.equal task.id task_id) state.tasks
+        | Some { D.k_current_task_id = None; _ } | None -> None
+      in
+      let async_requests =
+        match state.tools_async_observation with
+        | Some (D.Async_ready { requests; _ }) ->
+            List.filter (fun (row : D.async_request_row) -> String.equal row.ar_keeper_name name) requests
+        | Some (D.Async_unavailable _) | None -> []
+      in
+      { Model.keeper; reading = keeper_reading state keeper; turn; waiting; approval; task
+      ; awaiting_verification = old_holds ~keeper_name:name state.tasks
+      ; open_questions = old_question_count state name
+      ; async_requests
+      ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper })
+    state.keepers
+  |> old_order
+
+let measure label f state ~iterations =
+  for _ = 1 to 200 do ignore (Sys.opaque_identity (f state)) done;
+  let words = Gc.minor_words () in
+  let started = Unix.gettimeofday () in
+  for _ = 1 to iterations do ignore (Sys.opaque_identity (f state)) done;
+  let elapsed = Unix.gettimeofday () -. started in
+  let words = Gc.minor_words () -. words in
+  let us = elapsed *. 1e6 /. float_of_int iterations in
+  let bytes = words *. float_of_int (Sys.word_size / 8) /. float_of_int iterations in
+  Printf.printf "%s us_per_call=%.2f minor_bytes_per_call=%.0f\n%!" label us bytes;
+  us, bytes
+
+let () =
+  let state = state () in
+  let old_result = old_rows state and new_result = keeper_list_rows state in
+  let names rows = List.map (fun (r : Model.row) -> r.keeper.D.k_name) rows in
+  Printf.printf "keepers=%d tasks=%d same_order=%b same_rows=%b\n%!" (List.length state.keepers)
+    (List.length state.tasks) (names old_result = names new_result) (old_result = new_result);
+  let iterations = 2000 in
+  let rounds = List.init 5 (fun _ ->
+      let o = measure "old" old_rows state ~iterations in
+      let n = measure "new" keeper_list_rows state ~iterations in
+      o, n) in
+  let median xs = let s = List.sort Float.compare xs in List.nth s (List.length s / 2) in
+  Printf.printf "median old_us=%.2f new_us=%.2f old_bytes=%.0f new_bytes=%.0f\n"
+    (median (List.map (fun ((u, _), _) -> u) rounds)) (median (List.map (fun (_, (u, _)) -> u) rounds))
+    (median (List.map (fun ((_, b), _) -> b) rounds)) (median (List.map (fun (_, (_, b)) -> b) rounds))

@@ -1,0 +1,12 @@
+keepers=43 tasks=375 same_order=true same_rows=true
+old us_per_call=375.60 minor_bytes_per_call=96872
+new us_per_call=226.11 minor_bytes_per_call=58752
+old us_per_call=461.76 minor_bytes_per_call=96872
+new us_per_call=97.88 minor_bytes_per_call=58752
+old us_per_call=681.68 minor_bytes_per_call=96872
+new us_per_call=78.79 minor_bytes_per_call=58752
+old us_per_call=710.15 minor_bytes_per_call=96872
+new us_per_call=142.96 minor_bytes_per_call=58752
+old us_per_call=374.50 minor_bytes_per_call=96872
+new us_per_call=279.87 minor_bytes_per_call=58752
+median old_us=461.76 new_us=142.96 old_bytes=96872 new_bytes=58752

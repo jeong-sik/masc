@@ -97,7 +97,9 @@ type settings =
       (** [Ok Overview] when the file is absent or does not parse. *)
   ; last_chat_keeper : (Keeper_id.Keeper_name.t option, string) result
       (** [Error] when the file cannot be read or parsed: unread history is
-          not presented as none. *)
+          not presented as none. The reason names the failed step only;
+          the detail, which can quote other tables or the file's path, goes
+          to the server log. *)
   ; theme : string option
   ; language : string option
       (** As stored; the reader reports a value it does not know. *)

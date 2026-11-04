@@ -1,7 +1,7 @@
 ---
 rfc: "0484"
 title: "운영자가 손써야 하는 일은 TUI 꼬리말과 대시보드에 뜬다"
-status: Accepted
+status: Draft
 created: 2026-11-04
 updated: 2026-11-04
 author: vincent + claude

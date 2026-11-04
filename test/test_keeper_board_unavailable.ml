@@ -311,12 +311,7 @@ let with_intake_sources ~max_events f =
     | Ok selections -> selections
     | Error message -> failf "failed to reload durable selections: %s" message
   in
-  let ack selection =
-    match Keeper_registry_event_queue.ack_pending_result ~base_path meta.name ~selection with
-    | Ok () -> ()
-    | Error message -> failf "failed to acknowledge selected source: %s" message
-  in
-  f ~seed ~seed_board ~intake ~pending ~ack
+  f ~seed ~seed_board ~intake ~pending
 ;;
 
 let admitted_ids intake =
@@ -325,7 +320,7 @@ let admitted_ids intake =
 ;;
 
 let test_empty_observation_source_still_spends_an_admission_slot () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending:_ ->
   let bootstrap =
     { (poison_board_signal_stimulus ()) with
       post_id = "bootstrap-limit"; payload = Keeper_event_queue.Bootstrap }
@@ -339,7 +334,7 @@ let test_empty_observation_source_still_spends_an_admission_slot () =
 ;;
 
 let test_permanent_absence_does_not_spend_an_admission_slot () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   seed (poison_board_signal_stimulus ());
   let readable = seed_board "readable source after permanently absent post" in
   let selected = intake () in
@@ -349,7 +344,7 @@ let test_permanent_absence_does_not_spend_an_admission_slot () =
 ;;
 
 let test_unavailable_posts_source_retains_the_exact_durable_selection () =
-  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed:_ ~seed_board ~intake ~pending ->
   let post_id = seed_board "retain this queued source" in
   let original = match pending () with
     | [selection] -> selection | _ -> fail "expected one queued Board source" in
@@ -367,7 +362,9 @@ let test_unavailable_posts_source_retains_the_exact_durable_selection () =
   check (list string) "an unavailable source is not admitted" [] (admitted_ids selected);
   (match selected.event_queue_intake_error with
    | Some (Keeper_heartbeat_stimulus_intake.Board_unavailable
-       { error = Board.Read_source_unavailable _; _ }) -> ()
+       { error = Board.Read_source_unavailable _; _ } as error) ->
+     check bool "an unavailable source is not a crashed cycle" false
+       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_counts_as_cycle_failure error)
    | _ -> fail "unavailable posts source lost its typed retention reason");
   (match pending () with
    | [selection] ->
@@ -424,7 +421,7 @@ let prepare_intake_rejection () =
 ;;
 
 let test_delivered_rejection_remains_current_at_intake () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board:_ ~intake ~pending ->
   let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -437,7 +434,7 @@ let test_delivered_rejection_remains_current_at_intake () =
 ;;
 
 let test_superseded_rejection_is_retired_before_projection () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   let config,task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   ignore (rejection_workspace_ok (Workspace.transition_task_r config
@@ -462,7 +459,7 @@ let test_superseded_rejection_is_retired_before_projection () =
 
 let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
   List.iter (fun malformed ->
-    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+    with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
     let config,task_id,verification_id,stimulus = prepare_intake_rejection () in
     seed stimulus;
     rejection_ok (Workspace_task_rejection_outbox.acknowledge config ~task_id ~verification_id);
@@ -488,7 +485,7 @@ let test_missing_or_malformed_delivered_evidence_preserves_active_rejection () =
 ;;
 
 let test_unread_rejection_authority_retains_source_and_allows_siblings () =
-  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ~ack:_ ->
+  with_intake_sources ~max_events:1 @@ fun ~seed ~seed_board ~intake ~pending ->
   let config,_task_id,_verification_id,stimulus = prepare_intake_rejection () in
   seed stimulus;
   let readable = seed_board "independent work after unread rejection authority" in

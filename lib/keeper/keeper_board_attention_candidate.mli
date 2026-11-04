@@ -69,8 +69,9 @@ type delivery =
   | Not_relevant
 
 type pending_state = { last_delivery_failure : delivery_failure option }
-(** v7 persists the current typed signal, not a historical Board thread
-    snapshot. The optional failure is delivery evidence, not judgment input. *)
+(** A pending candidate persists the current typed signal, not a historical
+    Board thread snapshot. The optional failure is delivery evidence, not
+    judgment input. *)
 
 type judged_state =
   { judgment : judgment
@@ -270,7 +271,7 @@ val of_board_signal :
   recorded_at:float ->
   Board_dispatch.addressed_board_signal ->
   candidate
-(** Constructs a v7 candidate from the producer-owned current typed signal
+(** Constructs a candidate from the producer-owned current typed signal
     and its event-time audience. It does not re-read or retain mutable Board
     thread history. *)
 

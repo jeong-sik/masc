@@ -241,7 +241,7 @@ let load_one ~base_path =
   | candidates -> Alcotest.failf "expected one candidate, got %d" (List.length candidates)
 ;;
 
-(* A vote signal round-trips through the v7 candidate codec with its payload
+(* A vote signal round-trips through the candidate codec with its payload
    under the [vote] key that only vote rows carry. *)
 let test_vote_signal_codec_round_trips_without_widening_other_rows () =
   let vote_signal : Masc.Board_dispatch.board_signal =
@@ -282,7 +282,7 @@ let test_vote_signal_codec_round_trips_without_widening_other_rows () =
     ]
     (signal_keys (A.signal_to_yojson vote_signal));
   Alcotest.(check (list string))
-    "post row keeps the v7 non-vote shape"
+    "post row keeps the non-vote shape"
     [ "author"
     ; "comment_id"
     ; "content"
@@ -685,7 +685,7 @@ let test_pending_row_has_no_board_thread_history () =
     | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
   Alcotest.(check bool)
-    "pending v7 row has no post or comments snapshot"
+    "pending row has no post or comments snapshot"
     true
     (status
      = `Assoc

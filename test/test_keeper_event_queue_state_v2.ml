@@ -1003,6 +1003,38 @@ let test_projected_disposition_ledger_replays_older_operation () =
    | Ok _ -> Alcotest.fail "compact witness accepted a changed transition payload")
 ;;
 
+(* A Board source with its audience encodes to exactly these bytes. The
+   cancellation and transfer receipts name a source by the hash of its bytes, so
+   a change in field order or spelling would stop a receipt from matching the
+   source it was written for. *)
+let test_board_source_keeps_its_wire_bytes_and_fingerprint () =
+  let comment_id = "c-" ^ String.make 32 'a' in
+  List.iter
+    (fun (label, source_bytes, fingerprint) ->
+       let source =
+         Yojson.Safe.from_string source_bytes
+         |> Queue.stimulus_of_yojson
+         |> require_ok ("decode " ^ label)
+       in
+       Alcotest.(check string)
+         (label ^ " keeps its canonical wire bytes")
+         source_bytes
+         (Queue.stimulus_to_yojson source |> Yojson.Safe.to_string);
+       Alcotest.(check string)
+         (label ^ " keeps its fingerprint")
+         fingerprint
+         (State.source_snapshot_ref source))
+    [ ( "post with a discoverable audience"
+      , {|{"post_id":"pinned-post","urgency":"normal","arrived_at_unix":1.0,"payload":{"kind":"board_signal","board_kind":"post_created","author":"alice","title":"title","content":"body","hearth":null,"updated_at_unix":null,"audience":{"kind":"discoverable"}}}|}
+      , "6847cfec43d5d725d59c8d02dae2e9d765d0c4a3d9d7b687b7cc5cdf1ac9591e" )
+    ; ( "comment with targeted audience"
+      , {|{"post_id":"pinned-comment","urgency":"normal","arrived_at_unix":2.0,"payload":{"kind":"board_signal","board_kind":"comment_added","author":"bob","title":"title","content":"reply","hearth":null,"updated_at_unix":null,"audience":{"kind":"targets","targets":["alpha"]},"comment_id":"|}
+        ^ comment_id
+        ^ {|","parent_id":null}}|}
+      , "2baa74164bec00281638fd57bc7250d302129a18acaeb3a0473bc37de3bf60db" )
+    ]
+;;
+
 let entry_named state post_id =
   State.pending_selections state
   |> List.find (fun (entry : State.pending_selection) ->
@@ -2852,6 +2884,10 @@ let () =
             "older projected disposition replays"
             `Quick
             test_projected_disposition_ledger_replays_older_operation
+        ; Alcotest.test_case
+            "Board source keeps its wire bytes and fingerprint"
+            `Quick
+            test_board_source_keeps_its_wire_bytes_and_fingerprint
         ; Alcotest.test_case
             "current schema only"
             `Quick

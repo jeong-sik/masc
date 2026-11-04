@@ -37,7 +37,7 @@ type delivery = Keeper_board_attention_candidate_wire.delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-(* v7 persists the current typed Board signal only. Historical post/comment
+(* A candidate persists the current typed Board signal only. Historical post/comment
    snapshots are neither identity nor judgment input, so retaining them would
    make stale context look authoritative. RFC-0424. *)
 type pending_state = Keeper_board_attention_candidate_wire.pending_state = { last_delivery_failure : delivery_failure option }

@@ -29,7 +29,7 @@ KEEPER_META_REJECTED='current keeper meta is invalid'
 RUNTIME_CONFIG_REJECTED='runtime.toml is not one this build accepts'
 RUNTIME_CONFIG_NEXT_BEFORE_STOP='nothing was stopped or installed: change the value (through the runtime config editor while a server runs on this workspace, in the file otherwise), then deploy again'
 RUNTIME_CONFIG_NEXT_UNDER_LEASE='no server runs on this workspace while this gate holds its writer lease, and the next runtime was not started: change the value in the file, then start it again'
-# Keep aligned with Keeper_board_attention_candidate.schema_version.
+# Keep aligned with Keeper_board_attention_candidate_wire.schema_version.
 BOARD_ATTENTION_SCHEMA_VERSION=8
 
 usage() {

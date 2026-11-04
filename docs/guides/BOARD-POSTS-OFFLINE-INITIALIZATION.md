@@ -50,17 +50,17 @@ exceptions are raised after structured output is attempted. Lease release is
 reported as attempted: the existing lease API does not certify release, and some
 acquisition rejections retain only a diagnostic string.
 
-`live_posts_guard_enforced` is true: normal Board loads require an actual valid
-initialization guard and complete Present posts source before granting posts
-write authority. Posts and auxiliary writers freshly revalidate the accepted
-guard; guard-only observations do not authorize posts. A changed guard cannot
-replace retained initialization history through repeated failed loads. Unknown
-posts effects remain unsettled. This command performs only the explicitly
-requested offline action; it does not initialize a running store automatically.
+`live_posts_guard_enforced` is false: normal Board loads and writes do not read
+the initialization guard. The first load of a workspace without a posts file
+starts from an empty source. Once a running store has observed an actual posts
+file, a later absence of that file is refused. Posts and auxiliary writers
+revalidate the workspace of the observation they act on. Unknown posts effects
+remain unsettled. This command performs only the explicitly requested offline
+action.
 
 One positive recognition path is narrower than creation: an exact Fusion-origin
-replay may return a matching already observed row from best-effort display data
-after guard refusal. Matching the row neither directly accesses source files
+replay may return a matching row already in memory, including one a partial
+load kept. Matching the row neither directly accesses source files
 nor publishes a new row, and grants no posts authority, negative evidence,
 operation receipt or durability guarantee. The call still runs ordinary
 maintenance scheduling before lookup; a separate flusher may process the

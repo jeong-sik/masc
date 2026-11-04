@@ -7,9 +7,10 @@
     successful "no file" load from a partially-loaded store after an IO
     failure.
 
-    The current contract returns [(int, string * exn) result]. Live posts
-    additionally require a valid initialization guard and an actual complete
-    Present payload. Missing comments remain a legitimate empty source. *)
+    The current contract returns [(int, string * exn) result]. A first load
+    of an absent posts file starts empty; once a store has observed an actual
+    posts file, its absence is refused. Missing comments remain a legitimate
+    empty source. *)
 
 open Masc
 
@@ -49,10 +50,10 @@ let test_load_persisted_posts_missing_file () =
   let _dir = fresh_test_base_path () in
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  Alcotest.(check bool) "uninitialized Missing posts are refused" true
-    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
-  Alcotest.(check bool) "missing source grants no posts authority" true
-    (Result.is_error (posts_source_health store));
+  Alcotest.(check bool) "a first load of absent posts starts empty" true
+    (Masc_board_handlers.Board_votes_json.load_persisted_posts store = Ok 0);
+  Alcotest.(check bool) "the empty start grants posts authority" true
+    (posts_source_health store = Ok ());
   Alcotest.(check bool) "live reads never bootstrap a posts payload" false
     (Sys.file_exists (Board.persist_path store));
   Alcotest.(check bool) "live reads never publish initialization" false

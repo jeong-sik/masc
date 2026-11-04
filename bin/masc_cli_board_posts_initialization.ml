@@ -17,7 +17,7 @@ let cmd ~base_path ~run =
   let leaf name doc action =
     Cmd.v (Cmd.info name ~doc)
       Term.(const run $ (const (fun base_path action -> { base_path; action }) $ base_path $ action)) in
-  Cmd.group (Cmd.info "board-posts" ~doc:"Inspect or explicitly initialize posts while offline; live Board writes require an initialized guard.")
+  Cmd.group (Cmd.info "board-posts" ~doc:"Inspect or explicitly initialize posts while offline. Live Board loads and writes do not read the initialization guard.")
     [leaf "inspect" "Observe existing posts initialization without creating files." (Term.const Inspect);
      leaf "bootstrap" "Explicitly initialize an unused posts layout while the workspace is offline."
        Term.(const (fun expected_intent_sha256 -> Bootstrap { expected_intent_sha256 }) $ expected);

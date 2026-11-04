@@ -456,7 +456,7 @@ let posts_observation store =
   match store.Board.posts_source with
   | Board.Posts_readable { observation; _ } ->
     observation.source_path, observation.snapshot.bytes, observation.snapshot.cursor
-  | Board.Posts_unobserved | Board.Posts_guard_observed _ | Board.Posts_refused _ | Board.Posts_unsettled _ ->
+  | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ ->
     Alcotest.fail "fixture must retain a readable posts source"
 
 let check_retained_posts_source (path, bytes, cursor) store =

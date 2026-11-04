@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
+import { storedTokenRevision } from '../../api/token-revision'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { unixishToMs } from '../../lib/format-time'
@@ -86,8 +87,22 @@ type SourceState<T> =
   | { readonly kind: 'ready'; readonly snapshot: SourceSnapshot<T> }
   | { readonly kind: 'error'; readonly snapshot: SourceSnapshot<T> | null; readonly error: string }
 
+// A snapshot belongs to the credential that read it. Under another credential
+// the source has no last successful data, so a failed read there cannot show
+// what the previous credential read.
+type CredentialSourceState<T> = { readonly credentialRevision: number; readonly state: SourceState<T> }
+
+function snapshotUnder<T>(scoped: CredentialSourceState<T>, credentialRevision: number): SourceSnapshot<T> | null {
+  return scoped.credentialRevision === credentialRevision ? scoped.state.snapshot : null
+}
+
 function useConversationSource<T>(source: IdeConversationSource, fetchItems: (signal: AbortSignal) => Promise<ReadonlyArray<T>>) {
-  const [state, setState] = useState<SourceState<T>>({ kind: 'loading', snapshot: null })
+  const credentialRevision = storedTokenRevision.value
+  const [scoped, setScoped] = useState<CredentialSourceState<T>>({
+    credentialRevision, state: { kind: 'loading', snapshot: null },
+  })
+  const state: SourceState<T> = scoped.credentialRevision === credentialRevision
+    ? scoped.state : { kind: 'loading', snapshot: null }
   const [revision, setRevision] = useState(0)
   const refresh = useCallback(() => setRevision(value => value + 1), [])
   useEffect(() => registerIdeConversationRefresh(changed => {
@@ -95,17 +110,24 @@ function useConversationSource<T>(source: IdeConversationSource, fetchItems: (si
   }), [source, refresh])
   useEffect(() => {
     const controller = new AbortController()
-    setState(previous => ({ kind: 'loading', snapshot: previous.snapshot }))
+    setScoped(previous => ({
+      credentialRevision, state: { kind: 'loading', snapshot: snapshotUnder(previous, credentialRevision) },
+    }))
     void fetchItems(controller.signal).then(items => {
-      if (!controller.signal.aborted) setState({ kind: 'ready', snapshot: { items, at: Date.now() } })
+      if (!controller.signal.aborted) setScoped({
+        credentialRevision, state: { kind: 'ready', snapshot: { items, at: Date.now() } },
+      })
     }, error => {
-      if (!controller.signal.aborted) setState(previous => ({
-        kind: 'error', snapshot: previous.snapshot,
-        error: error instanceof Error ? error.message : String(error),
+      if (!controller.signal.aborted) setScoped(previous => ({
+        credentialRevision,
+        state: {
+          kind: 'error', snapshot: snapshotUnder(previous, credentialRevision),
+          error: error instanceof Error ? error.message : String(error),
+        },
       }))
     })
     return () => controller.abort()
-  }, [revision, fetchItems])
+  }, [revision, fetchItems, credentialRevision])
   return { state, refresh }
 }
 

@@ -6,7 +6,7 @@ module Context = Keeper_librarian_context
 
 open Result.Syntax
 let permission = Masc_domain.CanAdmin
-let prefix = "/api/v1/keepers/"
+let prefix = Server_dashboard_http_keeper_api_types.keeper_api_prefix
 
 type target =
   | Current_memory of string

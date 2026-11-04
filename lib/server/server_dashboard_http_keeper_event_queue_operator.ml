@@ -6,7 +6,7 @@ module Execute = Server_dashboard_http_keeper_event_queue_operator_execute
 open Result.Syntax
 let schema = "keeper_event_queue.operator.request.v2"
 let result_schema = "keeper_event_queue.operator.result.v1"
-let prefix = "/api/v1/keepers/"
+let prefix = Server_dashboard_http_keeper_api_types.keeper_api_prefix
 let operator_permission = Masc_domain.CanAdmin
 
 let route path =

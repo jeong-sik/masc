@@ -16,18 +16,10 @@ val keeper_unified_temperature : unit -> float
 val keeper_status_fast_default : unit -> bool
 val keeper_enable_thinking : unit -> bool option
 val ensure_runtime_params_init : unit -> unit
-type sandbox_profile =
-  Keeper_types_profile_sandbox.sandbox_profile =
-    Docker
-  | Micro_vm
-  | Remote_ssh
+type sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile
 module Sandbox_profile_tla =
   Keeper_types_profile_sandbox.Sandbox_profile_tla
-type network_mode =
-  Keeper_types_profile_sandbox.network_mode =
-    Network_none
-  | Network_inherit
-  | Network_policy
+type network_mode = Keeper_types_profile_sandbox.network_mode
 val to_tla_symbol : network_mode -> string
 val all_symbols : string list
 val all_states : network_mode list

@@ -43,26 +43,17 @@ val is_terminal : phase -> bool
 
 (** Observable boolean conditions computed from keeper state.
     Phase is DERIVED from conditions via [derive_phase].
-    Conditions are the primitive; phase is the projection. *)
-type conditions = {
-  launch_pending : bool;
-  (** Fresh registration exists, but the keepalive fiber has not started yet. *)
-  fiber_alive : bool;
-  (** [done_p] unresolved AND [fiber_stop] not set *)
-  heartbeat_healthy : bool;
-  (** Result of the latest heartbeat observation. *)
-  turn_healthy : bool;
-  (** Result of the latest completed turn observation. *)
-  context_handoff_needed : bool;
-  operator_paused : bool;
-  (** [meta.paused = true] *)
-  stop_requested : bool;
-  (** [Atomic.get fiber_stop = true] *)
-  restart_requested : bool;
-  (** Supervisor has requested immediate restart of a stopped fiber. *)
-  drain_complete : bool;
-  (** Current turn finished, no pending work *)
-}
+    Conditions are the primitive; phase is the projection.
+    [launch_pending]: fresh registration exists, but the keepalive fiber
+    has not started yet. [fiber_alive]: [done_p] unresolved AND
+    [fiber_stop] not set. [heartbeat_healthy]: result of the latest
+    heartbeat observation. [turn_healthy]: result of the latest completed
+    turn observation. [operator_paused]: [meta.paused = true].
+    [stop_requested]: [Atomic.get fiber_stop = true].
+    [restart_requested]: supervisor requested immediate restart of a
+    stopped fiber. [drain_complete]: current turn finished, no pending
+    work. *)
+type conditions = Keeper_state_machine_types.conditions
 
 val default_conditions : conditions
 (** All false — the "zero state" for initialization. *)
@@ -70,13 +61,13 @@ val default_conditions : conditions
 (** {1 Events (Det/NonDet Boundary Output)} *)
 
 (** Auto-rule evaluation summary, captured at the boundary. *)
-type context_actions = { handoff : bool }
+type context_actions = Keeper_state_machine_types.context_actions
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.
     Non-deterministic measurements become typed events at the boundary. *)
 
-type event =
+type event = Keeper_state_machine_types.event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int }
   | Turn_succeeded

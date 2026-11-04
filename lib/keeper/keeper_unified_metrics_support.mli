@@ -6,10 +6,7 @@ type turn_mode =
   | Skip_text
   | Noop
 
-type usage_trust = Keeper_usage_trust.t =
-  | Usage_missing
-  | Usage_trusted
-  | Usage_untrusted of string list
+type usage_trust = Keeper_usage_trust.t
 
 val observed_triggers_of_observation :
   Keeper_world_observation.world_observation ->

@@ -21,10 +21,7 @@ type turn_mode =
   | Skip_text
   | Noop
 
-type usage_trust = Keeper_usage_trust.t =
-  | Usage_missing
-  | Usage_trusted
-  | Usage_untrusted of string list
+type usage_trust = Keeper_usage_trust.t
 
 val classify_usage_trust :
   usage_reported:bool ->

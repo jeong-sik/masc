@@ -6,10 +6,7 @@
 
 (** {1 Types} *)
 
-type backend = Keeper_types_profile_sandbox.sandbox_profile =
-  | Docker
-  | Micro_vm
-  | Remote_ssh
+type backend = Keeper_types_profile_sandbox.sandbox_profile
 
 type t = {
   keeper_name : string;

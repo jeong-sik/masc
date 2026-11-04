@@ -16832,6 +16832,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_params_notice <- None;
   state.observer <- Observer_off;
   state.observer_retry_owner <- None;
+  state.contact_retry_owner <- None;
   state.observer_recovery_owner <- None;
   state.observer_scope_binding <- Observer_scope_unbound;
   (* The withdrawal cancelled the fleet job with every other job. What it drew
@@ -18666,17 +18667,27 @@ let contact_retry_max_s = 30.0
 let contact_retry_delay_s ~failures =
   Float.min contact_retry_max_s (stream_reconnect_s *. Float.pow 2.0 (Float.of_int failures))
 
-(* Runs on every loop iteration. While the server cannot be reached, is
-   booting, or has not confirmed the workspace, and no revalidation is out,
-   one timer waits and then revalidates; each attempt that ends the same way
-   waits longer. A reached server opens the observer feed from the
+(* Whether nothing but a revalidation can bring the server back: it cannot be
+   reached or is booting, or the workspace it names is not yet confirmed (an
+   unconfirmed workspace withdraws the reading, and with it the feed). *)
+let contact_needed state =
+  (match state.connection_status with
+   | Disconnected | Connecting | Booting -> true
+   | Connected | Degraded -> false)
+  || (match state.workspace_identity with
+      | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> true
+      | Workspace_identity_match | Workspace_identity_mismatch _ -> false)
+
+(* Runs on every loop iteration. While a revalidation is needed and none is
+   out, one timer waits and then revalidates; each attempt that ends the same
+   way waits longer. A reached server opens the observer feed from the
    revalidation's answer, and the feed says what changes after that. *)
 let reconcile_contact_retry state ~mailbox ~refresh_inflight =
-  match state.connection_status with
-  | Connected | Degraded ->
-      state.contact_failures <- 0;
-      state.contact_retry_owner <- None
-  | Disconnected | Connecting | Booting ->
+  if not (contact_needed state) then begin
+    state.contact_failures <- 0;
+    state.contact_retry_owner <- None
+  end
+  else
       if Option.is_none state.contact_retry_owner && not refresh_inflight then
         match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
         | Some sw, Some clock ->
@@ -23590,15 +23601,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         open_fleet_stream_if_due state ~host:server_peer_host ~port:state.port ~mailbox
   | Contact_retry_due (authority, owner) ->
       (match state.contact_retry_owner with
-       | Some current when current == owner && authority = state.workspace_authority ->
+       | Some current when current == owner ->
            state.contact_retry_owner <- None;
-           (match state.connection_status with
-            | Disconnected | Connecting | Booting ->
-                start_http_refresh state ~host:server_peer_host ~port:state.port
-                  ~refresh_inflight:http_refresh_inflight
-                  ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                  ~scoped_refresh_followup ~mailbox
-            | Connected | Degraded -> ())
+           if authority = state.workspace_authority && contact_needed state then
+             start_http_refresh state ~host:server_peer_host ~port:state.port
+               ~refresh_inflight:http_refresh_inflight
+               ~scoped_refresh_inflight:http_scoped_refresh_inflight
+               ~scoped_refresh_followup ~mailbox
        | Some _ | None -> ())
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;

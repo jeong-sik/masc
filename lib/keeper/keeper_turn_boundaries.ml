@@ -455,13 +455,6 @@ let is_position ~end_atom ~last_atom_digest = function
   | Some _ | None -> None
 ;;
 
-let states_position ~trace_id ~end_atom ~last_atom_digest record =
-  match is_position ~end_atom ~last_atom_digest (atom_position_stated ~trace_id record) with
-  | Some _ as ended -> ended
-  | None ->
-    is_position ~end_atom ~last_atom_digest (start_position_stated ~trace_id record)
-;;
-
 (* The lines that number the atoms of [trace_id] from zero again. A start
    line before one of them states a position of a history that is gone. *)
 let restarts_history ~trace_id (record : record) =

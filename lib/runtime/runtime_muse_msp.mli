@@ -237,13 +237,6 @@ val turn_start_request
 (** [input] must be non-empty; the host refuses an empty list as invalid
     params. The fresh turn's id is [command_id] (MSP SS3.1.4). *)
 
-val turn_interrupt_request
-  :  id:int
-  -> session_id:string
-  -> command_id:string
-  -> turn_id:string
-  -> Yojson.Safe.t
-
 val usage_read_request : id:int -> Yojson.Safe.t
 
 val server_request_error : request_id -> code:int -> message:string -> Yojson.Safe.t

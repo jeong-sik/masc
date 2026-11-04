@@ -1659,6 +1659,25 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
      raise
        (Env_config_core.Config_error
           (Server_auth.configure_error_to_string error)));
+  (* HIGH-RISK-UNREVIEWED: the account mode is decided here, once per boot,
+     after the BasePath lease and before anything serves (multi-account A2). *)
+  (let mode_input =
+     Authz_boot_mode_read.input
+       ~base_path
+       ~config_dir:
+         (Authz_boot_mode_read.config_dir
+            ~xdg_config_home:(Env_config_core.raw_value_opt "XDG_CONFIG_HOME")
+            ~home:(Host_config.host ()).home)
+       ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
+   in
+   match Authz_boot_mode_read.decide mode_input with
+   | Authz_boot_mode_read.Boot_single_user -> ()
+   | ( Authz_boot_mode_read.Refuse _
+     | Authz_boot_mode_read.Multi_account_not_activatable
+     | Authz_boot_mode_read.Multi_account_not_served _ ) as decision ->
+     raise
+       (Env_config_core.Config_error
+          (String.concat "; " (Authz_boot_mode_read.messages mode_input decision))));
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in

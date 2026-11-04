@@ -28,7 +28,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
                 ~composition_plan_index:(Some composition_plan_index)
                 ~tool_name ~input
             with
-            | Policy.Run _ -> Agent_core.Hooks.Continue
+            | Policy.Run -> Agent_core.Hooks.Continue
             | Policy.Ask { because } ->
                 Agent_core.Hooks.ElicitToolApproval
                   { question = Policy.question_for ~tool_name ~input

@@ -539,7 +539,7 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core ~name 
   check bool "catalog requires read-state permission only" true
     ((Tool_catalog.metadata name).required_permission = Masc_domain.CanReadState);
   match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None ~tool_name:name ~input with
-  | Policy.Run _ -> ()
+  | Policy.Run -> ()
   | Policy.Ask { because } -> failf "stored-image reading asks for approval: %s" because
 ;;
 

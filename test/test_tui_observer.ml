@@ -143,13 +143,15 @@ let summary = function
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_name dataset
       ^ (match dataset with
          | Masc.Workspace_dataset_event.Keeper_metrics { keeper }
-         | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
+         | Masc.Workspace_dataset_event.Skill_activations { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
          | Masc.Workspace_dataset_event.Goals
          | Masc.Workspace_dataset_event.Runtime_config
-         | Masc.Workspace_dataset_event.Connectors -> "")
+         | Masc.Workspace_dataset_event.Connectors
+         | Masc.Workspace_dataset_event.Skill_catalog -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -847,6 +849,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   ( Masc.Workspace_dataset_event.Repositories
                   | Masc.Workspace_dataset_event.Keeper_metrics _
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Skill_activations _
+                  | Masc.Workspace_dataset_event.Skill_catalog
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -917,6 +921,8 @@ let test_a_repository_push_reads_the_list () =
                   ( Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Keeper_metrics _
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Skill_activations _
+                  | Masc.Workspace_dataset_event.Skill_catalog
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -935,6 +941,8 @@ let test_a_repository_push_reads_the_list () =
               ( Masc.Workspace_dataset_event.Repositories
               | Masc.Workspace_dataset_event.Keeper_metrics _
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+              | Masc.Workspace_dataset_event.Skill_activations _
+              | Masc.Workspace_dataset_event.Skill_catalog
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -964,7 +972,23 @@ let test_a_repository_push_reads_the_list () =
     [ "dataset(keeper_metrics:alpha)" ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]))
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]));
+  check (list string) "Skill pushes decode with the Keeper a ledger row names"
+    [ "dataset(skill_activations:alpha)"; "dataset(skill_catalog)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_activations\",\"keeper\":\"alpha\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_catalog\"}\n\n"
+          ]));
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a Skill ledger push without its Keeper was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_activations\"}\n\n" ]
 
 let test_only_a_question_change_reads_the_questions () =
   check (list string) "question changes decode with what asked them"

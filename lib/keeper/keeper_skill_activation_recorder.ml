@@ -10,7 +10,8 @@ type instruction_content =
       }
 
 type t =
-  { trace_id : Keeper_id.Trace_id.t
+  { keeper_name : string
+  ; trace_id : Keeper_id.Trace_id.t
   ; turn_ref : Ids.Turn_ref.t
   ; runtime_id : unit -> string option
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -42,6 +43,8 @@ type result_child =
   ; skill_tool_use_id : string
   ; activation_frame_sha256 : string
   }
+let keeper_name (context : t) = context.keeper_name
+let bound_keeper_name bound = bound.context.keeper_name
 let bound_trace_id bound = bound.context.trace_id
 let bound_turn_ref bound = bound.context.turn_ref
 
@@ -53,7 +56,7 @@ type error =
   | Store_failed of Ledger.store_error
   | Invalid_bound_context of string
 
-let make ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_selection =
+let make ~keeper_name ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_selection =
   let task_provenance =
     List.fold_left
       (fun result (selected : Keeper_task_skill_turn.selected) ->
@@ -91,7 +94,7 @@ let make ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_selection =
   else
     Result.map
       (fun task_provenance ->
-         { trace_id; turn_ref; runtime_id; snapshot_revision; task_provenance })
+         { keeper_name; trace_id; turn_ref; runtime_id; snapshot_revision; task_provenance })
       task_provenance
 ;;
 
@@ -133,7 +136,7 @@ let bound_context_to_yojson {context;runtime} = `Assoc
         `List (List.map (fun id -> `String (Keeper_id.Task_id.to_string id)) (Ledger.task_id_set_to_list ids)))]) context.task_provenance)]
 ;;
 
-let bound_context_of_yojson json =
+let bound_context_of_yojson ~keeper_name json =
   let invalid detail = Error (Invalid_bound_context detail) in
   let fields names = function
     | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
@@ -173,7 +176,7 @@ let bound_context_of_yojson json =
           |> Result.map_error (fun error -> Activation_rejected error)
       | _ -> invalid "expected Task identities or null" in
     Ok ({reference;task_ids}::previous)) (Ok []) rows |> Result.map List.rev in
-  Ok {context={trace_id;turn_ref;runtime_id=(fun () -> Some runtime);snapshot_revision;task_provenance};runtime}
+  Ok {context={keeper_name;trace_id;turn_ref;runtime_id=(fun () -> Some runtime);snapshot_revision;task_provenance};runtime}
 ;;
 
 let bound_task_references bound = bound.context.task_provenance
@@ -242,7 +245,8 @@ let find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =
 let record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =
   let activated_at = Masc_domain.now_iso () in
   let* activation = bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at in
-  Ledger.record_original_invocation ~config ~trace_id:bound.context.trace_id activation
+  Ledger.record_original_invocation ~config ~keeper_name:bound.context.keeper_name
+    ~trace_id:bound.context.trace_id activation
   |> Result.map snd |> Result.map_error (fun error -> Store_failed error)
 ;;
 
@@ -276,7 +280,7 @@ let record ~config context ~tool_invocation ~invocation reference =
       ~activated_at:(Masc_domain.now_iso ())
     |> Result.map_error (fun error -> Activation_rejected error)
   in
-  Ledger.record ~config ~trace_id:context.trace_id activation
+  Ledger.record ~config ~keeper_name:context.keeper_name ~trace_id:context.trace_id activation
   |> Result.map snd
   |> Result.map_error (fun error -> Store_failed error)
 ;;
@@ -344,6 +348,7 @@ let record_nested_composition ~config context ~invocation ~tool_name ~scope refe
 let observe_delivery ~config context ~tool_results ~boundary ~runtime_id =
   Ledger.observe_delivery
     ~config
+    ~keeper_name:context.keeper_name
     ~trace_id:context.trace_id
     ~turn_ref:context.turn_ref
     ~tool_results
@@ -368,6 +373,7 @@ let observe_action
   in
   Ledger.observe_action
     ~config
+    ~keeper_name:context.keeper_name
     ~trace_id:context.trace_id
     ~turn_ref:context.turn_ref
     ~active_skill_tool_use_ids
@@ -384,7 +390,7 @@ let observe_action
 let observe_native_action ~config context ~active_skill_tool_use_ids
       ~runtime_id ~agent_core_turn ~identity ~tool_name =
   Ledger.observe_action
-    ~config ~trace_id:context.trace_id ~turn_ref:context.turn_ref
+    ~config ~keeper_name:context.keeper_name ~trace_id:context.trace_id ~turn_ref:context.turn_ref
     ~active_skill_tool_use_ids ~action_identity:identity ~tool_name ~runtime_id
     ~agent_core_turn ~observed_at:(Masc_domain.now_iso ())
   |> Result.map snd

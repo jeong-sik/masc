@@ -62,7 +62,8 @@ let record state ~handles ~runtime_id ~tool_name ~occurrence =
     let* fact = Fact.make ~delivery_sha256:(Keeper_skill_async_delivery.identity handle.delivery)
       ~physical_turn_ref:(Recorder.physical_turn_ref state.context) ~runtime_id ~tool_name
       ~occurrence ~observed_at:(Masc_domain.now_iso ()) |> Result.map_error (fun detail -> Invalid_evidence detail) in
-    let* _ = Keeper_skill_activation_ledger.observe_async_action ~config:state.config ~trace_id:handle.trace_id fact
+    let* _ = Keeper_skill_activation_ledger.observe_async_action ~config:state.config
+      ~keeper_name:(Recorder.keeper_name state.context) ~trace_id:handle.trace_id fact
       |> Result.map_error (fun error -> Ledger_failed error) in
     Ok (count+1)) (Ok 0) handles
 let take_pending state ~invocation ~tool_name =

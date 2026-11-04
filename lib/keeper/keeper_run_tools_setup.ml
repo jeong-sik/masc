@@ -445,6 +445,7 @@ let prepare_agent_setup
     ~base_path:config.base_path ~physical_turn_ref:skill_turn_ref in
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
+      ~keeper_name:meta.name
       ~trace_id:meta.runtime.trace_id
       ~runtime_id:(fun () -> Atomic.get active_runtime_id)
       ~turn_ref:skill_turn_ref

@@ -1136,7 +1136,7 @@ esac
   let trace_id = meta.runtime.trace_id in
   ignore (Masc.Keeper_fs.ensure_dir
     (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)));
-  let activation_context = Recorder.make ~trace_id
+  let activation_context = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~absolute_turn:1)
       ~runtime_id:(fun () -> Some "overlap.runtime")
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'f') |> Result.get_ok)

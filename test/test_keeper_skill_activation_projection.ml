@@ -123,7 +123,7 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
     | Ok activation -> activation
     | Error _ -> fail "activation fixture rejected"
   in
-  match Ledger.record ~config ~trace_id:meta.runtime.trace_id activation with
+  match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:meta.runtime.trace_id activation with
   | Ok _ -> ()
   | Error error -> fail (Ledger.store_error_to_string error)
 ;;
@@ -385,7 +385,7 @@ let composition_fixture config meta =
         tool_name = "keeper_compose_review"; execution_id = Ids.Execution_id.of_string "physical-original" })
       ~activated_at:seed.activated_at with
     | Ok value -> value | Error _ -> fail "composition fixture rejected" in
-  (match Ledger.record ~config ~trace_id:meta.runtime.trace_id activation with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:meta.runtime.trace_id activation with
    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
   activation
 
@@ -437,7 +437,7 @@ let test_chat_history_reads_execution_beyond_the_trace () =
   let meta = persist_session config keeper_name in
   let activation = composition_fixture config meta in
   let content = "composition failure" in
-  (match Ledger.observe_delivery ~config ~trace_id:meta.runtime.trace_id
+  (match Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:meta.runtime.trace_id
     ~turn_ref:activation.turn_ref
     ~tool_results:[ { Ledger.tool_use_id = "composition-call"; content_bytes = String.length content;
       content_sha256 = Agent_core_sha256.(digest_string content |> to_hex) } ]
@@ -468,14 +468,14 @@ let test_physical_turn_finds_origin_evidence_and_preserves_read_gaps () =
   let origin_dir = Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string origin) in
   Unix.mkdir origin_dir 0o700;
   let originals = Ledger.activations canonical in
-  List.iter (fun activation -> match Ledger.record ~config ~trace_id:origin activation with
+  List.iter (fun activation -> match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin activation with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) originals;
   List.iter (fun delivery ->
-    match Ledger.observe_async_result_delivery ~config ~trace_id:origin
+    match Ledger.observe_async_result_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin
       ~expected_activations:originals delivery with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
     (Ledger.async_result_deliveries canonical);
-  List.iter (fun action -> match Ledger.observe_async_action ~config ~trace_id:origin action with
+  List.iter (fun action -> match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin action with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
     (Ledger.async_actions canonical);
   let receiving = "new-physical-trace#73" in

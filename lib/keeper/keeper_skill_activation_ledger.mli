@@ -382,8 +382,14 @@ val load_existing_read_only_from_root :
     Fleet discovery uses this to avoid resolving a replaced configured root
     independently for every session. *)
 
+(** The writers below take the Keeper whose turn writes the session. Every
+    row one of them commits, a rejected transition included, announces
+    {!Workspace_dataset_event.Skill_activations} for that Keeper to the
+    workspace's runtime observers; an idempotent re-observation commits
+    nothing and announces nothing. *)
+
 val record :
-  config:Workspace.config ->
+  config:Workspace.config -> keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   activation ->
   (t * record_outcome, store_error) result
@@ -394,14 +400,14 @@ val record :
     remains a distinct activation. *)
 
 val record_original_invocation :
-  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> activation ->
+  config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> activation ->
   (t * record_outcome, store_error) result
 (** Re-admit a sealed original nested invocation atomically. All immutable
     facts must match; the first actual activation clock, delivery and actions
     are retained. A changed source or child scope remains an ID collision. *)
 
 val observe_delivery :
-  config:Workspace.config ->
+  config:Workspace.config -> keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   tool_results:tool_result_receipt list ->
@@ -418,7 +424,7 @@ val observe_delivery :
     are matching Skill invocations, including idempotent re-observations. *)
 
 val observe_async_result_delivery :
-  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   expected_activations:activation list -> Keeper_skill_async_delivery.t ->
   (t * Keeper_skill_async_delivery.t, store_error) result
 (** Under the canonical transaction, compare every original activation with
@@ -427,14 +433,14 @@ val observe_async_result_delivery :
     handoff never becomes a full-body receipt. *)
 
 val observe_async_action :
-  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   Keeper_skill_async_action.t -> (t * Keeper_skill_async_action.t, store_error) result
 (** Revalidate the exact stored delivery and original activation frame under
     the canonical transaction. Repeated facts preserve their first clock;
     altered results for an existing occurrence are refused. *)
 
 val observe_action :
-  config:Workspace.config ->
+  config:Workspace.config -> keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   active_skill_tool_use_ids:string list ->

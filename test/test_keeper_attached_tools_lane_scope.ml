@@ -133,7 +133,7 @@ let with_bundle
       let trace_id = meta.Keeper_meta_contract.runtime.trace_id in
       let context =
         match
-          Keeper_skill_activation_recorder.make
+          Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
             ~trace_id
             ~runtime_id:(fun () -> Some "test.runtime")
             ~turn_ref:

@@ -100,7 +100,7 @@ let create_session config trace =
 ;;
 
 let record config trace activation =
-  match Ledger.record ~config ~trace_id:trace activation with
+  match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace activation with
   | Ok _ -> ()
   | Error error -> fail (Ledger.store_error_to_string error)
 ;;
@@ -373,7 +373,7 @@ let test_retained_async_evidence_preserves_selection_and_gaps () =
   create_session config trace;
   let original = List.hd (Ledger.activations canonical) in
   record config trace original;
-  List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~config ~trace_id:trace
+  List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace
       ~expected_activations:[original] delivery with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
     (Ledger.async_result_deliveries canonical);
@@ -383,7 +383,7 @@ let test_retained_async_evidence_preserves_selection_and_gaps () =
       | `Assoc fields -> `Assoc (("observed_at", `String "2026-10-15T12:00:00Z") :: List.remove_assoc "observed_at" fields)
       | _ -> fail "action fixture must be an object" in
     let late = match Keeper_skill_async_action.of_json late with Ok value -> value | Error detail -> fail detail in
-    match Ledger.observe_async_action ~config ~trace_id:trace late with
+    match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace late with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
     (Ledger.async_actions canonical);
   let reference = Skill_reference.make ~identity:original.identity ~content_revision:original.content_revision in

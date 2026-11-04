@@ -57,7 +57,8 @@ val install_publication_observer : (unit -> unit) -> unit
 (** Install the process-wide observer called after every [Published]
     publication, whichever call made it. An [Unchanged] one does not call it.
     The server installs the full-health invalidation here, so [/health?full=1]
-    reads the new catalog without waiting for its periodic refresh. An
+    reads the new catalog without waiting for its periodic refresh, and the
+    [skill_catalog] dataset announcement that the TUI Tools view reads on. An
     observer failure is logged and never changes the publication. *)
 
 val refresh_with_sources :

@@ -37,6 +37,14 @@ type dataset =
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads. The event names the Keeper only: no provider, attempt id,
           state, code or consent URL. *)
+  | Skill_activations of { keeper : string }
+      (** A Skill activation ledger row written in one of [keeper]'s turns:
+          an activation, a delivery, an action or a rejected transition, which
+          the Tools Skill record ([GET /dashboard/tools?keeper=]) and the Skill
+          usage counts ([GET /api/v1/skills]) read. *)
+  | Skill_catalog
+      (** A new Skill catalog snapshot was published, which
+          [GET /api/v1/skills] and the Tools call scope read. *)
 
 val event_type : string
 

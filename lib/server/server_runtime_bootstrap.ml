@@ -553,8 +553,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Keeper_owner.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
   Server_keeper_event_queue_broadcast.install ~sw;
-  Skill_catalog_snapshot_service.install_publication_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Skill_catalog_snapshot_service.install_publication_observer (fun () ->
+    Server_routes_http_runtime.invalidate_full_health_snapshot ();
+    Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Skill_catalog);
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net

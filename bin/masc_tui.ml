@@ -3947,7 +3947,9 @@ let launch_tools_load ?(force = true) state ~mailbox =
       { tri_generation = generation
       ; tri_keeper = keeper
       ; tri_pending = [ Tools_inventory_read; Tools_catalog_read ]
+      ; tri_failed = false
       };
+    state.tools_owed <- Masc_tui_owed_read.started state.tools_owed;
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read state ~mailbox
@@ -3960,15 +3962,21 @@ let launch_tools_load ?(force = true) state ~mailbox =
   end
   end
 
-let settle_tools_read state ~generation part =
+(* Settles one part of the current Tools read. Once its last part answers,
+   says whether any part failed. *)
+let settle_tools_read state ~generation ~failed part =
   match state.tools_read_inflight with
   | Some request when request.tri_generation = generation ->
       let pending = List.filter (fun pending -> pending <> part) request.tri_pending in
-      state.tools_read_inflight <-
-        (match pending with
-         | [] -> None
-         | _ -> Some { request with tri_pending = pending })
-  | Some _ | None -> ()
+      let failed = failed || request.tri_failed in
+      (match pending with
+       | [] ->
+           state.tools_read_inflight <- None;
+           Some failed
+       | _ ->
+           state.tools_read_inflight <- Some { request with tri_pending = pending; tri_failed = failed };
+           None)
+  | Some _ | None -> None
 
 let normalize_tools_skill_cursor state =
   let count = List.length (tools_skill_profiles state) in
@@ -7993,6 +8001,23 @@ let owe_runtime_config_read state =
 let owe_connectors_read state =
   state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
 
+(* The Tools catalog and selected-Keeper read reads again when the Skill
+   catalog is published, when a Skill ledger row is written for the selected
+   Keeper (for any Keeper while the usage counts are shown), when that
+   Keeper's row or the backlog changes, on a revalidation, and after a failed
+   read (RFC-0480 §3.4). *)
+let owe_tools_read state =
+  state.tools_owed <- Masc_tui_owed_read.changed state.tools_owed
+
+let owe_tools_read_for_keeper state keeper =
+  let selected =
+    Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
+  in
+  match state.tools_pane with
+  | Tools_usage -> owe_tools_read state
+  | Tools_surface | Tools_async | Tools_activations | Tools_catalog ->
+      if selected then owe_tools_read state
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -8005,6 +8030,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Connectors -> owe_connectors_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
+  | Masc.Workspace_dataset_event.Skill_activations { keeper } -> owe_tools_read_for_keeper state keeper
+  | Masc.Workspace_dataset_event.Skill_catalog -> owe_tools_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -17759,6 +17786,37 @@ let launch_owed_identity_logins state ~mailbox =
          end)
 ;;
 
+(* The last part of a Tools read answered: [Some true] when a part failed. *)
+let settle_tools_owed state = function
+  | None -> ()
+  | Some false -> state.tools_owed <- Masc_tui_owed_read.succeeded state.tools_owed
+  | Some true -> state.tools_owed <- failed_read state.tools_owed
+
+(* Runs on every loop iteration. Off the Tools surface nothing is owed:
+   arriving reads it. While an async request or its source Task is open the
+   read waits for the list to come back. A read in flight is let finish
+   first. *)
+let launch_owed_tools state ~mailbox =
+  match state.view with
+  | Tools ->
+      let async_open =
+        Option.is_some state.tools_async_task_source
+        || (state.tools_pane = Tools_async && state.tools_async_detail_open)
+      in
+      if not async_open then begin
+        let reading = Option.is_some state.tools_read_inflight in
+        let read =
+          if reading then state.tools_owed else Masc_tui_owed_read.abandoned state.tools_owed
+        in
+        state.tools_owed <- read;
+        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+          launch_tools_load ~force:false state ~mailbox
+      end
+  | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
+  | Schedules | Verification | Harness | Repositories | Fusion | Code | Changes | Runtime
+  | Config | Resources | Connectors | System_logs | Keepers _ ->
+      state.tools_owed <- Masc_tui_owed_read.settled
+
 
 (* Entering a Keeper detail tab, by [ / ] or by a press on its name in the
    title strip: one way in, so a press reads what the key reads. The scroll
@@ -18421,11 +18479,17 @@ let resolve_opening_chat state ~base_path ~mailbox =
 let owe_whole_keeper_roster_read state =
   state.keeper_roster_owed <- Masc_tui_roster_owed.roster_changed state.keeper_roster_owed
 
+(* The Tools call scope reads the selected Keeper's meta (trace, current Task,
+   sandbox profile), so a change of that row owes it too. *)
 let owe_keeper_roster_change state = function
   | Masc_tui_observer.Keeper_row_changed { keeper } ->
       state.keeper_roster_owed <-
-        Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed
-  | Masc_tui_observer.Every_row_changed -> owe_whole_keeper_roster_read state
+        Masc_tui_roster_owed.row_changed ~keeper_name:keeper state.keeper_roster_owed;
+      if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
+      then owe_tools_read state
+  | Masc_tui_observer.Every_row_changed ->
+      owe_whole_keeper_roster_read state;
+      owe_tools_read state
 
 let fail_keeper_roster_read state read =
   state.keeper_roster_owed <-
@@ -18540,6 +18604,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_runtime_config_read state;
        owe_connectors_read state;
        Masc_tui_types.owe_every_identity_login_read state;
+       owe_tools_read state;
        owe_async_requests_read state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
@@ -22932,7 +22997,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
       (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
          owe_verification_read state;
-         owe_goal_projection_reads state
+         owe_goal_projection_reads state;
+         (* The call scope reads the selected Keeper's current Task. *)
+         owe_tools_read state
        end);
       (* The Goal tree carries the approvals waiting on each Goal. *)
       (if !gate_changed && not !observer_source_loss_seen then
@@ -26535,7 +26602,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.terminal_safe_text detail)));
       read_again ())
   | Tools_loaded (generation, keeper_name, result) ->
-      settle_tools_read state ~generation Tools_inventory_read;
+      settle_tools_owed state
+        (settle_tools_read state ~generation ~failed:(Result.is_error result) Tools_inventory_read);
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
          && Option.equal String.equal keeper_name selected_name then (
@@ -26561,7 +26629,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Skills_catalog_loaded (generation, result) ->
-      settle_tools_read state ~generation Tools_catalog_read;
+      settle_tools_owed state
+        (settle_tools_read state ~generation ~failed:(Result.is_error result) Tools_catalog_read);
       if generation = state.tools_request_generation then (
       match result with
       | Ok catalog ->
@@ -32307,6 +32376,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
+      launch_owed_tools state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;
@@ -40973,13 +41043,15 @@ Use relative paths for resources already held in the package. -->
              launch_runtime_surface_load state ~mailbox:async_messages
                ~force:false
          | Tools ->
-             (* A slow current read must finish before the next automatic
-                poll; explicit refresh still replaces it. *)
+             (* The catalog and the selected Keeper's surface re-read on the
+                Skill, row and backlog pushes and retry a failed read
+                ([launch_owed_tools]). An open async request and its source
+                Task still read on this tick. A slow current read must finish
+                before the next one; explicit refresh still replaces it. *)
              if Option.is_some state.tools_async_task_source then
                launch_tools_async_task state ~mailbox:async_messages
              else if state.tools_pane=Tools_async && state.tools_async_detail_open then
                launch_tools_async_detail state ~mailbox:async_messages
-             else launch_tools_load ~force:false state ~mailbox:async_messages
          (* runtime.toml re-reads when the server commits it and retries a
             failed read ([launch_owed_runtime_config]). *)
          | Config -> ()

@@ -9,6 +9,8 @@ type dataset =
   | Runtime_config
   | Connectors
   | Keeper_oauth_attempts of { keeper : string }
+  | Skill_activations of { keeper : string }
+  | Skill_catalog
 
 let repositories_name = "repositories"
 let verification_requests_name = "verification_requests"
@@ -18,6 +20,8 @@ let goals_name = "goals"
 let runtime_config_name = "runtime_config"
 let connectors_name = "connectors"
 let keeper_oauth_attempts_name = "keeper_oauth_attempts"
+let skill_activations_name = "skill_activations"
+let skill_catalog_name = "skill_catalog"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -28,12 +32,15 @@ let dataset_name = function
   | Runtime_config -> runtime_config_name
   | Connectors -> connectors_name
   | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
+  | Skill_activations _ -> skill_activations_name
+  | Skill_catalog -> skill_catalog_name
 ;;
 
 let keeper_field = function
-  | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors ->
-    []
-  | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } -> [ "keeper", `String keeper ]
+  | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
+  | Skill_catalog -> []
+  | Keeper_metrics { keeper } | Keeper_oauth_attempts { keeper } | Skill_activations { keeper } ->
+    [ "keeper", `String keeper ]
 ;;
 
 let keeper_of_fields name fields =
@@ -51,10 +58,13 @@ let of_fields fields =
   | Some (`String name) when String.equal name goals_name -> Ok Goals
   | Some (`String name) when String.equal name runtime_config_name -> Ok Runtime_config
   | Some (`String name) when String.equal name connectors_name -> Ok Connectors
+  | Some (`String name) when String.equal name skill_catalog_name -> Ok Skill_catalog
   | Some (`String name) when String.equal name keeper_metrics_name ->
     Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
+  | Some (`String name) when String.equal name skill_activations_name ->
+    Result.map (fun keeper -> Skill_activations { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)
   | Some _ | None -> Error (event_type ^ " carries no dataset name")
 ;;

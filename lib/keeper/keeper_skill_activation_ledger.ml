@@ -2377,7 +2377,7 @@ let load_existing ~config ~trace_id =
    builds. The header goes first when the store has none. A failed append
    leaves the store's end unknown to this process, so the next read replays
    it from the first byte. *)
-let commit_event_locked session_dir (log : session_log) event =
+let commit_event_locked ~changed session_dir (log : session_log) event =
   let row = event_to_yojson event in
   let* ledger =
     (let* decoded = decode_event ~expected_trace_id:log.ledger.session_id row in
@@ -2407,12 +2407,20 @@ let commit_event_locked session_dir (log : session_log) event =
     Error (Event_log_failed error)
   | Ok cursor ->
     remember_session_log path { ledger; cursor; header_written = true };
+    changed ();
     Ok ledger
+;;
+
+(* A committed row changes what the Skill record and usage views read for
+   the Keeper whose turn wrote it. *)
+let activations_changed ~(config : Workspace.config) ~keeper_name () =
+  Workspace_dataset_event.announce ~base_path:config.base_path
+    (Workspace_dataset_event.Skill_activations { keeper = keeper_name })
 ;;
 
 type activation_clock = Exact_activation_clock | Original_activation_clock
 
-let record_with_clock ~activation_clock ~config ~trace_id (activation : activation) =
+let record_with_clock ~activation_clock ~config ~keeper_name ~trace_id (activation : activation) =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
       if
@@ -2437,28 +2445,29 @@ let record_with_clock ~activation_clock ~config ~trace_id (activation : activati
       else Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
       let* stored =
-        commit_event_locked session_dir log (Activation_recorded activation)
+        commit_event_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log (Activation_recorded activation)
       in
       Ok (stored, Recorded activation))
 ;;
 
-let record ~config ~trace_id activation =
-  record_with_clock ~activation_clock:Exact_activation_clock ~config ~trace_id activation
+let record ~config ~keeper_name ~trace_id activation =
+  record_with_clock ~activation_clock:Exact_activation_clock ~config ~keeper_name ~trace_id activation
 ;;
 
-let record_original_invocation ~config ~trace_id activation =
-  record_with_clock ~activation_clock:Original_activation_clock ~config ~trace_id activation
+let record_original_invocation ~config ~keeper_name ~trace_id activation =
+  record_with_clock ~activation_clock:Original_activation_clock ~config ~keeper_name ~trace_id activation
 ;;
 
 (* The rejection is evidence in its own right: it is recorded, and the
    observation that produced it still fails. *)
-let reject_transition_locked session_dir log rejection error =
-  let* _stored = commit_event_locked session_dir log (Transition_rejected rejection) in
+let reject_transition_locked ~changed session_dir log rejection error =
+  let* _stored = commit_event_locked ~changed session_dir log (Transition_rejected rejection) in
   Error error
 ;;
 
 let observe_delivery
       ~config
+      ~keeper_name
       ~trace_id
       ~turn_ref
       ~tool_results
@@ -2580,7 +2589,7 @@ let observe_delivery
     in
     match rejected with
     | Some (rejection, error) ->
-      reject_transition_locked session_dir log rejection error
+      reject_transition_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log rejection error
     | None ->
       (* The activations this request's results belong to, including ones
          already marked; the event carries only the deliveries not yet on
@@ -2612,12 +2621,12 @@ let observe_delivery
        | [] -> Ok (current, matched)
        | deliveries ->
          let* stored =
-           commit_event_locked session_dir log (Deliveries_observed deliveries)
+           commit_event_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log (Deliveries_observed deliveries)
          in
          Ok (stored, matched)))
 ;;
 
-let observe_async_result_delivery ~config ~trace_id ~expected_activations (delivery : Keeper_skill_async_delivery.t) =
+let observe_async_result_delivery ~config ~keeper_name ~trace_id ~expected_activations (delivery : Keeper_skill_async_delivery.t) =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     let current = log.ledger in
@@ -2634,11 +2643,11 @@ let observe_async_result_delivery ~config ~trace_id ~expected_activations (deliv
     match List.find_opt (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
         (Keeper_skill_async_delivery.identity delivery)) current.async_result_deliveries with
     | Some known -> Ok (current,known)
-    | None -> commit_event_locked session_dir log (Async_result_delivered delivery)
+    | None -> commit_event_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log (Async_result_delivered delivery)
       |> Result.map (fun ledger -> ledger,delivery))
 ;;
 
-let observe_async_action ~config ~trace_id action =
+let observe_async_action ~config ~keeper_name ~trace_id action =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     let current = log.ledger in
@@ -2649,12 +2658,13 @@ let observe_async_action ~config ~trace_id action =
         (Keeper_skill_async_action.identity action)) current.async_actions with
     | Some known when Keeper_skill_async_action.same_fact known action -> Ok (current,known)
     | Some _ -> Error (Decode_failed (Invalid_async_action_evidence "causal occurrence result differs"))
-    | None -> commit_event_locked session_dir log (Async_action_observed action)
+    | None -> commit_event_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log (Async_action_observed action)
       |> Result.map (fun ledger -> ledger,action))
 ;;
 
 let observe_action
       ~config
+      ~keeper_name
       ~trace_id
       ~turn_ref
       ~active_skill_tool_use_ids
@@ -2723,7 +2733,7 @@ let observe_action
         in
         match rejected with
         | Some (rejection, error) ->
-          reject_transition_locked session_dir log rejection error
+          reject_transition_locked ~changed:(activations_changed ~config ~keeper_name) session_dir log rejection error
         | None ->
           (* Every active Skill that has been delivered and has not seen
              this action yet; the same identity already recorded with other
@@ -2758,6 +2768,7 @@ let observe_action
            | skill_tool_use_ids ->
              let* stored =
                commit_event_locked
+                 ~changed:(activations_changed ~config ~keeper_name)
                  session_dir
                  log
                  (Action_observed { skill_tool_use_ids; action })

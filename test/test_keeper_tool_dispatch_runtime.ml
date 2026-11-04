@@ -8415,7 +8415,7 @@ let test_async_composition_binds_params_into_durable_status () =
          | Error error -> fail (Masc.Keeper_task_skill_turn.error_to_string error)
        in
        let make_activation_context ~absolute_turn =
-         match Masc.Keeper_skill_activation_recorder.make
+         match Masc.Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
              ~trace_id:meta.runtime.trace_id
              ~turn_ref:(Ids.Turn_ref.make
                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -8705,7 +8705,7 @@ let test_named_submission_crash_before_broker_entry_stays_fail_closed () =
          | Error error -> fail (Masc.Keeper_task_skill_turn.error_to_string error)
        in
        let make_activation_context ~absolute_turn =
-         match Masc.Keeper_skill_activation_recorder.make
+         match Masc.Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
              ~trace_id:meta.runtime.trace_id
              ~turn_ref:(Ids.Turn_ref.make
                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

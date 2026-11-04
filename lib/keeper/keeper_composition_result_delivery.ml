@@ -373,6 +373,7 @@ let persist ~(config : Workspace.config) (observation : observation) =
       ~observed_at:(Masc_domain.now_iso ())
       |> Result.map_error (fun detail -> Invalid_result detail) in
     Ledger.observe_async_result_delivery ~config
+      ~keeper_name:(Keeper_skill_activation_recorder.bound_keeper_name restored)
       ~trace_id:(Keeper_skill_activation_recorder.bound_trace_id restored) ~expected_activations delivery
     |> Result.map (fun (_,stored) -> Some stored) |> Result.map_error (fun error -> Ledger_failed error)
 ;;

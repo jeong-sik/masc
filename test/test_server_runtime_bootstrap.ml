@@ -164,6 +164,19 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir)
     (fun () -> with_clean_base_path_env (fun () -> f dir))
 
+(* [create_server_state] binds the process-wide Board backend to its workspace
+   ([Board_dispatch.init_jsonl]), and the binding refuses a different workspace
+   while one is bound. Each server-state test runs in its own temporary
+   workspace, so it starts with no Board bound and leaves none behind. *)
+let with_server_state_dir prefix f =
+  with_temp_dir prefix (fun dir ->
+      let unbind () =
+        Board.reset_global_for_test ();
+        Board_dispatch.reset_for_test ()
+      in
+      unbind ();
+      Fun.protect ~finally:unbind (fun () -> f dir))
+
 let with_cwd path f =
   let saved = Sys.getcwd () in
   Unix.chdir path;
@@ -5334,7 +5347,7 @@ let test_startup_state_json_includes_runtime_resolution () =
    |> to_string)
 
 let test_create_server_state_records_runtime_resolution () =
-  with_temp_dir "startup-create-state" (fun dir ->
+  with_server_state_dir "startup-create-state" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
@@ -5363,7 +5376,7 @@ let test_create_server_state_records_runtime_resolution () =
        |> to_string))
 
 let test_create_server_state_preserves_raw_input_base_path () =
-  with_temp_dir "startup-create-state-raw-input" (fun dir ->
+  with_server_state_dir "startup-create-state-raw-input" (fun dir ->
       let repo = Filename.concat dir "repo" in
       let raw_input = Filename.concat dir Common.masc_dirname in
       mkdir_p repo;
@@ -5404,7 +5417,7 @@ let full_health_invalidation_generation () =
    CAS, so a Skill publication from any path clears the cached
    /health?full=1. Removing that line from create_server_state fails this. *)
 let test_create_server_state_invalidates_health_on_skill_publication () =
-  with_temp_dir "startup-skill-health-invalidation" (fun dir ->
+  with_server_state_dir "startup-skill-health-invalidation" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
@@ -5932,7 +5945,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
                (Masc_domain.masc_error_to_string err)))
 
 let test_sync_bootable_keeper_credentials_mints_keeper_token () =
-  with_temp_dir "startup-keeper-credential-sync" (fun dir ->
+  with_server_state_dir "startup-keeper-credential-sync" (fun dir ->
       with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
@@ -6179,7 +6192,7 @@ let test_sync_admin_token_env_refuses_invalid_authority () =
             (before = startup_admin_path_snapshot paths)))) cases
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
-  with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
+  with_server_state_dir "startup-keeper-credential-rotate" (fun dir ->
       with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->

@@ -13923,26 +13923,10 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
-let test_keeper_usage_cache_failures_remain_visible () =
-  let decode text = Masc.Tui_decode_usage.decode_keeper_usage_window (Yojson.Safe.from_string text) in
-  (match decode {|{"state":"loading","cache":{"state":"warming","last_error":"EACCES"}}|} with
-   | Error reason -> Alcotest.(check bool) "initial failure keeps its cause" true
-       (String_util.contains_substring reason "EACCES")
-   | Ok _ -> Alcotest.fail "failed computation became collecting");
-  (match decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"stale_refreshing","age_s":90,"last_error":"EIO"}}|} with
-   | Ok (Keeper_usage_window { kuw_freshness = Keeper_usage_stale { age_s; last_error }; _ }) ->
-       Alcotest.(check (float 0.0)) "stale reading keeps its age" 90. age_s;
-       Alcotest.(check (option string)) "refresh failure keeps its cause" (Some "EIO") last_error
-   | Ok _ -> Alcotest.fail "failed refresh became fresh"
-   | Error reason -> Alcotest.fail reason);
-  Alcotest.(check bool) "unknown cache is rejected" true
-    (Result.is_error (decode {|{"generated_at":1,"window_minutes":1440,"keepers":[],"cache":{"state":"future"}}|}))
-
 let test_keeper_usage_rejects_unrenderable_generated_at () =
   let decode timestamp =
     Masc.Tui_decode_usage.decode_keeper_usage_window
-      (`Assoc [ "cache", `Assoc [ "state", `String "fresh" ];
-                "generated_at", `Float timestamp; "window_minutes", `Int 1440;
+      (`Assoc [ "generated_at", `Float timestamp; "window_minutes", `Int 1440;
                 "keepers", `List [] ])
   in
   List.iter (fun timestamp ->
@@ -13953,18 +13937,17 @@ let test_keeper_usage_rejects_unrenderable_generated_at () =
     [ Float.nan; Float.infinity; Float.neg_infinity; 1e300; -1e300 ];
   List.iter (fun timestamp ->
     match decode timestamp with
-    | Ok (Keeper_usage_window { kuw_generated_at; _ }) ->
+    | Ok { kuw_generated_at; _ } ->
         Alcotest.(check (float 0.)) "representable timestamp is preserved"
           timestamp kuw_generated_at;
         ignore (Unix.gmtime kuw_generated_at)
-    | Ok _ -> Alcotest.fail "a timestamp became a loading placeholder"
     | Error reason -> Alcotest.fail reason)
     [ -1.; 0.; 1790985600. ]
 
 let test_keeper_usage_unread_turns_remain_partial () =
   let decode unread =
     let json = Yojson.Safe.from_string (Printf.sprintf
-      {|{"cache":{"state":"fresh"},"generated_at":1,"window_minutes":1440,
+      {|{"generated_at":1,"window_minutes":1440,
       "keepers":[{"keeper_name":"alpha","sample_count":1,"total_tokens":100,
       "total_cost_usd":1.0,"tokens_reported_samples":1,"tokens_unreported_samples":0,
       "tokens_unread_samples":0,"cost_reported_samples":1,"cost_unreported_samples":0,
@@ -13972,12 +13955,12 @@ let test_keeper_usage_unread_turns_remain_partial () =
       "unread_turn_rows":%d}}]}|} unread) in
     Masc.Tui_decode_usage.decode_keeper_usage_window json in
   (match decode 2 with
-   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage =
-       Keeper_usage_partial { malformed_rows = 0; unread_turn_rows = 2 }; _ }]; _ }) -> ()
+   | Ok { kuw_rows = [{ kur_coverage =
+       Keeper_usage_partial { malformed_rows = 0; unread_turn_rows = 2 }; _ }]; _ } -> ()
    | Ok _ -> Alcotest.fail "unread turns became complete coverage"
    | Error detail -> Alcotest.fail detail);
   (match decode 0 with
-   | Ok (Keeper_usage_window { kuw_rows = [{ kur_coverage = Keeper_usage_complete; _ }]; _ }) -> ()
+   | Ok { kuw_rows = [{ kur_coverage = Keeper_usage_complete; _ }]; _ } -> ()
    | _ -> Alcotest.fail "fully read window must remain complete");
   Alcotest.(check bool) "negative unread count is rejected" true (Result.is_error (decode (-1)))
 
@@ -14976,10 +14959,8 @@ let () =
       ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
           test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
-    ( "keeper usage cache"
-    , [ Alcotest.test_case "compute and refresh failures remain visible" `Quick
-          test_keeper_usage_cache_failures_remain_visible;
-        Alcotest.test_case "Keeper usage rejects unrenderable generated_at" `Quick
+    ( "keeper usage"
+    , [ Alcotest.test_case "Keeper usage rejects unrenderable generated_at" `Quick
           test_keeper_usage_rejects_unrenderable_generated_at;
         Alcotest.test_case "Keeper usage unread turns remain partial" `Quick
           test_keeper_usage_unread_turns_remain_partial ] );

@@ -31,7 +31,6 @@ export type ModelLoadState =
 export type KeeperLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'pending'; windowMinutes: number }
   | { status: 'loaded'; data: KeeperCostMetric[]; windowMinutes: number }
   | { status: 'error'; message: string }
 

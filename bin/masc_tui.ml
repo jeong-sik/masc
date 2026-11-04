@@ -8190,48 +8190,6 @@ let owe_runtime_config_read state =
    failed read (RFC-0480 §3.4). *)
 let owe_connectors_read state =
   state.connectors_owed <- Masc_tui_owed_read.changed state.connectors_owed
-
-(* The Tools surface part reads again when the Skill catalog is published,
-   when a Skill ledger row is written for the selected Keeper, and when that
-   Keeper's row or the backlog changes. The catalog part reads again when the
-   catalog is published and, while the usage pane is shown, when any Keeper's
-   ledger takes a row; entering that pane reads it. Both read on a
-   revalidation and after a failed read (RFC-0480 §3.4). *)
-  state.tools_surface_owed <- Masc_tui_owed_read.changed state.tools_surface_owed
-
-  state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
-
-let owe_tools_read state =
-
-(* A ledger row of the selected Keeper changes its Skill record; any Keeper's
-   row changes the usage counts, which only the usage pane draws. *)
-let owe_tools_read_for_keeper state keeper =
-  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
-  match state.tools_pane with
-  | Tools_surface | Tools_async | Tools_activations | Tools_catalog -> ()
-
-(* The Clients roster reads again when a workspace client row changes, when
-   a Keeper registry row or every row changes, on a revalidation, and after a
-   failed read (RFC-0480 §3.4). A heartbeat that only moves a row's
-   [last_seen] is not announced. *)
-let owe_clients_read state =
-  state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
-
-(* A dataset push owes a read to the surface that shows that dataset. *)
-let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
-  match dataset with
-  | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
-  | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
-  | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
-  | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
-      Masc_tui_types.owe_identity_login_read state keeper
-  | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
-  | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
-  | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
-  | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
-
-(* The durable async requests the Keepers list and Tools draw read under the
-   same rules. *)
 let owe_async_requests_read state =
   state.async_requests_owed <- Masc_tui_owed_read.changed state.async_requests_owed
 

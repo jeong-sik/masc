@@ -22,6 +22,16 @@ val remember :
     [Gate_connector_announce.changed ~connector_id:connector] after the row is
     written. *)
 
+val remember_many :
+  base_dir:string ->
+  connector:string ->
+  scope:scope ->
+  (string * string) list ->
+  unit
+(** Record [(id, name)] pairs as {!remember} does, in one append. The
+    connector is announced once when any row was written, so a directory page
+    is one change. *)
+
 val recall :
   base_dir:string -> connector:string -> scope:scope -> id:string -> string option
 (** Recall the most recently observed name. Each scoped connector file is

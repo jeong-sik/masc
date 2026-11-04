@@ -10701,10 +10701,9 @@ type state = {
   mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
-  (* The memory health reads when the server announces a Keeper's row or the
-     execution availability moved, on a revalidation and an authority change,
-     and again after a failed read, while Memory or Metrics shows it
-     (RFC-0480 §3.4). *)
+  (* The memory health reads when the server announces a Keeper's row moved,
+     on a revalidation and an authority change, and again after a failed read,
+     while Memory or Metrics shows it (RFC-0480 §3.4). *)
   mutable memory_health_owed: Masc_tui_owed_read.t;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;

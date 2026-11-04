@@ -23,6 +23,18 @@
  (name runtest)
  (deps (alias runtest-test_measure_viewport_cadence_bytes)))
 
+(rule
+ (alias runtest-test_measure_tool_efficiency)
+ (deps ../scripts/measure-tool-efficiency.py
+       ../scripts/lib/masc_base_path.py
+       ../scripts/lib/recorded_tool_outcome.py
+       ../scripts/tests/test_measure_tool_efficiency.py)
+ (action (run python3 %{dep:../scripts/tests/test_measure_tool_efficiency.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_measure_tool_efficiency)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)

@@ -36,6 +36,8 @@ let test_scope_round_trip_and_strict_identity () =
       | Ok (Some actual) -> check bool "the observer query preserves the same scope" true (actual = scope)
       | Ok None | Error _ -> fail "a browser observer lost its scope")
     [ viewport client_a; region
+    ; { (viewport client_a) with
+        view = Dataset.Scene { scene_view = Browser_lane.Content; scope = None } }
     ; { source = Browser_lane.Lane_name.Automation; client_id = None; tab_id = 4; view = Dataset.Read } ];
   (match Spectator.scope_of_request_target "/mcp?sse_kind=observer" with
    | Ok None -> ()
@@ -139,6 +141,27 @@ let test_revision_rejects_another_target_or_scene () =
   | Error _ -> ()
   | Ok _ -> fail "a scene acknowledgement for another view or scope was admitted"
 
+let test_sampling_stops_with_the_observer () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let calls = ref 0 in
+      Spectator.For_testing.with_reader
+        (fun ~config:_ ~scope ->
+          incr calls;
+          match scope.Dataset.view with
+          | Dataset.Viewport -> Ok (screenshot ())
+          | Dataset.Read | Dataset.Scene _ -> Error "unexpected Browser read")
+        (fun () ->
+          let stop_promise, stop = Eio.Promise.create () in
+          Spectator.start ~sw ~clock:(Eio.Stdenv.clock env) ~stop_promise
+            ~scope:(viewport client_a) ~config:(Masc.Workspace.default_config "/fixture");
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+          check bool "the visible Browser was sampled" true (!calls > 0);
+          Eio.Promise.resolve stop ();
+          let stopped = !calls in
+          Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+          check int "closing the observer stops Browser sampling" stopped !calls)))
+
 let () =
   run "browser spectator"
     [ "scope",
@@ -148,4 +171,5 @@ let () =
       [ test_case "changed observations only, without image bytes" `Quick
           test_changed_observations_only_and_no_image_bytes
       ; test_case "revision rejects another target or scene" `Quick
-          test_revision_rejects_another_target_or_scene ] ]
+          test_revision_rejects_another_target_or_scene ]
+    ; "lifecycle", [ test_case "observer closure stops sampling" `Quick test_sampling_stops_with_the_observer ] ]

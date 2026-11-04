@@ -89,12 +89,14 @@ let browser_scope_query scope =
   let value = function
     | `String text -> text
     | `Int number -> string_of_int number
-    | `Null -> ""
+    | `Null -> "null"
     | (`Assoc _ | `List _ | `Bool _ | `Float _ | `Intlit _) as json ->
         Yojson.Safe.to_string json
   in
   Uri.encoded_of_query
-    (List.map (fun (name, json) -> name, [ value json ]) (browser_scope_fields scope))
+    (browser_scope_fields scope
+     |> List.filter (fun (name, json) -> not (String.equal name "clientId" && json = `Null))
+     |> List.map (fun (name, json) -> name, [ value json ]))
 
 let browser_scope_of_fields fields =
   let ( let* ) = Result.bind in

@@ -166,3 +166,10 @@ let start ~sw ~clock ~stop_promise ~scope ~config =
         (Eio.Fiber.first
            (fun () -> sample ())
            (fun () -> Eio.Promise.await stop_promise; `Observer_closed)))
+
+module For_testing = struct
+  let with_reader replacement f =
+    let previous = !reader in
+    reader := replacement;
+    Fun.protect ~finally:(fun () -> reader := previous) f
+end

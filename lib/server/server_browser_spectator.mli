@@ -20,3 +20,10 @@ val start :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> stop_promise:unit Eio.Promise.t ->
   scope:Workspace_dataset_event.browser_scope -> config:Workspace.config -> unit
 (** Sample only the selected target while its observer stream is open. *)
+
+module For_testing : sig
+  val with_reader :
+    (config:Workspace.config -> Workspace_dataset_event.browser_scope ->
+     (Yojson.Safe.t, string) result) ->
+    (unit -> 'a) -> 'a
+end

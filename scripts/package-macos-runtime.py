@@ -37,10 +37,9 @@ if "SSL_CERT_FILE" not in os.environ and "SSL_CERT_DIR" not in os.environ:
 
 # Run inside the staged interpreter. HTTP rejection is still a response over
 # validated TLS; certificate, proxy CONNECT and network errors must propagate.
+# The Linux runtime runs this probe as is; it ships no CA bundle.
 PYTHON_HTTPS_PROBE = '''
-import os, sys, json, tarfile, ssl, urllib.request, urllib.error, urllib.parse
-if os.environ.get("SSL_CERT_FILE") != os.path.join(sys.base_prefix, "ssl", "cacert.pem"):
-    raise ValueError("staged Python does not default to its shipped CA bundle")
+import json, tarfile, ssl, urllib.request, urllib.error, urllib.parse
 try:
     response = urllib.request.urlopen("https://example.com", timeout=30)
 except urllib.error.HTTPError as error:
@@ -50,6 +49,14 @@ with response:
         raise ValueError("HTTPS probe ended on a non-HTTPS response")
     print("staged Python: validated HTTPS response", response.status)
 '''
+
+# The macOS runtime first proves SITECUSTOMIZE made the shipped bundle its
+# default, so the HTTPS probe below validates with that bundle.
+MACOS_PYTHON_HTTPS_PROBE = '''
+import os, sys
+if os.environ.get("SSL_CERT_FILE") != os.path.join(sys.base_prefix, "ssl", "cacert.pem"):
+    raise ValueError("staged Python does not default to its shipped CA bundle")
+''' + PYTHON_HTTPS_PROBE
 
 
 def run(*args):
@@ -293,7 +300,7 @@ def package(dist, stage, platform, commit, lock_path):
                     [str(stage.resolve() / 'masc-deployment-preflight-helper'), '--help'],
                     [str(stage.resolve() / 'masc-exec-ssh-bootstrap'), '--help'],
                     [str(stage.resolve() / 'python/bin/python3'), '-I', '-c',
-                     PYTHON_HTTPS_PROBE]):
+                     MACOS_PYTHON_HTTPS_PROBE]):
         subprocess.run(['/usr/bin/sandbox-exec', '-p', profile, *command], env=clean, check=True)
     freeze_python_bytecode(stage)
     provenance = {'schema': 'masc.macos-runtime.v1', 'source_commit': commit, 'platform': platform,

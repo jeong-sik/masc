@@ -247,6 +247,14 @@ citing `:131` named an argument, not a frame. Quote the call's first line and sa
 which frame you mean when the traceback crosses into a helper: the test's own
 line shows the wait that was asked for, the helper's line shows where it failed.
 
+A `.ml` pattern match alone is not the contract. `masc_tui_owed_read.ml` drops
+`retry_at` when a change arrives while waiting, which reads like a discarded
+backoff until the `.mli` says why: "A change while waiting out a failure is read
+now … the failures in a row are kept, so the next failure still waits longer."
+Read the `.mli` before calling a transition a defect — a value the `.ml` discards
+is often one the interface documents as intentionally dropped, and a call that
+looks redundant can be the caller's mistake rather than the callee's.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

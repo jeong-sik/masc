@@ -371,6 +371,16 @@ type model_spec =
   }
 [@@deriving show, eq]
 
+(* [reasoning-uncontrolled] sends no thinking control at all, so the row's
+   [thinking-support] stays a statement about the model and never becomes an
+   enable or disable request. Every request built from a model row reads this,
+   not [thinking_support]. *)
+let thinking_request (model : model_spec) =
+  match model.reasoning_uncontrolled with
+  | true -> None
+  | false -> model.thinking_support
+;;
+
 (** {1 Layer 3: Binding — provider × model} *)
 
 type binding =

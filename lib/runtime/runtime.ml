@@ -891,7 +891,7 @@ let exact_output_targets runtimes =
               binding =
                 { config with
                   Llm_provider.Provider_config.enable_thinking =
-                    rt.model.Runtime_schema.thinking_support
+                    Runtime_schema.thinking_request rt.model
                 }
             ; (* A slot's credential is the key its binding already resolved --
                  the one the Keeper's requests carry, whatever source the

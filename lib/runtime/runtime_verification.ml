@@ -771,7 +771,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            let seed =
              Runtime_inference.seed_of_thinking_support
                ~preserve_thinking:runtime.model.preserve_thinking
-               runtime.model.thinking_support
+               (Runtime_schema.thinking_request runtime.model)
            in
            let provider_cfg =
              Runtime_agent_core_runner.apply_inference_seed ~seed provider_cfg

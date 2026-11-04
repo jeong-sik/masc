@@ -124,7 +124,8 @@ let native_attempt ~sw ~net ~(runtime : Runtime_instance.t) ~provider (params : 
     |> Result.map_error (fun error -> Runtime_unavailable
       (Runtime_instance.dispatch_credential_error_to_string error)) in
   let seed = Runtime_inference.seed_of_thinking_support
-      ~preserve_thinking:runtime.model.preserve_thinking runtime.model.thinking_support in
+      ~preserve_thinking:runtime.model.preserve_thinking
+      (Runtime_schema.thinking_request runtime.model) in
   let provider = Runtime_agent_core_runner.apply_inference_seed ~seed provider in
   let has_image = List.exists (fun (message : S.sampling_message) ->
     match message.content with S.Image _ -> true | S.Text _ -> false) params.messages in

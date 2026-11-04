@@ -155,12 +155,12 @@ bindings and lanes.
 | `api-name` | string | the table id | model id sent on the wire (`model-name` is an accepted alias) |
 | `max-context` | positive int | catalog | operator window override; fail-close at load when no source resolves (RFC-0206 §2.1) |
 | `tools-support` | bool | `false` | |
-| `thinking-support` | bool | absent | absent = follow the caller's policy |
+| `thinking-support` | bool | absent | absent = follow the caller's policy; on a `reasoning-uncontrolled` row it only says the model thinks and sends no request |
 | `preserve-thinking` | bool | absent | replay policy for prior-turn reasoning |
 | `streaming` | bool | `true` | |
 | `temperature`, `top-p`, `top-k`, `min-p` | float/int | absent | sampling; `top-k`/`min-p` are validated against the declared capabilities |
 | `reasoning-effort` | `low`\|`medium`\|`high`\|`xhigh`\|`max` | absent | |
-| `reasoning-uncontrolled` | bool | `false` | send no reasoning control; **cannot** coexist with `reasoning-effort` (load error) |
+| `reasoning-uncontrolled` | bool | `false` | send no reasoning control, including the enable or disable `thinking-support` would ask for; **cannot** coexist with `reasoning-effort` (load error) |
 | `turn-timeout-s` | non-negative float | absent | per-turn bound; `0` removes the deadline (the spawned client owns it), absent keeps the adapter default. Negative/non-finite is a load error |
 
 ### `[models.<id>.capabilities]`

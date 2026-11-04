@@ -24,6 +24,10 @@ type dataset =
   | Goals
       (** The Goal projection: the Goals, the verification ledger and the
           measurements the planning projection and the Goal tree join. *)
+  | Runtime_config
+      (** The server committed runtime.toml, read by
+          [GET /api/v1/runtime/config/raw]. A CLI or a hand edit is not
+          announced. *)
 
 val event_type : string
 

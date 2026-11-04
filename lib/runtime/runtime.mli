@@ -878,6 +878,13 @@ val save_config_text_if_current :
     uses {!save_config_text}'s validation, durability and application contract.
     Invalid revisions and read/validation/write failures are [Config_edit_failed]. *)
 
+val install_config_commit_observer : (runtime_config_path:string -> unit) -> unit
+(** Install the process-wide observer every {!commit_config_text_locked}
+    call reports to after its attempt, however it ends (RFC-0480 §3.4). The
+    observer runs under the config write lock: it must not yield and must not
+    raise. Only a process that installs one reports; a CLI or a TUI that
+    commits in its own process reports nothing. *)
+
 val commit_config_text_locked :
   ?replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
   runtime_config_path:string ->

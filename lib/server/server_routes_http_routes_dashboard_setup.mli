@@ -4,21 +4,6 @@ module Http = Http_server_eio
 module Provider_logs = Server_routes_http_dashboard_provider_logs
 module Keeper_api = Server_dashboard_http_keeper_api
 
-val dashboard_logs_json :
-  config:Workspace.config ->
-  limit:int ->
-  level_filter:string ->
-  applied_level:Log.level ->
-  min_level:int ->
-  module_filter:string ->
-  since_seq:int option ->
-  before_seq:int option ->
-  category_filter:string option ->
-  exclude_category:string list option ->
-  ring_bounds:Log.Ring.bounds ->
-  Log.Ring.entry list ->
-  Yojson.Safe.t
-
 val trimmed_query_param : Httpun.Request.t -> string -> string option
 val agent_core_telemetry_limit_param : Httpun.Request.t -> int
 val agent_core_telemetry_provider_param : Httpun.Request.t -> string option

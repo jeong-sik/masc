@@ -67,12 +67,8 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_turn_preview_changed')).toBe('keeper_turn_preview_changed')
   })
 
-  it('accepts verification request changes', () => {
-    expect(SSEEventTypeSchema.parse('verification_requests_changed')).toBe('verification_requests_changed')
-  })
-
-  it('accepts repository catalog changes', () => {
-    expect(SSEEventTypeSchema.parse('repositories_changed')).toBe('repositories_changed')
+  it('accepts workspace dataset changes', () => {
+    expect(SSEEventTypeSchema.parse('workspace_dataset_changed')).toBe('workspace_dataset_changed')
   })
 
   it('accepts Keeper event queue changes', () => {

@@ -141,8 +141,8 @@ let summary = function
       "internal_runs(" ^ Masc.Internal_agent_runs_event.registry_to_wire registry ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Schedule_store) -> "schedule_store_invalidated"
   | Observer.Event (Observer.Workspace_store_changed Observer.Pending_confirms) -> "pending_confirm_invalidated"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Verification_requests) -> "verification_requests"
-  | Observer.Event (Observer.Workspace_store_changed Observer.Repository_catalog) -> "repositories"
+  | Observer.Event (Observer.Dataset_changed dataset) ->
+      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
@@ -444,7 +444,7 @@ let test_a_goal_projection_change_is_named () =
               Masc.Goal_projection_broadcast.changed_event ]));
   check bool "and only it is a Goal projection change" true
     (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Goal_projection)
-     && not (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Repository_catalog)))
+     && not (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Schedule_store)))
 
 (* The metrics file's own announcement, not the heartbeat: the in-turn pulse
    sends [keeper_heartbeat] without writing a row. *)
@@ -836,7 +836,7 @@ let test_a_turns_push_names_its_keeper () =
      | _ -> false)
 
 let verification_frames =
-  [ {|data: {"type":"verification_requests_changed","ts_unix":100.0}
+  [ {|data: {"type":"workspace_dataset_changed","dataset":"verification_requests","ts_unix":100.0}
 
 |}
   ; {|data: {"type":"internal_agent_runs_changed","registry":"verification","ts_unix":100.0}
@@ -855,12 +855,15 @@ let other_run_registry_frames =
 
 let test_a_verification_or_run_push_reads_the_requests () =
   check (list string) "both decode with what changed"
-    [ "verification_requests"; "internal_runs(verification)" ]
+    [ "dataset(verification_requests)"; "internal_runs(verification)" ]
     (List.map summary (decode_all verification_frames));
   let count frames =
     decode_all frames
     |> List.filter (function
-         | Observer.Event event -> Observer.verification_requests_changed event
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Verification_requests -> true
+              | Some Masc.Workspace_dataset_event.Repositories | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
@@ -906,22 +909,43 @@ let test_a_queue_push_names_its_keeper () =
          ^ String.concat ", " (List.map summary decoded))
 
 let repositories_frame =
-  {|data: {"type":"repositories_changed","ts_unix":100.0}
+  {|data: {"type":"workspace_dataset_changed","dataset":"repositories","ts_unix":100.0}
 
 |}
 
 let test_a_repository_push_reads_the_list () =
-  check (list string) "it decodes without a payload" [ "repositories" ]
+  check (list string) "it decodes with the dataset it names" [ "dataset(repositories)" ]
     (List.map summary (decode_all [ repositories_frame ]));
   let count frames =
     decode_all frames
     |> List.filter (function
-         | Observer.Event event -> Observer.repositories_changed event
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Repositories -> true
+              | Some Masc.Workspace_dataset_event.Verification_requests | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
   in
   check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
-  check int "a verification or run push does not" 0 (count verification_frames)
+  check bool "it owes the verification requests nothing" true
+    (match decode_all [ repositories_frame ] with
+     | [ Observer.Event event ] ->
+         (match Observer.dataset_owed event with
+          | Some Masc.Workspace_dataset_event.Verification_requests -> false
+          | Some Masc.Workspace_dataset_event.Repositories | None -> true)
+     | _ -> false);
+  check int "a verification or run push does not" 0 (count verification_frames);
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a dataset push without a known dataset was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
+    ]
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

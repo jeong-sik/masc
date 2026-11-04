@@ -18,8 +18,8 @@ let test_compact_connection_priority () =
     check bool description true (Render_prim.compact_connection_state state = expected) in
   let make_progress outcome =
     P.start ~started_ns:1L
-    |> fun progress -> P.observe progress (Started (Overview, 1L))
-    |> fun progress -> P.observe progress (Completed (Overview, 2L, outcome))
+    |> fun progress -> P.observe progress (Started (Keepers, 1L))
+    |> fun progress -> P.observe progress (Completed (Keepers, 2L, outcome))
     |> P.finish ~finished_ns:3L in
   let set progress = state.http_refresh_progress <- Some (state.workspace_authority, progress) in
   expect "a connected HTTP observation remains distinct" (Compact_http Connected);

@@ -56,6 +56,14 @@ type dataset =
   | Lanes
       (** What [GET /api/v1/lanes] draws moved: the server compares
           the inventory on its own clock, the times it was taken at aside. *)
+  | Lane_addon_instance of { instance_id : string }
+      (** What the operator's Lane Add-ons Inspect shows for [instance_id]
+          moved, or the instance appeared or left: its entry, or its current
+          and queued action receipts, which Action_status reads. The server
+          compares on its own clock. The event carries ["instance_id"]. *)
+  | Lane_addon_configuration
+      (** The declaration reading the operator's Lane Add-ons Inspect shows
+          moved. The server compares on its own clock. *)
 
 val event_type : string
 
@@ -65,6 +73,9 @@ val of_fields : (string * Yojson.Safe.t) list -> (dataset, string) result
 (** Reads the event's fields: the dataset name, and the Keeper a
     Keeper-naming dataset carries. A dataset push without its Keeper, or one
     this build was not taught, is an [Error]. *)
+(** Read the dataset an event's members name. A missing or unknown name, a
+    Keeper dataset without a non-empty ["keeper"], and a Lane Add-on instance
+    dataset without a non-empty ["instance_id"], are errors. *)
 
 val announce : base_path:string -> dataset -> unit
 (** Broadcast the event to [base_path]'s runtime observers. A store calls this

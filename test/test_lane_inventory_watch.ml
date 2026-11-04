@@ -1,6 +1,8 @@
-(* The Lanes inventory is compared on the server's clock. Two captures of the
-   same registries and configuration draw the same value, the times they were
-   taken at aside, and only a drawing that moved announces [lanes]. *)
+(* The Lanes inventory and the operator's Lane Add-ons Inspect are compared on
+   the server's clock. Two captures of the same registries and configuration
+   draw the same value, the times they were taken at aside; only a drawing
+   that moved announces [lanes], and only an add-on instance or declaration
+   reading that moved is announced. *)
 
 open Alcotest
 open Masc
@@ -58,6 +60,49 @@ let test_only_a_moved_drawing_is_announced () =
       observe (drawing [ `String "librarian"; `String "verifier" ]);
       check int "another workspace's drawing does not replace this one's last" 2 !heard))
 
+let reading ?(configuration = `Assoc [ "complete", `Bool true ]) instances :
+    Lane_addon_runtime.inspect_reading =
+  { configuration; instances = List.map (fun (id, seq) -> id, `Assoc [ "observation_seq", `Int seq ]) instances }
+
+let test_only_moved_add_on_instances_are_announced () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Unix.realpath (Filename.temp_dir "lane-addons-watch-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    ignore (Workspace.init (Workspace.default_config base_path) ~agent_name:None);
+    let heard = ref [] in
+    let id = "lane-addons-watch" in
+    Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+      ~callback:(fun (event : Sse.external_event) ->
+        match Json_util.assoc_string_opt "type" event.ext_payload, event.ext_payload with
+        | Some kind, `Assoc fields when String.equal kind Workspace_dataset_event.event_type ->
+          (match Workspace_dataset_event.of_fields fields with
+           | Ok (Workspace_dataset_event.Lane_addon_instance { instance_id }) ->
+             heard := instance_id :: !heard
+           | Ok Workspace_dataset_event.Lane_addon_configuration -> heard := "configuration" :: !heard
+           | Ok _ | Error _ -> ())
+        | (Some _ | None), _ -> ())
+      ();
+    Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+      let take () = let got = List.sort String.compare !heard in heard := []; got in
+      let observe = Server_lane_addons_watch.observe ~base_path in
+      observe (reading [ "a", 1; "b", 1 ]);
+      check (list string) "the first reading announces the configuration and every instance"
+        [ "a"; "b"; "configuration" ] (take ());
+      observe (reading [ "a", 1; "b", 1 ]);
+      check (list string) "the same reading announces nothing" [] (take ());
+      observe (reading [ "a", 2; "b", 1 ]);
+      check (list string) "a moved instance is announced alone" [ "a" ] (take ());
+      observe (reading [ "a", 2 ]);
+      check (list string) "an instance that left is announced" [ "b" ] (take ());
+      observe (reading [ "a", 2; "c", 1 ]);
+      check (list string) "an instance that appeared is announced" [ "c" ] (take ());
+      observe (reading ~configuration:(`Assoc [ "complete", `Bool false ]) [ "a", 2; "c", 1 ]);
+      check (list string) "a moved declaration reading is announced" [ "configuration" ] (take ());
+      Server_lane_addons_watch.observe ~base_path:"/elsewhere" (reading []);
+      observe (reading ~configuration:(`Assoc [ "complete", `Bool false ]) [ "a", 2; "c", 1 ]);
+      check (list string) "another workspace's reading does not replace this one's last" [] (take ())))
+
 let () =
   run "lane_inventory_watch"
     [ ( "drawing"
@@ -67,5 +112,7 @@ let () =
     ; ( "announce"
       , [ test_case "only a moved drawing is announced" `Quick
             test_only_a_moved_drawing_is_announced
+        ; test_case "only moved add-on instances are announced" `Quick
+            test_only_moved_add_on_instances_are_announced
         ] )
     ]

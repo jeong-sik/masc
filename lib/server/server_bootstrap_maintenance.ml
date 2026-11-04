@@ -1075,9 +1075,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      (which reads as "runtime down" to an operator). *)
   Server_dashboard_http_runtime_info.start_dashboard_runtime_probe_loop ~sw ~clock
     ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* The Lanes inventory is compared on the server's clock and announced when
-     what it draws moves. *)
+  (* The Lanes inventory and the operator's Lane Add-ons Inspect are compared
+     on the server's clock and announced when what they show moves. *)
   Server_lane_inventory_watch.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
+  Server_lane_addons_watch.start ~sw ~clock ~config:(Mcp_server.workspace_config state);
   let resolved_base = (Mcp_server.workspace_config state).base_path in
   let masc_dir = Workspace.masc_dir (Mcp_server.workspace_config state) in
   resolved_base, masc_dir

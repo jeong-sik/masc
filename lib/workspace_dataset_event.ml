@@ -13,6 +13,8 @@ type dataset =
   | Runtime_probe
   | Runtime_metrics
   | Lanes
+  | Lane_addon_instance of { instance_id : string }
+  | Lane_addon_configuration
 
 let dataset_to_wire = function
   | Repositories -> "repositories"
@@ -32,6 +34,8 @@ let workspace_health_name = "workspace_health"
 let runtime_probe_name = "runtime_probe"
 let runtime_metrics_name = "runtime_metrics"
 let lanes_name = "lanes"
+let lane_addon_instance_name = "lane_addon_instance"
+let lane_addon_configuration_name = "lane_addon_configuration"
 
 let dataset_name = function
   | Repositories -> repositories_name
@@ -47,6 +51,8 @@ let dataset_name = function
   | Runtime_probe -> runtime_probe_name
   | Runtime_metrics -> runtime_metrics_name
   | Lanes -> lanes_name
+  | Lane_addon_instance _ -> lane_addon_instance_name
+  | Lane_addon_configuration -> lane_addon_configuration_name
 ;;
 
 let keeper_field = function
@@ -54,7 +60,10 @@ let keeper_field = function
   | Workspace_health | Runtime_probe -> []
   | Workspace_health | Runtime_probe | Runtime_metrics -> []
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
+let subject_field = function
+  | Workspace_health | Runtime_probe | Runtime_metrics | Lanes | Lane_addon_configuration -> []
     [ "keeper", `String keeper ]
+  | Lane_addon_instance { instance_id } -> [ "instance_id", `String instance_id ]
 ;;
 
 let keeper_of_fields name fields =
@@ -66,6 +75,12 @@ let keeper_of_fields name fields =
 (* The wire decoder reads the whole field list: a dataset that names a Keeper
    carries it beside the dataset name, so [dataset_of_wire]'s single string
    cannot express it. *)
+let instance_of_fields name fields =
+  match List.assoc_opt "instance_id" fields with
+  | Some (`String instance_id) when not (String.equal instance_id "") -> Ok instance_id
+  | Some _ | None -> Error (event_type ^ " " ^ name ^ " names no instance_id")
+;;
+
 let of_fields fields =
   match List.assoc_opt "dataset" fields with
   | Some (`String name) when String.equal name "repositories" -> Ok Repositories
@@ -87,6 +102,10 @@ let of_fields fields =
   | Some (`String name) when String.equal name runtime_probe_name -> Ok Runtime_probe
   | Some (`String name) when String.equal name runtime_metrics_name -> Ok Runtime_metrics
   | Some (`String name) when String.equal name lanes_name -> Ok Lanes
+  | Some (`String name) when String.equal name lane_addon_configuration_name ->
+    Ok Lane_addon_configuration
+  | Some (`String name) when String.equal name lane_addon_instance_name ->
+    Result.map (fun instance_id -> Lane_addon_instance { instance_id }) (instance_of_fields name fields)
   | Some (`String name) when String.equal name keeper_oauth_attempts_name ->
     Result.map (fun keeper -> Keeper_oauth_attempts { keeper }) (keeper_of_fields name fields)
   | Some (`String name) -> Error (event_type ^ " names an unknown dataset " ^ name)
@@ -106,6 +125,8 @@ let announce ~base_path dataset =
       (`Assoc
         ([ "type", `String event_type; "dataset", `String wire ]
          @ keeper_field dataset
+        ([ "type", `String event_type; "dataset", `String name ]
+         @ subject_field dataset
          @ [ "ts_unix", `Float (Time_compat.now ()) ]))
   with
   | () -> ()

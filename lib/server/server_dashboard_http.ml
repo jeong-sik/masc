@@ -972,7 +972,6 @@ let dashboard_bootstrap_http_json
 let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   let t0 = Time_compat.now () in
   let config = Mcp_server.workspace_config state in
-  let base_path = config.Workspace.base_path in
   let warm_board () =
     try
       let t_start = Time_compat.now () in

@@ -18180,6 +18180,7 @@ let launch_ask_followup_load state ~mailbox =
     let admission_started_ns=Mtime_clock.elapsed_ns () in
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
     | Some expected_workspace, Some (request, submission, keeper_name) ->
+        state.ask_followup_owed <- Masc_tui_owed_read.started state.ask_followup_owed;
         let origin=Masc_tui_observation_origin.capture state.observation_instance ~expected_workspace in
         let admission_capture=Option.map (fun store ->
           Masc_tui_observation_store.record_admission store ~origin
@@ -18197,7 +18198,10 @@ let launch_ask_followup_load state ~mailbox =
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           Ask_followup_observation.Followup_read_started;
         Masc_tui_workspace_result.launch_observation state ~results:mailbox.workspace_results
-          ~on_not_run:finish ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
+          ~on_not_run:(fun () ->
+            finish ();
+            state.ask_followup_owed <- Masc_tui_owed_read.abandoned state.ask_followup_owed)
+          ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
           ~observe_job:(fun event -> Ask_followup_observation.emit read ~sources:None (Ask_followup_observation.Followup_job_event event))
           ~not_started:(fun detail -> Ask.Followup_not_started detail)
           ~cancelled:(envelope (Ask_followup_finished (read,Error Ask.Followup_cancelled)))
@@ -18224,11 +18228,22 @@ let launch_ask_followup_load state ~mailbox =
     | None, _ | Some _, None -> ()
   end
 
-let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
-  if server_authority_ready state then begin
-  launch_ask_followup_load state ~mailbox
-  end
-;;
+(* The current answer's follow-up reads when the answer is recorded, on a
+   revalidation while no read has completed, and again after a failed read
+   with backoff. A completed read ends it. *)
+let owe_ask_followup_read state =
+  state.ask_followup_owed <- Masc_tui_owed_read.changed state.ask_followup_owed
+
+(* Runs on every loop iteration. Only the Approvals surface reads a
+   follow-up; one owed while another surface is open waits for the return.
+   An answer with nothing to follow owes nothing. *)
+let launch_owed_ask_followup state ~mailbox =
+  match Masc_tui_types.ask_followup_target state with
+  | None -> state.ask_followup_owed <- Masc_tui_owed_read.settled
+  | Some _ ->
+      if state.view = Approvals && server_authority_ready state
+         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.ask_followup_owed
+      then launch_ask_followup_load state ~mailbox
 
 (* An operator who consented in a browser is standing in front of a tab that
    does not know it happened: the callback lands on the server, not here. So
@@ -19113,7 +19128,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_tools_skill_reads state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
-       owe_chat_journal_reads state
+       owe_chat_journal_reads state;
+       if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state
    | Cadence -> ());
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -19139,15 +19155,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let ask_request = match intent with
       | Revalidate -> Masc_tui_types.begin_asks_read state
       | Cadence -> None in
-    (* Read before the label below moves. While the last probe said the
-       server is booting, only the probe goes out this tick: the side loads
-       below would each wait out a timeout against a process that has not
-       finished replaying its stores. *)
-    let was_booting =
-      match state.connection_status with
-      | Booting -> true
-      | Disconnected | Connecting | Degraded | Connected -> false
-    in
     state.connection_status <-
       (match state.connection_status with
        | Connected -> Masc_tui_types.Connected
@@ -19191,13 +19198,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
-    (* The side reads -- the ask follow-up and the identity logins this TUI
-       is waiting on -- start after workspace admission, either the cold
-       initial-probe acknowledgement or the terminal refresh. The open
-       questions the agenda strip counts read on their own announcement
-       ([launch_owed_asks]). *)
-    if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
-
     (* This worker owns the binding. The UI's initial-probe acknowledgement is
        the only replacement, before parallel collection starts. Callbacks never
        read a newer workspace authority out of mutable UI state. *)
@@ -20543,8 +20543,10 @@ let apply_ask_answer_receipt state submission ~mailbox =
   | None -> ()
   | Some (owner, observation) ->
     observe_ask_answer_receipt state owner observation.result;
-    if Masc_tui_types.owns_ask_submission state owner then
-      launch_ask_followup_load state ~mailbox
+    if Masc_tui_types.owns_ask_submission state owner then begin
+      owe_ask_followup_read state;
+      launch_owed_ask_followup state ~mailbox
+    end
 
 let apply_ask_answer_completion state submission result asks =
   let answered_label = submission.as_answered_label in
@@ -25603,6 +25605,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Ask_followup_finished (read, result) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
+        state.ask_followup_owed <-
+          (match result with
+           | Ok () -> Masc_tui_owed_read.succeeded state.ask_followup_owed
+           | Error _ -> failed_read state.ask_followup_owed);
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_ui_settled result))
         (Masc_tui_types.finish_ask_followup_read state request submission result)
@@ -25613,8 +25619,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         apply_ask_answer_receipt state submission ~mailbox;
         apply_ask_answer_completion state submission result asks;
         if Option.is_none (Masc_tui_types.current_ask_followup state)
-           && Option.is_none state.ask_followup_error then
-          launch_ask_followup_load state ~mailbox
+           && Option.is_none state.ask_followup_error then begin
+          owe_ask_followup_read state;
+          launch_owed_ask_followup state ~mailbox
+        end
       end
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
       let proceed = ref false in
@@ -33071,6 +33079,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
+      launch_owed_ask_followup state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
       reconcile_system_log_stream state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;

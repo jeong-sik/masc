@@ -56,7 +56,7 @@ let connector_changes stream =
       let payload = delivery.Masc.Sse.payload in
       (match Yojson.Safe.Util.member "type" payload, Yojson.Safe.Util.member "connector" payload with
        | `String kind, `String connector
-         when String.equal kind Server_gate_connector_broadcast.changed_event ->
+         when String.equal kind Masc.Gate_connector_changed_event.event_type ->
          drain (connector :: heard)
        | _ -> drain heard)
   in

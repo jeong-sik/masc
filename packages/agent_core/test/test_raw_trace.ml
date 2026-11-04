@@ -730,7 +730,7 @@ let test_record_of_json_rejects_historical_versions () =
     [ 1; 2 ]
 ;;
 
-let test_record_of_json_rejects_removed_descriptor_fields () =
+let test_record_of_json_rejects_unsupported_fields () =
   let assert_rejected field =
     let json = raw_record_json [ field, `String "old" ] in
     (match Raw_trace.record_of_json json with
@@ -746,8 +746,7 @@ let test_record_of_json_rejects_removed_descriptor_fields () =
       true
       (Result.is_error (Raw_trace.record_of_yojson json))
   in
-  assert_rejected "tool_concurrency_class";
-  assert_rejected "evidence_role"
+  assert_rejected "unlisted_field"
 ;;
 
 let test_record_of_json_requires_started_execution_mode () =
@@ -1134,9 +1133,9 @@ let () =
             `Quick
             test_record_of_json_rejects_historical_versions
         ; Alcotest.test_case
-            "removed descriptor fields rejected"
+            "unsupported fields rejected"
             `Quick
-            test_record_of_json_rejects_removed_descriptor_fields
+            test_record_of_json_rejects_unsupported_fields
         ; Alcotest.test_case
             "started mode required"
             `Quick

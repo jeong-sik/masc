@@ -1525,6 +1525,19 @@ let test_memory_health_pushes_require_their_keeper () =
     [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n" ]
 
+let test_machine_live_pushes_scope_the_machine () =
+  let fields = [ "type", `String "workspace_dataset_changed"
+               ; "dataset", `String "machine_live"; "machine", `String "msx" ] in
+  (match Masc.Workspace_dataset_event.of_fields fields with
+   | Ok (Masc.Workspace_dataset_event.Machine_live { machine }) ->
+       check string "only the selected machine is named" "msx"
+         (Masc.Machine_lane.to_wire machine)
+   | Ok _ | Error _ -> fail "a machine push was not decoded");
+  match decode_all [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\"}\n\n" ] with
+  | [ Observer.Undecodable _ ] -> ()
+  | decoded -> failf "a machine push without a machine was read: %s"
+      (String.concat ", " (List.map summary decoded))
+
 let () =
   run "tui observer"
     [ ( "session"

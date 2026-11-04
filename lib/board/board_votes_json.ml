@@ -96,11 +96,6 @@ let load_persisted_posts store =
           | Posts_complete { posts; _ } -> replace_loaded_posts store posts; Ok (List.length posts)
           | Posts_partial { posts; errors; _ } ->
             merge_loaded_posts store posts; error (Posts_rows_rejected errors)
-          | Posts_unadmitted { display; failure; _ } ->
-            (match display with
-             | Complete_display posts -> replace_loaded_posts store posts
-             | Partial_display { posts; _ } -> merge_loaded_posts store posts);
-            error failure
           | Posts_unavailable { failure; _ } -> error failure in
         publish_posts_read store outcome;
         outcome, result)
@@ -112,9 +107,7 @@ let load_persisted_posts store =
       (* This first finishes retained read/cleanup causes before logging. *)
       finish_posts_read outcome;
       let loaded = match outcome with
-        | Posts_complete { posts; _ } | Posts_partial { posts; _ }
-        | Posts_unadmitted { display = Complete_display posts; _ }
-        | Posts_unadmitted { display = Partial_display { posts; _ }; _ } -> List.length posts
+        | Posts_complete { posts; _ } | Posts_partial { posts; _ } -> List.length posts
         | Posts_unavailable _ -> 0 in
       log_loaded ~noun:"posts" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
         (Result.map (fun _ -> ()) result);

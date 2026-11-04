@@ -53,8 +53,8 @@ val create_store : base_path:string -> unit -> store
 
 val create_store_with_source_io_for_testing :
   base_path:string -> io:posts_source_io -> unit -> store
-(** Same production store with immutable per-file guard/posts transaction IO.
-    None slots use production IO; the constructor creates/adopts nothing and
+(** Same production store with an immutable posts transaction IO seam.
+    A None slot uses production IO; the constructor creates/adopts nothing and
     leaves posts unobserved until explicit load. *)
 
 (** {1 Locking + cache invalidation} *)
@@ -166,9 +166,10 @@ val read_posts_source : store -> posts_source_read
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
 val settle_posts_source : store -> posts_settle_outcome
 (** Settle the retained unknown write of an unsettled store. Caller holds
-    persistence; performs locked guard/posts reads and at most one durable
-    proof rewrite, and never touches the in-memory post tables. A store that
-    is not unsettled yields [Posts_settle_nothing_to_settle] with no IO. *)
+    persistence; revalidates the workspace of the pre-write observation,
+    performs one locked posts read and at most one durable proof rewrite, and
+    never touches the in-memory post tables. A store that is not unsettled
+    yields [Posts_settle_nothing_to_settle] with no IO. *)
 val settle_posts_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
 type settle_direction = Board_core_persist.settle_direction =
   | Direction_landed

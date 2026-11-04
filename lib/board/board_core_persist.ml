@@ -81,7 +81,7 @@ let create_store_with_source_io ~base_path posts_source_io () =
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { guard = None; posts = None } ()
+  create_store_with_source_io ~base_path { posts = None } ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
   create_store_with_source_io ~base_path io ()
 
@@ -554,36 +554,21 @@ let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir ~where store =
-  let check = Board_posts_source.check_initialization store in
-  let requested_result check =
-    match Board_posts_source.initialization_result check with
-    | Ok () -> Ok ()
-    | Error failure -> Error (Io_error (Printf.sprintf "%s: %s" where
-        (show_board_error (Board_posts_source.failure_to_board_error failure)))) in
-  let result = requested_result check in
-  match Board_posts_source.reserved_diagnostics
-      (Board_posts_source.initialization_diagnostics check) with
-  | Some _ ->
-    (* Do not invoke a logger after observing cancellation/another reserved
-       cause. Retain the single requested-operation error count and result. *)
-    (match result with Ok () -> () | Error _ -> Atomic.incr persist_errors);
-    Board_posts_source.finish_initialization ~result check;
-    result
-  | None ->
-    let check = try
-      (match Board_posts_source.initialization_result check with
-       | Error failure -> record_persist_error ~where
-           (show_board_error (Board_posts_source.failure_to_board_error failure))
-       | Ok () -> List.iter (fun diagnostic -> record_persist_error ~where
-           (Board_posts_source.diagnostic_to_string diagnostic))
-           (Board_posts_source.initialization_diagnostics check));
-      check
-    with exception_ ->
-      Board_posts_source.initialization_exception store check exception_
-        (Printexc.get_raw_backtrace ()) in
-    let result = requested_result check in
-    Board_posts_source.finish_initialization ~result check;
-    result
+  match Board_paths.ensure_masc_dir store with
+  | Ok () -> Ok ()
+  | Error rejection ->
+    let message = Board_workspace_binding.rejection_to_string rejection in
+    let result = Error (Io_error (Printf.sprintf "%s: %s" where message)) in
+    (match Option.bind (Board_workspace_binding.raised rejection)
+             Board_posts_source.reserved_exception with
+     | Some (exception_, backtrace) ->
+       (* Do not invoke a logger after observing cancellation/another reserved
+          cause. Retain the single requested-operation error count and carry
+          the result through the enclosing Board locks. *)
+       Atomic.incr persist_errors;
+       Board_posts_source.defer_reserved ~result exception_ backtrace;
+       result
+     | None -> record_persist_error ~where message; result)
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)

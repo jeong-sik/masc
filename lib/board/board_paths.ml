@@ -41,16 +41,12 @@ let workspace_masc_dir (store : Board_types.store) =
 let observe_workspace (store : Board_types.store) =
   let open Result.Syntax in
   let binding = store.workspace_binding in
-  let workspace_of_guard (guard : Board_types.posts_guard_observation) =
-    guard.workspace_observation in
   let workspace_of_history = function
-    | Board_types.No_initialization -> None
-    | Guard_observed guard -> Some (workspace_of_guard guard)
-    | Posts_observed observation -> Some (workspace_of_guard observation.initialization) in
+    | Board_types.No_observation -> None
+    | Posts_observed observation -> Some observation.Board_types.workspace_observation in
   let observed = match store.posts_source with
     | Posts_unobserved -> None
-    | Posts_guard_observed { initialization; _ } -> Some (workspace_of_guard initialization)
-    | Posts_readable { observation; _ } -> Some (workspace_of_guard observation.initialization)
+    | Posts_readable { observation; _ } -> Some observation.workspace_observation
     | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } ->
       workspace_of_history last_observed
   in
@@ -80,4 +76,19 @@ let ensure_dir path =
   if String.equal path "" || String.equal path "." || String.equal path "/"
   then ()
   else Fs_compat.mkdir_p path
+;;
+
+let ensure_masc_dir (store : Board_types.store) =
+  let open Result.Syntax in
+  try
+    let* () = check_workspace store in
+    let dir = workspace_masc_dir store in
+    ensure_dir (Filename.dirname dir);
+    ensure_dir dir;
+    let* observation = observe_workspace store in
+    if Board_workspace_binding.workspace_directory_missing observation then
+      Error (Board_workspace_binding.Workspace_directory_changed dir)
+    else Ok ()
+  with exception_ ->
+    Error (Board_workspace_binding.Raised { exception_; backtrace = Printexc.get_raw_backtrace () })
 ;;

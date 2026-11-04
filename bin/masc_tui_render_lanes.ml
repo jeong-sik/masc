@@ -776,13 +776,28 @@ let render_lanes_overview (state : state) =
     ^ Terminal_text.single_line (match state.lane_inventory with
       | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
       | None -> Masc_tui_lane_inventory.row_summary row) in
-  let status_width = List.fold_left (fun width row -> max width
-      (Message_layout.display_width (summary row))) (String.length "STATE") inventory
-    |> min (max 1 (inner / 2)) in
+  let widest_summary = List.fold_left (fun width row -> max width
+      (Message_layout.display_width (summary row))) (String.length "STATE") inventory in
+  let widest_label = List.fold_left
+      (fun width (row : Masc.Tui_decode_lane_inventory.row) -> max width
+        (Message_layout.display_width (Terminal_text.single_line row.label)))
+      (String.length "FEATURE") inventory in
   let mark_width = 2 in
-  let label_width = max 1 (inner - mark_width - status_width - 2) in
+  let column_gap = 2 in
+  (* Both columns take what their widest reading needs when the two fit
+     together, so a name and its state sit on the same stretch of the row. A
+     row that does not fit gives the state at most half the width and the names
+     the rest. *)
+  let status_width, label_width =
+    if mark_width + widest_label + column_gap + widest_summary <= inner then
+      (widest_summary, widest_label)
+    else
+      let status = min widest_summary (max 1 (inner / 2)) in
+      (status, max 1 (inner - mark_width - status - column_gap))
+  in
+  let gap = String.make column_gap ' ' in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ "  " ^ fit_width "STATE" status_width);
+    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ gap ^ fit_width "STATE" status_width);
   let window = Rows.of_list ~first:scroll ~height entries in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
@@ -807,14 +822,14 @@ let render_lanes_overview (state : state) =
         (* The selection band takes no colour of its own, so the selected row
            keeps the mark and drops the styles. *)
         if selected_position = Some index then
-          box_line_selected buf cols (marked (mark ^ label ^ "  " ^ state_text))
+          box_line_selected buf cols (marked (mark ^ label ^ gap ^ state_text))
         else
           let row_style = if Masc_tui_lane_standing.recedes standing then Theme.recede () else "" in
           let state_style = match standing with
             | Masc_tui_lane_standing.Failing -> Masc_tui_lane_standing.colour standing
             | Masc_tui_lane_standing.(Ready | Waiting | Changing | Off | Not_set_up | Unobserved) -> row_style in
           box_line buf cols (marked (Masc_tui_lane_standing.colour standing ^ mark ^ Ansi.reset
-            ^ row_style ^ label ^ "  " ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
+            ^ row_style ^ label ^ gap ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
   done;
   (match Masc_tui_scroll.position_row ~scroll ~height (List.length entries) with
    | None -> ()

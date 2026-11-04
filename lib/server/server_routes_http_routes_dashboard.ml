@@ -1091,6 +1091,16 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
         ~keeper_name ~runtime_id ~expected ())
     state agent_name req reqd body_str
 
+(* GET /api/v1/tui/preferences, after authentication: the [tui] settings of
+   the runtime.toml this server writes. *)
+let handle_tui_preferences_get state req reqd =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  Http.Response.json_value ~request:req
+    (Tui_preference.settings_to_yojson
+       (Tui_preference.read_settings
+          ~path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)))
+    reqd
+
 (* POST /api/v1/tui/preferences, after authentication: one change to the
    [tui] table of runtime.toml, parsed at the door (RFC-0482 §3.1). The edit
    goes through Runtime's config write lock and commit, so the commit
@@ -1442,6 +1452,7 @@ module For_testing = struct
   let handle_runtime_routing_post = handle_runtime_routing_post
   let handle_runtime_config_raw_post = handle_runtime_config_raw_post
   let handle_tui_preference_post = handle_tui_preference_post
+  let handle_tui_preferences_get = handle_tui_preferences_get
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
   let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
@@ -2835,6 +2846,11 @@ let add_routes ~sw ~clock router =
              handle_runtime_assignment_post state agent_name req reqd body_str
            )
          )
+  (* RFC-0482 §3.1: a terminal reader starts from the [tui] table the server
+     writes, not from whichever runtime.toml its own environment finds. Only
+     the settings are sent; the file carries provider configuration. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/tui/preferences" (fun state _agent_name req reqd ->
+         handle_tui_preferences_get state req reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/tui/preferences" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              handle_tui_preference_post state agent_name req reqd body_str))

@@ -115,7 +115,7 @@ ego 앱 안에서 연결이 묶인 Space 가 사라지면, 그 연결로 가는 
 1. clientId 없는 `take_over` 는 지금처럼 기록을 공개한 worker 로 가요.
 2. worker 는 설정의 Space 참조를 봐요.
    - `Named_space`: 기록을 지우고 다시 연결을 시작해요. 답은
-     `{action:"take_over", spaceName, reopening:true}` 예요. 사용자 소유 되찾기처럼
+     `{ok:true, action:"take_over", spaceName, reopening:true}` 예요. 사용자 소유 되찾기처럼
      연결은 답 뒤에 이어져요. 새 번호와 clientId 는 `BrowserTabs` 에서 보여요.
      이전 탭은 없어요.
    - `Existing_space`: 그 번호는 없으므로 거절해요. 기록은 남아요. 운영자가 설정을

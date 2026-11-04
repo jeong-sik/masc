@@ -73,8 +73,10 @@ let scenario () = Eio_main.run (fun env ->
      | W.Issue_result (Ok (B.Answered receipt)) ->
          check (list int) "the claim sees exactly the published Space id" [7] !claimed_ids;
          check bool "the claim receipt names the reclaimed Space" true
-           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 7;
-             "spaceName",`String "masc-keepers";"reclaimed",`Bool true])
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 7;
+             "spaceName",`String "masc-keepers";"reclaimed",`Bool true]);
+         check bool "the tool reads a reclaim as a success" true
+           (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
      | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "the claim answers with a reclaimed receipt" true false);
@@ -96,7 +98,9 @@ let scenario () = Eio_main.run (fun env ->
     (match send (take_over_route ()) with
      | W.Issue_result (Ok (B.Answered receipt)) ->
          check bool "a missing Space is reopened by name" true
-           (receipt=`Assoc ["action",`String "take_over";"spaceName",`String "masc-keepers";"reopening",`Bool true])
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceName",`String "masc-keepers";"reopening",`Bool true]);
+         check bool "the tool reads a reopening as a success" true
+           (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
      | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "a missing Space is reopened by name" true false);
@@ -126,7 +130,7 @@ let scenario () = Eio_main.run (fun env ->
     (match Eio.Promise.await_exn running with
      | W.Issue_result (Ok (B.Answered receipt)) ->
          check bool "the running reclaim answers with a receipt" true
-           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 11;
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 11;
              "spaceName",`String "busy";"reclaimed",`Bool true])
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
      | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->

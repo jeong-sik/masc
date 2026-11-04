@@ -62,7 +62,6 @@ function keeperMetrics({
   ],
 } = {}) {
   return {
-    state: 'ready',
     window_minutes: 60,
     keepers,
   }
@@ -127,33 +126,9 @@ describe('CostDashboard route-backed focus behavior', () => {
     container.remove()
   })
 
-  it('shows a pending keeper aggregate and loads its result on recheck', async () => {
-    apiMocks.fetchKeeperCostMetrics
-      .mockResolvedValueOnce({ state: 'pending', window_minutes: 60 })
-      .mockResolvedValueOnce(keeperMetrics())
-    const { route } = await import('../router')
-    const { keeperState } = await import('./cost/cost-store')
-    const { CostDashboard } = await import('./cost-dashboard')
-    route.value = {
-      tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' }, postId: null,
-    }
-    render(h(CostDashboard, { view: 'cost' }), container)
-    await waitFor(() => keeperState.value.status === 'pending', 'keeper aggregation pending')
-    expect(container.textContent).toContain('Keeper 비용 집계 중')
-    expect(container.querySelector('table')).toBeNull()
-    expect(container.textContent).not.toContain('$0')
-    const retry = Array.from(container.querySelectorAll('button'))
-      .find(button => button.textContent?.trim() === '집계 다시 확인')
-    expect(retry).toBeDefined()
-    retry!.click()
-    await waitFor(() => container.textContent?.includes('sangsu') ?? false, 'completed keeper aggregation')
-    expect(keeperState.value.status).toBe('loaded')
-    expect(apiMocks.fetchKeeperCostMetrics.mock.calls.map(call => call[0])).toEqual([60, 60])
-  })
-
   it('shows a failed keeper aggregate and lets the user retry it', async () => {
     apiMocks.fetchKeeperCostMetrics
-      .mockResolvedValueOnce({ state: 'failed', message: 'metrics unavailable' })
+      .mockRejectedValueOnce(new Error('metrics unavailable'))
       .mockResolvedValueOnce(keeperMetrics())
     const { route } = await import('../router')
     const { CostDashboard } = await import('./cost-dashboard')

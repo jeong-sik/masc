@@ -48,7 +48,14 @@ let keeper_metrics_store config name : Dated_jsonl.t =
 let append_keeper_metrics (config : Workspace.config) name json =
   Keeper_metrics_storage.append (keeper_metrics_storage config name) json;
   Workspace_dataset_event.announce ~base_path:config.base_path
-    (Workspace_dataset_event.Keeper_metrics { keeper = name })
+    (Workspace_dataset_event.Keeper_metrics { keeper = name });
+  (* The cost window counts every row but a heartbeat: a turn, or a row of a
+     kind it cannot read, which may have been one. *)
+  match Keeper_metrics_record.kind_of_json json with
+  | Some Keeper_metrics_record.Heartbeat -> ()
+  | Some Keeper_metrics_record.Turn | None ->
+    Workspace_dataset_event.announce ~base_path:config.base_path
+      Workspace_dataset_event.Keeper_costs
 
 let keeper_metrics_dir config name =
   Dated_jsonl.base_dir (keeper_metrics_store config name)

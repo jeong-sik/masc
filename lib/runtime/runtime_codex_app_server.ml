@@ -350,6 +350,17 @@ type error =
       ; message : string
       ; data : Yojson.Safe.t option
       }
+  | Account_read_failed of
+      { code : int option
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+      (* The account/read call of the startup handshake. It is sent before
+         thread/resume and turn/start, so nothing in this exchange touched
+         the session: a settled session's resume information must not be
+         revised by it. Carries the same payload as {!Rpc_error} but its
+         own constructor, because a thread/resume refusal is a different
+         fact -- that resume really was refused. *)
   | Subscription_required of string
   | Unsupported_server_request of string
   | Context_window_exceeded of
@@ -436,6 +447,7 @@ let input_capacity_refusal = function
      | Some (`String "input_too_large"), Some (`Int actual_chars), Some (`Int max_chars)
        when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
      | _ -> None)
+  | Account_read_failed _
   | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _
   | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
@@ -454,6 +466,9 @@ let error_to_string = function
   | Rpc_error { method_; code; message; _ } ->
     let code = Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code in
     Printf.sprintf "Codex app-server RPC %s failed%s: %s" method_ code message
+  | Account_read_failed { code; message; _ } ->
+    let code = Option.fold ~none:"" ~some:(Printf.sprintf " (code %d)") code in
+    Printf.sprintf "Codex app-server RPC account/read failed%s: %s" code message
   | Subscription_required detail ->
     "Codex authentication required: " ^ detail
   | Unsupported_server_request method_ ->
@@ -512,6 +527,7 @@ let refused_for_spent_usage = function
   | Turn_input_write_failed _
   | Protocol_error _
   | Rpc_error _
+  | Account_read_failed _
   | Subscription_required _
   | Unsupported_server_request _
   | Context_window_exceeded _
@@ -529,6 +545,7 @@ let error_kind = function
   | Turn_input_write_failed _ -> "turn_input_write_failed"
   | Protocol_error _ -> "protocol_error"
   | Rpc_error _ -> "rpc_error"
+  | Account_read_failed _ -> "account_read_failed"
   | Subscription_required _ -> "subscription_required"
   | Unsupported_server_request _ -> "unsupported_server_request"
   | Context_window_exceeded _ -> "context_window_exceeded"
@@ -1723,6 +1740,7 @@ type turn_reader_state = Reader_ready | Reader_inflight | Reader_closed
 
 let host_stop_of_error = function
   | Stopped_by_host stop -> Some stop
+  | Account_read_failed _
   | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
   | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
   | Subscription_required _ | Unsupported_server_request _
@@ -2590,7 +2608,22 @@ let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result
   send_notification io "initialized";
   send_control_request io ~id:2 ~method_:"account/read"
     ~params:(`Assoc [ "refreshToken", `Bool false ]);
-  let* account = await_response io ~id:2 ~method_:"account/read" in
+  let* account =
+    (* Exhaustive by name, not by a catch-all: a future error variant has
+       to say here whether it already means this stage. *)
+    Result.map_error
+      (function
+        | Rpc_error { code; message; data } ->
+            Account_read_failed { code; message; data }
+        | ( Invalid_config _ | Spawn_failed _
+          | Reasoning_effort_admission_failed _ | Account_read_failed _
+          | Turn_input_write_failed _ | Protocol_error _
+          | Subscription_required _ | Unsupported_server_request _
+          | Context_window_exceeded _ | Turn_failed _
+          | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down
+          | Process_exited _ | Timeout _ ) as other -> other)
+      (await_response io ~id:2 ~method_:"account/read")
+  in
   let* subscription = parse_subscription account in
   let* permissions_profile = permissions_profile_of_posture config.native in
   let requested = reasoning_effort in
@@ -2598,7 +2631,7 @@ let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result
     (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
     |> Result.map_error (function
       | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
-      | (Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+      | (Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Account_read_failed _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
   (* New persistent threads are created only after explicit effort is admitted.
      Pin the advertised default when no model was configured, so thread/start
      and the admitted account metadata name the same model. Resume creates no
@@ -2756,7 +2789,7 @@ let run_protocol io (config : config) ~await_handoff ~on_undelivered_tool_result
          the app-server rejected it, so rotating here could duplicate a turn
          that is already executing upstream. *)
       Error (Timeout { seconds; turn_accepted = true })
-    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _))))))))))))) | Ok _) as response -> response
+    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Account_read_failed _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _)))))))))))))) | Ok _) as response -> response
   in
   let* turn_id = parse_turn_start turn in
   let* () =
@@ -3334,7 +3367,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result =
               { detail
               ; turn_accepted = dispatch_ambiguous || !turn_accepted
               })
-       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _)))))))))))) | Ok _) as other -> other)
+       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Account_read_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _))))))))))))) | Ok _) as other -> other)
   in
   (match result with
    | Ok turn ->
@@ -3353,6 +3386,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?(on_undelivered_tool_result =
        (error_to_string stopped)
    | Error
        (( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+        | Account_read_failed _
         | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
         | Subscription_required _ | Unsupported_server_request _
         | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _

@@ -353,6 +353,17 @@ type error =
       ; message : string
       ; data : Yojson.Safe.t option
       }
+  | Account_read_failed of
+      { code : int option
+      ; message : string
+      ; data : Yojson.Safe.t option
+      }
+      (** The startup handshake's [account/read], refused by the server. It
+          is sent before [thread/resume] and [turn/start], so this exchange
+          touched no session and a settled session's resume information
+          must not be revised by it -- unlike an {!Rpc_error} on
+          [thread/resume] itself, whose refusal really does leave the
+          prior thread behind. *)
   | Subscription_required of string
   | Unsupported_server_request of string
   | Context_window_exceeded of

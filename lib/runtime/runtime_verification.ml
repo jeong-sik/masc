@@ -1037,6 +1037,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 codex_error_info)
          | Error
              (( Runtime_codex_app_server.Reasoning_effort_admission_failed _
+              | Runtime_codex_app_server.Account_read_failed _
               | Runtime_codex_app_server.Turn_input_write_failed _
               | Runtime_codex_app_server.Protocol_error _
               | Runtime_codex_app_server.Rpc_error _

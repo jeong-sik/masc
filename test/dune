@@ -235,6 +235,11 @@
  (libraries masc_test_deps))
 
 
+(test
+ (name test_keeper_codex_account_read_recovery)
+ (modules test_keeper_codex_account_read_recovery)
+ (libraries masc_test_deps))
+
 ; Explicit minimal check for the real adapter's asynchronous receipt lifecycle.
 ; The ordinary suite continues to include the complete native context group.
 (rule

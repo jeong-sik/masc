@@ -241,6 +241,7 @@ let panel_failure ~runtime_id = function
       (( Runtime_codex_app_server.Invalid_config _
        | Runtime_codex_app_server.Spawn_failed _
        | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+       | Runtime_codex_app_server.Account_read_failed _
        | Runtime_codex_app_server.Turn_input_write_failed _
        | Runtime_codex_app_server.Protocol_error _
        | Runtime_codex_app_server.Rpc_error _
@@ -577,7 +578,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             | Response_too_many_failed_attempts _ | Active_turn_not_steerable _
             | Unrecognized _); _}
       | Runtime_codex_app_server.Invalid_config _ | Spawn_failed _
-      | Reasoning_effort_admission_failed _ | Turn_input_write_failed _
+      | Reasoning_effort_admission_failed _ | Account_read_failed _
+      | Turn_input_write_failed _
       | Protocol_error _ | Rpc_error _ | Subscription_required _
       | Unsupported_server_request _ | Context_window_exceeded _ | Stopped_by_host _
       | Turn_interrupted | Runtime_shutting_down | Process_exited _ | Timeout _ -> ());

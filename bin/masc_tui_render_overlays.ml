@@ -589,9 +589,8 @@ let render_palette (state : state) =
                      | Masc_tui_fetched.Ready _ -> false
                      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                      | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _ -> true) -> ()
-             | (Palette_files _ | Palette_search _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
-               | Palette_jump
-               | Palette_choice _),
+             | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
+               | Palette_jump | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
                  c.push ("   No matching "

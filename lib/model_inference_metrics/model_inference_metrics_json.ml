@@ -349,10 +349,8 @@ let compute_cost_latency_json ~base_path ~window_minutes =
     ])
 ;;
 
-let compute_runtime_metrics_json ~base_path ~window_minutes =
-  let observed_at = Time_compat.now () in
-  let since_unix = observed_at -. (Float.of_int window_minutes *. 60.0) in
-  let entries, cost_read, decision_read = read_all_entries ~base_path ~since_unix in
+let runtime_metrics_json ~observed_at ~window_minutes
+    ({ entries; cost_read; decision_read } : Model_inference_metrics_kept.reading) =
   let unavailable diagnostic =
     `Assoc [ "state", `String "unavailable";
       "observed_at", `Float observed_at; "window_minutes", `Int window_minutes;
@@ -383,3 +381,11 @@ let compute_runtime_metrics_json ~base_path ~window_minutes =
     "unattributed_entries", `Int (List.length entries - List.length attributed);
     "cost_read", cost_read_to_json cost_read;
     "runtimes", `List runtimes ]
+
+let compute_runtime_metrics_json ~base_path ~window_minutes =
+  let observed_at = Time_compat.now () in
+  let _kept, reading =
+    Model_inference_metrics_kept.refresh ~base_path ~now:observed_at ~window_minutes
+      Model_inference_metrics_kept.empty
+  in
+  runtime_metrics_json ~observed_at ~window_minutes reading

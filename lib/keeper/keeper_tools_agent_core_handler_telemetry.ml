@@ -116,9 +116,7 @@ let broadcast_keeper_tool_call_event
 
 let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
   try
-    Keeper_types_support.append_jsonl_line
-      (Keeper_types_support.keeper_decision_log_path config keeper_name)
-      entry
+    Keeper_types_support.append_decision_record config keeper_name entry
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

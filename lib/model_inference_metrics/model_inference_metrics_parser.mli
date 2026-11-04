@@ -7,3 +7,6 @@ val parse_telemetry_entry :
 
 val parse_cost_entry :
   Yojson.Safe.t -> since_unix:float -> (raw_entry, parse_error) result
+
+val renderable_timestamp : float -> bool
+(** A finite time [Unix.gmtime] can render. *)

@@ -1330,9 +1330,7 @@ let keeper_memory_search_with_outcome
             | Some turn_ref -> [ "turn_ref", `String (Ids.Turn_ref.to_string turn_ref) ]
             | None -> [])
        in
-       Keeper_types_support.append_jsonl_line
-         (Keeper_types_support.keeper_decision_log_path config meta.name)
-         log_entry
+       Keeper_types_support.append_decision_record config meta.name log_entry
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

@@ -169,8 +169,14 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 **B3 범위**
 
+- 층은 넷이다(2026-11-05).
+  - B3a: 접힌 상태 `Authz_state`(지금은 `mode` 필드 하나)와 mode event 순서 `Authz_mode_state`(상태 3개 × 사건 3개, 9쌍을 모두 적는다). 외부 저장소도 mode 변경을 같은 순서로 받는다. 부팅 판정이 이 `step`으로 로그를 읽는다.
+  - B3b: 쓰기 구역. 구역에 들어갈 때 남은 intent를 판정하고(§8.2 규칙 1~5), append 전에 `step`을 돌리고, `Intent_pending` → append → `Committed` 순서로 쓰고, 새 상태를 불변 값으로 발행한다. `Authz_bootstrap`도 이 구역으로 쓴다.
+  - B3c: principal과 `External_identity`, CSPRNG `user_id`, Admin_assignment, WorkspaceMembership, 초대, 마지막 Admin 보호, 삭제 사건, 외부 고수위의 epoch 항목. 저마다 `Authz_state` 필드 하나와 `step` 갈래 하나로 들어온다.
+  - B3d: CLI bootstrap 하위 명령, 한 번 쓰는 Admin 초대 링크, `Multi_account_not_activatable` 거부를 거두는 일.
+- 첫 Admin(2026-11-05 사용자 결정): bootstrap 명령이 한 번 쓰는 Admin 초대 링크를 찍는다. 그 링크로 로그인한 사람의 초대 소비, User 생성, Admin 지정은 append 한 번이다. Principal 레코드는 인증된 author만 쓴다(설계 §6.3). `Local_operator`는 초대 기록만 쓴다. 그래서 초대는 Principal과 다른 Kind다.
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.
-- 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, 활성화 전 요청일 때 호스트 로컬 bootstrap만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 서버 밖 프로세스가 `Fresh_bootstrap`을 실행할 때 BasePath lease를 쥐는지는 이 층이 정한다. bootstrap끼리도 한 번에 하나만 돌려야 한다(B2d의 한계 참고). lease를 쥐거나 이 층에서 잠금을 걸어서 막는다.
+- 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, 활성화 전 요청일 때 호스트 로컬 bootstrap만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 호스트 로컬 bootstrap은 서버를 멈추고 돌리는 CLI 하위 명령이고 BasePath lease를 쥔다(2026-11-05 사용자 결정). 그래서 서버와도, 다른 bootstrap과도 동시에 돌지 않는다(B2d의 한계 참고). loopback 엔드포인트는 쓰지 않는다. 터널이 localhost로 들어와서 원격 요청과 구분할 수 없다.
 - 삭제 사건(§4.1): `(iss, sub)`는 `authz.jsonl`의 사건에만 싣고 ledger의 `Delete` 기록에는 ID만 둔다.
 - 표시가 붙은 상태는 D6에서 처음 생긴다. D6 전에는 삭제가 올릴 `Purge_pending` 대상이 없다.
 - 접힌 상태 `Authz_state.t`는 층별 하위 상태를 필드로 가진 레코드다. replay의 적용 함수 `step`은 `Kind.t`를 빠짐없이 match해 하위 모듈로 보낸다. 층마다 필드 한 줄과 갈래 한 줄이 는다. 이 타입은 저장소(B1b)가 아니라 `Authz_state` 모듈이 붙인다.

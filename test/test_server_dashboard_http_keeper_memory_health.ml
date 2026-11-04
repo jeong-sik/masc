@@ -1193,11 +1193,43 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
     (String.length (string_field "detail" stalled) > 0)
 ;;
 
+let test_memory_health_reloads_only_the_changed_keeper () =
+  let base = fresh_dir "masc-memory-health-incremental" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"]);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"beta" [fact "beta one"]);
+  let reads = Hashtbl.create 2 in
+  let count keeper_id =
+    Hashtbl.replace reads keeper_id (1 + Option.value ~default:0 (Hashtbl.find_opt reads keeper_id))
+  in
+  let read_count keeper_id = Option.value ~default:0 (Hashtbl.find_opt reads keeper_id) in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      count keeper_id;
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      Alcotest.(check int) "alpha is cold once" 1 (read_count "alpha");
+      Alcotest.(check int) "beta is cold once" 1 (read_count "beta");
+      ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"; fact "alpha two"]);
+      let json = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check int) "only alpha is refreshed" 2 (read_count "alpha");
+      Alcotest.(check int) "beta is not reloaded" 1 (read_count "beta");
+      Alcotest.(check int) "the committed alpha revision is visible" 2
+        (int_field "revision" (keeper_obj "alpha" json));
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      Alcotest.(check int) "alpha is warm too" 2 (read_count "alpha");
+      Alcotest.(check int) "beta remains warm" 1 (read_count "beta"))
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "unread evidence is observed without publication" `Quick
+      , [ Alcotest.test_case "a write reloads only its own Keeper" `Quick
+            test_memory_health_reloads_only_the_changed_keeper
+        ; Alcotest.test_case "unread evidence is observed without publication" `Quick
             test_unread_evidence_is_observed_without_publication
         ; Alcotest.test_case "saved versus prepared context" `Quick
             test_context_cycle_separates_saved_and_prepared

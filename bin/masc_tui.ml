@@ -6439,6 +6439,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_generation <- state.runtime_surface_generation + 1;
       let generation = state.runtime_surface_generation in
       state.runtime_surface_inflight <- Some generation;
+      state.runtime_surface_owed <- Masc_tui_owed_read.started state.runtime_surface_owed;
       let host = server_peer_host in
       let port = state.port in
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -8103,6 +8104,12 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
+(* The Runtime surface reads again when the server announces a probe landed,
+   a usage report, a standing change or a runtime.toml commit, which move its
+   probe and resolved document, and after a failed read (RFC-0480 §3.4). *)
+let owe_runtime_surface_read state =
+  state.runtime_surface_owed <- Masc_tui_owed_read.changed state.runtime_surface_owed
+
 (* The Usage view's provider windows and runtime quota standing read again
    when the server announces a usage report or a standing change; the
    provider history reads again on a usage report and once the UTC day a
@@ -8110,10 +8117,12 @@ let owe_harness_read state =
    after a failed read (RFC-0480 §3.4). *)
 let owe_provider_usage_reads state =
   owe_pushed_read state Surface_read_source.Runtime_quota;
-  owe_pushed_read state Surface_read_source.Provider_history
+  owe_pushed_read state Surface_read_source.Provider_history;
+  owe_runtime_surface_read state
 
 let owe_provider_standing_read state =
-  owe_pushed_read state Surface_read_source.Runtime_quota
+  owe_pushed_read state Surface_read_source.Runtime_quota;
+  owe_runtime_surface_read state
 
 (* The Usage view's Keeper usage reads again when the server announces that
    its cost window took or dropped a row, on a revalidation and after a
@@ -8138,8 +8147,10 @@ let owe_runtime_config_read state =
      included. A login run in a terminal, or a client switching its own
      account, shows on arrival or [r], as a hand edit of runtime.toml does. *)
   owe_pushed_read state Surface_read_source.Account_emails;
-  (* The Usage view draws a quota row for each runtime the file declares. *)
-  owe_pushed_read state Surface_read_source.Runtime_quota
+  (* The Usage view draws a quota row for each runtime the file declares, the
+     Runtime surface a row. *)
+  owe_pushed_read state Surface_read_source.Runtime_quota;
+  owe_runtime_surface_read state
 
 (* The Clients roster reads again when a workspace client row changes, when
    a Keeper registry row or every row changes, on a revalidation, and after a
@@ -8163,6 +8174,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
   (* Every refresh pass reads the Health line with the workspace identity. *)
   | Masc.Workspace_dataset_event.Workspace_health -> ()
+  | Masc.Workspace_dataset_event.Runtime_probe -> owe_runtime_surface_read state
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -9133,6 +9145,21 @@ let launch_owed_harness state ~mailbox =
     state.harness_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_harness_load state ~mailbox
+  end
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving on the
+   surface reads it. A read already in flight is let finish first. *)
+let launch_owed_runtime_surface state ~mailbox =
+  if state.view <> Runtime then state.runtime_surface_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Option.is_some state.runtime_surface_inflight in
+    let read =
+      if reading then state.runtime_surface_owed
+      else Masc_tui_owed_read.abandoned state.runtime_surface_owed
+    in
+    state.runtime_surface_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_runtime_surface_load state ~mailbox ~force:false
   end
 
 (* Whether the Config view is open, and whether its pane draws runtime.toml.
@@ -27530,6 +27557,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.runtime_surface_error <- Some detail;
              Masc_tui_types.runtime_lane_list_reread state
                ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));
+      (* A read that left the probe, the resolved document or their join
+         unread still owes it. *)
+      if is_current then
+        state.runtime_surface_owed <-
+          (match state.runtime_surface_error with
+           | None -> Masc_tui_owed_read.succeeded state.runtime_surface_owed
+           | Some _ -> failed_read state.runtime_surface_owed);
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
@@ -33032,6 +33066,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
+      launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;

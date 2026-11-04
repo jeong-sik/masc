@@ -1,26 +1,17 @@
 open Alcotest
 open Masc
 
-(* Regression tests for the runtime-probe route's non-blocking background
-   refresh.
+(* The runtime-probe route never runs a probe: the server's probe loop does
+   (test_dashboard_runtime_probe_loop.ml). A read serves the loop's latest
+   value, or a warming-up envelope before the first probe lands.
 
-   Before the fix, a cache-miss [dashboard_runtime_probe_http_json] waited
-   synchronously for [run_dashboard_runtime_probe] (up to
-   [dashboard_runtime_probe_timeout_sec] = 15s), stalling the whole dashboard
-   shell on every cache-miss poll and every force=1 request. The fix triggers a
-   background refresh via [maybe_fork_dashboard_runtime_probe_refresh] and
-   returns a stale or warming-up envelope immediately.
-
-   The contract these tests pin is "no synchronous probe on the request path".
-   That is asserted with a deterministic invocation COUNTER ([slow_runner_invoked]),
-   not a wall-clock threshold: a unit test has no Eio server switch, so
-   [maybe_fork_dashboard_runtime_probe_refresh] skips the background fork and the
-   runner is never invoked from the request path. The [refresh_state] field of
-   the response is asserted directly, so every freshness branch (warming_up /
-   served_stale / recent) is verified by state transition rather than by timing.
-   If a future change reintroduces a synchronous [run_dashboard_runtime_probe]
-   call on the request path, [slow_runner_invoked] becomes 1 and these tests
-   fail. *)
+   "No probe on the request path" is asserted with a deterministic invocation
+   COUNTER ([slow_runner_invoked]), not a wall-clock threshold. The
+   [refresh_state] field of the response is asserted directly, so every
+   freshness branch (warming_up / served_stale / recent / fresh) is verified by
+   state transition rather than by timing. If a change makes a read call
+   [run_dashboard_runtime_probe], [slow_runner_invoked] becomes 1 and these
+   tests fail. *)
 
 let slow_runner_invoked = ref 0
 
@@ -92,8 +83,8 @@ let reset_probe_seams () =
   Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_runner_for_tests ();
   Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ()
 
-(* P1: failure-visibility contract. When the background refresh raises, the
-   failure envelope persisted to the cache must carry probe_ok=false and a
+(* P1: failure-visibility contract. When a probe raises, the
+   failure envelope kept as the value must carry probe_ok=false and a
    distinct [unreachable] status (not [warming_up]) so the dashboard can tell
    "probe failed" apart from "probe still warming up". If this regresses to
    "log only, never cache the cause", the operator loses the failure reason. *)
@@ -123,9 +114,9 @@ let test_cold_start_returns_warming_up_without_probe () =
   check string "refresh_state is warming_up" "warming_up" (refresh_state_of json);
   reset_probe_seams ()
 
-(* force=1 with a stale cache value: the route must serve the stale value
-   immediately (no synchronous probe) and tag it [served_stale] so the client
-   knows a refresh was scheduled and the fresh value arrives on the next poll. *)
+(* force=1 with a stale cache value: the route serves the stale value at once
+   (no probe on the request path) and tags it [served_stale]: the read woke the
+   probe loop, which announces runtime_probe when its probe lands. *)
 let test_force_with_stale_cache_serves_stale_without_probe () =
   reset_probe_seams ();
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
@@ -147,14 +138,14 @@ let test_force_with_stale_cache_serves_stale_without_probe () =
   in
   check int "slow runner never invoked on force=1 stale" 0 !slow_runner_invoked;
   check string "refresh_state is served_stale" "served_stale" (refresh_state_of json);
-  check bool "cache_hit false (value is stale, refresh scheduled)" false
+  check bool "cache_hit false (value is stale, the loop was woken)" false
     (cache_hit_of json);
   check (option string) "stale value served verbatim" (Some "stale-cache-value")
     (probe_marker_of json);
   reset_probe_seams ()
 
 (* force=1 within the recent-value window: the recent value is served as a hit
-   and tagged [recent]; no refresh is scheduled (force rate limit) and the
+   and tagged [recent]; the loop is not woken (force rate limit) and the
    runner is not invoked. *)
 let test_force_within_recent_window_serves_recent () =
   reset_probe_seams ();
@@ -183,18 +174,9 @@ let test_force_within_recent_window_serves_recent () =
     (probe_marker_of json);
   reset_probe_seams ()
 
-(* SWR soft-TTL fresh hit: a non-force value aged past the soft-TTL (15s) but
-   within the cache TTL (30s) must still be served as a [fresh] hit WITHOUT a
-   synchronous probe on the request path. The background refresh the soft-TTL
-   schedules is forked under a server switch in production; a unit test has no
-   switch, so [maybe_fork_dashboard_runtime_probe_refresh] is a no-op here and
-   the runner stays uninvoked. This pins the request-path contract for the SWR
-   branch: if a future change makes the soft-TTL hit refresh synchronously (or
-   downgrade the envelope), [slow_runner_invoked] becomes 1 or [refresh_state]
-   stops being [fresh] and this fails. That the background refresh actually
-   fires and pre-warms the cache is pinned under a server switch by
-   [test_switch_soft_ttl_hit_fires_background_refresh] below. *)
-let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
+(* A value younger than the TTL is served as a [fresh] hit, verbatim, and
+   the read runs no probe. *)
+let test_fresh_hit_serves_fresh_without_probe () =
   reset_probe_seams ();
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
@@ -203,32 +185,30 @@ let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
     `Assoc
       [ "probe_ok", `Bool true
       ; "status", `String "reachable"
-      ; "marker", `String "soft-ttl-fresh-value"
+      ; "marker", `String "fresh-value"
       ]
   in
-  (* Past the soft-TTL (15s), still within the cache TTL (30s) and outside the
-     force window (10s): the soft-TTL refresh branch is taken. *)
+  (* Within the cache TTL (30s) and outside the force window (10s). *)
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
     ~probe:fresh_probe ~age_sec:20.0 ();
   let json =
     Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
   in
-  check int "slow runner never invoked on soft-TTL fresh hit" 0 !slow_runner_invoked;
+  check int "slow runner never invoked on a fresh hit" 0 !slow_runner_invoked;
   check string "refresh_state is fresh" "fresh" (refresh_state_of json);
-  check bool "cache_hit true (value still within TTL)" true (cache_hit_of json);
-  check (option string) "fresh value served verbatim" (Some "soft-ttl-fresh-value")
+  check bool "cache_hit true (value within TTL)" true (cache_hit_of json);
+  check (option string) "fresh value served verbatim" (Some "fresh-value")
     (probe_marker_of json);
   reset_probe_seams ()
 
 (* ---- Switch-bearing pins (#22067) -------------------------------------------
 
-   The tests above run without an Eio server switch, so the two branches that
-   only exist under one stay unexercised there: the concurrent provider fan-out
-   in [dashboard_runtime_probe_payload_json_of_runtimes] and the soft-TTL
-   background refresh forked by [maybe_fork_dashboard_runtime_probe_refresh].
-   Each pin below installs a switch as the server root switch (as the server
-   boot path does) for the duration of one test and restores the previous Eio
-   context afterwards, so the switch never leaks into the switch-less tests. *)
+   The tests above run without an Eio server switch, so the branch that only
+   exists under one stays unexercised there: the concurrent provider fan-out in
+   [dashboard_runtime_probe_payload_json_of_runtimes]. Each pin below installs
+   a switch as the server root switch (as the server boot path does) for the
+   duration of one test and restores the previous Eio context afterwards, so
+   the switch never leaks into the switch-less tests. *)
 
 let with_server_switch f =
   Eio_main.run @@ fun _env ->
@@ -455,89 +435,6 @@ let test_switch_fanout_raise_does_not_fail_root_switch () =
   check bool "sibling fiber on the root switch not cancelled" true
     !sentinel_finished
 
-(* Stale-while-revalidate: a soft-TTL hit actually fires the background
-   refresh under a server switch.
-
-   A non-force hit aged past the soft-TTL (15s) but inside the cache TTL (30s)
-   must fork exactly one background run of the probe and replace the cached
-   value with its output, so the next poll is pre-warmed. The switch-less
-   [test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe] above only shows
-   the request path does not probe synchronously; it still passes if the
-   soft-TTL branch stops scheduling the refresh at all, which brings back the
-   TTL == poll-interval trap where every other poll lands on an expired cache.
-   This pin fails in that case (runner count 0, the next poll keeps the seeded
-   marker). It does not pin single-flight: the refresh finishes and clears its
-   in-flight flag before the second poll, which reads a fresh cache. *)
-let background_runner_invoked = ref 0
-
-let background_runner () : Yojson.Safe.t =
-  incr background_runner_invoked;
-  `Assoc
-    [ "probe_ok", `Bool true
-    ; "status", `String "reachable"
-    ; "marker", `String "background-refreshed-value"
-    ]
-
-let seeded_probe marker : Yojson.Safe.t =
-  `Assoc
-    [ "probe_ok", `Bool true
-    ; "status", `String "reachable"
-    ; "marker", `String marker
-    ]
-
-let test_switch_soft_ttl_hit_fires_background_refresh () =
-  reset_probe_seams ();
-  Fun.protect ~finally:reset_probe_seams @@ fun () ->
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
-    background_runner;
-  background_runner_invoked := 0;
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
-    ~probe:(seeded_probe "soft-ttl-seeded-value") ~age_sec:20.0 ();
-  let first, second =
-    with_server_switch @@ fun _sw ->
-    let first =
-      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
-    in
-    Eio.Fiber.yield ();
-    let second =
-      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
-    in
-    first, second
-  in
-  check string "soft-TTL hit still served as fresh" "fresh"
-    (refresh_state_of first);
-  check (option string) "soft-TTL hit serves the seeded value"
-    (Some "soft-ttl-seeded-value") (probe_marker_of first);
-  check int "background refresh ran exactly once" 1 !background_runner_invoked;
-  check (option string) "next poll sees the refreshed value"
-    (Some "background-refreshed-value") (probe_marker_of second);
-  check string "next poll is a fresh hit" "fresh" (refresh_state_of second)
-
-(* Soft-TTL threshold: below the soft-TTL (age 5s < 15s) a hit must NOT
-   schedule a refresh, even with a switch available. If the age comparison is
-   dropped or the soft-TTL collapses toward 0, every poll forks a probe and the
-   runner count here becomes 1. *)
-let test_switch_below_soft_ttl_does_not_refresh () =
-  reset_probe_seams ();
-  Fun.protect ~finally:reset_probe_seams @@ fun () ->
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
-    background_runner;
-  background_runner_invoked := 0;
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
-    ~probe:(seeded_probe "young-cache-value") ~age_sec:5.0 ();
-  let json =
-    with_server_switch @@ fun _sw ->
-    let json =
-      Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
-    in
-    Eio.Fiber.yield ();
-    json
-  in
-  check int "no background refresh below soft-TTL" 0 !background_runner_invoked;
-  check string "young hit is fresh" "fresh" (refresh_state_of json);
-  check (option string) "young value served verbatim"
-    (Some "young-cache-value") (probe_marker_of json)
-
 let () =
   run "dashboard_runtime_probe_nonblocking"
     [ ( "non-blocking",
@@ -547,8 +444,8 @@ let () =
             test_force_with_stale_cache_serves_stale_without_probe
         ; test_case "force=1 recent serves recent hit, no probe" `Quick
             test_force_within_recent_window_serves_recent
-        ; test_case "soft-TTL fresh hit serves fresh, no sync probe" `Quick
-            test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe
+        ; test_case "fresh hit serves fresh, no probe" `Quick
+            test_fresh_hit_serves_fresh_without_probe
         ] )
     ; ( "failure visibility",
         [ test_case "failure envelope carries unreachable status" `Quick
@@ -559,9 +456,5 @@ let () =
             test_switch_fanout_runs_providers_concurrently_in_order
         ; test_case "fan-out raise does not fail the root switch" `Quick
             test_switch_fanout_raise_does_not_fail_root_switch
-        ; test_case "soft-TTL hit fires one background refresh" `Quick
-            test_switch_soft_ttl_hit_fires_background_refresh
-        ; test_case "below soft-TTL no background refresh" `Quick
-            test_switch_below_soft_ttl_does_not_refresh
         ] )
     ]

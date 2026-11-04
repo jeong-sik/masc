@@ -47,6 +47,10 @@ type dataset =
           recomputation of the mission briefing moved the workspace health,
           the Keeper listing or the count of Keepers whose state no one can
           read. *)
+  | Runtime_probe
+      (** The server's runtime probe landed, [GET /api/v1/dashboard/runtime-probe]:
+          a probe a forced read asked for, or a periodic one whose findings
+          differ from the last probe. *)
 
 val event_type : string
 

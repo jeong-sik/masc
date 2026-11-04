@@ -328,20 +328,24 @@ let test_unrequested_board_context_does_not_gain_new_navigation_input () =
      && observe_delivery current (Surface_read_context.current navigation_context)
        {bpr_query=requested;bpr_result=Ok [post "late"]}=None)
 
-(* A list read in flight when one /health probe fails is dropped with the
-   old authority. Resuming the same workspace does not owe the list again, so
-   the debt itself survives the suspension and the launcher reads it again. *)
-let test_withdrawal_keeps_the_list_debt () =
-  let current=state () in
-  current.board_list_owed <- Masc_tui_owed_read.(started (changed settled));
-  suspend_workspace_readings current;
-  Alcotest.(check bool) "the read in flight is still owed after withdrawal" true
-    (match current.board_list_owed with
-     | Masc_tui_owed_read.Reading _ -> true
-     | Settled | Owed _ | Waiting _ -> false);
-  Alcotest.(check bool) "once it ends unanswered the list is due again" true
-    (Masc_tui_owed_read.due ~now:0.
-       (Masc_tui_owed_read.abandoned current.board_list_owed))
+(* Suspension clears the list, and resuming the same workspace does not
+   revalidate the Board, so the list is owed whether or not a read was in
+   flight. A read in flight is dropped with the old authority; it stays
+   recorded with the change it can no longer deliver. *)
+let test_withdrawal_owes_the_list () =
+  let idle=state () in
+  suspend_workspace_readings idle;
+  Alcotest.(check bool) "a cleared list with no read in flight is owed" true
+    (match idle.board_list_owed with
+     | Masc_tui_owed_read.Owed _ -> true
+     | Settled | Reading _ | Waiting _ -> false);
+  let reading=state () in
+  reading.board_list_owed <- Masc_tui_owed_read.(started (changed settled));
+  suspend_workspace_readings reading;
+  Alcotest.(check bool) "a read in flight keeps the change it missed" true
+    (match reading.board_list_owed with
+     | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true
+     | Reading { changed_since = false; _ } | Settled | Owed _ | Waiting _ -> false)
 
 let () = Alcotest.run "tui_board_list_reading"
   ["availability and continuity",
@@ -360,5 +364,5 @@ let () = Alcotest.run "tui_board_list_reading"
       test_surface_context_rebind_keeps_origin_query_and_current_admission;
     Alcotest.test_case "unrequested context navigation and retirement" `Quick
       test_unrequested_board_context_does_not_gain_new_navigation_input;
-    Alcotest.test_case "withdrawal keeps the list debt" `Quick
-      test_withdrawal_keeps_the_list_debt]]
+    Alcotest.test_case "withdrawal owes the list" `Quick
+      test_withdrawal_owes_the_list]]

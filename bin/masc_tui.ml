@@ -8636,6 +8636,14 @@ let failed_read owed =
 
 let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
 
+(* A surface dataset read can end without its answer being applied: a newer
+   refresh ticket supersedes it, the workspace is not this checkout's, or the
+   bundle carries no answer. Such a read waits like a failed one, so a cause
+   that repeats does not read back to back. *)
+let unanswered_read owed =
+  Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()) owed
+
 (* The Planning screen's Goals and their tree read again when
    [goal_projection_changed] or [execution_snapshot] arrives while Planning is
    on screen, and after a failed read (RFC-0480 §3.1). The read on entering
@@ -19183,9 +19191,10 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
   end
 
 (* Runs on every loop iteration. A Board read already in flight is let finish
-   first; one that will not deliver leaves the list owed again. The scoped
-   and full refreshes record the start of every Board read
-   ([note_owed_surface_reads_started]). *)
+   first; one that ended unanswered waits and reads again
+   ([unanswered_read]). The scoped and full refreshes record the start of
+   every Board read ([note_owed_surface_reads_started]). Only a matched
+   workspace applies the list, so only a matched workspace reads it. *)
 let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if state.view <> Board then state.board_list_owed <- Masc_tui_owed_read.settled
@@ -19195,11 +19204,12 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
     in
     let read =
       if reading then state.board_list_owed
-      else Masc_tui_owed_read.abandoned state.board_list_owed
+      else unanswered_read state.board_list_owed
     in
     state.board_list_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
        && server_authority_ready state
+       && state.workspace_identity = Workspace_identity_match
        && not reading
     then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
@@ -19208,9 +19218,11 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
   end
 
 (* Runs on every loop iteration. A dataset already in flight is let finish
-   first; one that ended without an answer leaves its read owed again. Only
-   the datasets whose debt is due are read; the scoped refresh records their
-   start ([note_owed_surface_reads_started]). *)
+   first; one that ended unanswered waits and reads again
+   ([unanswered_read]). Only the datasets whose debt is due are read; the
+   scoped refresh records their start ([note_owed_surface_reads_started]).
+   Only a matched workspace applies them, so only a matched workspace reads
+   them. *)
 let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if state.view <> Planning then begin
@@ -19224,18 +19236,19 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     let goals_reading = pending Surface_read_order.Overview_goals_data in
     let planning =
       if planning_reading then state.planning_owed
-      else Masc_tui_owed_read.abandoned state.planning_owed
+      else unanswered_read state.planning_owed
     in
     let goals =
       if goals_reading then state.overview_goals_owed
-      else Masc_tui_owed_read.abandoned state.overview_goals_owed
+      else unanswered_read state.overview_goals_owed
     in
     state.planning_owed <- planning;
     state.overview_goals_owed <- goals;
     let now = monotonic_now_s () in
     let planning_due = Masc_tui_owed_read.due ~now planning && not planning_reading in
     let goals_due = Masc_tui_owed_read.due ~now goals && not goals_reading in
-    if (planning_due || goals_due) && server_authority_ready state then
+    if (planning_due || goals_due) && server_authority_ready state
+       && state.workspace_identity = Workspace_identity_match then
       start_http_scoped_refresh state ~host:server_peer_host ~port:state.port
         ~refresh_inflight ~full_refresh_inflight ~scoped_refresh_followup ~mailbox
         ~needs:{ Masc_tui_types.nothing with

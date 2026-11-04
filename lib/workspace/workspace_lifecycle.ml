@@ -84,8 +84,12 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
   let already_bound = Sys.file_exists agent_file_dedup in
   if already_bound then begin
-    (match read_agent config agent_file_dedup with
-     | Ok existing_agent ->
+    (* The record is read and rewritten under its lock, as a heartbeat does,
+       so neither overwrites the other's status. *)
+    (match with_file_lock config agent_file_dedup (fun () ->
+       match read_agent config agent_file_dedup with
+       | Error e -> Error e
+       | Ok existing_agent ->
        let is_inactive = existing_agent.status = Inactive in
        let new_session_id = if is_inactive then generate_session_id () else
          match existing_agent.meta with Some m -> m.session_id | None -> generate_session_id ()
@@ -107,6 +111,8 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
          meta = Some new_meta;
        } in
        Workspace_agent_record.write config agent_file_dedup ~previous:(Some existing_agent) updated;
+       Ok (is_inactive, new_session_id)) with
+     | Ok (is_inactive, new_session_id) ->
        if is_inactive then begin
          (* Restore to active_agents on session rebound *)
          let _state = update_state config (fun s ->
@@ -225,10 +231,14 @@ let end_session config ~agent_name =
   if in_fs then begin
     (* Mark agent as Inactive instead of deleting, so a future session can restore
        identity without orphan state. *)
-    (match read_agent config agent_file with
-     | Ok existing_agent ->
-       let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
-       Workspace_agent_record.write config agent_file ~previous:(Some existing_agent) updated
+    (match with_file_lock config agent_file (fun () ->
+       match read_agent config agent_file with
+       | Error e -> Error e
+       | Ok existing_agent ->
+         let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
+         Ok (Workspace_agent_record.write config agent_file ~previous:(Some existing_agent) updated))
+     with
+     | Ok () -> ()
      | Error e ->
          let snapshot =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
@@ -240,6 +250,8 @@ let end_session config ~agent_name =
     let _state = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
+    (* The pruned name was also a workspace-state row of the roster. *)
+    Workspace_agent_record.report_roster_changed config;
 
     broadcast ~audience:System_record config ~from_agent:"system"
       ~msg_type:Msg_session_ended

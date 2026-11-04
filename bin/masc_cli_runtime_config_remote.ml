@@ -92,11 +92,14 @@ let fetch ~clock server =
 type store_error =
   | Changed_on_server
   | Not_stored of string
+  | Unanswered of string
 
 let store_error_message = function
   | Changed_on_server ->
     "runtime.toml changed on the server while this command ran. Nothing was saved; run it again."
   | Not_stored message -> message
+  | Unanswered detail ->
+    "The server's answer to the save did not arrive, so whether it was stored is unknown: " ^ detail
 
 (* Save [edited] over [source] with the revision and path it was read at. A
    save that finds the file changed since is refused by the server (409); the
@@ -115,10 +118,7 @@ let store_source ~clock server source ~edited =
     match
       Masc_http_client.post_sync ~clock ~url:(server.origin ^ raw_path) ~headers:server.headers ~body:request ()
     with
-    | Error detail ->
-      Error
-        (Not_stored
-           ("The server's answer to the save did not arrive, so whether it was stored is unknown: " ^ detail))
+    | Error detail -> Error (Unanswered detail)
     | Ok (200, _) -> Ok (Saved { path = source.path })
     | Ok (409, _) -> Error Changed_on_server
     | Ok (status, body) -> Error (Not_stored (error_of_body ~status body))
@@ -258,7 +258,25 @@ let table_store ~clock server =
                 (match store_source ~clock server source ~edited with
                  | Ok (Saved _ | Unchanged) -> Ok ()
                  | Error Changed_on_server -> Error Masc.Runtime_table_edit.Changed_meanwhile
-                 | Error (Not_stored message) -> Error (Masc.Runtime_table_edit.Not_written message))))
+                 | Error (Not_stored message) -> Error (Masc.Runtime_table_edit.Not_written message)
+                 (* The answer was lost: what the server holds now says whether
+                    the edit landed. *)
+                 | Error (Unanswered detail) ->
+                   let revision_of text =
+                     Masc.Runtime_table_edit.revision_of_observation (observation_of { source with text })
+                   in
+                   (match fetch ~clock server with
+                    | Ok now when String.equal (revision_of now.text) (revision_of edited) -> Ok ()
+                    | Ok now when String.equal (revision_of now.text) (revision_of source.text) ->
+                      Error (Masc.Runtime_table_edit.Not_written ("the server did not answer the save: " ^ detail))
+                    | Ok (_ : source) ->
+                      Error
+                        (Masc.Runtime_table_edit.Outcome_unknown
+                           ("the server did not answer the save, and runtime.toml has changed since: " ^ detail))
+                    | Error reason ->
+                      Error
+                        (Masc.Runtime_table_edit.Outcome_unknown
+                           ("the server did not answer the save, and could not be read again: " ^ reason))))))
     }
 
 (* The Eio context the HTTP client needs, for a command that otherwise runs

@@ -60,6 +60,9 @@ type error =
           made again, the automation table changed. The table was not
           written. *)
   | Not_written of string
+  | Outcome_unknown of string
+      (** The table was sent to the workspace's running server and whether it
+          landed could not be told. *)
 
 val error_message : error -> string
 

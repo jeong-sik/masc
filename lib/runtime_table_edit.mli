@@ -34,6 +34,10 @@ type 'e commit_error =
           written. *)
   | Edit_refused of 'e
   | Not_written of string
+  | Outcome_unknown of string
+      (** The edit was sent to the workspace's running server, and whether it
+          landed could not be told: the answer was lost and the text could
+          not be read again, or changed since. *)
 
 type observe_error =
   | Missing of string  (** No runtime.toml at this path. *)

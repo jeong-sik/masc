@@ -30,6 +30,7 @@ type error =
   | Table_refused of string
   | Configuration_changed
   | Not_written of string
+  | Outcome_unknown of string
 
 let automation_table = [ "browser"; "automation" ]
 let browser_table = [ "browser" ]
@@ -63,6 +64,8 @@ let error_message = function
     "runtime.toml changed while this ran, so the automation table was not written. Run this \
      again."
   | Not_written reason -> Printf.sprintf "The automation table was not written to runtime.toml: %s." reason
+  | Outcome_unknown reason ->
+    Printf.sprintf "The automation table may have been written to runtime.toml: %s. Run the command again to see what it holds." reason
 
 open Result.Syntax
 
@@ -349,4 +352,5 @@ let apply plan =
      | Ok () -> Ok ()
      | Error Runtime_table_edit.Changed_meanwhile -> Error Configuration_changed
      | Error (Runtime_table_edit.Edit_refused error) -> Error error
-     | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason))
+     | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason)
+     | Error (Runtime_table_edit.Outcome_unknown reason) -> Error (Outcome_unknown reason))

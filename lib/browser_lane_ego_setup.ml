@@ -32,6 +32,7 @@ type error =
   | Spaces_unreadable of { path : string; space : Browser_configuration.ego_space; detail : string }
   | Configuration_changed
   | Not_written of string
+  | Outcome_unknown of string
 
 let table_path = "browser.live.ego"
 (* How a message names the configured Space: a name quoted, an exact ID as a
@@ -91,6 +92,8 @@ let error_message = function
     Printf.sprintf "runtime.toml changed while this ran, so [%s] was not written. Run this again."
       table_path
   | Not_written reason -> Printf.sprintf "[%s] was not written to runtime.toml: %s." table_path reason
+  | Outcome_unknown reason ->
+    Printf.sprintf "[%s] may have been written to runtime.toml: %s. Run the command again to see what it holds." table_path reason
 
 open Result.Syntax
 
@@ -323,4 +326,5 @@ let apply plan =
      | Ok () -> Ok ()
      | Error Runtime_table_edit.Changed_meanwhile -> Error Configuration_changed
      | Error (Runtime_table_edit.Edit_refused error) -> Error error
-     | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason))
+     | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason)
+     | Error (Runtime_table_edit.Outcome_unknown reason) -> Error (Outcome_unknown reason))

@@ -579,6 +579,7 @@ let run
       ~runtime_config_path
       ~server_port
       ~agent
+      ~agent_named
       ~modes:requested
       ~no_addon
       ~binary
@@ -609,6 +610,7 @@ let run
       ; "--ego-command", Option.is_some ego_command, [ Ego ]
       ; "--ego-space", Option.is_some ego_space, [ Ego ]
       ; "--no-addon", no_addon, [ Extension; Bidi; Ego; Host; Automation ]
+      ; "--agent", agent_named, [ Bidi; Automation; Ego ]
       ]
   with
   | Some message -> refuse message

@@ -811,24 +811,87 @@ let clear_keeper_history_projection state =
     state.msg_older_loading <- false;
     state.msg_older_error <- None
 
-let apply_chat_visit_completion state (completion : Masc_tui_chat_visit.completion) =
-  let applied = accept_chat_visit state completion in
-  let target = Keeper_id.Keeper_name.to_string completion.request.keeper in
-  match completion.outcome with
-  | Masc_tui_chat_visit.Saved Runtime.Durable -> applied
-  | Saved (Runtime.Durability_unconfirmed {detail}) ->
-      add_event state "error" ("Conversation " ^ target ^ " saved; durability unconfirmed: " ^ detail); true
-  | Refused detail | Not_started detail ->
-      add_event state "error" ("Conversation " ^ target ^ " remembered only in this session: " ^ detail); true
-  | Unobserved detail ->
-      add_event state "error" ("Conversation " ^ target ^ " save outcome unknown: " ^ detail); true
+(* Send one [tui] pick to the server (RFC-0482 §3.1). The screen has already
+   taken it; what the server answered is said when the writer's completion is
+   drained, below. *)
+let store_preference state change =
+  ignore
+    (Masc_tui_preference_writer.submit state.preference_writer
+       ~sw:(Eio_context.get_switch_opt ()) change
+     : Masc_tui_preference_writer.request)
 
-let drain_chat_visit_completions state ~can_take =
+let preference_name state = function
+  | Masc.Tui_preference.Theme_chosen _ -> ui_text state ~ko:"테마" ~en:"Theme"
+  | Masc.Tui_preference.Language_chosen _ -> ui_text state ~ko:"UI 언어" ~en:"UI language"
+  | Masc.Tui_preference.Board_sort_chosen _ -> ui_text state ~ko:"Board 정렬" ~en:"Board sort"
+  | Masc.Tui_preference.Candle_chosen _ -> ui_text state ~ko:"Candle" ~en:"Candle"
+  | Masc.Tui_preference.Help_hint_retired -> ui_text state ~ko:"도움말 안내" ~en:"The help hint"
+  | Masc.Tui_preference.Chat_visited keeper ->
+      let target = Keeper_id.Keeper_name.to_string keeper in
+      ui_text state ~ko:("대화 " ^ target) ~en:("Conversation " ^ target)
+
+(* A pick the screen already shows: only what did not go as shown is said. A
+   credential that may not write runtime.toml is said once for the session. *)
+let report_preference_outcome state change outcome =
+  let name = preference_name state change in
+  match outcome with
+  | Ok Masc_tui_preference_writer.Unchanged -> false
+  | Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys }) ->
+      let legacy_said =
+        match ignored_legacy_keys with
+        | [] -> false
+        | keys ->
+            report_action state "warn"
+              (ui_text state
+                 ~ko:(name ^ ": 저장했어요. 다만 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시돼요: " ^ String.concat ", " keys)
+                 ~en:(name ^ " saved. Legacy keys left in the file are ignored from this release on: " ^ String.concat ", " keys));
+            true
+      in
+      let durability_said =
+        match durability with
+        | Runtime.Durable -> false
+        | Runtime.Durability_unconfirmed { detail } ->
+            report_action state "warn"
+              (ui_text state ~ko:(name ^ ": 저장했지만 디스크에 반영됐는지 확인하지 못했어요: " ^ detail)
+                 ~en:(name ^ " saved; durability unconfirmed: " ^ detail));
+            true
+      in
+      legacy_said || durability_said
+  | Error (Masc_tui_preference_writer.Not_permitted reason) ->
+      if state.preference_refusal_said then false
+      else begin
+        state.preference_refusal_said <- true;
+        report_action state "error"
+          (ui_text state
+             ~ko:("이 터미널의 credential 로는 화면 설정을 저장할 수 없어요. 이번 세션에만 적용돼요: " ^ reason)
+             ~en:("This terminal's credential may not store screen settings. They last this session only: " ^ reason));
+        true
+      end
+  | Error (Masc_tui_preference_writer.Refused reason | Masc_tui_preference_writer.Not_started reason) ->
+      report_action state "error"
+        (ui_text state ~ko:(name ^ ": 저장하지 못했어요. 이번 세션에만 적용돼요: " ^ reason)
+           ~en:(name ^ " not saved. This session only: " ^ reason));
+      true
+  | Error (Masc_tui_preference_writer.Unobserved reason) ->
+      report_action state "error"
+        (ui_text state ~ko:(name ^ ": 저장됐는지 알 수 없어요: " ^ reason)
+           ~en:(name ^ " save outcome unknown: " ^ reason));
+      true
+
+let drain_preference_completions state ~can_take =
   let changed = ref false in
-  Masc_tui_chat_visit.drain_completed state.home_chat_writer ~can_take
-    ~apply:(fun completion ->
-      let applied = apply_chat_visit_completion state completion in
-      changed := !changed || applied);
+  Masc_tui_preference_writer.drain_completed state.preference_writer ~can_take
+    ~apply:(fun (completion : Masc_tui_preference_writer.completion) ->
+      let change = completion.request.change in
+      let accepted =
+        match change with
+        | Masc.Tui_preference.Chat_visited keeper -> accept_chat_visit state completion keeper
+        | Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
+        | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _
+        | Masc.Tui_preference.Help_hint_retired -> false
+      in
+      let said = report_preference_outcome state change completion.outcome in
+      changed := !changed || accepted || said);
   !changed
 
 let drain_keeper_preference_completions state ~can_take =
@@ -17978,21 +18041,15 @@ let open_lane_inventory_selection state ~mailbox =
    from, so the choice survives a restart. Said in the language just picked,
    including the failure: the new language is already on the screen by then,
    so silence would let the screen stand as proof it was kept. *)
-let apply_ui_language state ~base_path lang =
+let apply_ui_language state lang =
   state.ui_language <- lang;
   report_action state "info"
     (ui_text state
        ~ko:("UI 언어: " ^ ui_language_label lang)
        ~en:("UI language: " ^ ui_language_label lang));
-  (match Masc_tui_config.set_language ~base_path (ui_language_to_string lang) with
-   | Ok () -> ()
-   | Error message ->
-       report_action state "error"
-         (ui_text state
-            ~ko:("UI 언어를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: " ^ message)
-            ~en:("UI language not saved to runtime.toml. This session only: " ^ message)))
+  store_preference state (Masc.Tui_preference.Language_chosen lang)
 
-let press_marked_target state ~base_path ~mailbox (target : press_target) =
+let press_marked_target state ~mailbox (target : press_target) =
   match target with
   | Press_input_rejection _ | Press_quit_confirmation _ | Press_notice_fragment _ -> ()
   | Press_surface surface ->
@@ -18013,8 +18070,7 @@ let press_marked_target state ~base_path ~mailbox (target : press_target) =
   | Press_theme_filter filter ->
       if filter <> state.theme_filter then enter_theme_filter state filter
   | Press_ui_language ->
-      apply_ui_language state ~base_path
-        (next_ui_language state.ui_language)
+      apply_ui_language state (next_ui_language state.ui_language)
   | Press_runtime_mode mode ->
       if mode <> state.runtime_mode || state.view <> Runtime then
         enter_runtime_mode state ~mailbox mode
@@ -27428,7 +27484,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     | None -> false
     | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
   in
-  let chat_changed = drain_chat_visit_completions state
+  let chat_changed = drain_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let keeper_preferences_changed = drain_keeper_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
@@ -27841,6 +27897,15 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
+  (* The server could not answer this terminal's settings: it opens on the
+     defaults, says so once, and leaves the stored picks as they are. *)
+  Option.iter
+    (fun reason ->
+       report_action state "error"
+         (ui_text state
+            ~ko:("서버에서 화면 설정을 읽지 못해 기본값으로 열었어요: " ^ reason)
+            ~en:("Screen settings could not be read from the server; opened on the defaults: " ^ reason)))
+    tui_settings.settings_unread;
   boot_midi_soundfont := tui_settings.midi_soundfont;
   boot_audio_input_device := tui_settings.audio_input_device;
   (match tui_settings.last_chat_keeper with
@@ -27973,16 +28038,41 @@ let main
      file sink; the server's dashboard and this stderr mirror cannot persist
      them. Keep initialization failure diagnostic and let the surface open. *)
   let observation_store=Masc_tui_observation_store.initialize ~base_path in
+  let own_paths = local_workspace_paths_of_base_path base_path in
+  (* RFC-0482 §3.1: picks go to the server that also answers them at start.
+     Both carry this terminal's own workspace paths, so another workspace's
+     server on the port refuses instead of reading or storing its own. *)
+  let preference_send change =
+    match own_paths with
+    | None -> Error (Masc_tui_preference_writer.Not_started "No workspace is open")
+    | Some paths ->
+        Masc_tui_http.post_tui_preference ~host:server_peer_host ~port
+          ~base_path:paths.lw_base_path ~masc_root:paths.lw_masc_root change
+  in
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
-      ~local_base_path:base_path ~port
+      ~local_base_path:base_path ~preference_send ~port
       ~refresh_interval:refresh ()
   in
   state.observation_store <- Result.to_option observation_store;
   state.view <- Overview;
 
+  (* Bind the bearer to the workspace actually opened, before any request is
+     built -- the settings read below is the first. HTTP workers await this
+     original installer, independently of input and UI consumption, so the
+     settings read waits for it and the terminal setup does not. *)
+  Masc_tui_http.install_credential_preparation state.credential_preparation;
+  launch_credential_preparation state
+    ~purpose:Masc_tui_credential_preparation.Initial ~base_path ~host:server_peer_host ~port;
+  let read_settings () =
+    match own_paths with
+    | None -> Error "No workspace is open"
+    | Some paths ->
+        Masc_tui_http.fetch_tui_preferences ~host:server_peer_host ~port
+          ~base_path:paths.lw_base_path ~masc_root:paths.lw_masc_root
+  in
   let tui_settings_read = Masc_tui_config.prepare_startup_read
-      ~sw:(Eio_context.get_switch_opt ()) ~base_path in
+      ~sw:(Eio_context.get_switch_opt ()) ~base_path ~read_settings in
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -28220,20 +28310,7 @@ let main
      time this runs, so silence would let the screen stand as proof it was
      kept, and the reader would find the old one back after a restart with
      nothing having told them. *)
-  let store_theme_choice choice =
-    match Masc_tui_config.set_theme ~base_path choice with
-    | Ok [] -> ()
-    | Ok ignored ->
-        report_action state "warn"
-          (Printf.sprintf
-             "테마를 runtime.toml 에 저장했습니다. 이후 릴리스에서 읽지 않는 옛 키가 파일에 남아 있어 무시됩니다: %s"
-             (String.concat ", " ignored))
-    | Error message ->
-        report_action state "error"
-          (Printf.sprintf
-             "테마를 runtime.toml 에 저장하지 못했습니다. 이번 세션에만 적용됩니다: %s"
-             message)
-  in
+  let store_theme_choice choice = store_preference state (Masc.Tui_preference.Theme_chosen choice) in
   (* A scheme named in runtime.toml was applied at boot, before this existed.
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
@@ -28654,17 +28731,10 @@ let main
         (* Same text, but a picture may have moved on a step. *)
         Masc_tui_portrait_view.flush unchanged ~write:write_to_terminal
   in
-  (* Bind the bearer to the workspace actually opened, before any request is
-     built. Reported before the recovery load as well, so when neither source
-     holds one the operator sees the cause ahead of the symptom: a tokenless
-     process cannot dispatch, and cannot reconcile a dispatch an authenticated
-     predecessor left behind. *)
-  (* HTTP workers await this original installer, independently of input and
-     UI consumption. A quick installation can still begin the health probe
-     while the terminal capability probe runs. *)
-  Masc_tui_http.install_credential_preparation state.credential_preparation;
-  launch_credential_preparation state
-    ~purpose:Masc_tui_credential_preparation.Initial ~base_path ~host ~port;
+  (* The credential preparation started before the settings read, above. A
+     process with no bearer still sees the cause ahead of the symptom: a
+     tokenless process cannot dispatch, and cannot reconcile a dispatch an
+     authenticated predecessor left behind. *)
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
@@ -32226,10 +32296,10 @@ Use relative paths for resources already held in the package. -->
        | Some (Mouse_left_release _) when (play_was_presented || Option.is_some presented_queue)
            && queue_play_owner = Wait_for_frame -> ()
        | Some (Mouse_left_release _) when Option.is_some presented_queue ->
-           Option.iter (press_marked_target state ~base_path ~mailbox:async_messages) pressed
+           Option.iter (press_marked_target state ~mailbox:async_messages) pressed
        | Some (Mouse_left_release _) when Option.is_some pressed ->
            Option.iter
-             (press_marked_target state ~base_path ~mailbox:async_messages)
+             (press_marked_target state ~mailbox:async_messages)
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
            Option.iter (fun reader ->
@@ -32361,11 +32431,7 @@ Use relative paths for resources already held in the package. -->
       (match input with
        | Some (Key _ | Pasted _) when not state.help_hint_shown ->
            state.help_hint_shown <- true;
-           (match Masc_tui_config.set_help_hint_shown ~base_path with
-            | Ok () -> ()
-            | Error reason ->
-                report_action state "system"
-                  ("Could not store the help hint as shown: " ^ reason))
+           store_preference state Masc.Tui_preference.Help_hint_retired
        | Some (Key _ | Pasted _)
        | Some (Graphics_reply _)
        | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _)
@@ -32999,14 +33065,10 @@ Use relative paths for resources already held in the package. -->
                 let style = Masc_tui_emblem_screen.next_style (Masc_tui_emblem_screen.style ()) in
                 Masc_tui_emblem_screen.set_style style;
                 (* The candle on screen already changed, so a write that
-                   failed is said out loud, or a restart would bring the old
-                   one back with nothing having told the reader. *)
-                (match
-                   Masc_tui_config.set_candle ~base_path
-                     (Masc_tui_emblem_screen.string_of_style style)
-                 with
-                 | Ok () -> ()
-                 | Error message -> report_action state "error" ("Candle not saved: " ^ message))
+                   failed is said out loud when the writer answers, or a
+                   restart would bring the old one back with nothing having
+                   told the reader. *)
+                store_preference state (Masc.Tui_preference.Candle_chosen style)
             | _ -> ())
        | Some k when panel_owns_input && current_panel = Some Presented.Agenda ->
            let close () = close_agenda state in
@@ -35191,7 +35253,7 @@ Use relative paths for resources already held in the package. -->
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_palette.Palette_ui_language lang) ->
-                     apply_ui_language state ~base_path lang
+                     apply_ui_language state lang
                  | Some (_, Masc_tui_palette.Palette_chat keeper_name) ->
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->
@@ -40416,9 +40478,8 @@ Use relative paths for resources already held in the package. -->
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
                      state.board_sort <- next_board_sort state.board_sort;
-                     (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
-                      | Ok () -> ()
-                      | Error message -> report_action state "error" ("Board sort not saved: " ^ message));
+                     store_preference state
+                       (Masc.Tui_preference.Board_sort_chosen (board_sort_order state.board_sort));
                      (* The session log row is read away from Board, so it
                         says the order rather than the token the request
                         carries. *)
@@ -41217,8 +41278,8 @@ Use relative paths for resources already held in the package. -->
       ~can_take:(fun () -> true)
       ~apply:(fun completion -> ignore (apply_keeper_preference_completion state completion));
     keeper_preference_exit_warnings := List.rev (keeper_preference_unresolved_warnings state);
-    Masc_tui_chat_visit.close state.home_chat_writer;
-    ignore (drain_chat_visit_completions state ~can_take:(fun () -> true))) run_loop
+    Masc_tui_preference_writer.close state.preference_writer;
+    ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
   (* The server's minor heap, for the same reason: every frame allocates the

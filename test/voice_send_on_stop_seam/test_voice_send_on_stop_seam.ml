@@ -7,7 +7,7 @@
    Both sides had tests. Both passed. Nothing crossed the seam, so nobody
    noticed that turning the documented setting on did nothing. This suite is
    that crossing: write it the way a configuring surface does, read it the way
-   the TUI does, in one process. *)
+   the server answers it to the TUI at start (RFC-0482 §3.1), in one process. *)
 
 (* A whole runtime.toml, because the writer validates the whole file before it
    commits: a voice edit on a file whose [runtime] section is broken is
@@ -72,22 +72,32 @@ let write ~path changes =
      | Error error -> Alcotest.fail (Voice_setup.error_message error)
      | Ok _revision -> ())
 
+(* The settings the server reads from runtime.toml and sends to the TUI, after
+   the trip over the wire. *)
+let read_as_the_tui_starts ~path : Masc.Tui_preference.settings =
+  match
+    Masc.Tui_preference.settings_of_yojson
+      (Masc.Tui_preference.settings_to_yojson (Masc.Tui_preference.read_settings ~path))
+  with
+  | Ok settings -> settings
+  | Error detail -> Alcotest.fail detail
+
 let test_what_the_writer_sets_is_what_the_tui_reads () =
-  with_workspace (fun ~base ~path ->
+  with_workspace (fun ~base:_ ~path ->
     Alcotest.(check (option bool))
       "off before anything is written"
       (Some false)
-      (Masc_tui_config.load ~base_path:base).Masc_tui_config.send_on_stop;
+      (read_as_the_tui_starts ~path).send_on_stop;
     write ~path [ Voice_setup.Set_send_on_stop true ];
     Alcotest.(check (option bool))
       "on, read by the side that acts on it"
       (Some true)
-      (Masc_tui_config.load ~base_path:base).Masc_tui_config.send_on_stop;
+      (read_as_the_tui_starts ~path).send_on_stop;
     write ~path [ Voice_setup.Set_send_on_stop false ];
     Alcotest.(check (option bool))
       "and off again"
       (Some false)
-      (Masc_tui_config.load ~base_path:base).Masc_tui_config.send_on_stop)
+      (read_as_the_tui_starts ~path).send_on_stop)
 
 (* The comment above the section survives the write. The file is an operator's
    to keep: the whole reason the voice writer edits lines instead of

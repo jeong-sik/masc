@@ -88,17 +88,17 @@
   있는지 확인한다. 해제됐으면 원래 terminal로 세션을 정착하고 recorder는 시작하지 않는다.
   이미 시작한 녹음의 Keep/Discard 정책과 구분하며, 채팅 footer도 같은 준비 단계 관측을
   읽는다. `.ml` 이벤트를 바꾸면 공개 `.mli`의 생성자와 payload도 함께 고친다.
-- 명시적 채팅 방문 기록은 `Masc_tui_chat_visit`의 세션 FIFO로 저장하고 초안 복원을
-  config commit 뒤에 세우지 않는다. 각 효과는 원래 base·Keeper와 Runtime의 최신 파일
-  잠금 편집을 사용하며 방문을 합치거나 실패 효과를 재실행하지 않는다. Home은 최신
-  opaque request만 저장 결과로 정착시켜 A→B→A의 옛 응답도 거절한다. 저장 대기·거절·
-  내구성 미확인·결과 미확인을 구분하고 superseded 실패도 원래 Keeper로 남긴다.
+- 명시적 채팅 방문 기록은 `Masc_tui_preference_writer`의 세션 FIFO로 서버
+  (`POST /api/v1/tui/preferences`)에 보낸다. 테마·언어 같은 다른 `[tui]` 선택도 같은
+  FIFO를 지나 하나씩 저장된다. 초안 복원을 저장 뒤에 세우지 않는다. 방문을 합치거나
+  실패한 요청을 다시 보내지 않는다. Home은 최신 opaque request만 저장 결과로 정착시켜
+  A→B→A의 옛 응답도 거절한다. 저장 대기·거절·내구성 미확인·결과 미확인을 구분하고
+  superseded 실패도 원래 Keeper로 남긴다.
   기존 입력/시간 예산 사이에서 owned 결과를 적용하며 bounded mailbox로 종료 flush를
-  막지 않는다. 정상 종료의 drain은 config I/O가 정착하는 경우의 보장이다. 반환하지 않는
-  lock/storage 작업은 close를 Closing/미완료에 남기며 종료 시간 상한을 약속하지 않는다.
-  caller 취소 보호와 실제 writer 취소·효과 정착을 구분하고, 아직 실행 중인 효과를 추측해
-  성공·미저장·결과 미관측으로 정착시키지 않는다. 메모리 초안과 config 영속화, 소스상 대기
-  제거와 실측 속도를 구분한다.
+  막지 않는다. 정상 종료의 drain은 보낸 요청의 답이 오는 경우의 보장이며 종료 시간
+  상한을 약속하지 않는다. 답이 오기 전에 취소되면 결과 미관측으로 남기고, 아직 보내지
+  않은 요청은 시작하지 않았다고 남긴다. 메모리 초안과 서버 저장, 소스상 대기 제거와 실측
+  속도를 구분한다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

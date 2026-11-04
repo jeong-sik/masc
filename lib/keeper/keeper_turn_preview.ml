@@ -271,6 +271,9 @@ let note_tool ~writer ~now tool_name =
   update ~writer ~now (fun old ->
     { old with last_tool = Some tool_name; activity = Tool_observed })
 
+let note_request ~writer ~now =
+  update ~writer ~now (fun old -> { old with activity = Awaiting_response })
+
 (* What a provider event says about the turn apart from its text. It reads
    the event as it arrived, so the activity moves while the redactor still
    holds the first line back. *)

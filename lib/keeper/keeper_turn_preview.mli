@@ -92,6 +92,12 @@ val note_text : writer:writer option -> now:float -> string -> unit
 
 val note_tool : writer:writer option -> now:float -> string -> unit
 
+val note_request : writer:writer option -> now:float -> unit
+(** A provider request of the running attempt goes out. The turn waits on
+    the provider until that request's stream says otherwise, so a tool that
+    ran before it stays shown as the last observed tool, not as the turn's
+    activity. *)
+
 val with_preparation_result :
   writer:writer option -> turn_ref:Ids.Turn_ref.t option -> phase:preparation_phase ->
   (unit -> ('a, 'e) result) -> ('a, 'e) result

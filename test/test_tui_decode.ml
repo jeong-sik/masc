@@ -7016,6 +7016,7 @@ let clients_snapshot_json rows =
     [ "schema", `String "masc.dashboard.clients.v1"
     ; "generated_at", `String "2026-09-04T01:21:00Z"
     ; "observation_only", `Bool true
+    ; "read_failures", `List []
     ; "clients", `List rows
     ]
 

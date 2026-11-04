@@ -4516,8 +4516,8 @@ let nothing =
 let rec surface_needs ~keeper_pane_drawn ~about_open surface =
   let needs = surface_needs_of_surface surface in
   let needs =
-    (* About hides the ordinary Keeper pane but draws current outfits. Its
-       opening delta and refresh cadence must keep reading that same roster. *)
+    (* About hides the ordinary Keeper pane but draws current outfits, so it
+       reads that same roster. *)
     if keeper_pane_drawn || about_open then { needs with needs_keeper_roster = true }
     else needs
   in
@@ -4622,9 +4622,8 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
   | Surface_read_source.Overview_goals -> { needs with needs_overview_goals = wanted }
   | Surface_read_source.Account_emails -> { needs with needs_account_emails = wanted }
 
-(* The bundle sources a server push re-reads instead of the refresh cadence
-   (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
-   cadence then leaves it out and its read is owed. *)
+(* The bundle sources a server push re-reads (RFC-0480 §3.4): a push owes
+   the source a read while its surface is on screen. *)
 let pushed_sources : Surface_read_source.t list =
   [ Surface_read_source.Transport; Surface_read_source.Planning; Surface_read_source.Overview_goals
   ; Surface_read_source.Account_emails; Surface_read_source.Runtime_quota
@@ -4798,8 +4797,6 @@ end = struct
       "planned_board_query", (match context.planned_board_query with
         | Some query -> board_query_to_yojson query | None -> `Null)]
 end
-
-type full_refresh_intent = Cadence | Revalidate
 
 (* Full and scoped bundles share one authority order. A later dispatch
    supersedes an earlier result, including failure and booting results. *)
@@ -5232,12 +5229,11 @@ type scoped_refresh_followup =
   | No_scoped_followup
   | Revalidate_after_scoped
 
-let note_full_refresh_intent ~intent ~full_refresh_inflight
-    ~scoped_refresh_inflight followup =
-  match intent with
-  | Revalidate when full_refresh_inflight || scoped_refresh_inflight ->
-      Revalidate_after_scoped
-  | Cadence | Revalidate -> followup
+(* A revalidation asked while a full or scoped bundle is out runs once both
+   have settled. *)
+let note_full_refresh_intent ~full_refresh_inflight ~scoped_refresh_inflight followup =
+  if full_refresh_inflight || scoped_refresh_inflight then Revalidate_after_scoped
+  else followup
 
 let take_scoped_refresh_followup ~full_refresh_inflight
     ~scoped_refresh_inflight = function
@@ -10186,7 +10182,7 @@ type state = {
   mutable approvals_error: string option;
   (* Ticket for the confirm-queue read outside the refresh bundle. The count
      on Home draws from [approval_snapshot] alone, so a refused refresh answer
-     needs a read of its own to recover the count before the next cadence. *)
+     needs a read of its own to recover the count. *)
   mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
@@ -10953,6 +10949,10 @@ type state = {
           revalidating the same requested workspace does not end the outage.
           This log key never admits readings or grants request authority. *)
   mutable observer_retry_owner: unit ref option;
+  (* While the server cannot be reached, booting or unconfirmed, a timer
+     tries a revalidation again, waiting longer after each failure. *)
+  mutable contact_retry_owner: unit ref option;
+  mutable contact_failures: int;
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
@@ -20080,6 +20080,8 @@ let create_state
   observer = Observer_off;
   observer_last_close = None;
   observer_retry_owner = None;
+  contact_retry_owner = None;
+  contact_failures = 0;
   observer_recovery_owner = None;
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;

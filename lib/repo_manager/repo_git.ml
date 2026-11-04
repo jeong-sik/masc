@@ -907,3 +907,95 @@ let status_snapshot_at ?timeout_sec ~local_path () =
   with
   | Stdlib.Error msg, _ | _, Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok files, Stdlib.Ok branch -> Stdlib.Ok (files, branch)
+
+type grep_match = {
+  gm_path : string;
+  gm_line : int;
+  gm_text : string;
+}
+
+type grep_result = {
+  gr_matches : grep_match list;
+  gr_truncated : bool;
+}
+
+(* One row of [git grep -n -z]: [path NUL line NUL text]. The text is a single
+   source line, so it holds no newline; it may hold any other byte. *)
+let grep_match_of_row row =
+  match String.index_opt row '\000' with
+  | None -> Stdlib.Error (Printf.sprintf "git grep row has no path separator: %S" row)
+  | Some first ->
+      let rest_start = first + 1 in
+      (match String.index_from_opt row rest_start '\000' with
+       | None ->
+           Stdlib.Error (Printf.sprintf "git grep row has no line separator: %S" row)
+       | Some second ->
+           let path = String.sub row 0 first in
+           let line_field = String.sub row rest_start (second - rest_start) in
+           let text = String.sub row (second + 1) (String.length row - second - 1) in
+           (match int_of_string_opt line_field with
+            | Some line when line > 0 && String.length path > 0 ->
+                Stdlib.Ok { gm_path = path; gm_line = line; gm_text = text }
+            | Some _ | None ->
+                Stdlib.Error
+                  (Printf.sprintf "git grep row has a bad line number: %S" line_field)))
+
+(* Reads rows until [max_matches] are held. A row after that proves the answer
+   was cut, which is all [gr_truncated] says. A malformed row is an error, never a
+   skipped one: the captured output can carry a truncation marker when it
+   exceeds the process capture, and a silent skip would present a partial list
+   as the whole answer. *)
+let grep_result_of_z_output ~max_matches output =
+  let rows =
+    match List.rev (String.split_on_char '\n' output) with
+    | "" :: rest -> List.rev rest
+    | _ -> String.split_on_char '\n' output
+  in
+  let rec take acc count = function
+    | [] -> Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = false }
+    | _ :: _ when count >= max_matches ->
+        Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = true }
+    | row :: rest ->
+        (match grep_match_of_row row with
+         | Stdlib.Error msg -> Stdlib.Error msg
+         | Stdlib.Ok found -> take (found :: acc) (count + 1) rest)
+  in
+  if max_matches < 1 then Stdlib.Error "git grep needs max_matches of at least 1"
+  else take [] 0 rows
+
+(* Per file, so one generated file cannot fill the answer by itself. *)
+let grep_max_matches_per_file = 20
+
+let grep_at
+    ?(timeout_sec = inspection_timeout_sec)
+    ~local_path
+    ~pathspec
+    ~pattern
+    ~ignore_case
+    ~max_matches
+    ()
+  =
+  if String.equal pattern "" then Stdlib.Error "git grep needs a non-empty pattern"
+  else
+    let args =
+      [ "--no-optional-locks"; "--literal-pathspecs"; "grep"; "-n"; "-I"; "-z"
+      ; "-F"; "--no-color"; "--untracked"; "--exclude-standard"; "-m"
+      ; string_of_int grep_max_matches_per_file
+      ]
+      @ (if ignore_case then [ "-i" ] else [])
+      @ [ "-e"; pattern ]
+      @ (if String.equal pathspec "" then [] else [ "--"; pathspec ])
+    in
+    let status, stdout, stderr =
+      Process_eio.run_argv_with_status_split
+        ~env:(merge_env read_only_git_env)
+        ~timeout_sec
+        ("git" :: "-C" :: local_path :: args)
+    in
+    match status with
+    | Unix.WEXITED 0 -> grep_result_of_z_output ~max_matches stdout
+    | Unix.WEXITED 1 when String.equal (String.trim stderr) "" ->
+        (* git grep exits 1 when nothing matched; that is an answer. *)
+        Stdlib.Ok { gr_matches = []; gr_truncated = false }
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        Stdlib.Error (git_failure_detail args status stdout stderr)

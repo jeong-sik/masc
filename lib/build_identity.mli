@@ -112,6 +112,11 @@ val runtime_instance_id : string
 (** Immutable process identity minted at initialization. Reading this value
     performs no repository or executable provenance probes. *)
 
+val resolved_executable_path : string
+(** This executable's absolute path, resolved at initialization; the same value
+    {!current} reports as [executable_path]. Reading it performs no repository
+    probe and no executable hash. *)
+
 (** The package managers a dashboard build receipt may name. *)
 type package_manager_kind =
   | Pnpm

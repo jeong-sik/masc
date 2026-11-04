@@ -3,7 +3,7 @@ description = """
 Create or update a durable keeper. Keepers auto-start on server boot and are \
 reconciled back into live presence. Each call snapshots the keeper manifest \
 and commits compare-and-swap: if another writer commits first, the call \
-fails with keeper_manifest_revision_conflict and no side effects. Retry the \
+fails with keeper_config_revision_conflict and no side effects. Retry the \
 same call — it re-snapshots the current manifest and applies only the \
 fields you pass, so a retry cannot revert another writer's change."""
 additional_properties = false

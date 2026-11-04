@@ -446,6 +446,10 @@
 - Each `test_completion_trust_harness` case starts with no Board bound and
   unbinds on exit, so a later case no longer writes its Task Board posts into
   an earlier case's removed directory (#48064).
+- Linux release packaging runs the shared HTTPS probe again instead of the
+  macOS check that the shipped CA bundle is the default; the Linux runtime
+  ships no bundle, so both Linux release builds stopped at that check
+  (#48106).
 
 ## [0.67.0] - 2026-11-02
 

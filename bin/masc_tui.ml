@@ -5929,6 +5929,16 @@ let launch_lane_addons ?target state ~mailbox request =
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
+  (match request, target with
+   | Addons.Inspect, Addons.Read_detail (instance_id, incarnation) ->
+       state.lane_addons_owed <- Option.map (fun ((owner, epoch), owed) ->
+         if String.equal owner instance_id && String.equal epoch incarnation
+         then ((owner, epoch), Masc_tui_owed_read.started owed)
+         else ((owner, epoch), owed)) state.lane_addons_owed
+   | Addons.Inspect, (Addons.Read_screen | Addons.Read_installation_results _)
+   | (Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
+     | Addons.Evidence _ | Addons.Act _ | Addons.Action_status _
+     | Addons.Subscriptions _), _ -> ());
   state.lane_addons_reading <- (match request with
     | Addons.Inspect | Slice _ | Action_status _ -> Some generation
     | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
@@ -7031,6 +7041,7 @@ let launch_lanes_load state ~mailbox =
   if state.standalone_lanes_inflight then ()
   else begin
     state.standalone_lanes_inflight <- true;
+    state.lanes_owed <- Masc_tui_owed_read.started state.lanes_owed;
     let host = server_peer_host in
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
@@ -7051,6 +7062,39 @@ let launch_lanes_reread state ~mailbox =
   if state.standalone_lanes_inflight
   then state.standalone_lanes_reread_pending <- true
   else launch_lanes_load state ~mailbox
+
+let launch_owed_lanes state ~mailbox =
+  if state.view <> Lanes then
+    state.lanes_owed <- Masc_tui_owed_read.settled
+  else begin
+    if not state.standalone_lanes_inflight then
+      state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.lanes_owed then
+      launch_lanes_load state ~mailbox
+  end
+
+let launch_owed_lane_addons state ~mailbox =
+  match state.lane_addons, state.lane_addons_owed with
+  | Some ({ Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ } as view),
+    Some ((owner, epoch), owed)
+    when String.equal owner open_id && String.equal epoch incarnation ->
+      let busy =
+        Option.is_some view.draft || Option.is_some view.document_key
+        || Option.is_some view.action_menu || Option.is_some view.installer
+        || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
+        || Option.is_some (Masc_tui_lane_addons.pending_action view)
+      in
+      if view.loading || busy then ()
+      else begin
+        let owed = Masc_tui_owed_read.abandoned owed in
+        state.lane_addons_owed <- Some ((owner, epoch), owed);
+        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
+          launch_lane_addons state ~mailbox
+            ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
+            Masc_tui_lane_addons.Inspect
+      end
+  | Some _, Some _ | None, Some _ -> state.lane_addons_owed <- None
+  | Some _, None | None, None -> ()
 
 let launch_machine_activity_read state ~mailbox owner =
   if server_authority_ready state then begin
@@ -8145,7 +8189,31 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Workspace_health -> owe_overview_read state
   | Masc.Workspace_dataset_event.Runtime_probe | Masc.Workspace_dataset_event.Runtime_metrics ->
       owe_runtime_surface_read state
-  | Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _ -> ()
+  | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
+      let module Decision = Masc_tui_lane_read_decision in
+      let view =
+        match state.view, state.lane_addons with
+        | Lanes, _ -> Decision.Lanes
+        | _, Some { Masc_tui_lane_addons.screen = Detail (instance_id, _); _ } ->
+            Decision.Addons (Some instance_id)
+        | _, Some _ -> Decision.Addons None
+        | _, None -> Decision.Overview
+      in
+      (match Decision.of_dataset ~view dataset with
+       | Decision.Read_lanes -> state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
+       | Decision.Read_addon instance_id ->
+           (match state.lane_addons with
+            | Some { Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ }
+              when String.equal open_id instance_id ->
+                let owed = match state.lane_addons_owed with
+                  | Some ((owner, epoch), owed) when String.equal owner open_id
+                      && String.equal epoch incarnation -> owed
+                  | Some _ | None -> Masc_tui_owed_read.settled
+                in
+                state.lane_addons_owed <-
+                  Some ((open_id, incarnation), Masc_tui_owed_read.changed owed)
+            | Some { Masc_tui_lane_addons.screen = Overview | Detail _; _ } | None -> ())
+       | Decision.Ignore -> ())
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -22388,6 +22456,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, target, result) ->
       let showing = Option.is_some state.lane_addons in
+      (match target with
+       | Masc_tui_lane_addons.Read_detail (owner, epoch) ->
+           let owns_answer = Option.exists (fun (view : Masc_tui_lane_addons.t) ->
+             view.generation = generation
+             && view.screen = Detail (owner, epoch)) state.lane_addons
+           in
+           if owns_answer then
+             state.lane_addons_owed <- Option.map (fun ((owed_owner, owed_epoch), owed) ->
+               let next =
+                 if not (String.equal owner owed_owner && String.equal epoch owed_epoch) then owed
+                 else match result with
+                   | Ok reply when Option.is_some reply.lar_snapshot
+                       && Option.is_none reply.lar_diagnostic
+                       && (match reply.lar_inventory_read with
+                           | `Read | `Unchanged -> true
+                           | `Failed _ -> false) ->
+                       Masc_tui_owed_read.succeeded owed
+                   | Ok _ | Error _ -> failed_read owed
+               in
+               ((owed_owner, owed_epoch), next)) state.lane_addons_owed
+       | Masc_tui_lane_addons.Read_screen | Masc_tui_lane_addons.Read_installation_results _ -> ());
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
         if not (Masc_tui_lane_addons.read_still_wanted view ~showing target)
@@ -22996,10 +23085,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
            visible surfaces read once more (RFC-0480 §3.3). *)
-        if not (Masc_tui_types.observer_replay_is_complete handshake) then
+        if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+          if state.view = Lanes then
+            owe_dataset_read state Masc.Workspace_dataset_event.Lanes;
+          Option.iter (fun (view : Masc_tui_lane_addons.t) ->
+            match view.screen with
+            | Masc_tui_lane_addons.Detail (instance_id, _) ->
+                owe_dataset_read state
+                  (Masc.Workspace_dataset_event.Lane_addons { instance_id })
+            | Masc_tui_lane_addons.Overview -> ()) state.lane_addons;
           start_http_refresh state ~host:server_peer_host ~port:state.port ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox
+        end
       end
   | Observer_received (instance_id, decoded) ->
       let received = Unix.gettimeofday () in
@@ -27549,7 +27647,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Lane_inventory_loaded (generation, result) ->
       state.standalone_lanes_inflight <- false;
-      if generation = state.standalone_lanes_generation then (
+      if generation = state.standalone_lanes_generation then begin
+        state.lanes_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.lanes_owed
+           | Error _ -> failed_read state.lanes_owed);
         match result with
         | Ok snapshot ->
             replace_lane_inventory state snapshot;
@@ -27575,7 +27677,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail ->
             state.standalone_lanes_error <- Some detail;
             Masc_tui_types.runtime_lane_list_reread state
-              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error detail));
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error detail)
+      end;
       if state.standalone_lanes_reread_pending then begin
         state.standalone_lanes_reread_pending <- false;
         launch_lanes_load state ~mailbox
@@ -32781,6 +32884,8 @@ Use relative paths for resources already held in the package. -->
       launch_owed_held_calls state ~mailbox:async_messages;
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
+      launch_owed_lanes state ~mailbox:async_messages;
+      launch_owed_lane_addons state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_keeper_logs state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;

@@ -9,3 +9,20 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
     when String.equal open_id instance_id -> Read_addon instance_id
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Lanes
     | Masc.Workspace_dataset_event.Lane_addons _) -> Ignore
+  | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Repositories
+    | Masc.Workspace_dataset_event.Verification_requests
+    | Masc.Workspace_dataset_event.Keeper_metrics _
+    | Masc.Workspace_dataset_event.Harness_verdicts
+    | Masc.Workspace_dataset_event.Goals
+    | Masc.Workspace_dataset_event.Runtime_config
+    | Masc.Workspace_dataset_event.Connectors
+    | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+    | Masc.Workspace_dataset_event.Skill_activations _
+    | Masc.Workspace_dataset_event.Skill_catalog
+    | Masc.Workspace_dataset_event.Clients
+    | Masc.Workspace_dataset_event.Provider_usage
+    | Masc.Workspace_dataset_event.Provider_standing
+    | Masc.Workspace_dataset_event.Keeper_costs
+    | Masc.Workspace_dataset_event.Workspace_health
+    | Masc.Workspace_dataset_event.Runtime_probe
+    | Masc.Workspace_dataset_event.Runtime_metrics) -> Ignore

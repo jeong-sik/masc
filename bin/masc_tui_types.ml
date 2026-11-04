@@ -10500,6 +10500,7 @@ type state = {
      the change it has to show, so one more follows it. *)
   mutable standalone_lanes_reread_pending: bool;
   mutable standalone_lanes_generation: int;
+  mutable lanes_owed: Masc_tui_owed_read.t;
   (* The slot editor open over the Lanes reading, or [None]. It names the lane
      rather than holding its slots: the list is re-read after every write, and
      a copy taken when the editor opened would go stale in place. *)
@@ -10600,6 +10601,7 @@ type state = {
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
   mutable lane_addons_reading: int option;
+  mutable lane_addons_owed: ((string * string) * Masc_tui_owed_read.t) option;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
   mutable browser_history_generation: int;
@@ -14483,6 +14485,7 @@ let suspend_workspace_readings state =
   state.lane_addons <- Option.map suspend_lane state.lane_addons;
   state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
   state.lane_addons_reading <- None;
+  state.lane_addons_owed <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
@@ -14571,6 +14574,7 @@ let suspend_workspace_readings state =
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;
   state.standalone_lanes_reread_pending <- false;
+  state.lanes_owed <- Masc_tui_owed_read.settled;
   state.runtime_surface_inflight <- None;
   state.runtime_surface_force_pending <- false;
   state.runtime_surface_owed <- Masc_tui_owed_read.settled;
@@ -19823,6 +19827,7 @@ let create_state
   standalone_lanes_inflight = false;
   standalone_lanes_reread_pending = false;
   standalone_lanes_generation = 0;
+  lanes_owed = Masc_tui_owed_read.settled;
   slot_editor = None;
   clients_surface = None;
   clients_surface_error = None;
@@ -19895,6 +19900,7 @@ let create_state
   lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
   lane_addons_reading = None;
+  lane_addons_owed = None;
   browser_lane = None;
   browser_history = None;
   browser_history_generation = 0;

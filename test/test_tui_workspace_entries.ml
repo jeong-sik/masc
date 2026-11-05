@@ -537,7 +537,8 @@ let branches_fixture () =
   let origin =
     match state.palette_mode with
     | Palette_branches origin -> origin
-    | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _ ->
+    | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _
+    | Palette_worktrees _ ->
         Alcotest.fail "the branch palette did not open"
   in
   let reading, request =
@@ -607,6 +608,113 @@ let test_branch_list_needs_the_palette_and_directory_it_was_asked_in () =
   Code_results.apply_branches state request (Error "git failed");
   Alcotest.(check bool) "a failure is kept, not an empty list" true
     (match code_branches_view state with
+     | Fetched.Failed _ -> true
+     | Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Stale _ -> false)
+
+let worktree_head = String.make 40 'b'
+
+let git_worktree ?(main = false) ?(locked = false) ?(prunable = false)
+    ?(state = Decode.Git_worktree_branch "main") name =
+  { Decode.gw_name = name; gw_main = main
+  ; gw_head = (match state with
+            | Decode.Git_worktree_bare -> None
+            | Decode.Git_worktree_branch _ | Decode.Git_worktree_detached -> Some worktree_head)
+  ; gw_state = state; gw_locked = locked; gw_prunable = prunable }
+
+let worktrees_answer worktrees =
+  { Decode.gws_root = ""; gws_worktrees = worktrees; gws_truncated = false }
+
+(* The Code pane has src/old.ml open, with the worktree palette open over it and
+   one list landed. *)
+let worktrees_fixture () =
+  let state, _ = finder_fixture () in
+  open_code_worktrees state;
+  let origin =
+    match state.palette_mode with
+    | Palette_worktrees origin -> origin
+    | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _
+    | Palette_branches _ -> Alcotest.fail "the worktree palette did not open"
+  in
+  let reading, request =
+    start_read ~equal:code_scope_path_equal state.code_worktrees
+      (origin.cfo_scope, origin.cfo_dir) in
+  state.code_worktrees <- reading;
+  Code_results.apply_worktrees state request
+    (Ok (worktrees_answer
+           [ git_worktree ~main:true "repo"
+           ; git_worktree ~locked:true ~state:Decode.Git_worktree_detached "linked"
+           ; git_worktree ~prunable:true ~state:(Decode.Git_worktree_branch "feat/a") "gone" ]));
+  state, origin, request
+
+let test_worktree_palette_lists_the_landed_answer_and_filters_by_typing () =
+  let state, origin, _ = worktrees_fixture () in
+  Alcotest.(check bool) "the palette is over this directory" true
+    (origin.cfo_scope = Code_scope_repo "example" && String.equal origin.cfo_dir "src");
+  let names () =
+    List.filter_map
+      (function
+        | _, Masc_tui_palette.Palette_code_worktree worktree -> Some worktree.Decode.gw_name
+        | _, _ -> None)
+      (Masc_tui_palette.palette_matches state)
+  in
+  Alcotest.(check (list string)) "server order" [ "repo"; "linked"; "gone" ] (names ());
+  state.palette_query <- "link";
+  Alcotest.(check (list string)) "typing filters by name" [ "linked" ] (names ());
+  state.palette_query <- "";
+  let label_of name =
+    List.find_map
+      (function
+        | label, Masc_tui_palette.Palette_code_worktree worktree
+          when String.equal worktree.Decode.gw_name name -> Some label
+        | _, _ -> None)
+      (Masc_tui_palette.palette_matches state)
+  in
+  let contains label needle =
+    let n = String.length needle and l = String.length label in
+    let rec at i = i + n <= l && (String.sub label i n = needle || at (i + 1)) in
+    at 0
+  in
+  (match label_of "linked", label_of "gone", label_of "repo" with
+   | Some linked, Some gone, Some repo ->
+       Alcotest.(check bool) "a detached row shows the short head and its lock" true
+         (contains linked ("detached " ^ String.sub worktree_head 0 8) && contains linked "locked");
+       Alcotest.(check bool) "a prunable row says so and names its branch" true
+         (contains gone "feat/a" && contains gone "prunable");
+       Alcotest.(check bool) "the main worktree carries the mark" true
+         (String.length repo > 0 && repo.[0] = '*')
+   | _ -> Alcotest.fail "a worktree row is missing");
+  close_code_finder state;
+  Alcotest.(check bool) "closing clears the list" true
+    (Option.is_none (Fetched.current state.code_worktrees))
+
+let test_worktree_list_needs_the_palette_and_directory_it_was_asked_in () =
+  let state, origin = finder_fixture () in
+  let reading, request =
+    start_read ~equal:code_scope_path_equal state.code_worktrees
+      (origin.cfo_scope, origin.cfo_dir) in
+  state.code_worktrees <- reading;
+  Code_results.apply_worktrees state request (Ok (worktrees_answer []));
+  Alcotest.(check bool) "a file finder palette does not take a worktree list" true
+    (match Fetched.current state.code_worktrees with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.palette_mode <- Palette_branches origin;
+  Code_results.apply_worktrees state request (Ok (worktrees_answer []));
+  Alcotest.(check bool) "a branch palette does not take it either" true
+    (match Fetched.current state.code_worktrees with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.palette_mode <- Palette_worktrees origin;
+  state.code_dir <- "elsewhere";
+  Code_results.apply_worktrees state request (Ok (worktrees_answer []));
+  Alcotest.(check bool) "a palette whose directory moved does not take it" true
+    (match Fetched.current state.code_worktrees with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.code_dir <- origin.cfo_dir;
+  Code_results.apply_worktrees state request (Error "git failed");
+  Alcotest.(check bool) "a failure is kept, not an empty list" true
+    (match code_worktrees_view state with
      | Fetched.Failed _ -> true
      | Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Stale _ -> false)
 
@@ -753,8 +861,6 @@ let test_branches_decoder_refuses_bad_rows () =
     (`Assoc [ "root", `String ""; "branches", `List [] ]);
   rejected "branches that are not a list"
     (`Assoc [ "root", `String ""; "branches", `Null; "truncated", `Bool false ])
-
-let worktree_head = String.make 40 'b'
 
 let worktree_json ?(main = false) ?(head = `String worktree_head) ?(state = "branch")
     ?(branch = `String "main") ?(locked = false) ?(prunable = false) name =
@@ -1515,7 +1621,8 @@ let test_location_picker_survives_finder_idle_and_late_replies () =
        && code_location_offer_current state offer
        && (match state.palette_mode with
            | Palette_locations current -> current == offer
-           | Palette_files _ | Palette_branches _ | Palette_jump | Palette_choice _ -> false)
+           | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_jump
+           | Palette_choice _ -> false)
        && state.code_file == source && state.code_jump_back == history
        && state.code_file_cursor=2 && state.code_file_scroll=2
        && state.code_dir="src" && Option.is_none state.code_navigation);
@@ -1899,6 +2006,10 @@ let () =
             test_branch_palette_lists_the_landed_answer_and_filters_by_typing
         ; Alcotest.test_case "branch list needs the palette and directory it was asked in" `Quick
             test_branch_list_needs_the_palette_and_directory_it_was_asked_in
+        ; Alcotest.test_case "worktree palette lists the landed answer and filters by typing" `Quick
+            test_worktree_palette_lists_the_landed_answer_and_filters_by_typing
+        ; Alcotest.test_case "worktree list needs the palette and directory it was asked in" `Quick
+            test_worktree_list_needs_the_palette_and_directory_it_was_asked_in
         ; Alcotest.test_case "received success yields to queued input" `Quick
             test_finder_success_yields_to_pending_input
         ; Alcotest.test_case "ready content cannot borrow reconfirmed read authority" `Quick

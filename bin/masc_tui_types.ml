@@ -6257,6 +6257,7 @@ type palette_mode =
   | Palette_jump
   | Palette_files of code_finder_origin
   | Palette_branches of code_finder_origin
+  | Palette_worktrees of code_finder_origin
   | Palette_locations of code_location_offer
   | Palette_choice of {
       choice_question : string;  (* "hover", "definition", "references" *)
@@ -10852,6 +10853,9 @@ type state = {
   (* The branch list of the checkout that owns the key's directory. *)
   mutable code_branches:
     (code_workspace_scope * string, Tui_decode.git_branches) Masc_tui_fetched.t;
+  (* The worktree list of the repository that owns the key's directory. *)
+  mutable code_worktrees:
+    (code_workspace_scope * string, Tui_decode.git_worktrees) Masc_tui_fetched.t;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -14785,6 +14789,7 @@ let suspend_workspace_readings state =
   state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
   state.code_branches <- Masc_tui_fetched.suspend state.code_branches;
+  state.code_worktrees <- Masc_tui_fetched.suspend state.code_worktrees;
   state.code_navigation <- None;
   state.code_file <- Masc_tui_fetched.suspend state.code_file;
   state.code_history <- Masc_tui_fetched.suspend state.code_history;
@@ -17565,6 +17570,7 @@ let set_code_scope state scope =
     state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
     state.code_branches <- Masc_tui_fetched.clear state.code_branches;
+    state.code_worktrees <- Masc_tui_fetched.clear state.code_worktrees;
     state.code_navigation <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_location_offer <- None;
@@ -20234,6 +20240,7 @@ let create_state
   code_listing = Masc_tui_fetched.initial;
   code_catalog = Masc_tui_fetched.initial;
   code_branches = Masc_tui_fetched.initial;
+  code_worktrees = Masc_tui_fetched.initial;
   code_finder_file = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
@@ -20592,10 +20599,11 @@ let close_code_finder (state : state) =
   (match state.palette_mode with
    | Palette_locations _ ->
        state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query
-   | Palette_files _ | Palette_branches _ | Palette_jump | Palette_choice _ -> ());
+   | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_jump | Palette_choice _ -> ());
   state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
   state.code_branches <- Masc_tui_fetched.clear state.code_branches;
+  state.code_worktrees <- Masc_tui_fetched.clear state.code_worktrees;
   state.code_location_offer <- None;
   state.palette_open <- false;
   state.palette_mode <- Palette_jump;
@@ -20607,7 +20615,7 @@ let code_finder_catalog (state : state) =
   | Palette_files origin when code_finder_current state origin ->
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_catalog
         ~key:(origin.cfo_scope, origin.cfo_dir)
-  | Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump
+  | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
   | Palette_choice _ -> Masc_tui_fetched.Absent
 
 (* The branch list the open branch palette asked for. The palette's owner must
@@ -20617,7 +20625,7 @@ let code_branches_view (state : state) =
   | Palette_branches origin when code_finder_current state origin ->
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_branches
         ~key:(origin.cfo_scope, origin.cfo_dir)
-  | Palette_branches _ | Palette_files _ | Palette_locations _ | Palette_jump
+  | Palette_branches _ | Palette_worktrees _ | Palette_files _ | Palette_locations _ | Palette_jump
   | Palette_choice _ -> Masc_tui_fetched.Absent
 
 (* Opens the branch palette over the Code pane, in the directory and over the
@@ -20627,6 +20635,31 @@ let open_code_branches (state : state) =
   close_code_finder state;
   state.palette_mode <-
     Palette_branches
+      { cfo_workspace = state.workspace_authority
+      ; cfo_reading = state.workspace_read_authority
+      ; cfo_scope = state.code_scope
+      ; cfo_dir = state.code_dir
+      ; cfo_file = Masc_tui_fetched.current_request state.code_file
+      };
+  state.palette_open <- true
+
+(* The worktree list the open worktree palette asked for. As with branches, a
+   list read for another directory is not shown. *)
+let code_worktrees_view (state : state) =
+  match state.palette_mode with
+  | Palette_worktrees origin when code_finder_current state origin ->
+      Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_worktrees
+        ~key:(origin.cfo_scope, origin.cfo_dir)
+  | Palette_worktrees _ | Palette_branches _ | Palette_files _ | Palette_locations _
+  | Palette_jump | Palette_choice _ -> Masc_tui_fetched.Absent
+
+(* Opens the worktree palette over the Code pane, in the directory and over the
+   file it is looking at. *)
+let open_code_worktrees (state : state) =
+  state.code_navigation <- None;
+  close_code_finder state;
+  state.palette_mode <-
+    Palette_worktrees
       { cfo_workspace = state.workspace_authority
       ; cfo_reading = state.workspace_read_authority
       ; cfo_scope = state.code_scope

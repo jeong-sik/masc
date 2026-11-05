@@ -749,6 +749,9 @@ type async_msg =
   | Code_branches_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.git_branches, string) result
+  | Code_worktrees_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_worktrees, string) result
   | Code_finder_file_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_file_source, string) result

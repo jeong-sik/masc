@@ -64,6 +64,7 @@ type palette_action =
   | Palette_code_file of string
   | Palette_code_location of code_location_offer * Masc.Tui_decode.lsp_location
   | Palette_code_branch of Masc.Tui_decode.git_branch
+  | Palette_code_worktree of Masc.Tui_decode.git_worktree
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
@@ -378,6 +379,7 @@ let palette_action_words = function
       []
   | Palette_code_location (_, location) -> [location.Masc.Tui_decode.ll_path]
   | Palette_code_branch branch -> [branch.Masc.Tui_decode.gb_name; branch.gb_subject]
+  | Palette_code_worktree worktree -> [worktree.Masc.Tui_decode.gw_name]
 
 (* One branch row: the checked-out mark, the name, how it stands against its
    upstream, the tip's UTC date and its subject. The date comes from the tip
@@ -403,6 +405,29 @@ let branch_label (branch : Masc.Tui_decode.git_branch) =
     (if branch.gb_current then "*" else " ")
     branch.gb_name upstream date branch.gb_subject
 
+(* One worktree row: the main mark, the directory name, what is checked out and
+   the flags git reports. The path is not here: the server sends only the last
+   name. *)
+let worktree_label (worktree : Masc.Tui_decode.git_worktree) =
+  let open Masc.Tui_decode in
+  let checkout =
+    match worktree.gw_state with
+    | Git_worktree_branch name -> name
+    | Git_worktree_detached ->
+        (match worktree.gw_head with
+         | Some head -> "detached " ^ String.sub head 0 (min 8 (String.length head))
+         | None -> "detached")
+    | Git_worktree_bare -> "bare"
+  in
+  let flags =
+    (if worktree.gw_locked then [ "locked" ] else [])
+    @ (if worktree.gw_prunable then [ "prunable" ] else [])
+  in
+  Printf.sprintf "%s %s  %s%s"
+    (if worktree.gw_main then "*" else " ")
+    worktree.gw_name checkout
+    (match flags with [] -> "" | flags -> "  " ^ String.concat " " flags)
+
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
@@ -422,7 +447,8 @@ let palette_matches (state : state) =
                    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
-                   | Palette_code_location _ | Palette_code_branch _ ) ) -> false) entries
+                   | Palette_code_location _ | Palette_code_branch _
+                   | Palette_code_worktree _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
@@ -439,6 +465,13 @@ let palette_matches (state : state) =
          | Masc_tui_fetched.Ready listing | Masc_tui_fetched.Stale (listing, _) ->
              List.map (fun branch -> branch_label branch, Palette_code_branch branch)
                listing.Tui_decode.gbs_branches
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+         | Masc_tui_fetched.Failed _ -> [])
+    | Palette_worktrees _ ->
+        (match code_worktrees_view state with
+         | Masc_tui_fetched.Ready listing | Masc_tui_fetched.Stale (listing, _) ->
+             List.map (fun worktree -> worktree_label worktree, Palette_code_worktree worktree)
+               listing.Tui_decode.gws_worktrees
          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
          | Masc_tui_fetched.Failed _ -> [])
     | Palette_locations offer ->
@@ -476,7 +509,7 @@ let selected_file state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_location _ | Palette_code_branch _))
+    | Palette_code_location _ | Palette_code_branch _ | Palette_code_worktree _))
   | None -> None
 
 let selected_location state =
@@ -489,5 +522,5 @@ let selected_location state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_file _ | Palette_code_branch _))
+    | Palette_code_file _ | Palette_code_branch _ | Palette_code_worktree _))
   | None -> None

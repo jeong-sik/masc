@@ -22,6 +22,13 @@ val launch_branches :
     that owns the directory shown. A late list for another directory is dropped
     by the reading key. *)
 
+val launch_worktrees :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+(** Open the worktree palette over Code and read the worktrees of the
+    repository that owns the directory shown. A late list for another directory
+    is dropped by the reading key. *)
+
 val open_found_file :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_async_protocol.async_msg -> unit) -> path:string -> unit

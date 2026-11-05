@@ -646,6 +646,7 @@ count is drawn beyond the available space.
 | `h/l` | focus the tree or open file |
 | `Ctrl-P` | filter all tracked and nonignored files in the owning Git checkout; Enter opens, Esc returns |
 | `Ctrl-R` | list the local branches of the owning Git checkout, newest tip first, with how each stands against its upstream; type to filter, Enter or Esc returns |
+| `W` | list the worktrees of the owning Git repository: each one's directory name, what it has checked out, and whether it is locked or prunable; type to filter, Enter or Esc returns |
 | `Right / Enter` | drill in, or open the file |
 | `Left / Esc` | close the history, then the file, then climb one directory; Esc at the project root leaves for Workspace |
 | `Shift-Left / Shift-Right` | with a file open, scroll it sideways one cell at a time |

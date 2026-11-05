@@ -13,6 +13,13 @@ its newest commit and that commit's subject. Type to filter by name or subject.
 At most 200 branches are listed and the palette says when more exist. The list
 is read-only: Enter and Esc both return to Code.
 
+`W` lists the worktrees of the repository that owns the directory, main worktree
+first. Each row shows the directory's name, what it has checked out (a branch,
+the short head when detached, or bare) and whether git reports it locked or
+prunable. The list carries names only, never host paths. Type to filter by name.
+At most 500 worktrees are listed and the palette says when more exist. The list
+is read-only: Enter and Esc both return to Code.
+
 `D` asks for a definition on the cursor line. `B` returns through the locations
 left by definition jumps and successful finder selections. A location includes
 the workspace scope, directory, file, cursor, vertical and horizontal offsets,

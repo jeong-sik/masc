@@ -436,6 +436,96 @@ let test_enum_member_passes () =
   | Tool_input_validation.Invalid _ -> fail "expected enum member to validate"
 ;;
 
+let note_schema ?(extra = []) () =
+  match
+    Types.tool_schema_of_input_schema
+      ~name:"note_tool"
+      ~description:"test"
+      ~input_schema:
+        (`Assoc
+          ([ "type", `String "object"
+           ; ( "properties"
+             , `Assoc
+                 [ "content", `Assoc [ "type", `String "string" ]
+                 ; "tags", `Assoc [ "type", `String "array" ]
+                 ; ( "target"
+                   , `Assoc
+                       [ "type", `String "object"
+                       ; ( "properties"
+                         , `Assoc [ "keeper_name", `Assoc [ "type", `String "string" ] ] )
+                       ; "additionalProperties", `Bool false
+                       ] )
+                 ] )
+           ; "required", `List [ `String "content" ]
+           ]
+           @ extra))
+      ()
+  with
+  | Ok schema -> schema
+  | Error message -> fail message
+;;
+
+let error_shape (error : Tool_input_validation.field_error) =
+  let expected =
+    match error.expected with
+    | Tool_input_validation.Expected_declared_field { declared } ->
+      "declared:" ^ String.concat "," declared
+    | Tool_input_validation.Expected_required -> "required"
+    | Tool_input_validation.Expected_types types -> "types:" ^ String.concat "," types
+    | Tool_input_validation.Expected_enum _ -> "enum"
+    | Tool_input_validation.Expected_const _ -> "const"
+  in
+  let actual =
+    match error.actual with
+    | Tool_input_validation.Missing -> "missing"
+    | Tool_input_validation.Received description -> description
+  in
+  String.concat " " [ error.path; expected; actual ]
+;;
+
+(* A closed object names the field it does not declare in the same result as
+   the required field the call left out, and the names it accepts, so one
+   corrected call fixes both. Nested closed objects follow the same rule. *)
+let test_closed_object_names_an_undeclared_field_beside_a_missing_one () =
+  let schema = note_schema ~extra:[ "additionalProperties", `Bool false ] () in
+  let input =
+    `Assoc [ "body", `String "note"; "target", `Assoc [ "agent", `String "a" ] ]
+  in
+  match Tool_input_validation.validate schema input with
+  | Tool_input_validation.Valid _ -> fail "undeclared fields were accepted"
+  | Tool_input_validation.Invalid errors ->
+    check
+      (list string)
+      "missing, nested undeclared and root undeclared, in one result"
+      [ "/content types:string missing"
+      ; {|/target/agent declared:keeper_name string("a")|}
+      ; {|/body declared:content,tags,target string("note")|}
+      ]
+      (List.map error_shape errors)
+;;
+
+(* Without [additionalProperties: false] a field outside [properties] is
+   allowed, and with [patternProperties] the declared names are not every name
+   the object accepts, so neither reports one. *)
+let test_open_or_patterned_object_accepts_an_undeclared_field () =
+  let input = `Assoc [ "content", `String "note"; "x-trace", `String "1" ] in
+  let accepts label schema =
+    match Tool_input_validation.validate schema input with
+    | Tool_input_validation.Valid _ -> ()
+    | Tool_input_validation.Invalid errors ->
+      fail (label ^ ": " ^ String.concat "; " (List.map error_shape errors))
+  in
+  accepts "open object" (note_schema ());
+  accepts
+    "pattern properties"
+    (note_schema
+       ~extra:
+         [ "additionalProperties", `Bool false
+         ; "patternProperties", `Assoc [ "^x-", `Assoc [ "type", `String "string" ] ]
+         ]
+       ())
+;;
+
 let test_enum_violation_names_allowed_values () =
   let input = `Assoc [ "projection", `String "summary" ] in
   match Tool_input_validation.validate (projection_enum_schema ()) input with
@@ -450,7 +540,8 @@ let test_enum_violation_names_allowed_values () =
          (List.map Yojson.Safe.to_string allowed)
      | Tool_input_validation.Expected_types _
      | Tool_input_validation.Expected_const _
-     | Tool_input_validation.Expected_required ->
+     | Tool_input_validation.Expected_required
+     | Tool_input_validation.Expected_declared_field _ ->
        fail "expected the enum constraint to be reported");
     let msg =
       Tool_input_validation.format_errors_inline ~tool_name:"test_tool" ~args:input errors
@@ -729,6 +820,14 @@ let () =
         ] )
     ; ( "constraints"
       , [ test_case "enum member passes" `Quick test_enum_member_passes
+        ; test_case
+            "closed object names an undeclared field beside a missing one"
+            `Quick
+            test_closed_object_names_an_undeclared_field_beside_a_missing_one
+        ; test_case
+            "open or patterned object accepts an undeclared field"
+            `Quick
+            test_open_or_patterned_object_accepts_an_undeclared_field
         ; test_case
             "enum violation names allowed values"
             `Quick

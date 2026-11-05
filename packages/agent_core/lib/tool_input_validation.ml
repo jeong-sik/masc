@@ -19,6 +19,7 @@ type expected =
       }
   | Expected_const of Yojson.Safe.t
   | Expected_required
+  | Expected_declared_field of { declared : string list }
 
 type field_error =
   { path : string
@@ -307,6 +308,9 @@ let describe_expected = function
     "one of: " ^ String.concat ", " (List.map Yojson.Safe.to_string allowed)
   | Expected_const value -> "exactly " ^ Yojson.Safe.to_string value
   | Expected_required -> "required"
+  | Expected_declared_field { declared = [] } -> "no field (the object declares none)"
+  | Expected_declared_field { declared } ->
+    "a declared field (" ^ String.concat ", " declared ^ ")"
 ;;
 
 let authoritative_schema_parts = function
@@ -331,34 +335,71 @@ let authoritative_schema_parts = function
 ;;
 
 (* Nested objects and array items are held to the same required/type/enum/const
-   rule as the root, and every violation is reported in one result. Stopping
-   at the root let a nested shape error reach the tool handler, which names
-   only its first problem, so a caller fixed one field per round trip. *)
+   and closed-object rule as the root, and every violation is reported in one
+   result. Stopping at the root let a nested shape error reach the tool
+   handler, which names only its first problem, so a caller fixed one field
+   per round trip. *)
 let rec object_errors ~prefix schema fields =
   let required, properties = authoritative_schema_parts schema in
   let names =
     List.map fst properties
     @ List.filter (fun name -> not (List.mem_assoc name properties)) required
   in
-  List.concat_map
-    (fun name ->
-       let path = prefix ^ "/" ^ name in
-       let property = List.assoc_opt name properties in
-       match List.assoc_opt name fields, property with
-       | None, _ when List.mem name required ->
-         [ { path
-           ; expected =
-               Option.fold
-                 ~none:Expected_required
-                 ~some:(fun property -> expected_of_property property)
-                 property
-           ; actual = Missing
-           }
-         ]
-       | None, _ -> []
-       | Some value, Some property -> value_errors ~path property value
-       | Some _, None -> [])
-    names
+  let declared_errors =
+    List.concat_map
+      (fun name ->
+         let path = prefix ^ "/" ^ name in
+         let property = List.assoc_opt name properties in
+         match List.assoc_opt name fields, property with
+         | None, _ when List.mem name required ->
+           [ { path
+             ; expected =
+                 Option.fold
+                   ~none:Expected_required
+                   ~some:(fun property -> expected_of_property property)
+                   property
+             ; actual = Missing
+             }
+           ]
+         | None, _ -> []
+         | Some value, Some property -> value_errors ~path property value
+         | Some _, None -> [])
+      names
+  in
+  declared_errors @ undeclared_errors ~prefix schema properties fields
+
+(* A closed object ([additionalProperties: false]) refuses a field it does not
+   declare. It is named in the same result as a missing required field, with
+   the names the object declares, so a call that misspelled the required field
+   is corrected once. With [patternProperties] the declared names are not the
+   whole contract, so nothing is reported here. *)
+and undeclared_errors ~prefix schema properties fields =
+  let closed =
+    match schema with
+    | `Assoc schema_fields ->
+      (match
+         ( List.assoc_opt "additionalProperties" schema_fields
+         , List.assoc_opt "patternProperties" schema_fields )
+       with
+       | Some (`Bool false), None -> true
+       | (None | Some _), (None | Some _) -> false)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+  in
+  if not closed
+  then []
+  else (
+    let declared = List.map fst properties in
+    List.filter_map
+      (fun (name, value) ->
+         if List.mem_assoc name properties
+         then None
+         else
+           Some
+             { path = prefix ^ "/" ^ name
+             ; expected = Expected_declared_field { declared }
+             ; actual = Received (describe_json_value value)
+             })
+      fields)
 
 and value_errors ~path property value =
   if not (property_matches property value)
@@ -498,6 +539,7 @@ let format_errors_inline ~tool_name ~(args : Yojson.Safe.t) errors =
            let label =
              match e.expected with
              | Expected_enum _ | Expected_const _ -> "invalid value"
+             | Expected_declared_field _ -> "unsupported field"
              | Expected_types _ | Expected_required -> "wrong type"
            in
            Printf.sprintf

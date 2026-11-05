@@ -1,2 +1,4 @@
-(* RFC-0480 §3.4: a Keeper's OAuth login attempt change tells its workspace's
-   readers, naming the Keeper only. *)
+(test
+ (name test_keeper_oauth_attempts_announce)
+ (modules test_keeper_oauth_attempts_announce)
+ (libraries alcotest eio eio_main unix masc masc.fs_compat masc.keeper_identity masc.masc_core masc_workspace yojson))

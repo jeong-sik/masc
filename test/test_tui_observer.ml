@@ -948,7 +948,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some Masc.Workspace_dataset_event.Verification_requests -> true
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -1010,7 +1011,8 @@ let test_a_repository_push_reads_the_list () =
               | Some Masc.Workspace_dataset_event.Repositories -> true
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
-                  | Masc.Workspace_dataset_event.Harness_verdicts )
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -1023,8 +1025,9 @@ let test_a_repository_push_reads_the_list () =
           | Some Masc.Workspace_dataset_event.Verification_requests -> false
           | Some
               ( Masc.Workspace_dataset_event.Repositories
-              | Masc.Workspace_dataset_event.Harness_verdicts )
-          | Some (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) | None -> true)
+              | Masc.Workspace_dataset_event.Harness_verdicts
+              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
+          | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
   List.iter

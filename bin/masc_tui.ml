@@ -9150,14 +9150,28 @@ let launch_owed_identity_logins state ~mailbox =
   else
     Masc_tui_types.identity_login_pending_keepers state ~now:(Unix.gettimeofday ())
     |> List.iter (fun keeper_name ->
-         if identity_login_recovery_poll_ready state ~now:(Unix.gettimeofday ()) keeper_name
-            && Masc_tui_owed_read.due ~now:(monotonic_now_s ())
-                 (Masc_tui_types.identity_login_read state keeper_name)
-         then begin
+         (* A read the request table still holds is let finish first; one
+            whose answer is gone — the request retired, the reading dropped —
+            goes back to owed so its Keeper's status is read again instead of
+            staying Reading forever. *)
+         let reading =
+           Option.is_some (Masc_tui_types.pending_detail_read state
+                             ~tab:Masc_tui_types.Detail_identity ~keeper:keeper_name) in
+         if reading then
            Masc_tui_types.update_identity_login_read state keeper_name
-             (fun read -> Masc_tui_owed_read.started read);
-           Masc_tui_identity_requests.launch_view state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state mailbox) keeper_name
+             (fun read -> read)
+         else begin
+           Masc_tui_types.update_identity_login_read state keeper_name
+             (fun read -> Masc_tui_owed_read.abandoned read);
+           if identity_login_recovery_poll_ready state ~now:(Unix.gettimeofday ()) keeper_name
+              && Masc_tui_owed_read.due ~now:(monotonic_now_s ())
+                   (Masc_tui_types.identity_login_read state keeper_name)
+           then begin
+             Masc_tui_types.update_identity_login_read state keeper_name
+               (fun read -> Masc_tui_owed_read.started read);
+             Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+               ~deliver:(workspace_enqueue state mailbox) keeper_name
+           end
          end)
 
 let launch_owed_harness state ~mailbox =

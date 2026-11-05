@@ -14771,6 +14771,13 @@ let suspend_workspace_readings state =
   (* The list is cleared, and resuming the same workspace does not revalidate
      the Board, so the list is owed. A read in flight keeps its failures. *)
   state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed;
+  (* Each waited Keeper's login read was Reading under the withdrawn
+     authority; its answer will not be current there, so the reads go back
+     to owed and the revalidation this suspend precedes re-reads them. *)
+  state.identity_login_reads <-
+    List.map (fun (keeper_name, read) ->
+      keeper_name, Masc_tui_owed_read.abandoned read)
+      state.identity_login_reads;
   retire_keeper_message_search state;
   stop_waiting_for_memory_recall_standing state
     "서버 신원 확인이 끊겨서 읽지 못했어요";

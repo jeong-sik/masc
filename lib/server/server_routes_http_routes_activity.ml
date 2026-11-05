@@ -202,6 +202,7 @@ let handle_schedule_write_request
                ~payload ~channel:None)
       ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
       ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+      ; result_boundary = Tool_output.Sent_to_client
       }
     in
     let start_time = Tool_timing.start () in
@@ -1404,6 +1405,7 @@ let add_routes ~sw ~clock router =
                         ~payload ~channel:None)
                ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
                ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+               ; result_boundary = Tool_output.Sent_to_client
                }
              in
              let start_time = Tool_timing.start () in

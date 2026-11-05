@@ -4,11 +4,15 @@ keyed by the stable schedule_id and survive definition replacements
 (masc_schedule_update) and terminal schedule states. Use them to read why a
 schedule exists and what changed and when. A wake does not carry the notes, so a
 woken Keeper reads them here when it needs them. Each page is oldest first;
-the first page is the newest window. When has_more_older is true, pass
-next_before_note_id as before_note_id to read the preceding page. total_count
-is the count at that read. If it changes while paging or on a fresh newest-page
-read before acting, repeat the scan: a newly appended note can have an earlier
-timestamp and appear outside the newest page."""
+the first page is the newest window. A page holds at most limit notes, and
+fewer when they would not fit in one result. When has_more_older is true, pass
+next_before_note_id as before_note_id to read the preceding page. To look for
+something, pass contains: only notes whose body has that text are returned, and
+matched_count is how many notes of the whole schedule have it, so one read says
+whether paging further is worth it. total_count and matched_count are the counts
+at that read. If either changes between reads, a note was appended. Its timestamp
+can be earlier than the newest note's, which puts it outside the newest page, so
+read the pages again."""
 additional_properties = false
 defer_loading = true
 
@@ -29,3 +33,8 @@ description = "Maximum notes per page (default 50). The newest eligible window i
 name = "before_note_id"
 type = "string"
 description = "Exclusive note id from this schedule; omit for the newest page. Use next_before_note_id to continue toward older notes."
+
+[[params]]
+name = "contains"
+type = "string"
+description = "Return only notes whose body contains this text, case sensitive. Pages, has_more_older and next_before_note_id then follow the matching notes, and matched_count is the number of matching notes in the whole schedule. Omit it to list every note."

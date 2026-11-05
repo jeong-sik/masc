@@ -111,6 +111,7 @@ let schedule_tool_name action =
 let schedule_ctx
       ?continuation_channel
       ?(caller = Tool_schedule.Named_caller "scheduler-agent")
+      ?(result_boundary = Tool_output.Sent_to_client)
       config
   : Tool_schedule.context
   =
@@ -123,6 +124,7 @@ let schedule_ctx
            ~channel:continuation_channel)
   ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
   ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+  ; result_boundary
   }
 ;;
 
@@ -1316,6 +1318,7 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
              ~channel:None)
     ; admit_keeper_wake_creation
     ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    ; result_boundary = Tool_output.Sent_to_client
     }
   in
   Fun.protect
@@ -2496,6 +2499,204 @@ let test_note_pages_keep_older_history_when_new_notes_arrive () =
     ]
 ;;
 
+let append_note_exn config ~schedule_id ~body ~now =
+  match
+    Schedule_store.append_note config ~schedule_id ~author_id:"operator"
+      ~author_kind:Schedule_domain.Human_operator ~body ~now
+  with
+  | Ok (note, _) -> note.Schedule_domain.note_id
+  | Error err -> fail (Schedule_store.store_error_to_string err)
+;;
+
+let list_notes_with ?result_boundary config schedule_id extra =
+  let name = schedule_tool_name Tool_schemas_schedule.List_notes in
+  match
+    Tool_schedule.dispatch
+      (schedule_ctx ?result_boundary config)
+      ~name
+      ~args:(`Assoc (("schedule_id", `String schedule_id) :: extra))
+  with
+  | Some result -> result
+  | None -> fail ("schedule dispatch returned None: " ^ name)
+;;
+
+let next_anchor_of result =
+  match Tool_result.data result |> Yojson.Safe.Util.member "next_before_note_id" with
+  | `Null -> None
+  | `String id -> Some id
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+    fail "the next note anchor must be a string or null"
+;;
+
+(* A page as the reader sees it: its notes oldest first as (id, body), whether
+   older ones remain, and the cursor toward them. *)
+let note_page_of result =
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data result in
+  let notes =
+    data |> member "notes" |> to_list
+    |> List.map (fun note ->
+      note |> member "note_id" |> to_string, note |> member "body" |> to_string)
+  in
+  notes, data |> member "has_more_older" |> to_bool, next_anchor_of result
+;;
+
+let note_bodies_of result =
+  let notes, _, _ = note_page_of result in
+  List.map snd notes
+;;
+
+(* Every page from the newest to the oldest, following the cursor, newest page
+   first. A page that did not move the cursor would never end, so the walk
+   stops the test after more pages than the schedule has notes. *)
+let scan_note_pages ?result_boundary ?(extra = []) config schedule_id ~note_count =
+  let rec walk before pages =
+    if List.length pages > note_count then fail "the note cursor did not advance";
+    let anchor =
+      match before with
+      | None -> []
+      | Some id -> [ "before_note_id", `String id ]
+    in
+    let page = list_notes_with ?result_boundary config schedule_id (extra @ anchor) in
+    let pages = page :: pages in
+    match next_anchor_of page with
+    | None -> List.rev pages
+    | Some id -> walk (Some id) pages
+  in
+  walk None []
+;;
+
+let test_note_filter_returns_matching_notes_and_pages_over_them () =
+  with_config @@ fun config ->
+  let schedule_id = "note-filter" in
+  ignore (create_service_exn config ~schedule_id ~due_at:future_due_at
+            ~payload:(keeper_wake_payload "wake") ());
+  let bodies =
+    [ "deploy blocked: queue full"; "ok"; "deploy done"; "retro"
+    ; "deploy blocked again"; "ok"; "deploy retried" ]
+  in
+  let ids =
+    List.mapi
+      (fun index body ->
+         append_note_exn config ~schedule_id ~body ~now:(101.0 +. float_of_int index))
+      bodies
+  in
+  let id_at = List.nth ids in
+  let open Yojson.Safe.Util in
+  let list_notes extra = list_notes_with config schedule_id extra in
+  let filtered extra = list_notes (("contains", `String "deploy") :: extra) in
+  let int_field result name = Tool_result.data result |> member name |> to_int in
+  let newest = filtered [ "limit", `Int 2 ] in
+  check (list string) "the newest window holds matching notes only, oldest first"
+    [ "deploy blocked again"; "deploy retried" ] (note_bodies_of newest);
+  check int "the match count covers the whole schedule" 4 (int_field newest "matched_count");
+  check int "the total count is still every note" 7 (int_field newest "total_count");
+  check (option string) "the cursor is the oldest returned match" (Some (id_at 4))
+    (next_anchor_of newest);
+  let older = filtered [ "limit", `Int 2; "before_note_id", `String (id_at 4) ] in
+  check (list string) "the cursor continues over matches only"
+    [ "deploy blocked: queue full"; "deploy done" ] (note_bodies_of older);
+  check int "the match count does not depend on the anchor" 4 (int_field older "matched_count");
+  check (option string) "the last page of matches has no cursor" None (next_anchor_of older);
+  check (list string) "an anchor may be a note that does not match"
+    [ "deploy blocked: queue full"; "deploy done" ]
+    (note_bodies_of (filtered [ "before_note_id", `String (id_at 3) ]));
+  let unmatched = list_notes [ "contains", `String "Deploy" ] in
+  check (list string) "the match is case sensitive" [] (note_bodies_of unmatched);
+  check int "no match is a count of zero" 0 (int_field unmatched "matched_count");
+  check (option string) "no match leaves no cursor" None (next_anchor_of unmatched);
+  check bool "a read without a filter has no match count" true
+    (Tool_result.data (list_notes []) |> member "matched_count" = `Null);
+  check int "a null filter reads every note" 7
+    (List.length (note_bodies_of (list_notes [ "contains", `Null ])));
+  let contains_text haystack needle =
+    let needle_length = String.length needle in
+    let rec at index =
+      index + needle_length <= String.length haystack
+      && (String.equal (String.sub haystack index needle_length) needle || at (index + 1))
+    in
+    at 0
+  in
+  let expected = List.filter (fun body -> contains_text body "deploy") bodies in
+  let pages =
+    scan_note_pages config schedule_id ~note_count:7
+      ~extra:[ "contains", `String "deploy"; "limit", `Int 1 ]
+  in
+  check (list string) "one-note pages return every match once, newest page first"
+    (List.rev expected) (List.concat_map note_bodies_of pages);
+  List.iter
+    (fun (label, contains) ->
+       check bool label false (Tool_result.is_success (list_notes [ "contains", contains ])))
+    [ "an empty filter is refused", `String ""
+    ; "a non-string filter is refused", `Int 1
+    ]
+;;
+
+let test_note_page_follows_the_result_ceiling () =
+  with_config @@ fun config ->
+  let schedule_id = "note-ceiling" in
+  ignore (create_service_exn config ~schedule_id ~due_at:future_due_at
+            ~payload:(keeper_wake_payload "wake") ());
+  let note_count = 30 in
+  let bodies =
+    List.init note_count (fun index -> Printf.sprintf "note %02d %s" index (String.make 1_000 'x'))
+  in
+  List.iteri
+    (fun index body ->
+       ignore (append_note_exn config ~schedule_id ~body ~now:(101.0 +. float_of_int index)))
+    bodies;
+  let lane threshold_bytes =
+    Tool_output.Projected_for_model (Tool_output.Store_above { threshold_bytes })
+  in
+  let read ?result_boundary extra = list_notes_with ?result_boundary config schedule_id extra in
+  (* The size the lane measures: the text of the result. *)
+  let size result = String.length (Tool_result.message result) in
+  let held result = List.length (note_bodies_of result) in
+  let ceiling = 6_000 in
+  let first = read ~result_boundary:(lane ceiling) [] in
+  check bool "the page fits the ceiling" true (size first <= ceiling);
+  check bool "the page holds several notes, not all" true
+    (held first > 1 && held first < note_count);
+  let notes, has_more_older, cursor = note_page_of first in
+  check bool "older notes remain" true has_more_older;
+  (match notes with
+   | (oldest_id, _) :: _ ->
+     check (option string) "the cursor is the oldest returned note" (Some oldest_id) cursor
+   | [] -> fail "a cut page still holds a note");
+  check int "a page exactly at the ceiling is not cut" (held first)
+    (held (read ~result_boundary:(lane (size first)) []));
+  check int "one byte less drops exactly one note" (held first - 1)
+    (held (read ~result_boundary:(lane (size first - 1)) []));
+  let pages = scan_note_pages ~result_boundary:(lane ceiling) config schedule_id ~note_count in
+  List.iter (fun page -> check bool "every page fits the ceiling" true (size page <= ceiling)) pages;
+  check (list string) "the pages together hold every note once"
+    bodies (List.concat_map note_bodies_of (List.rev pages));
+  let default_page = read [] in
+  check bool "a caller without a lane gets the smallest lane ceiling" true
+    (size default_page <= Common.max_tool_result_wire_bytes);
+  check bool "a larger ceiling returns more notes" true (held default_page > held first);
+  let wide = read ~result_boundary:(lane 65_536) [] in
+  check int "a lane that holds the whole schedule gets it in one page" note_count (held wide);
+  let over_schedule = "note-over-ceiling" in
+  ignore (create_service_exn config ~schedule_id:over_schedule ~due_at:future_due_at
+            ~payload:(keeper_wake_payload "wake") ());
+  let small_id = append_note_exn config ~schedule_id:over_schedule ~body:"small" ~now:101.0 in
+  let big_id =
+    append_note_exn config ~schedule_id:over_schedule ~body:(String.make 20_000 'y') ~now:102.0
+  in
+  let big_notes, big_has_more, big_cursor =
+    note_page_of (list_notes_with config over_schedule [])
+  in
+  check (list string) "a note above the ceiling is returned alone" [ big_id ] (List.map fst big_notes);
+  check bool "the notes before it remain" true big_has_more;
+  check (option string) "the cursor names the lone note" (Some big_id) big_cursor;
+  check (list string) "the cursor moves past it" [ small_id ]
+    (let notes, _, _ =
+       note_page_of (list_notes_with config over_schedule [ "before_note_id", `String big_id ])
+     in
+     List.map fst notes)
+;;
+
 let test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger () =
   with_config @@ fun config ->
   let schedule_id = "note-tool-corruption" in
@@ -2788,6 +2989,10 @@ let () =
         ; test_case "partial cancel preserves durable effects and reports failure" `Quick test_cancel_partial_withdrawal_does_not_claim_rollback
         ; test_case "note pages retain older history across appends" `Quick
             test_note_pages_keep_older_history_when_new_notes_arrive
+        ; test_case "note filter returns matching notes and pages over them" `Quick
+            test_note_filter_returns_matching_notes_and_pages_over_them
+        ; test_case "note page follows the result ceiling" `Quick
+            test_note_page_follows_the_result_ceiling
         ; test_case "note distinguishes absent schedule from unreadable ledger" `Quick
             test_note_tool_distinguishes_missing_schedule_from_unreadable_ledger
         ; test_case "note reports actual primary write failure" `Quick

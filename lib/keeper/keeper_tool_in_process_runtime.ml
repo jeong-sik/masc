@@ -1916,6 +1916,7 @@ let handle_keeper_webmcp_with_outcome ~name ~args =
 let handle_masc_schedule_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(result_projection : Tool_output.model_projection)
       ?continuation_channel
       ~name
       ~args
@@ -1931,6 +1932,7 @@ let handle_masc_schedule_with_outcome
              ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+    ; result_boundary = Tool_output.Projected_for_model result_projection
     }
   in
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name

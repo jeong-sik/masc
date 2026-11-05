@@ -236,15 +236,6 @@ let disposition_of_string = function
   | _ -> Error "Unknown nested composition disposition"
 ;;
 
-let export_error = function
-  | Plan.Producer_unavailable node_id -> `Assoc
-      [ "kind", `String "producer_unavailable"; "node_id", `String (Plan.Node_id.to_string node_id) ]
-  | Plan.Producer_invalid error -> `Assoc
-      [ "kind", `String "producer_invalid"; "error", Projection.plan_execution_error_to_json error ]
-  | Plan.Export_pointer_unavailable error -> `Assoc
-      [ "kind", `String "pointer_unavailable"; "error", Projection.pointer_resolution_error_to_json error ]
-;;
-
 let evidence_to_json run ~plan ~execution =
   let index = List.fold_left (fun index (node : Executor.node_result) -> Node_map.add node.node_id node index)
       Node_map.empty (settled execution) in
@@ -285,7 +276,7 @@ let evidence_to_json run ~plan ~execution =
     let exports = `Assoc (List.map (fun (export : Plan.export) -> export.name,
         match Plan.resolve_export plan ~lookup export with
         | Ok value -> `Assoc [ "available", `Bool true; "value", value ]
-        | Error error -> `Assoc [ "available", `Bool false; "error", export_error error ]) child.call.exports) in
+        | Error error -> `Assoc [ "available", `Bool false; "error", Projection.export_resolution_error_to_json error ]) child.call.exports) in
     `Assoc [ "scope", Nested.call_to_json child.call
            ; "admission", admission
            ; "disposition", `String (disposition_to_string (disposition child nodes execution))

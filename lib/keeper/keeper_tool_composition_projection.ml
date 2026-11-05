@@ -1,5 +1,6 @@
 (** Pure composition result and failure projection; no clock or publication acquisition. *)
 module Executor = Keeper_tool_plan_executor
+module Plan_error = Keeper_tool_plan_error_projection
 
 (* Composition tools are materialized Agent_core tools outside the Keeper
    descriptor registry, so their tool kind is observable through their own
@@ -35,14 +36,6 @@ let deferred_kind_to_json = function
   | Some kind -> `String (Keeper_tool_execution.deferred_kind_to_string kind)
 ;;
 
-let pointer_resolution_error_to_json =
-  Keeper_tool_plan_error_projection.pointer_resolution_error_to_json
-;;
-
-let plan_execution_error_to_json =
-  Keeper_tool_plan_error_projection.plan_execution_error_to_json
-;;
-
 let node_observation_result (node : Executor.node_result) =
   match node.output_validation_error with
   | None -> node.result
@@ -53,7 +46,7 @@ let node_observation_result (node : Executor.node_result) =
       ; message = "Composition node output failed its declared schema"
       ; data_source = Tool_result.Explicit_data
           (`Assoc
-            [ "validation_error", plan_execution_error_to_json error
+            [ "validation_error", Plan_error.plan_execution_error_to_json error
             ; "producer_result", Tool_result.to_json node.result ])
       ; metadata = Tool_result.metadata node.result
       ; tool_name = node.tool_name
@@ -105,7 +98,7 @@ let cause_to_json = function
       [ "kind", `String "plan_execution_failed"
       ; "node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
       ; "schedule", schedule_to_json schedule
-      ; "error", plan_execution_error_to_json error
+      ; "error", Plan_error.plan_execution_error_to_json error
       ]
   | Executor.Outer_completion_mismatch { expected; actual } ->
     `Assoc

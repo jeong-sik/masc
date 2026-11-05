@@ -12,3 +12,6 @@ val template_resolution_error_to_json :
 
 val plan_execution_error_to_json :
   Keeper_tool_plan.execution_error -> Yojson.Safe.t
+
+val export_resolution_error_to_json :
+  Keeper_tool_plan.export_resolution_error -> Yojson.Safe.t

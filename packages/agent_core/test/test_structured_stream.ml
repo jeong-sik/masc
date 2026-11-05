@@ -1,7 +1,7 @@
 (** Tests for Structured output + SSE streaming integration.
 
     Verifies that emit_synthetic_events and parse_sse_event compose correctly
-    for the structured output streaming pattern (extract_stream). *)
+    for streamed structured output. *)
 
 open Agent_core
 open Types

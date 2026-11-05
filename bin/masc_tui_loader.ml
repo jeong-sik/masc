@@ -537,11 +537,10 @@ let replace_keeper_rows ?(before_view_change = fun () -> ()) ~preserve_on_error 
   if not (Option.equal String.equal selected_keeper_name selected_keeper_name_after_refresh)
   then clear_keeper_logs state
 
-(** Immutable local work/agent observation. Required Keeper metadata is a
+(** Immutable local work observation. Required Keeper metadata is a
     separate source, so task/archive work cannot gate chat availability. *)
 type local_reading =
-  { lr_agents : agent list
-  ; lr_rows : Masc_tui_overview_tasks.rows_reading
+  { lr_rows : Masc_tui_overview_tasks.rows_reading
   ; lr_task_payloads : Masc_tui_task_payloads.t
   ; lr_tasks_error : string option
   ; lr_task_flow : Masc_tui_task_flow.t option
@@ -588,37 +587,11 @@ let with_local_read_mutex mutex read =
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
 let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
-  (* Load agents *)
-  let agents_dir = Filename.concat masc_dir "agents" in
-  let agents =
-    if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
-      Sys.readdir agents_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-           try
-             let path = Filename.concat agents_dir f in
-             let json = Yojson.Safe.from_file path in
-             match Tui_decode.decode_agent json with
-             | Ok agent -> Some agent
-             | Error err ->
-                 report path err;
-                 None
-           with Yojson.Json_error err ->
-             report (Filename.concat agents_dir f) ("invalid JSON: " ^ err);
-             None
-           | Sys_error err ->
-             report (Filename.concat agents_dir f) err;
-             None
-         )
-    else []
-  in
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
     load_active_tasks ~fresh base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
-  { lr_agents = agents; lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
+  { lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
   ; lr_tasks_error = tasks_error; lr_task_flow = task_flow
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
@@ -629,13 +602,31 @@ let read_local_workspace ?(fresh = false) base_path =
       if fresh then archive_seen := None;
       read_local_work_unlocked ~fresh base_path)
 
+(* Whether the named Keeper's metadata file is not the one the last local
+   read decoded: written since, created, or removed. The server announces a
+   Keeper row change for a receipt, a candle or a rest move too, and those
+   leave the file as it was, so the local list has nothing new to read. A
+   file the last read could not decode is never remembered and always counts
+   as moved. *)
+let local_keeper_meta_moved base_path keeper_name =
+  with_local_read_mutex local_keeper_read_mutex (fun () ->
+      let config = Workspace_core.default_config base_path in
+      let path =
+        Filename.concat (Keeper_types_profile.keeper_dir config)
+          (Keeper_runtime_root_entry.keeper_basename ~keeper_name
+             Keeper_runtime_root_entry.Metadata)
+      in
+      match stat_opt path, Hashtbl.find_opt keeper_meta_cache path with
+      | Some _ as stat, Some _ -> Option.is_none (cached_keeper_for path stat)
+      | None, None -> false
+      | Some _, None | None, Some _ -> true)
+
 let read_local_keepers base_path =
   with_local_read_mutex local_keeper_read_mutex (fun () ->
       let lkr_keepers, lkr_error = load_keepers base_path in
       { lkr_keepers; lkr_error })
 
 let apply_local_workspace (state : state) (reading : local_reading) =
-  state.agents <- reading.lr_agents;
   (* The domain rows land first: a detail view open across this refresh keeps
      its row even when the task just turned terminal, because the projection
      below drops exactly those. *)
@@ -679,7 +670,6 @@ let apply_local_keepers ?before_view_change (state : state) (reading : local_kee
 let clear_local_workspace ?(keep_keeper_rows = false) (state : state) =
   invalidate_local_source_read state Local_keepers;
   invalidate_local_source_read state Local_work;
-  state.agents <- [];
   state.tasks <- [];
   state.task_payloads <- Masc_tui_task_payloads.empty;
   state.goal_task_links <- Goal_links_not_read;

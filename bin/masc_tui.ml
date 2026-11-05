@@ -8138,6 +8138,19 @@ let owe_verification_read state =
 let owe_repositories_read state =
   state.repositories_owed <- Masc_tui_owed_read.changed state.repositories_owed
 
+let pushed_read state source =
+  Option.value ~default:Masc_tui_owed_read.settled (List.assoc_opt source state.pushed_reads)
+
+let set_pushed_read state source read =
+  state.pushed_reads <- (source, read) :: List.remove_assoc source state.pushed_reads
+
+(* A bundle source in [pushed_sources] reads again when the server announces
+   its change while its surface is on screen, and after a failed read
+   (RFC-0480 §3.4). Entering the surface and a revalidation read it in the
+   surface bundle. *)
+let owe_pushed_read state source =
+  set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
+
 (* runtime.toml reads when the server says it committed a text of it, on
    arrival and on a revalidation, and again after a failed read (RFC-0482
    L4). *)
@@ -8169,6 +8182,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
   | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
+  | Masc.Workspace_dataset_event.Account_emails ->
+      owe_pushed_read state Surface_read_source.Account_emails
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
 
@@ -8901,19 +8916,6 @@ let settle_overview_goals_read state result =
     (match result with
      | Ok _ -> Masc_tui_owed_read.succeeded state.overview_goals_owed
      | Error _ -> failed_read state.overview_goals_owed)
-
-let pushed_read state source =
-  Option.value ~default:Masc_tui_owed_read.settled (List.assoc_opt source state.pushed_reads)
-
-let set_pushed_read state source read =
-  state.pushed_reads <- (source, read) :: List.remove_assoc source state.pushed_reads
-
-(* A bundle source in [pushed_sources] reads again when the server announces
-   its change while its surface is on screen, and after a failed read
-   (RFC-0480 §3.4). Entering the surface and a revalidation read it in the
-   surface bundle. *)
-let owe_pushed_read state source =
-  set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
 
 (* Any surface bundle that reads a pushed source, full or scoped, is the read
    its owed change waits on. *)
@@ -23242,7 +23244,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         owe_agenda_revalidation state;
         (* A change can land between the initial read and subscription, or
            during a disconnected interval. Read under the current authority. *)
-        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
         revalidate_visible_fusion state ~mailbox;
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
@@ -23307,6 +23309,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let fusion_status_seen = ref Masc_tui_fusion_updates.no_changed_runs in
       let observer_source_loss_seen = ref false in
       let execution_snapshot_seen = ref false in
+      (* The local Keeper list reads each Keeper's meta, which a row change
+         announces; hand edits to a declaration show on arrival or [r]. *)
+      let local_keepers_changed = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
       let datasets_owed = ref [] in
@@ -23449,6 +23454,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    (* The Clients roster lists the registry's Keepers by
                       phase, so a registry row change re-reads it too. *)
                    owe_clients_read state;
+                   (match change with
+                    | Masc_tui_observer.Every_row_changed -> local_keepers_changed := true
+                    | Masc_tui_observer.Keeper_row_changed { keeper } ->
+                        if not !local_keepers_changed
+                           && Masc_tui_loader.local_keeper_meta_moved
+                                 state.local_base_path keeper
+                        then local_keepers_changed := true);
                    (* A Keeper's metadata and configuration feed its
                       effective tool surface. *)
                    (match change, selected_keeper state with
@@ -23540,11 +23552,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Masc_tui_observer.Undecodable _, _, _ -> ());
           end)
         decoded;
-      if !execution_snapshot_seen || !observer_source_loss_seen then
+      (* The local work read also lists the Goals waiting for confirmation. *)
+      if !execution_snapshot_seen || !observer_source_loss_seen || !goals_changed then
         (* Both the compact invalidation and the complete snapshot use this
            type. Work reads its own local source; it does not trust either
            payload. A read already in flight queues one newer follow-up. *)
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+      (* The local Keeper list is the metadata files and the Keepers runtime
+         config declares without one. While the server or the feed is down
+         nothing is announced; the Keepers run in the server, so their files
+         hold still, and a CLI write shows on reopen or [r]. *)
+      if !local_keepers_changed || !observer_source_loss_seen || !runtime_config_changed then
+        launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
       if !observer_source_loss_seen then begin
         revalidate_visible_fusion state ~mailbox;
@@ -41787,7 +41806,6 @@ Use relative paths for resources already held in the package. -->
           | Server -> ()
           | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
         end;
-        launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Poll base_path;
         let host = server_peer_host in
         let port = state.port in
         (* Closed feeds normally retry on their own timer. The cadence can

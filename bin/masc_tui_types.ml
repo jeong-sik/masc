@@ -4694,7 +4694,8 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
 (* The bundle sources a server push re-reads instead of the refresh cadence
    (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
    cadence then leaves it out and its read is owed. *)
-let pushed_sources : Surface_read_source.t list = [ Surface_read_source.Transport ]
+let pushed_sources : Surface_read_source.t list =
+  [ Surface_read_source.Transport; Surface_read_source.Account_emails ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
@@ -9461,7 +9462,6 @@ type state = {
   mutable usage_section: usage_section;
   mutable usage_scope_id: string option;
   mutable usage_show_limit_exhausted: bool;
-  mutable agents: agent list;
   mutable tasks: task list;
   (* Full Task values and their original immutable producer snapshot are one
      observation. Terminal Tasks remain available independently of active rows. *)
@@ -19707,7 +19707,6 @@ let create_state
   usage_section = Usage_plan;
   usage_scope_id = None;
   usage_show_limit_exhausted = false;
-  agents = [];
   tasks = [];
   task_payloads = Task_payloads.empty;
   goal_task_links = Goal_links_not_read;

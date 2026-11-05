@@ -22,6 +22,11 @@ type dataset =
       (** What [GET /api/v1/dashboard/clients] lists: an agent record's row
           ({!Workspace_agent_record}) or a purge. Keeper registry rows change
           with [keeper_row_changed] instead. *)
+  | Account_emails
+      (** The account emails a server-run login's rewritten credentials hold,
+          read by the setup account-emails route the Metrics and Config
+          models panes draw. A login run in a terminal has no writer here
+          and is not announced. *)
   | Keeper_oauth_attempts of { keeper : string }
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
@@ -40,6 +45,7 @@ module Kind : sig
     | Verification_requests
     | Harness_verdicts
     | Clients
+    | Account_emails
     | Keeper_oauth_attempts
 
   val to_wire : t -> string

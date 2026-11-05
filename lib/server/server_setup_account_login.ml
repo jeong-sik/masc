@@ -120,6 +120,12 @@ let start ~actor ~base_path ~body request reqd =
                  | Ok reference -> Some reference
                  | Error _ -> !receipt.account_ref) in
           save { !receipt with account_ref; status } in
+        (* The official client rewrites its credential file however the login
+           ends, a cancelled one included, and the models panes draw the
+           account emails those files hold. *)
+        let credentials_rewritten () =
+          Workspace_dataset_event.announce ~base_path
+            Workspace_dataset_event.Account_emails in
         Fun.protect ~finally:(fun () -> Httpun.Body.Writer.close writer) (fun () ->
           let on_ready () = send "started" (Receipt.to_json !receipt) in
           let on_output stream text = send "output" (`Assoc ["stream", `String stream; "text", `String text]) in
@@ -149,7 +155,8 @@ let start ~actor ~base_path ~body request reqd =
                 | Running | Failed | Cancelled | Interrupted ->
                   (match recover Receipt.Interrupted with
                    | Ok () -> ()
-                   | Error _ -> Log.Server.warn "Setup login interruption receipt could not be saved"));
+                   | Error _ -> Log.Server.warn "Setup login interruption receipt could not be saved");
+                credentials_rewritten ());
               raise exn in
           (match !receipt.status, completed with
            | Receipt.Complete _, _ ->
@@ -171,6 +178,7 @@ let start ~actor ~base_path ~body request reqd =
              Log.Server.info "Setup login %s did not complete" (Session.id session);
              let fields = match Receipt.to_json !receipt with `Assoc fields -> fields | _ -> [] in
              send "error" (`Assoc (("message", `String message) :: fields)));
+          credentials_rewritten ();
           Ok ())) in
     (match result with
      | Ok () -> ()

@@ -146,8 +146,20 @@ let providers_loaded (state : state) request ~report ~now ~attempts result =
         List.exists (fun (expectation, status) ->
           String.equal expectation.ile_keeper keeper_name
           && (match status with
-              | Masc_tui_identity_model.Consent_waiting deadline -> deadline <= now
-              | _ -> false)) attempts in
+              (* A status this TUI could not read is a failed read, not a
+                 clean one: settling on it would drop the debt while the
+                 Keeper's answer is unknown. *)
+              | Error _ -> true
+              | Ok status ->
+                (match status with
+                 | Masc_tui_identity_model.Consent_waiting deadline -> deadline <= now
+                 | Masc_tui_identity_model.Callback_in_progress
+                 | Masc_tui_identity_model.Credentials_published _
+                 | Masc_tui_identity_model.Login_exchange_failed
+                 | Masc_tui_identity_model.Credential_publication_incomplete
+                 | Masc_tui_identity_model.Consent_expired
+                 | Masc_tui_identity_model.Consent_superseded
+                 | Masc_tui_identity_model.Attempt_unavailable -> false))) attempts in
     Masc_tui_types.update_identity_login_read state keeper_name
       (if failed then
          Masc_tui_owed_read.failed

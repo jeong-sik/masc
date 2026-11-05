@@ -439,7 +439,9 @@ let keeper_of_event ~traces (event : Observer.event) =
       keeper
   | Observer.Approval_change change -> approval_change_keeper change
   | Observer.Keeper_roster_change Observer.Every_row_changed
-  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
+  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.(Repositories | Verification_requests | Harness_verdicts)
+  | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
 

@@ -164,7 +164,7 @@ let test_login_read_settles_by_outcome () =
     match Masc_tui_types.identity_expectations_for_keeper state "A" with
     | expectation :: _ -> expectation
     | [] -> Alcotest.fail "expected a held expectation" in
-  Masc_tui_identity_updates.providers_loaded state read waiting ~report:ignore ~now:1000.
+  Masc_tui_identity_updates.providers_loaded state waiting ~report:ignore ~now:1000.
     ~attempts:[deadline_expectation, Ok (Masc_tui_identity_model.Consent_waiting 500.)]
     (reading (Ok catalog));
   let after_deadline = login_read_state state "A" in
@@ -175,7 +175,7 @@ let test_login_read_settles_by_outcome () =
   Masc_tui_types.owe_identity_login_read state "A";
   let failing = read_for () in
   Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.started;
-  Masc_tui_identity_updates.providers_loaded state read failing ~report:ignore ~now:1000.
+  Masc_tui_identity_updates.providers_loaded state failing ~report:ignore ~now:1000.
     ~attempts:[]
     (reading (Error "catalog unavailable"));
   (match login_read_state state "A" with
@@ -185,7 +185,7 @@ let test_login_read_settles_by_outcome () =
   Masc_tui_types.owe_identity_login_read state "A";
   let clean = read_for () in
   Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.started;
-  Masc_tui_identity_updates.providers_loaded state read clean ~report:ignore ~now:1000.
+  Masc_tui_identity_updates.providers_loaded state clean ~report:ignore ~now:1000.
     ~attempts:[]
     (reading (Ok catalog));
   (match login_read_state state "A" with

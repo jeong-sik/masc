@@ -1,0 +1,299 @@
+{
+  "days_without_file": [],
+  "execute": {
+    "by_day": [
+      {
+        "calls": 20331,
+        "day": "2026-11-01",
+        "hours": 17.35,
+        "long_calls": 67,
+        "long_hours": 4.09,
+        "sleeping_long_hours": 0.44
+      },
+      {
+        "calls": 25804,
+        "day": "2026-11-02",
+        "hours": 36.86,
+        "long_calls": 177,
+        "long_hours": 16.78,
+        "sleeping_long_hours": 12.88
+      },
+      {
+        "calls": 10674,
+        "day": "2026-11-03",
+        "hours": 22.52,
+        "long_calls": 180,
+        "long_hours": 12.54,
+        "sleeping_long_hours": 8.1
+      },
+      {
+        "calls": 14461,
+        "day": "2026-11-04",
+        "hours": 27.94,
+        "long_calls": 211,
+        "long_hours": 14.8,
+        "sleeping_long_hours": 11.18
+      },
+      {
+        "calls": 4201,
+        "day": "2026-11-05",
+        "hours": 12.48,
+        "long_calls": 94,
+        "long_hours": 8.3,
+        "sleeping_long_hours": 4.18
+      }
+    ],
+    "calls": 75471,
+    "calls_without_command": 850,
+    "duration_buckets": [
+      {
+        "calls": 27084,
+        "hours": 4.73,
+        "hours_percent": 4.0,
+        "label": "<1s"
+      },
+      {
+        "calls": 29872,
+        "hours": 13.92,
+        "hours_percent": 11.9,
+        "label": "1-3s"
+      },
+      {
+        "calls": 13939,
+        "hours": 19.31,
+        "hours_percent": 16.5,
+        "label": "3-10s"
+      },
+      {
+        "calls": 3847,
+        "hours": 22.67,
+        "hours_percent": 19.4,
+        "label": "10-60s"
+      },
+      {
+        "calls": 507,
+        "hours": 23.67,
+        "hours_percent": 20.2,
+        "label": "60-300s"
+      },
+      {
+        "calls": 222,
+        "hours": 32.85,
+        "hours_percent": 28.0,
+        "label": ">=300s"
+      }
+    ],
+    "hours": 117.15,
+    "long_calls": {
+      "by_kind": [
+        {
+          "calls": 246,
+          "hours": 27.58,
+          "hours_percent_of_long": 48.8,
+          "kind": "names_a_run",
+          "sleeping_calls": 239,
+          "sleeping_hours": 27.23,
+          "sleeping_hours_percent_of_sleeping": 74.0
+        },
+        {
+          "calls": 204,
+          "hours": 11.88,
+          "hours_percent_of_long": 21.0,
+          "kind": "gh_without_run",
+          "sleeping_calls": 123,
+          "sleeping_hours": 7.94,
+          "sleeping_hours_percent_of_sleeping": 21.6
+        },
+        {
+          "calls": 84,
+          "hours": 4.58,
+          "hours_percent_of_long": 8.1,
+          "kind": "build_or_test",
+          "sleeping_calls": 0,
+          "sleeping_hours": 0.0,
+          "sleeping_hours_percent_of_sleeping": 0.0
+        },
+        {
+          "calls": 195,
+          "hours": 12.48,
+          "hours_percent_of_long": 22.1,
+          "kind": "rest",
+          "sleeping_calls": 16,
+          "sleeping_hours": 1.61,
+          "sleeping_hours_percent_of_sleeping": 4.4
+        }
+      ],
+      "calls": 729,
+      "calls_percent": 1.0,
+      "calls_without_command": 0,
+      "hours": 56.52,
+      "hours_percent_of_execute": 48.2,
+      "sleeping_calls": 378,
+      "sleeping_github_hours": 35.16,
+      "sleeping_github_percent_of_sleeping": 95.6,
+      "sleeping_hours": 36.77,
+      "sleeping_hours_percent_of_long": 65.1,
+      "threshold_seconds": 60
+    }
+  },
+  "executes_without_duration": 0,
+  "files_read": 55,
+  "keepers_in_both": [
+    {
+      "blocked_hours": 8.97,
+      "keeper": "wkbl-data",
+      "self_wakes_naming_a_run": 20
+    },
+    {
+      "blocked_hours": 4.88,
+      "keeper": "masc-productor-owner",
+      "self_wakes_naming_a_run": 13
+    },
+    {
+      "blocked_hours": 3.49,
+      "keeper": "sangsu",
+      "self_wakes_naming_a_run": 13
+    },
+    {
+      "blocked_hours": 2.95,
+      "keeper": "wkbl-front",
+      "self_wakes_naming_a_run": 9
+    },
+    {
+      "blocked_hours": 0.33,
+      "keeper": "e-masc-the-leader",
+      "self_wakes_naming_a_run": 22
+    }
+  ],
+  "rows_in_window": 159144,
+  "rows_without_timestamp": 0,
+  "run_waits": {
+    "blocked_hours": 27.41,
+    "blocked_hours_percent_of_execute": 23.4,
+    "blocked_hours_summed_over_waits": 28.76,
+    "blocked_minutes_per_wait": {
+      "max": 46.7,
+      "median": 7.1,
+      "p90": 17.0
+    },
+    "polls": 277,
+    "polls_naming_several_runs": 12,
+    "polls_per_wait": {
+      "max": 7.0,
+      "median": 1.0,
+      "p90": 2.0
+    },
+    "polls_summed_over_waits": 289,
+    "repos": {
+      "blocked_hours_without_a_repo": 4.52,
+      "by_repo": [
+        {
+          "blocked_hours": 11.83,
+          "repo": "jeong-sik/masc",
+          "waits": 95
+        },
+        {
+          "blocked_hours": 11.07,
+          "repo": "jeong-sik/wkbl",
+          "waits": 61
+        }
+      ],
+      "waits_without_a_repo": 32
+    },
+    "single_poll_waits": 117,
+    "top_keepers": [
+      {
+        "blocked_hours": 8.97,
+        "keeper": "wkbl-data",
+        "waits": 34
+      },
+      {
+        "blocked_hours": 4.88,
+        "keeper": "masc-productor-owner",
+        "waits": 38
+      },
+      {
+        "blocked_hours": 3.49,
+        "keeper": "sangsu",
+        "waits": 31
+      },
+      {
+        "blocked_hours": 2.95,
+        "keeper": "wkbl-front",
+        "waits": 23
+      },
+      {
+        "blocked_hours": 2.53,
+        "keeper": "pr-updater",
+        "waits": 19
+      },
+      {
+        "blocked_hours": 2.21,
+        "keeper": "goo-yang-bong",
+        "waits": 20
+      },
+      {
+        "blocked_hours": 1.75,
+        "keeper": "github-pr-checker",
+        "waits": 10
+      },
+      {
+        "blocked_hours": 0.33,
+        "keeper": "e-masc-the-leader",
+        "waits": 8
+      }
+    ],
+    "waits": 188
+  },
+  "schedule_wakes": {
+    "creates": 326,
+    "distinct_keeper_run_pairs": 68,
+    "due_in_sec_of_those": {
+      "median": 1500.0,
+      "p10": 900.0,
+      "p90": 3600.0
+    },
+    "self_wakes": 240,
+    "self_wakes_naming_a_run": 81,
+    "top_keepers": [
+      {
+        "keeper": "e-masc-the-leader",
+        "wakes": 22
+      },
+      {
+        "keeper": "wkbl-data",
+        "wakes": 20
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "wakes": 13
+      },
+      {
+        "keeper": "sangsu",
+        "wakes": 13
+      },
+      {
+        "keeper": "wkbl-front",
+        "wakes": 9
+      },
+      {
+        "keeper": "wkbl-web-leader",
+        "wakes": 2
+      },
+      {
+        "keeper": "build-maniac",
+        "wakes": 1
+      },
+      {
+        "keeper": "you-never-change",
+        "wakes": 1
+      }
+    ]
+  },
+  "skipped_lines": 0,
+  "window": {
+    "from": "2026-11-01",
+    "to": "2026-11-05",
+    "until": "2026-11-05T05:00:00+00:00"
+  }
+}

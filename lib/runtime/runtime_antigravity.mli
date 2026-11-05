@@ -180,6 +180,26 @@ val noncompletion_result_to_json : noncompletion_result -> Yojson.Safe.t
 (** Diagnostic evidence with [completed=false] and [partial_response], never a
     completed assistant reply. Usage retains the CLI's exclusive raw counts. *)
 
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+(** The actions print mode refused, as the result's [denied_actions] names
+    them. Never empty: a result without refusals has no value of this type. *)
+
+type denied_result =
+  { conversation_id : string
+  ; denied : denied_actions
+  ; response : string
+  ; num_turns : int
+  ; usage : usage
+  }
+(** A SUCCESS result that named refusals. Print mode cannot ask for approval,
+    so agy refuses the action and ends the run; [response] is only the text
+    written before the refused call. *)
+
+val denied_action_names : denied_actions -> string list
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -193,6 +213,8 @@ type error =
       (** The exact documented result state and any partial reply. The identity
           is the matching [init] identity when present; before [init] it is only
           the result's unbound restatement and does not admit a session. *)
+  | Actions_denied of denied_result
+      (** The run ended on a refusal, not on the model's answer. *)
   | Process_exited of string
   | Unhandled_exception of string
       (** An exception nothing in the runtime expected, caught as the turn

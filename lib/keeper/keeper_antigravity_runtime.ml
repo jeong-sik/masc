@@ -28,6 +28,16 @@ let runtime_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
+  (* The same provider failure an empty SUCCESS already raises as
+     [Turn_failed]; the refusal now names itself instead of hiding in a
+     stderr tail, and a partial reply no longer passes as the answer. *)
+  | Runtime_antigravity.Actions_denied _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "antigravity_cli"
+         ; error_type = Some "actions_denied"
+         ; detail = Runtime_antigravity.error_to_string error
+         })
   | Runtime_antigravity.Result_not_completed evidence ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderTerminal
@@ -100,7 +110,8 @@ let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Unhandled_exception _ -> Session_store.Protocol_failed
   | Runtime_antigravity.State_callback_failed _ ->
     Session_store.State_persistence_failed
-  | Runtime_antigravity.Turn_failed _ -> Session_store.Provider_rejected
+  | Runtime_antigravity.Turn_failed _
+  | Runtime_antigravity.Actions_denied _ -> Session_store.Provider_rejected
 ;;
 
 let home_error_to_core_error error =

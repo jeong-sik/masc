@@ -3916,6 +3916,13 @@ let fetch_keeper_memory_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/keeper-memory-health"
 
+(** Fetch one Keeper's row of the memory health ([?keeper=], RFC-0487). A
+    Keeper the fleet does not list answers [keeper: null]. *)
+let fetch_keeper_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/dashboard/keeper-memory-health?keeper=" ^ percent_encode_query_value keeper)
+
 (** Fetch what one keeper remembers, fact by fact
     ([GET /api/v1/keepers/:name/memory-facts]): the ordinary and
     source-bound stores, each answered independently. *)

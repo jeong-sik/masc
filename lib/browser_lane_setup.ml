@@ -164,6 +164,30 @@ let prepare_directory path =
 let real_path path = try Unix.realpath path with Unix.Unix_error _ -> path
 let host_executable_name = "masc-browser-host"
 
+(* A macOS release host loads its libraries through [@loader_path/lib]
+   (scripts/package-macos-runtime.py), so it runs only with the [lib]
+   directory beside it, and the copy takes that directory's files along. A host
+   with no [lib] directory beside it, such as a local build linked to absolute
+   library paths, needs nothing more. The loader opens files, so only regular
+   files (or links to them) are libraries. *)
+let host_libraries_dirname = "lib"
+
+let host_libraries ~source =
+  let directory = Filename.concat (Filename.dirname source) host_libraries_dirname in
+  io ~step:"read" ~path:directory (fun () ->
+    match (Unix.stat directory).Unix.st_kind with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> []
+    | Unix.S_DIR ->
+      Sys.readdir directory
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.filter_map (fun name ->
+        let path = Filename.concat directory name in
+        match (Unix.stat path).Unix.st_kind with
+        | Unix.S_REG -> Some (name, read_file path)
+        | Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> None)
+    | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> [])
+
 (* The host that belongs to this masc is the one installed beside it: they
    were built and installed together, and the extension this binary embeds is
    written for that host's protocol. Both the directory the executable is
@@ -455,7 +479,21 @@ let install request =
     let* () = prepare_directory host_directory in
     let* () = prepare_extension extension in
     let* host_bytes = io ~step:"read" ~path:source (fun () -> read_file source) in
+    let* libraries = host_libraries ~source in
+    let host_library_directory = Filename.concat host_directory host_libraries_dirname in
+    let* () =
+      match libraries with
+      | [] -> Ok ()
+      | _ :: _ -> prepare_directory host_library_directory
+    in
     let* () = provision_token ~lane plan in
+    let* () =
+      List.fold_left
+        (fun written (name, contents) ->
+           let* () = written in
+           write_replacing ~mode:0o644 (Filename.concat host_library_directory name) contents)
+        (Ok ()) libraries
+    in
     let host = Filename.concat host_directory host_executable_name in
     let* () = write_replacing ~mode:0o755 host host_bytes in
     let launcher = Browser_lane_launcher.launcher_path ~base_path in

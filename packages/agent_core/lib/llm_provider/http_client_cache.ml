@@ -56,6 +56,7 @@ type stats =
   ; reuse_count_total : int
   ; create_count_total : int
   ; closed_total : close_counts
+  ; closed_after_reuse : close_counts
   }
 
 type close_counters =
@@ -72,6 +73,22 @@ let close_counter counters : Reuse_verdict.close_reason -> int Atomic.t = functi
   | Transport_ended -> counters.transport_ended_total
 ;;
 
+let make_close_counters () =
+  { request_failed_total = Atomic.make 0
+  ; not_persistent_total = Atomic.make 0
+  ; body_not_drained_total = Atomic.make 0
+  ; transport_ended_total = Atomic.make 0
+  }
+;;
+
+let read_close_counters counters =
+  { request_failed = Atomic.get counters.request_failed_total
+  ; not_persistent = Atomic.get counters.not_persistent_total
+  ; body_not_drained = Atomic.get counters.body_not_drained_total
+  ; transport_ended = Atomic.get counters.transport_ended_total
+  }
+;;
+
 type t =
   { sw : Eio.Switch.t
   ; mu : Eio.Mutex.t
@@ -81,6 +98,7 @@ type t =
   ; reuse_count_total : int Atomic.t
   ; create_count_total : int Atomic.t
   ; closed : close_counters
+  ; closed_after_reuse : close_counters
   ; stop : bool Atomic.t
   ; now : unit -> float
   }
@@ -103,12 +121,8 @@ let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t
     ; entries = Key_map.empty
     ; reuse_count_total = Atomic.make 0
     ; create_count_total = Atomic.make 0
-    ; closed =
-        { request_failed_total = Atomic.make 0
-        ; not_persistent_total = Atomic.make 0
-        ; body_not_drained_total = Atomic.make 0
-        ; transport_ended_total = Atomic.make 0
-        }
+    ; closed = make_close_counters ()
+    ; closed_after_reuse = make_close_counters ()
     ; stop = Atomic.make false
     ; now
     }
@@ -179,16 +193,17 @@ let stats (cache : t) : stats =
         Printf.sprintf "%s://%s:%d" scheme host port, List.length v)
     in
     let total_idle = List.fold_left (fun acc (_, n) -> acc + n) 0 idle_per_host in
+    (* [release] counts a close in [closed] before [closed_after_reuse], and a
+       reader on another domain may run between the two. Reading in the other
+       order keeps every reason's reused count at or below its total. *)
+    let closed_after_reuse = read_close_counters cache.closed_after_reuse in
+    let closed_total = read_close_counters cache.closed in
     { idle_per_host
     ; total_idle
     ; reuse_count_total = Atomic.get cache.reuse_count_total
     ; create_count_total = Atomic.get cache.create_count_total
-    ; closed_total =
-        { request_failed = Atomic.get cache.closed.request_failed_total
-        ; not_persistent = Atomic.get cache.closed.not_persistent_total
-        ; body_not_drained = Atomic.get cache.closed.body_not_drained_total
-        ; transport_ended = Atomic.get cache.closed.transport_ended_total
-        }
+    ; closed_total
+    ; closed_after_reuse
     })
 ;;
 
@@ -236,26 +251,50 @@ let park (cache : t) key connection : unit =
     if not parked then Eio.Resource.close connection)
 ;;
 
+type provenance =
+  | Reused
+  | Created
+
+type lease =
+  { cache : t
+  ; key : Key.t
+  ; connection : connection
+  ; provenance : provenance
+  ; released : bool Atomic.t
+  }
+
+let lease_connection lease = lease.connection
+
 (* Protected because a cancelled request still ends its connection: a
    contended [Eio.Mutex.lock] in [park] is a cancellation point, and a
    connection that is neither parked nor closed stays open until the cache's
    switch ends. *)
-let release (cache : t) key connection (verdict : Reuse_verdict.t) : unit =
+let release lease (verdict : Reuse_verdict.t) : unit =
+  (* A second release would park one socket twice, and two later requests
+     would share it. Like [Eio.Promise.resolve] on a resolved promise, it
+     raises instead of acting. *)
+  if not (Atomic.compare_and_set lease.released false true)
+  then invalid_arg "Http_client_cache.release: the lease was already released";
+  let { cache; key; connection; provenance; released = _ } = lease in
   Eio.Cancel.protect (fun () ->
     match verdict with
     | Park -> park cache key connection
     | Close reason ->
       Atomic.incr (close_counter cache.closed reason);
+      (match provenance with
+       | Reused -> Atomic.incr (close_counter cache.closed_after_reuse reason)
+       | Created -> ());
       Eio.Resource.close connection)
 ;;
 
 let checkout (cache : t) key ~create =
   match take cache key with
-  | Some connection -> Ok connection
+  | Some connection ->
+    Ok { cache; key; connection; provenance = Reused; released = Atomic.make false }
   | None ->
     (match create ~sw:cache.sw with
      | Ok connection ->
        Atomic.incr cache.create_count_total;
-       Ok connection
+       Ok { cache; key; connection; provenance = Created; released = Atomic.make false }
      | Error _ as error -> error)
 ;;

@@ -829,6 +829,7 @@ type cache_stats = Http_client_cache.stats =
   ; reuse_count_total : int
   ; create_count_total : int
   ; closed_total : cache_close_counts
+  ; closed_after_reuse : cache_close_counts
   }
 
 let create_cache = Http_client_cache.create
@@ -1063,20 +1064,37 @@ let tracked_client ~eof_seen conn =
   Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked)
 ;;
 
-(** A parked connection to [origin] from [cache], or a new one opened on the
-    cache's switch so that it can be parked after the request's own switch
-    ends. *)
-let checkout_connection cache ~net ~origin =
-  Http_client_cache.checkout cache (cache_key_of_origin origin) ~create:(fun ~sw ->
-    make_connection ~sw ~net ~origin)
+(* A request's connection: opened for this request alone, or leased from a
+   cache. [end_connection] ends either: a one-shot connection cannot be
+   parked, and a leased one ends through its cache's [release]. *)
+type held_connection =
+  | One_shot of connection
+  | Leased of Http_client_cache.lease
+
+let held_flow = function
+  | One_shot connection -> connection
+  | Leased lease -> Http_client_cache.lease_connection lease
 ;;
 
-(** Ends a request's connection. One from [cache] goes back through
-    [verdict] (RFC-0492 §3.2); one opened for the request alone is closed. *)
-let end_connection ?cache ~origin connection verdict =
+let open_connection cache ~sw ~net ~origin =
   match cache with
-  | Some cache -> Http_client_cache.release cache (cache_key_of_origin origin) connection verdict
-  | None -> Eio.Resource.close connection
+  | None ->
+    let* connection = make_connection ~sw ~net ~origin in
+    Ok (One_shot connection)
+  | Some cache ->
+    let* lease =
+      Http_client_cache.checkout cache (cache_key_of_origin origin) ~create:(fun ~sw ->
+        make_connection ~sw ~net ~origin)
+    in
+    Ok (Leased lease)
+;;
+
+(** Ends a request's connection. A leased one goes back through [verdict]
+    (RFC-0492 §3.2); one opened for the request alone is closed. *)
+let end_connection held verdict =
+  match held with
+  | One_shot connection -> Eio.Resource.close connection
+  | Leased lease -> Http_client_cache.release lease verdict
 ;;
 
 (** Client wrapper that tracks the socket for explicit close.
@@ -1112,13 +1130,13 @@ let with_client ?cache ~sw ~net ~origin f =
          let* result, (_ : Reuse_verdict.t) = f ~sw client in
          Ok result)
   | Some cache ->
-    let* conn = checkout_connection cache ~net ~origin in
+    let* conn = open_connection (Some cache) ~sw ~net ~origin in
     let eof_seen = ref false in
-    let client = tracked_client ~eof_seen conn in
+    let client = tracked_client ~eof_seen (held_flow conn) in
     let verdict = ref (Reuse_verdict.Close Request_failed) in
     Fun.protect
       ~finally:(fun () ->
-        try end_connection ~cache ~origin conn !verdict with
+        try end_connection conn !verdict with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Diag.warn
@@ -1339,12 +1357,6 @@ let post_sync_once_after_validation
   let status = ref None in
   let connection = ref None in
   let transport_eof_seen = ref false in
-  let close_connection conn =
-    try Eio.Cancel.protect (fun () -> Eio.Resource.close conn) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Diag.warn "http_client" "post_sync_once cleanup failed: %s" (Printexc.to_string exn)
-  in
   let fail error =
     match !phase, !status with
     | Before_dispatch, None -> Error (Before_dispatch_error error)
@@ -1358,19 +1370,10 @@ let post_sync_once_after_validation
     | None -> ()
     | Some conn ->
       connection := None;
-      (match cache with
-       | Some _ ->
-         (try
-            Eio.Cancel.protect (fun () ->
-              end_connection ?cache ~origin conn verdict)
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Diag.warn
-              "http_client"
-              "post_sync_once cleanup failed: %s"
-              (Printexc.to_string exn))
-       | None -> close_connection conn)
+      (try Eio.Cancel.protect (fun () -> end_connection conn verdict) with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Diag.warn "http_client" "post_sync_once cleanup failed: %s" (Printexc.to_string exn))
   in
   let release_connection reason = end_request_connection (Close reason) in
   (* An unclassified exception is still a transport failure, and this function
@@ -1452,13 +1455,9 @@ let post_sync_once_after_validation
   let post_result =
     try
       with_headers_deadline (fun () ->
-        let* conn =
-          match cache with
-          | None -> make_connection ~sw ~net ~origin
-          | Some cache -> checkout_connection cache ~net ~origin
-        in
+        let* conn = open_connection cache ~sw ~net ~origin in
         connection := Some conn;
-        let client = tracked_client ~eof_seen:transport_eof_seen conn in
+        let client = tracked_client ~eof_seen:transport_eof_seen (held_flow conn) in
         phase := Dispatch_started;
         Http_client_phase_observer.observe Http_client_phase_observer.Dispatch_started;
         Http_request_observer.dispatch_entered observation;
@@ -1806,19 +1805,15 @@ let with_post_stream
         | None -> ()
         | Some conn ->
           connection := None;
-          end_connection ?cache ~origin conn (Close Request_failed)
+          end_connection conn (Close Request_failed)
       in
       let* answer =
         match
           under_the_window (fun () ->
-            let* conn =
-              match cache with
-              | None -> make_connection ~sw ~net ~origin
-              | Some cache -> checkout_connection cache ~net ~origin
-            in
+            let* conn = open_connection cache ~sw ~net ~origin in
             connection := Some conn;
             let transport_eof_seen = ref false in
-            let client = tracked_client ~eof_seen:transport_eof_seen conn in
+            let client = tracked_client ~eof_seen:transport_eof_seen (held_flow conn) in
             Http_request_observer.dispatch_entered observation;
             match
               Cohttp_eio.Client.post
@@ -1888,7 +1883,7 @@ let with_post_stream
               | `Drained when !transport_eof_seen -> `Transport_ended
               | (`Drained | `Not_drained | `Failed) as state -> state
             in
-            end_connection ?cache ~origin conn
+            end_connection conn
               (Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body))
           (fun () ->
              let read_body () =
@@ -1940,10 +1935,10 @@ let with_post_stream
            let reader =
              Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body
            in
-           Ok (origin, conn, reuse, transport_eof_seen, reader)
+           Ok (conn, reuse, transport_eof_seen, reader)
          with
          | exn ->
-           end_connection ?cache ~origin conn (Close Request_failed);
+           end_connection conn (Close Request_failed);
            (match classify_network_exn exn with
             | Some e -> Error e
             | None when !transport_eof_seen -> Error (eof_error exn)
@@ -1996,7 +1991,7 @@ let with_post_stream
 
      The connection is parked back into the cache only after [f] returns
      successfully, ensuring the reader is no longer using the flow. *)
-  let* origin, conn, reuse, transport_eof_seen, reader = post_result in
+  let* conn, reuse, transport_eof_seen, reader = post_result in
   let pre_header_elapsed_s =
     match window_opened with
     | Some (clock, opened_at) -> Eio.Time.now clock -. opened_at
@@ -2025,7 +2020,7 @@ let with_post_stream
               the connection before re-raising to avoid leaking a cached socket
               bound to the long-lived cache switch. *)
          Eio.Cancel.protect (fun () ->
-           end_connection ?cache ~origin conn (Close Request_failed));
+           end_connection conn (Close Request_failed));
          raise exn)
   in
   let body =
@@ -2035,7 +2030,7 @@ let with_post_stream
     | Ok _ when not (Eio.Buf_read.eof_seen reader) -> `Not_drained
     | Ok _ -> `Drained
   in
-  end_connection ?cache ~origin conn (reuse ~body);
+  end_connection conn (reuse ~body);
   body_result
 ;;
 

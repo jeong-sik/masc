@@ -30,13 +30,16 @@ type close_counts =
   ; transport_ended : int
   }
 
-(** Snapshot of the cache for observability. *)
+(** Snapshot of the cache for observability. [closed_after_reuse] counts the
+    part of [closed_total] whose connection had been parked before, so a
+    reused connection's failures can be told from a new one's (RFC-0492 §6). *)
 type stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
   ; closed_total : close_counts
+  ; closed_after_reuse : close_counts
   }
 
 (** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
@@ -59,20 +62,30 @@ val create
 
 val stats : t -> stats
 
-(** A parked connection for the origin idle for at most the TTL, now owned
-    by the caller; otherwise the result of [create], which must open its
-    connection on the given switch. Expired connections for the origin are
-    closed on the way. Counts a reuse for the first case and a created
-    connection for a [create] that returns [Ok]. Always runs [create] once
-    the cache is stopped. *)
+(** A checked-out connection with its cache, its origin, and whether it was
+    parked before or opened by [create] for this checkout. {!release} ends it
+    once; closing its connection directly would skip the cache's counts. *)
+type lease
+
+val lease_connection : lease -> connection
+
+(** A lease on a parked connection for the origin idle for at most the TTL;
+    otherwise on the connection [create] opens, on the given switch. The
+    caller holds the lease until {!release}. Expired connections for the
+    origin are closed on the way. Counts a reuse for the first case and a
+    created connection for a [create] that returns [Ok], whose [Error] is
+    returned as it is. Always runs [create] once the cache is stopped. *)
 val checkout
   :  t
   -> Key.t
   -> create:(sw:Eio.Switch.t -> (connection, 'e) result)
-  -> (connection, 'e) result
+  -> (lease, 'e) result
 
-(** Ends a checked-out connection. [Park] parks it for later reuse, or closes
-    it when the origin already holds [max_idle_per_host] idle connections or
-    the cache is stopped. [Close reason] closes it and counts [reason] in
-    {!stats}. Cancellation does not interrupt it. *)
-val release : t -> Key.t -> connection -> Reuse_verdict.t -> unit
+(** Ends a lease. [Park] parks its connection for later reuse, or closes it
+    when the origin already holds [max_idle_per_host] idle connections or the
+    cache is stopped. [Close reason] closes it and counts [reason] in
+    [closed_total], and also in [closed_after_reuse] when the connection was
+    parked before. Cancellation does not interrupt it.
+
+    @raise Invalid_argument if the lease was already released. *)
+val release : lease -> Reuse_verdict.t -> unit

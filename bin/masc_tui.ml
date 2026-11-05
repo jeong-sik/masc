@@ -8074,6 +8074,22 @@ let owe_machine_live_read state machine =
     | Masc.Machine_lane.Dos ->
         state.dos_live_owed <- Masc_tui_owed_read.changed state.dos_live_owed
 
+let owe_open_lane_addon_read state =
+  match state.lane_addons with
+  | Some { Masc_tui_lane_addons.screen = Masc_tui_lane_addons.Detail (open_id, incarnation); _ } ->
+      let owed = match state.lane_addons_owed with
+        | Some ((owner, epoch), owed) when String.equal owner open_id
+            && String.equal epoch incarnation -> owed
+        | Some _ | None -> Masc_tui_owed_read.settled
+      in
+      state.lane_addons_owed <-
+        Some ((open_id, incarnation), Masc_tui_owed_read.changed owed)
+  | Some { Masc_tui_lane_addons.screen = Masc_tui_lane_addons.Overview; _ } | None -> ()
+
+let owe_open_observation_reads state =
+  owe_machine_live_read state state.machine_source;
+  owe_open_lane_addon_read state
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -8112,15 +8128,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
        | Decision.Read_lanes -> state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
        | Decision.Read_addon instance_id ->
            (match state.lane_addons with
-            | Some { Masc_tui_lane_addons.screen = Detail (open_id, incarnation); _ }
-              when String.equal open_id instance_id ->
-                let owed = match state.lane_addons_owed with
-                  | Some ((owner, epoch), owed) when String.equal owner open_id
-                      && String.equal epoch incarnation -> owed
-                  | Some _ | None -> Masc_tui_owed_read.settled
-                in
-                state.lane_addons_owed <-
-                  Some ((open_id, incarnation), Masc_tui_owed_read.changed owed)
+            | Some { Masc_tui_lane_addons.screen = Detail (open_id, _); _ }
+              when String.equal open_id instance_id -> owe_open_lane_addon_read state
             | Some { Masc_tui_lane_addons.screen = Overview | Detail _; _ } | None -> ())
        | Decision.Ignore -> ())
 
@@ -19084,6 +19093,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state;
        owe_overview_read state;
+       owe_open_observation_reads state;
        if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state);
   scoped_refresh_followup :=
     note_full_refresh_intent

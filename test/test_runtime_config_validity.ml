@@ -73,7 +73,7 @@ let ollama_cloud_seed_cases =
     ; api_name = "deepseek-v4.1-flash"
     ; context = 1048576
     ; tools = true
-    ; thinking = true
+    ; thinking = false
     ; vision = true
     }
   ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
@@ -4001,7 +4001,11 @@ let test_gemini_provider_resolves_capabilities_under_its_own_label () =
    a runtime on the Messages wire replays only the latest user turn's tool loop;
    a capability row that states its own replay stays authoritative. Seen live on
    2026-10-12: 294 log lines of "Invalid `signature` in `thinking` block" on the
-   direct Anthropic runtime, each a 400 that retrying cannot clear. *)
+   direct Anthropic runtime, each a 400 that retrying cannot clear.
+
+   The row leaves thinking-support out. The replay policy does not read it,
+   and a row that states it with no thinking-control policy for its provider
+   is refused at load (#28447). *)
 let anthropic_messages_runtime_toml =
   "[providers.my_claude]\n\
    kind = \"anthropic\"\n\
@@ -4017,7 +4021,6 @@ let anthropic_messages_runtime_toml =
    api-name = \"claude-sonnet-5-5\"\n\
    max-context = 200000\n\
    tools-support = true\n\
-   thinking-support = true\n\
    streaming = true\n\
    \n\
    [models.probe.capabilities]\n\
@@ -4133,6 +4136,21 @@ let test_operator_own_anthropic_policy_admits_explicit_thinking () =
 
 let test_operator_own_anthropic_without_policy_still_refuses_explicit_thinking () =
   with_model_catalog_content bare_sonnet_row_without_a_readable_provider @@ fun () ->
+  with_temp_runtime_toml
+    (anthropic_operator_own_policy_runtime_toml ~policy_line:"")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Error (Runtime_config_error.Thinking_requests_inadmissible refusals) ->
+        check (list string) "a row stating thinking-support is refused at load"
+          [ "my_claude.probe" ]
+          (List.map
+             (fun (refusal : Runtime_config_error.thinking_request_refusal) ->
+               refusal.runtime_id)
+             refusals)
+      | Error failure ->
+        failf "refused for another reason: %s"
+          (Runtime_config_error.to_diagnostic_text ~config_path:path failure)
+      | Ok _ -> fail "a row stating thinking-support without a policy loaded");
   with_temp_runtime_toml anthropic_messages_runtime_toml (fun path ->
     match load_list_text ~config_path:path with
     | Error error -> failf "operator-own anthropic runtime should load: %s" error

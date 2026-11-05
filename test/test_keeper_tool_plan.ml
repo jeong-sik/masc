@@ -1896,6 +1896,37 @@ let test_plan_error_json_covers_closed_sum () =
     schema_errors
 ;;
 
+let test_export_resolution_error_json_names_each_cause () =
+  let json = testable Yojson.Safe.pp Yojson.Safe.equal in
+  let a = node_id "a" in
+  let rows =
+    [ ( Plan.Producer_unavailable a
+      , `Assoc [ "kind", `String "producer_unavailable"; "node_id", `String "a" ] )
+    ; ( Plan.Producer_invalid (Plan.Unknown_node_id a)
+      , `Assoc
+          [ "kind", `String "producer_invalid"
+          ; ( "error"
+            , `Assoc [ "kind", `String "unknown_node_id"; "node_id", `String "a" ] )
+          ] )
+    ; ( Plan.Export_pointer_unavailable (Plan.Json_pointer.Missing_object_field "value")
+      , `Assoc
+          [ "kind", `String "pointer_unavailable"
+          ; ( "error"
+            , `Assoc
+                [ "kind", `String "missing_object_field"; "field", `String "value" ] )
+          ] )
+    ]
+  in
+  List.iter
+    (fun (error, expected) ->
+       check
+         json
+         "export resolution error payload"
+         expected
+         (Masc.Keeper_tool_plan_error_projection.export_resolution_error_to_json error))
+    rows
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -1942,6 +1973,10 @@ let () =
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation
         ; test_case "JSON template" `Quick test_json_template_preserves_declared_structure
         ; test_case "plan error JSON sum" `Quick test_plan_error_json_covers_closed_sum
+        ; test_case
+            "export resolution error JSON"
+            `Quick
+            test_export_resolution_error_json_names_each_cause
         ] )
     ; ( "plan"
       , [ test_case

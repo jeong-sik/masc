@@ -1,6 +1,7 @@
 module Plan = Keeper_tool_plan
 module Executor = Keeper_tool_plan_executor
 module Projection = Keeper_tool_composition_projection
+module Plan_error = Keeper_tool_plan_error_projection
 
 let settled = function
   | Ok nodes -> nodes
@@ -27,7 +28,7 @@ let node_summary (node : Executor.node_result) =
      ; "schedule", Projection.schedule_to_json node.schedule
      ; "output_validation_error", (match node.output_validation_error with
          | None -> `Null
-         | Some error -> Projection.plan_execution_error_to_json error)
+         | Some error -> Plan_error.plan_execution_error_to_json error)
      ; "failure_effect_disposition", Projection.failure_effect_disposition_to_json node.failure_effect_disposition
      ; "deferred_kind", Projection.deferred_kind_to_json node.deferred_kind ] @ failure)
 ;;
@@ -44,20 +45,11 @@ let cause_summary = function
     `Assoc [ "kind", `String "plan_execution_failed"
            ; "node_id", `String (Plan.Node_id.to_string node_id)
            ; "schedule", Projection.schedule_to_json schedule
-           ; "error", Projection.plan_execution_error_to_json error ]
+           ; "error", Plan_error.plan_execution_error_to_json error ]
   | Executor.Outer_completion_mismatch { expected; actual } ->
     `Assoc [ "kind", `String "outer_completion_mismatch"
            ; "expected", Agent_core.Tool_contract.completion_to_yojson expected
            ; "actual", Agent_core.Tool_contract.completion_to_yojson actual ]
-;;
-
-let export_error = function
-  | Plan.Producer_unavailable node_id ->
-    `Assoc [ "kind", `String "producer_unavailable"; "node_id", `String (Plan.Node_id.to_string node_id) ]
-  | Plan.Producer_invalid error ->
-    `Assoc [ "kind", `String "producer_invalid"; "error", Projection.plan_execution_error_to_json error ]
-  | Plan.Export_pointer_unavailable error ->
-    `Assoc [ "kind", `String "pointer_unavailable"; "error", Projection.pointer_resolution_error_to_json error ]
 ;;
 
 let selected_fields plan nodes =
@@ -73,7 +65,7 @@ let selected_fields plan nodes =
   |> List.map (fun (export, value) ->
     export.Plan.name, match value with
     | Ok value -> `Assoc [ "available", `Bool true; "value", value ]
-    | Error error -> `Assoc [ "available", `Bool false; "error", export_error error ])
+    | Error error -> `Assoc [ "available", `Bool false; "error", Plan_error.export_resolution_error_to_json error ])
   |> fun fields -> `Assoc fields
 ;;
 

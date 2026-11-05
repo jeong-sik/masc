@@ -123,3 +123,21 @@ let plan_execution_error_to_json = function
       ; "tool_name", `String tool_name
       ]
 ;;
+
+let export_resolution_error_to_json = function
+  | Keeper_tool_plan.Producer_unavailable node_id ->
+    `Assoc
+      [ "kind", `String "producer_unavailable"
+      ; "node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
+      ]
+  | Keeper_tool_plan.Producer_invalid error ->
+    `Assoc
+      [ "kind", `String "producer_invalid"
+      ; "error", plan_execution_error_to_json error
+      ]
+  | Keeper_tool_plan.Export_pointer_unavailable error ->
+    `Assoc
+      [ "kind", `String "pointer_unavailable"
+      ; "error", pointer_resolution_error_to_json error
+      ]
+;;

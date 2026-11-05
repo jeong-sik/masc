@@ -3,7 +3,8 @@
    did when the answers were constructors of [async_msg] themselves: a draft
    save is a write and every other answer is a read, and no answer waits for
    input. An answer to a request the pane never sent asks the loop for
-   nothing. *)
+   nothing, and a save that commits while its file is on screen asks the loop
+   to read that file again. *)
 
 module Protocol = Masc_tui_async_protocol
 module Code = Masc_tui_code_results
@@ -102,6 +103,43 @@ let test_an_unasked_answer_asks_for_nothing () =
          | Code.Reload_saved_file _ -> false))
     (answers ())
 
+(* The server the save's address names, confirmed as the workspace on screen. *)
+let confirm_workspace (state : Types.state) =
+  state.server_identity <- Some
+    { Masc.Tui_decode.sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_runtime_instance_id = None;
+      sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace";
+      sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/.masc";
+      sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
+      sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.view <- Types.Code
+
+let test_a_committed_save_rereads_its_file () =
+  let state = Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_workspace state;
+  let reading, read =
+    match Fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with
+    | Fetched.Started (next, request) -> next, request
+    | Fetched.Already_loading -> Alcotest.fail "a fresh file reported a read in flight"
+  in
+  state.code_file <- reading;
+  let source = { Masc.Tui_decode.wfs_content = "a\n"; wfs_revision = String.make 64 'a' } in
+  Alcotest.(check bool) "the file read asks the loop for nothing" true
+    (match Code.apply state (Code.Code_file_loaded (Types.Refresh_code_file, read, Ok source)) with
+     | Code.No_answer_followup -> true
+     | Code.Reload_saved_file _ -> false);
+  state.code_focus_file <- Types.Right_pane;
+  let must = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let draft = must (Code.prepare_draft state) in
+  must (Code.edit_draft state draft "b\n");
+  let saving, _ = must (Code.begin_draft_save state) in
+  Alcotest.(check (option string)) "the committed save asks to read its file again"
+    (Some "src/a.ml")
+    (match Code.apply state (Code.Code_draft_saved (saving, Draft.Save_succeeded (String.make 64 'b'))) with
+     | Code.Reload_saved_file path -> Some path
+     | Code.No_answer_followup -> None)
+
 let () =
   Alcotest.run "tui code msg"
     [ ( "classifiers"
@@ -111,4 +149,6 @@ let () =
             test_no_answer_waits_for_input ] )
     ; ( "apply"
       , [ Alcotest.test_case "an unasked Code answer asks the loop for nothing" `Quick
-            test_an_unasked_answer_asks_for_nothing ] ) ]
+            test_an_unasked_answer_asks_for_nothing
+        ; Alcotest.test_case "a committed save asks to read its file again" `Quick
+            test_a_committed_save_rereads_its_file ] ) ]

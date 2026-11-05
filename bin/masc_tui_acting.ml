@@ -434,11 +434,14 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_event_queue_changed { keeper }
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
   | Observer.Keeper_turn_changed { keeper; _ }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Approval_change change -> approval_change_keeper change
   | Observer.Keeper_roster_change Observer.Every_row_changed
-  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
+  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.(Repositories | Verification_requests | Harness_verdicts)
+  | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
 
@@ -495,6 +498,8 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Gate_connector_changed _ -> "connector"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
+  | Observer.Dataset_changed
+      (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
   | Observer.Approval_change
@@ -661,6 +666,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "connector " ^ connector ^ " changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "an OAuth login attempt changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

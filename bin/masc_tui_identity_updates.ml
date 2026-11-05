@@ -92,7 +92,7 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
         report (Printf.sprintf "%s %s login: %s" expectation.ile_keeper
           expectation.ile_provider detail)) notice
 
-let providers_loaded (state : state) request ~report ~attempts result =
+let providers_loaded (state : state) request ~report ~now ~attempts result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -131,7 +131,41 @@ let providers_loaded (state : state) request ~report ~attempts result =
   if current then List.iter (fun (expectation, status) ->
     if String.equal expectation.ile_keeper keeper_name then
       apply_login_status state ~report ~catalog:(Result.to_option providers_result)
-        expectation status) attempts
+        expectation status) attempts;
+  (* The read that owed this answer settles the Keeper's debt either way. A
+     deadline the server still reports as waiting has passed on this clock:
+     the server applies expiry only when it reads, so this TUI treats it as
+     a failed read and backs off rather than waiting on a slower clock
+     forever. *)
+  if current then
+    let failed =
+      match providers_result, attempts with
+      | Error _, _ -> true
+      | Ok _, [] -> false
+      | Ok _, _ ->
+        List.exists (fun (expectation, status) ->
+          String.equal expectation.ile_keeper keeper_name
+          && (match status with
+              (* A status this TUI could not read is a failed read, not a
+                 clean one: settling on it would drop the debt while the
+                 Keeper's answer is unknown. *)
+              | Error _ -> true
+              | Ok status ->
+                (match status with
+                 | Masc_tui_identity_model.Consent_waiting deadline -> deadline <= now
+                 | Masc_tui_identity_model.Callback_in_progress
+                 | Masc_tui_identity_model.Credentials_published _
+                 | Masc_tui_identity_model.Login_exchange_failed
+                 | Masc_tui_identity_model.Credential_publication_incomplete
+                 | Masc_tui_identity_model.Consent_expired
+                 | Masc_tui_identity_model.Consent_superseded
+                 | Masc_tui_identity_model.Attempt_unavailable -> false))) attempts in
+    Masc_tui_types.update_identity_login_read state keeper_name
+      (if failed then
+         Masc_tui_owed_read.failed
+           ~retry_s:Masc_tui_types.identity_login_retry_s
+           ~max_retry_s:Masc_tui_types.identity_login_max_retry_s ~now
+       else Masc_tui_owed_read.succeeded)
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =

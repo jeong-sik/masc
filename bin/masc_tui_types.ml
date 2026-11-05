@@ -10038,6 +10038,11 @@ type state = {
      or starting another provider must leave outstanding logins available. *)
   mutable identity_logins: identity_login_started list;
   mutable identity_login_expectations: identity_login_expectation list;
+  (* What each Keeper this workspace waits on a login for owes its attempt
+     read: an announcement, a revalidation, a passed consent deadline or a
+     failed read owes one; the record of a Keeper nobody waits on is
+     dropped. *)
+  mutable identity_login_reads: (string * Masc_tui_owed_read.t) list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -14774,6 +14779,13 @@ let suspend_workspace_readings state =
   (* The list is cleared, and resuming the same workspace does not revalidate
      the Board, so the list is owed. A read in flight keeps its failures. *)
   state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed;
+  (* Each waited Keeper's login read was Reading under the withdrawn
+     authority; its answer will not be current there, so the reads go back
+     to owed and the revalidation this suspend precedes re-reads them. *)
+  state.identity_login_reads <-
+    List.map (fun (keeper_name, read) ->
+      keeper_name, Masc_tui_owed_read.abandoned read)
+      state.identity_login_reads;
   retire_keeper_message_search state;
   stop_waiting_for_memory_recall_standing state
     "서버 신원 확인이 끊겨서 읽지 못했어요";
@@ -15165,6 +15177,39 @@ let identity_login_pending_keepers (state : state) ~now =
        then Some expectation.ile_keeper
        else None)
   |> List.sort_uniq String.compare
+
+(* A failed login attempt read waits longer each time, bounded, so a server
+   that keeps failing does not take the loop. *)
+let identity_login_retry_s = 2.0
+let identity_login_max_retry_s = 60.0
+
+(* The read a Keeper's login attempts owe. A Keeper with no record owes
+   nothing; the record disappears with the last expectation that waited on
+   it, so a finished login leaves no debt behind. *)
+let identity_login_read (state : state) keeper_name =
+  Option.value ~default:Masc_tui_owed_read.settled
+    (List.assoc_opt keeper_name state.identity_login_reads)
+
+let update_identity_login_read (state : state) keeper_name f =
+  let waited =
+    List.exists (fun expectation -> String.equal expectation.ile_keeper keeper_name)
+      state.identity_login_expectations in
+  let others = List.remove_assoc keeper_name state.identity_login_reads in
+  state.identity_login_reads <-
+    (if waited then (keeper_name, f (identity_login_read state keeper_name)) :: others
+     else others)
+
+(* An announcement, a revalidation or a passed consent deadline owes the
+   Keeper's attempt read (RFC-0480 §3.4). *)
+let owe_identity_login_read (state : state) keeper_name =
+  update_identity_login_read state keeper_name Masc_tui_owed_read.changed
+
+(* Authority coming back owes every Keeper a kept expectation names: while
+   the feed was gone its announcements were lost, and this is the one moment
+   the whole wait is known to be stale. *)
+let owe_every_identity_login_read (state : state) =
+  state.identity_login_expectations
+  |> List.iter (fun expectation -> owe_identity_login_read state expectation.ile_keeper)
 
 (* A restart supersedes the outstanding response for this exact key, while
    the previous consent URL remains available until a replacement arrives. *)
@@ -19860,6 +19905,7 @@ let create_state
   identity_callback = None;
   identity_logins = [];
   identity_login_expectations = [];
+  identity_login_reads = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;

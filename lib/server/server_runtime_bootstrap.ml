@@ -579,6 +579,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Dashboard_cache.invalidate_prefix Dashboard_harness_health.cache_key_prefix;
     Workspace_dataset_event.announce ~base_path
       Workspace_dataset_event.Harness_verdicts);
+  Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
+    Workspace_dataset_event.announce ~base_path
+      (Workspace_dataset_event.Keeper_oauth_attempts { keeper }));
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path

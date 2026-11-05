@@ -29,6 +29,7 @@ val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
   -> report:(string -> unit)
+  -> now:float
   -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   -> ( Masc_tui_identity_model.identity_provider list
        * Masc_tui_identity_model.identity_callback option

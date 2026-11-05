@@ -62,6 +62,20 @@ val publish_renewal :
 (** Validate the captured credential revision, invalidate borrowed observations
     before attempting writes, and return the resulting revision on success.
     A failed write can have changed storage; no rollback is implied. *)
+val install_change_observer : (base_path:string -> keeper:string -> unit) -> unit
+(** Called with the table's [base_path] and the Keeper whose attempts a status
+    reader would now see differently: {!remember} held a new attempt,
+    {!take} admitted a callback, {!finish} recorded an outcome,
+    {!publish_credentials} was interrupted, or {!retire_scope} ran. It gets
+    no provider, state, verifier, code or URL. Expiry is a deadline, not a
+    change, and is not reported; a read, a refused start, a repeated
+    callback and a finish nobody admitted change nothing and are not
+    reported either.
+
+    It runs under the table's lock, so it must not call back into this
+    table, must not yield and must not raise. The last installed observer
+    wins. *)
+
 val retire_scope :
   t -> keeper:string -> provider_id:string ->
   local_delete:(unit -> ('a, string) result) -> ('a, string) result

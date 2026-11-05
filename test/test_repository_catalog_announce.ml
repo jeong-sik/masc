@@ -30,18 +30,15 @@ let test_catalog_writes_announce () =
       let id = "repository-catalog-announce" in
       Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
         ~callback:(fun (event : Sse.external_event) ->
-          match
-            ( Json_util.assoc_string_opt "type" event.ext_payload
-            , Json_util.assoc_string_opt "dataset" event.ext_payload )
-          with
-          | Some kind, Some wire
-            when String.equal kind Workspace_dataset_event.event_type
-                 && Option.equal
-                      (fun (a : Workspace_dataset_event.dataset) b -> a = b)
-                      (Workspace_dataset_event.dataset_of_wire wire)
-                      (Some Workspace_dataset_event.Repositories) ->
-            incr heard
-          | (Some _ | None), (Some _ | None) -> ())
+          match Json_util.assoc_string_opt "type" event.ext_payload with
+          | Some kind when String.equal kind Workspace_dataset_event.event_type ->
+            (match event.ext_payload with
+             | `Assoc fields ->
+               (match Workspace_dataset_event.of_fields fields with
+                | Ok Workspace_dataset_event.Repositories -> incr heard
+                | Ok _ | Error _ -> ())
+             | _ -> ())
+          | Some _ | None -> ())
         ();
       Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
         let repo = repository ~local_path:(Filename.concat base_path "repo") in

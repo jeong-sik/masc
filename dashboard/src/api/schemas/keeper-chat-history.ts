@@ -66,24 +66,6 @@ export const SurfaceRefSchema = object({
   address: optional(record(string(), string())),
 })
 
-// RFC-0235 P1/P3: synthesized voice clip. Backend uses snake_case in
-// history rows (lib/keeper/keeper_chat_store.ml) and camelCase in SSE
-// payloads (lib/keeper/keeper_chat_broadcast.ml). We accept both at the
-// boundary and let normalizers canonicalize to camelCase.
-export const KeeperChatHistoryAudioClipSchema = object({
-  token: string(),
-  audio_url: optional(string()),
-  audioUrl: optional(string()),
-  mime: string(),
-  duration_sec: optional(number()),
-  durationSec: optional(number()),
-  message_text: optional(string()),
-  messageText: optional(string()),
-  device_id: optional(string()),
-  deviceId: optional(string()),
-  expired: optional(boolean()),
-})
-
 const KeeperChatTableCellSchema = union([
   string(),
   object({

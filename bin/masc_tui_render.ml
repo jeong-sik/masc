@@ -166,7 +166,7 @@ let render_overview (state : state) home =
   let all_decisions = Masc_tui_home.home_decision_rows home in
   let continuation = Masc_tui_home.home_continue_rows home in
   let selected = Masc_tui_home.home_selected_action home in
-  let overview_error, overview = overview_refresh_reading state in
+  let overview_error, overview = state.overview_error, state.overview in
   let health =
     match Terminal_text.optional_single_line overview_error, overview with
     | Some error, _ -> " Health: unavailable · " ^ error

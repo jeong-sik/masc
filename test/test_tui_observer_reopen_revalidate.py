@@ -31,7 +31,7 @@ from typing import Callable, cast
 
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
-# The full refresh bundle reads this on every pass, whatever the surface.
+# A revalidation reads the Home Health line, whatever the surface.
 BUNDLE_PATH = "/api/v1/dashboard/health-line"
 WAIT_SECONDS = 25.0
 QUIET_SECONDS = 3.0
@@ -121,7 +121,15 @@ class FeedHandler(http.server.BaseHTTPRequestHandler):
             with server.condition:
                 server.bundle_reads += 1
                 server.condition.notify_all()
-            self.respond(200, {})
+            # A line the TUI reads, so no failed read is retried.
+            self.respond(
+                200,
+                {
+                    "workspace_health": "ok",
+                    "keepers_listing": {"state": "listed"},
+                    "unreadable_keepers": 0,
+                },
+            )
             return
         if split.path != "/mcp":
             self.respond(200, {})

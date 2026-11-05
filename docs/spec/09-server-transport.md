@@ -192,9 +192,9 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 
 지원 버전은 `Mcp_transport_protocol.supported_protocol_versions`에 정의된다. 세션 생성 시 `initialize` 요청의 `params.protocolVersion` 필드로 버전을 협상한다.
 
-- `mcp_protocol_versions`: 지원 버전 목록
-- `mcp_protocol_version_default`: 기본 버전
-- 세션별 버전은 `protocol_version_by_session` Hashtbl에 기록된다.
+- `mcp_protocol_versions`: 지원 버전 목록(위 값의 별칭)
+- `mcp_protocol_version_default`: 기본 버전(`Mcp_transport_protocol.default_protocol_version` 의 별칭)
+- 세션별 버전은 세션 레지스트리에 기록된다(`remember_protocol_version`).
 - 동일 세션에서 버전 변경 시도는 `validate_protocol_version_continuity`가 거부한다.
 
 ### 4.4 MCP Session Management

@@ -20,7 +20,7 @@ val emit_synthetic_events : api_response -> (sse_event -> unit) -> unit
     These predicates distinguish *prelude / scheduling* events
     (which set [prefill_ms] in [Streaming_summary]) from
     *first-token* events (which set [ttft_ms]). The capture site
-    is [Complete] §publish_summary. *)
+    is [Complete_stream] §publish_summary. *)
 
 (** [true] when the SSE event represents the first generated
     content. That means a [ContentBlockDelta] carrying a
@@ -143,7 +143,7 @@ val parse_openai_sse_chunk
     [delta_content] or a non-empty [delta_reasoning] or any
     [delta_tool_calls] — that is, the consumer would surface a
     visible token (or tool-call argument) to the application. Used
-    by the TTFT capture point in [Complete] to distinguish prelude
+    by the TTFT capture point in [Complete_stream] to distinguish prelude
     chunks (empty role-only deltas, finish-only chunks) from the
     first real token.
 

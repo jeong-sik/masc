@@ -8,7 +8,7 @@ sources are cited at each row; calibration history is at the bottom.
 **Definition.**  Milliseconds from provider HTTP request submission
 to the first parsed chunk that carries a non-empty user-visible
 delta (text / reasoning / tool-call argument).  Captured in-process
-in `Complete.publish_summary` and emitted as
+in `publish_summary` (`complete_stream.ml`) and emitted as
 `Streaming_summary.ttft_ms : float option` (RFC-AC-020 §3.2).
 
 Distinct from `Streaming_first_chunk.ttfrc_ms` which fires on the

@@ -115,7 +115,8 @@ class ChatHandler(FixtureHandler):
         )
         self.send_header("x-masc-sse-replay", replay)
         if replay == "resumed-after-gap":
-            self.send_header("x-masc-sse-replay-missed-through", "1")
+            missed_through = int(self.headers["Last-Event-ID"]) + 1
+            self.send_header("x-masc-sse-replay-missed-through", str(missed_through))
         self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()

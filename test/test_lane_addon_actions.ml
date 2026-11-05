@@ -875,13 +875,16 @@ let test_private_addon_events_are_scoped_to_their_readers () =
         drain []
       in
       let ids deliveries = List.map (fun (delivery : Sse.delivery) -> delivery.payload) deliveries in
+      let owner_events = ids (received owner_stream) in
+      let other_events = ids (received other_stream) in
+      let admin_events = ids (received admin_stream) in
       check (list bool) "owner reads only owner and shared" [ true; false; true ]
-        (List.map (fun payload -> List.mem payload (ids (received owner_stream)))
+        (List.map (fun payload -> List.mem payload owner_events)
           [ owner_only; operator_only; shared ]);
       check (list bool) "another Keeper reads neither private event" [ false; false ]
-        (List.map (fun payload -> List.mem payload (ids (received other_stream))) [ owner_only; operator_only ]);
+        (List.map (fun payload -> List.mem payload other_events) [ owner_only; operator_only ]);
       check (list bool) "operator reads all events" [ true; true; true ]
-        (List.map (fun payload -> List.mem payload (ids (received admin_stream)))
+        (List.map (fun payload -> List.mem payload admin_events)
           [ owner_only; operator_only; shared ]);
       check int "an external subscriber without identity sees shared" 1 !shared_external;
       check int "an external subscriber without identity sees no private event" 0 !private_external;

@@ -10,6 +10,11 @@ module Flow = Keeper_memory_recall_flow
 module J = Keeper_memory_recall_judgment
 module C = Keeper_memory_recall_candidates
 module T = Keeper_memory_os_types
+
+(* A System with no amendments, as a turn without a basis issues it. *)
+let system_of_text text =
+  Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Keeper_turn_system.Without_basis
+    ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
 module Codec = Keeper_memory_recall_jev_codec
 module Eval = Keeper_memory_recall_evaluation
 module Types = Typesafeai_types
@@ -605,7 +610,7 @@ let test_no_clock_with_an_unreadable_status_prompt_keeps_status_only () =
 
 let assemble_recall ~post_tool_round texts =
   Keeper_run_prompt.assemble_request_context
-    ~base_system_prompt:"fixture instructions" ~post_tool_round ~previous_assembly:None
+    ~system:(system_of_text "fixture instructions") ~post_tool_round ~previous_assembly:None
     ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:(Blocks.prompt_blocks texts)
 

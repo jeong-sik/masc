@@ -9,6 +9,11 @@ module Prompt = Keeper_unified_prompt
 module Direct = Keeper_direct_turn_context
 module Json = Yojson.Safe.Util
 
+(* A System with no amendments, as a turn without a basis issues it. *)
+let system_of_text text =
+  Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Keeper_turn_system.Without_basis
+    ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+
 type source = Current | Revised | Measurement_unavailable | Goal_unavailable | Empty
 
 let contains ~needle text = Astring.String.is_infix ~affix:needle text
@@ -96,7 +101,7 @@ let run_case source () =
   let partition = Direct.project_partition prepared ~workspace_memory_access:None in
   let dynamic = Keeper_context_layers.text partition in
   let base_system_prompt = "Respond to the owner using current workspace observations." in
-  let assembled = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+  let assembled = Keeper_run_prompt.assemble_request_context ~system:(system_of_text base_system_prompt)
       ~post_tool_round:false ~previous_assembly:None
       ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, dynamic] in
@@ -234,7 +239,7 @@ let test_goal_survives_read_then_task_creation () =
           ~injected_this_turn:(Option.is_some !previous) messages in
       let current_params = {current_params with system_prompt_override=Some existing_override} in
       let issued = Keeper_run_prompt.assemble_request_context
-          ~base_system_prompt:(Option.get current_params.system_prompt_override) ~post_tool_round
+          ~system:(system_of_text (Option.get current_params.system_prompt_override)) ~post_tool_round
           ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
           ~existing_extra_system_context:current_params.extra_system_context
           ~blocks:[Prompt_block_id.Dynamic_context, dynamic;
@@ -421,7 +426,7 @@ let test_completion_observation_survives_tool_reply approved () =
   let issued_requests = ref [] in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
-      let issued = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE_AUTHORITY_WIRE"
+      let issued = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE_AUTHORITY_WIRE")
           ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
             ~injected_this_turn:(Option.is_some !previous) messages)
           ~previous_assembly:!previous ~dynamic_context_partition:(Some rendered.world_partition)

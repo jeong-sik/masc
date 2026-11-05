@@ -384,7 +384,7 @@ end
     observations never publish a dataset or grant workspace authority. *)
 module Http_refresh_progress = struct
   type source =
-    | Identity_before | Overview | Approvals | Questions | Keepers
+    | Identity_before | Approvals | Questions | Keepers
     | Quiz_rows
     | Surface_data of Surface_read_source.t
     | Identity_after
@@ -422,7 +422,6 @@ module Http_refresh_progress = struct
 
   let source_name = function
     | Identity_before -> "workspace"
-    | Overview -> "dashboard"
     | Approvals -> "confirmations"
     | Questions -> "questions"
     | Keepers -> "keepers"
@@ -4861,15 +4860,6 @@ module Http_refresh_order = struct
   let for_navigation ~collection_inflight latest =
     if collection_inflight then latest else dispatch latest
 end
-
-(** Display-only result from a refresh whose other reads are still running.
-    The final bundle alone updates [state.overview] and workspace authority. *)
-type overview_preview = {
-  op_ticket: Http_refresh_order.ticket;
-  op_authority: workspace_authority;
-  op_identity: Tui_decode.server_identity;
-  op_snapshot: overview_snapshot;
-}
 
 type asks_observation = {
   asks_request: Snapshot_read.request;
@@ -10328,11 +10318,14 @@ type state = {
   mutable live_context_cancel: (unit -> unit) option;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
-  mutable overview_preview: overview_preview option;
   (* [None] means nothing has been read yet, which is not the same as an
      installation with no rows. *)
   mutable quiz_scorecard: quiz_scorecard_snapshot option;
   mutable quiz_scorecard_error: string option;
+  (* The Home Health line's own read (RFC-0480 §3.1): owed on a
+     workspace_health push and a revalidation. *)
+  mutable overview_inflight: bool;
+  mutable overview_owed: Masc_tui_owed_read.t;
   mutable transport: Tui_decode.transport_health option;
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
@@ -11848,11 +11841,9 @@ let restore_message_draft (state : state) keeper_name =
       state.msg_attachments_since <- draft.kcd_since;
       state.msg_recall_walk <- draft.kcd_recall
 
-(* These transitions are shared by the mailbox handler and readonly overview
-   projection. Preview admission never changes confirmed data or authority. *)
+(* Shared by the mailbox handler and the readonly progress projection. *)
 let begin_http_refresh_state (state : state) ~ticket ~started_ns =
   state.http_refresh_order <- ticket;
-  state.overview_preview <- None;
   state.http_refresh_started_ns <- Some started_ns;
   state.http_refresh_progress_events <- Atomic.make [];
   state.http_refresh_progress <- Some
@@ -11891,14 +11882,6 @@ let drain_http_progress (state : state) =
     (List.rev (Atomic.exchange state.http_refresh_progress_events []));
   before != state.http_refresh_progress
 
-let accept_overview_preview (state : state) preview =
-  if Option.is_some state.http_refresh_started_ns
-     && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
-     && preview.op_authority = state.workspace_authority
-     && workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
-          (Ok preview.op_identity) = Workspace_identity_match then
-    state.overview_preview <- Some preview
-
 (* One passive line for the operator quiz: the three window scores and the
    count of open wrong answers. [None] while nothing has been read, which
    is not an error. *)
@@ -11928,15 +11911,6 @@ let quiz_scorecard_reading (state : state) =
   | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · g opens the lane"
   | None, None -> None
 
-let overview_refresh_reading (state : state) =
-  match state.overview_preview with
-  | Some preview
-    when Option.is_some state.http_refresh_started_ns
-      && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
-      && preview.op_authority = state.workspace_authority ->
-      None, Some preview.op_snapshot
-  | Some _ | None -> state.overview_error, state.overview
-
 let finish_http_refresh_state ?finished_ns (state : state) =
   ignore (drain_http_progress state);
   let finished_ns = match finished_ns with
@@ -11944,8 +11918,7 @@ let finish_http_refresh_state ?finished_ns (state : state) =
   state.http_refresh_progress <- Option.map
     (fun (authority, progress) -> authority,
       Http_refresh_progress.finish ~finished_ns progress) state.http_refresh_progress;
-  state.http_refresh_started_ns <- None;
-  state.overview_preview <- None
+  state.http_refresh_started_ns <- None
 
 let retire_asks_read (state : state) =
   state.asks_read <- Snapshot_read.invalidate state.asks_read
@@ -15030,6 +15003,8 @@ let suspend_workspace_readings state =
   state.tools_skill_pending <- [];
   state.harness_inflight <- false;
   state.harness_owed <- Masc_tui_owed_read.settled;
+  state.overview_inflight <- false;
+  state.overview_owed <- Masc_tui_owed_read.settled;
   state.harness_stale_at <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
@@ -20165,9 +20140,10 @@ let create_state
   live_context_cancel = None;
   overview = None;
   overview_error = None;
-  overview_preview = None;
   quiz_scorecard = None;
   quiz_scorecard_error = None;
+  overview_inflight = false;
+  overview_owed = Masc_tui_owed_read.settled;
   transport = None;
   transport_error = None;
   approval_snapshot = None;

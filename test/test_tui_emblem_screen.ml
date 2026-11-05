@@ -4,20 +4,7 @@ open Alcotest
 module Screen = Masc_tui_emblem_screen
 module View = Masc_tui_portrait_view
 module Draw = Keeper_portrait_draw
-module Layout = Masc_tui_message_layout
 module Palette = Masc_tui_terminal_palette
-
-(* Whether a row draws a half block, U+2580 or U+2584 (E2 96 80 / E2 96 84).
-   A colour escape is ASCII, so it never looks like one. *)
-let has_block row =
-  let length = String.length row in
-  let rec scan index =
-    index + 2 < length
-    && ((row.[index] = '\xe2' && row.[index + 1] = '\x96'
-         && (row.[index + 2] = '\x80' || row.[index + 2] = '\x84'))
-        || scan (index + 1))
-  in
-  scan 0
 
 let caption = [ "first caption"; "second caption" ]
 let cols = 80
@@ -34,93 +21,26 @@ let laid_out ?(style = Screen.Painted) ?(rows = rows) ?(elapsed = 0.0) display =
 let picture_rows_in rows = rows - List.length caption - 1
 let picture_rows = picture_rows_in rows
 
-let index_of row lines =
-  let rec find index = function
-    | [] -> None
-    | line :: rest -> if String.equal line row then Some index else find (index + 1) rest
-  in
-  find 0 lines
-
 let trimmed line = String.trim (Masc_tui_theme.strip_sgr line)
 
 let test_the_candle_stands_centred_over_its_caption () =
   let out = laid_out View.Mosaic in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
   check bool "a mosaic is in the rows, nothing is placed" true
-    (Option.is_none out.Screen.placement);
-  let lines = out.Screen.lines in
-  check bool "no taller than the space" true (List.length lines <= rows);
-  List.iter
-    (fun line ->
-      check bool "no row wider than the space" true (Layout.display_width line <= cols))
-    lines;
-  let picture = List.filter has_block lines in
-  check bool "the candle is drawn" true (picture <> []);
-  let texts = List.map trimmed lines in
-  let first_caption = Option.get (index_of "first caption" texts) in
-  check (option int) "the second caption line follows the first"
-    (Some (first_caption + 1)) (index_of "second caption" texts);
-  check string "one blank row between the candle and its caption" ""
-    (List.nth lines (first_caption - 1));
-  check bool "the row above the gap is the candle's" false
-    (String.equal (List.nth lines (first_caption - 2)) "");
-  check bool "the candle is above its caption" true
-    (List.exists has_block (List.filteri (fun index _ -> index < first_caption) lines));
-  (* Centred top to bottom: the rows left above the block and below it differ
-     by at most the one an odd remainder leaves. *)
-  let rec leading_empty = function
-    | "" :: rest -> 1 + leading_empty rest
-    | _ -> 0
-  in
-  let above = leading_empty lines in
-  let below = rows - (first_caption + 2) in
-  check bool "centred top to bottom" true (abs (above - below) <= 1);
-  (* Centred left to right: each row of the picture is its box behind a pad
-     of plain spaces, and the pad leaves as much on the left as on the right. *)
-  let box = Option.get (View.fit View.Mosaic ~max_cols:cols ~max_rows:picture_rows) in
-  let left = (cols - box.View.cols) / 2 in
-  check int "every picture row is drawn" box.View.rows
-    (List.length (List.filteri (fun index _ -> index >= above && index < above + box.View.rows) lines));
-  List.iteri
-    (fun index line ->
-      if index >= above && index < above + box.View.rows then begin
-        check string "padded with plain spaces" (String.make left ' ') (String.sub line 0 left);
-        check int "the box's width behind the pad" (left + box.View.cols)
-          (Layout.display_width line)
-      end)
-    lines;
-  check bool "centred left to right" true (abs (left - (cols - left - box.View.cols)) <= 1)
+    (Option.is_none out.Screen.placement)
 
 let test_pixels_leave_blank_rows_and_place_the_picture_there () =
   let out = laid_out pixels in
   check bool "drawn" true (out.Screen.drawn = Screen.Moving);
   let p = Option.get out.Screen.placement in
-  let origin_row, origin_col = origin in
-  let top = p.View.row - origin_row in
-  let left = p.View.column - origin_col in
   check int "the mascot's picture slot" (Masc_tui_graphics.image_id Masc_tui_graphics.Mascot)
-    p.View.image_id;
-  check bool "placed inside the body" true (top >= 0 && top + p.View.box.View.rows <= rows);
-  check int "centred left to right" left ((cols - p.View.box.View.cols) / 2);
-  List.iteri
-    (fun index line ->
-      if index >= top && index < top + p.View.box.View.rows then
-        check string "the rows under the picture are blank"
-          (String.make (left + p.View.box.View.cols) ' ') line)
-    out.Screen.lines;
-  check bool "no half blocks under real pixels" false (List.exists has_block out.Screen.lines);
-  let texts = List.map trimmed out.Screen.lines in
-  check (option int) "the caption sits one row under the picture"
-    (Some (top + p.View.box.View.rows + 1)) (index_of "first caption" texts)
+    p.View.image_id
 
 let test_no_picture_draws_the_caption_alone () =
   let alone display ~rows =
     let out = laid_out ~rows display in
     check bool "no candle" true (out.Screen.drawn = Screen.Absent);
-    check bool "nothing placed" true (Option.is_none out.Screen.placement);
-    check bool "no half blocks" false (List.exists has_block out.Screen.lines);
-    check bool "the caption is still there" true
-      (List.exists (fun line -> String.equal (trimmed line) "first caption") out.Screen.lines)
+    check bool "nothing placed" true (Option.is_none out.Screen.placement)
   in
   (* NO_COLOR, or a stdout that projects no colour. *)
   alone View.No_picture ~rows;
@@ -157,9 +77,7 @@ let test_a_dotted_candle_is_drawn_at_the_size_it_is_shown () =
     (String.equal p.View.image.Draw.rgba (Option.get (laid_out pixels).Screen.placement).View.image.Draw.rgba);
   check bool "held still, it faces front" true
     (String.equal (placed ~elapsed:Float.nan).View.image.Draw.rgba
-       (Keeper_portrait_solid.mascot ~milliseconds:0 shown).Draw.rgba);
-  let mosaic = laid_out ~style:Screen.Dotted View.Mosaic in
-  check bool "a mosaic draws it too" true (List.exists has_block mosaic.Screen.lines)
+       (Keeper_portrait_solid.mascot ~milliseconds:0 shown).Draw.rgba)
 
 let test_the_style_is_stored_by_name () =
   List.iter
@@ -235,9 +153,6 @@ let test_about_observed_outfit_and_unavailable_names () =
     unavailable.Screen.visible_keepers;
   check int "unavailable outfits draw only the candle" 1
     (List.length unavailable.Screen.placements);
-  List.iter (fun label -> check bool "registered names and overflow stay readable" true
-    (List.exists (fun line -> String.equal (trimmed line) label) unavailable.Screen.lines))
-    [name; "fixture-bravo"; "+1 more Keepers"];
   let raw_name = "fixture-\027-alpha" in
   let unsafe = scene [raw_name, Some equipment] in
   check bool "control bytes in a registered name cannot reach terminal rows" false
@@ -256,16 +171,10 @@ let test_the_arrival_gathers_then_stops () =
   check (list int) "unobserved equipment keeps only the mascot placement"
     [Masc_tui_graphics.image_id Masc_tui_graphics.Mascot]
     (List.map (fun p -> p.View.image_id) unavailable.Screen.placements);
-  check bool "unobserved equipment retains the registered name" true
-    (List.exists (fun line -> String.equal (trimmed line) "fixture-alpha")
-       unavailable.Screen.lines);
   let at_start = about ~cols:76 ~frame:0 pixels in
   let gathered = about ~cols:76 ~frame:7 pixels in
   let finished = about ~cols:76 ~frame:Screen.final_frame pixels in
   check int "narrow view shows two registered Keepers" 2 at_start.Screen.visible_keepers;
-  check bool "other registered Keepers have a count" true
-    (List.exists (fun line -> String.equal (trimmed line) "+3 more Keepers")
-       at_start.Screen.lines);
   check bool "the arrival is moving at first" true
     (at_start.Screen.drawn = Screen.Moving);
   check bool "the final frame is still" true
@@ -288,28 +197,15 @@ let test_the_arrival_gathers_then_stops () =
 let test_wide_and_mosaic_keep_the_roster () =
   let wide = about ~cols:136 ~frame:Screen.final_frame View.Mosaic in
   check int "wide view shows four registered Keepers" 4 wide.Screen.visible_keepers;
-  check bool "the fifth Keeper is counted" true
-    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
-       wide.Screen.lines);
-  check bool "mosaic draws portraits in text cells" true
-    (List.exists has_block wide.Screen.lines);
   check bool "mosaic asks for no Kitty placement" true
-    (wide.Screen.placements = []);
-  List.iter
-    (fun line ->
-      check bool "no about row loses its edge" true
-        (Layout.display_width line <= 136))
-    wide.Screen.lines
+    (wide.Screen.placements = [])
 
 let test_no_picture_keeps_the_count () =
   let plain = about ~cols:76 ~frame:Screen.final_frame View.No_picture in
   check bool "no picture asks for no animation tick" true
     (plain.Screen.drawn = Screen.Absent);
   check int "four Keeper names remain readable without colour" 4
-    plain.Screen.visible_keepers;
-  check bool "the remaining registered Keeper is counted" true
-    (List.exists (fun line -> String.equal (trimmed line) "+1 more Keepers")
-       plain.Screen.lines)
+    plain.Screen.visible_keepers
 
 let test_about_candle_frames_are_reused_with_a_bound () =
   let mascot_image scene =

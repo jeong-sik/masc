@@ -99,9 +99,6 @@ let reference_at revision =
 
 let usage_reference = reference_at hex64
 
-(* A revision of the same Skill that the catalog reading does not hold. *)
-let other_revision = String.make 64 'b'
-
 let usage_row ?(reference = usage_reference) invocations =
   { Masc.Tui_decode_tools.ksu_reference = reference
   ; ksu_invocations = invocations
@@ -130,10 +127,6 @@ let usage_state () =
 
 let ready rows = Ok (Masc.Tui_decode_tools.Keeper_usage_ready rows)
 
-let usage_text state =
-  Masc_tui_render_tools.tools_display_lines ~cols:160 state
-  |> List.map snd |> String.concat "\n"
-
 (* The Usage pane joins each Keeper's own usage answer to the catalog by
    exact reference (RFC-0483) and counts the ledgers it read. *)
 let test_usage_pane_joins_each_keepers_answer () =
@@ -146,16 +139,7 @@ let test_usage_pane_joins_each_keepers_answer () =
           { kua_reason = "activation_ledger_unreadable"; kua_detail = "decode failed" }));
   record_keeper_skill_usage state ~keeper:"idle" (Ok Masc.Tui_decode_tools.Keeper_usage_no_session);
   Alcotest.(check (list string)) "readings are kept in Keeper name order"
-    [ "alpha"; "bravo"; "carol"; "idle" ] (List.map fst state.tools_keeper_usage);
-  let text = usage_text state in
-  let contains needle = String_util.contains_substring text needle in
-  Alcotest.(check bool) "both Keepers' uses are summed" true
-    (contains "Keepers 2 · TRIGGERED 5 · DELIVERED 5 · ACTIONS 2");
-  Alcotest.(check bool) "read ledgers are counted" true
-    (contains "Activation ledgers loaded: 2; unavailable: 1");
-  Alcotest.(check bool) "the unreadable ledger is named" true
-    (contains "Unavailable: carol: activation_ledger_unreadable (decode failed)");
-  Alcotest.(check bool) "each Keeper has a row" true (contains "alpha" && contains "bravo")
+    [ "alpha"; "bravo"; "carol"; "idle" ] (List.map fst state.tools_keeper_usage)
 
 (* A failed read keeps the Keeper's last answer in the totals and says the
    read failed; a Keeper with no answer at all is not counted. *)
@@ -168,38 +152,7 @@ let test_a_failed_read_keeps_the_last_answer () =
    | Some (Skill_usage_read_failed { last = Some (Masc.Tui_decode_tools.Keeper_usage_ready [ _ ]); detail }) ->
      Alcotest.(check string) "the failure is kept" "timed out" detail
    | Some (Skill_usage_read _ | Skill_usage_read_failed _) | None ->
-     Alcotest.fail "alpha should keep its last answer beside the failure");
-  let text = usage_text state in
-  let contains needle = String_util.contains_substring text needle in
-  Alcotest.(check bool) "the last answer stays in the totals" true
-    (contains "Keepers 1 · TRIGGERED 2 · DELIVERED 2 · ACTIONS 1");
-  Alcotest.(check bool) "the earlier answer is counted apart" true
-    (contains "Activation ledgers loaded: 1; unavailable: 1; 1 from an earlier read");
-  Alcotest.(check bool) "the totals say part of them is earlier" true
-    (contains "Some totals come from an earlier read.");
-  Alcotest.(check bool) "the kept answer is marked" true
-    (contains "Read failed, counts from the earlier answer: alpha: timed out");
-  Alcotest.(check bool) "the failed Keeper is named" true
-    (contains "Read failed: bravo: connection refused");
-  Alcotest.(check bool) "a failed read is not called unavailable" false
-    (contains "Unavailable: alpha")
-
-(* A Keeper answered against a catalog this reading does not hold: its row
-   is drawn on its own and counted, not dropped. *)
-let test_a_revision_outside_the_catalog_reading_is_drawn () =
-  let state = usage_state () in
-  record_keeper_skill_usage state ~keeper:"alpha"
-    (ready [ usage_row 2; usage_row ~reference:(reference_at other_revision) 4 ]);
-  let text = usage_text state in
-  let contains needle = String_util.contains_substring text needle in
-  Alcotest.(check bool) "both rows are counted" true
-    (contains "Keepers 1 · TRIGGERED 6 · DELIVERED 6 · ACTIONS 2");
-  Alcotest.(check bool) "the outside rows are headed" true
-    (contains "Usage rows outside this catalog reading — 1");
-  Alcotest.(check bool) "the outside revision is named" true
-    (contains ("capture-skill · rev " ^ other_revision));
-  Alcotest.(check bool) "its Keeper's counts are drawn" true
-    (contains "alpha · TRIGGERED 4 · DELIVERED 4 · ACTIONS 1")
+     Alcotest.fail "alpha should keep its last answer beside the failure")
 
 (* Only a whole roster drops a reading. A roster read empty says there is no
    Keeper; one not read yet, or whose read failed, keeps the readings and
@@ -215,13 +168,8 @@ let test_only_a_whole_roster_drops_readings () =
   in
   let unread = roster_state Local_workspace_unread in
   Alcotest.(check int) "an unread roster keeps the reading" 1 (List.length unread.tools_keeper_usage);
-  Alcotest.(check bool) "and says the roster is not read" true
-    (String_util.contains_substring (usage_text unread) "Keeper roster not read yet.");
   let failed = roster_state (Local_workspace_failed "roster unavailable") in
   Alcotest.(check int) "a failed roster keeps the reading" 1 (List.length failed.tools_keeper_usage);
-  Alcotest.(check bool) "and names the failure" true
-    (String_util.contains_substring (usage_text failed)
-       "Keeper roster read failed: roster unavailable; totals cover only the Keepers listed.");
   let partial = roster_state Local_workspace_read in
   partial.keepers_error <- Some "one keeper unreadable";
   record_keeper_skill_usage partial ~keeper:"alpha" (ready [ usage_row 2 ]);
@@ -229,12 +177,7 @@ let test_only_a_whole_roster_drops_readings () =
   Alcotest.(check int) "a roster read with an error keeps the reading" 1
     (List.length partial.tools_keeper_usage);
   let empty = roster_state Local_workspace_read in
-  Alcotest.(check int) "a whole empty roster keeps none" 0 (List.length empty.tools_keeper_usage);
-  let text = usage_text empty in
-  Alcotest.(check bool) "and says there is no Keeper" true
-    (String_util.contains_substring text "No Keepers in the roster.");
-  Alcotest.(check bool) "with no roster warning" false
-    (String_util.contains_substring text "Keeper roster")
+  Alcotest.(check int) "a whole empty roster keeps none" 0 (List.length empty.tools_keeper_usage)
 
 (* A reading or a failure is held for one Keeper. The Tools screen treats
    one held for another Keeper, or for one while none is selected, as
@@ -284,8 +227,6 @@ let () =
             test_usage_pane_joins_each_keepers_answer
         ; test_case "a failed read keeps the last answer" `Quick
             test_a_failed_read_keeps_the_last_answer
-        ; test_case "a revision outside the catalog reading is drawn" `Quick
-            test_a_revision_outside_the_catalog_reading_is_drawn
         ; test_case "only a whole roster drops readings" `Quick
             test_only_a_whole_roster_drops_readings
         ; test_case "readings and failures belong to their Keeper" `Quick

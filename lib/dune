@@ -32,6 +32,7 @@
   keeper_gate_authorization
   keeper_gate_auto_judge_queue
   keeper_gate_auto_judge_worker
+  keeper_gate_auto_judge_recovery
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_board_attention_partition_types

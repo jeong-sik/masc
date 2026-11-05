@@ -1,12 +1,13 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27 and 29 of the
-stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292, #48299,
-#48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386, #48389,
-#48392, #48401, #48411, #48424). Layer 7 is the first version of this document.
-Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21
-added layers 19 and 20. Layer 26 is an RFC and has no screens. Layer 28 added
-layers 22 to 25 and 27. The layer that carries this text added layer 29.
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29 and 31 of
+the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
+#48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386,
+#48389, #48392, #48401, #48411, #48424, #48436). Layer 7 is the first version
+of this document. Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13
+to 17. Layer 21 added layers 19 and 20. Layer 26 is an RFC and has no screens.
+Layer 28 added layers 22 to 25 and 27. Layer 30 added layer 29. The layer that
+carries this text added layer 31.
 
 ## Source
 
@@ -32,6 +33,7 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 25) | `c514194fc2b378b3569485d5e8a58189b24ca69a` | 41925502321 | `c290ad1f9eb83919fbe77958bd7f614186d64e62123a0a0f948f3de241aa8700` | `bce80de3f7c0a05d0069469e1e13b8241cdaadf1fbee0912409d078ec6925990` |
 | After (layers 1 to 27) | `d738d2334693f14ffa475ca8e5552dbe0425daf4` | 41929495694 | `8f0ca03fe34d837dafb2b17453ecef13dbb39ef3fe8aaa9c33ff7105e0cbe26f` | `76dd1f564067a2533487100dc6e772cc8debd74187b7cabf8b37c11b38e264ba` |
 | After (layers 1 to 29) | `b9161eaa6acd24bae552597a20fadf638eaa0730` | 41934340932 | `b39991f1dad8a7b8913daf0d2ae8c7785a20d0be2c29eae992cd5088a3f89acb` | `c5cf37f66a5896cefba4beb3f712b12d9993d96e778e83b75a8cc247c712331f` |
+| After (layers 1 to 31) | `8b86dd384c842d8f7f20027ae5ddc39132e26f08` | 41937783831 | `3dee2c63f3fe896f814dd14fa55e0c0e046581f003205141d3344556575a272b` | `6a00ffc156c1e6cb0c26e887636db87a8f6a53c4c43fea32a3ddddb4c38ba358` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -56,7 +58,8 @@ artifacts were uploaded after that failure.
   80x24, 100x30, 120x35 and 140x40 (Runtime). Layer 25 used 60x24, 80x24, 120x35
   and 200x55 with 42 open tasks (Work, Tasks). Layer 27 used 120x35 and 80x24 with
   the 12-task fixture (Task detail). Layer 29 used 60x24, 80x24, 120x35 and 200x55
-  (Artifacts / Resources).
+  (Artifacts / Resources). Layer 31 used 60x24, 80x24, 90x28, 100x30 and 120x35
+  (Approvals).
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -659,6 +662,39 @@ once the clock is masked.
 ![Resources at 60x24 after](resources-60-after.png)
 ![Resources at 80x24 after, cursor 40 rows down](resources-80-scrolled-after.png)
 
+### Layer 31: Approvals gives each Gate lane its own row when the two do not fit (#48436)
+
+Approvals (`:`, then `go Approvals` and Enter). The fixture's lanes read `Let
+Auto Judge decide` (Workspace) and `Ask me for each decision` (Outside
+services). Before is the layers 1 to 29 build: the only earlier commit that
+touches `masc_tui_render_approvals.ml` changes the question heading (layer 11),
+not the lane row. After is the layers 1 to 31 build.
+
+```
+size    before                                      after
+60x24   one row, ends "[e] Outside se…"             two rows, both modes whole
+80x24   one row, ends "Ask me for e…"               two rows, both modes whole
+90x28   one row, ends "Ask me for each decisi…"     two rows, both modes whole
+100x30  one row, whole                              unchanged
+120x35  one row, whole                              unchanged
+```
+
+With these two modes the two lanes need 89 cells on one row. Before, a pane
+narrower than that cut the row at its right edge, so the Outside services mode
+was cut in the middle of a word (90 and 80 cells) or left out (60 cells). After,
+each lane gets its own row when the two do not fit together, and the rule rows
+under them keep their place. The queue area gives up one row at 60x24, 80x24
+and 90x28 (11 non-blank rows become 12). The divider, the question block and the
+footer stay on the same row numbers. At 100x30 and 120x35 every row of the
+screen is identical once the clock is masked.
+
+![Approvals at 80x24 before](approvals-80-before.png)
+![Approvals at 80x24 after](approvals-80-after.png)
+![Approvals at 60x24 before](approvals-60-before.png)
+![Approvals at 60x24 after](approvals-60-after.png)
+![Approvals at 90x28 before](approvals-90-before.png)
+![Approvals at 90x28 after](approvals-90-after.png)
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -711,5 +747,12 @@ once the clock is masked.
 - Layer 29 with a terminal that answers the palette query: the capture terminal
   does not, so the receded colour of `TYPE`, `DETAIL`, `META` and the header row
   was not drawn. The name is bold and the cursor row is reversed.
+- Layer 31 with a pending approval or a question waiting: the fixture has
+  none, so the queue held `(no pending approvals)` and the row it gives up at
+  narrow widths was measured only as a blank row.
+- Layer 31 with Gate modes other than the fixture's, such as `Allow every call
+  without review` in both lanes, and with a rule in the Always-allow row.
+- Layer 31 on a terminal that answers the palette query: the capture terminal
+  does not, so the Gate rows are the fallback bright cyan (SGR 96).
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

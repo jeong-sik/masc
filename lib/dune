@@ -5,6 +5,7 @@
  (public_name masc)
  (private_modules
   fusion_decision_event
+  hitl_summary_flow_outcome
   keeper_attempt_request_evidence
   keeper_composition_child_exports
   keeper_librarian_message_floor

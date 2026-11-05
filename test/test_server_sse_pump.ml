@@ -443,6 +443,23 @@ let test_a_last_frame_ends_the_stream_once_written () =
       check int "the subscription is removed" 0 !live))
 ;;
 
+let test_a_stop_ends_the_stream_without_a_frame () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
+    Eio.Switch.run (fun sw ->
+      let step event = if revision_is 2 event then Pump.Stop else fleet_step event in
+      let served = serve ~sw ~clock ~live ~step hub in
+      Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
+      Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
+      check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
+      check int "only the Snapshot, nothing for the stop or after it" 1
+        (Eio.Stream.length served.frames);
+      check int "the subscription is removed" 0 !live))
+;;
+
 let test_a_quiet_interval_writes_nothing_and_asks_again () =
   Eio_mock.Backend.run (fun () ->
     let clock = Eio_mock.Clock.make () in
@@ -623,6 +640,8 @@ let () =
       , [ test_case "a skipped event writes nothing" `Quick test_a_skipped_event_writes_nothing
         ; test_case "a last frame ends the stream once written" `Quick
             test_a_last_frame_ends_the_stream_once_written
+        ; test_case "a stop ends the stream without a frame" `Quick
+            test_a_stop_ends_the_stream_without_a_frame
         ; test_case "a quiet interval writes nothing and asks again" `Quick
             test_a_quiet_interval_writes_nothing_and_asks_again
         ; test_case "an idle finish ends the stream without a frame" `Quick

@@ -8,6 +8,7 @@ type step =
   | Skip
   | Send of string
   | Send_last of string
+  | Stop
 
 type idle =
   | Keepalive
@@ -77,7 +78,8 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
         (match step event with
          | Skip -> serve ()
          | Send frame -> after_send ~last:false (send frame)
-         | Send_last frame -> after_send ~last:true (send frame))
+         | Send_last frame -> after_send ~last:true (send frame)
+         | Stop -> Finished)
       | Ping ->
         (match idle () with
          | Keepalive -> after_send ~last:false (send keepalive_frame)

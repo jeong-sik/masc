@@ -7,23 +7,27 @@
     fiber waits for the client; a producer never does. The stream ends when
     [send] reports that the client is gone or stalled, when the client let
     the queue fill up, or when the stream says it is done ([Send_last],
-    [Finish]).
+    [Stop], [Finish]).
 
     The pile-up closes the connection and drops what was queued. Each stream
     says how its client catches up after reconnecting: the fleet stream sends
-    a [Snapshot] (RFC-0477). A pile-up is acted on when the [send] in progress
-    returns, and nothing is written after it. *)
+    a [Snapshot] (RFC-0477), and the Keeper chat stream replays the journal
+    after [since_seq] (RFC-0412). A pile-up is acted on when the [send] in
+    progress returns, and nothing is written after it. *)
 
 type ending =
   | Client_gone  (** [send] answered [Closed]. *)
   | Fell_behind  (** An event came while the queue was full. *)
   | Stalled  (** [send] answered [Stalled]. *)
-  | Finished  (** A [Send_last] frame was written, or [idle] said [Finish]. *)
+  | Finished
+  (** A [Send_last] frame was written, or [step] said [Stop], or [idle] said
+      [Finish]. *)
 
 type step =
   | Skip  (** Nothing is written for this event. *)
   | Send of string  (** The whole frame is written and the stream goes on. *)
   | Send_last of string  (** The whole frame is written and the stream ends. *)
+  | Stop  (** Nothing is written and the stream ends. *)
 
 type idle =
   | Keepalive  (** {!keepalive_frame} is written. *)

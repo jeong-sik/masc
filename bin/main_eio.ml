@@ -1429,6 +1429,46 @@ let oauth_client_cmd =
   in
   Cmd.group (Cmd.info "oauth-client" ~doc ~man) [ list_cmd; revoke_cmd ]
 
+let auth_cmd =
+  let external_store =
+    let doc =
+      "Absolute path of the external store of the authorization log. Put it \
+       outside what the backups of the base path copy: a backup restored over \
+       the base path must not take the store back with it."
+    in
+    Arg.(required & opt (some string) None & info [ "external-store" ] ~docv:"PATH" ~doc)
+  in
+  let bootstrap_cmd =
+    let doc =
+      "Activate multi-account use while no server runs on the workspace, and \
+       print the link of the first Admin invitation once."
+    in
+    let man =
+      [ `S Manpage.s_description
+      ; `P
+          "config.json must ask for account_mode Multi_account, and the \
+           workspace must hold no authorization log and no external store \
+           yet. The command takes the workspace lease, so stop the server \
+           first."
+      ; `P
+          "The link carries the invitation token after #, so a browser keeps \
+           it out of the request URL. Only a digest of the token is written. \
+           The invitation works once and expires after 24 hours."
+      ]
+    in
+    Cmd.v
+      (Cmd.info "bootstrap" ~doc ~man)
+      Term.(
+        const (fun base_path external_store ->
+          Masc_cli_auth.bootstrap
+            ~base_path:(Env_config.normalize_masc_base_path_input base_path)
+            ~external_store)
+        $ base_path
+        $ external_store)
+  in
+  let doc = "Set up multi-account authorization on this workspace." in
+  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd ]
+
 let login_cmd =
   let doc =
     "Mint a local bearer token, persist its raw token file, and print \
@@ -5191,6 +5231,7 @@ let cmd =
     ; runtime_client_path_cmd
     ; token_cmd
     ; oauth_client_cmd
+    ; auth_cmd
     ; build_commit_cmd
     ]
 

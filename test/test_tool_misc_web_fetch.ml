@@ -467,6 +467,46 @@ let test_destination_boundary () =
        "https://example.com/next"
      = Ok ())
 
+(* Feature contract: a DNS name is admitted by the addresses it resolves to.
+   [rebind.example] stands for a public name whose resolver answers with the
+   host's loopback, as [127.0.0.1.nip.io] does; it is refused before curl
+   runs, the same caller-input violation as the literal [127.0.0.1]. *)
+module Loopback_answer_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = {
+    net : tag Eio.Net.ty Eio.Resource.t;
+    lookups : int ref;
+  }
+  let getaddrinfo t ~service _host =
+    incr t.lookups;
+    [`Tcp (Eio.Net.Ipaddr.V4.loopback, int_of_string service)]
+  let connect _ ~sw:_ _ = fail "WebFetch connected from the MASC process"
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
+    Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let test_name_resolving_to_loopback_is_refused ~env () =
+  let lookups = ref 0 in
+  let net = Eio.Resource.T
+    ({ Loopback_answer_net.net = Eio.Stdenv.net env; lookups },
+     Eio.Net.Pi.network (module Loopback_answer_net)) in
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  let result = handle "https://rebind.example/internal" in
+  check bool "refused" false (Tool_result.is_success result);
+  check (option string) "class" (Some "workflow_rejection")
+    (Tool_result.failure_class result
+    |> Option.map Tool_result.tool_failure_class_to_string);
+  check bool "reason names the resolved address" true
+    (String_util.contains_substring (Tool_result.message result)
+       "destination refused: resolved address is not allowed: loopback address");
+  check int "one lookup" 1 !lookups
+
 (* The real handler and model bridge preserve an upstream rejection as a
    failed call, without leaking its body, adding credentials, or replaying it.
    A second explicit request can succeed, proving failures were not cached. *)
@@ -546,6 +586,8 @@ let () =
           test_case "truncation outline maps headings" `Quick
             test_truncation_outline_maps_headings;
           test_case "destination boundary" `Quick test_destination_boundary;
+          test_case "name resolving to loopback is refused" `Quick
+            (test_name_resolving_to_loopback_is_refused ~env);
           test_case "upstream authentication response" `Quick
             (fun () -> test_upstream_http_failure 401 "valid authentication");
           test_case "upstream permission response" `Quick

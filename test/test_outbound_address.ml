@@ -6,29 +6,72 @@ let ip raw =
   | Error (`Msg message) -> fail (raw ^ ": " ^ message)
 ;;
 
+let refusal raw =
+  Masc.Outbound_address.ip_refusal (ip raw)
+  |> Option.map Masc.Outbound_address.refusal_to_string
+;;
+
 let test_private_and_public_addresses () =
   List.iter
-    (fun (raw, expected) ->
-      check bool raw expected (Server_outbound_address.ipaddr_is_private_or_reserved (ip raw)))
-    [ "10.0.0.1", true
-    ; "127.0.0.53", true
-    ; "169.254.169.254", true
-    ; "192.168.1.10", true
-    ; "8.8.8.8", false
-    ; "::1", true
-    ; "fd00::1", true
-    ; "2606:4700::6810:84e5", false
-    ; "::ffff:10.0.0.1", true
-    ; "::ffff:169.254.169.254", true
-    ; "::ffff:8.8.8.8", false
+    (fun (raw, expected) -> check (option string) raw expected (refusal raw))
+    [ "10.0.0.1", Some "private-network address"
+    ; "127.0.0.53", Some "loopback address"
+    ; "169.254.169.254", Some "link-local address"
+    ; "192.168.1.10", Some "private-network address"
+    ; "8.8.8.8", None
+    ; "::1", Some "loopback address"
+    ; "fd00::1", Some "private-network address"
+    ; "2606:4700::6810:84e5", None
+    ; "::ffff:10.0.0.1", Some "private-network address"
+    ; "::ffff:169.254.169.254", Some "link-local address"
+    ; "::ffff:8.8.8.8", None
+    ]
+;;
+
+(* Each special-purpose block ends where the IANA registry ends it: the
+   public neighbours on either side stay fetchable. *)
+let test_special_purpose_block_boundaries () =
+  List.iter
+    (fun (raw, expected) -> check (option string) raw expected (refusal raw))
+    [ "0.1.2.3", Some "unspecified address"
+    ; "100.64.0.1", Some "shared address space"
+    ; "100.127.255.255", Some "shared address space"
+    ; "100.128.0.1", None
+    ; "192.0.0.8", Some "reserved address"
+    ; "192.0.1.1", None
+    ; "192.0.2.5", Some "reserved address"
+    ; "198.18.0.1", Some "reserved address"
+    ; "198.20.0.1", None
+    ; "198.51.100.7", Some "reserved address"
+    ; "198.52.0.1", None
+    ; "203.0.113.9", Some "reserved address"
+    ; "203.0.114.1", None
+    ; "224.0.0.1", Some "multicast address"
+    ; "255.255.255.255", Some "reserved address"
+    ; "64:ff9b::7f00:1", Some "loopback address"
+    ; "64:ff9b::808:808", None
+    ; "fec0::1", Some "private-network address"
+    ; "fe80::1", Some "link-local address"
+    ; "fe80:0:0:1::1", Some "link-local address"
+    ; "febf:ffff::1", Some "link-local address"
+    ; "ff02::1", Some "multicast address"
+    ; "100::1", Some "reserved address"
+    ; "::7f00:1", Some "reserved address"
+    ; "64:ff9b:1::7f00:1", Some "reserved address"
+    ; "2001::1", Some "reserved address"
+    ; "2001:1ff:ffff::1", Some "reserved address"
+    ; "2001:200::1", None
+    ; "2002:7f00:1::1", Some "reserved address"
+    ; "3fff::1", Some "reserved address"
+    ; "4000::1", Some "reserved address"
+    ; "2606:4700:4700::1111", None
     ]
 ;;
 
 let test_ipv6_documentation_prefix_boundary () =
   List.iter
     (fun (raw, expected) ->
-      check bool raw expected
-        (Server_outbound_address.ipaddr_is_private_or_reserved (ip raw)))
+      check bool raw expected (Option.is_some (refusal raw)))
     [ "2001:db8::", true
     ; "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff", true
     ; "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", false
@@ -36,6 +79,34 @@ let test_ipv6_documentation_prefix_boundary () =
     ; "2001:db80::1", false
     ; "2001:db8f::1", false
     ]
+;;
+
+(* The pin is what keeps curl on the admitted addresses: every spelling of
+   the host curl may look up maps to them, and an environment proxy, which
+   would resolve the name itself, is off. *)
+let test_pinned_request_keeps_curl_on_admitted_addresses () =
+  let argv =
+    Masc.Tool_local_runtime_http.curl_get_argv_for_test
+      ~pinned_resolution:
+        { Masc.Tool_local_runtime_http.host = "pin.invalid."
+        ; port = 8935
+        ; first_address = Ipaddr.of_string_exn "203.0.114.5"
+        ; other_addresses = [ Ipaddr.of_string_exn "2606:4700:4700::1111" ]
+        }
+      "http://pin.invalid.:8935/page"
+  in
+  let rec values flag = function
+    | name :: value :: rest when String.equal name flag ->
+      value :: values flag rest
+    | _ :: rest -> values flag rest
+    | [] -> []
+  in
+  check (list string) "resolve entries"
+    [ "pin.invalid.:8935:203.0.114.5,[2606:4700:4700::1111]"
+    ; "pin.invalid:8935:203.0.114.5,[2606:4700:4700::1111]"
+    ]
+    (values "--resolve" argv);
+  check (list string) "no proxy" [ "*" ] (values "--noproxy" argv)
 ;;
 
 let with_net f = Eio_main.run (fun env -> f env)
@@ -47,7 +118,7 @@ let test_refused_hosts () =
     let net = Eio.Stdenv.net env in
     List.iter
       (fun url ->
-        match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
+        match Masc.Outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
         | Error _ -> ()
         | Ok _ -> fail (url ^ " was allowed"))
       [ "https://localhost/meta.json"
@@ -75,7 +146,8 @@ let test_document_fetch_refuses_before_connecting () =
         url
     with
     | Error reason ->
-      check string "refused by the address check" "resolved address is not allowed" reason
+      check string "refused by the address check"
+        "resolved address is not allowed: private-network address" reason
     | Ok _ -> fail "a private address was fetched")
 ;;
 
@@ -138,11 +210,15 @@ let test_document_fetch_binds_approved_dns_answer () =
 
 let () =
   run
-    "server_outbound_address"
+    "outbound_address"
     [ ( "address"
       , [ test_case "private and public addresses" `Quick test_private_and_public_addresses
+        ; test_case "special-purpose block boundaries" `Quick
+            test_special_purpose_block_boundaries
         ; test_case "IPv6 documentation prefix boundary" `Quick
             test_ipv6_documentation_prefix_boundary
+        ; test_case "pinned request keeps curl on admitted addresses" `Quick
+            test_pinned_request_keeps_curl_on_admitted_addresses
         ; test_case "refused hosts" `Quick test_refused_hosts
         ; test_case
             "document fetch refuses before connecting"

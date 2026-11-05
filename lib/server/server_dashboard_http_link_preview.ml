@@ -198,8 +198,8 @@ let fetch_response ~net ~url =
   match normalize_request_url url with
   | Error _ as error -> error
   | Ok url ->
-  match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
-  | Error _ as error -> error
+  match Outbound_address.resolve_allowed_host ~net (Uri.of_string url) with
+  | Error refusal -> Error (Outbound_address.host_refusal_to_string refusal)
   | Ok resolved_addresses ->
   Masc_http_client.get_response_sync ~resolved_addresses ~url
     ~headers:
@@ -254,8 +254,8 @@ let fetch_preview ~clock ~net url =
   match normalize_request_url url with
   | Error reason -> Error reason
   | Ok normalized_url -> (
-      match Server_outbound_address.resolve_allowed_host ~net (Uri.of_string normalized_url) with
-      | Error reason -> Error reason
+      match Outbound_address.resolve_allowed_host ~net (Uri.of_string normalized_url) with
+      | Error refusal -> Error (Outbound_address.host_refusal_to_string refusal)
       | Ok _ ->
           if infer_image_url normalized_url then
             Ok

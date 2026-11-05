@@ -73,6 +73,15 @@ val transport_failure_cause : transport_failure -> string
     ["curl exit 6 (could not resolve host)"]. A code without a named cause is
     reported by number; a signal is reported without its number. *)
 
+type pinned_resolution =
+  { host : string  (** The URL's host exactly as {!Uri.host} returns it. *)
+  ; port : int
+  ; first_address : Ipaddr.t
+  ; other_addresses : Ipaddr.t list
+  }
+(** The addresses curl must connect to for [host:port], instead of its own
+    lookup ([curl --resolve]). *)
+
 val http_get_text_response_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
@@ -80,13 +89,16 @@ val http_get_text_response_with_headers :
   ?max_redirects:int ->
   ?compressed:bool ->
   ?max_response_bytes:int ->
+  ?pinned_resolution:pinned_resolution ->
   string ->
   (http_get_response, transport_failure) Result.t
 (** [http_get_text_response_with_headers ?timeout_sec ?headers url] issues a
     [GET url] via curl and returns both body text and curl write-out metadata.
 
     It is the metadata-preserving form of
-    {!http_get_text_with_status_with_headers}. *)
+    {!http_get_text_with_status_with_headers}. With [pinned_resolution], curl
+    connects only to its addresses for that host and port, with or without a
+    trailing dot, and ignores proxy environment variables. *)
 
 val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->
@@ -122,6 +134,7 @@ val curl_get_argv_for_test :
   ?max_redirects:int ->
   ?compressed:bool ->
   ?max_response_bytes:int ->
+  ?pinned_resolution:pinned_resolution ->
   string ->
   string list
 

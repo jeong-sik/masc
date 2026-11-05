@@ -18,6 +18,7 @@
  (libraries
   masc.cost_ledger
   dated_jsonl
+  dated_jsonl_kept_days
   eio
   fs_compat
   masc_core

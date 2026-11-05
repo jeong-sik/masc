@@ -567,6 +567,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let config = Mcp_server.workspace_config state in
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
+  Server_runtime_metrics.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
   Channel_gate_change.install (fun () ->

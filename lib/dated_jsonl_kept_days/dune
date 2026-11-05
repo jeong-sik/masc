@@ -1,0 +1,12 @@
+; Dated_jsonl_kept_days — what the day files of a Dated_jsonl store said,
+; folded per file and kept between reads. Its own library because the
+; dated_jsonl library exposes only its main module, which this one reads.
+
+(include_subdirs no)
+
+(library
+ (name dated_jsonl_kept_days)
+ (public_name masc.dated_jsonl_kept_days)
+ (flags
+  (:standard -w +33 -w +4 -w +37))
+ (libraries dated_jsonl masc_log))

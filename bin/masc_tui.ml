@@ -6155,6 +6155,7 @@ let launch_browser_lane state ~mailbox operation =
         | exn -> Error (Printexc.to_string exn)
       in
       let perform () =
+        Log.Transport.warn "browser operation dispatch";
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
@@ -9144,9 +9145,12 @@ let launch_owed_browser_observation state ~mailbox =
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
         match Browser_lane_view.cadence_operation ?viewport view with
         | Some operation ->
+            Log.Transport.warn "browser observation cadence selected";
             state.browser_observation_owed <- Masc_tui_owed_read.started owed;
             launch_browser_lane state ~mailbox operation
-        | None -> state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
+        | None ->
+            Log.Transport.warn "browser observation cadence refused";
+            state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
       end
 
 let launch_owed_lanes state ~mailbox =

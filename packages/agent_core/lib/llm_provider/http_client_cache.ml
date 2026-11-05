@@ -1,7 +1,7 @@
 (* Idle connection cache of [Http_client]. It parks reusable transport
-   connections per origin, closes the ones idle past [idle_ttl_seconds], and
-   closes everything still parked when the switch it was created with is
-   released. The mutable state is reachable only through this module, so
+   connections per origin, closes the ones idle past [idle_ttl_seconds] on
+   the monotonic clock it was created with, and closes everything still
+   parked when the switch it was created with is released. The mutable state is reachable only through this module, so
    every access goes through the mutex. *)
 
 type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
@@ -27,11 +27,13 @@ module Key_map = Map.Make (Key)
 
 type entry =
   { connection : connection
-  ; last_used_at : float
+  ; last_used_at : Mtime.t
   }
 
 (* Idle longer than the TTL: no request takes it, and it is closed. *)
-let is_expired ~idle_ttl_seconds ~now entry = now -. entry.last_used_at > idle_ttl_seconds
+let is_expired ~idle_ttl ~now entry =
+  Mtime.Span.is_longer (Mtime.span entry.last_used_at now) ~than:idle_ttl
+;;
 
 let close_entries entries =
   Eio.Cancel.protect (fun () ->
@@ -93,38 +95,44 @@ type t =
   { sw : Eio.Switch.t
   ; mu : Eio.Mutex.t
   ; max_idle_per_host : int
-  ; idle_ttl_seconds : float
+  ; idle_ttl : Mtime.span
   ; mutable entries : entry list Key_map.t
   ; reuse_count_total : int Atomic.t
   ; create_count_total : int Atomic.t
   ; closed : close_counters
   ; closed_after_reuse : close_counters
   ; stop : bool Atomic.t
-  ; now : unit -> float
+  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t
   }
 
-let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t =
+let now cache = Eio.Time.Mono.now cache.mono_clock
+
+(* [Mtime.Span.of_float_ns] is [None] for a negative, non-finite, or
+   2{^53} ns or longer value, and rounds a value under 1 ns to zero. *)
+let idle_ttl_of_seconds seconds =
+  match Mtime.Span.of_float_ns (seconds *. 1e9) with
+  | Some span when Mtime.Span.is_longer span ~than:Mtime.Span.zero -> span
+  | Some _ | None ->
+    invalid_arg
+      "Http_client_cache.create: idle_ttl_seconds must be at least 1 ns and below 2^53 ns"
+;;
+
+let create ~sw ~mono_clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t =
   if max_idle_per_host < 1
   then invalid_arg "Http_client_cache.create: max_idle_per_host must be >= 1";
-  if idle_ttl_seconds <= 0.0
-  then invalid_arg "Http_client_cache.create: idle_ttl_seconds must be > 0";
+  let idle_ttl = idle_ttl_of_seconds idle_ttl_seconds in
   let cache =
-    let now =
-      match clock with
-      | Some clock -> fun () -> Eio.Time.now clock
-      | None -> Unix.gettimeofday
-    in
     { sw
     ; mu = Eio.Mutex.create ()
     ; max_idle_per_host
-    ; idle_ttl_seconds
+    ; idle_ttl
     ; entries = Key_map.empty
     ; reuse_count_total = Atomic.make 0
     ; create_count_total = Atomic.make 0
     ; closed = make_close_counters ()
     ; closed_after_reuse = make_close_counters ()
     ; stop = Atomic.make false
-    ; now
+    ; mono_clock = (mono_clock :> Eio.Time.Mono.ty Eio.Resource.t)
     }
   in
   Eio.Switch.on_release sw (fun () ->
@@ -147,41 +155,40 @@ let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | _ -> ())
         leftover));
-  (* Eviction daemon: reap entries past [idle_ttl_seconds] when a clock
-     is supplied. A regular infinite fiber would prevent normal switch
-     completion, and the release hook that sets [stop] only runs after all
-     fibers finish. Without a clock the cache still works; stale entries
-     are closed on switch release. *)
-  (match clock with
-   | Some clock ->
-     Eio.Fiber.fork_daemon ~sw (fun () ->
-       let rec loop () =
-         if Atomic.get cache.stop
-         then `Stop_daemon
-         else (
-           Eio.Time.sleep clock (cache.idle_ttl_seconds /. 2.0);
-           let now = cache.now () in
-           let expired =
-             Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-               let expired = ref [] in
-               let remaining =
-                 Key_map.map
-                   (List.filter (fun e ->
-                      if is_expired ~idle_ttl_seconds:cache.idle_ttl_seconds ~now e
-                      then (
-                        expired := e :: !expired;
-                        false)
-                      else true))
-                   cache.entries
-               in
-               cache.entries <- remaining;
-               !expired)
-           in
-           close_entries expired;
-           loop ())
-       in
-       loop ())
-   | None -> ());
+  (* Eviction daemon: every half TTL on the monotonic clock, it closes the
+     entries idle past the TTL. A regular infinite fiber would prevent
+     normal switch completion, and the release hook that sets [stop] only
+     runs after all fibers finish. *)
+  let eviction_interval =
+    Mtime.Span.of_uint64_ns (Int64.div (Mtime.Span.to_uint64_ns idle_ttl) 2L)
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec loop () =
+      if Atomic.get cache.stop
+      then `Stop_daemon
+      else (
+        Eio.Time.Mono.sleep_span cache.mono_clock eviction_interval;
+        let now = now cache in
+        let expired =
+          Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
+            let expired = ref [] in
+            let remaining =
+              Key_map.map
+                (List.filter (fun e ->
+                   if is_expired ~idle_ttl:cache.idle_ttl ~now e
+                   then (
+                     expired := e :: !expired;
+                     false)
+                   else true))
+                cache.entries
+            in
+            cache.entries <- remaining;
+            !expired)
+        in
+        close_entries expired;
+        loop ())
+    in
+    loop ());
   cache
 ;;
 
@@ -214,12 +221,12 @@ let take (cache : t) key : connection option =
   if Atomic.get cache.stop
   then None
   else (
-    let now = cache.now () in
+    let now = now cache in
     let taken, expired =
       Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
         let parked = Key_map.find_opt key cache.entries |> Option.value ~default:[] in
         let expired, fresh =
-          List.partition (is_expired ~idle_ttl_seconds:cache.idle_ttl_seconds ~now) parked
+          List.partition (is_expired ~idle_ttl:cache.idle_ttl ~now) parked
         in
         match fresh with
         | e :: rest ->
@@ -238,7 +245,7 @@ let park (cache : t) key connection : unit =
   if Atomic.get cache.stop
   then Eio.Resource.close connection
   else (
-    let entry = { connection; last_used_at = cache.now () } in
+    let entry = { connection; last_used_at = now cache } in
     let parked =
       Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
         let existing = Key_map.find_opt key cache.entries |> Option.value ~default:[] in

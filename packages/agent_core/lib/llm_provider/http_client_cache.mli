@@ -1,8 +1,9 @@
 (** Idle connection cache behind {!Http_client.cache}.
 
     Parks reusable transport connections per origin, closes the ones idle for
-    longer than [idle_ttl_seconds], and closes every parked connection when the
-    switch the cache was created with is released. *)
+    longer than [idle_ttl_seconds] on its monotonic clock, and closes every
+    parked connection when the switch the cache was created with is
+    released. *)
 
 type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
 
@@ -44,17 +45,17 @@ type stats =
 
 (** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
     connections kept per origin and [idle_ttl_seconds] is how long one may sit
-    idle. {!checkout} never hands out a connection idle for longer; it closes
-    it instead. [clock], if supplied, drives a background fiber that closes
-    expired connections every [idle_ttl_seconds /. 2.]; without it they are
-    closed at the next {!checkout} for their origin or when [sw] is
-    released.
+    idle, measured on [mono_clock] from when it was parked. {!checkout} never
+    hands out a connection idle for longer; it closes it instead. A daemon on
+    [sw] also closes expired connections every [idle_ttl_seconds /. 2.] on
+    [mono_clock].
 
-    @raise Invalid_argument if [max_idle_per_host < 1] or
-    [idle_ttl_seconds <= 0]. *)
+    @raise Invalid_argument if [max_idle_per_host < 1], or if
+    [idle_ttl_seconds] is under 1 ns, not finite, or 2{^53} ns (about 104
+    days) or longer. *)
 val create
   :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
+  -> mono_clock:_ Eio.Time.Mono.t
   -> ?max_idle_per_host:int
   -> ?idle_ttl_seconds:float
   -> unit

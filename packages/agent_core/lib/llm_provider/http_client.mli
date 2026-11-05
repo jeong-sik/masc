@@ -385,8 +385,9 @@ val with_explicit_deadline : _ Eio.Time.clock explicit_deadline -> (unit -> 'a) 
     A cache holds idle Eio transport connections keyed by origin
     [(scheme, host, port)]. It is bound to the [sw] passed to
     {!create_cache}; all cached connections are closed when that switch is
-    released. An optional eviction fiber reaps entries that have been
-    idle longer than [idle_ttl_seconds].
+    released. An eviction fiber on that switch closes entries idle longer
+    than [idle_ttl_seconds] on the monotonic clock given to
+    {!create_cache}.
 
     @since 0.208.0 *)
 type cache
@@ -417,13 +418,17 @@ type cache_stats =
 
     [max_idle_per_host] caps the number of idle connections kept per origin.
     [idle_ttl_seconds] is the longest a connection a request takes may have
-    sat idle; an older one is closed instead.
-    [clock], if supplied, drives the background eviction fiber.
+    sat idle, measured on [mono_clock]; an older one is closed instead. The
+    eviction fiber wakes every half TTL on [mono_clock]. A wall clock step
+    does not change a connection's age.
+
+    @raise Invalid_argument if [max_idle_per_host < 1], or if
+    [idle_ttl_seconds] is under 1 ns, not finite, or 2{^53} ns or longer.
 
     @since 0.208.0 *)
 val create_cache
   :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
+  -> mono_clock:_ Eio.Time.Mono.t
   -> ?max_idle_per_host:int
   -> ?idle_ttl_seconds:float
   -> unit

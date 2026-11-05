@@ -75,7 +75,7 @@ let test_complete_reuses_connection () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
     let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     (match
        (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
@@ -99,68 +99,6 @@ let test_complete_reuses_connection () =
   | Exit -> ()
 ;;
 
-(* Short enough that the test waits twice that, long enough that one
-   request finishes well inside it on loopback. *)
-let short_idle_ttl_s = 0.05
-
-(* The cache has no clock, so no eviction fiber runs: only checkout can keep
-   a request from taking the expired connection. The eviction fiber runs
-   every half TTL and would leave such a connection parked for that long. *)
-let test_checkout_skips_a_connection_idle_past_the_ttl () =
-  Eio_main.run
-  @@ fun env ->
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
-    let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw ~idle_ttl_seconds:short_idle_ttl_s () in
-    let complete () =
-      match
-        (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ())
-          .Llm_provider.Completion_outcome.result
-      with
-      | Ok _ -> ()
-      | Error _ -> Alcotest.fail "expected Ok"
-    in
-    complete ();
-    Alcotest.(check int) "the first connection is parked" 1
-      (Http_client.cache_stats cache).total_idle;
-    Eio.Time.sleep env#clock (2.0 *. short_idle_ttl_s);
-    complete ();
-    let stats = Http_client.cache_stats cache in
-    Alcotest.(check int) "the expired connection was not reused" 0 stats.reuse_count_total;
-    Alcotest.(check int) "a second connection was opened" 2 stats.create_count_total;
-    Alcotest.(check int) "only the new connection is parked" 1 stats.total_idle;
-    Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
-;;
-
-let test_eviction_fiber_closes_idle () =
-  Eio_main.run
-  @@ fun env ->
-  try
-    Eio.Switch.run
-    @@ fun sw ->
-    let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
-    let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw ~clock:env#clock ~idle_ttl_seconds:0.05 () in
-    (match
-       (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
-     with
-     | Ok _ -> ()
-     | Error _ -> Alcotest.fail "expected Ok");
-    let stats_after_first = Http_client.cache_stats cache in
-    Alcotest.(check int) "one idle before eviction" 1 stats_after_first.total_idle;
-    Eio.Time.sleep env#clock 0.2;
-    let stats_after_wait = Http_client.cache_stats cache in
-    Alcotest.(check int) "idle evicted by fiber" 0 stats_after_wait.total_idle;
-    Eio.Switch.fail sw Exit
-  with
-  | Exit -> ()
-;;
-
 let test_omits_connection_close_header () =
   Eio_main.run
   @@ fun env ->
@@ -176,7 +114,7 @@ let test_omits_connection_close_header () =
         (anthropic_response "cached")
     in
     let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     (match
        (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
      with
@@ -319,7 +257,7 @@ let test_cache_switch_releases_idle_connection () =
     with_lifecycle_watchdog ~clock:env#clock ~label:"cache-owning switch" (fun () ->
       Eio.Switch.run
       @@ fun cache_sw ->
-      let cache = Http_client.create_cache ~sw:cache_sw ~clock:env#clock () in
+      let cache = Http_client.create_cache ~sw:cache_sw ~mono_clock:env#mono_clock () in
       (match
          Http_client.get_sync ~cache ~sw:cache_sw ~net:env#net ~url ~headers:[] ()
        with
@@ -351,7 +289,7 @@ let test_stream_reuses_connection () =
     @@ fun sw ->
     let url = start_sse_server ~sw ~net:env#net (anthropic_sse_response "streamed") in
     let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     let got = ref [] in
     (match
        (Complete.complete_stream
@@ -402,7 +340,7 @@ let test_per_host_cap_closes_excess () =
     @@ fun sw ->
     let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
     let config = make_anthropic_config url in
-    let cache = Http_client.create_cache ~sw ~max_idle_per_host:1 () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~max_idle_per_host:1 () in
     let once () =
       match
         (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ()).Llm_provider.Completion_outcome.result
@@ -485,11 +423,16 @@ let test_create_cache_rejects_invalid_params () =
       with
       | Invalid_argument _ -> ()
     in
-    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~max_idle_per_host:0 ());
-    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~max_idle_per_host:(-1) ());
-    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~idle_ttl_seconds:0.0 ());
+    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~max_idle_per_host:0 ());
+    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~max_idle_per_host:(-1) ());
+    expect_invalid_arg (fun () -> Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~idle_ttl_seconds:0.0 ());
     expect_invalid_arg (fun () ->
-      Http_client.create_cache ~sw ~idle_ttl_seconds:(-1.0) ());
+      Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~idle_ttl_seconds:(-1.0) ());
+    expect_invalid_arg (fun () ->
+      Http_client.create_cache ~sw ~mono_clock:env#mono_clock ~idle_ttl_seconds:Float.nan ());
+    expect_invalid_arg (fun () ->
+      Http_client.create_cache ~sw ~mono_clock:env#mono_clock
+        ~idle_ttl_seconds:Float.infinity ());
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
@@ -504,7 +447,7 @@ let test_stream_cancellation_closes_connection () =
     Eio.Switch.run
     @@ fun sw ->
     let url = start_sse_server ~sw ~net:env#net (anthropic_sse_response "never") in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     let stream () =
       Http_client.with_post_stream
         ~cache
@@ -536,7 +479,7 @@ let test_stream_typed_error_closes_unconsumed_connection () =
     Eio.Switch.run
     @@ fun sw ->
     let url = start_sse_server ~sw ~net:env#net "unconsumed stream body" in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     (match
        Http_client.with_post_stream
          ~cache
@@ -682,7 +625,7 @@ let test_get_sync_does_not_park_a_closing_response () =
       start_raw_server ~sw ~net:env#net
         "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
     in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     get_ok ~sw ~net:env#net ~cache url;
     let stats = Http_client.cache_stats cache in
     Alcotest.(check int) "nothing parked" 0 stats.total_idle;
@@ -705,7 +648,7 @@ let test_get_sync_reuses_a_persistent_response () =
     let url, accepted =
       start_raw_server ~sw ~net:env#net "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
     in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     get_ok ~sw ~net:env#net ~cache url;
     get_ok ~sw ~net:env#net ~cache url;
     let stats = Http_client.cache_stats cache in
@@ -717,13 +660,98 @@ let test_get_sync_reuses_a_persistent_response () =
   | Exit -> ()
 ;;
 
+(* The TTL the two tests below give the cache. They move a mock monotonic
+   clock in fractions of it, so its length does not change what they wait. *)
+let mock_idle_ttl_s = 20.0
+
+let set_mock_time mono_clock fraction_of_ttl =
+  Eio_mock.Clock.Mono.set_time
+    mono_clock
+    (Mtime.of_uint64_ns (Int64.of_float (fraction_of_ttl *. mock_idle_ttl_s *. 1e9)))
+;;
+
+(* The eviction daemon sleeps half a TTL after each scan, so the clock is
+   moved to an instant where the parked connection is past the TTL and the
+   daemon is asleep: only checkout can keep the request from taking it. *)
+let test_checkout_skips_a_connection_idle_past_the_ttl () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url, accepted =
+      start_raw_server ~sw ~net:env#net "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    in
+    let mono_clock = Eio_mock.Clock.Mono.make () in
+    let cache =
+      Http_client.create_cache ~sw ~mono_clock ~idle_ttl_seconds:mock_idle_ttl_s ()
+    in
+    set_mock_time mono_clock 0.4;
+    get_ok ~sw ~net:env#net ~cache url;
+    Alcotest.(check int) "the first connection is parked" 1
+      (Http_client.cache_stats cache).total_idle;
+    (* Each move wakes the daemon; the yield lets it scan and sleep again. At
+       0.5 and 1.0 TTL the connection is idle 0.1 and 0.6 TTL, and the daemon
+       next wakes at 1.5 TTL. *)
+    set_mock_time mono_clock 0.5;
+    Eio.Fiber.yield ();
+    set_mock_time mono_clock 1.0;
+    Eio.Fiber.yield ();
+    Alcotest.(check int) "the daemon left the young connection parked" 1
+      (Http_client.cache_stats cache).total_idle;
+    set_mock_time mono_clock 1.45;
+    get_ok ~sw ~net:env#net ~cache url;
+    let stats = Http_client.cache_stats cache in
+    Alcotest.(check int) "the expired connection was not reused" 0 stats.reuse_count_total;
+    Alcotest.(check int) "a second connection was opened" 2 stats.create_count_total;
+    Alcotest.(check int) "only the new connection is parked" 1 stats.total_idle;
+    Alcotest.(check int) "the server saw two connections" 2 !accepted;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* The connection is parked at mock time 0 and the daemon sleeps until half a
+   TTL. Moving the clock to 1.5 TTL wakes it with the connection past the
+   TTL, and the server then sees the client close. *)
+let test_eviction_fiber_closes_idle () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun server_sw ->
+  let url, disconnected =
+    start_one_shot_lifecycle_server ~sw:server_sw ~net:env#net ~clock:env#clock "cached"
+  in
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let mono_clock = Eio_mock.Clock.Mono.make () in
+    let cache =
+      Http_client.create_cache ~sw ~mono_clock ~idle_ttl_seconds:mock_idle_ttl_s ()
+    in
+    (match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
+     | Ok { status = 200; body = "cached"; _ } -> ()
+     | Ok { status; body; _ } -> Alcotest.failf "expected 200/cached, got %d/%S" status body
+     | Error _ -> Alcotest.fail "expected cached response");
+    Alcotest.(check int) "one idle before eviction" 1 (Http_client.cache_stats cache).total_idle;
+    set_mock_time mono_clock 1.5;
+    await_client_disconnect
+      ~clock:env#clock
+      ~label:"the eviction daemon closes the expired connection"
+      disconnected;
+    Alcotest.(check int) "idle evicted by fiber" 0 (Http_client.cache_stats cache).total_idle;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let with_cache_switch f =
   Eio_main.run
   @@ fun env ->
   try
     Eio.Switch.run
     @@ fun sw ->
-    f ~sw ~env ~cache:(Http_client.create_cache ~sw ());
+    f ~sw ~env ~cache:(Http_client.create_cache ~sw ~mono_clock:env#mono_clock ());
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
@@ -872,7 +900,7 @@ let test_stream_connection_close_does_not_park () =
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Net.run_server socket handler ~on_error:(fun _ -> ()) ~max_connections:4);
     let url = Printf.sprintf "http://127.0.0.1:%d" port in
-    let cache = Http_client.create_cache ~sw () in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
     let seen = ref 0 in
     (match
        Http_client.with_post_stream
@@ -919,6 +947,7 @@ let with_raw_one_dispatch_server
      @@ fun sw ->
      let net = Eio.Stdenv.net env in
      let clock = Eio.Stdenv.clock env in
+     let mono_clock = Eio.Stdenv.mono_clock env in
      let port = fresh_port () in
      let socket =
        Eio.Net.listen
@@ -986,6 +1015,7 @@ let with_raw_one_dispatch_server
              ~sw
              ~net
              ~clock
+             ~mono_clock
              ~url:(Printf.sprintf "http://127.0.0.1:%d/one-dispatch" port));
      Eio.Switch.fail sw Raw_server_complete
    with
@@ -1014,8 +1044,8 @@ let exercise_raw_one_dispatch_cache
     ?encode_body
     ?keep_connection
     ~response_body
-  @@ fun ~sw ~net ~clock:_ ~url ->
-  let cache = Http_client.create_cache ~sw () in
+  @@ fun ~sw ~net ~clock:_ ~mono_clock ~url ->
+  let cache = Http_client.create_cache ~sw ~mono_clock () in
   let post () =
     Http_client.post_sync_once
       ~cache
@@ -1046,8 +1076,8 @@ let exercise_raw_stream_cache
     ?encode_body
     ?keep_connection
     ~response_body
-  @@ fun ~sw ~net ~clock:_ ~url ->
-  let cache = Http_client.create_cache ~sw () in
+  @@ fun ~sw ~net ~clock:_ ~mono_clock ~url ->
+  let cache = Http_client.create_cache ~sw ~mono_clock () in
   let post () =
     Http_client.with_post_stream
       ~cache
@@ -1352,8 +1382,8 @@ let test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal () =
         [ "Content-Length: 64"; Printf.sprintf "Retry-After: %d" refusal_retry_after_s ])
       ~keep_connection:true
       ~response_body:""
-    @@ fun ~sw ~net ~clock ~url ->
-    let cache = Http_client.create_cache ~sw () in
+    @@ fun ~sw ~net ~clock ~mono_clock ~url ->
+    let cache = Http_client.create_cache ~sw ~mono_clock () in
     let started = Eio.Time.now clock in
     let outcome =
       Http_client.post_sync_once_with_evidence
@@ -1395,8 +1425,8 @@ let test_one_dispatch_body_timeout_covers_response_headers () =
     with_raw_one_dispatch_server
       ~before_response:(fun ~clock ~request_index:_ -> Eio.Time.sleep clock 0.25)
       ~response_body:"ok"
-    @@ fun ~sw ~net ~clock ~url ->
-    let cache = Http_client.create_cache ~sw () in
+    @@ fun ~sw ~net ~clock ~mono_clock ~url ->
+    let cache = Http_client.create_cache ~sw ~mono_clock () in
     let outcome =
       Http_client.post_sync_once
         ~cache
@@ -1435,8 +1465,8 @@ let test_one_dispatch_caller_cancellation_identity_and_cache () =
       ~before_response:(fun ~clock ~request_index ->
         if request_index = 1 then Eio.Time.sleep clock 0.25)
       ~response_body:"ok"
-    @@ fun ~sw ~net ~clock ~url ->
-    let cache = Http_client.create_cache ~sw () in
+    @@ fun ~sw ~net ~clock ~mono_clock ~url ->
+    let cache = Http_client.create_cache ~sw ~mono_clock () in
     let post () =
       Http_client.post_sync_once
         ~cache

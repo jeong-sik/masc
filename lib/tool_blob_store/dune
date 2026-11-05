@@ -25,4 +25,6 @@
   yojson
   fs_compat
   masc_core
+  ; The sweep's period is Masc_time_constants.day (RFC-0499 §4.1).
+  masc.config
   masc.keeper_chat_operations))

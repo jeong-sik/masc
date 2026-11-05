@@ -227,7 +227,7 @@ let read_response_body response_body =
 
 let retry_after_header response =
   match Http.Header.get_multi (Cohttp.Response.headers response) "retry-after" with
-  | [ raw ] -> Http_client.parse_retry_after_seconds ~now:(Unix.gettimeofday ()) raw
+  | [ raw ] -> Http_retry_after.parse_seconds ~now:(Unix.gettimeofday ()) raw
   | [] | _ :: _ :: _ -> None
 ;;
 

@@ -25,7 +25,10 @@ let resume_message_seq config =
   | exception Sys_error _ -> 0
   | names ->
     Array.fold_left
-      (fun highest name -> max highest (message_seq_of_filename name))
+      (fun highest name ->
+         match message_seq_of_filename name with
+         | Some seq -> max highest seq
+         | None -> highest)
       0
       names
 ;;

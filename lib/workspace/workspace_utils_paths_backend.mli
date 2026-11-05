@@ -25,11 +25,17 @@ val agents_dir : config -> string
 val tasks_dir : config -> string
 val messages_dir : config -> string
 
-val message_seq_of_filename : string -> int
-(** The sequence a committed message's filename opens with, or [0] for a name
-    that carries none. Shared by the reader that pages in sequence order and
-    the bootstrap that resumes the counter, so the two cannot read a name
-    differently. *)
+val committed_message_suffix : string
+(** The ending every committed message's filename carries. The writer names
+    files with it and {!message_seq_of_filename} reads it. *)
+
+val message_seq_of_filename : string -> int option
+(** The positive sequence a committed message's filename opens with, or
+    [None] for a name that is not a committed message: no
+    {!committed_message_suffix} ending (an atomic-write staging file among
+    them), no leading decimal sequence, or a zero sequence. Shared by the
+    reader that pages in sequence order and the bootstrap that resumes the
+    counter, so the two cannot read a name differently. *)
 val state_path : config -> string
 val backlog_path : config -> string
 val archive_path : config -> string

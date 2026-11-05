@@ -1666,8 +1666,8 @@ assert sys.argv[sys.argv.index("--mode") + 1] == "plan"
 assert [sys.argv[i + 1] for i, value in enumerate(sys.argv) if value == "--add-dir"] == [str(workspace)]
 assert not (account_dir / ".gemini/config/mcp_config.json").exists()
 policy = json.loads((account_dir / ".gemini/antigravity-cli/settings.json").read_text())["permissions"]
-assert policy["allow"] == ["mcp(masc/*)", "read_file(" + str(workspace) + ")"]
-assert policy["deny"] == ["write_file(*)", "command(*)", "read_url(*)", "execute_url(*)"]
+assert policy["allow"] == ["mcp(masc/*)", "read_file(" + str(account_dir / ".gemini/antigravity-cli/mcp/masc") + ")", "read_file(" + str(workspace) + ")"]
+assert policy["deny"] == ["read_file(" + str(account_dir / ".gemini/config") + ")", "read_file(" + str(account_dir / ".gemini/antigravity-cli/antigravity-oauth-token") + ")", "write_file(*)", "command(*)", "read_url(*)", "execute_url(*)"]
 assert "XDG_CONFIG_HOME" not in os.environ
 credential = account_dir / ".gemini/antigravity-cli/antigravity-oauth-token"
 assert credential.stat().st_mode & 0o777 == 0o600

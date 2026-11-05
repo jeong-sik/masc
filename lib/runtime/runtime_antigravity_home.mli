@@ -121,6 +121,11 @@ val oauth_path : t -> string
 
 val home_dir : t -> string
 
+val mcp_server_name : string
+(** The MCP server name every Antigravity caller starts its bridge under. The
+    policy opens [<appDataDir>/mcp/<this name>], where agy keeps the lazily
+    loaded tools' arguments, and grants every tool of this server. *)
+
 type native_workspace = Shared_workspace of string | Private_workspace
 
 val canonical_workspace : string -> (string, error) result
@@ -140,6 +145,10 @@ val prepare_native_tools
     prepared under is refused, and so is an additional root inside it. For a
     Keeper that root is the masc state directory, which holds every Keeper's
     credentials. A refusal leaves the published settings unchanged.
+    Every posture reads the masc tool schema folder and denies the config
+    folder and the token file by exact path (RFC-0490 2.2). [Native_none]
+    also denies each workspace root, since agy allows workspace reads no rule
+    matches, and refuses a root that holds the HOME.
     Read posture denies commands and writes; full permits sandboxed effects.
     Both deny native network tools. The caller must enable the CLI sandbox;
     no command allow rule is emitted because it would grant sandbox escapes
@@ -206,8 +215,8 @@ module For_testing : sig
     }
 
   val paths : t -> paths
-  val settings_json : unit -> Yojson.Safe.t
-  val native_settings_json : posture:Runtime_native_tools.posture -> workspaces:string list -> Yojson.Safe.t
+  val settings_json : t -> (Yojson.Safe.t, error) result
+  (** The default ([Native_none]) policy this HOME is prepared with. *)
 
   val prepared_count_below : runtime_root:string -> int
   (** How many homes below [runtime_root] hold a first-preparation claim. *)

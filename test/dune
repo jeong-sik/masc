@@ -4122,7 +4122,7 @@
 (test
  (name test_tui_quiz_scorecard)
  (modules test_tui_quiz_scorecard)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc masc_tui_types))
 
 (test
  (name test_tui_memory_fold)

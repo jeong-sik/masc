@@ -314,11 +314,15 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
       (* Preserve the original state, including last_step/read phase. *)
       Ok { candidate = state; required = [] }
     else
+      (* Only a response step carries the answer. Text on any other step is
+         not the reply and does not reach the reader as one. *)
       let streamed, text_obligations =
-        match text_delta with
-        | Some text when text <> "" ->
+        match step_type, text_delta with
+        | Agent_response, Some text when text <> "" ->
           true, [ Stream (Text_delta { step_index; text }) ]
-        | Some _ | None -> false, []
+        | Agent_response, (Some _ | None)
+        | (System_message | Tool | User_input | Internal | Checkpoint | Unrecognized _),
+          (Some _ | None) -> false, []
       in
       let closed_responses, completion_obligations =
         match step_index, ending with

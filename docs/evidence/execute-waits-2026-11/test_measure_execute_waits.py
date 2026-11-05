@@ -1041,18 +1041,31 @@ class SummarizeTurnTimeTest(unittest.TestCase):
         summary = waits.summarize_turn_time([call("b", 100, end=NOON + 3000)], self.TURNS)
         self.assertEqual(object_of(summary["execute"])["inside_hours"], 0.0)
 
-    def test_the_two_github_kinds_and_only_long_calls_make_the_github_group(self) -> None:
+    def test_the_two_github_kinds_make_the_github_group_and_only_calls_of_sixty_seconds_or_more_are_long(self) -> None:
         calls = [
             call("a", 100, kind=waits.Kind.RUN, end=NOON + 1000),
             call("a", 100, kind=waits.Kind.GH, end=NOON + 1000),
             call("a", 100, kind=waits.Kind.BUILD, end=NOON + 1000),
             call("a", 100, kind=waits.Kind.REST, end=NOON + 1000),
-            call("a", 59, kind=waits.Kind.GH, end=NOON + 1000),
+            call("a", 60, kind=waits.Kind.GH, end=NOON + 1000),  # exactly the limit: long
+            call("a", 59, kind=waits.Kind.GH, end=NOON + 1000),  # under the limit: in no group but execute
+            call("a", 59, kind=waits.Kind.BUILD, end=NOON + 1000),
         ]
         summary = waits.summarize_turn_time(calls, self.TURNS)
-        self.assertEqual(object_of(summary["github_calls"])["calls"], 2)
+        self.assertEqual(object_of(summary["github_calls"])["calls"], 3)
         self.assertEqual(object_of(summary["build_or_test_calls"])["calls"], 1)
-        self.assertEqual(object_of(summary["long_calls"])["calls"], 4)
+        self.assertEqual(object_of(summary["long_calls"])["calls"], 5)
+        self.assertEqual(object_of(summary["execute"])["calls"], 7)
+
+    def test_the_calls_of_keepers_without_a_turn_file_are_counted_by_call_and_by_keeper(self) -> None:
+        calls = [
+            call("c", 30, end=NOON + 100),
+            call("c", 36, end=NOON + 200),
+            call("d", 42, end=NOON + 300),
+            call("a", 3600, end=NOON + 1000),  # a Keeper with a turn file
+        ]
+        summary = waits.summarize_turn_time(calls, self.TURNS)
+        self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 2, "calls": 3, "hours": 0.03})
 
     def test_a_poll_call_is_sleeping_and_names_a_run_whatever_its_length(self) -> None:
         calls = [
@@ -1071,7 +1084,7 @@ class SummarizeTurnTimeTest(unittest.TestCase):
         )
         self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 2, "calls": 2, "hours": 2.0})
 
-    def test_no_calls_hold_no_time_and_no_share(self) -> None:
+    def test_no_calls_hold_no_time_and_a_zero_share(self) -> None:
         summary = waits.summarize_turn_time([], self.TURNS)
         empty = {"calls": 0, "hours": 0.0, "inside_hours": 0.0, "outside_hours": 0.0, "inside_percent_of_turn_time": 0.0}
         for group in ("execute", "long_calls", "github_calls", "build_or_test_calls", "poll_calls"):
@@ -1287,6 +1300,12 @@ class MainTest(unittest.TestCase):
             summary, _ = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
             self.assertEqual(object_of(summary["turn_time"])["keepers_with_turn_traces"], 0)
 
+    def test_loading_the_turn_reader_puts_the_bytecode_flag_back(self) -> None:
+        for before in (False, True):
+            with self.subTest(before=before), mock.patch.object(sys, "dont_write_bytecode", before):
+                waits.load_lane_time()
+                self.assertEqual(sys.dont_write_bytecode, before)
+
     def test_a_lane_time_script_that_cannot_be_loaded_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
@@ -1300,23 +1319,29 @@ class MainTest(unittest.TestCase):
                     with mock.patch.object(waits, "LANE_TIME_SCRIPT", path):
                         message = self.fails(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
                     self.assertIn(f"error: cannot load the turn reader from {path}", message)
+                    if name == "not_python.txt":
+                        # No import spec is built for this suffix: the refusal is the ImportError, not a lookup on a missing spec.
+                        self.assertIn(f"{path} is not a Python file", message)
                     self.assertNotIn(waits.LANE_TIME_MODULE, sys.modules)
 
 
 class ProgramTest(unittest.TestCase):
-    def test_the_script_run_as_a_program_prints_the_summary(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
+    def test_the_script_run_as_a_program_prints_the_summary_and_writes_no_bytecode_of_the_turn_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as raw, tempfile.TemporaryDirectory() as cache:
             base = pathlib.Path(raw)
             write_day(base, "01.jsonl", [execute_row("a", 108, f"sleep 108; gh run view {RUN_A}")])
             write_turns(base, "a", "one.jsonl", NOON - 200, NOON + 100)
-            command = [sys.executable, "-B", "-I", str(SCRIPT), "--base-path", str(base), "--from-date", "2026-11-01", "--to-date", "2026-11-01"]
+            # No -B, so the process may write bytecode. pycache_prefix sends what it writes to `cache`, not next to the scripts.
+            command = [sys.executable, "-I", "-X", f"pycache_prefix={cache}", str(SCRIPT), "--base-path", str(base), "--from-date", "2026-11-01", "--to-date", "2026-11-01"]
             done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=PROGRAM_TIMEOUT_SECONDS)
             self.assertEqual((done.returncode, done.stderr), (0, ""))
             summary = object_of(json.loads(done.stdout))
             self.assertEqual(object_of(summary["execute"])["calls"], 1)
             turn_time = object_of(summary["turn_time"])
             self.assertEqual((turn_time["keepers_with_turn_traces"], object_of(turn_time["execute"])["inside_hours"]), (1, 0.03))
-            self.assertEqual(list(SCRIPT.parent.parent.glob("lane-time-2026-11/__pycache__")), [])
+            written = {path.name.split(".")[0] for path in pathlib.Path(cache).rglob("*.pyc")}
+            self.assertIn("masc_base_path", written)  # bytecode could be written
+            self.assertNotIn(waits.LANE_TIME_MODULE, written)
 
 
 if __name__ == "__main__":

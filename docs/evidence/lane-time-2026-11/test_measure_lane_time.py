@@ -349,6 +349,16 @@ class UntracedTest(unittest.TestCase):
         clocked = block(summary["keepers_with_a_trace_file"])
         self.assertEqual((clocked["tool_time_s"], clocked["execute_time_s"]), (15.6, 10.3))
 
+    def test_a_keeper_with_a_clock_has_only_the_calls_of_its_turns_without_a_trace_file_in_its_block(self) -> None:
+        calls = [
+            call_of_turn("k/trace-1-00000#1", "autonomous", 0, 10),  # the turn has a trace file
+            call_of_turn("k/trace-1-00000#2", "direct", 20, 30),
+        ]
+        summary = lane.summarize_untraced(calls, frozenset({"k/trace-1-00000#1"}), clocks_of((0, 40)))
+        clocked = block(summary["keepers_with_a_trace_file"])
+        self.assertEqual((clocked["calls"], clocked["tool_time_s"]), (1, 10.0))
+        self.assertEqual(summary["calls"], 1)
+
     def test_the_file_of_another_keeper_does_not_trace_the_call(self) -> None:
         summary = lane.summarize_untraced([call_of_turn("k/trace-1-00000#1", "direct", 0, 10)], frozenset({"other/trace-1-00000#1"}), {})
         self.assertEqual(summary["calls"], 1)
@@ -481,6 +491,7 @@ class TraceKeysTest(unittest.TestCase):
         near_misses = [
             "trace-1-2-4-abc.jsonl.jsonl",  # the extension twice: the glob lets it through, the pattern has to refuse it
             "trace-1-2-9-abc.jsonl.tmp",  # another extension after the first
+            "foo-1-2-10-abc.jsonl",  # the right shape, but not named trace-
             "trace-1-2-5-.jsonl",  # no hash
             "trace-1-2--abc.jsonl",  # no turn id
             "trace-1--6-abc.jsonl",  # no sequence
@@ -924,7 +935,9 @@ def run_main(
                 "--until", f"1970-01-{day:02d}T01:00:00Z"]
         out = io.StringIO()
         with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
-            assert lane.main() == 0
+            status = lane.main()
+        if status != 0:
+            raise AssertionError(f"measure_lane_time.py returned {status}")
     return block(json.loads(out.getvalue())["turn_time"])
 
 

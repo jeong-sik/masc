@@ -16,7 +16,7 @@ implementation_prs: ["#48685"]
 ## 0. 요약
 
 TUI 가 서버에서 받은 답(`async_msg`)은 `bin/masc_tui.ml` 의
-`apply_async_message_body` 한 함수가 모두 상태에 반영한다. 지금 254갈래, 5,888줄이다.
+`apply_async_message_body` 한 함수가 모두 상태에 반영한다. 지금 254갈래, 5,896줄이다.
 
 열린 스택 #48627 → #48637 → #48638 은 답 타입을 묶음마다 나눈다. 그래서 `async_msg` 의
 인자 있는 생성자가 한도 244개(#48617)에서 56개로 줄어든다. 하지만 나뉘는 것은 타입뿐이다.
@@ -30,7 +30,7 @@ TUI 가 서버에서 받은 답(`async_msg`)은 `bin/masc_tui.ml` 의
 3. 프로토콜과 루프가 답을 어떻게 다룰지 정하는 kind(`answer_kind`). 읽기 답인가, 입력을
    기다려야 하는가 같은 질문은 답마다가 아니라 kind 로 정한다.
 
-답을 보내는 코드는 자기 묶음 답만 받는 `deliver` 를 받는다. `masc_tui.ml` 은 묶음마다
+요청 함수는 자기 묶음 답만 받는 `deliver` 를 받는다. `masc_tui.ml` 은 묶음마다
 한 갈래로 넘기고, 돌려받은 할 일을 실행한다.
 
 동작은 바꾸지 않는다. `state` 레코드를 묶음별로 나누는 일은 이 RFC 범위 밖이다.
@@ -44,7 +44,7 @@ TUI 가 서버에서 받은 답(`async_msg`)은 `bin/masc_tui.ml` 의
 
 - `async_msg` 는 인자 있는 생성자 56개다. 묶음 생성자 38개, 답이 하나뿐인 묶음의 답 14개,
   다른 `async_msg` 를 싣는 생성자 4개다.
-- `apply_async_message_body` 는 254갈래, 5,888줄이다. `bin/masc_tui.ml` 은 42,229줄이고
+- `apply_async_message_body` 는 254갈래, 5,896줄이다. `bin/masc_tui.ml` 은 42,229줄이고
   맨 위 값이 943개다.
 - 상태는 `Masc_tui_types.state` 레코드 하나이고 필드가 979개다. `bin/masc_tui_types.ml` 은
   26,180줄이다.
@@ -214,8 +214,11 @@ let deliver_code state =
 (Code_msg msg)` 로 쓰면 답이 도착할 때 잡는다. 그러면 옛 작업 공간의 늦은 답이 새 작업 공간
 것으로 들어온다.
 
-Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 모듈은 다른 묶음의
-답을 보지 않는다. 초안 저장처럼 작업 공간 도장 없이 보내는 답은 그 자리에서 직접 감싼다.
+Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 함수는 자기 묶음의
+답만 만든다. 한 요청 모듈에 다른 묶음의 요청 함수가 있으면 함수마다 그 묶음의 `deliver` 를
+받는다. 예를 들어 `Masc_tui_identity_requests.launch_github_view` 는 Github 답을 보내므로
+Github 의 `deliver` 를 받는다. 초안 저장처럼 작업 공간 도장 없이 보내는 답은 그 자리에서
+직접 감싼다.
 
 ### 3.3 `masc_tui.ml` 에 남는 것
 
@@ -232,6 +235,19 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
               ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path)
   ```
 
+- 받지 않는 답의 갈래도 묶음마다 하나다. 작업 공간이 바뀐 뒤 도착한 답은
+  `workspace_message_admitted` 를 통과하지 못한다. 그래도 치울 것이 있으면 이 갈래에서
+  치운다. Code 는 치울 것이 없어서 kind 만 묻는다.
+
+  ```ocaml
+  | Code_msg answer ->
+      (match Code_results.answer_kind answer with
+       | Code_results.(Read | Save) -> ())
+  ```
+
+  치울 일이 답의 내용에 달린 묶음은 그 일을 묶음 모듈의 함수로 둔다. 3.1 의
+  `project_workspace_operation_reply` 와 같은 경우다. 예를 들어 Keeper 는 목록·행 읽기
+  자리를 비우고, 채팅 전송을 기다리는 promise 를 resolve 한다.
 - 다른 `async_msg` 를 싣는 생성자 4개, 새로고침 흐름(`Http_*`), 답이 하나뿐인 묶음의 답
   14개. 여러 묶음에 걸친 일이라 Elm 의 `Main` 처럼 한가운데가 맡는다.
 - 돌려받은 할 일의 실행(IO).
@@ -240,9 +256,20 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 - 묶음은 답이 바꾸는 상태의 주인이다. 1.3 의 "그 묶음만 바꾸는 필드"로 확인한다.
 - 이름 첫 단어가 주인이 아니면 이름을 주인에 맞게 바꾼다.
-- 두 묶음이 같이 바꾸는 필드는 옮기기 전에 주인을 정한다. 지금 보이는 곳은 Keeper 와 Gate 가
-  같이 바꾸는 `approval_cursor`·`approval_flow`(Approvals 화면의 승인 작업 자리)와, Keeper 와
-  Connectors 가 같이 바꾸는 필드 둘이다.
+- 두 곳 이상이 같이 바꾸는 필드는 옮기기 전에 주인을 정한다. 갈래 본문이 직접 바꾸는 필드
+  중 12개가 그렇다. 세는 방법은 1.3 과 같다. 한가운데 갈래는 3.3 대로 `masc_tui.ml` 에 남는
+  갈래다.
+
+  | 필드 | 묶음 갈래 | 한가운데 갈래 |
+  |---|---|---|
+  | `approval_cursor`·`approval_flow` | Keeper, Gate | 없음 |
+  | `connector_unbind_offer_origin`·`connector_unbind_offer_pending` | Keeper, Connectors | 없음 |
+  | `runtime_lane_replacement_selection` | Runtime, Lane | 없음 |
+  | `config_scroll` | Preset, Runtime | `Librarian_input_loaded` |
+  | `connection_status` | Workspace, Observer | `Http_*` |
+  | `acting_pane_changes`·`acting_pane_changes_at`·`acting_pane_changes_loss_followup` | Observer | `Acting_pane_changes_loaded` |
+  | `lane_nested_read_resume` | Lane | `Workspace_scoped` |
+  | `http_surface_reads` | 없음 | `Http_*`, `System_logs_loaded` |
 
 ### 3.5 하지 않는 것
 
@@ -257,7 +284,7 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 | 층 | 하는 일 | 끝난 기준 |
 |---|---|---|
-| L1(#48685) | Code 시범. `code_msg`·`apply`·`answer_kind` 를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, Code 생성자를 나열하던 분류 자리 5 → 0, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
+| L1(#48685) | Code 시범. `code_msg`·`apply`·`answer_kind` 를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, Code 생성자를 나열하던 분류 자리 5곳(프로토콜 함수 넷, 받지 않는 답의 갈래) → 0, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
 | L2~ | 나머지 얇은 묶음 16개를 서너 개씩 | L1 과 같은 기준 |
 | Ls | 1.3 의 공용 함수 13개를 `masc_tui.ml` 아래 라이브러리로 내리거나 할 일 값으로 바꾼다 | 두꺼운 묶음이 그 함수를 모듈 이름 없이 부르지 않는다 |
 | Lt | 두꺼운 묶음(Runtime, Lane, Voice, Board, Observer 등) | L1 과 같은 기준 |
@@ -267,11 +294,12 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 - **컴파일러**: `apply` 와 `answer_kind` 는 자기 `msg` 를 와일드카드 없이 빠짐없이 match
   한다. 새 답을 더하면 두 곳이 컴파일 오류로 알려 준다. kind 를 더하면 그 kind 를 따지는
-  곳이 모두 알려 준다.
+  곳이 모두 알려 준다. Code 는 프로토콜 함수 넷과 받지 않는 답의 갈래, 다섯 곳이다.
 - **시험**: 묶음마다 모든 생성자를 나열해 `apply`·분류 함수를 부르는 시험을 둔다.
   `test/test_tui_code_msg.ml` 이 이미 `code_msg` 를 생성자마다 나열한다.
-- **파싱 검사(층마다)**: `apply_async_message_body` 에 그 묶음 갈래가 하나만 있는지, 그 묶음
-  생성자가 쓰인 곳이 모두 자기 묶음 생성자 안에 있는지 센다.
+- **파싱 검사(층마다)**: `apply_async_message_body` 의 맨 위 갈래와 받지 않는 답의 match 에
+  그 묶음 갈래가 하나씩만 있는지 센다. 그 묶음 생성자가 쓰인 곳이 모두 자기 묶음 생성자
+  안에 있는지도 센다.
 - CI type-check 와 그 묶음의 시험 suite.
 
 ## 6. 비용과 위험
@@ -282,6 +310,9 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
   가 받는 라이브러리 8개는 프로토콜이 이미 받는다. 그래서 프로토콜의 의존은 이 라이브러리
   하나만 는다. 다른 묶음도 같은 방법으로 잰다. 묶음 모듈이 프로토콜이 받지 않는 라이브러리를
   받으면 그때 타입만 담은 모듈을 검토한다.
+- 묶음 모듈은 dune 라이브러리여야 한다. 프로토콜이 라이브러리(`masc_tui_async_protocol`)라서
+  `masc_tui` 실행 파일의 모듈을 볼 수 없다. `masc_tui_code_results` 는 이미 라이브러리다.
+  `masc_tui_identity_requests` 는 실행 파일의 모듈이라 Identity 의 `msg` 를 둘 수 없다.
 - `dune-project` 가 `(implicit_transitive_deps false)` 다. 묶음 타입의 생성자를 쓰는 stanza 는
   그 묶음 라이브러리를 직접 적어야 한다. L1 은 시험 stanza 에 더했다.
 - 옮기는 동안 두 모양이 섞인다. 층마다 묶음 하나를 끝까지 옮겨서, 반쯤 옮긴 묶음은 남기지
@@ -289,20 +320,27 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 ## 7. 열린 질문
 
-1. `approval_cursor`·`approval_flow` 의 주인은 Gate, Approvals, Keeper 중 누구인가.
+1. 3.4 표의 필드는 누가 주인인가. `approval_cursor`·`approval_flow` 는 Approvals 화면의
+   자리라서 Gate, Approvals, Keeper 가 모두 후보다. 한가운데 갈래도 바꾸는 필드는 한가운데가
+   주인일 수도 있다.
 2. 답이 하나뿐인 묶음 중 주인이 분명한 답은 그 주인 묶음으로 옮길까.
 
 ## 부록 A. 세는 방법
 
-`compiler-libs` 의 `Parse.implementation` 으로 `bin/masc_tui.ml` 과 `bin/masc_tui_types.ml` 을
-읽는다. 컴파일하지 않는다.
+`compiler-libs` 의 `Parse.implementation`·`Parse.interface` 로 파싱만 한다. 컴파일하지 않는다.
 
+- 읽는 파일: 0·1.4 의 감싸는 곳은 저장소의 OCaml 파일 8,609개(.ml·.mli)에서 센다. 갈래·필드·
+  맨 위 값은 `bin/masc_tui.ml` 과 `bin/masc_tui_types.ml` 에서 센다.
 - `state` 필드: `Masc_tui_types` 의 `type state = { … }` 레코드 필드.
 - 맨 위 값: `bin/masc_tui.ml` 의 맨 위 `let` 이 묶는 이름.
+- 줄: 함수는 정의 전체의 줄 수다(5,896). 갈래는 패턴 첫 줄부터 본문 끝 줄까지다. 묶음의 줄은
+  그 묶음 갈래의 줄을 더한 값이다. 254갈래를 모두 더하면 5,888줄이다. 함수 머리와 갈래 사이
+  주석은 들어가지 않는다.
 - 갈래마다 패턴의 바깥 생성자를 묶음으로 본다. 본문이 모듈 이름 없이 부르는 맨 위 값 중
   그 갈래 안에서 다시 묶지 않은 이름을 "`masc_tui.ml` 함수"로 센다. `state.f <- e` 와
   `state.f.g <- e` 를 "직접 바꾸는 필드 `f`"로 센다.
-- 감싸는 곳은 묶음 생성자를 만드는 식과 match 하는 패턴을 센다.
+- 감싸는 곳은 묶음 생성자(`<묶음>_msg`)를 만드는 식과 match 하는 패턴을 센다. 만드는 곳
+  369곳 중 274곳, match 779곳 중 339곳이 `bin/masc_tui.ml` 이다. 프로토콜은 match 405곳이다.
 - 한계: 다른 모듈 함수 안에서 바꾸는 필드는 세지 않는다. 갈래 안에서 같은 이름을 다시 묶으면
   그 이름은 세지 않는다. 측정 도구는 저장소에 넣지 않았다.
 

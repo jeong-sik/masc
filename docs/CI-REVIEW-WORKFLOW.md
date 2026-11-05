@@ -329,35 +329,6 @@ not become an individual PR's check, an independent source approval or merge
 permission. A source review does not establish a CI result; Release admission
 still requires its current-head full verification evidence.
 
-For real browser Addon checks, dispatch `browser-stagehand-proof.yml` with a full
-`candidate_sha` and `browser=chromium`, `browser=firefox` or `browser=gecko`. The workflow builds
-only that browser's scenario and its launcher, process guardian and worker. It
-checks out the source candidate independently of the workflow ref; the artifact
-records both commits and retains the four executables with their SHA-256 list.
-Chromium exercises Stagehand on isolated private and persistent profiles. Firefox
-uses a fresh private test workspace and persistent profile for trusted input,
-in-flight detach, confirmed cleanup, fresh reattachment and stale-client refusal.
-`gecko` selects owned Firefox through geckodriver for host-granted file upload,
-late page reads after host snapshot release, actual download bytes and durable
-download/screenshot artifacts after confirmed Addon retirement. Its fixture
-payload reader is explicit host authority, not a Keeper sandbox authorization test.
-All three scenarios use controlled loopback pages, never the operator's profile or signed-in
-sites. Logs, scenario receipts and screenshots show only that selected execution;
-they do not prove Safari parity, installed production behavior or full regression.
-
-```bash
-gh workflow run browser-stagehand-proof.yml --ref WORKFLOW_REF \
-  -f candidate_sha=EXACT_SOURCE_SHA -f browser=firefox
-```
-
-Set `-f companion_checks=true` for a candidate containing the original-session
-companion implementation. This additionally builds the server and executes the
-Stagehand backend, extension companion, Unix broker, allocation cleanup,
-worker protocol, original Keeper invocation retention and canonical publication
-queue suites. The candidate must contain all seven fixtures; the worker protocol suite initializes the actual
-package, while origin retention covers immutable source ownership and refuses
-duplicate dispatch. The artifact records the selected build targets and
-test names, retains individual test logs and packages the matching server.
 After the complete selected build succeeds, binaries and their source/checksums
 are retained before runtime checks. A later fixture failure therefore preserves
 the build artifact without implying runtime success. Independent fixture commands

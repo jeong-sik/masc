@@ -59,6 +59,15 @@ let trees ~element signals =
   Markup.trees ~text:node_of_text ~element signals
   |> Markup.to_list
 
+(* WORKAROUND: Markup 1.0.3 builds its named character reference table in a
+   [lazy] the first time a document uses one (&amp;), and [Lazy.force] raises
+   [Lazy.Undefined] when two domains force it at once. Web fetch, search,
+   link preview, PDF inspection and Telegram rendering parse HTML on pool
+   domains. Reading one reference here, while the program initializes on the
+   main domain, builds the table before any of them runs. Root fix: Markup
+   builds the table without [lazy]. *)
+let () = Markup.string "&amp;" |> Markup.parse_html |> Markup.signals |> Markup.drain
+
 let parse_html source =
   source |> Markup.string |> Markup.parse_html |> Markup.signals
   |> trees ~element:html_element

@@ -224,53 +224,6 @@ let test_task_status_of_yojson_unknown () =
   check bool "is error" true (is_error result)
 
 (* ============================================================ *)
-(* Masc_domain.tempo_mode Tests                                        *)
-(* ============================================================ *)
-
-let test_tempo_mode_to_string () =
-  check string "Normal" "normal" (Masc_domain.tempo_mode_to_string Masc_domain.Normal);
-  check string "Slow" "slow" (Masc_domain.tempo_mode_to_string Masc_domain.Slow);
-  check string "Fast" "fast" (Masc_domain.tempo_mode_to_string Masc_domain.Fast);
-  check string "Paused" "paused" (Masc_domain.tempo_mode_to_string Masc_domain.Paused)
-
-let test_tempo_mode_of_string () =
-  check bool "normal ok" true (is_ok (Masc_domain.tempo_mode_of_string "normal"));
-  check bool "slow ok" true (is_ok (Masc_domain.tempo_mode_of_string "slow"));
-  check bool "fast ok" true (is_ok (Masc_domain.tempo_mode_of_string "fast"));
-  check bool "paused ok" true (is_ok (Masc_domain.tempo_mode_of_string "paused"));
-  check bool "unknown error" true (is_error (Masc_domain.tempo_mode_of_string "turbo"))
-
-let test_tempo_mode_roundtrip () =
-  let modes = [Masc_domain.Normal; Masc_domain.Slow; Masc_domain.Fast; Masc_domain.Paused] in
-  List.iter (fun mode ->
-    let json = Masc_domain.tempo_mode_to_yojson mode in
-    let result = Masc_domain.tempo_mode_of_yojson json in
-    check bool "roundtrip ok" true (is_ok result)
-  ) modes
-
-(* ============================================================ *)
-(* Masc_domain.tempo_config Tests                                      *)
-(* ============================================================ *)
-
-let test_default_tempo_config () =
-  let cfg = Masc_domain.default_tempo_config in
-  check bool "mode is Normal" true (cfg.mode = Masc_domain.Normal);
-  check int "delay_ms is 0" 0 cfg.delay_ms;
-  check bool "reason is None" true (cfg.reason = None)
-
-let test_tempo_config_roundtrip () =
-  let cfg = Masc_domain.{
-    mode = Slow;
-    delay_ms = 500;
-    reason = Some "Heavy workload";
-    set_by = Some "admin";
-    set_at = Some "2024-01-01T00:00:00Z";
-  } in
-  let json = Masc_domain.tempo_config_to_yojson cfg in
-  let result = Masc_domain.tempo_config_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
 (* Masc_domain.agent_role Tests                                        *)
 (* ============================================================ *)
 
@@ -620,14 +573,6 @@ let task_status_tests = [
   "unknown status error", `Quick, test_task_status_of_yojson_unknown;
 ]
 
-let tempo_tests = [
-  "mode to_string", `Quick, test_tempo_mode_to_string;
-  "mode of_string", `Quick, test_tempo_mode_of_string;
-  "mode roundtrip", `Quick, test_tempo_mode_roundtrip;
-  "default config", `Quick, test_default_tempo_config;
-  "config roundtrip", `Quick, test_tempo_config_roundtrip;
-]
-
 let role_tests = [
   "all roles", `Quick, test_agent_role_all;
   "unknown error", `Quick, test_agent_role_of_string_unknown;
@@ -712,7 +657,6 @@ let () =
     "Timestamp", timestamp_tests;
     "agent_status", agent_status_tests;
     "task_status", task_status_tests;
-    "tempo", tempo_tests;
     "agent_role", role_tests;
     "rate_limit", rate_limit_tests;
     "masc_error", error_tests;

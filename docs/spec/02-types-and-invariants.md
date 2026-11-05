@@ -195,23 +195,7 @@ type workspace_state = {
 
 RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
 
-### 2.11 Tempo
-
-```ocaml
-type tempo_mode = Normal | Slow | Fast | Paused
-
-type tempo_config = {
-  mode : tempo_mode;
-  delay_ms : int;
-  reason : string option;
-  set_by : string option;
-  set_at : string option;
-}
-```
-
-워크스페이스/서버 실행 속도를 제어한다. `delay_ms`는 작업 간 인위적 지연을 삽입한다.
-
-### 2.12 Backlog
+### 2.11 Backlog
 
 ```ocaml
 type backlog = {
@@ -221,7 +205,7 @@ type backlog = {
 }
 ```
 
-### 2.13 A2A Task (Google A2A Protocol)
+### 2.12 A2A Task (Google A2A Protocol)
 
 ```ocaml
 type a2a_task_status = A2APending | A2ARunning | A2ACompleted | A2AFailed | A2ACanceled
@@ -238,7 +222,7 @@ type a2a_task = {
 }
 ```
 
-### 2.14 SSE Session
+### 2.13 SSE Session
 
 ```ocaml
 type sse_session = {
@@ -249,7 +233,7 @@ type sse_session = {
 }
 ```
 
-### 2.15 Tool Result (core)
+### 2.14 Tool Result (core)
 
 `types_core.ml`에 정의된 기본 tool_result:
 
@@ -261,7 +245,7 @@ type tool_result = {
 }
 ```
 
-### 2.16 Claim Next Result
+### 2.15 Claim Next Result
 
 스케줄링 결과를 구조화한 ADT. brittle한 문자열 파싱을 방지한다:
 

@@ -522,7 +522,9 @@ def validate_acceptance(value: dict[str, Any]) -> str:
 def validate_operation(value: dict[str, Any], operation_id: str) -> str:
     # The status read names one operation the caller already chose, so the
     # reply carries no schema tag and does not repeat the submitted request:
-    # no sequence, digests, source or input.
+    # no sequence, digests, source or input.  A Succeeded reply also carries
+    # completed_reply, which keeper_delegate_status_body appends to every
+    # Succeeded status: the reply objects, or an "unavailable" marker.
     require(value.get("operation_id") == operation_id, "operation identity changed")
     state = value.get("state")
     require(
@@ -536,7 +538,7 @@ def validate_operation(value: dict[str, Any], operation_id: str) -> str:
     extras = {
         "Queued": set(),
         "Running": {"started_at"},
-        "Succeeded": {"completed_at", "outcome_ref"},
+        "Succeeded": {"completed_at", "outcome_ref", "completed_reply"},
         "Failed": {
             "completed_at",
             "failure_kind",
@@ -555,6 +557,10 @@ def validate_operation(value: dict[str, Any], operation_id: str) -> str:
         required_number(value, "started_at", "Keeper chat operation")
     if state == "Succeeded":
         required_string(value, "outcome_ref", "Keeper chat operation")
+        require(
+            isinstance(value.get("completed_reply"), dict),
+            "Keeper chat operation.completed_reply is not an object",
+        )
     if state == "Failed":
         required_string(value, "failure_kind", "Keeper chat operation")
         required_string(value, "failure_detail", "Keeper chat operation")

@@ -10,7 +10,6 @@ let rec remove path = match (Unix.lstat path).Unix.st_kind with
    slot, so the slot holds only its claim. *)
 let kept_root directory = directory ^ "-kept"
 let cleanup ~admission ~directory = Socket.cleanup ~admission ~directory ~kept_root:(kept_root directory)
-let owned_gecko={Masc.Browser_addon_automation.driver="/usr/bin/geckodriver";binary=None;profiles="/fixture/gecko-profiles"}
 (* Without a [source], the allocation is an external host worker's: it starts
    no browser and may hold only its socket. *)
 let with_claim ?(source=fun _ -> Socket.External_host) ?(models=fun _ -> None)
@@ -88,7 +87,7 @@ let model_configuration_cleanup () =
     check "model bootstrap is released with original allocation" false (Sys.file_exists root);
     check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let downloads=Filename.concat root "downloads" in
@@ -98,17 +97,18 @@ let owned_backend_cleanup () =
       released (cleanup ~admission ~directory);
       check "a settled worker and empty trees release the allocation" false (Sys.file_exists root))
 let interrupted_owned_cleanup () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       (* A known leaf cannot be removed: fail during deletion, then resume
-         after some earlier leaves already disappeared. *)
-      let obstruction=Filename.concat root "webdriver.log" in
+         after the empty downloads tree already disappeared. *)
+      let downloads=Filename.concat root "downloads" in
+      Unix.mkdir downloads 0o700;Unix.mkdir (Filename.concat downloads "session") 0o700;
+      let obstruction=Filename.concat root "s" in
       Unix.mkdir obstruction 0o700;
       lease (Lease.retire admission);
       check "interrupted deletion is reported" true (Result.is_error (cleanup ~admission ~directory));
-      List.iter (fun name -> let path=Filename.concat root name in
-        if Sys.file_exists path then Unix.unlink path) ["automation.json"];
+      check "the earlier leaves are gone" false (Sys.file_exists downloads);
       Unix.rmdir obstruction;
       released (cleanup ~admission ~directory);
       check "cleanup resumes after a partial deletion" false (Sys.file_exists root))
@@ -127,8 +127,7 @@ let foreign_source_resources () =
       Unix.unlink path;
       released (cleanup ~admission ~directory);
       check "the allocation of its own source's resources is released" false (Sys.file_exists root)))
-    [Socket.Automation owned_gecko,"live-bidi.json";
-     Socket.Ego,"automation.json";
+    [Socket.Ego,"live-bidi.json";
      Socket.External_host,"live-bidi.json"]
 let acquisition_state directory =
   match List.filter (fun name -> String.starts_with ~prefix:"browser-" name) (Array.to_list (Sys.readdir directory)) with
@@ -142,7 +141,7 @@ let acquisition_state directory =
    released. *)
 let keeper_files_move_out () =
   List.iter (fun tree ->
-    with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+    with_claim ~source:(fun _ -> Socket.Ego)
       (fun admission directory root ->
         ignore (ok (Socket.acquire ~admission ~directory));
         let parent=Filename.concat root tree in
@@ -197,7 +196,7 @@ let a_replaced_directory_moves_nothing () = with_claim (fun admission directory 
 (* A destination that already holds the tree refuses the move and leaves the
    allocation unreleased with its file in place. *)
 let an_occupied_destination_moves_nothing () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko) (fun admission directory root ->
+  with_claim ~source:(fun _ -> Socket.Ego) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
     Unix.mkdir (Filename.concat root "downloads") 0o700;
     let left=Filename.concat (Filename.concat root "downloads") "left" in
@@ -212,9 +211,9 @@ let an_occupied_destination_moves_nothing () =
 (* A cleanup that stopped part way leaves the claim cleaning; a file found on
    the next pass still moves out before the release. *)
 let a_cleaning_allocation_moves_keeper_files () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko) (fun admission directory root ->
+  with_claim ~source:(fun _ -> Socket.Ego) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let obstruction=Filename.concat root "webdriver.log" in
+    let obstruction=Filename.concat root "s" in
     Unix.mkdir obstruction 0o700;
     lease (Lease.retire admission);
     check "the obstructed pass is unconfirmed" true (Result.is_error (cleanup ~admission ~directory));
@@ -230,7 +229,7 @@ let a_cleaning_allocation_moves_keeper_files () =
     check "the allocation is gone" false (Sys.file_exists root))
 (* A file left for the Keeper in an allocation of [source], beside whatever
    [extra] adds, with the worker settled. *)
-let with_left_file ?(source=Socket.Automation owned_gecko) ~extra work =
+let with_left_file ?(source=Socket.Ego) ~extra work =
   with_claim ~source:(fun _ -> source) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
     let downloads=Filename.concat root "downloads" in
@@ -251,7 +250,7 @@ let a_link_left_behind_is_unconfirmed () =
       check (label ^ ": no kept folder is made") false (Sys.file_exists (kept_root directory));
       check (label ^ ": the record is still acquired") true (acquisition_state directory = "acquired")))
     ["a symbolic link",(fun ~directory:_ ~root ~downloads ->
-        Unix.symlink (Filename.concat root "automation.json") (Filename.concat downloads "link"));
+        Unix.symlink (Filename.concat root "elsewhere") (Filename.concat downloads "link"));
      "a second hard link",(fun ~directory:_ ~root:_ ~downloads ->
         Unix.link (Filename.concat downloads "left") (Filename.concat downloads "again"))]
 (* A kept root another user could reach is refused before anything moves. *)
@@ -298,7 +297,7 @@ let a_failure_after_the_move_names_the_kept_folder () =
       check "the moved file stays" true (Sys.file_exists moved))
 (* An allocation with a Keeper file in both [uploads] and [downloads]. *)
 let with_two_trees work =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko) (fun admission directory root ->
+  with_claim ~source:(fun _ -> Socket.Ego) (fun admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
     let left tree=
       let parent=Filename.concat root tree in
@@ -342,7 +341,7 @@ let a_partial_move_names_the_kept_folder () =
       (Sys.file_exists (Filename.concat (Filename.concat into "downloads") "left"));
     check "the allocation is gone" false (Sys.file_exists root))
 let operator_retains_unconfirmed_allocation () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let file=Filename.concat root "foreign.json" in
@@ -361,7 +360,7 @@ let operator_retains_unconfirmed_allocation () =
       check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained);
       check "a repeated retain changes nothing" true (Sys.file_exists file && acquisition_state directory = "retained"))
 let retain_refuses_replaced_directory () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       let original=Filename.concat directory "original" in
@@ -370,7 +369,7 @@ let retain_refuses_replaced_directory () =
       refused "a different directory identity is not retained" (Socket.retain ~admission ~directory);
       check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let retain_reports_a_released_allocation () =
-  with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);
@@ -418,7 +417,7 @@ let retain_requires_a_settled_child_without_signalling () =
 let retain_reports_where_a_record_write_failed () =
   let failing stage _path _contents = Error {Fs_compat.path="record";stage;
     exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
-  let attempt save = with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
+  let attempt save = with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory _root ->
       ignore (ok (Socket.acquire ~admission ~directory));
       lease (Lease.retire admission);
@@ -468,12 +467,12 @@ let retain_waits_for_an_unpublished_child_to_be_fenced () =
     check "the operator retains the allocation once the child is fenced" true
       (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
 (* A reservation keeps its producer's backend payloads. Settlement must not
-   require interpreting them after an explicit operator handoff. The owned
-   Gecko configuration below has no profiles folder, so only a reader that
-   interprets it refuses it. *)
+   require interpreting them after an explicit operator handoff. The ego
+   source below carries a configuration an ego source never has, so only a
+   reader that interprets it refuses it. *)
 let opaque_backends = function
   | `Assoc fields -> `Assoc (List.map (fun (key,value) -> match key with
-      | "source" -> key,`Assoc ["backend",`String "automation";
+      | "source" -> key,`Assoc ["backend",`String "ego";
           "configuration",`Assoc ["driver",`String "/fixture/driver";"binary",`Null]]
       | "models" -> key,`String "operator-owned payload"
       | _ -> key,value) fields)
@@ -497,7 +496,7 @@ let opaque_payload_handoff () = with_claim ~context:opaque_backends (fun admissi
     (Result.is_error (cleanup ~admission ~directory));
   Alcotest.check Alcotest.string "failed cleanup leaves acquisition unchanged" acquired
     (In_channel.with_open_bin record In_channel.input_all);
-  check "official handoff does not interpret automation or model contents" true
+  check "official handoff does not interpret backend or model contents" true
     (retain_ok (Socket.retain ~admission ~directory)=Socket.Allocation_retained);
   check "an allocation cannot be projected as an empty reservation" true
     (Result.is_error (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory None));

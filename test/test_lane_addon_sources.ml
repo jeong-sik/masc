@@ -106,7 +106,7 @@ let browser_source ?client lane = `Assoc (["kind", `String "browser_document"; "
   "lane", `String lane; "tab_id", `Int 4; "target_id", `String "service";
   "environment", `String "production"; "request_id", `String "verify-1"]
   @ match client with None -> [] | Some id -> ["client_id", `String id])
-let browser_payload ?(client="automation:actual-session") ~tab ~complete ~html () =
+let browser_payload ?(client=live_client) ~tab ~complete ~html () =
   Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", `Assoc [
   "clientId", `String client; "tabId", `Int tab;
   "documentId", `String "actual-document"; "url", `String "https://actual.example:8123/app?q=1";
@@ -115,7 +115,6 @@ let browser_payload ?(client="automation:actual-session") ~tab ~complete ~html (
 let route_name = function
   | Browser_lane.Live_route (Some id) -> "live:" ^ Browser_lane.client_id_to_string id
   | Browser_lane.Live_route None -> "live:unselected"
-  | Browser_lane.Automation_route -> "automation"
 (* The host's reader stands in for the browser Add-on worker. It records each
    request so a test can see which route and tab the source asked for. *)
 let browser_reader answer =
@@ -132,11 +131,11 @@ let observation_count source = member "observations" source |> list |> List.leng
 let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
   let response = ref (Ok (browser_payload ~tab:4 ~complete:true ~html:(`String "<html>actual document</html>") ())) in
   let read, requests = browser_reader response in
-  let read () = read_browser ~dir ~store ~read (browser_source "automation") in
+  let read () = read_browser ~dir ~store ~read (browser_source ~client:live_client "live") in
   let source = read () in
-  check (Alcotest.list (pair string int)) "the bound route and tab are asked once" ["automation", 4] !requests;
+  check (Alcotest.list (pair string int)) "the bound route and tab are asked once" ["live:" ^ live_client, 4] !requests;
   let observation = member "observations" source |> list |> List.hd in
-  check string "returned client is preserved" "automation:actual-session" (text (member "client_id" observation));
+  check string "returned client is preserved" live_client (text (member "client_id" observation));
   check string "tab uses package string representation" "4" (text (member "tab_id" observation));
   check string "actual URL preserved exactly" "https://actual.example:8123/app?q=1"
     (text (member "url" (member "target" observation)));
@@ -160,9 +159,9 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
 let test_browser_refusals_leave_the_source_unavailable () = with_store (fun dir store ->
   let response = ref (Error "no browser Add-on is attached") in
   let read, _requests = browser_reader response in
-  let read () = read_browser ~dir ~store ~read (browser_source "automation") in
+  let read () = read_browser ~dir ~store ~read (browser_source ~client:live_client "live") in
   let absent = "no browser Add-on is attached" and busy = "optional_document_observation_busy"
-  and unknown = "owned session authority is unknown" in
+  and unknown = "the connection's authority is unknown" in
   let cases = [
     "the host found no browser Add-on", Error absent, Some absent;
     "the worker refused a busy browser", Ok (Browser_lane.Refused busy), Some busy;
@@ -438,7 +437,7 @@ let test_source_activity_does_not_infer_ownership () =
   let interest sources = Sources.refresh_interest (binding sources) |> require in
   let msx = interest [`Assoc ["source_id",`String "screen";"kind",`String "msx_capture"]] in
   let browser = interest [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
-    "lane",`String "automation";"tab_id",`Int 1;"target_id",`String "project";
+    "lane",`String "live";"client_id",`String live_client;"tab_id",`Int 1;"target_id",`String "project";
     "environment",`String "preview";"request_id",`String "capture"]] in
   let dependent = interest [`Assoc ["source_id",`String "metric";"kind",`String "lane_output";
     "installation_id",`String "producer";"selection",`String "latest_completed"]] in
@@ -500,8 +499,6 @@ let test_misc_tools_name_the_source_they_move () =
    match. *)
 let test_built_in_lanes_offer_what_parse_accepts () =
   let offers builtin = List.map Sources.kind_to_string (Sources.offers builtin) in
-  check (Alcotest.list string) "automation offers its document" [ "browser_document" ]
-    (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Automation));
   check (Alcotest.list string) "the live browser offers its document" [ "browser_document" ]
     (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Live));
   check (Alcotest.list string) "MSX offers its capture" [ "msx_capture" ]
@@ -515,10 +512,10 @@ let test_built_in_lanes_offer_what_parse_accepts () =
     Standalone_lane.all;
   let document lane =
     binding [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
-      "lane",`String (Browser_lane.Lane_name.to_wire lane);"tab_id",`Int 1;
+      "lane",`String (Browser_lane.Lane_name.to_wire lane);"client_id",`String live_client;"tab_id",`Int 1;
       "target_id",`String "project";"environment",`String "preview";"request_id",`String "capture"]] in
-  check bool "an automation document source is accepted" true
-    (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Automation)))
+  check bool "a live document source with its client is accepted" true
+    (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Live)))
 
 let test_fusion_capture_retains_exact_state_across_terminal_change () =
   with_store (fun dir store ->

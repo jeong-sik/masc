@@ -22,12 +22,12 @@ with tempfile.TemporaryDirectory(prefix='masc-native-lifetime-') as folder:
  test_name='test_browser_selection.ml' if args.selection else 'test_browser_lane.ml' if args.activity else 'test_browser_lane_watched_work.ml'
  sources=[root/'lib/browser_lane/browser_lane.ml']
  if args.selection:
-  for name in ['browser_capabilities','browser_selection','browser_binding','browser_addon_inventory']:
+  for name in ['browser_capabilities','browser_selection','browser_binding']:
    sources.extend(root/'lib'/(name+'.'+ext) for ext in ['mli','ml'])
  for source in sources:
   shutil.copyfile(source,d/source.name);files.append(source.name)
  if args.selection:
-  (d/'masc.ml').write_text('module Browser_selection = Browser_selection\nmodule Browser_binding = Browser_binding\nmodule Browser_addon_inventory = Browser_addon_inventory\n')
+  (d/'masc.ml').write_text('module Browser_selection = Browser_selection\nmodule Browser_binding = Browser_binding\n')
   files.append('masc.ml')
  source=root/'test'/test_name
  shutil.copyfile(source,d/source.name);files.append(source.name)

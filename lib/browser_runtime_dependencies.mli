@@ -2,7 +2,7 @@
     connecting or a page being read: it says a program answers, not that
     runtime.toml names it or that the server has restarted since. *)
 
-type program = Geckodriver | Firefox | Ego_browser
+type program = Firefox | Ego_browser
 
 val name : program -> string
 (** The name the program carries in the readiness JSON and in
@@ -22,8 +22,8 @@ type check =
           searching [PATH]. *)
   | Started of { command : string; path : string; output : string }
       (** The executable at [path] answered its version entry point. [path] is
-          always absolute: [\[browser.automation\]] and [\[browser.live.bidi\]]
-          take absolute paths only. A program found through a relative [PATH]
+          always absolute: [\[browser.live.bidi\]] takes absolute paths
+          only. A program found through a relative [PATH]
           entry is reported under the current working directory. *)
   | Failed of { command : string; path : string; status : Unix.process_status; detail : string }
       (** An executable exists at [path] and did not answer. *)
@@ -51,8 +51,8 @@ val ego_versions : string -> (string * string, string) result
     [ego-browser --version] printed. *)
 
 val probe_program : program -> string -> check
-(** {!probe}, and what [program]'s answer must say. geckodriver and Firefox
-    answer by exiting 0. An [ego-browser] must also name ego lite's and
+(** {!probe}, and what [program]'s answer must say. Firefox answers by
+    exiting 0. An [ego-browser] must also name ego lite's and
     Chromium's versions ({!ego_versions}); one that exits 0 without them is
     [Failed], as an ego lite whose onboarding is not finished is. *)
 

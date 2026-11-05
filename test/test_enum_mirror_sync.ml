@@ -481,7 +481,6 @@ let test_capability_table_names_advertised_values () =
     [ Cap.Connected Browser_lane.Web_extension
     ; Cap.Connected Browser_lane.Webdriver_bidi
     ; Cap.Connected Browser_lane.Ego_task_space
-    ; Cap.Owned_gecko
     ; Cap.Safari_unavailable
     ]
   in
@@ -510,7 +509,6 @@ let test_capability_table_names_advertised_values () =
                         | Cap.Connected Browser_lane.Web_extension -> "extension"
                         | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
                         | Cap.Connected Browser_lane.Ego_task_space -> "ego"
-                        | Cap.Owned_gecko -> "owned Gecko"
                         | Cap.Safari_unavailable -> "Safari")
                        property value (tool_label inv.tool))
                     true
@@ -600,7 +598,6 @@ let test_capability_table_sharing_is_listed () =
     [ Cap.Connected Browser_lane.Web_extension
     ; Cap.Connected Browser_lane.Webdriver_bidi
     ; Cap.Connected Browser_lane.Ego_task_space
-    ; Cap.Owned_gecko
     ; Cap.Safari_unavailable
     ]
 ;;

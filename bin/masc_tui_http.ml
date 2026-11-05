@@ -4867,16 +4867,6 @@ let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
   act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
     ~action:(Browser_lane.Scroll {x=0; y=delta_y})
 
-let browser_lane_action ~host ~port ~source operation =
-  let open Masc_tui_types.Browser_lane_view in
-  let* endpoint, json, timeout_sec = action_request ~source operation in
-  let body = Yojson.Safe.to_string json in
-  (* Native startup allows 60s; navigation may include Firefox loading. *)
-  let* json = post_json_with_timeout ~timeout_sec ~host ~port
-      ~path:("/api/v1/dashboard/browser-lane/" ^ endpoint) ~body in
-  let* ok = get boolean "ok" json in
-  if ok then Ok () else let* detail = get string "error" json in Error detail
-
 let post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk =
   let url = url_of ~host ~port ~path:"/api/v1/setup/accounts/login" in
   match with_credential_refresh_on ~refused:stream_refused @@ fun () ->

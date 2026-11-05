@@ -1044,7 +1044,7 @@ def docker_account_action(binary, base_path, port, action):
 
 
 # The wire spells tool readiness with exactly these two words, for PDF tools,
-# presentation tools and the browser programs (geckodriver, Firefox) alike.
+# presentation tools and the browser programs (Firefox, ego-browser) alike.
 # Naming them once is what keeps the call sites from each carrying their own
 # copy of the literal, where a renamed or added word would change what the
 # installer does without anything here failing.
@@ -1174,12 +1174,12 @@ def show_presentation_readiness(readiness):
             print(terminal_text(detail), file=sys.stderr)
 
 
-# The programs the automation lane starts, in the order they are checked. The
-# names are the ones `masc prerequisite-actions` takes.
-BROWSER_TOOLS = ('geckodriver', 'firefox')
+# The program the Firefox routes start or attach, by the name
+# `masc prerequisite-actions` takes.
+FIREFOX_PROGRAM = 'firefox'
 # ego lite's command: looked for on its own, by its own row (ego_row).
 EGO_PROGRAM = 'ego-browser'
-BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox', EGO_PROGRAM: 'ego-browser'}
+BROWSER_TOOL_NAMES = {FIREFOX_PROGRAM: 'Firefox', EGO_PROGRAM: 'ego-browser'}
 
 
 @dataclass(frozen=True)
@@ -1347,7 +1347,7 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
                 raise ValueError('inconsistent PDF recheck')
             if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
-        elif dependency in BROWSER_TOOLS and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
+        elif dependency == FIREFOX_PROGRAM and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
             browser = decode_browser_tools_readiness(receipt.get('dependency_readiness'), dependency)
             if (readiness == TOOLS_AVAILABLE) != browser.available:
                 raise ValueError('inconsistent browser tool recheck')
@@ -1369,7 +1369,7 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
             raise ValueError('invalid readiness')
         if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
-        if (dependency in BROWSER_TOOLS and state == 'commands_completed'
+        if (dependency == FIREFOX_PROGRAM and state == 'commands_completed'
                 and readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)):
             raise ValueError('browser installation was not rechecked')
         if (dependency == SEARXNG_DEPENDENCY and state == 'commands_completed'
@@ -1392,7 +1392,7 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
         print('The selected presentation component is ready. Install the remaining component shown above, then refresh detection.', file=sys.stderr)
     elif dependency == 'pdf-tools' and state == 'commands_completed':
         print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
-    elif dependency in BROWSER_TOOLS and state == 'commands_completed':
+    elif dependency == FIREFOX_PROGRAM and state == 'commands_completed':
         print(BROWSER_TOOL_NAMES[dependency] + ' is installed and starts.', file=sys.stderr)
     elif dependency == SEARXNG_DEPENDENCY and state == 'commands_completed':
         print('SearXNG answers JSON searches at ' + terminal_text(searxng.url) + '.', file=sys.stderr)
@@ -2646,20 +2646,20 @@ def quick_sandbox(binary, base_path, backend):
 
 
 # What imp can use once setup ends, offered as one checklist
-# (RFC setup-web-search-and-browser-lane section 4.3). The browser, web search
-# and GitHub rows start marked; the ones that open a port or need a human at
-# every browser start do not. Nothing is installed or written until the
-# reader confirms the list, and a quick setup only prints it.
+# (RFC setup-web-search-and-browser-lane section 4.3). The web search and
+# GitHub rows start marked; the browser routes, which open a port, need a human
+# at every browser start or act with the reader's own logins, do not. Nothing
+# is installed or written until the reader confirms the list, and a quick
+# setup only prints it.
 #
 # The three browser keys are also the `--mode` names of `masc browser-lane-setup`,
 # so a confirmed row is the argument the command takes.
-AUTOMATION_TOOL = 'automation'
 BIDI_TOOL = 'bidi'
 EXTENSION_TOOL = 'extension'
 EGO_TOOL = 'ego'
-BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL, EGO_TOOL)
+BROWSER_MODES = (BIDI_TOOL, EXTENSION_TOOL, EGO_TOOL)
 # The routes that start or attach a Firefox. The ego route runs ego lite.
-FIREFOX_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
+FIREFOX_MODES = (BIDI_TOOL, EXTENSION_TOOL)
 WEB_SEARCH_TOOL = 'web-search'
 ZAI_TOOL = 'zai'
 # The value `web_search.provider` takes for z.ai, and what `--provider` is given.
@@ -2724,14 +2724,11 @@ def browser_lane_command(base, modes):
 
     The command orders the routes itself, whatever order it is given. [modes]
     is passed in a fixed order (BROWSER_MODES) so the line the reader sees is
-    the same each time.
+    the same each time. With no mode the command writes nothing and prints
+    what is set up.
     """
-    flags = ' '.join('--mode ' + mode for mode in modes)
-    return 'masc browser-lane-setup ' + flags + ' --base-path ' + shlex.quote(str(base))
-
-
-def automation_command(base):
-    return browser_lane_command(base, (AUTOMATION_TOOL,))
+    words = ['masc', 'browser-lane-setup'] + ['--mode ' + mode for mode in modes]
+    return ' '.join(words + ['--base-path', shlex.quote(str(base))])
 
 
 def web_search_command(base):
@@ -2771,57 +2768,14 @@ def browser_tool(binary, program):
     return decode_browser_tools_readiness(catalog.get('dependency_readiness'), program), catalog['actions']
 
 
-def install_action(actions):
-    """The first action MASC offers for a missing program, or None when it offers none."""
-    if not actions:
-        return None
-    action = actions[0]
-    # The fields `prerequisite_menu` reads when the reader chooses it: a catalog
-    # that drops one is refused here, with the row, instead of after the mark.
-    if not (isinstance(action, dict) and all(isinstance(action.get(key), str) for key in ('id', 'label', 'detail', 'source_url'))
-            and isinstance(action.get('requires_admin'), bool)):
-        raise SetupError('MASC returned an unreadable install action')
-    return action
-
-
-def action_command(action):
-    """The command line an action runs, for a person to read and copy, or None
-    when the action opens a page instead. It is printed, never handed to a shell."""
-    effect = action.get('effect')
-    if isinstance(effect, dict) and effect.get('kind') == 'run_commands':
-        steps = effect.get('argv_steps')
-        if isinstance(steps, list) and steps and all(isinstance(step, list) and step for step in steps):
-            return ' && '.join(' '.join(shlex.quote(str(part)) for part in step) for step in steps)
-    return None
-
-
 def browser_rows(binary, base):
-    """The browser rows from one look at geckodriver and Firefox.
-
-    The automation row is there whenever both programs could be read: it offers
-    the install when one is missing. The two Firefox routes are shown only when
-    Firefox was found (RFC section 4.3): recommending a browser is not this
-    step's job, so with none there is nothing to attach to and nothing to ask.
-    The routes need Firefox and not geckodriver, so each program is read on its
-    own and a catalog that cannot be read for one does not hide the rest.
-    """
-    found, unreadable = {}, []
-    for program in BROWSER_TOOLS:
-        try:
-            found[program] = browser_tool(binary, program)
-        except (SetupError, OSError) as error:
-            unreadable.append((program, error))
-    rows = []
-    if len(found) == len(BROWSER_TOOLS):
-        rows.append(automation_row(found, base))
-    if 'firefox' in found and found['firefox'][0].available:
-        rows += firefox_route_rows(base)
-    for program, error in unreadable:
-        print(BROWSER_TOOL_NAMES[program] + ': ' + terminal_text(str(error))
-              + '\nWhat that program offers is left out of this list.', file=sys.stderr)
-    if unreadable:
-        print('Run ' + automation_command(base) + ' to give imp a browser later.', file=sys.stderr)
-    return rows
+    """The Firefox routes, shown only when Firefox was found (RFC section 4.3):
+    recommending a browser is not this step's job, so with none there is
+    nothing to attach to and nothing to ask."""
+    readiness, _ = browser_tool(binary, FIREFOX_PROGRAM)
+    if not readiness.available:
+        return []
+    return firefox_route_rows(base)
 
 
 def firefox_route_rows(base):
@@ -2837,8 +2791,7 @@ def firefox_route_rows(base):
                    'the login.')
     extension_notice = ('\nThe extension route attaches the Firefox you use every day. Firefox removes the add-on '
                         'when it restarts, so you load it again from about:debugging each time. A request that names '
-                        'no browser connection goes to this Firefox only while no BiDi or ego lite connection is up '
-                        'and imp has no browser of its own open.')
+                        'no browser connection goes to this Firefox only while no BiDi or ego lite connection is up.')
     return [
         ToolRow(BIDI_TOOL, "Firefox of its own that MASC starts for imp (BiDi) · log in once · open debugging port",
                 browser_lane_command(base, (BIDI_TOOL,)), checked=False, notice=bidi_notice),
@@ -2864,27 +2817,6 @@ def ego_row(binary, base):
               'refused as ambiguous.')
     return ToolRow(EGO_TOOL, 'Your ego lite, in a task space of its own for imp · uses your ego lite logins',
                    browser_lane_command(base, (EGO_TOOL,)), checked=False, notice=notice)
-
-
-def automation_row(found, base):
-    missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
-    head = "Web pages in imp's own Firefox"
-    if not missing:
-        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', automation_command(base), checked=True)
-    names = ', '.join(BROWSER_TOOL_NAMES[program] for program in missing)
-    offered = [action for action in (install_action(found[program][1]) for program in missing) if action is not None]
-    runnable, described = [], []
-    for action in offered:
-        command = action_command(action)
-        if command:
-            runnable.append(command)
-            described.append(command)
-        else:
-            described.append('official page ' + terminal_text(action.get('source_url', '')))
-    label = head + ' · ' + names + ' not found' + (' · ' + '; '.join(described) if described else '')
-    if any(action['requires_admin'] for action in offered):
-        label += ' · administrator permission'
-    return ToolRow(AUTOMATION_TOOL, label, ' && '.join(runnable + [automation_command(base)]), checked=True)
 
 
 def host_github_login():
@@ -3040,8 +2972,8 @@ def imp_tool_rows(binary, base):
     try:
         rows += browser_rows(binary, base)
     except (SetupError, OSError) as error:
-        print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
-              file=sys.stderr)
+        print(terminal_text(str(error)) + '\nRun ' + browser_lane_command(base, FIREFOX_MODES)
+              + ' to connect Firefox later.', file=sys.stderr)
     try:
         ego = ego_row(binary, base)
     except (SetupError, OSError) as error:
@@ -3070,7 +3002,7 @@ SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
 # The routes that write a table of runtime.toml, which the server reads when it
 # starts. The extension route writes none: it installs the host, the manifest
 # and the add-on files, and the lane token is read for each request.
-RUNTIME_TABLE_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EGO_TOOL)
+RUNTIME_TABLE_MODES = (BIDI_TOOL, EGO_TOOL)
 
 
 def note_running_server(binary, base, port):
@@ -3123,21 +3055,17 @@ def prepare_browser_lane(binary, base, modes, port=None):
     plans them together and a route refused while planning writes none. Its
     tables are then committed one after another; one refused at that point
     leaves the tables before it, and the command lists them. It is not told which
-    geckodriver or Firefox to use: it finds them the way the catalog did (the
-    first one on PATH that answers), and it keeps a value the operator already
-    wrote in runtime.toml, which a named path would replace.
+    Firefox to use: it finds it the way the catalog did (the first one on PATH
+    that answers), and it keeps a value the operator already wrote in
+    runtime.toml, which a named path would replace.
 
-    The automation lane is the one that starts geckodriver. A reader who leaves
-    the install menu without it loses that lane and keeps the routes they also
-    chose, which never needed it. The same holds for Firefox and the ego route,
-    which needs ego-browser and no Firefox.
+    A reader who leaves the Firefox install menu loses the Firefox routes and
+    keeps the ego route, which needs ego-browser and no Firefox. The same holds
+    the other way round.
     """
     remaining = list(modes)
-    if AUTOMATION_TOOL in remaining and not ensure_program(
-            binary, base, 'geckodriver', browser_lane_command(base, (AUTOMATION_TOOL,))):
-        remaining.remove(AUTOMATION_TOOL)
     firefox_routes = tuple(mode for mode in remaining if mode in FIREFOX_MODES)
-    if firefox_routes and not ensure_program(binary, base, 'firefox', browser_lane_command(base, firefox_routes)):
+    if firefox_routes and not ensure_program(binary, base, FIREFOX_PROGRAM, browser_lane_command(base, firefox_routes)):
         remaining = [mode for mode in remaining if mode not in FIREFOX_MODES]
     if EGO_TOOL in remaining and not ensure_program(
             binary, base, EGO_PROGRAM, browser_lane_command(base, (EGO_TOOL,))):
@@ -3327,8 +3255,8 @@ def select_imp_tools(binary, base, port=None):
     try:
         confirmed = choose_imp_tools(binary, base)
     except SetupError as error:
-        print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
-              + ' gives imp a browser, ' + web_search_command(base) + ' shows which web search providers have a key, and '
+        print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + browser_lane_command(base, ())
+              + ' shows the routes that give imp a browser, ' + web_search_command(base) + ' shows which web search providers have a key, and '
               + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
         return ()
     # The choices that write `[web_search]` keys come first, so the check that

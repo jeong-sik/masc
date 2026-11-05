@@ -763,7 +763,7 @@ let test_category_edit_preserves_original_export_and_worker () =
            declaration=Some (Tui_decode_lane_inventory.Valid _);instances=([]|_::_::_)}
        | Tui_decode_lane_inventory.Package_state {
            declaration=(None|Some (Tui_decode_lane_inventory.Invalid _|Absent|Unobserved));instances=_}
-       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+       | Exact_state _ | Browser_clients _ | Machine_state _ ->
            fail "common inventory lost the exact installation and original worker");
       admit (); call ();
       check int "both original handler calls reached the original worker" 2 !calls;

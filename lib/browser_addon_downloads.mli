@@ -40,9 +40,8 @@ val publish : t -> string -> (Yojson.Safe.t, string) result
 val bind : t -> actor:string -> route:Browser_lane.route -> verb:Browser_lane.verb ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Bind [Page_downloads] rows to this call, replacing private snapshot markers
-    with fresh opaque grants and removing source paths. Only the owned
-    automation route and a selected live connection of this worker are
-    supported. A cached snapshot can be bound by later calls;
+    with fresh opaque grants and removing source paths. Only a selected live
+    connection of this worker is supported. A cached snapshot can be bound by later calls;
     every grant retains its exact actor, route and verb. *)
 val claim : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb -> (claim, string) result

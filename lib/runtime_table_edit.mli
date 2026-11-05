@@ -1,5 +1,5 @@
 (** What the commands that write one table of runtime.toml with the line
-    editor ([masc browser-lane-setup --mode bidi], [--mode automation]) share.
+    editor ([masc browser-lane-setup --mode bidi], [--mode ego]) share.
 
     The loader reads what strict TOML forbids: a header for a table that dotted
     keys or an inline table already declared loads as one table, and a strict

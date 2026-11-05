@@ -13,7 +13,6 @@ let scenario () = Eio_main.run (fun env ->
         let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
         let entered,enter=Eio.Promise.create () in
         let model_waiting,model_wait=Eio.Promise.create () in
-        let locating,locate=Eio.Promise.create () in
         let workflowing,workflow=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
@@ -26,7 +25,6 @@ let scenario () = Eio_main.run (fun env ->
               let request=Yojson.Safe.from_string raw in
               if Yojson.Safe.Util.member "operation" request=`String "issue" then (
                 match Yojson.Safe.Util.(request |> member "command" |> member "verb") with
-                | `String "page.locate" -> ignore (Eio.Promise.try_resolve locate ())
                 | `String "page.native_workflow" -> ignore (Eio.Promise.try_resolve workflow ())
                 | _ -> ignore (Eio.Promise.try_resolve enter ()));
               if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
@@ -44,14 +42,6 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await model_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "model state watch must outlive the quick control timeout");
-            (match Eio.Fiber.first
-              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
-                (W.Issue {route=Browser_lane.Automation_route;
-                  verb=Browser_lane.Page_locate {tab_id=1;instruction=None};actor=None;
-                  timeout_sec=0.001;only_if_idle=false})))
-              (fun () -> Eio.Promise.await locating;Eio.Time.sleep clock 0.03;`Waiting) with
-             | `Waiting -> ()
-             | `Returned _ -> fail "model-backed issue must retain its caller-owned wait");
             let native=ok (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
               "expectedUrl",`String "https://example.org";"steps",`List [];"maxChars",`Int 1000])) in
             (match Eio.Fiber.first
@@ -99,10 +89,7 @@ let transport_policy () = Eio_main.run (fun env ->
             transport;version="test";engine_version="test";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)} in
           let ego=info "1" Ego_task_space and extension=info "2" Web_extension and bidi=info "3" Webdriver_bidi in
           let snapshot clients =
-            let owned=`Assoc ["activity",`String "disabled";"registered",`Bool false;
-              "session",`String "closed";"locate",`Bool false] in
             W.Snapshot_result (`Assoc ["state",`String "serving";
-              "owned_backends",`Assoc ["automation",owned];
               "clients",`List (List.map W.client_to_json clients)]) in
           let click=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";
             frame_path=[];action=Browser_lane.Click "#send"} in
@@ -146,7 +133,7 @@ let transport_policy () = Eio_main.run (fun env ->
               refused "unselected live transport refused" (issue (Live_route None) click);
               read [ego;extension;bidi];
               List.iter (fun route -> List.iter (bounded route) [click;goto;reload;open_tab])
-                [Browser_lane.Automation_route;Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
+                [Browser_lane.Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
               List.iter (fun verb ->
                 issue_entered := Eio.Promise.create ();
                 match Eio.Fiber.first
@@ -199,38 +186,6 @@ let transport_policy () = Eio_main.run (fun env ->
               overlap malformed (snapshot [extension]) ~newest_first:true [extension];
               read [ego]; Client.revoke client;
               refused "revoked client cannot use prior metadata" (issue (Live_route (Some ego.client_id)) click)))))))
-let silent_selector_reply_window route = Eio_main.run (fun env ->
-  let directory=Filename.temp_dir "bac-selector-" "" in
-  let path=Filename.concat directory "s" in
-  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path;Unix.rmdir directory)
-    (fun () -> Eio.Switch.run (fun sw ->
-      let net=Eio.Stdenv.net env and clock=Eio.Stdenv.clock env in
-      Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
-        let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
-        let dispatched,dispatch=Eio.Promise.create () in
-        let never,_=Eio.Promise.create () in
-        let cancellations=ref 0 in
-        let client=ok (Client.create ~socket_path:path ~incarnation:"0b000000-0000-4000-8000-000000000001"
-          ~max_message_bytes:4096 ~control_timeout_sec:0.01 ~available:(fun () -> true)) in
-        Eio.Fiber.first (fun () -> Eio.Switch.run (fun server_sw ->
-          Eio.Net.accept_fork ~sw:server_sw socket ~on_error:(fun exn -> raise exn) (fun flow _ ->
-            ignore(Eio.Buf_read.line(Eio.Buf_read.of_flow flow ~max_size:4096));
-            Eio.Promise.resolve dispatch ();
-            Eio.Promise.await never);
-          Eio.Promise.await never))
-          (fun () ->
-            let verb=Browser_lane.Page_interact {tab_id=1;frame_path=[];
-              expected_url=Some "https://example.test/";action=Browser_lane.Click "#save"} in
-            let observed=Eio.Fiber.first
-              (fun () -> `Returned(Client.call client ~on_cancel_after_dispatch:(fun () -> incr cancellations)
-                (W.Issue {route;verb;actor=None;timeout_sec=0.001;only_if_idle=false})))
-              (fun () -> Eio.Promise.await dispatched;Eio.Time.sleep clock 0.03;`Still_waiting) in
-            (match observed with
-             | `Returned(Error(Client.Outcome_unknown _)) -> ()
-             | `Returned(Ok _|Error(Client.Unavailable _)) -> fail "silent dispatched selector lost its unknown outcome"
-             | `Still_waiting -> fail "selector request escaped the private reply window");
-            check int "reply timeout is distinct from caller cancellation" 0 !cancellations)))))
-
 let private_reply_boundary () = Eio_main.run (fun env ->
   let directory=Filename.temp_dir "bac-private-" "" in
   let path=Filename.concat directory "s" in
@@ -258,6 +213,4 @@ let private_reply_boundary () = Eio_main.run (fun env ->
 let ()=run "browser addon private client" ["transport",[
   test_case "silent peer timeout cancellation and revoked connection" `Quick scenario;
   test_case "worker transport scopes SDK-owned waits" `Quick transport_policy;
-  test_case "silent automation selector keeps reply window" `Quick
-    (fun () -> silent_selector_reply_window Browser_lane.Automation_route);
   test_case "private payload errors and distinct reply kinds" `Quick private_reply_boundary]]

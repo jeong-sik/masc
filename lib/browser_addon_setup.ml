@@ -62,8 +62,7 @@ let error_message = function
    folder under packages/, the declaration's id and its file name. The
    manifest's own id and source must be the same; [apply] checks them. *)
 let package_folder = function
-  | Browser_lane.Backend.Automation -> "automation"
-  | Owned_firefox -> "firefox"
+  | Browser_lane.Backend.Owned_firefox -> "firefox"
   | Ego -> "ego"
   | External_host -> "external"
 let package_name backend = "browser-" ^ package_folder backend
@@ -253,7 +252,7 @@ let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
         (match defaults with
          | _::_ -> defaults
          | [] -> List.filter (fun (declared:Lane_addon_config.declaration) -> declared.id=package_name backend) declared)
-    | Automation|Owned_firefox|External_host -> declared in
+    | Owned_firefox|External_host -> declared in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with
   | [ enabled ] -> Ok (Some enabled)
   | _ :: _ :: _ as enabled ->

@@ -1,7 +1,6 @@
 let label : Lane_id.builtin -> string = function
   | Lane_id.Exact lane -> Lane_run_identity.label (Standalone_lane.run_identity lane)
   | Lane_id.Browser Browser_lane.Lane_name.Live -> "Browser Lane (live)"
-  | Lane_id.Browser Browser_lane.Lane_name.Automation -> "Browser Lane (automation)"
   | Lane_id.Machine Machine_lane.Msx -> "MSX"
   | Lane_id.Machine Machine_lane.Dos -> "DOS"
 ;;
@@ -20,8 +19,6 @@ let purpose : Lane_id.builtin -> string = function
   | Lane_id.Browser Browser_lane.Lane_name.Live ->
     "Reads and drives tabs in the operator's own browser, through the browser-lane extension \
      and host."
-  | Lane_id.Browser Browser_lane.Lane_name.Automation ->
-    "Drives a Firefox the server starts through geckodriver."
   | Lane_id.Machine Machine_lane.Msx ->
     "The one MSX machine in the server; masc_msx_* tools put keys in and read its screen."
   | Lane_id.Machine Machine_lane.Dos ->
@@ -29,17 +26,6 @@ let purpose : Lane_id.builtin -> string = function
 ;;
 
 let browser_backends = List.map (fun lane -> Lane_id.Browser lane) Browser_lane.Lane_name.all
-
-(* Sessions and navigation belong to the backends whose browser the server
-   owns; [Browser_lane.server_lane_of_name] is where that is decided. *)
-let server_browser_backends =
-  List.filter_map
-    (fun lane ->
-       Option.map
-         (fun (_ : Browser_lane.server_lane) -> Lane_id.Browser lane)
-         (Browser_lane.server_lane_of_name lane))
-    Browser_lane.Lane_name.all
-;;
 
 let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builtin list =
   function
@@ -75,9 +61,9 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read
   | Tool_schemas_misc.Misc_browser_act
-  | Tool_schemas_misc.Misc_browser_interact -> browser_backends
-  | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto ->
-    server_browser_backends
+  | Tool_schemas_misc.Misc_browser_interact
+  | Tool_schemas_misc.Misc_browser_session
+  | Tool_schemas_misc.Misc_browser_goto -> browser_backends
   | Tool_schemas_misc.Misc_msx _ -> [ Lane_id.Machine Machine_lane.Msx ]
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_meta

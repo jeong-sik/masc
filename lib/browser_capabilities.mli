@@ -2,7 +2,7 @@
     This catalog performs no discovery, grants no admission and never switches
     browsers. Available means implemented, not that a session/page is ready or
     that an application accepted an effect. *)
-type backend = Connected of Browser_lane.live_transport | Owned_gecko
+type backend = Connected of Browser_lane.live_transport
   | Safari_unavailable
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window

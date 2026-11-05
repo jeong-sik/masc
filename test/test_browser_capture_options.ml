@@ -23,8 +23,6 @@ let route_and_wait () =
   let ordinary=B.Page_capture {tab_id=7;options=None} in
   check bool "native capture uses SDK execution ownership" true (B.ego_reply_policy native=B.Executor_owned);
   check bool "viewport capture also uses SDK execution ownership" true (B.ego_reply_policy ordinary=B.Executor_owned);
-  check bool "native options are refused before automation work" true (B.automation_refusal native<>None);
-  check bool "ordinary viewport capture remains available on automation" true (B.automation_refusal ordinary=None);
   check bool "native options require Ego capability" true
     (B.live_capability native=Some B.Native_workflow
       && B.live_transport_serves B.Ego_task_space B.Native_workflow

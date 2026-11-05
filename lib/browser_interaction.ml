@@ -179,8 +179,7 @@ let parse = function
         let* () = match expected_url with Some _ -> Ok () | None -> Error "activate_tab requires expectedUrl" in
         let* () = match base.route with
           | Browser_selection.Exact (Browser_lane.Live_route _) -> Ok ()
-          | Browser_selection.Automatic
-          | Browser_selection.Exact Browser_lane.Automation_route ->
+          | Browser_selection.Automatic ->
               Error "activate_tab requires an observed live clientId or lane" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->

@@ -2717,9 +2717,8 @@ let browser_lane_setup_cmd =
              writes the \
              [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
              host installs the host and its launcher only, for a browser you attach \
-             yourself or to bring an installed lane's host up to date; automation writes \
-             the geckodriver the server starts for the lane that opens a fresh profile \
-             per session and keeps no login; ego writes the [browser.live.ego] table so \
+             yourself or to bring an installed lane's host up to date; ego writes the \
+             [browser.live.ego] table so \
              the browser Add-on serves an ego lite task space. Give it more than once for \
              more than one. \
              Without a mode nothing is written and the current state is printed.")
@@ -2805,30 +2804,6 @@ let browser_lane_setup_cmd =
              written and the server uses 9222. An existing table keeps its value unless \
              this is given.")
   in
-  let geckodriver =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "geckodriver" ]
-          ~docv:"FILE"
-          ~doc:
-            "With --mode automation, the geckodriver executable, an absolute path. By \
-             default the geckodriver PATH finds first, if it answers --version. A \
-             configuration that is already there keeps its value unless this is given.")
-  in
-  let browser =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "browser" ]
-          ~docv:"FILE"
-          ~doc:
-            "With --mode automation, the browser executable geckodriver launches (the \
-             binary key), an absolute path. Written only when named: geckodriver finds \
-             Firefox itself.")
-  in
   let ego_command =
     Arg.(
       value
@@ -2885,18 +2860,14 @@ let browser_lane_setup_cmd =
              "Every route runs in a browser Lane Add-on, one per browser source, so every \
               mode also writes the package of each source the workspace runs to \
               .masc/packages/browser-<source> and, when the workspace has no declaration of \
-              that source, creates browser-<source>.toml in its Lane directory: automation, \
-              firefox and ego when runtime.toml has their table or the mode writes it, \
+              that source, creates browser-<source>.toml in its Lane directory: firefox \
+              and ego when runtime.toml has their table or the mode writes it, \
               and external when a native host is installed. A source whose table the mode writes is declared once that table is \
               written. A declaration's enabled switches its source on or off. An existing \
               declaration is left as it is. \
               The server attaches the Add-ons when it starts and on its maintenance pass. \
               Outside --mode addon a refusal of that step is reported and the mode goes on; \
               --no-addon skips it."
-         ; `P
-             "--mode automation writes the geckodriver of the lane that opens a fresh \
-              profile per session ([browser.automation], or the keys where they already \
-              are) and installs no host. It keeps no login."
          ; `P
              "--mode bidi writes [browser.live.bidi] into runtime.toml without touching \
               its comments or other tables. A table that is already there keeps its \
@@ -2910,8 +2881,8 @@ let browser_lane_setup_cmd =
               installs no host. An existing table keeps its values unless they are named. \
               The server reads the table when it starts."
          ; `P
-             "While this workspace's server answers on its port, the bidi, automation and \
-              ego tables are planned against the runtime.toml the server holds and saved \
+             "While this workspace's server answers on its port, the bidi and ego tables \
+              are planned against the runtime.toml the server holds and saved \
               through it; with no server answering they are written to the file. The \
               server's port is MASC_HTTP_PORT, the workspace's saved port or the default: \
               --port names the BiDi port. While the server is still starting, or no \
@@ -2919,7 +2890,7 @@ let browser_lane_setup_cmd =
          ])
     Term.(
       const (fun base_path requested_base_path named_agent modes no_addon binary token_file manifest_dir
-                  host_name firefox profile port geckodriver browser ego_command ego_space ->
+                  host_name firefox profile port ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
@@ -2935,14 +2906,14 @@ let browser_lane_setup_cmd =
           ~agent:(Option.value named_agent ~default:default_login_agent)
           ~agent_named:(Option.is_some named_agent)
           ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
-          ~port ~geckodriver ~browser ~ego_command ~ego_space)
+          ~port ~ego_command ~ego_space)
       $ base_path
       $ run_base_path
       $ Arg.(
           value
           & opt (some string) None
           & info [ "agent" ] ~docv:"AGENT"
-              ~doc:"The sign-in a bidi, automation or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
+              ~doc:"The sign-in a bidi or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
       $ modes
       $ no_addon
       $ binary
@@ -2952,8 +2923,6 @@ let browser_lane_setup_cmd =
       $ firefox
       $ profile
       $ port
-      $ geckodriver
-      $ browser
       $ ego_command
       $ ego_space)
 
@@ -5186,7 +5155,7 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, geckodriver, firefox, ego-browser, or searxng.")
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, firefox, ego-browser, or searxng.")
     (* Resolved on demand: only presentation-tools and searxng are scoped to a workspace, and
        an operator installing Codex or Docker has not made one yet. Taking the
        resolving [base_path] term here refused every dependency with "MASC_BASE_PATH

@@ -36,13 +36,12 @@ describe('Lane destinations at the URL and TOML boundaries', () => {
     expect(parseLaneTarget(route.value.params.lane_target)).toEqual({ kind: 'target',
       target: { ...current, kind: 'run_history' } })
   })
-  const browser: RuntimeLaneTarget = { kind: 'browser', workspace: '/workspace', lane: 'automation' }
+  const browser: RuntimeLaneTarget = { kind: 'browser', workspace: '/workspace', lane: 'live' }
   const machine: RuntimeLaneTarget = { kind: 'machine', workspace: '/workspace', machine: 'dos' }
   it.each([
-    [browser, '[browser.automation]\nbinary = "firefox"\n', '[browser.automation]'],
-    [browser, '[browser]\nautomation.binary = "firefox"\n', 'automation.binary'],
-    [browser, 'browser = { "automation" = { binary = "firefox" } }\n', '"automation"'],
-    [browser, '[browser]\ngeckodriver = "driver"\n', 'geckodriver'],
+    [browser, '[browser.live.ego]\ncommand = "/bin/ego-browser"\n', '[browser.live.ego]'],
+    [browser, '[browser]\nlive.ego.command = "/bin/ego-browser"\n', 'live.ego.command'],
+    [browser, 'browser = { "live" = { ego = { command = "/bin/ego-browser" } } }\n', '"live"'],
     [machine, 'machines = { msx = {}, dos = { enabled = false } }\n', 'dos'],
     [machine, '["machines"."dos"]\nenabled = true\n', '["machines"."dos"]'],
   ] as const)('selects the actual TOML node for %j', (target, source, start) => {

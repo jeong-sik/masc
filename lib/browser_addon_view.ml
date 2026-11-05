@@ -16,7 +16,7 @@ let bound request = match request.Browser_surface.route,request.tab_id with
   | (Browser_selection.Automatic|Exact (B.Live_route None)),Some _ ->
       input (Error (Browser_selection.error_message Binding_required))
   | (Automatic|Exact (B.Live_route None)),None
-  | Exact (B.Live_route (Some _)|Automation_route),(None|Some _) -> Ok ()
+  | Exact (B.Live_route (Some _)),(None|Some _) -> Ok ()
 let read host json=run (fun () ->
   let started=Mtime_clock.elapsed_ns () in
   let* request=parse Browser_surface.parse_request json in

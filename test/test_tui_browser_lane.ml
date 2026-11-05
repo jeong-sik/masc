@@ -38,7 +38,7 @@ let host_ended ?reason session =
   host (Record.Ended ({ host_entry with ended = Some ending }, ending))
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
-    "source", `String source; "clientId", (if source = "automation" then `Null else `String client); "elapsed_ms", `Float 12.5;
+    "source", `String source; "clientId", `String client; "elapsed_ms", `Float 12.5;
     "tabs", `List [tab 1 "first"; tab 2 "second"];
     "page", `Assoc ["tabId", `Int page_id; "title", `String "second";
       "url", `String "https://example.org/"; "text", `String "real page text";
@@ -80,7 +80,6 @@ let test_raw_refresh_scroll_identity () =
     expect "changed or absent prior identity resets raw scroll"
       ((refresh previous reading).scroll=0))
     [None;Some {reading with page=None};
-     Some {reading with source=Automation;client_id=None};
      Some {reading with client_id=Some zen.client_id};
      Some {reading with page=Option.map (fun (page : page) -> {page with tab_id=1}) reading.page}];
   expect "missing returned page resets raw scroll"
@@ -94,27 +93,19 @@ let test_refresh_rediscovers_tabs () =
   expect "rediscovery retains previous content until reply" (retry.reading = previous.reading)
 
 let test_stale_response () =
-  let current = { (switch_source Automation (create ())) with load = Loading (4, Read) } in
+  let current = { (choose_client zen (create ())) with load = Loading (4, Read) } in
   let late = accept ~generation:3 (decode (response ())) current in
-  expect "old generation cannot replace new source" (late = current);
-  let wrong_source = accept ~generation:4 (decode (response ())) current in
-  expect "wrong source rejected" (match wrong_source.load with Failed _ -> true | _ -> false);
-  expect "wrong source cannot publish content" (wrong_source.reading = None)
+  expect "old generation cannot replace new client" (late = current);
+  let wrong_client = accept ~generation:4 (decode (response ())) current in
+  expect "wrong client rejected" (match wrong_client.load with Failed _ -> true | _ -> false);
+  expect "wrong client cannot publish content" (wrong_client.reading = None)
 
-let test_session_generation () =
+let test_other_operation_generation () =
   List.iter (fun operation ->
     let view = { (create ()) with load = Loading (7, operation) } in
-    expect "read cannot settle session or navigation operation"
+    expect "read cannot settle another operation"
       (accept ~generation:7 (decode (response ())) view = view))
-    [Open_session; Close_session; Goto "https://example.org/?q=한글"; Screenshot 2]
-
-let test_navigation_failure_recovery () =
-  let url = "https://example.org/?q=한글" in
-  let pending = { (switch_source Automation (create ())) with load = Loading (9, Goto url) } in
-  let failed = fail_action "navigation failed" pending in
-  expect "failed URL restored for editing" (failed.url_draft = Some url);
-  expect "failure is visible and retry is possible"
-    (failed.load = Failed "navigation failed" && not (busy failed))
+    [Screenshot 2; Scene_read 2]
 
 let test_failed_refresh () =
   let previous = loaded () in
@@ -129,15 +120,15 @@ let test_http_read_status_provenance () =
   expect "successful request records read ok" (read_status ready = Read_ok);
   expect "pending read does not report retained content as current success"
     (read_status { ready with load = Loading (2, Read) } = Reading);
-  expect "session action has its own status"
-    (read_status { ready with load = Loading (3, Open_session) } = Operating);
+  expect "a browser action has its own status"
+    (read_status { ready with load = Loading (3, Screenshot 2) } = Operating);
   expect "failed read overrides retained success"
     (read_status { ready with load = Failed "connection refused" } = Read_failed)
 
 let test_source_switch () =
-  let view = switch_source Automation { (loaded ()) with url_draft = Some "https://example.org" } in
-  expect "switch clears content, selection and hidden URL input"
-    (view.reading = None && view.selected_tab = None && view.url_draft = None);
+  let view = switch_source Live (loaded ()) in
+  expect "switch clears content and selection"
+    (view.reading = None && view.selected_tab = None && view.selection = Live_unbound);
   expect "live is the default" ((create ()).source = Live);
   expect "browser request only needs the source"
     (request_body (create ()) = `Assoc ["lane", `String "live"])
@@ -151,13 +142,13 @@ let test_malformed_response () =
 
 let test_empty_tabs () =
   let reading = success (decode (`Assoc ["ok", `Bool true; "data", `Assoc [
-    "source", `String "automation"; "clientId", `Null; "elapsed_ms", `Int 0;
+    "source", `String "live"; "clientId", `String firefox.client_id; "elapsed_ms", `Int 0;
     "tabs", `List []; "page", `Null]])) in
   expect "empty tab set is distinct from failure" (reading.tabs = [] && reading.page = None)
 
 let screenshot_response ?(source="live") ?(client=firefox.client_id) ?(tab_id=2) ?(mime="image/png") () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
-    "source", `String source; "clientId", (if source = "automation" then `Null else `String client); "tabId", `Int tab_id; "title", `String "second";
+    "source", `String source; "clientId", `String client; "tabId", `Int tab_id; "title", `String "second";
     "url", `String "https://example.org/"; "mimeType", `String mime;
     "data", `String "UE5H"; "viewport", `Assoc ["documentId",`String "fixture";
       "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]; "elapsed_ms", `Float 13.]]
@@ -179,9 +170,7 @@ let test_screenshot_drag_support () =
       (screenshot_drag_support (choose_client client (create ())) (shot client.client_id) = Drag_served))
     [bidi; ego];
   expect "a client the view no longer holds is not given a rule"
-    (screenshot_drag_support (create ()) (shot firefox.client_id) = Drag_unknown);
-  expect "the server's own browser takes the drag"
-    (screenshot_drag_support (create ()) (shot ~source:"automation" firefox.client_id) = Drag_served)
+    (screenshot_drag_support (create ()) (shot firefox.client_id) = Drag_unknown)
 let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   let drag (shot : screenshot) =
@@ -216,8 +205,6 @@ let test_pointer_decision () =
     (sends ego_view on_ego (drag on_ego));
   expect "an Ego connection can serve the drag refused on an extension"
     (pointer_decision ego_view on_extension (drag on_extension) = Pointer_unserved (unserved true));
-  let automation = shot ~source:"automation" firefox.client_id in
-  expect "the server's own browser answers for itself" (sends both automation (drag automation));
   expect "a connection the view no longer holds is left to the server"
     (sends (create ()) on_extension (drag on_extension));
   let busy_view = { both with load = Loading (3, Read) } in
@@ -255,28 +242,26 @@ let test_unserved_gesture () =
   expect "a view with nothing refused draws no such rows" (unserved_rows ready = []);
   expect "the next input withdraws it"
     ((withdraw_unserved_gesture refreshed).unserved_gesture = None);
-  expect "choosing a connection or finishing an action leaves no refusal about the old one"
+  expect "choosing a connection or the lane again leaves no refusal about the old one"
     ((choose_client zen refreshed).unserved_gesture = None
-     && (after_action refreshed).unserved_gesture = None
-     && (switch_source Automation refreshed).unserved_gesture = None);
+     && (switch_source Live refreshed).unserved_gesture = None);
   expect "an input with nothing refused changes nothing"
     (withdraw_unserved_gesture ready == ready)
 
-let test_screenshot_ownership_and_draft () =
-  let pending = { (loaded ()) with scroll = 3; url_draft = Some "https://example.org/?q=한글";
-      load = Loading (8, Screenshot 2) } in
+let test_screenshot_ownership () =
+  let pending = { (loaded ()) with scroll = 3; load = Loading (8, Screenshot 2) } in
   let settled, screenshot = accept_screenshot ~generation:8 (decode_screenshot (screenshot_response ())) pending in
   expect "matching screenshot settles busy state" (not (busy settled) && Option.is_some screenshot);
-  expect "screenshot never replaces source, selection or draft"
+  expect "screenshot never replaces source or selection"
     (settled.reading = pending.reading && settled.selected_tab = pending.selected_tab
-     && settled.scroll = 3 && settled.url_draft = pending.url_draft);
+     && settled.scroll = 3);
   expect "late screenshot cannot settle another operation"
     (accept_screenshot ~generation:7 (decode_screenshot (screenshot_response ())) pending = (pending, None));
   List.iter (fun response ->
     let failed, preview = accept_screenshot ~generation:8 (decode_screenshot response) pending in
     expect "wrong screenshot ownership is visible, no overlay" (match failed.load with Failed _ -> preview = None | _ -> false);
-    expect "failure retains source and draft" (failed.reading = pending.reading && failed.url_draft = pending.url_draft))
-    [screenshot_response ~source:"automation" (); screenshot_response ~tab_id:1 ()];
+    expect "failure retains source" (failed.reading = pending.reading))
+    [screenshot_response ~client:zen.client_id (); screenshot_response ~tab_id:1 ()];
   let failed, preview = accept_screenshot ~generation:8 (Error "selected tab closed") pending in
   expect "closed tab failure does not fall back to active tab"
     (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
@@ -332,8 +317,7 @@ let test_viewport_cadence_skip_inputs () =
                                "scrollX", `Int 3; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ] ]) ];
   List.iter (fun (field, changed) ->
     expect ("a changed " ^ field ^ " requires a redraw") (not (unchanged changed "PNG")))
-    [ "source", {shot with source = Automation};
-      "client", {shot with client_id = Some zen.client_id};
+    [ "client", {shot with client_id = Some zen.client_id};
       "tab", {shot with tab_id = 3};
       "document", {shot with viewport = {shot.viewport with document_id = "another"}};
       "width", {shot with viewport = {shot.viewport with width = shot.viewport.width +. 1.}};
@@ -346,12 +330,11 @@ let test_viewport_cadence_skip_inputs () =
   List.iter (fun (owner, view) ->
     expect (owner ^ " blocks cadence") (cadence_operation ~viewport:shot view = None))
     [ "pending refresh", {settled with refresh_pending = Some 9};
-      "client picker", {settled with client_picker = Some 0};
-      "URL draft", {settled with url_draft = Some "https://example.org/new"} ]
+      "client picker", {settled with client_picker = Some 0} ]
 
 let test_activity_refresh_preserves_pending_read () =
   let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);
-    refresh_pending=Some 42;url_draft=Some "https://example.org/draft"} in
+    refresh_pending=Some 42} in
   let work : Browser_lane.interaction_activity =
     {request_id="activity-read";actor=Some "keeper/reader";action="page.snapshot";
      tab_id=Some 2;phase=Browser_lane.Interaction_running} in
@@ -362,7 +345,7 @@ let test_activity_refresh_preserves_pending_read () =
     (updated.selected_client=Some current && updated.load=original.load
      && updated.refresh_pending=original.refresh_pending && updated.scroll=9
      && updated.selected_tab=original.selected_tab && updated.reading=original.reading
-     && updated.scene=original.scene && updated.url_draft=original.url_draft
+     && updated.scene=original.scene
      && request_body updated=request_body original);
   let failed=accept_activity (Error "inventory disconnected") updated in
   expect "activity failure retains page and activity evidence"
@@ -451,8 +434,7 @@ let test_client_connection_ownership () =
   let refused, image = accept_screenshot ~generation:23 (decode_screenshot (screenshot_response ())) capture in
   expect "same tab id screenshot from wrong client is refused" (image = None && match refused.load with Failed _ -> true | _ -> false);
   expect "late discovery cannot replace chosen client"
-    (accept_clients ~generation:20 (Ok (found [firefox])) pending = (pending, false));
-  expect "automation sends no native client ID" (request_body (switch_source Automation right) = `Assoc ["lane", `String "automation"])
+    (accept_clients ~generation:20 (Ok (found [firefox])) pending = (pending, false))
 
 (* The picker's empty row reads the list, not the failure: a discovery that
    failed has no list, and an empty one is an answer. *)
@@ -521,14 +503,14 @@ let test_clients_decode () =
       | `Assoc fields -> `Assoc (List.remove_assoc "spaceObservation" fields) | _ -> assert false])));
   let original={ (choose_client ego {(create ()) with clients=Some [ego]}) with
     load=Loading (91,Read_refresh);refresh_pending=Some 91;selected_tab=Some 2;
-    scroll=37;url_draft=Some "https://example.org/draft"} in
+    scroll=37} in
   let observed_client={ego with space_observation=Some observed} in
   let updated=accept_activity (Ok (found [observed_client])) original in
   expect "metadata refresh does not change the pending request or connection authority"
     (updated.selected_client=Some observed_client && same_client ego observed_client
      && updated.load=original.load && updated.refresh_pending=original.refresh_pending
      && updated.selected_tab=original.selected_tab && updated.scroll=original.scroll
-     && updated.url_draft=original.url_draft && request_body updated=request_body original);
+     && request_body updated=request_body original);
   let unavailable=accept_activity (Error "worker unreachable") updated in
   expect "failed refresh retains dated metadata with the original failure"
     (unavailable.selected_client=Some observed_client && unavailable.activity_error=Some "worker unreachable");
@@ -590,7 +572,7 @@ let test_visual_scroll_ownership () =
   expect "refresh never silently repins a different URL" (not (busy refused) && image = None);
   let refused, image = accept_screenshot ~generation:41 (Error "scroll outcome unknown") pending in
   expect "failed effect is surfaced without retry" (not (busy refused) && image = None);
-  let switched = switch_source Automation pending in
+  let switched = switch_source Live pending in
   let same, image = accept_screenshot ~generation:41 (Ok shot) switched in
   expect "closed or switched visual mode rejects an old frame" (same = switched && image = None)
 
@@ -643,7 +625,6 @@ let test_scoped_refresh_failure_retains_read_intent () =
   expect "failed refresh withdraws stale action references" (failed.scene=None && selected_scene_target failed=None);
   expect "retry retains original scoped scene intent" (cadence_operation failed=Some refresh);
   expect "picker owns cadence" (cadence_operation {failed with client_picker=Some 0}=None);
-  expect "URL draft owns cadence" (cadence_operation {failed with url_draft=Some "https://example.org/new"}=None);
   let new_map = success (decode_scene (scene_json ~document_id:"replacement-document" ~view:"regions" ~scope:`Null)) in
   let retry = {failed with load=Loading (82,refresh)} in
   let resolved = accept_scene ~generation:82 (Ok new_map) retry in
@@ -652,23 +633,13 @@ let test_scoped_refresh_failure_retains_read_intent () =
     (cadence_operation resolved=Some (Scene_refresh {tab_id=2;scene_view=Browser_lane.Regions;scope=None}))
 
 let test_unified_browser_picker () =
-  expect "server browsers stay selectable without native clients"
-    (browser_choices (create ()) = [Automatic_browser; Work_browser]);
+  expect "Automatic stays selectable without native clients"
+    (browser_choices (create ()) = [Automatic_browser]);
   let current = { (loaded ()) with scroll = 8; client_picker = Some 0 } in
   let same = choose_browser (Connected_browser firefox) current in
   expect "choosing current browser retains tab and scroll"
     (same = { current with client_picker = None });
-  let independent = choose_browser Automation_browser current in
-  let waiting = { independent with scroll = 7; selected_tab = Some 3;
-    load = Loading (90, Discover Choose_client) } in
-  let discovered, read = accept_clients ~generation:90 (Ok (found [firefox])) waiting in
-  expect "opening picker on server source does not switch to singleton live client"
-    (not read && discovered.source = Automation && discovered.selected_tab = Some 3
-     && discovered.scroll = 7 && discovered.client_picker = Some 0);
-  let failed, read = accept_clients ~generation:90 (Error "offline") waiting in
-  expect "failed native discovery retains server tab"
-    (not read && failed.source = Automation && failed.selected_tab = Some 3 && failed.scroll = 7);
-  let live = choose_browser (Connected_browser zen) discovered in
+  let live = choose_browser (Connected_browser zen) current in
   expect "explicit live selection routes back to chosen connection"
     (live.source = Live && live.selected_client = Some zen && live.selected_tab = None
      && request_body live = `Assoc ["lane", `String "live"; "clientId", `String zen.client_id]);
@@ -694,8 +665,7 @@ let test_failed_discovery_retains_startup_observation () =
   let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let unavailable = decode_unavailable
       (Some (`List [Masc.Browser_addon_observation.unavailable_to_json conflict])) in
-  let observed = { (pinned ()) with unavailable; selected_tab=Some 2; scroll=9;
-    url_draft=Some "https://example.org/draft"; pending_open=true } in
+  let observed = { (pinned ()) with unavailable; selected_tab=Some 2; scroll=9 } in
   let waiting purpose =
     let pending = {observed with load=Loading (42, Discover purpose)} in
     match purpose with Choose_client -> withdraw_discovery pending | Read_after_discovery -> pending in
@@ -713,13 +683,13 @@ let test_failed_discovery_retains_startup_observation () =
     expect "a failed list retains the same recovery scope and observation time"
       (failed.unavailable=unavailable);
     expect "failure remains a failure without an automatic continuation"
-      (failed.load=Failed "connection refused" && not read && not failed.pending_open
+      (failed.load=Failed "connection refused" && not read
        && failed.clients=None && failed.bidi_host=Host_not_reported
        && failed.inventory_report=Inventory_not_reported && failed.automatic=None
        && not (selected_client_available failed));
-    expect "the failed list cannot replace the selected connection or operator draft"
+    expect "the failed list cannot replace the selected connection or its tab"
       (failed.selected_client=observed.selected_client && failed.selected_tab=observed.selected_tab
-       && failed.reading=observed.reading && failed.url_draft=observed.url_draft && failed.scroll=observed.scroll);
+       && failed.reading=observed.reading && failed.scroll=observed.scroll);
     expect "a stale failure cannot retire current request ownership"
       (accept_clients ~generation:41 (Error "stale failure") pending=(pending,false));
     expect "a stale success cannot replace recovery evidence"
@@ -764,13 +734,12 @@ let test_bidi_host_discovery () =
   expect "the same discovery retains the unavailable backend and its original observation"
     (decoded.listed=[firefox] && decoded.unavailable=Backends_unavailable [conflict]);
   let observed = { (create ()) with unavailable=decoded.unavailable } in
-  expect "switching sources retains the last backend observation"
-    ((switch_source Automation observed).unavailable=observed.unavailable
+  expect "choosing the lane again retains the last backend observation"
+    ((switch_source Live observed).unavailable=observed.unavailable
      && (choose_automatic observed).unavailable=observed.unavailable);
   expect "connection-list refresh follows the current input owner"
     (list_reload observed=Open_browser_list
      && list_reload {observed with client_picker=Some 0}=Reload_picker
-     && list_reload {observed with url_draft=Some "https://example.test"}=Close_url_draft_then_open
      && list_reload {observed with load=Loading (42,Read)}=Wait_until_idle);
   let renewed, _ = accept_clients ~generation:41 (Ok (found [firefox]))
       {observed with load=Loading (41, Discover Choose_client)} in
@@ -809,12 +778,6 @@ let test_bidi_host_discovery () =
   let failed, _ = accept_clients ~generation:40 (Error "connection refused") (discover reported) in
   expect "a discovery that failed holds no report, as it holds no list"
     (failed.bidi_host = Host_not_reported && failed.clients = None);
-  (* The picker opened from the server's own browser asks for the list too. *)
-  let elsewhere, _ =
-    accept_clients ~generation:40 (Error "connection refused")
-      (discover { reported with source = Automation }) in
-  expect "a failed discovery from another source holds no report either"
-    (elsewhere.bidi_host = Host_not_reported && elsewhere.clients = None);
   let waiting = withdraw_discovery reported in
   expect "a picker waiting on a discovery shows neither of the read before it"
     (waiting.clients = None && bidi_host_rows ~width:74 waiting = []
@@ -829,8 +792,8 @@ let test_operation_is_refresh () =
   let guard = { expected_url = "https://example.org/";
                 navigation_source = { url = "https://example.org/"; document_id = "observed-document" } } in
   let operations =
-    [ Discover Choose_client; Discover Read_after_discovery; Read; Open_session; Close_session
-    ; Goto "https://example.org/"; Screenshot 2; Read_refresh; Scene_read 2; Scene_regions 2
+    [ Discover Choose_client; Discover Read_after_discovery; Read
+    ; Screenshot 2; Read_refresh; Scene_read 2; Scene_regions 2
     ; Scene_refresh {tab_id=2;scene_view=Browser_lane.Content;scope=None}
     ; Scene_scroll {tab_id=2;document_id="observed-document";expected_url="https://example.org/";
                     scene_view=Browser_lane.Content;scope=None;delta_y=1}
@@ -845,11 +808,11 @@ let test_operation_is_refresh () =
     ; Viewport_pointer {tab_id=2;expected_url="https://example.org/";action=Browser_lane.Activate_tab} ] in
   let expected_refresh = function
     | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
-    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Discover _ | Read | Screenshot _
     | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
     | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false in
   expect "the list holds one value for each constructor, two for Discover"
-    (List.length operations = 19);
+    (List.length operations = 16);
   List.iter (fun operation ->
     expect "an operation is a refresh exactly when the table says"
       (operation_is_refresh operation = expected_refresh operation);
@@ -867,37 +830,36 @@ let test_operation_is_refresh () =
 
 (* Exercise the server recommendation boundary and concrete request owners,
    rather than screen copy or layout. *)
-let automatic_answer ?(listed=[firefox;zen]) browse work =
+let automatic_answer ?(listed=[firefox;zen]) browse =
   let row (client : client) = `Assoc ["clientId",`String client.client_id;
     "browser",`String (Browser_lane.browser_name client.browser);
     "transport",`String (Browser_lane.live_transport_to_string client.transport);"space",Browser_lane.client_space_to_json client.space;"spaceObservation",`Null;"interactions",`List [];"lastActivities",`List []] in
   `Assoc ["ok",`Bool true;"data",`Assoc ["clients",`List (List.map row listed);
-    "automatic",`Assoc ["browse",browse;"work",work]]]
+    "automatic",`Assoc ["browse",browse]]]
 let recommended lane client reason = `Assoc ["ok",`Bool true;"data",`Assoc [
   "lane",`String lane;"clientId",(match client with None->`Null | Some id->`String id);
   "reason",`String reason]]
 let unavailable = `Assoc ["ok",`Bool false;"error",`Assoc [
   "code",`String "no_available_browser";"message",`String "No connected browser"]]
-let recommended_work = recommended "automation" None "compatible_work_browser"
 let automatic_discover ?(generation=101) view answer =
   accept_clients ~generation (decode_discovery answer)
     {view with load=Loading (generation,Discover Read_after_discovery)}
 
 let test_automatic_browser_binding () =
   let answer = automatic_answer
-    (recommended "live" (Some zen.client_id) "existing_login") recommended_work in
+    (recommended "live" (Some zen.client_id) "existing_login") in
   let bound, read = automatic_discover (create ()) answer in
   expect "server choice wins even with multiple connected browsers"
     (read && bound.selection=Bound_automatic && bound.selected_client=Some zen);
   expect "all subsequent requests carry the concrete selected identity"
     (request_body bound=`Assoc ["lane",`String "live";"clientId",`String zen.client_id]);
   let changed = automatic_answer
-    (recommended "live" (Some firefox.client_id) "available_connected_browser") recommended_work in
+    (recommended "live" (Some firefox.client_id) "available_connected_browser") in
   let same, read = automatic_discover bound changed in
   expect "a recommendation refresh cannot transfer an existing binding"
     (read && same.selected_client=Some zen);
   let missing = automatic_answer ~listed:[firefox]
-    (recommended "live" (Some firefox.client_id) "existing_login") recommended_work in
+    (recommended "live" (Some firefox.client_id) "existing_login") in
   let lost, read = automatic_discover bound missing in
   expect "disconnect does not rebind or authorize a read against another browser"
     (not read && lost.selected_client=Some zen && not (selected_client_available lost));
@@ -909,7 +871,7 @@ let test_automatic_browser_binding () =
   expect "explicitly choosing the same browser pins it without dropping content"
     (explicit.selection=Bound_explicit && explicit.selected_client=bound.selected_client);
   let live_override, read = automatic_discover (switch_source Live (create ())) answer in
-  expect "an advanced live override requests a concrete client rather than automatic work"
+  expect "an explicit live lane requests a concrete client rather than an automatic one"
     (not read && live_override.selection=Live_unbound && live_override.selected_client=None
      && live_override.client_picker=Some 0);
   let no_policy, read = automatic_discover (create ())
@@ -918,81 +880,40 @@ let test_automatic_browser_binding () =
     (not read && no_policy.selection=Unbound && Result.is_error (match no_policy.load with
       Failed detail->Error detail | Idle | No_browser | Loading _->Ok ()))
 
-let test_automatic_work_requests () =
+let test_automatic_refusals () =
   let ambiguous = `Assoc ["ok",`Bool false;"error",`Assoc [
     "code",`String "ambiguous_browsers";"message",`String "Choose a connected browser"]] in
-  let refusal, read = automatic_discover (create ())
-    (automatic_answer ambiguous recommended_work) in
-  expect "ambiguous connected browsers do not become a work-browser open prompt"
+  let refusal, read = automatic_discover (create ()) (automatic_answer ambiguous) in
+  expect "ambiguous connected browsers ask for an explicit choice"
     (not read && refusal.selection=Unbound && refusal.source=Live
-     && refusal.selected_client=None && not refusal.pending_open
+     && refusal.selected_client=None
      && refusal.client_picker=Some 0 && refusal.load=Failed "Choose a connected browser");
   List.iter (fun code ->
     let refused = `Assoc ["ok",`Bool false;"error",`Assoc [
       "code",`String code;"message",`String "Keep the original refusal"]] in
-    let same, read = automatic_discover (create ())
-      (automatic_answer refused recommended_work) in
-    expect "other selection refusals never authorize a work fallback"
+    let same, read = automatic_discover (create ()) (automatic_answer refused) in
+    expect "other selection refusals keep the original refusal"
       (not read && same.selection=Unbound && same.source=Live
        && same.load=Failed "Keep the original refusal"))
     ["browser_binding_required";"new_server_refusal"];
-  let empty = automatic_answer ~listed:[] unavailable recommended_work in
-  let prompt, read = automatic_discover (create ()) empty in
-  expect "entering the reader with no browser binds a work recommendation without opening it"
-    (not read && prompt.source=Automation && prompt.load=No_browser
+  let prompt, read = automatic_discover (create ()) (automatic_answer ~listed:[] unavailable) in
+  expect "with no browser available the reader asks for a choice and reads nothing"
+    (not read && prompt.load=Failed "No connected browser" && prompt.client_picker=Some 0
      && prompt.reading=None && cadence_operation prompt=None);
-  let selected, operation = prepare_open (pinned ()) in
-  expect "explicit open discovers the work recommendation instead of opening the login browser"
-    (selected.selection=Work_unbound && selected.pending_open && operation=Discover Read_after_discovery);
-  let pending = {selected with load=Loading (202,operation)} in
-  let ignored, read = accept_clients ~generation:201 (decode_discovery empty) pending in
-  expect "a stale discovery keeps the newer open continuation untouched"
-    (not read && ignored=pending && ignored.pending_open);
-  let opened, continue = accept_clients ~generation:202 (decode_discovery empty) pending in
-  expect "current work discovery dispatches one open against its concrete owned source"
-    (continue && opened.source=Automation && discovery_continuation opened=Open_session);
-  let endpoint, body, _ = success (action_request ~source:opened.source Open_session) in
-  expect "the actual shared HTTP request builder opens a visible work browser"
-    (endpoint="session" && body=`Assoc ["action",`String "open";"headless",`Bool false;
-      "lane",`String "automation"]);
-  let owned = {(switch_source Automation (create ())) with selected_tab=Some 7} in
-  let retained, operation = prepare_open owned in
-  expect "choosing the same advanced owned browser preserves its tab and owner"
-    (choose_browser Automation_browser owned=owned
-     && browser_choice_operation Automation_browser ~before:owned owned=None);
-  expect "an already bound owned browser remains the open/navigation/close owner"
-    (retained=owned && operation=Open_session &&
-      action_request ~source:retained.source (Goto "https://example.org/") =
-      Ok ("goto",`Assoc ["url",`String "https://example.org/";"lane",`String "automation"],65.0));
-  let session = automatic_answer ~listed:[]
-    (recommended "automation" None "existing_work_session")
-    (recommended "automation" None "existing_work_session") in
-  let existing, read = automatic_discover (create ()) session in
-  expect "an existing owned session can be read without opening another window"
-    (read && existing.source=Automation && discovery_continuation existing=Read);
-  let wrong_id = recommended "automation" (Some zen.client_id) "existing_work_session" in
-  let unknown_reason = recommended "automation" None "unknown_reason" in
+  let without_client = recommended "live" None "existing_login" in
+  let unknown_reason = recommended "live" (Some zen.client_id) "unknown_reason" in
+  let unknown_lane = recommended "unknown" None "existing_login" in
   List.iter (fun invalid ->
-    let decoded = success (decode_discovery (automatic_answer invalid recommended_work)) in
-    let refused, read = automatic_discover (create ()) (automatic_answer invalid recommended_work) in
+    let decoded = success (decode_discovery (automatic_answer invalid)) in
+    let refused, read = automatic_discover (create ()) (automatic_answer invalid) in
     expect "invalid automatic decision is refused without hiding manual choices"
       (Result.is_error (decode_recommendation invalid) && decoded.listed=[firefox;zen]
        && not read && refused.selection=Unbound && refused.clients=Some [firefox;zen]))
-    [wrong_id;unknown_reason];
-  expect "work decisions cannot name an existing login browser"
-    (Result.is_error (decode_automatic (`Assoc ["automatic",`Assoc ["browse",unavailable;
-      "work",recommended "live" (Some zen.client_id) "existing_login"]])));
-  let switched = choose_work (loaded ()) in
-  expect "choosing work only discovers its owner and does not open a window"
-    (browser_choice_operation Work_browser ~before:(loaded ()) switched
-     = Some (Discover Read_after_discovery));
+    [without_client;unknown_reason;unknown_lane];
   let retry = {(create ()) with load=Failed "automatic decision unavailable"} in
   expect "explicitly choosing Automatic can retry an unbound refusal"
     (browser_choice_operation Automatic_browser ~before:retry
-      (choose_browser Automatic_browser retry) = Some (Discover Read_after_discovery));
-  expect "work selection clears stale tabs and screenshot ownership"
-    (switched.selected_tab=None && switched.selected_client=None && switched.reading=None
-     && switched.scene=None && switched.selection=Work_unbound)
+      (choose_browser Automatic_browser retry) = Some (Discover Read_after_discovery))
 
 let with_inventory_fields extra = function
   | `Assoc fields ->
@@ -1010,28 +931,25 @@ let test_inventory_report_preserves_request_owner () =
       instances=["worker-a";"worker-b"]}] in
   let refusal=`Assoc ["ok",`Bool false;"error",`Assoc [
     "code",`String "browser_binding_required";"message",`String "Choose an observed client"]] in
-  let answer=automatic_answer refusal refusal
+  let answer=automatic_answer refusal
     |> with_inventory_fields ["inventoryIssues",I.issues_to_json issues] in
   let discovered=success (decode_discovery answer) in
   expect "all typed inventory issues retain the separately valid client rows"
     (discovered.inventory_report=Inventory_reported issues && discovered.listed=[firefox;zen]);
   let original={(loaded ()) with load=Loading (77,Read_refresh);refresh_pending=Some 77;
-    scroll=11;url_draft=Some "https://example.org/draft"} in
+    scroll=11} in
   let current=accept_activity (Ok discovered) original in
   expect "inventory activity cannot consume or retarget the pending page read"
     (current.inventory_report=Inventory_reported issues && current.clients=Some [firefox;zen]
       && current.selected_client=original.selected_client && current.selected_tab=original.selected_tab
       && current.reading=original.reading && current.scene=original.scene
       && current.load=original.load && current.refresh_pending=original.refresh_pending
-      && current.scroll=original.scroll && current.url_draft=original.url_draft
+      && current.scroll=original.scroll
       && request_body current=request_body original);
   let failed=accept_activity (Error "inventory disconnected") current in
   expect "failed activity retains the last inventory issues and request owner"
     (failed.inventory_report=current.inventory_report && failed.selected_client=current.selected_client
       && failed.reading=current.reading && failed.load=current.load);
-  let work=choose_work current in
-  expect "explicit work selection retains the inventory observation it presents"
-    (work.inventory_report=current.inventory_report && work.clients=current.clients);
   let withdrawn=withdraw_discovery current in
   expect "withdrawing inventory does not withdraw the selected Page"
     (withdrawn.inventory_report=Inventory_not_reported && withdrawn.clients=None
@@ -1054,25 +972,24 @@ let test_inventory_report_preserves_request_owner () =
       && unreported.load=current.load)
 
 let test_invalid_inventory_never_recommends_a_fallback () =
-  let automatic=automatic_answer unavailable recommended_work in
+  let automatic=automatic_answer unavailable in
   let invalid = function
-    | Some {browse=Error {kind=Invalid_automatic_response;_};
-        work=Error {kind=Invalid_automatic_response;_}} -> true
+    | Some {browse=Error {kind=Invalid_automatic_response;_}} -> true
     | Some _|None -> false in
   List.iter (fun extra ->
     let answer=with_inventory_fields extra automatic in
     let decoded=success (decode_discovery answer) in
-    expect "unreadable inventory preserves valid rows and refuses both automatic decisions"
+    expect "unreadable inventory preserves valid rows and refuses the automatic decision"
       (decoded.listed=[firefox;zen] && invalid decoded.automatic
         && (match decoded.inventory_report with Inventory_report_unreadable _ -> true
           | Inventory_not_reported|Inventory_reported _ -> false));
     List.iter (fun view ->
       let refused,read=automatic_discover view answer in
-      expect "unreadable inventory never becomes an owned-browser fallback or open"
+      expect "unreadable inventory never becomes a fallback"
         (not read && refused.source=Live && refused.clients=Some [firefox;zen]
-          && refused.selected_client=None && not refused.pending_open
+          && refused.selected_client=None
           && (match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false)))
-      [create ();{(choose_work (create ())) with pending_open=true}])
+      [create ()])
     [["inventoryIssues",`Null];["inventoryIssues",`Assoc []];
      ["inventoryIssues",`List [`Assoc ["kind",`String "future";"instanceId",`String "worker-a";"message",`String "unknown"]]];
      ["inventoryIssues",`List [`Assoc ["kind",`String "unready";"instanceId",`String "worker-a";
@@ -1085,24 +1002,23 @@ let test_inventory_issues_guard_automatic_recommendations () =
   let reported answer=with_inventory_fields ["inventoryIssues",I.issues_to_json [issue]] answer in
   let preferred=recommended "live" (Some zen.client_id) "existing_login" in
   List.iter (fun browse ->
-    let answer=reported (automatic_answer browse recommended_work) in
+    let answer=reported (automatic_answer browse) in
     let decoded=success (decode_discovery answer) in
     let refused,read=automatic_discover (create ()) answer in
-    expect "reported worker issues invalidate a success or no-browser fallback recommendation"
+    expect "reported worker issues invalidate a success or no-browser recommendation"
       (decoded.inventory_report=Inventory_reported [issue]
         && (match decoded.automatic with
-          | Some {browse=Error {kind=Invalid_automatic_response;_};
-              work=Error {kind=Invalid_automatic_response;_}} -> true
+          | Some {browse=Error {kind=Invalid_automatic_response;_}} -> true
           | Some _|None -> false)
-        && not read && refused.source=Live && refused.selected_client=None && not refused.pending_open))
+        && not read && refused.source=Live && refused.selected_client=None))
     [preferred;unavailable];
   let refusal=`Assoc ["ok",`Bool false;"error",`Assoc [
     "code",`String "browser_binding_required";"message",`String "Original inventory refusal"]] in
-  let decoded=success (decode_discovery (reported (automatic_answer refusal refusal))) in
+  let decoded=success (decode_discovery (reported (automatic_answer refusal))) in
   expect "an existing safe server refusal retains its typed reason"
-    (match decoded.automatic with Some {browse=Error {kind=Binding_required;_};
-        work=Error {kind=Binding_required;_}} -> true | Some _|None -> false);
-  let answer=automatic_answer preferred recommended_work in
+    (match decoded.automatic with Some {browse=Error {kind=Binding_required;_}} -> true
+     | Some _|None -> false);
+  let answer=automatic_answer preferred in
   let absent=success (decode_discovery answer) in
   let complete,read=automatic_discover (create ())
     (with_inventory_fields ["inventoryIssues",`List []] answer) in
@@ -1115,25 +1031,24 @@ let test_inventory_summary_contract () =
   let module I=Masc.Browser_connection_inventory in
   let issue=I.Source_unready {instance_id="starting";message="not observed yet"} in
   let issues=I.issues_to_json [issue] in
-  let answer=automatic_answer unavailable recommended_work in
+  let answer=automatic_answer unavailable in
   let invalid = function
-    | Some {browse=Error {kind=Invalid_automatic_response;_};
-        work=Error {kind=Invalid_automatic_response;_}} -> true
+    | Some {browse=Error {kind=Invalid_automatic_response;_}} -> true
     | Some _|None -> false in
   List.iter (fun fields ->
     let response=with_inventory_fields fields answer in
     let decoded=success (decode_discovery response) in
-    expect "an invalid completeness summary preserves rows and refuses both decisions"
+    expect "an invalid completeness summary preserves rows and refuses the automatic decision"
       (decoded.listed=[firefox;zen] && invalid decoded.automatic
         && match decoded.inventory_report with Inventory_report_unreadable _ -> true
           | Inventory_not_reported|Inventory_reported _ -> false);
     List.iter (fun view ->
       let refused,read=automatic_discover view response in
-      expect "an incomplete or contradictory summary cannot open a fallback browser"
+      expect "an incomplete or contradictory summary cannot choose a fallback browser"
         (not read && refused.clients=Some [firefox;zen] && refused.source=Live
-          && refused.selected_client=None && not refused.pending_open
+          && refused.selected_client=None
           && match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false))
-      [create ();{(choose_work (create ())) with pending_open=true}])
+      [create ()])
     [["inventoryComplete",`Bool false];
      ["inventoryComplete",`Bool false;"inventoryIssues",`List []];
      ["inventoryComplete",`Bool true];
@@ -1148,12 +1063,12 @@ let test_inventory_summary_contract () =
     (decoded.inventory_report=Inventory_reported [issue] && invalid decoded.automatic);
   List.iter (fun view ->
     let refused,read=automatic_discover view partial in
-    expect "reported incomplete work stays unbound even with an open intent"
-      (not read && refused.selected_client=None && not refused.pending_open && refused.source=Live))
-    [create ();{(choose_work (create ())) with pending_open=true}];
+    expect "a reported incomplete inventory stays unbound"
+      (not read && refused.selected_client=None && refused.source=Live))
+    [create ()];
   let complete,read=automatic_discover (create ())
     (with_inventory_fields ["inventoryComplete",`Bool true;"inventoryIssues",`List []]
-      (automatic_answer (recommended "live" (Some zen.client_id) "existing_login") recommended_work)) in
+      (automatic_answer (recommended "live" (Some zen.client_id) "existing_login"))) in
   expect "a consistent complete report preserves the concrete server recommendation"
     (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some zen);
   (* A lane fact beside a complete inventory is not a contradiction: the
@@ -1177,7 +1092,7 @@ let () =
     ["activity refresh preserves pending read", test_activity_refresh_preserves_pending_read;
      "client activity keeps connection", test_client_activity_preserves_connection;
      "automatic browser binding", test_automatic_browser_binding;
-     "automatic work requests", test_automatic_work_requests;
+     "automatic refusals", test_automatic_refusals;
      "inventory issues preserve request ownership", test_inventory_report_preserves_request_owner;
      "invalid inventory refuses fallback", test_invalid_inventory_never_recommends_a_fallback;
      "inventory issues guard recommendations", test_inventory_issues_guard_automatic_recommendations;
@@ -1197,14 +1112,13 @@ let () =
      "screenshot drag support follows the connection", test_screenshot_drag_support;
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;
-     "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
+     "screenshot ownership and stale tab", test_screenshot_ownership;
      "viewport cadence skip inputs", test_viewport_cadence_skip_inputs;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;
-     "session generation", test_session_generation;
+     "other operation generation", test_other_operation_generation;
      "failed refresh preserves evidence", test_failed_refresh;
-     "navigation failure preserves editable URL", test_navigation_failure_recovery;
      "HTTP read status provenance", test_http_read_status_provenance;
      "source switch", test_source_switch;
      "malformed response", test_malformed_response;

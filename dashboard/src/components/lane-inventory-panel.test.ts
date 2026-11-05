@@ -158,7 +158,6 @@ describe('operator Lane inventory', () => {
   it('carries each browser row\'s Add-on reading into its details', async () => {
     const raw = structuredClone(fixture)
     const readings: Record<string, object> = {
-      'browser/automation': { kind: 'observed', registered: true },
       'browser/live': { kind: 'observed', connected_clients: 2 },
     }
     for (const [id, addon] of Object.entries(readings)) Object.assign(raw.rows.find(item => item.id === id)!.state, { addon })

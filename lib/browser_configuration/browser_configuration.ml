@@ -1,5 +1,3 @@
-type automation = { driver : string; binary : string option }
-[@@deriving show, eq]
 type live_bidi = { firefox : string; profile : string; port : int }
 [@@deriving show, eq]
 type ego_space = Named_space of string | Existing_space of int
@@ -12,7 +10,6 @@ let validate_ego_space = function
 type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
-  automation : automation option;
   live_bidi : live_bidi option;
   live_ego : live_ego option;
 }
@@ -21,7 +18,7 @@ type t = {
 let browser_table = Runtime_toml_namespace.(key Browser)
 let default_live_bidi_port = 9222
 let max_port = 65535
-let none = { automation = None; live_bidi = None; live_ego = None }
+let none = { live_bidi = None; live_ego = None }
 open Result.Syntax
 
 let table ~path ~keys = function
@@ -51,14 +48,6 @@ let absolute ~path entries key =
         | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
         | TomlTableArray _) ->
     Error (path ^ "." ^ key ^ " must be a non-empty absolute path")
-
-(* A table that is there names a Firefox to drive, so geckodriver is needed. *)
-let parse_automation ~path entries =
-  let* driver = absolute ~path entries "geckodriver" in
-  let* binary = absolute ~path entries "binary" in
-  match driver with
-  | Some driver -> Ok (Some { driver; binary })
-  | None -> Error (path ^ ".geckodriver is required when the backend is configured")
 
 let port ~path entries =
   match List.assoc_opt "port" entries with
@@ -114,18 +103,15 @@ let parse_live_ego ~path = function
      | None, _ -> Error (path ^ ".command is required when the table is configured")
      | Some _, None -> Error (path ^ ".space is required when the table is configured"))
 
-let automation_path = browser_table ^ ".automation"
 let live_path = browser_table ^ ".live"
 let live_bidi_path = live_path ^ ".bidi"
 let live_ego_path = live_path ^ ".ego"
 
 let parse toml =
   let* root = table ~path:browser_table
-    ~keys:["geckodriver"; "binary"; "live"; "automation"]
+    ~keys:["live"]
     (Otoml.find_opt toml Fun.id [browser_table]) in
   let root = fields root in
-  let* automation_table = table ~path:automation_path
-    ~keys:["geckodriver"; "binary"] (List.assoc_opt "automation" root) in
   let* live_table = table ~path:live_path ~keys:["bidi"; "ego"] (List.assoc_opt "live" root) in
   let* live_bidi_table = table ~path:live_bidi_path
     ~keys:["firefox"; "profile"; "port"] (List.assoc_opt "bidi" (fields live_table)) in
@@ -133,29 +119,18 @@ let parse toml =
   let* live_ego_table = table ~path:live_ego_path
     ~keys:["command"; "space"] (List.assoc_opt "ego" (fields live_table)) in
   let* live_ego = parse_live_ego ~path:live_ego_path live_ego_table in
-  let root_automation = List.mem_assoc "geckodriver" root || List.mem_assoc "binary" root in
-  let* automation = match automation_table, root_automation with
-    | Some _, true ->
-      Error "configure geckodriver/binary in only one place: [browser.automation] or [browser]"
-    | Some entries, false -> parse_automation ~path:automation_path entries
-    | None, true -> parse_automation ~path:browser_table root
-    | None, false -> Ok None
-  in
-  Ok { automation; live_bidi; live_ego }
+  Ok { live_bidi; live_ego }
 
 type _ source =
-  | Automation : automation source
   | Live_bidi : live_bidi source
   | Live_ego : live_ego source
 
 let source_path : type a. a source -> string = function
-  | Automation -> automation_path
   | Live_bidi -> live_bidi_path
   | Live_ego -> live_ego_path
 
 let source_table : type a. a source -> t -> a option = fun source t ->
   match source with
-  | Automation -> t.automation
   | Live_bidi -> t.live_bidi
   | Live_ego -> t.live_ego
 

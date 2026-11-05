@@ -26,7 +26,6 @@ let expected command reply = match command,reply with
 let issue_policy t route verb =
   let open Browser_lane in
   match route with
-  | Automation_route -> Ok (reply_policy verb)
   | Live_route selected ->
     match reply_policy verb with
     | Executor_owned -> Ok Executor_owned

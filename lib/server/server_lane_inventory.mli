@@ -41,7 +41,6 @@ type 'a browser_reading =
 type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
   | Browser_clients of int browser_reading
-  | Browser_executor of bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of {
       declaration : declaration option;

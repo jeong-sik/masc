@@ -937,15 +937,16 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
    | _ -> Alcotest.fail "browser read stayed pending");
   state.queue_panel <- Option.map (fun panel ->
     {panel with qp_receipt=Some (Queue_read_receipt "Keeper is active")}) state.queue_panel;
-  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (2, Goto "https://example.test")};
+  state.browser_lane <- Some {browser with load=Browser_lane_view.Loading (2, Scene_click {tab_id=2;
+    document_id="document";node_id="control";expected_url="https://example.test";scope=None})};
   suspend_workspace_readings state;
   (match state.queue_panel with
    | Some panel -> Alcotest.(check bool) "withdrawal retires the read-only queue observation" true
        (panel.qp_receipt = None)
    | None -> Alcotest.fail "queue panel was discarded");
   (match state.browser_lane with
-   | Some {load=Browser_lane_view.Loading (2, Goto _); _} -> ()
-   | _ -> Alcotest.fail "admitted browser navigation lost its receipt owner");
+   | Some {load=Browser_lane_view.Loading (2, Scene_click _); _} -> ()
+   | _ -> Alcotest.fail "admitted browser effect lost its receipt owner");
   state.board_detail <- Detail.complete state.board_detail delayed (Ok (b, [], None));
   (match Detail.view_for state.board_detail ~post_id:a.bp_id with
    | Detail.Ready (shown, _, _) -> Alcotest.(check string) "A stays on screen" a.bp_body shown.bp_body

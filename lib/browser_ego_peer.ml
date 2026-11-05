@@ -576,7 +576,7 @@ let download_row ~root ~tab json =
     let* status = match state, path, reason with
       | "pending", `Null, `Null -> Ok Browser_downloads.Pending
       | "completed", `String path, `Null when String.equal path (Filename.concat root id) ->
-        Ok (Browser_downloads.Completed (Browser_downloads.File path))
+        Ok (Browser_downloads.Completed path)
       | "completed", `String _, `Null -> Error "ego answered a download saved outside the connection's download folder"
       | "interrupted", `Null, `String reason -> Ok (Browser_downloads.Interrupted reason)
       | _ -> Error (Printf.sprintf "ego answered a download in an unreadable state %S" state) in

@@ -110,10 +110,10 @@ let issues_of_json = function
   | _ -> Error "inventory issues must be an array"
 type observation = {instance_id:string; published:Browser_addon_observation.published}
 type decision = Selected of S.selected | Refused of S.error | Incomplete | Worker_scope_required
-type t = {client_rows:Yojson.Safe.t list; issues:issue list; browse:decision; work:decision}
+type t = {client_rows:Yojson.Safe.t list; issues:issue list; browse:decision}
 module Instance_set = Set.Make (String)
 let snapshot (published:Browser_addon_observation.published) : S.snapshot =
-  {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation}
+  {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence}
 let decide snapshot verb = match S.choose ~verb ~bound:false ~snapshot S.Automatic with
   | Ok selected -> Selected selected | Error error -> Refused error
 let breaks_completeness (issue : issue)=match issue with
@@ -153,22 +153,17 @@ let build ~observations ~issues =
      the inventory incomplete, so a healthy client of another transport on
      the same worker is still chosen automatically. *)
   let incomplete=List.exists breaks_completeness issues in
-  let browse,work=match incomplete,observations with
-    | true,_ -> Incomplete,Incomplete
-    | false,[observation] ->
-      let snapshot=snapshot observation.published in
-      decide snapshot B.Tabs_list,decide snapshot (B.Session_open {headless=Some false})
+  let browse=match incomplete,observations with
+    | true,_ -> Incomplete
+    | false,[observation] -> decide (snapshot observation.published) B.Tabs_list
     | false,([]|_::_::_) ->
-      let disabled:S.work_browser={activity=B.Disabled;registered=false;session=B.Browser_unknown;locate=false} in
       let snapshot:S.snapshot={live_activity=B.Enabled;live_clients=List.map (fun (_,client,_) -> client) pairs;
-        live_space_presence=List.concat_map (fun observation -> observation.published.space_presence) observations;
-        automation=disabled} in
-      let browse=match decide snapshot B.Tabs_list with
-        | Refused S.No_available_browser -> Worker_scope_required
-        | Selected _|Refused (Binding_required|Ambiguous_browsers _|Required_actions_unavailable _|Unsupported_required_actions _) as value -> value
-        | Incomplete|Worker_scope_required -> Worker_scope_required in
-      browse,Worker_scope_required in
-  {client_rows=List.map (fun (_,_,row) -> row) pairs;issues;browse;work}
+        live_space_presence=List.concat_map (fun observation -> observation.published.space_presence) observations} in
+      (match decide snapshot B.Tabs_list with
+       | Refused S.No_available_browser -> Worker_scope_required
+       | Selected _|Refused (Binding_required|Ambiguous_browsers _|Required_actions_unavailable _|Unsupported_required_actions _) as value -> value
+       | Incomplete|Worker_scope_required -> Worker_scope_required) in
+  {client_rows=List.map (fun (_,_,row) -> row) pairs;issues;browse}
 let scoped_refusal message =
   `Assoc ["ok",`Bool false;"error",`Assoc ["code",`String (B.choice_case_code B.Binding_required_case);
     "message",`String message]]
@@ -176,8 +171,8 @@ let decision_to_json = function
   | Selected selected -> `Assoc ["ok",`Bool true;"data",S.to_json selected]
   | Refused error -> `Assoc ["ok",`Bool false;"error",S.error_to_json error]
   | Incomplete -> scoped_refusal "Browser worker observations are incomplete. Inspect the inventory issues and choose an observed client explicitly."
-  | Worker_scope_required -> scoped_refusal "Choose an observed client explicitly; this inventory does not identify an owned work-session worker. No session was selected or opened."
+  | Worker_scope_required -> scoped_refusal "Choose an observed client explicitly; this inventory spans several browser workers and none of them serves the request alone."
 let to_json t =
   `Assoc ["clients",`List t.client_rows;"inventoryIssues",issues_to_json t.issues;
   "inventoryComplete",`Bool (not (List.exists breaks_completeness t.issues));
-  "automatic",`Assoc ["browse",decision_to_json t.browse;"work",decision_to_json t.work]]
+  "automatic",`Assoc ["browse",decision_to_json t.browse]]

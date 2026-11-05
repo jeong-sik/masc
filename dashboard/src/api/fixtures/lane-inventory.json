@@ -150,23 +150,6 @@
       }
     },
     {
-      "id": "browser/automation",
-      "label": "Browser automation",
-      "purpose": "Browser backend observation.",
-      "ui_category": "browser",
-      "selection": {
-        "kind": "browser",
-        "lane": "automation"
-      },
-      "state": {
-        "kind": "browser_executor",
-        "addon": {
-          "kind": "observed",
-          "registered": false
-        }
-      }
-    },
-    {
       "id": "machine/msx",
       "label": "MSX",
       "purpose": "Published machine state.",

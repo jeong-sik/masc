@@ -2,7 +2,7 @@ open Alcotest
 module Broker = Masc.Browser_addon_downloads
 module B = Browser_lane
 let ok = function Ok value -> value|Error detail -> fail detail
-let route=B.Automation_route
+let route=B.Live_route (Some (ok (B.client_id_of_string "1b000000-0000-4000-8000-000000000009")))
 let actor="keeper/download-reader"
 let verb=B.Page_downloads {tab_id=7}
 let write path contents = Out_channel.with_open_bin path (fun out -> output_string out contents)
@@ -97,8 +97,6 @@ let live_route_grants_are_its_own () = with_download (fun _root source _contents
     | _ -> fail "missing bound live download row" in
   check bool "another live connection cannot import it" true
     (Result.is_error (Broker.claim broker ~id ~actor ~route:other ~verb));
-  check bool "the automation route cannot import it" true
-    (Result.is_error (Broker.claim broker ~id ~actor ~route:B.Automation_route ~verb));
   ignore (ok (Broker.claim broker ~id ~actor ~route:live ~verb));
   ok (Broker.release broker ~id ~actor ~route:live ~verb);
   List.iter (fun (name, route) ->

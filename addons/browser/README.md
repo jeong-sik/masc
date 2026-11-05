@@ -1,8 +1,8 @@
 # Browser workers
 
-Each browser source has its own package here: `automation/`, `firefox/`,
-`ego/` and `external/`, with the ids `browser-automation`, `browser-firefox`,
-`browser-ego` and `browser-external`.
+Each browser source has its own package here: `firefox/`, `ego/` and
+`external/`, with the ids `browser-firefox`, `browser-ego` and
+`browser-external`.
 Every package runs `masc-browser-addon-worker` as a native Add-on for the one
 source its `lane.toml` names in `browser_backend`, so a failure of one source
 ends only its own worker. The server finds the worker on its PATH, and `masc-native-addon-launcher` and
@@ -24,7 +24,7 @@ download installer does not supply these programs.
 masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
 `browser-lane-setup` mode does the same, for each source the workspace runs:
-automation, firefox and ego when `runtime.toml` has their table or the run
+firefox and ego when `runtime.toml` has their table or the run
 writes it, and external when a native host is installed. A source whose table the mode writes is declared
 once that table is written.
 
@@ -94,8 +94,7 @@ retirement alone preserves an active Space, and an unknown finish is never repla
 An unreadable or unready live-source publisher can hide another controller of
 the same native Space. Until every live publisher's identity is observed, Ego
 commands and Goal pins are refused before dispatch, including exact-client and
-stored Goal routes. Explicit extension clients remain usable, and a failed
-Automation observation does not block an exact Ego route. Cached
+stored Goal routes. Explicit extension clients remain usable. Cached
 `browser_document` reads preserve the same unknown-identity refusal.
 The host rechecks topology after snapshot I/O; this admission observation does
 not provide an atomic native-Space lease against later lifecycle changes.
@@ -127,9 +126,8 @@ dispatch too. An explicit `lane = "live"` tab creation requires the observed `cl
 path, retaining contextual/scene/screenshot projections, capability receipts,
 caller attribution and producer effect metadata. Public core/Keeper dispatchers
 use this adapter. Screenshot retention and Vision handles belong to the served
-Workspace. The automation worker's owned Gecko and the ego worker use
-host-mediated upload and download brokers, independently of the optional
-validation hooks and model consumers; the other sources have none.
+Workspace. The ego worker uses host-mediated upload and download brokers,
+independently of the optional validation hooks; the other sources have none.
 
 The worker publishes connection observations through MCP. Its separate private
 socket lets browser commands wait while client polls and results use other
@@ -191,26 +189,23 @@ an actual browser run.
 
 `masc browser-lane-setup --mode addon` writes these declarations; the
 [TOML guide](../../docs/guides/lane-addon-toml.md) describes every key. To
-choose hooks or model outputs, add them to the `browser-<source>.toml` setup
-wrote; setup never rewrites an existing declaration. `locate` belongs to
-`browser-automation`:
+choose hooks, add them to the `browser-<source>.toml` setup wrote; setup never
+rewrites an existing declaration:
 
 ```toml
-id = "browser-automation"
+id = "browser-ego"
 enabled = true
-run_id = "browser-automation"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
+run_id = "browser-ego"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-ego/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate"]
 
 [binding]
 sources = []
 ```
 
 The installed external native host and browser extension/BiDi peer use the
-workspace token. Each worker owns only its own source's browser. The
-automation worker starts its Gecko driver with a private profile/download
-directory. The firefox worker starts its configured live
+workspace token. Each worker owns only its own source's browser. The firefox
+worker starts its configured live
 Firefox during attachment, on its dedicated existing owner-only profile. Its reported profile
 and process ID must match the original process owner. A busy port is refused;
 no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
@@ -262,26 +257,7 @@ the package baseline remains mandatory. The shared broker and worker receipt
 check required object keys, visited primitive types and `anyOf` before accepting
 the result. The consuming SDK owns complete validation of its schema dialect;
 this partial guard is not a full JSON Schema validator. Baseline and grant are
-both pinned to the worker incarnation. The bundled fixed `locate` output does
-not grant request schemas.
-
-The `browser-automation` package declares the fixed `locate` output and connects it to owned
-Gecko `page.locate`. Configure an existing model slot for the installation's
-`runtime.addon_exact_lanes.<installation-id>.locate` route using the
-[TOML guide](../../docs/guides/lane-addon-toml.md). Package defaults select this
-output; installation `exact_outputs = []` disables it independently of tool
-validation hooks. Inventory `locate` observes the selected consumer, not provider
-readiness. A missing/off/unavailable route remains pending under the existing
-Exact Output policy until an authority event or original-command cancellation.
-
-The model selects node IDs from a typed scene; it supplies no selectors, code,
-coordinates or input actions. The driver reads the same tab again and refuses
-changed documents, URLs, missing nodes or changed observed meaning. Returned
-geometry and node observations come from this fresh read. The model's explanation
-is separate inference, and a match grants no permission to click. A truncated
-scene never establishes that all matching elements were found. The original
-command or detach owns model waiting; the quick browser transport clock does
-not abandon its request.
+both pinned to the worker incarnation.
 
 Scripted protocol cases, actual isolated BiDi/Gecko cases and installed
 browser behavior are separate evidence scopes. New production changes require

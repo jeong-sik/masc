@@ -1,7 +1,6 @@
-type program = Geckodriver | Firefox | Ego_browser
+type program = Firefox | Ego_browser
 
 let name = function
-  | Geckodriver -> "geckodriver"
   | Firefox -> "firefox"
   | Ego_browser -> "ego-browser"
 
@@ -15,7 +14,6 @@ let absolute_home () =
   | Some _ | None -> None
 
 let candidates = function
-  | Geckodriver -> [ "geckodriver" ]
   | Ego_browser ->
     (* ego lite's onboarding links ego-browser into ~/.local/bin, which a
        shell started before it, or a service, may not have on PATH. *)
@@ -46,8 +44,7 @@ type check =
    reported as a failed probe, which is what an unusable program is. *)
 let probe_timeout_sec = 10.
 
-(* The lane takes absolute paths only ([browser.automation] geckodriver and
-   binary, [browser.live.bidi] firefox). A program found through a relative
+(* The lane takes absolute paths only ([browser.live.bidi] firefox). A program found through a relative
    PATH entry, or given as a relative path, is reported where it is on disk
    rather than as a path that only means something from this directory. A
    working directory that cannot be read leaves no such path to report. *)
@@ -133,14 +130,14 @@ let ego_versions output =
        ^ excerpt
        ^ if String.length excerpt < String.length printed then "..." else "")
 
-(* geckodriver and Firefox answer by exiting 0. An ego-browser that exits 0
+(* Firefox answers by exiting 0. An ego-browser that exits 0
    without naming its versions belongs to an ego lite whose onboarding is not
    finished, and the worker cannot start it, so it has not answered. *)
 let probe_program program command =
   match probe command with
   | Started { command; path; output } as check ->
     (match program with
-     | Geckodriver | Firefox -> check
+     | Firefox -> check
      | Ego_browser ->
        (match ego_versions output with
         | Ok _ -> check

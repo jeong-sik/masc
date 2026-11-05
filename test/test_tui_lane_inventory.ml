@@ -34,8 +34,7 @@ let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->
     | Lane_id.Exact id -> object_ ["kind",str "exact";"lane_id",str (Standalone_lane.to_id id)],
         object_ ["kind",str "exact";"configuration",configuration]
     | Lane_id.Browser id -> object_ ["kind",str "browser";"lane",str (Browser_lane.Lane_name.to_wire id)],
-        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]]
-        | Automation -> object_ ["kind",str "browser_executor";"addon",object_ ["kind",str "observed";"registered",`Bool true]])
+        (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]])
     | Lane_id.Machine id -> object_ ["kind",str "machine";"machine",str (Machine_lane.to_wire id)],
         object_ ["kind",str "machine";"activity",str "on";"publication",str "stable"] in
   row (Lane_id.to_wire (Lane_id.Builtin lane)) selection state)
@@ -65,8 +64,8 @@ let complete_inventory () =
   (match (find "instance/manual" snapshot).selection with
    | Decode.Manual_instance {instance_id="manual";incarnation="manual-incarnation"} -> ()
    | _ -> Alcotest.fail "manual selection identity lost");
-  Alcotest.(check bool) "registration is read as registration" true
-    ((find "browser/automation" snapshot).state = Decode.Browser_executor (Decode.Browser_observed true))
+  Alcotest.(check bool) "connected clients are read as a count" true
+    ((find "browser/live" snapshot).state = Decode.Browser_clients (Decode.Browser_observed 0))
 
 let builtin_role_is_server_metadata () =
   let original = ok (Decode.decode (snapshot [])) in
@@ -310,9 +309,9 @@ let standing_reads_what_the_row_says () =
   check "a browser lane whose Add-on is switched off is off" S.Off
     (Decode.Browser_clients (Decode.Browser_addon_off));
   check "a browser lane whose Add-on is declared on and not running waits" S.Waiting
-    (Decode.Browser_executor (Decode.Browser_addon_not_running));
+    (Decode.Browser_clients (Decode.Browser_addon_not_running));
   check "a browser lane whose Add-on cannot be read is failing" S.Failing
-    (Decode.Browser_executor (Decode.Browser_addon_unavailable "cleanup incomplete"));
+    (Decode.Browser_clients (Decode.Browser_addon_unavailable "cleanup incomplete"));
   check "an exact lane switched off is off" S.Off
     (Decode.Exact_state (Decode.Disabled { declared_slots = []; declared_cli_slots = [] }));
   check "an exact lane without its registry is unknown" S.Unobserved
@@ -364,7 +363,7 @@ let categories_are_strict_metadata () =
            && instance.ui_category=Some Lane_addon_category.Analysis)
    | Decode.Package_state {declaration=Some (Decode.Valid _);instances=([]|_::_::_)}
    | Decode.Package_state {declaration=(None|Some (Decode.Invalid _|Absent|Unobserved));instances=_}
-   | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+   | Exact_state _ | Browser_clients _ | Machine_state _ ->
        Alcotest.fail "category metadata lost its owners");
   List.iter (fun value -> rejects "unsupported declared category is not a fallback" (payload value))
     [str "unknown";str "";`Null;`Bool true;`List [str "browser"]];
@@ -377,7 +376,7 @@ let categories_are_strict_metadata () =
   | Decode.Package_state {instances=[instance];_} ->
       Alcotest.(check bool) "omission alone remains unclassified" true (instance.ui_category=None)
   | Decode.Package_state {instances=([]|_::_::_);_}
-  | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ ->
+  | Exact_state _ | Browser_clients _ | Machine_state _ ->
       Alcotest.fail "unclassified original worker was removed"
 
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[

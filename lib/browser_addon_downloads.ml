@@ -201,14 +201,14 @@ let publish t path =
             if not t.serving then Error "download broker retired during preparation"
             else Ok (`Assoc ["downloadSnapshot",`String id]))))
 (* Only a snapshot this broker published can become a grant, and only the
-   browsers this worker runs publish: the owned Gecko, and the ego
-   connection, whose agent pages save their downloads into the same folder.
+   browser this worker runs publishes: the ego connection, whose agent pages
+   save their downloads into the worker's folder.
    A grant keeps the exact route, so one live connection cannot claim
    another's. *)
 let allowed route verb = match route,verb with
-  | (B.Automation_route|Live_route (Some _)),B.Page_downloads _ -> Ok ()
+  | B.Live_route (Some _),B.Page_downloads _ -> Ok ()
   | (B.Live_route None),(B.Page_downloads _)
-  | (B.Live_route _|Automation_route),
+  | (B.Live_route _),
     (B.Tabs_list|Page_read _|Page_document _|Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
     |Page_context _|Page_locate _) ->

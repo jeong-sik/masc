@@ -3,11 +3,9 @@ module Native_input = Browser_native_input_contract
 (** Browser_lane — the in-process state of the masc ↔ browser lanes
     (docs/design/browser-lane.md, task-1382).
 
-    A lane is one connected browser backend: "live" is the user's real
-    Firefox/Zen through the extension's native-messaging host. "automation"
-    is the in-process OCaml WebDriver executor. Only the live host long-polls
-    this process and posts results through the HTTP transport; automation
-    owns its session directly inside the server.
+    The live lane holds the connected browser clients. A polled client
+    long-polls this process and posts results through the HTTP transport; a
+    browser worker holds its client for as long as it serves it.
 
     Verbs are a closed variant: an unknown verb is refused by name on every
     boundary (tool input, lane issue, backend), the same rule the observe
@@ -93,12 +91,6 @@ let ego_input_contract = function
 
 (* Whether an interaction acts on an ego snapshot target, which only an ego
    connection serves. *)
-let acts_on_snapshot_target = function
-  | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> true
-  | Activate_tab | Click _ | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _ | Double_click _
-  | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover _ | Drag_to _ | Hover_at _ | Tap_at _
-  | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> false
-
 type elements_filter = { within : string option; selector : string option }
 
 let unfiltered_elements = { within = None; selector = None }
@@ -465,8 +457,7 @@ let verb_json = function
      Interaction, navigation, and session changes are writes.
    - [live_capability]: what does this ask of the operator's browser, if it
      may run there at all? Readers and explicit-tab interactions are
-     supported. Session ownership and direct navigation remain with the
-     automation backend. *)
+     supported. *)
 let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Session_status | Page_locate _ -> true
@@ -599,8 +590,7 @@ let live_capability = function
   | Page_downloads _ -> Some Download_listing
   | Page_context { mode = `Dialog; _ } -> Some Dialog_read
   | Page_console _ | Page_network _ | Page_cookies _ -> None
-  (* The operator's browser owns itself, so it has no session to report on.
-     Answering here would describe something the automation backend holds. *)
+  (* The operator's browser owns itself, so it has no session to report on. *)
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> Some File_upload
   | Session_open _ | Session_close | Session_status
   | Page_act (Action.On_tab { interaction = (Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
@@ -613,25 +603,9 @@ let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
 let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
 let handoff_refused = "Space control actions apply only to an ego connection on the live lane"
-(* Why the automation lane does not serve a verb, if it does not.
-   Model-assisted locate is admitted separately by the installed executor. *)
-let automation_refusal = function
-  | Page_capture {options=Some _;_} -> Some "native screenshot options require an Ego connection"
-  | Page_native_workflow _ -> Some "native workflows require an ego connection"
-  | Page_interact {action; _} when acts_on_snapshot_target action -> Some snapshot_target_refused
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> Some handoff_refused
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
-  | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _
-  | Page_act (Action.Open_tab _ | Action.Open_window _ | Action.On_tab _)
-  | Page_locate _ -> None
-  | Page_snapshot _ -> Some snapshot_refused
-;;
-let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
-
 let verb_allowed (lane : Lane_name.t) verb =
   match lane with
   | Live -> verb_allowed_on_live verb
-  | Automation -> verb_allowed_on_automation verb
 ;;
 
 
@@ -867,7 +841,7 @@ let settle_activity client id outcome = match Hashtbl.find_opt client.interactio
   | None -> ()
   | Some work -> Hashtbl.replace client.last_activities work.actor {work;outcome};
       Hashtbl.remove client.interactions id
-type target = Automation | Live_client of client
+type target = Live_client of client
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
 (* Retain only IDs after disconnect; queues and page payloads must be reclaimed. *)
@@ -940,10 +914,9 @@ let client_json info =
   "space",client_space_to_json info.space;
   "interactions",`List (List.map interaction_activity_json active);
   "lastActivities",`List (List.map settled_activity_json settled)]
-let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
+let target_client_id = function Live_client client -> Some client.info.client_id
 (* Where an answer came from, as every successful answer states it: a live
-   connection's ID and how its browser is reached. The server's own browsers
-   have no client, and no transport to name. *)
+   connection's ID and how its browser is reached. *)
 let client_id_field = "clientId"
 let transport_field = "transport"
 let space_field = "browserSpace"
@@ -955,11 +928,10 @@ let live_connection_fields ~client_id ~transport ~space =
 let target_connection_fields = function
   | Live_client client ->
     live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport ~space:client.info.space
-  | Automation -> [client_id_field, `Null]
 (* Those fields read back from an answer, for a holder that keeps only what
-   it can check. An answer states no connection, the server's own browser, or
-   a live connection together with its transport. A client ID without its
-   transport, or a transport without its client, is none of the three. *)
+   it can check. An answer states no connection, or a live connection
+   together with its transport. A client ID without its transport, or a
+   transport without its client, is neither. *)
 let connection_fields_of_json fields =
   let keys=List.filter_map (fun (key,_) -> if List.mem key connection_field_names then Some key else None) fields in
   if List.length keys<>List.length (List.sort_uniq String.compare keys) then Error "duplicate_connection_fields"
@@ -967,7 +939,6 @@ let connection_fields_of_json fields =
   let space=List.assoc_opt space_field fields in
   match List.assoc_opt client_id_field fields, List.assoc_opt transport_field fields,space with
   | None, None,None -> Ok []
-  | Some `Null, None,None -> Ok [client_id_field, `Null]
   | Some (`String client_id), Some (`String transport),space ->
     Result.bind (client_id_of_string client_id) (fun client_id ->
       Result.bind (live_transport_of_string transport) (fun transport ->
@@ -988,12 +959,10 @@ let with_connection_fields target fields =
   @ List.filter (fun (key, _) -> not (List.mem key connection_field_names)) fields
 ;;
 
-(* Which backend a request names. A browser client id belongs to the live
-   source, so a request for the automation backend has nowhere to carry one. *)
-type route = Automation_route | Live_route of client_id option
+(* Which live client a request names, if it names one. *)
+type route = Live_route of client_id option
 
 let route_lane_name = function
-  | Automation_route -> Lane_name.Automation
   | Live_route _ -> Lane_name.Live
 ;;
 
@@ -1079,7 +1048,6 @@ let resolve_target ~verb route =
   match activity_rejection (route_lane_name route) verb with
   | Some rejection -> Error (Activity_rejected rejection)
   | None -> match route with
-  | Automation_route -> Ok Automation
   | Live_route selected ->
     Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
       prune_unlocked ();
@@ -1222,7 +1190,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
     Error (Selected_client_disconnected client.info.client_id)
   else match live_capability verb with
   | None ->
-    Ok (Rejected_before_effect "session ownership, direct navigation and model locate belong to the server's lanes")
+    Ok (Rejected_before_effect "no live browser connection serves this command")
   | Some capability when not (live_transport_serves client.info.transport capability) ->
     Error (Transport_unsupported
       { client_id = client.info.client_id; transport = client.info.transport; capability })
@@ -1286,32 +1254,7 @@ let serving_port_cell : serving_port Atomic.t = Atomic.make Serving_port_unknown
 let install_serving_port port = Atomic.set serving_port_cell (Serving_port port)
 let withdraw_serving_port () = Atomic.set serving_port_cell Serving_port_unknown
 let serving_port () = Atomic.get serving_port_cell
-type automation_backend = { execute : verb -> answer; locate : bool }
-let automation_executor : automation_backend option Atomic.t = Atomic.make None
-let install_automation_executor ?(locate=false) executor =
-  Atomic.set automation_executor (Option.map (fun execute -> {execute;locate}) executor)
-let automation_locate_available () = match Atomic.get automation_executor with
-  | None -> false | Some backend -> backend.locate
-let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
-let install_automation_document_observer observer = Atomic.set automation_document_observer observer
-let issue_automation_with ~activity_check ~verb ~timeout_sec =
-  match automation_refusal verb with
-  | Some refusal -> Rejected_before_effect refusal
-  | None -> match activity_check verb with
-  | Some refusal -> refusal
-  | None -> match Atomic.get automation_executor with
-  | None -> Lane_absent
-  | Some backend ->
-      (match verb with
-       | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
-       | Page_locate _ -> backend.execute verb
-       | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _ | Page_snapshot _|Page_context _
-       | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _ | Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _ ->
-           Watched_work.run (fun () -> backend.execute verb)
-             ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
-let issue_automation ~verb ~timeout_sec =
-  issue_automation_with ~activity_check:(activity_refusal Lane_name.Automation) ~verb ~timeout_sec
-type backend_observation = Live_clients of int | Executor_registered of bool
+type backend_observation = Live_clients of int
 type inventory_observation = { activity : activity; backend : backend_observation }
 (* Reading inventory must not prune clients or resolve their waiting requests. *)
 let inventory_observation ?observed_activity lane =
@@ -1320,56 +1263,10 @@ let inventory_observation ?observed_activity lane =
   let backend = match lane with
   | Lane_name.Live -> Live_clients (Eio.Mutex.use_ro clients_mutex (fun () ->
       Hashtbl.fold (fun _ client count -> if connected client then count+1 else count) clients 0))
-  | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
   in { activity; backend }
-(* The lanes whose browser the server owns; sessions and navigation belong
-   to them, and the live browser belongs to the operator. *)
-type server_lane = Server_automation
-
-type session_observation = Browser_closed | Browser_open | Browser_changing | Browser_unknown
-let automation_session_observer : (unit -> session_observation) option Atomic.t = Atomic.make None
-let session_observer = function
-  | Server_automation -> automation_session_observer
-let install_server_session_observer lane observer = Atomic.set (session_observer lane) observer
-let server_session_observation lane = match Atomic.get (session_observer lane) with
-  | None -> Browser_unknown
-  | Some observe -> observe ()
-
-let server_lane_of_name : Lane_name.t -> server_lane option = function
-  | Lane_name.Automation -> Some Server_automation
-  | Lane_name.Live -> None
-;;
-
-let server_lane_name = function
-  | Server_automation -> Lane_name.Automation
-;;
-
-let server_lanes_expected =
-  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation ])
-;;
-
-let server_lane_refused = "lane must be " ^ server_lanes_expected
-
-(* A wire lane name as a server lane, or why not. Models often reach for live
-   here, since the read tools default to it, so that refusal says whose
-   browser it is. *)
-let parse_server_lane raw =
-  match Lane_name.of_wire raw with
-  | Some Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ server_lane_refused)
-  | Some (Lane_name.Automation as name) ->
-    Option.to_result ~none:server_lane_refused (server_lane_of_name name)
-  | None -> Error server_lane_refused
-;;
-
-let issue_server_lane lane ~verb ~timeout_sec =
-  match lane with
-  | Server_automation -> issue_automation ~verb ~timeout_sec
-;;
-
 let issue_for_actor ~actor ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?actor client ~verb ~timeout_sec
-  | Automation -> Ok (issue_automation ~verb ~timeout_sec)
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller
@@ -1385,10 +1282,3 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
      | (Ok (Answered (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _))))))) | Ok (Lane_absent | (Timed_out | (Refused _ | Rejected_before_effect _))) | Error _) as answer -> answer)
-  | Automation ->
-    match activity_refusal Lane_name.Automation (Page_document {tab_id}) with
-    | Some refusal -> Ok refusal
-    | None -> match Atomic.get automation_document_observer with
-    | None -> Ok Lane_absent
-    | Some observe -> Ok (Watched_work.run (fun () -> observe ~tab_id)
-        ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))

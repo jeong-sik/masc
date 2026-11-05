@@ -1,9 +1,7 @@
 open Alcotest
 module Selection = Masc.Browser_selection
 module Lane = Browser_lane
-let work session : Selection.work_browser = {activity=Lane.Enabled;registered=true;session;locate=false}
-let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];live_space_presence=[];
-  automation=work Lane.Browser_closed}
+let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];live_space_presence=[]}
 let client digit transport : Lane.client_info =
   let id="00000000-0000-4000-8000-00000000000" ^ digit in
   let client_id = match Lane.client_id_of_string id with Ok id -> id | Error error -> fail error in
@@ -31,19 +29,14 @@ let test_space_presence () =
   check bool "disconnection is a separate route error" true
     (Selection.target ~verb:Lane.Tabs_list ~snapshot:empty (route ego)=Error (Lane.Selected_client_disconnected ego.client_id));
   selected {route=route ego;reason=Selection.Existing_login} (choose (snapshot O.Present))
-let test_connections_and_sessions () =
+let test_connections () =
   let bidi=client "1" Lane.Webdriver_bidi and extension=client "2" Lane.Web_extension in
-  let opened={empty with automation=work Lane.Browser_open} in
-  selected {route=route bidi;reason=Selection.Existing_login} (choose {opened with live_clients=[extension;bidi]});
-  selected {route=Lane.Automation_route;reason=Selection.Existing_work_session} (choose {opened with live_clients=[extension]});
+  selected {route=route bidi;reason=Selection.Existing_login} (choose {empty with live_clients=[extension;bidi]});
   selected {route=route extension;reason=Selection.Available_connected_browser} (choose {empty with live_clients=[extension]});
-  check bool "registration does not invent an open session" true (choose empty=Error Selection.No_available_browser);
-  List.iter (fun session -> check bool "unknown/changing is not open" true
-    (choose {empty with automation=work session}=Error Selection.No_available_browser))
-    [Lane.Browser_unknown;Lane.Browser_changing];
+  check bool "no connection is no browser" true (choose empty=Error Selection.No_available_browser);
   let second=client "3" Lane.Webdriver_bidi in
   check bool "connected identity ambiguity needs a browser choice" true
-    (choose {opened with live_clients=[bidi;second]}=Error (Selection.Ambiguous_browsers [route bidi;route second]))
+    (choose {empty with live_clients=[bidi;second]}=Error (Selection.Ambiguous_browsers [route bidi;route second]))
 let test_explicit_binding () =
   let workflow=match Lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
     "expectedUrl",`String "https://example.test/";"steps",`List [];"maxChars",`Int 1000]) with
@@ -83,16 +76,6 @@ let test_native_workflow_binding () =
   selected {route=route second;reason=Selection.Explicit_browser}
     (Selection.choose ~verb ~bound ~snapshot (Selection.Exact (route second)))
 
-let test_work_lifecycle () =
-  let open_=Lane.Session_open {headless=None} in
-  selected {route=Lane.Automation_route;reason=Selection.Compatible_work_browser} (choose ~verb:open_ empty);
-  check bool "an unregistered backend opens no session" true
-    (choose ~verb:open_ {empty with automation={empty.automation with registered=false}}=Error Selection.No_available_browser);
-  selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
-    (choose ~verb:open_ {empty with automation=work Lane.Browser_open});
-  selected {route=Lane.Automation_route;reason=Selection.Compatible_work_browser} (choose ~verb:Lane.Session_status empty);
-  List.iter (fun verb -> check bool "close/goto never create a session" true
-    (choose ~verb empty=Error Selection.No_available_browser)) [Lane.Session_close;Lane.Page_goto {url="https://example.org";tab_id=None}]
 let test_eligibility () =
   let extension=client "1" Lane.Web_extension in
   let hover=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Hover (Lane.Selector "#observed")} in
@@ -102,57 +85,16 @@ let test_eligibility () =
     (choose {empty with live_activity=Lane.Disabled;live_clients=[client "1" Lane.Webdriver_bidi]}=Error Selection.No_available_browser);
   let timing=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Drag_to {
     source=Lane.Selector "#from";destination=Lane.Selector "#to";via=[];duration_ms=10}} in
-  selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
-    (choose ~verb:timing {empty with automation=work Lane.Browser_open});
   check bool "bound timing request still requires its exact browser" true
-    (choose ~verb:timing ~bound:true {empty with automation=work Lane.Browser_open}=Error Selection.Binding_required);
-  let locate=Lane.Page_locate {tab_id=1;instruction=None} in
-  let automation=work Lane.Browser_open in
-  check bool "a driver without the selected locate consumer is not eligible" true
-    (choose ~verb:locate {empty with automation}=Error Selection.No_available_browser);
-  selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
-    (choose ~verb:locate {empty with automation={automation with locate=true}});
-  check bool "a bound locate cannot switch from its observed browser" true
-    (choose ~verb:locate ~bound:true {empty with automation={automation with locate=true}}=Error Selection.Binding_required)
-let test_inactive_session_cleanup () =
-  List.iter (fun activity ->
-    let inactive : Selection.work_browser = {activity;registered=true;session=Lane.Browser_open;locate=false} in
-    let sole = {empty with automation=inactive} in
-    List.iter (fun verb ->
-      selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
-        (choose ~verb sole))
-      [Lane.Session_status;Lane.Session_close];
-    List.iter (fun verb -> check bool "inactive owned browser cannot receive new work" true
-      (choose ~verb sole=Error Selection.No_available_browser))
-      [Lane.Tabs_list;Lane.Page_goto {url="https://example.org";tab_id=None}];
-    check bool "inactive owned browser opens no session" true
-      (choose ~verb:(Lane.Session_open {headless=None}) sole=Error Selection.No_available_browser);
-    check bool "closed inactive backend is not a ready status default" true
-      (choose ~verb:Lane.Session_status {empty with automation={inactive with session=Lane.Browser_closed}}
-       = Error Selection.No_available_browser);
-    check bool "unregistered backend cannot be inspected or closed" true
-      (choose ~verb:Lane.Session_close {sole with automation={inactive with registered=false}}=
-       Error Selection.No_available_browser)) [Lane.Disabled;Lane.Unobserved]
-let test_observation_is_not_dispatch () = Eio_main.run (fun _ ->
-  let dispatched=ref 0 in
-  Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
-  Lane.install_automation_executor (Some (fun _ -> incr dispatched;Lane.Lane_absent));
-  Lane.install_server_session_observer Lane.Server_automation (Some (fun () -> Lane.Browser_closed));
-  Fun.protect ~finally:(fun () -> Lane.install_activity_observer None;
-    Lane.install_automation_executor None;Lane.install_server_session_observer Lane.Server_automation None) (fun () ->
-    selected {route=Lane.Automation_route;reason=Selection.Compatible_work_browser}
-      (Selection.choose ~verb:(Lane.Session_open {headless=None}) ~bound:false
-        ~snapshot:(Masc.Browser_addon_inventory.observe ()) Selection.Automatic);
-    check int "selection opens no browser and sends no command" 0 !dispatched;
-    check bool "closed remains closed" true (Lane.server_session_observation Lane.Server_automation=Lane.Browser_closed)))
+    (choose ~verb:timing ~bound:true {empty with live_clients=[client "1" Lane.Webdriver_bidi]}=Error Selection.Binding_required)
 let test_wire () =
   List.iter (fun reason -> check bool "typed reason round trip" true
     (Selection.reason_of_wire (Selection.reason_to_wire reason)=Some reason))
-    [Selection.Explicit_browser;Existing_login;Existing_work_session;Compatible_work_browser;Available_connected_browser];
+    [Selection.Explicit_browser;Existing_login;Available_connected_browser];
   check bool "unknown selection reason is not defaulted" true (Selection.reason_of_wire "unknown"=None);
   check string "wire gives exact backend identity and reason"
-    {|{"lane":"automation","clientId":null,"reason":"compatible_work_browser"}|}
-    (Selection.to_json {route=Lane.Automation_route;reason=Selection.Compatible_work_browser} |> Yojson.Safe.to_string)
+    {|{"lane":"live","clientId":"00000000-0000-4000-8000-000000000001","reason":"existing_login"}|}
+    (Selection.to_json {route=route (client "1" Lane.Webdriver_bidi);reason=Selection.Existing_login} |> Yojson.Safe.to_string)
 let test_ambiguous_selection_recovery () =
   let first=client "1" Lane.Webdriver_bidi and second=client "2" Lane.Ego_task_space in
   let json=Selection.error_to_json (Selection.Ambiguous_browsers [route first;route second]) in
@@ -181,11 +123,9 @@ let test_target_from_snapshot () =
     (target {empty with live_clients=[first]} (route second)=Error (Lane.Selected_client_disconnected second.client_id));
   check bool "a named client is that client" true
     (target {empty with live_clients=[first;second]} (route second)=Ok (Selection.Connected second));
-  let off={empty with automation={empty.automation with activity=Lane.Disabled}} in
   check bool "a lane that is off refuses new work" true
-    (target off Lane.Automation_route=Error (Lane.Activity_rejected (Lane.Lane_off Lane.Lane_name.Automation)));
-  check bool "a lane that is off still closes its session" true
-    (target ~verb:Lane.Session_close off Lane.Automation_route=Ok Selection.Owned_automation);
+    (target {empty with live_activity=Lane.Disabled;live_clients=[first]} (route first)
+     =Error (Lane.Activity_rejected (Lane.Lane_off Lane.Lane_name.Live)));
   check bool "the live lane follows the snapshot's live activity" true
     (target {empty with live_activity=Lane.Unobserved;live_clients=[first]} (route first)
      =Error (Lane.Activity_rejected Lane.Activity_unavailable))
@@ -304,7 +244,6 @@ let test_goal_space_default () =
 let test_multi_worker_inventory () =
   let module I=Masc.Browser_connection_inventory in
   let member=Yojson.Safe.Util.member in
-  let off:Selection.work_browser={activity=Lane.Disabled;registered=false;session=Lane.Browser_closed;locate=false} in
   let observation instance_id clients : I.observation =
     let space_presence=List.filter_map (fun (client:Lane.client_info) ->
       Option.map (fun (space:Lane.ego_space) -> client.client_id,
@@ -313,7 +252,7 @@ let test_multi_worker_inventory () =
       space_presence;
       client_rows=List.map (fun (client:Lane.client_info) -> Masc.Browser_addon_observation.publish_client client
         ~space_observation:None ~space_presence:(List.assoc_opt client.client_id space_presence)) clients;
-      automation=off;unavailable=[]}} in
+      unavailable=[]}} in
   let ego={(client "1" Lane.Ego_task_space) with browser=Lane.Ego_lite} and firefox=client "2" Lane.Webdriver_bidi in
   let first=observation "first" [ego] and second=observation "second" [firefox] in
   let report ?(issues=[]) observations=I.to_json (I.build ~observations ~issues) in
@@ -325,7 +264,6 @@ let test_multi_worker_inventory () =
     (List.map (fun (info:Lane.client_info) -> Lane.client_id_to_string info.client_id) [ego;firefox]) (ids both);
   check bool "complete cross-worker observations are distinguished" true (member "inventoryComplete" both=`Bool true);
   check bool "different logged-in clients require a choice" true (code "browse" both=`String "ambiguous_browsers");
-  check bool "an owned work route never guesses a worker" true (code "work" both=`String "browser_binding_required");
   let single=report [first;observation "empty" []] in
   check bool "one cross-worker live candidate retains its UUID" true
     (member "automatic" single |> member "browse" |> member "data" |> member "clientId"
@@ -346,8 +284,8 @@ let test_multi_worker_inventory () =
   let issue=I.Source_unready {instance_id="starting";message="worker has not started"} in
   let partial=report ~issues:[issue] [first] in
   check (list string) "a failed sibling does not erase valid manual choices" [Lane.client_id_to_string ego.client_id] (ids partial);
-  List.iter (fun name -> check bool "incomplete observations never offer no-browser fallback" true
-    (code name partial=`String "browser_binding_required")) ["browse";"work"];
+  check bool "incomplete observations never offer no-browser fallback" true
+    (code "browse" partial=`String "browser_binding_required");
   check bool "incomplete report is explicit" true (member "inventoryComplete" partial=`Bool false);
   let only_failure=report ~issues:[issue] [] in
   check bool "no readable workers is still incomplete" true
@@ -379,12 +317,11 @@ let test_multi_worker_inventory () =
 let test_ego_user_owned_inventory () =
   let module I=Masc.Browser_connection_inventory in
   let member=Yojson.Safe.Util.member in
-  let off:Selection.work_browser={activity=Lane.Disabled;registered=false;session=Lane.Browser_closed;locate=false} in
   let observation instance_id clients unavailable : I.observation =
     {instance_id;published={Masc.Browser_addon_observation.clients;
       space_presence=[];client_rows=List.map (fun (client:Lane.client_info) ->
         Masc.Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None) clients;
-      automation=off;unavailable}} in
+      unavailable}} in
   let refusal=Masc.Browser_addon_observation.Ego_user_owned_name
     {space="masc-keepers";ids=[1];observed_at=1793617161.} in
   let refused=observation "ego-worker" [] [refusal] in
@@ -399,7 +336,7 @@ let test_ego_user_owned_inventory () =
        "Browser worker ego-worker: ego task space \"masc-keepers\" is user-owned, so the live ego lane refuses it; take_over reclaims it after the operator asks to continue");
   let code name=member "automatic" report |> member name |> member "error" |> member "code" in
   check bool "automatic selection says there is no browser, not that the answer is missing" true
-    (code "browse"=`String "no_available_browser" && code "work"=`String "no_available_browser");
+    (code "browse"=`String "no_available_browser");
   (* The same worker serving a healthy client of another transport keeps
      automatic selection working; the refusal stays listed beside it. *)
   let firefox=client "2" Lane.Webdriver_bidi in
@@ -446,13 +383,10 @@ let () = run "browser selection" ["policy",[
   test_case "multiple worker inventory preserves choices and uncertainty" `Quick test_multi_worker_inventory;
   test_case "user-owned ego Space refusal surfaces as an inventory issue" `Quick test_ego_user_owned_inventory;
   test_case "Goal Space assignment and reconnect preserve browser identity" `Quick test_goal_space_default;
-  test_case "connected login and actual owned sessions" `Quick test_connections_and_sessions;
+  test_case "connected login and connected browsers" `Quick test_connections;
   test_case "exact browser binding" `Quick test_explicit_binding;
   test_case "native workflow retains its original browser" `Quick test_native_workflow_binding;
-  test_case "work session lifecycle" `Quick test_work_lifecycle;
   test_case "capability and activity eligibility" `Quick test_eligibility;
-  test_case "inactive owned session inspection and cleanup" `Quick test_inactive_session_cleanup;
-  test_case "observation sends no command" `Quick test_observation_is_not_dispatch;
   test_case "selection wire contract" `Quick test_wire;
   test_case "ambiguous selection names its recovery" `Quick test_ambiguous_selection_recovery;
   test_case "receipts bind Space identity and reject forged context" `Quick test_space_binding;

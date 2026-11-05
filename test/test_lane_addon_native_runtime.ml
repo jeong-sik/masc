@@ -231,8 +231,7 @@ let operator_retain () = with_fixture (fun clock root config ->
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
     let context = require (Browser_addon_socket.context ~instance_id ~models:None
-      ~source:(Browser_addon_socket.Automation
-        {Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"})) in
+      ~source:Browser_addon_socket.Ego) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
     let root = Filename.dirname (Browser_addon_socket.socket_path allocation) in
@@ -244,8 +243,7 @@ let operator_retain () = with_fixture (fun clock root config ->
     seed ~instance_id ~authority:(Lane_addon_lifecycle.authority_to_json
       (Lane_addon_lifecycle.Native_admission {installation_id=instance_id})) unconfirmed;
     (instance_id, admission, slot, root, left) in
-  (* A file no browser backend writes is unknown in an automation
-     allocation. *)
+  (* A file no browser backend writes is unknown in an ego allocation. *)
   let unknown = "foreign.json" in
   let cleanup_refused id = Result.is_error
     (R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
@@ -323,7 +321,7 @@ def handle(conn):
         lose=os.path.join(a.root,"lose-snapshot-"+a.incarnation)
         lost=False
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
-        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False}}}}
+        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values())}}
         elif op=="poll":
             client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;client["spacePresence"]={"spaceId":client["space"]["id"],"observedAt":1,"state":"present"} if client["transport"]=="ego_task_space" else None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
@@ -575,8 +573,7 @@ hooks = ["validate_input", "validate_output"]
       host_refusal (label ^ ": space control keeps its observed live identity")
         (`Assoc (selection @ ["command",Browser_lane.verb_json
           (Browser_lane.Page_act (Browser_lane.Action.Control control))])))
-      ["automatic",[];"unnamed live",["lane",`String "live"];
-       "automation",["lane",`String "automation"]])
+      ["automatic",[];"unnamed live",["lane",`String "live"]])
     [Browser_lane.Action.Hand_off;Take_over];
   host_refusal "a repeated field is refused as input" (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list;
     "command",Browser_lane.verb_json Browser_lane.Tabs_list]);
@@ -959,125 +956,6 @@ let native_worker_ended_outside_masc () = with_fixture (fun clock root config ->
   wait clock (fun () -> phase ()="detached" && text "runtime_presence" (inspect ())="retained");
   check string "Detach confirms the native release" "native_released"
     (inspect () |> member "lifecycle" |> member "release" |> text "kind"))
-(* A browser stand-in: holds a profile's lock until a signal ends it. *)
-let holder_script = {|import fcntl,os,sys,time
-fd=os.open(sys.argv[1],os.O_RDWR|os.O_CREAT,0o600)
-fcntl.lockf(fd,fcntl.LOCK_EX)
-open(sys.argv[2],"w").close()
-time.sleep(600)
-|}
-(* A signal the pass sent has reached its holder by then, so a holder still
-   running was not signalled. *)
-let signal_settle_seconds = 0.5
-(* The configuration pass sweeps the Gecko profiles of an instance whose record
-   says its allocation was released, or that no record names. It never
-   signals the holder of a live, retained or failed instance's profile, nor of
-   one an unreadable record names, and an unreadable record that names no
-   instance holds back the whole pass. *)
-let gecko_sweep_follows_records () = with_fixture (fun clock root config ->
-  let manifest = write_native_manifest root in
-  let id = dispatch config R.Attach ["manifest_path",`String manifest;
-    "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
-  let inspect id = dispatch config R.Inspect ["instance_id",`String id]
-    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
-  let lifecycle id = require (Lane_addon_lifecycle.state_of_json (member "lifecycle" (inspect id))) in
-  wait clock (fun () -> match lifecycle id with
-    | Lane_addon_lifecycle.Attached | Observing -> (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0
-    | Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
-    | Detaching _ | Detached _ -> fail "native fixture retired before observation");
-  let captured = match inspect id with `Assoc fields -> fields | _ -> fail "captured binding is not an object" in
-  ignore (dispatch config R.Detach ["instance_id",`String id]);
-  wait clock (fun () -> match lifecycle id with
-    | Lane_addon_lifecycle.Detached _ -> true | Attached | Observing | Failed _ | Detaching _ -> false);
-  R.For_testing.reset ();
-  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  let seed ~instance_id state =
-    let replaced = ["instance_id";"incarnation";"execution_authority";"resource";"phase";"lifecycle"] in
-    require (Lane_addon_store.save_binding store ~instance_id
-      (`Assoc (["instance_id",`String instance_id;"incarnation",`String instance_id;
-        "execution_authority",Lane_addon_lifecycle.authority_to_json
-          (Lane_addon_lifecycle.Native_admission {installation_id=instance_id});"resource",`Null;
-        "phase",Lane_addon_types.phase_to_json (Lane_addon_lifecycle.project state);
-        "lifecycle",Lane_addon_lifecycle.state_to_json state]
-        @ List.filter (fun (name,_) -> not (List.mem name replaced)) captured))) in
-  let fresh () = Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let released = fresh () and retained = fresh () and failed = fresh () and unrecorded = fresh () in
-  seed ~instance_id:released (Lane_addon_lifecycle.Detached
-    (Lane_addon_lifecycle.Native_released {installation_id=released;instance_id=released}));
-  seed ~instance_id:retained (Lane_addon_lifecycle.Detached
-    (Lane_addon_lifecycle.Native_retained {installation_id=retained;instance_id=retained}));
-  seed ~instance_id:failed (Lane_addon_lifecycle.Failed (Lane_addon_lifecycle.failed
-    (Lane_addon_lifecycle.Cleanup_unconfirmed "an unsettled download remains in the allocation")));
-  let gecko = Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
-  let held instance_id =
-    let instance = require (Browser_gecko_profile.prepare_instance ~root:gecko ~instance_id) in
-    let profile = require (Browser_gecko_profile.create ~instance) in
-    let ready = Filename.concat profile "ready" in
-    let pid = Unix.create_process "python3"
-      [|"python3";"-c";holder_script;Filename.concat profile Browser_gecko_profile.lock_name;ready|]
-      Unix.stdin Unix.stdout Unix.stderr in
-    wait clock (fun () -> Sys.file_exists ready);
-    (profile, pid) in
-  let holders = ref (List.map (fun id -> id, held id) [released; retained; failed; unrecorded]) in
-  let hold id = holders := (id, held id) :: !holders in
-  let ended = Hashtbl.create 4 in
-  let status pid = match Hashtbl.find_opt ended pid with
-    | Some status -> Some status
-    | None -> match Unix.waitpid [Unix.WNOHANG] pid with
-      | 0, _ -> None
-      | _, status -> Hashtbl.replace ended pid status; Some status in
-  let pid id = snd (List.assoc id !holders) and profile id = fst (List.assoc id !holders) in
-  let still_runs id = Option.is_none (status (pid id)) in
-  Fun.protect ~finally:(fun () -> List.iter (fun (_, (_, pid)) -> match status pid with
-      | Some _ -> ()
-      | None -> Unix.kill pid Sys.sigkill; ignore (Unix.waitpid [] pid)) !holders) (fun () ->
-    let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
-    let reconcile () = ignore (require (R.reconcile_configuration ~config ~directory)) in
-    reconcile ();
-    wait clock (fun () -> Option.is_some (status (pid released)) && Option.is_some (status (pid unrecorded)));
-    check bool "the released instance's holder got SIGTERM" true (status (pid released) = Some (Unix.WSIGNALED Sys.sigterm));
-    check bool "an instance no record names had its holder sent SIGTERM" true
-      (status (pid unrecorded) = Some (Unix.WSIGNALED Sys.sigterm));
-    Eio.Time.sleep clock signal_settle_seconds;
-    check bool "the retained instance's holder still runs" true (still_runs retained);
-    check bool "the failed instance's holder still runs" true (still_runs failed);
-    reconcile ();
-    check bool "the next pass removes the released instance's profile" false (Sys.file_exists (profile released));
-    check bool "the next pass removes the profile no record names" false (Sys.file_exists (profile unrecorded));
-    check bool "the retained instance's profile stays" true (Sys.file_exists (profile retained));
-    check bool "the failed instance's profile stays" true (Sys.file_exists (profile failed));
-    (* A live instance, and one whose record cannot be read, keep their holders
-       while a released one beside them is swept. *)
-    let live = dispatch config R.Attach ["manifest_path",`String manifest;
-      "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
-    wait clock (fun () -> match lifecycle live with
-      | Lane_addon_lifecycle.Attached | Observing -> true
-      | Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
-      | Detaching _ | Detached _ -> fail "the live fixture retired");
-    let unreadable = fresh () and released_beside = fresh () in
-    write (Filename.concat (Lane_addon_store.root store) (Lane_addon_store.binding_path unreadable))
-      (Yojson.Safe.to_string (`Assoc ["instance_id",`String unreadable]));
-    seed ~instance_id:released_beside (Lane_addon_lifecycle.Detached
-      (Lane_addon_lifecycle.Native_released {installation_id=released_beside;instance_id=released_beside}));
-    List.iter hold [live; unreadable; released_beside];
-    reconcile ();
-    wait clock (fun () -> not (still_runs released_beside));
-    Eio.Time.sleep clock signal_settle_seconds;
-    check bool "a live instance's holder still runs" true (still_runs live);
-    check bool "the holder of an instance an unreadable record names still runs" true (still_runs unreadable);
-    (* An unreadable record that names no instance may be any of them. *)
-    write (Filename.concat (Filename.concat (Lane_addon_store.root store) Lane_addon_store.bindings_directory)
-      "unattributed.json") "[]";
-    let released_after = fresh () in
-    seed ~instance_id:released_after (Lane_addon_lifecycle.Detached
-      (Lane_addon_lifecycle.Native_released {installation_id=released_after;instance_id=released_after}));
-    hold released_after;
-    reconcile ();
-    Eio.Time.sleep clock signal_settle_seconds;
-    check bool "an unattributed record holds back the whole pass" true (still_runs released_after);
-    ignore (dispatch config R.Detach ["instance_id",`String live]);
-    wait clock (fun () -> match lifecycle live with
-      | Lane_addon_lifecycle.Detached _ -> true | Attached | Observing | Failed _ | Detaching _ -> false)))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -1090,5 +968,4 @@ let () =
     test_case "a native worker that ends outside masc turns failed and Detach releases it" `Quick
       native_worker_ended_outside_masc;
     test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation;
-    test_case "a browser document source reads through the browser Add-on worker" `Quick browser_document_source;
-    test_case "the Gecko profile pass follows each instance's record" `Quick gecko_sweep_follows_records]]
+    test_case "a browser document source reads through the browser Add-on worker" `Quick browser_document_source]]

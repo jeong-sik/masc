@@ -19,10 +19,9 @@ type searxng_container =
     ([{{.State.Status}}]), as far as an action can tell. *)
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Geckodriver | Firefox | Ego_browser
-  (** The programs the browser lanes start: [\[browser.automation\]] names
-      geckodriver by absolute path and starts it with the server;
-      [\[browser.live.bidi\]] names Firefox; [\[browser.live.ego\]] names
+  | Firefox | Ego_browser
+  (** The programs the browser lanes start: [\[browser.live.bidi\]] names
+      Firefox; [\[browser.live.ego\]] names
       ego lite's [ego-browser]. None is installed with MASC, and no action here
       edits runtime.toml. *)
   | Searxng of { config_dir : string }

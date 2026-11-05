@@ -14,8 +14,12 @@ id = "page"
 tool = "BrowserRead"
 [compositions.nodes.input]
 kind = "literal"
-value = { lane = "automation", tabId = 7, mode = "scene" }
+value = { lane = "live", clientId = "0c000000-0000-4000-8000-000000000007", tabId = 7, mode = "scene" }
 |}
+let client : Browser_lane.client_info =
+  {client_id=expect (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000007");
+   browser=Browser_lane.Firefox;version="fixture";engine_version="fixture";
+   transport=Browser_lane.Web_extension;space=None}
 let scene = `Assoc [
   "schema",`String "masc.browser.scene.v1"; "tabId",`Int 7;
   "documentId",`String "observed-document"; "url",`String "https://example.org/page";
@@ -36,7 +40,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
         | _ -> fail "composition must perform only the observed scene read" in
       let config=Masc.Workspace.default_config base in
-      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
+      Browser_addon_fixture.with_worker ~clients:[client] ~env ~config ~respond (fun _browser ->
       let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
       let catalog = Catalog.parse composition |> Result.map_error Catalog.error_to_string |> expect in
       let plan = Catalog.instantiate ~descriptors ~args:(`Assoc []) (List.hd (Catalog.entries catalog))

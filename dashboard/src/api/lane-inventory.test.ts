@@ -90,23 +90,9 @@ describe('common Lane inventory wire', () => {
     expect(() => read({ kind: 'maybe' })).toThrow()
     expect(() => read({ kind: 'observed' })).toThrow()
   })
-  it('reads executor registration and refuses an observation without it', () => {
-    for (const registered of [true, false]) {
-      const raw = structuredClone(fixture)
-      const row = raw.rows.find(item => item.id === 'browser/automation')!
-      Object.assign(row.state, { addon: { kind: 'observed', registered } })
-      expect(parseLaneInventory(raw).rows.find(item => item.id === row.id)?.state)
-        .toEqual({ kind: 'browser_executor', addon: { kind: 'observed', registered } })
-    }
-    for (const registered of [undefined, null, 'yes']) {
-      const raw = structuredClone(fixture)
-      Object.assign(raw.rows.find(item => item.id === 'browser/automation')!.state, { addon: { kind: 'observed', registered } })
-      expect(() => parseLaneInventory(raw)).toThrow()
-    }
-  })
   it('reads the actual TUI fixture contract with every built-in and exact observation', () => {
     const parsed = parseLaneInventory(fixture)
-    expect(parsed.rows).toHaveLength(9)
+    expect(parsed.rows).toHaveLength(8)
     expect(parsed.exact_snapshot.lanes).toHaveLength(5)
   })
   it('keeps disabled candidates and running observations, rejecting contradictory activity', () => {

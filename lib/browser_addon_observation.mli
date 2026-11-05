@@ -19,14 +19,12 @@ val publish_client : Browser_lane.client_info ->
 (** Add the cached SDK observation to the ordinary connection/activity row.
     No SDK calls. Foreign Space IDs and non-Ego connections publish [null]. *)
 
-(** What a serving browser worker published: its connected clients and
-    whether its automation backend is registered. *)
+(** What a serving browser worker published: its connected clients. *)
 type published = {
   clients : Browser_lane.client_info list;
   space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list;
   client_rows : Yojson.Safe.t list;
   (** The client rows as the worker sent them, for a caller that passes them on. *)
-  automation : Browser_selection.work_browser;
   unavailable : unavailable list;
 }
 
@@ -38,9 +36,6 @@ val read : Lane_addon_types.output -> (published, string) result
 (** Read back the observation {!of_snapshot} published, from the cached
     output of the browser installation, whose row the runtime has renamed
     under its instance and sequence. *)
-
-(** No serving worker published for this source. *)
-val unobserved : Browser_selection.work_browser
 
 (** A worker of this source serves a live connection. *)
 val serves_live : Browser_lane.Backend.t -> bool
@@ -59,19 +54,15 @@ val ego_identity_knowledge :
   (Browser_lane.Backend.t * client_observation) list -> ego_identity_knowledge
 (** Every live-source publisher can report an Ego controller under the current
     snapshot contract. An unreadable or unready live publisher can therefore
-    hide a conflicting controller. Owned Automation is unrelated. *)
+    hide a conflicting controller. *)
 val check_ego_identity : ego_identity_knowledge -> Browser_lane.client_info -> (unit, string) result
 (** An Ego route requires all possible controllers' identities. Explicit
     non-Ego clients remain usable when another publisher is unreadable. *)
 
 (** What several browser workers published, read as one, with each worker's
-    source: unique live clients and unavailable backends of live workers, and the
-    automation report of the one worker that serves it, when
-    exactly one does and it published; otherwise {!unobserved}. A worker that
-    published nothing is [None] and still counts as serving its source. The
-    host chooses from this, and the lane rows read it. *)
-val merge : among:Browser_lane.Backend.t list ->
-  (Browser_lane.Backend.t * published option) list -> published
-(** [among] counts every serving source for owned automation
-    uniqueness. Live workers coexist; only actual client/Space conflicts are
-    excluded, with metadata and presence filtered to the same client set. *)
+    source: unique live clients and unavailable backends of live workers. A
+    worker that published nothing is [None]. The host chooses from this, and
+    the lane rows read it. Live workers coexist; only actual client/Space
+    conflicts are excluded, with metadata and presence filtered to the same
+    client set. *)
+val merge : (Browser_lane.Backend.t * published option) list -> published

@@ -581,7 +581,7 @@ name = "query"
 let read_mode_composition ~param_lines =
   {|[[compositions]]
 name = "read-mode"
-description = "Read one automation tab in the chosen mode."
+description = "Read one live tab in the chosen mode."
 execution = "inline"
 
 [[compositions.params]]
@@ -595,7 +595,8 @@ description = "Which read to return."
 id = "read"
 tool = "BrowserRead"
 input = { kind = "object", fields = [
-  { name = "lane", value = { kind = "literal", value = "automation" } },
+  { name = "lane", value = { kind = "literal", value = "live" } },
+  { name = "clientId", value = { kind = "literal", value = "0c000000-0000-4000-8000-000000000001" } },
   { name = "tabId", value = { kind = "literal", value = 1 } },
   { name = "mode", value = { kind = "param", name = "mode" } }
 ] }

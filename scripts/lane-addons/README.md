@@ -80,10 +80,9 @@ Web `binding.sources` may combine:
 ]
 ```
 
-Use the actual selected client and tab from the existing Browser Lane. For an
-existing automation session use `lane: "automation"` and omit `client_id`; the
-source refuses to switch to a different current tab. Attach does not create the
-session. The package binding's target, expected build and request must match the
+Use the actual selected client and tab from the existing Browser Lane. The
+source refuses to switch to a different current tab. Attach does not open a
+browser. The package binding's target, expected build and request must match the
 declared source mapping. See `addons/README.md` for exact domain payloads.
 
 MSX source configuration is `{"kind":"msx_capture","source_id":"game"}`.

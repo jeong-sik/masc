@@ -42,11 +42,6 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
     }
     case 'browser_clients': return [
       state.addon.kind === 'observed' ? `${state.addon.connected_clients} connected clients` : browserAddonText(state.addon)]
-    case 'browser_executor': return [
-      state.addon.kind === 'observed'
-        ? (state.addon.registered ? 'Executor registered · session activity unverified' : 'Executor not registered')
-        : browserAddonText(state.addon),
-      'Executable and profile paths apply at server startup.']
     case 'machine': return [machineActivityText[state.activity],
       machinePublicationText[state.publication]]
     case 'package': {

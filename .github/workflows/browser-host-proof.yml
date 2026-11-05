@@ -83,17 +83,6 @@ jobs:
       - name: Verify bounded upload byte transfer
         run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
 
-      - name: Build native Firefox scenario
-        run: opam exec -- dune build --release test/firefox_controls_probe.exe
-
-      - name: Exercise real Firefox controls and screenshots
-        run: |
-          python3 scripts/probe-firefox-controls.py \
-            --geckodriver "$(command -v geckodriver)" \
-            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
-            --compiled-probe _build/default/test/firefox_controls_probe.exe \
-            --out proof/firefox
-
       - name: Exercise explicit live tab activation
         run: |
           python3 test/test_browser_activation.py \
@@ -106,7 +95,7 @@ jobs:
       # including that background.js still starts with the scene runtime this
       # repository builds. Nothing ran it: the pull-request gate skips it (no
       # dune rule declares runtest-test_browser_scene), the nightly names it
-      # nowhere, and this workflow listed the other three probes only. It takes
+      # nowhere, and this workflow listed the other probes only. It takes
       # the same two binaries they take, and they are already installed above.
       - name: Exercise the real Gecko scene contract
         run: |
@@ -119,9 +108,8 @@ jobs:
         working-directory: proof
         run: |
           cp ../_build/default/bin/masc_browser_host.exe masc-browser-host-macos-arm64
-          cp ../_build/default/test/firefox_controls_probe.exe firefox-controls-probe-macos-arm64
           git rev-parse HEAD > SOURCE_COMMIT
-          shasum -a 256 masc-browser-host-macos-arm64 firefox-controls-probe-macos-arm64 > SHA256SUMS
+          shasum -a 256 masc-browser-host-macos-arm64 > SHA256SUMS
 
       - name: Upload native host proof
         if: always()

@@ -2,8 +2,8 @@
     from the packages this build carries.
 
     Each browser source has its own package and worker (RFC
-    browser-backends-end-alone): [browser-automation],
-    [browser-firefox], [browser-ego] and [browser-external]. For each source it
+    browser-backends-end-alone): [browser-firefox], [browser-ego] and
+    [browser-external]. For each source it
     is given, {!apply} does the two steps that used to be by hand:
 
     - It writes the package this binary was built with to

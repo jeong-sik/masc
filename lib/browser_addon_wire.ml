@@ -29,13 +29,11 @@ let list parse = function
   | `List values -> List.fold_left (fun result value -> let* values = result in let* value = parse value in Ok (value::values)) (Ok []) values |> Result.map List.rev
   | _ -> Error "expected array"
 let route_to_json = function
-  | B.Automation_route -> `Assoc ["lane",string "automation"]
   | B.Live_route client -> `Assoc ["lane",string "live";"clientId",nullable (fun id -> string (B.client_id_to_string id)) client]
 let route_of_json value =
   let* fields = object_fields ["lane";"clientId"] value in
   let* lane = text_field fields "lane" in
   match lane,fields with
-  | "automation",[_] -> Ok B.Automation_route
   | "live",_ ->
       let* _ = exact ["lane";"clientId"] value in
       let* client = required fields "clientId" in
@@ -168,7 +166,7 @@ let ends_with_caller = function
      | Session_open _ | Session_close | Session_status | Page_goto _
      | Page_elements _ | Page_act _ | Page_context _
      | Page_locate _ -> true)
-  | Issue {route=(B.Automation_route | B.Live_route None);_}
+  | Issue {route=B.Live_route None;_}
   | Snapshot | Retire | Upload_stage _ | Upload_discard _ | Download_claim _
   | Download_commit _ | Download_release _ | Model_requests | Model_result _
   | Model_wait _ | Poll _ | Deliver _ | Disconnect _ -> false

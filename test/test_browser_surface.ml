@@ -49,9 +49,14 @@ let test_live_scene_and_capture_state_their_connection () =
      "data",`String (Base64.encode_string "\137PNG\r\n\026\nfixture")] @ forged)))
 let tab id url active = `Assoc ["id", `Int id; "title", `String "Page";
   "url", `String url; "active", `Bool active]
-let owned = Masc.Browser_binding.of_browser
-  {Browser_selection.route=Browser_lane.Automation_route;reason=Browser_selection.Explicit_browser}
-  Browser_selection.Owned_automation
+(* A connected extension: a browser whose tabs carry no ego Page provenance. *)
+let connected =
+  let client_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000002" with
+    | Ok id -> id | Error detail -> fail detail in
+  Masc.Browser_binding.of_browser
+    {Browser_selection.route=Browser_lane.Live_route (Some client_id);reason=Browser_selection.Explicit_browser}
+    (Browser_selection.Connected {client_id;browser=Browser_lane.Firefox;version="fixture";
+      transport=Browser_lane.Web_extension;engine_version="fixture";space=None})
 let page_of id = `Assoc ["tabId", `Int id; "url", `String "https://example.org/page";
   "title", `String "Page"; "text", `String "Observed page"; "chars", `Int 13; "truncated", `Bool false]
 (* What the host's tab read does with the browser's two answers
@@ -65,7 +70,7 @@ let with_browser ?unavailable tabs f =
   let read tab_id = Result.bind (Surface.prepare_read ~tab_id raw) (fun plan ->
     let page = Option.map (fun (tab : Surface.tab) -> reads := tab.id :: !reads; page_of tab.id)
       (Surface.selected_tab plan) in
-    Surface.project_read plan ~binding:owned ~started:0L ~page) in
+    Surface.project_read plan ~binding:connected ~started:0L ~page) in
   f read reads
 let read_ok read tab_id = match read tab_id with Ok data -> data | Error detail -> fail detail
 let selection data = Yojson.Safe.Util.member "selection" data
@@ -249,7 +254,7 @@ let test_capture_identity () =
   check bool "capture requires an explicit tab" true
     (Result.is_error (Surface.parse_capture_request (`Assoc [])));
   let capture ?(actual=7) ?(payload=Base64.encode_string "\137PNG\r\n\026\nfixture") () =
-    Surface.capture_from ~binding:owned ~tab_id:7 ~started:0L (`Assoc ["tabId", `Int actual;
+    Surface.capture_from ~binding:connected ~tab_id:7 ~started:0L (`Assoc ["tabId", `Int actual;
       "url", `String "https://example.org"; "title", `String "Fixture"; "mimeType", `String "image/png";
       "data", `String payload; "viewport", `Assoc ["documentId",`String "fixture";
         "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]]) in
@@ -266,7 +271,7 @@ let test_native_capture_coordinate_scope () =
   let payload=["tabId",`Int 7;"url",`String "https://example.org";"title",`String "Fixture";
     "mimeType",`String "image/png";"data",`String (Base64.encode_string "\137PNG\r\n\026\nfixture")] in
   let echo=["captureOptions",Browser_lane.Capture.to_json options] in
-  let native fields=Surface.native_capture_from ~binding:owned ~tab_id:7 ~started:0L ~options (`Assoc fields) in
+  let native fields=Surface.native_capture_from ~binding:connected ~tab_id:7 ~started:0L ~options (`Assoc fields) in
   (match native (payload@echo) with
    | Ok json -> check bool "page image carries options without viewport geometry" true
        (Yojson.Safe.Util.member "scope" json=`String "page"
@@ -278,10 +283,10 @@ let test_native_capture_coordinate_scope () =
     [payload;payload@["captureOptions",`Assoc []];payload@echo@["viewport",viewport];
      ("tabId",`Int 8)::List.remove_assoc "tabId" (payload@echo);payload@echo@echo];
   check bool "native image cannot become a pointer frame" true
-    (Result.is_error (Surface.capture_from ~binding:owned ~tab_id:7 ~started:0L
+    (Result.is_error (Surface.capture_from ~binding:connected ~tab_id:7 ~started:0L
       (`Assoc (payload@echo@["viewport",viewport]))));
   check bool "HTTP capture retains typed native options" true
-    (match Surface.parse_screenshot_request (`Assoc ["lane",`String "automation";"tabId",`Int 7;
+    (match Surface.parse_screenshot_request (`Assoc ["lane",`String "live";"tabId",`Int 7;
       "screenshotOptions",Browser_lane.Capture.to_json options]) with
      | Ok (_,Some actual) -> actual=options | Ok (_,None)|Error _ -> false);
   List.iter (fun json -> check bool "HTTP capture rejects invalid native request" true
@@ -296,9 +301,9 @@ let test_scoped_scene_acknowledgement () =
     "title",`String "Page";"viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
     "nodes",`List [];"truncated",`Bool false;"view",`String view;"scope",scope] in
   let request fields = match Masc.Browser_scene.parse_request
-      (`Assoc (["lane",`String "automation";"tabId",`Int 7;"maxChars",`Int 1000] @ fields)) with
+      (`Assoc (["lane",`String "live";"tabId",`Int 7;"maxChars",`Int 1000] @ fields)) with
     | Ok request -> request | Error detail -> fail detail in
-  let project request data = Masc.Browser_scene.project request ~binding:owned ~started:0L data in
+  let project request data = Masc.Browser_scene.project request ~binding:connected ~started:0L data in
   let scope = `Assoc ["documentId",`String "fixture";"nodeId",`String "region"] in
   let scoped = request ["scope",scope] and regions = request ["view",`String "regions"] in
   check bool "exact scoped scene accepted" true
@@ -340,7 +345,8 @@ let reaches_the_addon_lookup result =
 let test_malformed_arguments_reach_no_browser () =
   let module Cap = Masc.Browser_capabilities in
   let invalid_id = `String "not-a-browser-uuid" in
-  let read fields = addon_tool Cap.Read (("lane",`String "automation") :: ("tabId",`Int 1) :: fields) in
+  let live fields = ("lane",`String "live") :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields in
+  let read fields = addon_tool Cap.Read (live (("tabId",`Int 1) :: fields)) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a malformed connection in tabs", addon_tool Cap.Tabs ["lane",`String "live";"clientId",invalid_id]
     ; "a malformed connection in read",
@@ -354,12 +360,12 @@ let test_malformed_arguments_reach_no_browser () =
     ; "a malformed scene source", read ["mode",`String "scene";"navigationSource",`Assoc []]
     ; "a malformed scene scope", read ["mode",`String "scene";"scope",`Assoc []]
     ; "a malformed scene URL", read ["mode",`String "scene";"expectedUrl",`Int 1]
-    ; "a scene with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "scene"]
+    ; "a scene with no tab", addon_tool Cap.Read (live ["mode",`String "scene"])
     ; "a malformed act", addon_tool Cap.Act []
     ; "an unknown session action", addon_tool Cap.Session ["action",`String "unknown"]
     ; "a malformed navigation URL", addon_tool Cap.Goto ["url",`Int 1]
     ; "a document source read with a text cap", read ["mode",`String "html";"maxChars",`Int 100]
-    ; "a document source read with no tab", addon_tool Cap.Read ["lane",`String "automation";"mode",`String "html"]
+    ; "a document source read with no tab", addon_tool Cap.Read (live ["mode",`String "html"])
     ; "a document source read in a frame",
       read ["mode",`String "html";"framePath",`List [`String "#frame"]] ];
   check bool "a well-formed text read goes on to find the browser Add-on" true
@@ -388,10 +394,7 @@ let test_a_snapshot_target_is_checked_before_any_browser () =
   let url = ["expectedUrl",`String "https://example.org/"] in
   let live fields = interact "live" (("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
-    [ "a target on the automation browser", interact "automation" (click @ url)
-    ; "a fill target on the automation browser",
-      interact "automation" (["action",`String "fill";"target",`Assoc ["ref",`Int 5];"text",`String "Ada"] @ url)
-    ; "a target without expectedUrl", live click ];
+    [ "a target without expectedUrl", live click ];
   check bool "a target click on a live connection goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (live (click @ url)))
 
@@ -402,8 +405,7 @@ let test_a_hand_off_is_checked_before_any_browser () =
   let act fields = addon_tool Cap.Act fields in
   let live fields = act (("lane",`String "live") :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
-    [ "a hand-off on the automation browser", act ["lane",`String "automation";"action",`String "hand_off"]
-    ; "a hand-off with no connection named", act ["lane",`String "live";"action",`String "hand_off"]
+    [ "a hand-off with no connection named", act ["lane",`String "live";"action",`String "hand_off"]
     ; "a hand-off with no lane", act ["action",`String "hand_off"]
     ; "a hand-off of one tab", live ["action",`String "hand_off";"tabId",`Int 1] ];
   List.iter (fun (name, result) -> check bool name true (reaches_the_addon_lookup result))
@@ -418,9 +420,7 @@ let test_a_snapshot_read_is_checked_before_any_browser () =
     :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: ("tabId",`Int 1) :: fields) in
   let snapshot fields = live (("mode",`String "snapshot") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
-    [ "a snapshot on the automation browser",
-      addon_tool Cap.Read ["lane",`String "automation";"tabId",`Int 1;"mode",`String "snapshot"]
-    ; "a snapshot scope on a text read", live ["mode",`String "text";"snapshotScope",`String "full_page"]
+    [ "a snapshot scope on a text read", live ["mode",`String "text";"snapshotScope",`String "full_page"]
     ; "a root on a scene read", live ["mode",`String "scene";"root",`String "@12"]
     ; "a subtree with no root", snapshot ["snapshotScope",`String "subtree"]
     ; "a root that is not a ref", snapshot ["snapshotScope",`String "subtree";"root",`String "12"]
@@ -436,7 +436,8 @@ let test_a_snapshot_read_is_checked_before_any_browser () =
    to find the browser Add-on. *)
 let test_screenshot_reaches_the_addon_with_or_without_a_keeper () =
   let read keeper_name = addon_tool ?keeper_name Masc.Browser_capabilities.Read
-      ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73] in
+      ["lane",`String "live";"clientId",`String "0c000000-0000-4000-8000-000000000001";
+       "mode",`String "screenshot";"tabId",`Int 73] in
   check bool "a screenshot without a Keeper goes on to find the browser Add-on" true
     (reaches_the_addon_lookup (read None));
   check bool "a Keeper's screenshot goes on to find the browser Add-on" true

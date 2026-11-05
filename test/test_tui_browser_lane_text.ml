@@ -100,8 +100,8 @@ let () =
   let content : Masc.Browser_scene.t = {
     document_id="document";url="https://example.org";title="Scene";
     width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false;view=Content;scope=None } in
-  let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
-  let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
+  let scene : Lane.scene = {source=Live;client_id=None;tab_id=1;content;elapsed_ms=1.} in
+  let view = {(Lane.create ()) with source=Live;selected_tab=Some 1;scene=Some scene} in
   let copied_target source client_id selected =
     let scene = {scene with source;client_id;content={content with nodes=[selected]}} in
     match Lane.scene_context {view with scene=Some scene} with
@@ -125,31 +125,31 @@ let () =
   let article = {node with node_id="article-body";
     ancestor_region=Some {Masc.Browser_scene.node_id="article";
       role=Masc.Browser_scene.Article; label="Post A"}} in
-  let article_context = copied_target Automation None article in
+  let article_context = copied_target Live (Some client) article in
   assert (article_context |> member "ancestorRegion" =
     `Assoc ["documentId", `String content.document_id;
       "nodeId", `String "article"; "role", `String "article";
       "label", `String "Post A"]);
   let control = {node with kind=Control {clickable=true;editable=false;disabled=false;href=None;selection=Masc.Browser_scene.unobserved_control_selection};tag="button"} in
-  let control_context = copied_target Automation None control in
+  let control_context = copied_target Live (Some client) control in
   let control_action = control_context |> member "defaultAction" in
   assert (Lane.scene_target_action control = Some Click_control);
   assert (control_action |> member "tool" = `String "BrowserInteract");
   (match Masc.Browser_interaction.parse (control_action |> member "input") with
-   | Ok {action=Browser_lane.Click_node target;expected_url=Some url;route=Browser_selection.Exact Browser_lane.Automation_route;_} ->
+   | Ok {action=Browser_lane.Click_node target;expected_url=Some url;route=Browser_selection.Exact (Browser_lane.Live_route (Some _));_} ->
        assert (target.document_id=content.document_id && target.node_id=control.node_id && url=content.url)
    | _ -> failwith "copied control action does not satisfy the actual interaction contract");
   let link = {node with node_id="link"; kind=Control {
       clickable=true;editable=false;disabled=false;
       href=Some "https://example.org/observed";selection=Masc.Browser_scene.unobserved_control_selection}; tag="a"; text="Observed thread"} in
-  let link_context = copied_target Automation None link in
+  let link_context = copied_target Live (Some client) link in
   let link_action = link_context |> member "defaultAction" in
   assert (Lane.scene_target_action link = Some Follow_link);
   assert (link_context |> member "targetKind" = `String "link");
   assert (link_context |> member "href" = `String "https://example.org/observed");
   assert (link_action |> member "kind" = `String "follow_link");
   (match Masc.Browser_interaction.parse (link_action |> member "input") with
-   | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;route=Browser_selection.Exact Browser_lane.Automation_route;_} ->
+   | Ok {action=Browser_lane.Follow_link target;expected_url=Some url;route=Browser_selection.Exact (Browser_lane.Live_route (Some _));_} ->
        assert (target.document_id=content.document_id && target.node_id=link.node_id && url=content.url)
    | _ -> failwith "copied link action does not satisfy the actual follow contract");
   let raster = {node with node_id="image";kind=Raster;tag="img";text="Preview"} in
@@ -159,7 +159,7 @@ let () =
   List.iter (fun kind ->
     let selected={node with kind} in
     assert (Lane.scene_target_action selected=None);
-    assert (copied_target Automation None selected |> member "defaultAction" = `Null))
+    assert (copied_target Live (Some client) selected |> member "defaultAction" = `Null))
     [Text;Raster;Control {clickable=true;editable=false;disabled=true;href=None;selection=Masc.Browser_scene.unobserved_control_selection};
      Control {clickable=false;editable=true;disabled=false;href=None;selection=Masc.Browser_scene.unobserved_control_selection}];
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
@@ -564,7 +564,7 @@ let () =
     "whiteSpace",`String "normal";"sourceContext",`Null] @ attributes) in
   let decode attributes =
     Lane.decode_scene (`Assoc ["ok",`Bool true;"data",`Assoc [
-      "source",`String "automation";"clientId",`Null;"tabId",`Int 1;"elapsed_ms",`Int 0;
+      "source",`String "live";"clientId",`String "10000000-0000-4000-8000-000000000001";"tabId",`Int 1;"elapsed_ms",`Int 0;
       "schema",`String "masc.browser.scene.v1";"documentId",`String "doc";
       "url",`String "https://example.org";"title",`String "Selection";
       "viewport",`Assoc ["width",`Int 100;"height",`Int 40;"scrollX",`Int 0;"scrollY",`Int 0];

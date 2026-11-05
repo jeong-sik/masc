@@ -7404,8 +7404,9 @@ max-context = 1024
 [local.sample]
 [runtime]
 default = "local.sample"
-[browser.automation]
-geckodriver = "/fixture/geckodriver"
+[browser.live.bidi]
+firefox = "/fixture/firefox"
+profile = "/fixture/profile"
 [machines.msx]
 enabled = %b
 [machines.dos]
@@ -7439,8 +7440,8 @@ enabled = %b
      | Error (Runtime.Config_source_conflict _) -> ()
      | Ok _ | Error (Runtime.Config_edit_failed _) -> fail "stale Browser save must conflict");
     check_published "conflict preserves published activity" off;
-    let malformed = off ^ "\n[browser]\ngeckodriver = '/fixture/other'\n" in
-    check bool "both automation locations rejected before saving" true
+    let malformed = off ^ "\n[browser]\nunknown = '/fixture/other'\n" in
+    check bool "an unsupported browser setting is rejected before saving" true
       (Result.is_error (Runtime.save_config_text ~runtime_config_path:path malformed));
     check string "invalid browser configuration leaves file intact" off (Fs_compat.load_file path);
     check_published "invalid save leaves published activity intact" off;

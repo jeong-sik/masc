@@ -70,13 +70,12 @@ type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_rec
 type observation = Regions | Content
 
 let follow_skill = "browser-live-follow-read"
-let navigate_skill = "browser-navigate-read"
 
 let read_mode = function
   | Regions -> "regions"
   | Content -> "scene"
 
-(* Both shipped compositions offer the same two reads and nothing else.
+(* The shipped composition offers two reads and nothing else.
    BrowserRead itself also takes "text"; the materialized tools refuse it in
    Agent-Core's input check (test_keeper_tool_dispatch_runtime). *)
 let test_mode_is_a_closed_choice skill_name () =
@@ -163,90 +162,11 @@ let test_follow_then_read observation case () =
       check bool "composition completes" true (Result.is_ok result);
       check (list string) "exact ordered browser route" ["BrowserInteract";"BrowserRead"] !calls))
 
-let test_navigate_then_read observation case () =
-  Eio_main.run (fun _ ->
-    let skill_name = navigate_skill in
-    let read_mode = read_mode observation in
-    let requested_url = "https://example.org/start" in
-    let landing_url = "https://example.org/redirected" in
-    let navigation =
-      `Assoc [ "lane", `String "automation"; "tabId", `Int 7; "url", `String requested_url ] in
-    let args =
-      `Assoc [ "tabId", `Int 7; "url", `String requested_url; "mode", `String read_mode ]
-    in
-    let entry = skill_entry skill_name in
-    check string "native callable skill name"
-      ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
-    let plan =
-      match Catalog.instantiate
-        ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~args entry with
-      | Ok plan -> plan
-      | Error error -> fail (Catalog.instantiation_error_to_string error)
-    in
-    let calls = ref [] in
-    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
-      calls := !calls @ [ node.Plan.tool_name ];
-      let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ~data () in
-      let rejected message = Tool_result.make_err ~tool_name:node.tool_name
-        ~class_:Tool_result.Workflow_rejection ~start_time:(Tool_timing.start ()) message in
-      let result =
-        match node.tool_name with
-        | "BrowserGoto" ->
-          check bool "navigation pins the observed tab and requested URL" true
-            (input = navigation);
-          (match case with
-           | Navigation_failed -> rejected "navigation unavailable"
-           | Invalid_receipt -> ok (`Assoc [ "title", `String "Landing page" ])
-           | Navigated | Read_failed ->
-             ok (`Assoc [ "url", `String landing_url; "title", `String "Landing page" ]))
-        | "BrowserRead" ->
-          let open Yojson.Safe.Util in
-          check string "explicit automation lane" "automation"
-            (input |> member "lane" |> to_string);
-          check int "same observed tab" 7 (input |> member "tabId" |> to_int);
-          check string "the selected observation precedes the site decision" read_mode
-            (input |> member "mode" |> to_string);
-          check string "guard follows the actual redirect receipt" landing_url
-            (input |> member "expectedUrl" |> to_string);
-          (match case with
-           | Read_failed -> rejected "observation unavailable"
-           | Navigated -> ok (`Assoc [ "url", `String landing_url; "nodes", `List [] ])
-           | Navigation_failed | Invalid_receipt -> fail "read ran without a valid receipt")
-        | name -> fail ("unexpected composition tool: " ^ name)
-      in
-      Executor.dispatch_result result
-    in
-    let result = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () in
-    match case with
-    | Navigated ->
-      check bool "navigation and observation complete" true (Result.is_ok result);
-      check (list string) "one ordered pair" [ "BrowserGoto"; "BrowserRead" ] !calls
-    | Navigation_failed | Invalid_receipt ->
-      check bool "failure remains visible" true (Result.is_error result);
-      check (list string) "no dependent read or navigation retry" [ "BrowserGoto" ] !calls
-    | Read_failed ->
-      check (list string) "failed observation does not replay navigation"
-        [ "BrowserGoto"; "BrowserRead" ] !calls;
-      (match result with
-       | Ok _ -> fail "read failure disappeared"
-       | Error failure ->
-         check bool "settlement records that navigation already took effect" true
-           (failure.effect_disposition = Tool_result.Proven_post_effect);
-         check bool "completed navigation remains available for recovery" true
-           (List.exists (fun node ->
-              Plan.Node_id.to_string node.Executor.node_id = "navigate"
-              && match node.result with Tool_result.Completed _ -> true | _ -> false)
-              failure.settled)))
-;;
-
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
   test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
-  test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
   test_case "live follow is deferred" `Quick (test_is_deferred follow_skill);
-  test_case "navigation is deferred" `Quick (test_is_deferred navigate_skill);
   test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
-  test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
   test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);
   test_case "failed follow stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
   test_case "read failure retains successful follow without replay" `Quick (test_follow_then_read Regions Read_failed);
@@ -254,12 +174,4 @@ let () = run "browser composition" ["native skill",[
   test_case "observed follow then visible content" `Quick (test_follow_then_read Content Navigated);
   test_case "content follow failure stops without replay" `Quick (test_follow_then_read Content Navigation_failed);
   test_case "content read failure retains follow receipt" `Quick (test_follow_then_read Content Read_failed);
-  test_case "content read rejects malformed follow receipt" `Quick (test_follow_then_read Content Invalid_receipt);
-  test_case "navigation uses redirected landing URL" `Quick (test_navigate_then_read Regions Navigated);
-  test_case "navigation failure stops before read" `Quick (test_navigate_then_read Regions Navigation_failed);
-  test_case "read failure retains navigation receipt" `Quick (test_navigate_then_read Regions Read_failed);
-  test_case "malformed navigation receipt stops before read" `Quick (test_navigate_then_read Regions Invalid_receipt);
-  test_case "content uses redirected landing URL" `Quick (test_navigate_then_read Content Navigated);
-  test_case "content navigation failure stops before read" `Quick (test_navigate_then_read Content Navigation_failed);
-  test_case "content read failure retains navigation receipt" `Quick (test_navigate_then_read Content Read_failed);
-  test_case "content rejects malformed navigation receipt" `Quick (test_navigate_then_read Content Invalid_receipt)]]
+  test_case "content read rejects malformed follow receipt" `Quick (test_follow_then_read Content Invalid_receipt)]]

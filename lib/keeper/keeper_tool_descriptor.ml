@@ -703,13 +703,12 @@ let execute_output_schema =
 let browser_read_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
 
-(* Browser_webdriver.page_summary observes the landing document after Page_goto.
-   Its URL can differ from the requested URL after a redirect. Browser_addon_tools
+(* The live connection observes the landing document after Page_goto. Its URL
+   can differ from the requested URL after a redirect. Browser_addon_tools
    returns that receipt with the browser that served it (Browser_binding.annotate:
-   [source], [lane], [browserSelection], and the connection's [clientId] and, on a
-   live browser, [transport]). Only the page receipt is required; the browser
-   fields are declared so the object stays closed. [clientId] is null on an owned
-   browser. *)
+   [source], [lane], [browserSelection], and the connection's [clientId] and
+   [transport]). Only the page receipt is required; the browser fields are
+   declared so the object stays closed. *)
 let browser_goto_output_schema =
   let object_value = `Assoc [ "type", `String "object" ] in
   `Assoc
@@ -719,7 +718,7 @@ let browser_goto_output_schema =
         ; "title", `Assoc [ "type", `String "string" ]
         ; "source", `Assoc [ "type", `String "string" ]
         ; "lane", `Assoc [ "type", `String "string" ]
-        ; "clientId", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+        ; "clientId", `Assoc [ "type", `String "string" ]
         ; "transport", `Assoc [ "type", `String "string" ]
         ; "browserSelection", object_value
         ]
@@ -1152,9 +1151,7 @@ let public_descriptors =
       ~description:Tool_schemas_misc.browser_goto_schema.description
       ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
       ~composable_output:(Json_output { schema = browser_goto_output_schema })
-      (* A navigation reaches the web from a browser the server owns
-         (automation); the live lane refuses navigation verbs at
-         the state layer. Serial: each server lane is one browser, and
+      (* A navigation reaches the web from a live connection's tab. Serial:
          Concurrent here demands a statically read-only tool this is not. *)
       ~ordinary_execution_mode:Serial
       ~policy:(policy ~readonly:false ())

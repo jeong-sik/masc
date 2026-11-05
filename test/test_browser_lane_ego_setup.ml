@@ -378,13 +378,13 @@ let test_a_change_after_the_plan_is_refused_and_not_overwritten () =
 let test_a_replan_writes_beside_what_was_written_since () =
   with_fixture (fun fixture ->
     let plan = plan_ok ~find:(found fixture) (request fixture) in
-    write fixture.runtime (read fixture.runtime ^ "\n[browser.automation]\ngeckodriver = \"/bin/sh\"\n");
+    write fixture.runtime (read fixture.runtime ^ "\n[browser.live.bidi]\nfirefox = \"/bin/sh\"\nprofile = \"/tmp\"\n");
     Sys.remove fixture.started;
     let plan = match E.replan plan with Ok plan -> plan | Error error -> fail (E.error_message error) in
     check bool "nothing is started again" false (Sys.file_exists fixture.started);
     apply_ok plan;
     ignore (configured fixture);
-    check bool "the other table stays" true (contains (read fixture.runtime) "geckodriver = \"/bin/sh\""))
+    check bool "the other table stays" true (contains (read fixture.runtime) "firefox = \"/bin/sh\""))
 
 (* The table itself was written since the plan, by someone else: a replan
    refuses rather than overwrite it. *)

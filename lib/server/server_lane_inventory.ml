@@ -26,7 +26,6 @@ type 'a browser_reading =
 type state =
   | Exact_state of Exact_projection.lane_configuration
   | Browser_clients of int browser_reading
-  | Browser_executor of bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of { declaration : declaration option; instances : Addon.inventory_instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -133,9 +132,6 @@ let browser_state publication = function
   | Browser_lane.Lane_name.Live ->
       Browser_clients (browser_map (fun (p : Browser_addon_observation.published) ->
         List.length p.clients) publication)
-  | Browser_lane.Lane_name.Automation ->
-      Browser_executor (browser_map (fun (p : Browser_addon_observation.published) ->
-        p.automation.registered) publication)
 
 (* The Lane directory and what it declares, read off the server fiber. *)
 let declarations ~config =
@@ -158,8 +154,7 @@ let snapshot ~config =
   let exact = Exact_projection.observe () in
   let machine_configuration = Runtime.machine_configuration () in
   let directory, declarations = declarations ~config in
-  (* Read once per snapshot, so the three browser rows describe one
-     observation. The inventory is served to the operator alone. *)
+  (* Read once per snapshot. The inventory is served to the operator alone. *)
   let browser_publication =
     Browser_addon_presence.read ~config ~access:Lane_addon_sources.Operator_configuration
       ~declarations in
@@ -231,8 +226,6 @@ let state_json = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
   | Browser_clients reading -> `Assoc ["kind",str "browser_clients";
       "addon",browser_reading_json (fun count -> ["connected_clients",`Int count]) reading]
-  | Browser_executor reading -> `Assoc ["kind",str "browser_executor";
-      "addon",browser_reading_json (fun registered -> ["registered",`Bool registered]) reading]
   | Machine_state (activity,publication) -> `Assoc ["kind",str "machine";
       "activity",str (Machine_configuration.activity_to_wire activity);
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running" | Publication_unavailable -> "unavailable")]

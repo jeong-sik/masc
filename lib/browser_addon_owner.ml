@@ -13,7 +13,6 @@ type t = {
   gate : Eio.Mutex.t;
   mutable phase : phase;
   mutable clients : B.client_id list;
-  mutable automation : cleanup option;
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
   mutable ego_space : (B.client_id * ego_space) option;
@@ -41,11 +40,10 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
-        | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
-        | Retired,(B.Lane_name.Live|Automation) -> B.Disabled));
+        | Retired,B.Lane_name.Live -> B.Disabled));
       Ok t
 let refusal ?(disposition=W.Not_started) message = W.Service_refusal {message;disposition}
 let admission t incarnation =
@@ -61,8 +59,7 @@ let snapshot t = `Assoc ([
       | Some (client_id,ego_space) when client_id=client.client_id ->
         ego_space.space_observation (),Some (ego_space.space_presence ())
       | None|Some _ -> None,None in
-    Browser_addon_observation.publish_client client ~space_observation ~space_presence) (B.connected_clients ()));
-  "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
+    Browser_addon_observation.publish_client client ~space_observation ~space_presence) (B.connected_clients ()))]
   @ (match t.unavailable with [] -> [] | items ->
       ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))
 let mark_ego_user_owned_name t ~space ~ids ~observed_at =
@@ -143,15 +140,6 @@ let owned_cleanup backend cleanup =
     | result -> result
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception _ -> Error (backend ^ " backend cleanup raised; settlement is unconfirmed"))
-let attach_automation t ~locate ~execute ~session ~document ~cleanup =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.automation with
-    | Retired,_ -> Error "browser owner is retired"
-    | Serving,Some _ -> Error "automation backend is already attached"
-    | Serving,None ->
-      B.install_automation_executor ~locate (Some execute);
-      B.install_server_session_observer B.Server_automation (Some session);
-      B.install_automation_document_observer (Some document);
-      t.automation <- Some (owned_cleanup "automation" cleanup);Ok ())
 let attach_live ?ego_space t ~client_id ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
     | Retired -> Error "browser owner is retired"
@@ -192,9 +180,6 @@ let revoke t =
       Option.iter Browser_addon_models.retire t.models;
       Option.iter Browser_addon_uploads.revoke t.uploads;
       Option.iter Browser_addon_downloads.revoke t.downloads;
-      B.install_automation_executor None;
-      B.install_server_session_observer B.Server_automation None;
-      B.install_automation_document_observer None;
       Eio.Promise.resolve t.retire ();
       List.iter (fun client_id -> ignore (B.disconnect_client ~client_id)) t.clients;
       t.clients <- [])
@@ -203,22 +188,20 @@ let cleanup t =
      stopping the other, and a cancelled Retire cannot abandon an owned cleanup.
      The lazy values retain the original result rather than replaying teardown. *)
   Eio.Cancel.protect (fun () ->
-    let settle = function None -> Ok () | Some cleanup -> Eio.Lazy.force cleanup in
-    let settle_live () =
+    let live =
       match List.filter_map (fun result -> match result with Ok () -> None | Error detail -> Some detail)
               (Eio.Fiber.List.map (fun (_, cleanup) -> Eio.Lazy.force cleanup) t.live) with
       | [] -> Ok ()
       | errors -> Error (String.concat "; " errors) in
-    let live,automation = Eio.Fiber.pair settle_live (fun () -> settle t.automation) in
     let uploads=cleanup_uploads t in
     let downloads=match t.downloads with
       | None -> Ok ()
-      | Some downloads -> (match live,automation with
-          | Ok (),Ok () -> cleanup_downloads t
-          | Error _,_ | Ok (),Error _ ->
+      | Some downloads -> (match live with
+          | Ok () -> cleanup_downloads t
+          | Error _ ->
               Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.abandon downloads)) in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
-      [live;automation;uploads;downloads] in
+      [live;uploads;downloads] in
     match errors with [] -> W.Receipt
       | _::_ -> refusal ~disposition:W.Outcome_unknown (String.concat "; " errors))
 let waiting t ~disposition run =
@@ -263,7 +246,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
            |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
            |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
            |B.Page_context _|B.Page_locate _ -> false)
-      | B.Live_route (Some _) | B.Automation_route -> false in
+      | B.Live_route (Some _) -> false in
     if reclaim then
       (* The claim answers in seconds, so only this state read holds the
          gate; the claim itself runs like any other browser command, and
@@ -309,9 +292,8 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
     else
     (match with_admission t incarnation (fun () ->
       match route with
-      | B.Automation_route when Option.is_none t.automation -> Error (refusal "automation is not attached to this worker")
       | B.Live_route None -> Error (refusal "worker execution requires a selected clientId")
-      | B.Live_route (Some _) | B.Automation_route ->
+      | B.Live_route (Some _) ->
         B.resolve_target ~verb route |> Result.map_error (fun error -> W.Issue_result (Error error))) with
      | Error reply -> reply
      | Ok target -> waiting t ~disposition:W.Outcome_unknown (fun () ->

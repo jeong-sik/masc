@@ -475,7 +475,7 @@ let is_read_only = function
   (* Saving writes a named slot; restoring replaces the shared machine. *)
   | Tool_schemas_misc.Misc_dos_save
   | Tool_schemas_misc.Misc_dos_restore
-  (* Starting and stopping the automation browser changes its lifecycle. *)
+  (* Binding a Goal to an ego Space changes which browser later calls use. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask
   | Tool_schemas_misc.Misc_ask_withdraw

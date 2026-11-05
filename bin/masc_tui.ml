@@ -6425,7 +6425,7 @@ let launch_browser_lane state ~mailbox operation =
   | Some view when Option.is_some state.browser_history ->
       (match operation with
        | Read -> state.browser_lane <- Some (defer_read view)
-       | Open_session | Close_session | Read_refresh | Discover _ | Goto _ | Screenshot _
+       | Read_refresh | Discover _ | Screenshot _
        | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
        | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
        | Viewport_cadence _ | Viewport_pointer _ -> ())
@@ -6436,7 +6436,7 @@ let launch_browser_lane state ~mailbox operation =
     | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _
     | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
     | Viewport_cadence _ | Viewport_pointer _ -> true
-    | Discover _ | Open_session | Close_session | Goto _ -> false)
+    | Discover _ -> false)
       && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
@@ -6459,7 +6459,7 @@ let launch_browser_lane state ~mailbox operation =
          refreshes withdraw that scene. *)
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
-        | Read | Open_session | Close_session | Goto _ | Screenshot _
+        | Read | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None }
         | Scene_scroll _ -> view
@@ -6471,7 +6471,7 @@ let launch_browser_lane state ~mailbox operation =
       let launched = { view with load = Loading (generation, operation);
         read_continuation = (match operation with
           | Read -> No_read_continuation
-          | Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+          | Discover _ | Screenshot _ | Read_refresh
           | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
           | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
           | Viewport_cadence _ | Viewport_pointer _ -> view.read_continuation);
@@ -6483,7 +6483,7 @@ let launch_browser_lane state ~mailbox operation =
          Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with
         | Discover Choose_client -> Browser_lane_view.withdraw_discovery launched
-        | Discover Read_after_discovery | Read | Read_refresh | Open_session | Close_session | Goto _
+        | Discover Read_after_discovery | Read | Read_refresh
         | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _
         | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
         | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> launched);
@@ -6555,8 +6555,6 @@ let launch_browser_lane state ~mailbox operation =
               (Masc_tui_http.act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action)
               (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
           })
-        | Open_session | Close_session | Goto _ -> Browser_msg (Browser_lane_action_done
-            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation)))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -6582,8 +6580,7 @@ let refresh_browser_lane state ~mailbox =
       launch_browser_lane state ~mailbox
         (match view.selection, view.source with
          | Live_unbound, _ -> Discover Choose_client
-         | (Unbound | Work_unbound), _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery
-         | (Bound_automatic | Bound_explicit), Automation -> Read)
+         | Unbound, _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -7406,7 +7403,7 @@ let launch_machine_activity_read state ~mailbox owner =
                      | Machine_disabled -> Machine_configuration.Disabled
                      | Machine_unobserved -> Machine_configuration.Unobserved)
                | None
-               | Some {state=(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _);_} ->
+               | Some {state=(Exact_state _ | Browser_clients _ | Package_state _);_} ->
                    Error "The selected machine is absent from the server reading.") in
            Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
              (check ()))))
@@ -14608,8 +14605,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   in
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
-        let click = match shot.source with
-          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link" in
+        let click = "click: link" in
         (* A view that holds no clients answers "not listed" for a live shot. *)
         let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
         click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
@@ -14624,7 +14620,6 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
              (match Browser_lane_view.screenshot_client view shot with
               | Some client -> Browser_lane_view.browser_identity client
               | None -> "Selected browser")
-         | Automation, _ -> "Work browser"
          | Live, None -> "Selected browser") shot.tab_id shot.elapsed_ms; shot.url]
     ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
   if not !failed then state.browser_viewport <- Some (shot, bytes)
@@ -18848,7 +18843,7 @@ let open_lane_inventory_selection state ~mailbox =
           state.browser_lane <- Option.map (fun view ->
             if view.Browser_lane_view.source = lane
                && (match view.selection with Bound_automatic | Bound_explicit -> true
-                   | Unbound | Work_unbound | Live_unbound -> false) then view
+                   | Unbound | Live_unbound -> false) then view
             else Browser_lane_view.switch_source lane view) state.browser_lane;
           release_composer_for_browser_reader state;
           refresh_browser_lane state ~mailbox
@@ -22826,7 +22821,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _)) | Git_diff_loaded (_, _)
         | Browser_msg (Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
         | Browser_lane_clients_loaded (_, _) | Browser_lane_loaded (_, _)
-        | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
+        | Browser_lane_scene_loaded (_, _)
         | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _)
         | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
         | Tools_msg (Tools_read_loaded _) | Skill_evidence_loaded (_, _, _)
@@ -27755,15 +27750,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let next, read = match view.load with
              | Loading (_, Discover _) -> Browser_lane_view.accept_clients ~generation result view
              | Idle | No_browser
-             | Loading (_, (Read | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+             | Loading (_, (Read | Screenshot _ | Read_refresh
                  | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
                  | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
                  | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _)) | Failed _ ->
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
-           let operation = Browser_lane_view.discovery_continuation next in
-           state.browser_lane <- Some (if read then Browser_lane_view.finish_discovery next else next);
-           if read then launch_browser_lane state ~mailbox operation)
+           state.browser_lane <- Some next;
+           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read)
   | Browser_msg (Browser_lane_loaded (generation, result)) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
@@ -27790,7 +27784,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let settled, screenshot = Browser_lane_view.accept_screenshot ~generation
                (Result.map fst result) view in
            state.browser_lane <- Some settled;
-           (* Any deliberate input cancels the overlay, including a URL edit.
+           (* Any deliberate input cancels the overlay.
               It must not leave the matching browser operation busy forever. *)
            if image_generation = state.image_request_generation
               && Option.is_none state.browser_history
@@ -27819,35 +27813,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  end
              | None, (Ok _ | Error _) | Some _, Error _ ->
                  if Option.is_some state.browser_viewport then close_image state)
-  | Browser_msg (Browser_lane_action_done (generation, result)) ->
-      (match state.browser_lane with
-       | Some view ->
-           (match view.Browser_lane_view.load with
-            | Browser_lane_view.Loading (current, Close_session)
-              when generation = current ->
-                (match result with
-                 | Error detail ->
-                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
-                 | Ok () ->
-                     let closed = Browser_lane_view.after_action view in
-                     state.browser_lane <- Some { closed with load = No_browser })
-            | Browser_lane_view.Loading (current, (Open_session | Goto _))
-              when generation = current ->
-                (match result with
-                 | Error detail ->
-                     state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
-                 | Ok () ->
-                     state.browser_lane <- Some
-                       (Browser_lane_view.after_action view);
-                     launch_browser_lane state ~mailbox Browser_lane_view.Read)
-            | Browser_lane_view.Loading
-                (_, ( Close_session | Open_session | Goto _ | Discover _ | Read
-                    | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
-                    | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
-                    | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-                    | Viewport_cadence _ | Viewport_pointer _ ))
-            | Idle | No_browser | Failed _ -> ())
-       | None -> ())
   | Tools_msg (Tools_volume_gc_reported result) ->
       settle_volume_gc state Masc_tui_volume_gc.Report_request result
   | Tools_msg (Tools_volume_gc_reclaimed (names, result)) ->
@@ -32394,7 +32359,7 @@ Use relative paths for resources already held in the package. -->
                  press and release or reopen a dismissed viewport. *)
               state.image_request_generation <- state.image_request_generation + 1;
               state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
-          | Some { load = Browser_lane_view.Loading (_, (Browser_lane_view.Read | (Browser_lane_view.Open_session | (Browser_lane_view.Close_session | (Browser_lane_view.Read_refresh | (Browser_lane_view.Discover _ | (Browser_lane_view.Goto _ | (Browser_lane_view.Screenshot _ | (Browser_lane_view.Scene_read _ | (Browser_lane_view.Scene_regions _ | (Browser_lane_view.Scene_refresh _ | (Browser_lane_view.Scene_scroll _ | (Browser_lane_view.Scene_focus _ | (Browser_lane_view.Scene_click _ | (Browser_lane_view.Scene_follow _ | (Browser_lane_view.Scene_follow_refresh _ | (Browser_lane_view.Viewport_refresh _ | Browser_lane_view.Viewport_pointer _)))))))))))))))));_}
+          | Some { load = Browser_lane_view.Loading (_, (Browser_lane_view.Read | Browser_lane_view.Read_refresh | Browser_lane_view.Discover _ | Browser_lane_view.Screenshot _ | Browser_lane_view.Scene_read _ | Browser_lane_view.Scene_regions _ | Browser_lane_view.Scene_refresh _ | Browser_lane_view.Scene_scroll _ | Browser_lane_view.Scene_focus _ | Browser_lane_view.Scene_click _ | Browser_lane_view.Scene_follow _ | Browser_lane_view.Scene_follow_refresh _ | Browser_lane_view.Viewport_refresh _ | Browser_lane_view.Viewport_pointer _));_}
           | Some { load = (Browser_lane_view.Idle | (Browser_lane_view.No_browser | Browser_lane_view.Failed _));_}
           | None -> ()
       end;
@@ -33307,11 +33272,6 @@ Use relative paths for resources already held in the package. -->
             (* Typing in row search moves the cursor to the first match as
                each character lands, so a paste has to jump the same way or
                the query on screen and the row under it disagree. *)
-            | Some Text_browser_url ->
-                state.browser_lane <- Option.map
-                  (fun (view : Browser_lane_view.t) ->
-                    { view with url_draft = Some (Option.value ~default:"" view.url_draft ^ text) })
-                  state.browser_lane
             (* A pasted runtime id narrows the picker the way typing it
                would. *)
             | Some Text_runtime_picker_filter ->
@@ -36886,7 +36846,7 @@ Use relative paths for resources already held in the package. -->
                           | Loading (_, Discover _) -> Idle
                           | (Idle | No_browser | Failed _
                             | Loading
-                                (_, ( Read | Open_session | Close_session | Goto _ | Screenshot _
+                                (_, ( Read | Screenshot _
                                     | Read_refresh | Scene_read _ | Scene_regions _
                                     | Scene_refresh _ | Scene_scroll _ | Scene_focus _
                                     | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
@@ -36896,9 +36856,6 @@ Use relative paths for resources already held in the package. -->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "A" when not (busy view) ->
                      state.browser_lane <- Some {view with advanced_choices = not view.advanced_choices; client_picker=Some 0}
-                 | "a" when view.advanced_choices && not (busy view) ->
-                     state.browser_lane <- Some (switch_source Automation view);
-                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
@@ -36928,35 +36885,6 @@ Use relative paths for resources already held in the package. -->
                 | (Some true | None), Some tab_id ->
                     launch_browser_lane state ~mailbox:async_messages
                       (Browser_lane_view.Screenshot tab_id))
-       | Some key
-         when text_input_target state ~compact_viewport = Some Text_browser_url ->
-           (match state.browser_lane with
-            | None -> ()
-            | Some view ->
-                let draft = Option.value ~default:"" view.Browser_lane_view.url_draft in
-                let edit url_draft = state.browser_lane <- Some { view with url_draft } in
-                (match key with
-                 | "esc" -> edit None
-                 | "\r" | "\n" | "enter" when Browser_lane_view.busy view ->
-                     (* A screenshot owns the pending operation. Retain the
-                        URL until Enter can actually launch its navigation. *)
-                     ()
-                 | "\r" | "\n" | "enter" ->
-                     let url = String.trim draft in
-                     if url = "" then
-                       state.browser_lane <- Some { view with load = Failed "Enter a URL" }
-                     else begin
-                       edit None;
-                       launch_browser_lane state ~mailbox:async_messages (Browser_lane_view.Goto url)
-                     end
-                 | "\127" | "\b" | "backspace" ->
-                     edit (Some (Masc_tui_message_layout.drop_last_utf8_scalar draft))
-                 | "ctrl-u" | "\021" -> edit (Some "")
-                 | text when String.length text > 0
-                             && Char.code text.[0] >= 32
-                             && (String.length text = 1 || Char.code text.[0] >= 128) ->
-                     edit (Some (draft ^ text))
-                 | _ -> ()))
        | Some key when Browser_history.owns_key key && Option.is_some (browser_history_on_screen state) ->
            (match state.browser_history with
             | None -> ()
@@ -36987,8 +36915,7 @@ Use relative paths for resources already held in the package. -->
                        | "pagedown" -> max 1 (terminal_rows-10) | "pageup" -> -(max 1 (terminal_rows-10)) | _ -> -history.scroll in
                      state.browser_history <- Some {history with scroll=max 0 (min limit (min limit history.scroll+delta))}
                  | _ -> ()))
-       | Some "h" when (match browser_lane_on_screen state with
-           | Some {url_draft=None;_} -> true | _ -> false) ->
+       | Some "h" when Option.is_some (browser_lane_on_screen state) ->
            (match selected_keeper state with
             | None -> report_action state "system" "Choose a Keeper to read its retained observations"
             | Some keeper ->
@@ -36996,16 +36923,16 @@ Use relative paths for resources already held in the package. -->
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "c" | "A" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
+       | Some (("esc" | "left" | "c" | "A" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
+               | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
                | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
                || match browser_lane_on_screen state with
                   | Some view ->
-                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      Option.is_none view.client_picker
                       && (Option.is_some view.scene || Browser_lane_view.busy view)
                   | None -> false) ->
            (match state.browser_lane with
@@ -37022,10 +36949,6 @@ Use relative paths for resources already held in the package. -->
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
                 in
-                let switch_to source =
-                  state.browser_lane <- Some (switch_source source view);
-                  refresh_browser_lane state ~mailbox:async_messages
-                in
                 let reveal_selection selected =
                   let terminal_rows, cols = get_terminal_size () in
                   let scroll = Masc_tui_render.browser_lane_selection_scroll
@@ -37038,8 +36961,6 @@ Use relative paths for resources already held in the package. -->
                  | "A" when not (busy view) ->
                      state.browser_lane <- Some {view with advanced_choices = true; client_picker=Some 0};
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
-                 | "l" when view.advanced_choices -> switch_to Live
-                 | "a" when view.advanced_choices -> switch_to Automation
                  | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -37147,17 +37068,6 @@ Use relative paths for resources already held in the package. -->
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                            | None -> ())
                       | _ -> ())
-                 | "g" when Option.is_some (Browser_lane.server_lane_of_name view.source) && not (busy view) ->
-                     state.browser_lane <- Some { view with url_draft = Some "" }
-                 | "g" when view.source = Live ->
-                     report_action state "system" "Use o:work browser to open a separate session, then g:URL"
-                 | "o" when not (busy view) ->
-                     let selected, operation = prepare_open view in
-                     state.browser_lane <- Some selected;
-                     launch_browser_lane state ~mailbox:async_messages operation
-                 | "x" when Option.is_some (Browser_lane.server_lane_of_name view.source) ->
-                     launch_browser_lane state ~mailbox:async_messages Close_session
-                 | "x" -> report_action state "system" "The selected browser is not a work session owned by MASC"
                  | "j" | "down" -> scroll 1
                  | "k" | "up" -> scroll (-1)
                  | "pagedown" | "pageup" ->
@@ -38285,7 +38195,7 @@ Use relative paths for resources already held in the package. -->
          when (match text_input_target state ~compact_viewport with
                | Some (Text_board_draft | Text_board_attach_path) -> true
                | Some
-                   (Text_collab_form | Text_account_login | Text_browser_url
+                   (Text_collab_form | Text_account_login
                    | Text_ask_answer | Text_fusion_launch | Text_preset_name | Text_resource_save
                    | Text_runtime_lane_name | Text_runtime_param
                    | Text_runtime_model_form | Text_runtime_account_form | Text_memory_recall_form

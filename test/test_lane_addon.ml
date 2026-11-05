@@ -430,18 +430,16 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let service name backend listed = name,backend,Browser_addon_observation.Observed_clients listed in
   let read ?(unready=[]) services route = T.document_route_services ~services ~unready ~backend:(fun (_,backend,_) -> backend)
       ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
-  let automation=service "automation" B.Backend.Automation []
-  and ego_worker=service "ego" B.Backend.Ego [ego]
+  let ego_worker=service "ego" B.Backend.Ego [ego]
   and second_worker=service "second ego" B.Backend.Ego [second]
   and native=service "native" B.Backend.External_host [extension] in
-  let all=[automation;ego_worker;second_worker;native] in
+  let all=[ego_worker;second_worker;native] in
   let route client=B.Live_route (Some client.B.client_id) in
-  check bool "automation reads on its own service" true (read all B.Automation_route=Ok ["automation"]);
   check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
   check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
   check bool "another live source remains exact" true (read all (route extension)=Ok ["native"]);
   check bool "unknown client is never assigned to the only worker" true
-    (read [automation;service "empty ego" B.Backend.Ego []] (route ego)=Ok []);
+    (read [service "empty ego" B.Backend.Ego []] (route ego)=Ok []);
   check bool "duplicate client is refused" true
     (Result.is_error (read [ego_worker;service "copy" B.Backend.Ego [ego]] (route ego)));
   let same_space={second with space=ego.space} in
@@ -454,14 +452,8 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
     [B.Backend.Ego;Owned_firefox;External_host];
   check bool "an unready live sibling also blocks an Ego read" true
     (Result.is_error (read ~unready:[B.Backend.Ego] [ego_worker] (route ego)));
-  check bool "an unreadable owned backend cannot block an exact Ego read" true
-    (read [ego_worker;hidden B.Backend.Automation] (route ego)=Ok ["ego"]);
-  check bool "an unready owned backend cannot block an exact Ego read" true
-    (read ~unready:[B.Backend.Automation] [ego_worker] (route ego)=Ok ["ego"]);
   check bool "an exact extension read remains usable with an unknown live controller" true
     (read [native;hidden B.Backend.Ego] (route extension)=Ok ["native"]);
-  check bool "owned reads remain independent of unknown live controllers" true
-    (read [automation;hidden B.Backend.Ego] B.Automation_route=Ok ["automation"]);
   check bool "unreadable single live source is not empty-client success" true
     (Result.is_error (read [hidden B.Backend.Ego] (B.Live_route None)));
   check bool "a read without a client cannot choose between workers" true

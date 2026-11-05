@@ -1052,7 +1052,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
-          ~help:"read browser tabs and page text; choose Automatic, Work browser, or a connected browser"
+          ~help:"read browser tabs and page text; choose Automatic or a connected browser"
       ; b Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
       ; b Navigate "j/k" "scroll"
@@ -2703,8 +2703,6 @@ let footer_hints_browser_lane =
     ; b Navigate "[ / ]" "tab"
     ; b Navigate "j/k" "text"
     ; b Act "Ctrl-O" "screenshot"
-    ; b Act "g" "URL"
-    ; b Act "o / x" "work browser / close"
     ; b Act "r" "refresh"
     ; b Navigate "Ctrl-^ / Esc" "hide lane"
     ]

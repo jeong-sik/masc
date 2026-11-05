@@ -26,13 +26,13 @@ let () =
   let live_ego = match backend,!live_ego_command,ego_reference with
     | Browser_lane.Backend.Ego,Some command,Some space -> Some {Browser_configuration.command;space}
     | Browser_lane.Backend.Ego,_,_ -> raise (Arg.Bad "the ego source needs --live-ego-command and one Space reference")
-    | Browser_lane.Backend.(Automation|Owned_firefox|External_host),None,None -> None
-    | Browser_lane.Backend.(Automation|Owned_firefox|External_host),_,_ ->
+    | Browser_lane.Backend.(Owned_firefox|External_host),None,None -> None
+    | Browser_lane.Backend.(Owned_firefox|External_host),_,_ ->
       raise (Arg.Bad "--live-ego-command and the Space reference belong to the ego source") in
-  (* The browsers that read upload copies and write downloads are the owned
-     Gecko and ego lite; the other sources get neither broker. *)
+  (* The browser that reads upload copies and writes downloads is ego lite;
+     the other sources get neither broker. *)
   let transfers = match backend with
-    | Browser_lane.Backend.(Automation|Ego) -> true
+    | Browser_lane.Backend.Ego -> true
     | Browser_lane.Backend.(Owned_firefox|External_host) -> false in
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -88,7 +88,6 @@ let () =
       until_stop in
     let directory=Filename.dirname socket_path in
     match backend,live_ego with
-    | Browser_lane.Backend.Automation,_ -> Masc.Browser_addon_automation.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Owned_firefox,_ -> Masc.Browser_addon_live_bidi.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Ego,Some configuration ->
       Masc.Browser_addon_live_ego.run ~on_lane_ended:(fun () ->

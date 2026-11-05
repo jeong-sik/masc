@@ -6,24 +6,11 @@ let lane = testable (fun fmt lane -> Format.pp_print_string fmt (Lane_name.to_wi
 let test_round_trip () =
   List.iter (fun name -> check (option lane) (Lane_name.to_wire name) (Some name)
     (Lane_name.of_wire (Lane_name.to_wire name))) Lane_name.all;
-  check string "error text lists every lane" "live or automation" Lane_name.expected
+  check string "error text lists every lane" "live" Lane_name.expected
 
 let test_rejects_non_names () =
   List.iter (fun raw -> check (option lane) (Printf.sprintf "%S" raw) None (Lane_name.of_wire raw))
-    [ ""; "Live"; " live"; "automation "; "chromium" ]
-
-(* The server lanes: live is refused with whose browser it is, a non-name
-   with the names that serve, and the server lane is read. *)
-let test_server_lane () =
-  let server = function
-    | Ok lane -> Lane_name.to_wire (Browser_lane.server_lane_name lane)
-    | Error detail -> "refused: " ^ detail
-  in
-  check string "automation" "automation" (server (Browser_lane.parse_server_lane "automation"));
-  check string "live names its owner" ("refused: the live browser belongs to the operator; " ^ Browser_lane.server_lane_refused)
-    (server (Browser_lane.parse_server_lane "live"));
-  check string "a non-name lists the server lanes" ("refused: " ^ Browser_lane.server_lane_refused)
-    (server (Browser_lane.parse_server_lane "chromium"))
+    [ ""; "Live"; " live"; "live "; "chromium" ]
 
 let lane_param (schema : Masc_domain.tool_schema) =
   Yojson.Safe.Util.(schema.input_schema |> member "properties" |> member "lane")
@@ -67,10 +54,8 @@ let test_tool_enums () =
     check bool (tool ^ " leaves automatic selection available") true (lane_default schema = `Null))
     tool_verbs;
   let act = Tool_schemas_misc_toml.browser_act in
-  (* Opening a tab is the one action every lane can take: automation serves
-     every action, and live serves tab creation. The lanes the
-     schema offers follow the backends, so a lane that gains tab creation shows
-     up here until the schema lists it. *)
+  (* The lanes the schema offers follow the backends that open a tab, so a
+     lane that gains tab creation shows up here until the schema lists it. *)
   let open_tab = Browser_lane.(Page_act (Action.Open_tab "https://example.org/")) in
   check (list lane) "masc_browser_act offers the lanes that can open a tab" (sorted (serving [ open_tab ]))
     (sorted (decode_all "masc_browser_act" (lane_enum act)));
@@ -81,7 +66,6 @@ let () =
     "wire", [
       test_case "every lane round-trips" `Quick test_round_trip;
       test_case "a non-name is refused" `Quick test_rejects_non_names;
-      test_case "server lanes refuse live with its owner" `Quick test_server_lane;
     ];
     "tool schemas", [ test_case "lane enums follow the backends" `Quick test_tool_enums ];
   ]

@@ -16,7 +16,7 @@ const instance = { instance_id: 'worker', run_id: 'run', addon_id: 'browser', ti
   package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: {} } }
 const row: LaneAddonRow = { id: 'worker/1/browser', lane_id: 'worker/browser/connections', kind: 'value',
   title: 'Browser worker', observed_at: 1793037600, subject_id: 'browser', actor: null, clock: null,
-  fields: { state: 'serving', clients: [client], owned_backends: { automation: { activity: 'disabled', registered: false, session: 'closed', locate: false } } }, evidence: [], related_ids: [] }
+  fields: { state: 'serving', clients: [client] }, evidence: [], related_ids: [] }
 function show(fields = row.fields, runtime_presence = 'live') {
   const snapshot = parseLaneAddonSnapshot({ configuration: null, rows: [{ ...row, fields }],
     instances: [{ ...instance, runtime_presence }], coverage: [] })
@@ -38,44 +38,11 @@ describe('browser caller observations', () => {
     expect(unknown.container.textContent).toContain('Original Space presence: unknown')
     expect(unknown.container.textContent).toContain('The native inventory could not be reached.')
   })
-  it('shows the owned browser session beside personal browser callers without inventing login or caller identity', () => {
-    const view = show({ ...row.fields, owned_backends: {
-      automation: { activity: 'enabled', registered: true, session: 'open', locate: true },
-    } }, 'retained')
-    const automation = view.getByLabelText('Automation browser session')
-    expect(automation.textContent).toContain('Browser session at observation: open')
-    expect(automation.textContent).toContain('Executor registered: yes')
-    expect(automation.textContent).not.toContain('keeper/research')
+  it('shows a retained observation of personal browser callers without offering controls', () => {
+    const view = show(row.fields, 'retained')
     expect(view.getByLabelText(`Browser client ${client.clientId}`)).toBeTruthy()
-    expect(view.getByText(/does not identify a current caller or verify login/)).toBeTruthy()
     expect(view.getByText(/Retained worker observation/)).toBeTruthy()
     expect(view.container.querySelector('button')).toBeNull()
-  })
-  it('preserves unknown and closed session states independently of registration', () => {
-    const closed = show({ ...row.fields, clients: [], owned_backends: {
-      automation: { activity: 'enabled', registered: true, session: 'closed', locate: false },
-    } })
-    expect(closed.getByLabelText('Automation browser session').textContent).toContain('Browser session at observation: closed')
-    closed.unmount()
-    const unknown = show({ ...row.fields, clients: [], owned_backends: {
-      automation: { activity: 'unobserved', registered: false, session: 'unknown', locate: false },
-    } })
-    expect(unknown.getByLabelText('Automation browser session').textContent).toContain('Browser session at observation: unknown')
-    expect(unknown.getByLabelText('Automation browser session').textContent).toContain('Availability at observation: unobserved')
-  })
-  it.each([
-    ...[
-      { spaceId: 33, observedAt: 42, state: 'missing' },
-      { spaceId: 32, observedAt: Number.NaN, state: 'present' },
-      { spaceId: 32, observedAt: 42, state: 'unknown' },
-      { spaceId: 32, observedAt: 42, state: 'unknown', reason: { kind: 'unrecognized' } },
-    ].map(spacePresence => ({ ...client, spacePresence })),
-    null, {}, { automation: {} },
-    { automation: { activity: 'enabled', registered: true, session: 'ready', locate: true } },
-    { automation: { activity: 'enabled', registered: 'yes', session: 'open', locate: true } },
-    { automation: { activity: 'enabled', registered: true, session: 'open', locate: true, caller: 'fake' } },
-  ])('refuses malformed owned browser observations', owned_backends => {
-    expect(show({ ...row.fields, owned_backends }).getByRole('status').textContent).toContain('observation unreadable')
   })
 
   it('preserves healthy clients alongside a dated Ego connection refusal', () => {
@@ -195,6 +162,12 @@ describe('browser caller observations', () => {
       { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: Infinity },
       { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: 42, claim: true },
     ].map(spaceObservation => ({ ...client, spaceObservation })),
+    ...[
+      { spaceId: 33, observedAt: 42, state: 'missing' },
+      { spaceId: 32, observedAt: Number.NaN, state: 'present' },
+      { spaceId: 32, observedAt: 42, state: 'unknown' },
+      { spaceId: 32, observedAt: 42, state: 'unknown', reason: { kind: 'unrecognized' } },
+    ].map(spacePresence => ({ ...client, spacePresence })),
     { ...client, transport: 'webdriver_bidi', browser: 'firefox', space: null,
       spaceObservation: { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: 42 } },
   ])('refuses a malformed or inconsistent nested connection without hiding raw row data', malformed => {

@@ -1097,8 +1097,9 @@ let test_missing_cli_is_not_reported_as_logout () =
 
 (* Claude Code exits before a non-blocking pipe write drains, so a pipe
    stdout received the first 512 bytes of a longer auth status document
-   (2026-11-05: 241 probes). The stand-in answers only when its stdout is a
-   regular file, the one sink that takes the CLI's writes whole. *)
+   (159 probes retried on 2026-11-05). The stand-in answers only when
+   its stdout is a regular file, the one sink that takes the CLI's
+   writes whole. *)
 let test_auth_status_reaches_a_regular_file () =
   let path = Filename.temp_file "masc-claude-auth-file-" ".sh" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->

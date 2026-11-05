@@ -598,12 +598,13 @@ let note_cut_document ~bytes = function
 
    Claude Code exits before a write to a non-blocking pipe drains. On macOS
    (Claude Code 2.1.318, 2026-11-06) its [--help] reached a pipe as 1024 or
-   2048 of its 22,344 bytes, and each of the 241 cut [auth status] documents
-   of 2026-11-05 stopped at exactly 512 bytes. A regular file takes each
-   write whole, so the CLI's stdout is one: created 0600 in the temporary
-   directory and unlinked before the CLI starts, then read back through a
-   second descriptor once it exits. [cwd] names that path, so it must reach
-   the temporary directory, as one built from [Eio.Stdenv.fs] does. *)
+   2048 of its 22,344 bytes, and every cut [auth status] document the log
+   recorded on 2026-11-05 stopped at exactly 512 bytes. A regular file
+   takes each write whole, so the CLI's stdout is one: created 0600 in the
+   temporary directory and unlinked before the CLI starts, then read back
+   through a second descriptor once it exits. [cwd] names that path, so it
+   must reach the temporary directory, as one built from [Eio.Stdenv.fs]
+   does. *)
 let open_stdout_capture ~sw ~cwd =
   let path = Filename.temp_file "masc-claude-auth-status-" ".json" in
   Fun.protect

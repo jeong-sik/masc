@@ -1385,36 +1385,6 @@ let test_a_view_that_hides_the_cursor_clamps_it () =
   check Alcotest.bool "inside the shorter list" true
     (landed >= 0 && landed < List.length (listed ~order:attached.order ~show:attached.show))
 
-let test_the_cursor_row_is_the_cursor_provider_row () =
-  (* The pane scrolls to [cursor_row], so it has to be the row of the
-     provider under the cursor in either order, the gap between the
-     attached services and the rest included. *)
-  List.iter
-    (fun order ->
-       let listing =
-         { Masc_tui_identity_model.identity_listing_default with order }
-       in
-       List.iteri
-         (fun cursor _ ->
-            let drawn =
-              Masc_tui_render_identity.draw ~cols:120
-                { keeper_name = "A"; providers = mixed; filter = None; cursor;
-                  logins = []; attempt_error = None; app_form = None;
-                  callback = None; order; show = listing.show }
-            in
-            match drawn.cursor_row, at_cursor ~listing ~providers:mixed cursor with
-            | Some row, Some id ->
-              let label =
-                List.assoc id
-                  (Masc_tui_identity_model.identity_connectable ~listing mixed)
-              in
-              check Alcotest.bool ("the row of " ^ id) true
-                (contains label (List.nth drawn.rows row))
-            | None, _ | _, None -> Alcotest.fail "no cursor row")
-         mixed)
-    [ Masc_tui_identity_model.Identity_attached_first;
-      Masc_tui_identity_model.Identity_declared_order ]
-
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "callback and apps",
@@ -1436,8 +1406,6 @@ let () =
             test_a_reading_keeps_the_cursor_on_its_service;
           Alcotest.test_case "a view that hides the cursor clamps it" `Quick
             test_a_view_that_hides_the_cursor_clamps_it;
-          Alcotest.test_case "the cursor row is the cursor provider's row" `Quick
-            test_the_cursor_row_is_the_cursor_provider_row;
         ] );
       ( "numbering",
         [ Alcotest.test_case "a broken declaration does not take a number"

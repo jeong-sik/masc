@@ -3174,6 +3174,7 @@
 
 (include stanzas/test_keeper_execution_join.inc)
 (include stanzas/test_full_health_wakeup.inc)
+(include stanzas/test_dashboard_spa_deep_link.inc)
 (include stanzas/test_pending_confirm_expiry.inc)
 (include stanzas/test_wall_deadline.inc)
 

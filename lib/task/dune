@@ -9,6 +9,7 @@
   planning_eio
   task_goal_assignment
   task_history_page
+  task_history_types
   tool_task
   tool_task_args
   tool_task_completion_review
@@ -18,6 +19,8 @@
   tool_task_schemas_toml
   tool_task_transition_rejection
   workflow_rejection_payload)
+ (private_modules
+  task_history_types)
  (flags
   (:standard -w +37))
  (libraries

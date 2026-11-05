@@ -2893,12 +2893,10 @@ status: reference
 : 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
   RFC-0387 B1의 측정 가능한 성공 조건(`metric` 및 `target_value`) 필수 선언에 더해,
   새 Goal 생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
-  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한 이미
-  경과한 마감일(`due_date`)을 지정한 목표 생성은 본질적으로 도달 불가능(unreachable by
-  construction)하므로 `Rejected`(`Validation_error`)로 즉시 거절한다. 마감일은 UTC 역일 기준
-  당일 23:59:59 UTC에 만료되는 것으로 판정하며 운영자 로컬 타임존과 무관하다. 반면 기존 Goal의
-  수정(`upsert_goal` 업데이트) 시에는 마감일 경과가 정상적인 생명주기 진행이고 과거 날짜 소급
-  지정 역시 기록 정정이므로 이 검증으로 차단되지 않는다.
+  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한
+  `YYYY-MM-DD`로 읽을 수 없는 마감일(`due_date`)은 생성과 수정(`upsert_goal` 업데이트) 모두
+  `Rejected`로 거절하고 아무것도 쓰지 않는다. 읽을 수 있는 마감일은 UTC 역일 기준 당일
+  23:59:59 UTC에 만료되는 것으로 읽으며 운영자 로컬 타임존과 무관하다.
   → [Goal_store](../../lib/goal/goal_store.mli) · [Goal_due](../../lib/goal/goal_due.mli)
 
 **Goal Measurement (목표 관측값)**

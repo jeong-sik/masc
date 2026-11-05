@@ -11,6 +11,8 @@ let compare_subscription (a : subscription) (b : subscription) =
       let c = String.compare a.installation_id b.installation_id in
       if c <> 0 then c else String.compare a.output_id b.output_id
 type operation = Inspect | Save | Read | Acknowledge
+(* What a reader sends: nothing, or the receipt of the observation it acknowledges. *)
+type reader_request = Reading | Acknowledging of Yojson.Safe.t
 open Result.Syntax
 let mutex = Mutex.create ()
 let protect f = try f () with
@@ -239,6 +241,68 @@ let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~call
   Eio_guard.run_in_systhread ~label:"lane-subscription-dispatch" (fun () ->
   protect (fun () -> Mutex.protect mutex (fun () ->
   let* subscriptions,revision = load config in
+  (* Read and Acknowledge differ in the fields they accept and in whether the
+     request carries a receipt. The rest is shared. *)
+  let reader ~allowed ~request =
+    let* ()=exact allowed args in
+    let* ()=match access with
+      | Lane_addon_sources.Operator_configuration -> Ok ()
+      | Keeper keeper when String.equal keeper caller -> Ok ()
+      | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
+    let* s=select_subscription ~caller args subscriptions in
+    let store=Store.create ~root:(root config) in
+    let* bindings=Store.bindings store in
+    let* instance,latest,lanes,max_bytes=producer ~access bindings s in
+    let* prior=cursor ~io ~verification:Durable config s in
+    let after=match prior with Some prior when prior.instance_id=instance -> prior.sequence | _ -> 0 in
+    let* request=request () in
+    let equal a b=Yojson.Safe.sort a=Yojson.Safe.sort b in
+    let retry=match request,prior with
+      | Acknowledging supplied,Some prior when prior.instance_id=instance && equal prior.receipt supplied -> Some prior
+      | (Reading | Acknowledging _),_ -> None in
+    let* sequence=match retry with
+      | Some prior when prior.sequence<=latest -> Ok prior.sequence
+      | Some _ -> Error "subscription cursor exceeds retained producer sequence"
+      | None when after>=latest -> Error "no unread completed observation"
+      | None -> Ok (after+1) in
+    let* output=Store.read_observation ~instance_id:instance ~seq:sequence ~max_bytes store in
+    let selected=List.filter (fun (row:Types.row) ->
+      match lanes with None->true|Some lanes->List.mem row.lane_id lanes) output.rows in
+    let receipt=`Assoc ["subscription",json s;"instance_id",`String instance;"sequence",`Int sequence;
+      "output_sha256",`String (Store.digest (Yojson.Safe.to_string (Types.output_to_json output)))] in
+    let acknowledged ()=Ok (`Assoc ["acknowledged",`Bool true;"receipt",receipt]) in
+    match request with
+    | Reading -> Ok (`Assoc ["receipt",receipt;"output",Types.output_to_json {output with rows=selected};
+        "complete",`Bool (List.for_all (fun (c:Types.coverage)->c.complete) output.coverage)])
+    | Acknowledging supplied ->
+        if not (equal supplied receipt) then Error "receipt no longer identifies the next unread observation"
+        else if Option.is_some retry then acknowledged ()
+        else (
+          let path=cursor_path config s in
+          Fs_compat.mkdir_p (Filename.dirname path);
+          match io.replace_cursor_file path (Yojson.Safe.to_string receipt) with
+          | Ok () -> acknowledged ()
+          | Error failure ->
+            match failure.Fs_compat.stage with
+            | Fs_compat.Before_rename ->
+              (match failure.exception_ with
+               | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+               | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))
+            | Fs_compat.After_rename ->
+              let verification_error=match protect (fun () -> cursor ~io ~verification:Visible config s) with
+                | Ok (Some visible) when equal visible.receipt receipt -> None
+                | Ok (Some _) | Ok None -> Some "published cursor does not identify the proposed acknowledgement"
+                | Error detail -> Some detail in
+              (match failure.exception_ with
+               | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+               | _ ->
+                 let detail=Fs_compat.atomic_replace_failure_to_string failure in
+                 let detail=match verification_error with None -> detail
+                   | Some error -> detail ^ "; publication verification: " ^ error in
+                 Ok (`Assoc ["acknowledged",`Bool false;"published",`Bool true;
+                   "durability",`String "unconfirmed";"receipt",receipt;
+                   "detail",`String detail])))
+  in
   match operation with
   | Inspect -> let* ()=exact [] args in
       Ok (configuration_snapshot ~io ~access ~caller config subscriptions revision)
@@ -264,70 +328,10 @@ let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~call
           "output_id = " ^ string s.output_id;""]) rows) in
       let* ()=write (config_path config) bytes in
       Ok (configuration_snapshot ~io ~access ~caller config rows (Some (Store.digest bytes)))
-  | Read | Acknowledge ->
-      let* ()=exact (match operation with Read->["run_id";"installation_id";"output_id"]
-        | Inspect | Save | Acknowledge -> ["run_id";"installation_id";"output_id";"receipt"]) args in
-      let* ()=match access with
-        | Lane_addon_sources.Operator_configuration -> Ok ()
-        | Keeper keeper when String.equal keeper caller -> Ok ()
-        | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
-      let* s=select_subscription ~caller args subscriptions in
-      let store=Store.create ~root:(root config) in
-      let* bindings=Store.bindings store in
-      let* instance,latest,lanes,max_bytes=producer ~access bindings s in
-      let* prior=cursor ~io ~verification:Durable config s in
-      let after=match prior with Some prior when prior.instance_id=instance -> prior.sequence | _ -> 0 in
-      let supplied=match operation with Acknowledge -> field "receipt" args |> Result.map Option.some
-        | Read -> Ok None | Inspect | Save -> assert false in
-      let* supplied=supplied in
-      let equal a b=Yojson.Safe.sort a=Yojson.Safe.sort b in
-      let retry=match operation,prior,supplied with
-        | Acknowledge,Some prior,Some supplied when prior.instance_id=instance && equal prior.receipt supplied -> Some prior
-        | (Read | Acknowledge),_,_ -> None
-        | (Inspect | Save),_,_ -> assert false in
-      let* sequence=match retry with
-        | Some prior when prior.sequence<=latest -> Ok prior.sequence
-        | Some _ -> Error "subscription cursor exceeds retained producer sequence"
-        | None when after>=latest -> Error "no unread completed observation"
-        | None -> Ok (after+1) in
-      let* output=Store.read_observation ~instance_id:instance ~seq:sequence ~max_bytes store in
-      let selected=List.filter (fun (row:Types.row) ->
-        match lanes with None->true|Some lanes->List.mem row.lane_id lanes) output.rows in
-      let receipt=`Assoc ["subscription",json s;"instance_id",`String instance;"sequence",`Int sequence;
-        "output_sha256",`String (Store.digest (Yojson.Safe.to_string (Types.output_to_json output)))] in
-      let acknowledged ()=Ok (`Assoc ["acknowledged",`Bool true;"receipt",receipt]) in
-      match operation,supplied with
-      | Read,None -> Ok (`Assoc ["receipt",receipt;"output",Types.output_to_json {output with rows=selected};
-          "complete",`Bool (List.for_all (fun (c:Types.coverage)->c.complete) output.coverage)])
-      | Acknowledge,Some supplied ->
-          if not (equal supplied receipt) then Error "receipt no longer identifies the next unread observation"
-          else if Option.is_some retry then acknowledged ()
-          else (
-            let path=cursor_path config s in
-            Fs_compat.mkdir_p (Filename.dirname path);
-            match io.replace_cursor_file path (Yojson.Safe.to_string receipt) with
-            | Ok () -> acknowledged ()
-            | Error failure ->
-              match failure.Fs_compat.stage with
-              | Fs_compat.Before_rename ->
-                (match failure.exception_ with
-                 | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-                 | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure))
-              | Fs_compat.After_rename ->
-                let verification_error=match protect (fun () -> cursor ~io ~verification:Visible config s) with
-                  | Ok (Some visible) when equal visible.receipt receipt -> None
-                  | Ok (Some _) | Ok None -> Some "published cursor does not identify the proposed acknowledgement"
-                  | Error detail -> Some detail in
-                (match failure.exception_ with
-                 | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-                 | _ ->
-                   let detail=Fs_compat.atomic_replace_failure_to_string failure in
-                   let detail=match verification_error with None -> detail
-                     | Some error -> detail ^ "; publication verification: " ^ error in
-                   Ok (`Assoc ["acknowledged",`Bool false;"published",`Bool true;
-                     "durability",`String "unconfirmed";"receipt",receipt;
-                     "detail",`String detail])))
-      | Read,Some _ | Acknowledge,None | (Inspect | Save),_ -> assert false)))
+  | Read -> reader ~allowed:["run_id";"installation_id";"output_id"] ~request:(fun () -> Ok Reading)
+  | Acknowledge ->
+      reader ~allowed:["run_id";"installation_id";"output_id";"receipt"]
+        ~request:(fun () -> field "receipt" args |> Result.map (fun receipt -> Acknowledging receipt)))))
 let dispatch = dispatch_with ~io:real_cursor_io
 let observe = observe_with ~io:real_cursor_io
 let handle_with ~io ?access ~config ~caller args =

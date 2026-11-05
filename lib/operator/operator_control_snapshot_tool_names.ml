@@ -27,17 +27,17 @@ let tool_names_of_recent_json (json : Yojson.Safe.t) =
 ;;
 
 (* The walk stops as soon as [limit] names are collected, which the newest
-   rows usually supply, but every row in the window used to be parsed before
-   the walk began. Measured 2026-09-07 on a live server: those trees were
-   4.40 GB, 5.3% of the process's allocation, and the caller hands in 120
-   rows per Keeper on every operator snapshot.
+   rows usually supply. Rows are parsed one at a time, newest first, and a row
+   the walk never reaches is never parsed. Parsing the whole window is costly:
+   measured 2026-09-07 on a live server, those trees were 4.40 GB, 5.3% of the
+   process's allocation, and the caller hands in 120 rows per Keeper on every
+   operator snapshot.
 
-   Rows are now parsed one at a time, newest first, and a row the walk never
-   reaches is never parsed. A malformed row it does reach still warns exactly
-   as before - same message, same printed row number - because
-   [Fs_compat.parse_jsonl_line] is what the whole-window parse uses too. A
-   malformed row past the stopping point no longer warns; this function
-   reports the recent tool names and is not the ledger's validator. *)
+   A malformed row the walk does reach warns with the message and printed row
+   number that [Fs_compat.parse_jsonl_line] gives it; the whole-window parse
+   uses that parser too. A malformed row past the stopping point does not warn;
+   this function reports the recent tool names and is not the ledger's
+   validator. *)
 let collect_recent_tool_names ?(limit = 8) (lines : string list) =
   let newest_first = List.rev (Fs_compat.number_jsonl_lines lines) in
   let rec loop acc remaining = function

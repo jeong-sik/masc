@@ -20,9 +20,8 @@
 (** {1 resources.toml} *)
 
 (** One [masc://…] resource advertised by [resources/list]. Every field is
-    required in the file: the OCaml constructors the catalogue used to be
-    written with default [title] to [name], but every shipped entry passes an
-    explicit title, so the file carries them all. *)
+    required in the file, [title] included: every shipped entry passes an
+    explicit title. *)
 type resource_entry =
   { uri : string
   ; name : string

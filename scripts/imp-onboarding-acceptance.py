@@ -172,20 +172,22 @@ def directory_execution(traces, execution_evidence):
             continue
         if not isinstance(result, dict):
             continue
+        location = result.get('execution_location')
+        cwd = location.get('cwd') if isinstance(location, dict) else None
         evidence = execution_evidence.get(event['tool_use_id'])
         if not (isinstance(evidence, dict) and evidence.get('via') == 'docker'
                 and evidence.get('sandbox_profile') == 'docker'):
             continue
         if not (result.get('ok') is True
                 and result.get('status') == {'kind': 'exit', 'code': 0}
-                and result.get('cwd') == '/home/keeper/playground/imp'
+                and cwd == '/home/keeper/playground/imp'
                 and result.get('output_completeness') == 'complete'):
             continue
         lines = result.get('output', '').splitlines()
         directories = {line.split()[-1] for line in lines
                        if line.startswith('d') and len(line.split()) >= 9}
         proof = dict(input=started, completion=event)
-        scope = (event['worker_run_id'], event['session_id'], result['cwd'])
+        scope = (event['worker_run_id'], event['session_id'], cwd)
         observed = observations.setdefault(scope, {})
         if has_pwd and '/home/keeper/playground/imp' in lines:
             observed['pwd'] = proof

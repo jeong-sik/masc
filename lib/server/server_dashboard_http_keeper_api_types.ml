@@ -199,9 +199,9 @@ let extract_keeper_name_for_suffix req_path suffix =
     in
     if is_valid_keeper_name raw then raw else "")
 
-(* The POST dispatcher's spelling. One grammar, so one body: the two used to
-   be byte-for-byte identical definitions, which is a rule that can drift on
-   one side and a test that can only ever agree with itself. *)
+(* The POST dispatcher's spelling. One grammar, so one body: a second
+   definition is a rule that can drift on one side, and a test of the pair can
+   only ever agree with itself. *)
 let extract_keeper_name_for_post = extract_keeper_name_for_suffix
 
 let is_keeper_checkpoints_get_path req_path =

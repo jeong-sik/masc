@@ -28,8 +28,7 @@ type execution_mode =
 
 val execution_mode_to_string : execution_mode -> string
 
-(** ["matrix"] or ["live"]. Any other name is an error; it used to be read as
-    matrix. *)
+(** ["matrix"] or ["live"]. Any other name is an error. *)
 val execution_mode_of_string : string -> (execution_mode, string) result
 
 val execution_mode_of_run_scenario : run_scenario -> execution_mode

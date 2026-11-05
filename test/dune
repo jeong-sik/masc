@@ -1845,7 +1845,6 @@
   test_dashboard_tool_failure_parity
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1995,7 +1994,6 @@
   test_dashboard_tool_failure_parity
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify

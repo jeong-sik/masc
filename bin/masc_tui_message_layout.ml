@@ -1216,6 +1216,76 @@ let split_styled_cells ~max_cells text =
     inherited ^ chunk ^ (if String.equal inherited "" && not (String.contains chunk '\027')
       then "" else "\027[0m"))
 
+(* The characters a word wider than a row may break after. *)
+let word_separators = "_:/.-"
+
+(* A break that leaves a row under half full spends a row to save little: [a:]
+   before a hash of a hundred characters. The row is cut at the width instead. *)
+let least_fill_divisor = 2
+
+(* The byte offset just past the last separator of [row], where [row] may end
+   so the next row starts a new part of the same name. None when [row] holds no
+   separator, when ending there leaves it under half of [max_cells], or when a
+   combining mark after the separator would be parted from it. *)
+let separator_cut ~max_cells row =
+  let length = String.length row in
+  let rec last index =
+    if index < 0 then None
+    else if String.contains word_separators row.[index] then Some (index + 1)
+    else last (index - 1)
+  in
+  match last (length - 1) with
+  | None -> None
+  | Some stop ->
+      let on_boundary =
+        stop >= length
+        || printable_ascii_range row stop (stop + 1)
+        || List.mem stop (input_boundaries row)
+      in
+      if on_boundary
+         && display_width (String.sub row 0 stop) * least_fill_divisor >= max_cells
+      then Some stop
+      else None
+
+(* The rows a word wider than [max_cells] takes. A name still has parts, and a
+   row that stops after one reads as the start of the same name:
+   [keeper_identity_drift:configured_keeper_without_runtime_meta] in 54 cells
+   leaves [keeper_identity_drift:configured_keeper_without_] and
+   [runtime_meta], where a cut at the width leaves [...without_runtim] and
+   [e_meta]. Each row ends after the last separator that fits, and a stretch
+   with none is cut at the width as {!split_cells} does. Text holding an escape
+   is cut at the width: the escape's own bytes hold separators. The rows
+   concatenate to [word]. *)
+let split_word ~max_cells word =
+  if String.contains word '\x1B' then split_cells ~max_cells word
+  else begin
+    (* [buffer] is the text not yet in a row. The chunks of the word arrive one
+       at a time, so a long word costs one pass and not a pass for every row. *)
+    let rec drain rows buffer =
+      if display_width buffer <= max_cells then rows, buffer
+      else
+        match split_cells ~max_cells buffer with
+        | [] | "" :: _ -> rows, buffer
+        | row :: _ ->
+            let rest =
+              String.sub buffer (String.length row)
+                (String.length buffer - String.length row)
+            in
+            (match separator_cut ~max_cells row with
+             | Some stop ->
+                 drain (String.sub row 0 stop :: rows)
+                   (String.sub row stop (String.length row - stop) ^ rest)
+             | None -> drain (row :: rows) rest)
+    in
+    let rec feed rows buffer = function
+      | [] -> List.rev (if String.equal buffer "" then rows else buffer :: rows)
+      | chunk :: chunks ->
+          let rows, buffer = drain rows (buffer ^ chunk) in
+          feed rows buffer chunks
+    in
+    feed [] "" (split_cells ~max_cells word)
+  end
+
 (* A row is built by adding each word's own width to the row so far. That
    holds while no escape is left open across the join: an escape missing its
    final byte swallows the space after it, so the row and its parts disagree
@@ -1263,7 +1333,7 @@ let wrap_words_internal ?on_row ~max_cells text =
         end
         else if Buffer.length current > 0 then loop (take_row () :: rows) words
         else
-          let chunks = split_cells ~max_cells word in
+          let chunks = split_word ~max_cells word in
           (match List.rev chunks with
            | [] -> source_byte:= !source_byte + String.length word + 1; loop rows rest
            | last :: reversed_completed ->

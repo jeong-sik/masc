@@ -270,6 +270,33 @@ let test_redact_json_strings_masks_fragment_subtree () =
     expected
     (Yojson.Safe.to_string valued)
 
+(* The rewrite of string values is the one thing the two JSON entry points do
+   not share. It runs on string values outside masked subtrees, never on
+   keys. *)
+let test_redact_json_with_rewrites_only_unmasked_string_values () =
+  let seen = ref [] in
+  let on_string value =
+    seen := value :: !seen;
+    "<" ^ value ^ ">"
+  in
+  let json =
+    `Assoc
+      [ ("note", `String "plain")
+      ; ("password", `String "hunter2")
+      ; ("client_secret_v2", `Assoc [ ("value", `String "opaque") ])
+      ; ("items", `List [ `String "listed"; `Int 3 ])
+      ]
+  in
+  let redacted = Secret_patterns.redact_json_with ~on_string json in
+  Alcotest.(check string)
+    "string values rewritten outside masked subtrees"
+    {|{"note":"<plain>","password":"[REDACTED]","client_secret_v2":{"[REDACTED]":"[REDACTED]"},"items":["<listed>",3]}|}
+    (Yojson.Safe.to_string redacted);
+  Alcotest.(check (list string))
+    "rewrite saw only those values"
+    [ "listed"; "plain" ]
+    (List.sort String.compare !seen)
+
 let redacted_json_paths input =
   [ "shared log redactor", Some (Observability_redact.redact_json_strings input)
   ; "structural redactor", Some (Observability_redact.redact_json_value input)
@@ -707,6 +734,8 @@ let () =
             `Quick test_credential_reference_values_still_mask_secrets;
           Alcotest.test_case "redact_json_strings masks fragment subtree"
             `Quick test_redact_json_strings_masks_fragment_subtree;
+          Alcotest.test_case "redact_json_with rewrites only unmasked string values"
+            `Quick test_redact_json_with_rewrites_only_unmasked_string_values;
           Alcotest.test_case "collision metadata survives the Auth log sink"
             `Quick test_collision_metadata_survives_actual_log_sink;
           Alcotest.test_case "ordinary map keys mask credential patterns"

@@ -10,9 +10,6 @@
 
 let default_max_len = 200
 
-let is_sensitive_key = Secret_patterns.is_sensitive_key
-let key_suggests_secret = Secret_patterns.key_suggests_secret
-
 let redact_patterns = Secret_patterns.redact_text
 
 let redact_text (s : string) : string =
@@ -67,34 +64,11 @@ let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
 
 let redact_json_strings = Secret_patterns.redact_json_strings
 
-(* Same sensitive-parent rule as [Secret_patterns] for the fragment fallback:
-   under a fragment-matching key every string in the subtree is masked, so a
-   composite like [{"client_secret_v2":{"value":"opaque"}}] cannot smuggle
-   its leaves past the key-name match. Object names are strings too: an opaque
-   credential used as a map key is masked without dropping its member. *)
-let rec mask_fragment_subtree = function
-  | `String _ -> `String "[REDACTED]"
-  | `Assoc fields ->
-      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
-  | `List items -> `List (List.map mask_fragment_subtree items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
-
-let rec redact_json_value = function
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-             let visible_key = redact_patterns key in
-             if is_sensitive_key key
-             then (visible_key, `String "[REDACTED]")
-             else if key_suggests_secret key
-             then (visible_key, mask_fragment_subtree value)
-             else (visible_key, redact_json_value value))
-           fields)
-  | `List items -> `List (List.map redact_json_value items)
-  | `String text -> `String (map_marker_preview redact_patterns text)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json ->
-      json
+(* The structural pass is [Secret_patterns.redact_json_with], the same one
+   [redact_json_strings] runs. String values additionally keep the structural
+   fields of blob markers (see [map_marker_preview]). *)
+let redact_json_value =
+  Secret_patterns.redact_json_with ~on_string:(map_marker_preview redact_patterns)
 
 let preview_of_json ?(max_len = default_max_len) (json : Yojson.Safe.t) =
   Yojson.Safe.to_string (redact_json_value json) |> redact_preview ~max_len

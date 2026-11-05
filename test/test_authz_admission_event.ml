@@ -180,7 +180,8 @@ let a_namespace_has_no_capital_letter () =
   Alcotest.(check (option int)) "lower case" None (index_of "ns-alice");
   Alcotest.(check (option int)) "a capital first" (Some 0) (index_of "Ns-alice");
   Alcotest.(check (option int)) "a capital later" (Some 3) (index_of "ns-Alice");
-  Alcotest.(check (option int)) "a byte outside every id comes first" (Some 2) (index_of "ns Alice")
+  Alcotest.(check (option int)) "a space before a capital" (Some 2) (index_of "ns Alice");
+  Alcotest.(check (option int)) "a capital before a space" (Some 0) (index_of "Ns alice")
 ;;
 
 (* ---- the admission in a record ---- *)

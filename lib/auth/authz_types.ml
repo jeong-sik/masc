@@ -21,13 +21,17 @@ module Account_home_namespace = struct
       (String.to_seqi s)
   ;;
 
+  (* The checks keep the order of [Authz_id]: emptiness and length first, then
+     the first byte outside this alphabet, which is the earlier of the two
+     scans. A path segment has no capital letter. *)
   let of_string s =
-    match Id.of_string s with
-    | Error error -> Error error
-    | Ok id ->
-      (match first_capital s with
-       | Some index -> Error (Authz_id.Invalid_byte { index })
-       | None -> Ok id)
+    match Id.of_string s, first_capital s with
+    | Ok id, None -> Ok id
+    | Ok (_ : Id.t), Some index -> Error (Authz_id.Invalid_byte { index })
+    | Error (Authz_id.Invalid_byte { index }), Some capital ->
+      Error (Authz_id.Invalid_byte { index = Int.min index capital })
+    | ( Error ((Authz_id.Empty | Authz_id.Too_long | Authz_id.Path_segment | Authz_id.Invalid_byte _) as error)
+      , (None | Some _) ) -> Error error
   ;;
 end
 

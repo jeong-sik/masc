@@ -2754,6 +2754,38 @@ let test_tool_http_error_envelope_needs_status_error_and_a_message () =
     ; ["status", `String "error"; "message", `String "   "]
     ; ["status", `String "error"; "code", `Int 7] ]
 
+(* The message of a failed delegated tool is that tool's own envelope as text.
+   One such layer is unwrapped wherever the message sits: under the [ok:false]
+   wrapper, in an envelope that is the whole body, and in a body that has both. *)
+let test_tool_http_error_unwraps_a_nested_envelope_in_every_position () =
+  let inner = Yojson.Safe.to_string (`Assoc ["status", `String "error";
+    "error_code", `String "validation_error"; "message", `String "bad"]) in
+  let decode fields =
+    match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:400
+            ~body:(Yojson.Safe.to_string (`Assoc fields)) with
+    | Error message -> message
+    | Ok _ -> Alcotest.fail "HTTP 400 cannot be a successful response" in
+  Alcotest.(check string) "under ok:false" "HTTP 400: bad"
+    (decode ["ok", `Bool false; "message", `String inner]);
+  Alcotest.(check string) "whole body" "HTTP 400: bad"
+    (decode ["status", `String "error"; "message", `String inner]);
+  Alcotest.(check string) "both markers" "HTTP 400: bad"
+    (decode ["ok", `Bool false; "status", `String "error"; "message", `String inner]);
+  Alcotest.(check string) "a message that is not an envelope stays as written"
+    "HTTP 400: disk full"
+    (decode ["status", `String "error"; "message", `String "disk full"])
+
+(* The ["error"] string is the sentence the other shapes were added beside, so it
+   keeps winning when a body carries both. *)
+let test_json_error_field_wins_over_the_tool_envelope () =
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:409
+      ~body:(Yojson.Safe.to_string (`Assoc ["error", `String "first";
+        "status", `String "error"; "message", `String "second"]))
+  with
+  | Error message -> Alcotest.(check string) "error wins" "HTTP 409: first" message
+  | Ok _ -> Alcotest.fail "HTTP 409 cannot be a successful response"
+
 (* Raw bodies are bounded; their metadata does not claim a JSON parse result. *)
 let test_decode_json_response_body_bounded_body_names_its_size () =
   let body = String.make 900 'x' in
@@ -14791,6 +14823,10 @@ let () =
           test_tool_http_error_as_whole_body_shows_its_sentence;
         Alcotest.test_case "tool refusal needs status error and a message" `Quick
           test_tool_http_error_envelope_needs_status_error_and_a_message;
+        Alcotest.test_case "nested tool refusal is unwrapped in every position" `Quick
+          test_tool_http_error_unwraps_a_nested_envelope_in_every_position;
+        Alcotest.test_case "error field wins over the tool envelope" `Quick
+          test_json_error_field_wins_over_the_tool_envelope;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
         Alcotest.test_case "HTTP fallback and terminal controls" `Quick

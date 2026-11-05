@@ -2240,7 +2240,10 @@ val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
 val http_status_error : status_code:int -> body:string -> string
 (** A non-2xx answer as one terminal-safe line: [HTTP <status>: ] and then the
-    body's ["error"] sentence when it has one, otherwise the body's head. *)
+    server's own sentence when the body carries one -- its ["error"] string, or
+    the ["message"] of the tool error envelope [{"status":"error",...}], whether
+    that envelope is the whole body or the message of an [{"ok":false,...}]
+    wrapper -- otherwise the body's head. *)
 (** Keep the failure reason visible before the target URL on narrow rows. *)
 val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :

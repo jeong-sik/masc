@@ -105,9 +105,9 @@ type storage =
 
 | 경우 | 지금 막는 것 | 남는 것 |
 | --- | --- | --- |
-| 같은 프로세스에서 턴을 중단했다 | `with_spawned_client` 는 `Eio.Process.spawn ~sw` 로 띄운다. switch 가 끝나면 child 에 `SIGKILL` 이 간다(`eio/process.mli`). 세션 기록은 `run_turn` 이 돌아온 뒤에야 `Turn_inflight` 를 벗어난다 | 없다 |
+| 같은 프로세스에서 턴을 중단했다 | Keeper 턴은 `Posix_spawn_process_mgr.foreground_mgr` 로 Muse 를 띄운다. switch 가 끝나면 이 mgr 이 프로세스 그룹을 정리하고 leader 를 reap 한다(`posix_spawn_process_mgr.mli`). 세션 기록은 `run_turn` 이 돌아온 뒤에야 `Turn_inflight` 를 벗어난다 | 없다 |
 | 같은 Keeper 의 두 번째 claim | `plan_claim` 이 `Start`·`Active`·`Turn_inflight` 에서 거절한다 | 없다 |
-| 서버가 죽어 Muse child 가 남았다 | 없다. 부모가 죽으면 `SIGKILL` 이 가지 않는다 | 남은 child 가 새 root 에 경로로 파일을 쓸 수 있다 |
+| 서버가 죽어 Muse child 가 남았다 | 없다. 부모가 죽으면 정리하는 쪽이 없다 | 남은 child 가 새 root 에 경로로 파일을 쓸 수 있다 |
 
 - 세 번째 경우에 남은 child 가 쓰는 것은 버린 세션이다. `session-index.db` 는 SQLite 라 여러 프로세스가 같이 써도 파일이 깨지지 않는다. 새 세션의 기록은 그대로고, 버린 세션 하나가 다음 Start 까지 남는다.
 - 그래서 따로 진행 중 호출 수를 세는 장치를 더하지 않는다. 같은 Keeper 의 겹침은 세션 기록의 phase 가 이미 막는다.

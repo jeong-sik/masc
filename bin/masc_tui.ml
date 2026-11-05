@@ -33519,21 +33519,9 @@ Use relative paths for resources already held in the package. -->
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
       in
-      (* The cheat sheet's keys. While the filter is being typed every
-         printable key is text, so [h], [j], [g] and [?] reach the query and
-         the sheet's own keys wait for Enter or Esc. *)
+      (* The cheat sheet's keys. [Masc_tui_help.step] says what a key does in
+         the filter's current state; this applies it to the sheet. *)
       let handle_help_key k =
-           let close_help () =
-             state.help_open <- false;
-             state.help_scroll <- 0;
-             state.help_filter <- Help_filter_off
-           in
-           (* A different query is a different sheet; the reader looks for the
-              match at its top. *)
-           let filter_with query =
-             state.help_filter <- Help_filter_typing query;
-             state.help_scroll <- 0
-           in
            let scroll_help () =
              (* Bounded against the sheet the frame draws, which folds to
                 two columns on a wide terminal and so holds half the rows
@@ -33559,48 +33547,25 @@ Use relative paths for resources already held in the package. -->
              in
              state.help_scroll <- repeat step state.help_scroll
            in
-           (match state.help_filter with
-            | Help_filter_typing query ->
-                (match k with
-                 | "esc" ->
-                     state.help_filter <- Help_filter_off;
-                     state.help_scroll <- 0
-                 | "\r" | "\n" ->
-                     state.help_filter <-
-                       (if String.equal query "" then Help_filter_off
-                        else Help_filter_kept query)
-                 | "\127" | "\b" ->
-                     filter_with (Masc_tui_message_layout.drop_last_utf8_scalar query)
-                 | "down" | "up" | "pageup" | "pagedown" -> scroll_help ()
-                 | s
-                   when (String.length s = 1 && Char.code s.[0] >= 32)
-                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                     (* The sheet's keys and nearly all of its wording are
-                        English. A Hangul key is read back as the letters the
-                        operator pressed, a composed syllable as all of them,
-                        so Korean mode types the same query English mode
-                        does. *)
-                     filter_with (query ^ Masc_tui_key_ime.latin_text s)
-                 | _ -> ())
-            | Help_filter_kept _ when String.equal k "esc" ->
-                (* The first Esc puts the whole sheet back; the next closes it. *)
-                state.help_filter <- Help_filter_off;
-                state.help_scroll <- 0
-            | Help_filter_off | Help_filter_kept _ ->
-                (match k with
-                 | "/" -> state.help_filter <- Help_filter_typing (help_filter_query state.help_filter)
-                 | "?" | "esc" -> close_help ()
-                 | "h" ->
-                     (* Session toggle; the persistent form is [tui].hints_visible in
-                        runtime.toml, named on the help sheet itself. *)
-                     state.hints_visible <- not state.hints_visible;
-                     note_session_key state Masc.Tui_preference.Key.Hints_visible
-                 | "j" | "down" | "k" | "up" | "pageup" | "pagedown" -> scroll_help ()
-                 | "g" -> state.help_scroll <- 0
-                 | "G" ->
-                     let count, height = Masc_tui_render.help_viewport state in
-                     state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
-                 | _ -> ()))
+           (match Masc_tui_help.step state.help_filter ~key:k with
+            | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
+                state.help_filter <- filter;
+                if scroll_to_top then state.help_scroll <- 0
+            | Masc_tui_help.Close ->
+                state.help_open <- false;
+                state.help_scroll <- 0;
+                state.help_filter <- Masc_tui_help.Off
+            | Masc_tui_help.Toggle_hints ->
+                (* Session toggle; the persistent form is [tui].hints_visible in
+                   runtime.toml, named on the help sheet itself. *)
+                state.hints_visible <- not state.hints_visible;
+                note_session_key state Masc.Tui_preference.Key.Hints_visible
+            | Masc_tui_help.Scroll -> scroll_help ()
+            | Masc_tui_help.Scroll_to_top -> state.help_scroll <- 0
+            | Masc_tui_help.Scroll_to_end ->
+                let count, height = Masc_tui_render.help_viewport state in
+                state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+            | Masc_tui_help.Ignore -> ())
       in
       let toggle_roster_chrome () =
            if state.keeper_navigation_open then begin

@@ -3896,7 +3896,7 @@ let help_entry_rows ~width ~lead ~lead_cells ~column text =
 let help_lines ~width (state : state) =
   (* What the reader typed after [/]. An empty query matches everything, so
      the sheet is whole until something is typed. *)
-  let query = help_filter_query state.help_filter in
+  let query = Masc_tui_help.filter_query state.help_filter in
   let matches_query text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
   (* A section's name without the mark that says it is the reader's own. *)
   let heading title =

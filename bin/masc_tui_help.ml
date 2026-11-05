@@ -68,3 +68,56 @@ let filter_sections ~query ~heading sections =
           | [] -> None
           | kept -> Some (title, kept))
       sections
+
+type filter =
+  | Off
+  | Typing of string
+  | Kept of string
+
+let filter_query = function
+  | Off -> ""
+  | Typing query | Kept query -> query
+
+type step =
+  | Set_filter of { filter : filter; scroll_to_top : bool }
+  | Close
+  | Toggle_hints
+  | Scroll
+  | Scroll_to_top
+  | Scroll_to_end
+  | Ignore
+
+(* A key name that stands for text: one printable ASCII character, or a
+   character outside ASCII, whose name leads with a byte from 0x80 up. *)
+let names_text key =
+  (String.length key = 1 && Char.code key.[0] >= 32)
+  || (String.length key > 1 && Char.code key.[0] >= 0x80)
+
+let retyped query = Set_filter { filter = Typing query; scroll_to_top = true }
+
+let step filter ~key =
+  match filter with
+  | Typing query -> (
+      match key with
+      | "esc" -> Set_filter { filter = Off; scroll_to_top = true }
+      | "\r" | "\n" ->
+          let settled = if String.equal query "" then Off else Kept query in
+          Set_filter { filter = settled; scroll_to_top = false }
+      | "\127" | "\b" ->
+          retyped (Masc_tui_message_layout.drop_last_utf8_scalar query)
+      | "down" | "up" | "pageup" | "pagedown" -> Scroll
+      | text when names_text text ->
+          retyped (query ^ Masc_tui_key_ime.latin_text text)
+      | _ -> Ignore)
+  | Kept _ when String.equal key "esc" ->
+      Set_filter { filter = Off; scroll_to_top = true }
+  | Off | Kept _ -> (
+      match key with
+      | "/" ->
+          Set_filter { filter = Typing (filter_query filter); scroll_to_top = false }
+      | "?" | "esc" -> Close
+      | "h" -> Toggle_hints
+      | "j" | "down" | "k" | "up" | "pageup" | "pagedown" -> Scroll
+      | "g" -> Scroll_to_top
+      | "G" -> Scroll_to_end
+      | _ -> Ignore)

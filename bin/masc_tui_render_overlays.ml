@@ -834,15 +834,15 @@ let render_keeper_deletions (state : state) =
 let help_title (state : state) ~cols =
   let name = screen_title " MASC Cheat Sheet" in
   match state.help_filter with
-  | Help_filter_off ->
+  | Masc_tui_help.Off ->
       name ^ "  " ^ Ansi.dim ^ "hints "
       ^ (if state.hints_visible then "on" else "off")
       ^ Ansi.reset
-  | (Help_filter_typing query | Help_filter_kept query) as filter ->
+  | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
       let caret =
         match filter with
-        | Help_filter_typing _ -> "\xe2\x96\x8c"
-        | Help_filter_off | Help_filter_kept _ -> ""
+        | Masc_tui_help.Typing _ -> "\xe2\x96\x8c"
+        | Masc_tui_help.Off | Masc_tui_help.Kept _ -> ""
       in
       let lead = name ^ "  /" in
       let query_cells =
@@ -857,10 +857,10 @@ let help_title (state : state) ~cols =
 (* The keys the footer names for the sheet in its current state. *)
 let help_hints (state : state) =
   match state.help_filter with
-  | Help_filter_off ->
+  | Masc_tui_help.Off ->
       "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
-  | Help_filter_typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
-  | Help_filter_kept _ ->
+  | Masc_tui_help.Typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
+  | Masc_tui_help.Kept _ ->
       "/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows

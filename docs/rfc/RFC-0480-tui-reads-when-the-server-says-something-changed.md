@@ -184,7 +184,7 @@ TUI 가 켜진 뒤 처음 연결은 `Fresh` 라서, 시작할 때의 읽기와 �
 | L1b | §3.1 의 읽을 빚과 실패 재시도. 알림 뒤 읽기가 실패하면 화면 상태로 남고 백오프로 다시 읽는다 | 실패 응답 뒤 다시 읽는지, 성공 뒤 멈추는지 |
 | L2-pre | 채팅 기록의 쓰기 알림을 저장 함수로 옮긴다. memory journal 쓰기(`Keeper_memory_os_current.append_journal_line_strict`)는 알림이 없고, 사용자 행(`Keeper_chat_store.append_user_message_once`)도 알림 없이 저장된다. `keeper_chat_appended` 는 호출부 21곳에서 따로 나간다 | 쓰기 종류마다 알림이 나가는지 |
 | L2 | 채팅 history 의 2초 읽기를 지운다. 채팅 추가 알림은 L1b 의 읽을 빚으로 읽고, 다시 읽기(`Revalidate`)는 열린 채팅에 빚을 남긴다. 빚으로 읽을 때도 도구 상세를 함께 읽는다. `launch_tick_side_reads` 는 2초 tick 만이 아니라 모든 `start_http_refresh` 가 부르므로, 거기서 빼면 다시 읽기 경로도 빠진다. L2-pre 뒤에만 들어간다 | 피드가 다시 열린 뒤 열린 채팅이 읽는지 |
-| L2b | Fusion. 실행 저장소에 쓰는 세 곳(`register_running`, `mark_progress`, `mark_completed`)은 이미 `fusion_run_status` 를 보낸다. 상세 응답의 `keeper_decisions` 는 TUI 와 웹 어디에서도 그리지 않아서 알림이 필요 없다. TUI 는 Fusion 읽기에 실패 재시도를 쓰고, Fusion 의 2초 읽기를 지운다 | 실패 뒤 다시 읽는지 |
+| L2b | Fusion. 실행 저장소에 쓰는 세 곳(`register_running`, `mark_progress`, `mark_completed`)은 이미 `fusion_run_status` 를 보낸다. TUI 는 Fusion 읽기에 실패 재시도를 쓰고, Fusion 의 2초 읽기를 지운다 | 실패 뒤 다시 읽는지 |
 | L3 | 서버: composite 캐시를 알림 전에 지운다. TUI: `keeper_composite_changed` → Keeper 상세 Info·Secrets 는 그 키퍼만 `/api/v1/keepers/<k>/composite` 로 읽는다. `keeper_tool_call` → Keeper_calls. 해당 2초 분기를 지운다 | 알림 하나 → 요청 하나(이름이 맞을 때만), 측정(§7) |
 | L4 | 게시판. 서버는 `board_write_hook` 만 타던 쓰기(수정, 스레드 변경, 고정, 닫기, 다시 열기, 삭제)도 알린다. TUI 는 `notifications/board` 하나만 읽고 목록과 열린 글을 다시 읽는다. 2초 분기를 지운다 | 쓰기 종류마다 알림이 나가는지 |
 | L5 | 승인·gate 알림 → gate, tool-approvals, tool modes. `operator_snapshot` → operator 요약(승인 수). 스냅샷 문자열 비교를 생성자로 바꾼다(§3.2) | `approval:*` 가 gate 저장소의 모든 쓰기를 덮는지(아직 확인하지 못했다) |

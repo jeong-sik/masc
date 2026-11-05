@@ -1319,6 +1319,9 @@ class MainTest(unittest.TestCase):
                     with mock.patch.object(waits, "LANE_TIME_SCRIPT", path):
                         message = self.fails(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
                     self.assertIn(f"error: cannot load the turn reader from {path}", message)
+                    if name == "not_python.txt":
+                        # No import spec is built for this suffix: the refusal is the ImportError, not a lookup on a missing spec.
+                        self.assertIn(f"{path} is not a Python file", message)
                     self.assertNotIn(waits.LANE_TIME_MODULE, sys.modules)
 
 

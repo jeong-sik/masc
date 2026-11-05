@@ -70,7 +70,7 @@ docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-path ~/me \
 호출 시간을 턴 시간 792.17시간으로 나누려면 턴 구간 안의 시간만 써야 해요. 원장의 `Execute` 117.15시간 중 26.16시간(22.3%)이 그 호출을 한 Keeper 자신의 턴 구간 밖이에요. 세 덩어리이고 값은 `docs/evidence/lane-time-2026-11/result-2026-11-01_11-05.json` 의 `turn_time` 에 있어요.
 
 - 20.36시간은 trace 파일이 있는 Keeper 의 `direct` 호출이에요. 그 호출의 턴에는 trace 파일이 없어요(`calls_without_trace_file.keepers_with_a_trace_file.execute_time_s`).
-- 4.36시간은 trace 파일이 하나도 없는 Keeper 의 호출이에요(`calls_without_trace_file.keepers_without_any_trace_file.execute_time_s`). 그런 Keeper 는 2명이고, 그중 `Execute` 를 부른 Keeper 는 1명이에요. 이 스크립트 결과의 `turn_time.execute_of_keepers_without_turn_traces` 가 그 1명(호출 1,593건, 4.36시간)을 세요.
+- 4.36시간은 trace 파일이 하나도 없는 Keeper 의 호출이에요(`calls_without_trace_file.keepers_without_any_trace_file.execute_time_s`). 그런 Keeper 는 2명이고, 그중 `Execute` 를 부른 Keeper 는 1명이에요. 이 폴더의 `result-2026-11-01_11-05.json` 에 있는 `turn_time.execute_of_keepers_without_turn_traces` 가 그 1명(호출 1,593건, 4.36시간)을 세요.
 - 1.44시간은 trace 파일이 있는 턴인데 호출이 턴 구간 밖에 통째로 놓인 `direct` 호출이에요(`traced_calls_outside_turns.execute_time_outside_turns_s`). `Execute` 가 아닌 도구까지 1,168호출이고, 턴 구간 안에 든 초가 있는 호출은 없어요.
 
 앞의 두 덩어리를 더한 24.72시간이 trace 파일이 없는 턴의 호출이에요(`calls_without_trace_file`).

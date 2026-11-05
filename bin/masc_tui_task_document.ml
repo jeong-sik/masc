@@ -33,16 +33,27 @@ let document_palette () : Masc_tui_tool_detail.palette =
   ; reset = Ansi.reset
   }
 
-(* A note that is a JSON document is drawn as the chat draws one, with its
-   keys, strings, numbers and literals in their own colours. Any other note is
-   prose and keeps the one colour. [Document_row] already carries its colour
-   and is safe to draw; [Plain_row] is neither. *)
-type history_row =
-  | Plain_row of string
-  | Document_row of string
+(* A note that is a JSON object or array is drawn as the chat draws one, with
+   its keys, strings, numbers and literals in their own colours. Any other
+   note is prose and keeps the one colour. A block is lines drawn together, so
+   a blank line inside a note stays between its neighbours and only the blank
+   lines at the block's edges go. [Document_block] already carries its colour
+   and is safe to draw; [Plain_block] is neither. *)
+type history_block =
+  | Plain_block of string
+  | Document_block of string
 
-let history_rows = function
-        | [] -> [ Plain_row "    (no events in the observed prefix)" ]
+(* The indent of a note under the event that owns it. Every line of the note
+   takes it, not only the first. *)
+let note_indent = "      "
+
+let indented block =
+  String.split_on_char '\n' block
+  |> List.map (fun line -> note_indent ^ line)
+  |> String.concat "\n"
+
+let history_blocks = function
+        | [] -> [ Plain_block "    (no events in the observed prefix)" ]
         | events ->
             let palette = document_palette () in
             List.concat_map
@@ -65,21 +76,15 @@ let history_rows = function
                   | Some origin -> Printf.sprintf " [%s · %s:%d]"
                     (match origin.tho_source with Tui_decode.Task_activity -> "lifecycle" | Tui_decode.Task_audit -> "audit")
                     origin.tho_file origin.tho_offset in
-                Plain_row
+                Plain_block
                   (Printf.sprintf "    %s  %s%s%s%s"
                      (Planning_detail.short_ts event.th_ts)
                      event.th_label transition actor provenance)
                 :: (match event.th_note with
                     | Some note ->
-                        (* Every line takes the note's indent, not only the
-                           first. *)
                         (match Masc_tui_tool_detail.document ~palette note with
-                         | Some document ->
-                             List.map (fun line -> Document_row ("      " ^ line))
-                               (String.split_on_char '\n' document)
-                         | None ->
-                             List.map (fun line -> Plain_row ("      " ^ line))
-                               (Masc_tui_text_block.lines note))
+                         | Some document -> [ Document_block (indented document) ]
+                         | None -> [ Plain_block (indented note) ])
                     | None -> []))
               events
 
@@ -241,10 +246,10 @@ let equal_input a b = match a,b with
 let prepare_input = function
   | History_input (cols,events) ->
       let max_cells = max 1 (framed_inner_width cols) in
-      history_rows events |> List.concat_map (function
-        | Plain_row line -> Masc_tui_text_block.preformatted_rows ~max_cells line
-        | Document_row line ->
-            Masc_tui_text_block.preformatted_styled_rows ~max_cells line)
+      history_blocks events |> List.concat_map (function
+        | Plain_block block -> Masc_tui_text_block.preformatted_rows ~max_cells block
+        | Document_block block ->
+            Masc_tui_text_block.preformatted_styled_rows ~max_cells block)
   | Body_input (cols,goals,task) ->
       let field ?(style = "") label text =
         let prefix="  " ^ label ^ ": " in

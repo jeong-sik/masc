@@ -91,9 +91,20 @@ let block_lines text =
   |> List.map (fun line -> String.concat tab_mark (String.split_on_char '\t' line))
 ;;
 
+(* Yojson reads [NaN], [Infinity], [-Infinity] and a number too large for a
+   float (it reads [1E400] as infinity), but its writer raises on all of them.
+   They are spelled with the words the reader accepts. *)
+let non_finite_word number =
+  if Float.is_nan number then "NaN"
+  else if number > 0. then "Infinity"
+  else "-Infinity"
+
 (* Sanitize each complete Yojson scalar before applying the renderer's style. *)
 let terminal_json json =
-  Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview
+  match json with
+  | `Float number when not (Float.is_finite number) -> non_finite_word number
+  | json ->
+    Yojson.Safe.to_string json |> Masc.Tui_terminal_json.sanitize_canonical_preview
 
 (* One member per line, the way the JSON pretty printer lays it out, with
    two departures a reader wants and a parser would not: a string document

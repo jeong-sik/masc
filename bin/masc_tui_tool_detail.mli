@@ -51,7 +51,11 @@ val document : ?palette:palette -> string -> string option
     object or array, and [None] for anything else: a scalar, a bare word, a
     payload that does not parse. A caller that reads the rest its own way
     asks this instead of {!structured}. Every character of the text is
-    terminal-safe, so the only escapes in it are the palette's. *)
+    terminal-safe, so the only escapes in it are the palette's.
+
+    A number that JSON cannot write ([NaN], [Infinity], [-Infinity], or one
+    too large for a float) is drawn as that word in the number's colour. A
+    JSON object or array always gives [Some]; this does not raise. *)
 
 val structured : ?palette:palette -> string -> string
 (** [structured value] re-serves a whole JSON object or array with one member

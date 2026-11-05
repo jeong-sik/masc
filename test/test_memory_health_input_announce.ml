@@ -212,7 +212,8 @@ let test_each_store_write_tells_the_signal () =
        |> require);
     let write_snapshot path content =
       Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
-        ~sync_file:(fun _ -> failwith "before rename") path content
+        ~sync_file:(fun _ -> failwith "before rename")
+        ~sync_parent:(fun _ -> failwith "after rename") path content
     in
     (match
        Current.For_testing.replace_with_publication_io ~write_snapshot

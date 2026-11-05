@@ -31,11 +31,9 @@ import {
   sendBroadcast,
   broadcastReceiptMessage,
   fetchAgentTimeline,
-  fetchAgentRelations,
   currentDashboardActor,
   type AgentTimelineEvent,
   type AgentTimelineResponse,
-  type AgentRelationsResponse,
 } from '../api'
 import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
@@ -58,7 +56,6 @@ interface ProfileData {
   workspaceActivity: string[]
   taskHistories: TaskHistoryRow[]
   agentTimeline: AgentTimelineResponse | null
-  agentRelations: AgentRelationsResponse | null
 }
 
 const profileResource = createAsyncResource<ProfileData>()
@@ -121,10 +118,9 @@ function loadProfile(name: string): Promise<void> {
     profileLoadedName = name
   }
   return profileResource.load(async () => {
-    const [lines, timeline, relations] = await Promise.all([
+    const [lines, timeline] = await Promise.all([
       fetchWorkspaceMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
-      fetchAgentRelations(name).catch(() => null),
     ])
 
     const activity = lines
@@ -151,7 +147,6 @@ function loadProfile(name: string): Promise<void> {
       workspaceActivity: activity,
       taskHistories: histories,
       agentTimeline: timeline,
-      agentRelations: relations,
     }
   })
 }
@@ -359,47 +354,6 @@ export function AgentProfile({ name }: { name: string }) {
               `)}</div>`}
         <//>
         ` : null}
-
-        ${(() => {
-          const rel = profileData?.agentRelations ?? null
-          if (!rel) return null
-          const collabs = rel.collaborators ?? []
-          const interests = rel.interests ?? []
-          const hasData = collabs.length > 0 || interests.length > 0
-          return html`
-            <${SectionCard} label="관계 (${collabs.length})" class="ff-card rounded-[var(--r-1)]">
-              <${DashboardFeedSourceStrip} meta=${rel} className="mb-2" />
-              ${!hasData ? html`<${EmptyState} message="관계 데이터 없음" compact />` : null}
-              ${collabs.length > 0 ? html`
-                <div class="flex flex-col gap-1">
-                  ${collabs.map(c => html`
-                    <${ActionButton}
-                      key=${c.name}
-                      block
-                      variant="subtle"
-                      size="sm"
-                      class="text-left px-2 py-1.5 hover:bg-[var(--gold-8)]"
-                      ariaLabel=${`${c.name} 에이전트 프로필 열기`}
-                      onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}>
-                      <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
-                      <span class="text-[var(--color-fg-muted)] text-sm tabular-nums">${c.collaborations}회</span>
-                      ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
-                    <//>
-                  `)}
-                </div>
-              ` : null}
-              ${interests.length > 0 ? html`
-                <div class="border-t border-[var(--color-border-default)] pt-2 mt-2">
-                  <span class="ff-interests-label">관심사</span>
-                  <div class="flex flex-wrap gap-1 mt-1.5">
-                    ${interests.slice(0, 12).map(t => html`<span class="bg-[var(--gold-10)] text-[var(--color-fg-secondary)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="bg-[var(--gold-10)] text-[var(--color-fg-secondary)] px-2 py-0.5 rounded-xs text-2xs border border-[var(--gold-15)]">+${interests.length - 12}</span>` : null}
-                  </div>
-                </div>
-              ` : null}
-            <//>
-          `
-        })()}
 
         <${SectionCard} label="타임라인" class="ff-card rounded-[var(--r-1)]">
           <${DashboardFeedSourceStrip} meta=${timeline} className="mb-2" />

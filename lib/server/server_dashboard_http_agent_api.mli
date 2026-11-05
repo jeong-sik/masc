@@ -7,7 +7,6 @@
     - [GET /api/v1/tool-metrics] — aggregate tool metrics
     - [GET /api/v1/tool-metrics/series] — hourly or daily totals of tool calls
     - [GET /api/v1/agent-timeline] — per-agent timeline view
-    - [GET /api/v1/agent-relations] — agent-relation graph
 
     Internal request/response helpers are intentionally hidden — only
     the route registration entry point is exposed. *)

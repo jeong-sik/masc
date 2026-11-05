@@ -1,8 +1,8 @@
-(** Agent API HTTP handlers — activity, tool-metrics, timeline, relations.
+(** Agent API HTTP handlers — activity, tool-metrics, timeline.
 
     Extracted from server_routes_http_routes_dashboard.ml.
     Contains GET handler logic for /api/v1/agent-activity,
-    /api/v1/tool-metrics, /api/v1/agent-timeline, /api/v1/agent-relations. *)
+    /api/v1/tool-metrics, /api/v1/agent-timeline. *)
 
 module Http = Http_server_eio
 
@@ -340,27 +340,5 @@ let add_agent_api_routes router =
                ~include_tasks:true ~include_board:false
                ~include_tool_calls:true
            in
-          Http.Response.json_value ~compress:true ~request:req json reqd
-       )
-
-  (* Agent relations -- deterministic empty feed *)
-  |> Server_route.get Server_route.Public_read "/api/v1/agent-relations" (fun _state req reqd ->
-         let agent_name =
-           match Server_utils.query_param req "agent_name" with
-           | Some n ->
-               let trimmed = String.trim n in
-               if trimmed <> "" then trimmed else ""
-           | None -> ""
-         in
-         if agent_name = "" then
-           Http.Response.json_value ~status:`Bad_request
-             (`Assoc
-                [
-                  ( "error",
-                    `String "agent_name query parameter is required" );
-                ])
-             reqd
-         else
-           let json = Dashboard_agent_relations.json ~agent_name () in
           Http.Response.json_value ~compress:true ~request:req json reqd
        )

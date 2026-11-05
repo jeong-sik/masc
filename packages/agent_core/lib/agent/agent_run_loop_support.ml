@@ -1,21 +1,4 @@
-open Types
-
 let _log = Log.create ~module_name:"agent" ()
-
-let stop_reason_label : Types.stop_reason -> string = function
-  | EndTurn -> "end_turn"
-  | StopToolUse -> "stop_tool_use"
-  | MaxTokens -> "max_tokens"
-  | StopSequence -> "stop_sequence"
-  | Refusal -> "refusal"
-  | ContentFilter -> "content_filter"
-  | RepetitionTruncation -> "repetition_truncation"
-  | PauseTurn -> "pause_turn"
-  | Compaction -> "compaction"
-  | ContextWindowExceeded -> "model_context_window_exceeded"
-  | UnmatchedToolCalls -> "unmatched_tool_calls"
-  | Unknown s -> "unknown:" ^ s
-;;
 
 (* The host's AfterTurn hook owns the INFO record of a completed provider
    turn. The "turn completed" lines below are the agent loop's per-turn timing

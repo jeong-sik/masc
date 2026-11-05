@@ -126,7 +126,7 @@ else `Bad_gateway
 |---|---|---|
 | B4 | server 문자열 분류기 → typed 채널 (channel_gate 의 `keeper_exists` 는 status 전체 디스패치 대신 meta store typed 존재 API 직결) | 라이브 /health·404 경로 스모크 |
 | B5 | 툴 디스패치 단일 판정·단일 계측·typed 검증 (`tool_schema_of_params` 직결, registered_runtime 이중 실행 제거) | 텔레메트리 카디널리티 전후 실측 diff 첨부 |
-| B6 | keeper 존재 검증 1회화 — resolve 가 typed handle 을 운반 | operator_control 포함 → RFC 필수 영역, pr-rfc-check.sh |
+| B6 | keeper 존재 검증 1회화 — resolve 가 typed handle 을 운반 | operator_control 포함 → RFC 필수 영역 |
 
 ### Phase 3 — config/FS 경계
 
@@ -151,7 +151,7 @@ else `Bad_gateway
 3. **계측 변화 명시**: B5 의 span 감소 등 텔레메트리 변화는 전후 실측 diff 를 PR 에 첨부.
 4. **제거한 implicit bridge를 고정하던 테스트는 typed 계약 테스트로 교체**: 단순 삭제하지 않는다. 외부 wire 문자열 자체가 공개 계약인 경우에는 해당 boundary codec 테스트를 유지한다.
 5. **요청 경로 배치(B4-B6)는 머지 후 라이브 재측정**: merged≠booted 3단 분리, /health + keeper 턴 스모크.
-6. **본 RFC 구현 PR 은 RFC 인용 + pr-rfc-check.sh PASS**. counter-as-fix, string 분류기, N-of-M 같은 텍스트 매치만으로 자동 reject 하지 않고, 새 silent fallback 또는 implicit control channel 이 생기는지 데이터 흐름을 리뷰한다. 확인되면 배치를 재설계한다.
+6. **본 RFC 구현 PR 은 이 RFC 를 인용한다**. counter-as-fix, string 분류기, N-of-M 같은 텍스트 매치만으로 자동 reject 하지 않고, 새 silent fallback 또는 implicit control channel 이 생기는지 데이터 흐름을 리뷰한다. 확인되면 배치를 재설계한다.
 
 ## 6. 범위 밖 / 후속
 

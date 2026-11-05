@@ -67,4 +67,3 @@ closeout commit 또는 본문 Implementation summary 가 있는 RFC 만 `Impleme
 - 단일 RFC: `cat docs/rfc/RFC-NNNN-*.md`
 - 키워드 검색: `rg <keyword> docs/rfc/`
 - 색인 표: `python3 scripts/rfc-generate-index.py` (frontmatter 에서 생성, 커밋되지 않음). 최근 활동은 해당 RFC 파일의 `git log`로 확인
-- PR 작성 시 RFC 발견 체크: `bash ~/me/scripts/pr-rfc-check.sh --pr-body /tmp/pr-body.md`

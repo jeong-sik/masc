@@ -109,7 +109,7 @@ Net-new "silent counter + warn + default" emit site that does **not** fit any of
 
 ## 6. Stable behavior guarantee
 
-This RFC introduces **zero** behavior change. No code is touched by RFC-0088 merge. §4 Option A becomes a follow-up PR (Workspace typed reason). §5 is enforced by reviewer convention and by `bash ~/me/scripts/pr-rfc-check.sh`.
+This RFC introduces **zero** behavior change. No code is touched by RFC-0088 merge. §4 Option A becomes a follow-up PR (Workspace typed reason). §5 is enforced by reviewer convention.
 
 ## 7. Drift guards
 
@@ -134,7 +134,6 @@ This RFC introduces **zero** behavior change. No code is touched by RFC-0088 mer
 
 - [x] §3 inventory table reviewed and rows confirmed or contested by maintainer. *(Inventory frozen at 2026-05-15; drift guard in §7 covers ongoing reviewer enforcement.)*
 - [x] §4.3 decision A vs B made; **A chosen, implemented via PR #15519** (sibling module under `lib/workspace/`, not an RFC-0044 amendment — see §4.3 implementation note).
-- [x] §5 merge-reject bar referenced in `~/me/scripts/pr-rfc-check.sh` subsystem-keyword map (`metric_silent_`, `metric_workspace_telemetry_drop` → owning RFC). *(see ~/me PR for pr-rfc-check expansion)*
 - [ ] When multi-account C4 lands, rows 1-3 disposition transitions to "retired" in this RFC (one-line update). *(Tracked separately under multi-account C4; not a blocker for `Active` status — see §9 Q1.)*
 
 With the first three items closed and the fourth scoped out (`§9 Q1` "independent" verdict), this RFC moves from Draft to **Active** as of 2026-05-17.

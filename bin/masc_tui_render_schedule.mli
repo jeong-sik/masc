@@ -294,6 +294,67 @@ val verification_row :
     used to live in two format strings, and printf's width is a floor: a task
     id past fourteen cells pushed every column after it out of line. *)
 
+(** {1 Work / Tasks list columns} *)
+
+type work_task_row_values = {
+  wrow_mark : string;
+  wrow_task : string;
+  wrow_title : string;
+  wrow_status_named : string;
+  wrow_status_short : string;
+  wrow_owner : string;
+  wrow_goal : string;
+  wrow_urgent : string;
+}
+(** One task's readings. The status has two spellings, the state's own name and
+    a short one; the layout picks which one the list draws, so every row uses
+    the same. *)
+
+type work_task_styles = {
+  wstyle_state : string;
+  wstyle_task : string;
+  wstyle_goal : string;
+  wstyle_urgent : string;
+}
+(** The dress each kind of cell wears. [wstyle_state] dresses the mark, the
+    status and the owner, so the three read as one state. *)
+
+type work_task_widths
+
+val work_task_widths :
+  widest_id:int ->
+  widest_status_named:int ->
+  widest_status_short:int ->
+  widest_owner:int ->
+  widest_goal:int ->
+  work_task_widths
+(** The widest reading in each measured column, taken over every row of the
+    list so the columns stay put while the list scrolls. A column is never
+    narrower than its own name and never wider than its cap. *)
+
+val work_task_id_width : work_task_widths -> int
+(** What the id cell may take. A row whose id is wider shows its number or its
+    row coordinate instead, which the caller decides. *)
+
+type work_task_layout
+
+val work_task_layout :
+  inner_width:int -> widths:work_task_widths -> work_task_layout
+(** Keep the mark, the id, the title and the urgent mark. When the title would
+    fall below its floor, fold the goal, then the owner, then the status word.
+    The status word is spelled with the state's own name while that costs the
+    row no column and leaves the title its comfortable width; otherwise it is
+    spelled short. *)
+
+val work_task_header_row : layout:work_task_layout -> string
+
+val work_task_row :
+  styles:work_task_styles ->
+  layout:work_task_layout ->
+  work_task_row_values ->
+  string
+(** One task, on the same columns as {!work_task_header_row}. *)
+
 (** {1 Schedules list columns} *)
 
 type schedule_row_values = {

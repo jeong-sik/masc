@@ -779,12 +779,6 @@ let task_status_icon status =
   | Masc_domain.Todo -> Masc_tui_theme.Glyph.progress_waiting
   | Masc_domain.Cancelled _ -> Masc_tui_theme.Glyph.progress_ended
 
-(** Priority indicator. Empty for everything but the top priority — the glyph
-    owner in [Masc_tui_theme.Glyph] says which ranks speak at all. *)
-let priority_indicator p =
-  let glyph = Masc_tui_theme.Glyph.priority p in
-  if String.equal glyph "" then "" else Theme.bad () ^ glyph ^ Ansi.reset
-
 (** Context ratio tone: healthy capacity recedes; only pressure and danger
     claim an attention colour. All three resolve against the terminal palette. *)
 let ctx_color ratio =

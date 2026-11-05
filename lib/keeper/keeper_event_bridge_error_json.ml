@@ -109,7 +109,7 @@ let input_capacity_reason_to_json = function
       ]
 ;;
 
-let agent_failed_error_summary = function
+let rec agent_failed_error_summary = function
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolEffectFailed _) ->
     "terminal_tool_effect_failed"
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
@@ -124,9 +124,8 @@ let agent_failed_error_summary = function
     Agent_core.Error.to_string (Agent_core.Error.Agent agent_error)
   | Agent_core.Error.Internal_carried _ as error ->
     (match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure error with
-     | Some (Agent_core.Error.TerminalToolEffectFailed _) ->
-       "terminal_tool_effect_failed"
-     | Some _ | None -> Agent_core.Error.to_string error)
+     | Some agent_error -> agent_failed_error_summary (Agent_core.Error.Agent agent_error)
+     | None -> Agent_core.Error.to_string error)
   | ( Agent_core.Error.Api _
     | Agent_core.Error.Provider _
     | Agent_core.Error.Mcp _

@@ -427,16 +427,16 @@ let test_terminal_agent_failure_projection_redacts_detail () =
   check string "carried terminal reason retains call and disposition"
     "terminal_effect_failed:tool_use_id=tool-terminal-safe,effect_disposition=proven_post_effect"
     (Masc.Keeper_agent_error.terminal_reason_code_of_core_error run_error);
-  (match Masc.Keeper_internal_error.classify_masc_internal_error run_error with
+  (match Keeper_internal_error.classify_masc_internal_error run_error with
    | Some
-       (Masc.Keeper_internal_error.Terminal_effect_failed
+       (Keeper_internal_error.Terminal_effect_failed
           { failure_class = Tool_result.Policy_rejection
           ; effect_disposition = Tool_result.Proven_post_effect
           ; detail = Keeper_terminal_effect_detail.Tool_failed { message; _ }
           }) -> check string "carried typed detail" effect_secret message
    | Some other ->
      failf "carried error became %s"
-       (Masc.Keeper_internal_error.kind_of_masc_internal_error other)
+       (Keeper_internal_error.kind_of_masc_internal_error other)
    | None -> fail "carried error lost its typed terminal failure");
   let durability_secret = "terminal-durability-secret-2cc19a31" in
   check_terminal_projection

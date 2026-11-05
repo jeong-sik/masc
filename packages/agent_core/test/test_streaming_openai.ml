@@ -1904,15 +1904,14 @@ let test_responses_stream_uncovered_content_fails_closed () =
     Alcotest.fail "expected uncovered streamed block to fail closed with responses_replay:uncovered_content"
 ;;
 
-(* ── tool-argument fail-closed (canonical accumulator) ───────────────────────
-   The canonical [Complete_stream_acc] finalize path must not silently coerce a
+(* ── tool-argument boundary (canonical accumulator) ─────────────────────────
+   The canonical [Complete_stream_acc] finalize path must not coerce a
    malformed tool-argument buffer to empty arguments. A non-empty buffer that
-   fails to parse is a malformed tool call and surfaces a typed
-   [Stream_parse_failed]; an empty buffer is the legitimate no-arguments case
-   and yields [`Assoc []]. (Agent Core contract S8: no silent permissive default.) *)
-let malformed_tool_args_tag = "malformed_tool_use_arguments"
-
-let test_stream_tool_args_malformed_fails_closed () =
+   fails to parse never becomes a runnable [ToolUse]: the response carries it
+   in [unreadable_tool_uses] with its text. An empty buffer is the legitimate
+   no-arguments case and yields [`Assoc []]. (Agent Core contract S8: no
+   silent permissive default.) *)
+let test_stream_tool_args_malformed_is_not_runnable () =
   let module Acc = Llm_provider.Complete_stream_acc in
   let acc = Acc.create_stream_acc () in
   List.iter
@@ -1928,13 +1927,14 @@ let test_stream_tool_args_malformed_fails_closed () =
     ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
     ];
   match Acc.finalize_stream_acc acc with
-  | Ok _ -> Alcotest.fail "expected Error: malformed tool arguments must fail closed"
-  | Error (Stream_parse_failed { reason; _ }) ->
-    Alcotest.(check bool)
-      "reason identifies malformed tool arguments"
-      true
-      (String.starts_with ~prefix:malformed_tool_args_tag reason)
-  | Error _ -> Alcotest.fail "expected Stream_parse_failed, got a different stream_error"
+  | Error _ -> Alcotest.fail "expected Ok: the response stands without the call"
+  | Ok response ->
+    Alcotest.(check int) "no runnable block" 0 (List.length response.content);
+    (match response.unreadable_tool_uses with
+     | [ { tool_use_id; arguments; _ } ] ->
+       Alcotest.(check string) "call id" "tu_bad" tool_use_id;
+       Alcotest.(check string) "argument text" "not json{" arguments
+     | _ -> Alcotest.fail "expected one unreadable tool use")
 ;;
 
 let test_stream_tool_args_empty_is_no_args () =
@@ -2409,9 +2409,9 @@ let () =
         ] )
     ; ( "tool_args_failclosed"
       , [ test_case
-            "malformed args -> typed Stream_parse_failed"
+            "malformed args -> unreadable, not runnable"
             `Quick
-            test_stream_tool_args_malformed_fails_closed
+            test_stream_tool_args_malformed_is_not_runnable
         ; test_case
             "empty args -> empty object (no-args)"
             `Quick

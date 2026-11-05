@@ -398,37 +398,6 @@ let test_finalize_multi_block_ordered () =
   | _ -> Alcotest.fail "expected 3 text blocks in order"
 ;;
 
-(* ── finalize: tool_use with invalid JSON fails closed ─────────── *)
-
-let test_finalize_tool_use_invalid_json () =
-  let acc = Streaming.create_stream_acc () in
-  Streaming.accumulate_event
-    acc
-    (ContentBlockStart
-       { index = 0
-       ; content_type = "tool_use"
-       ; tool_id = Some "tu_bad"
-       ; tool_name = Some "broken"
-       });
-  Streaming.accumulate_event
-    acc
-    (ContentBlockDelta { index = 0; delta = InputJsonDelta "not valid json{{{" });
-  Streaming.accumulate_event
-    acc
-    (MessageDelta { stop_reason = Some EndTurn; usage = None });
-  match Streaming.finalize_stream_acc acc with
-  | Error (Stream_parse_failed { reason; raw }) ->
-    (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis; structural failures intentionally omit provider payloads. *)
-    check_string "raw preserved" "not valid json{{{" raw;
-    check_bool
-      "malformed tool args"
-      true
-      (String.starts_with ~prefix:"malformed_tool_use_arguments:index:0" reason)
-  | Error err -> fail_unexpected_stream_error err
-  | Ok _ -> Alcotest.fail "expected invalid tool_use JSON to fail closed"
-;;
-
 (* ── finalize: tool_use metadata boundary ───────────────────────── *)
 
 let test_finalize_tool_use_missing_name () =
@@ -977,10 +946,6 @@ let () =
             "multi-block ordered"
             `Quick
             test_finalize_multi_block_ordered
-        ; Alcotest.test_case
-            "tool_use invalid JSON"
-            `Quick
-            test_finalize_tool_use_invalid_json
         ; Alcotest.test_case
             "tool_use missing name"
             `Quick

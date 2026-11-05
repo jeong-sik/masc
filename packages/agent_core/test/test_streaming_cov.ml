@@ -384,35 +384,6 @@ let test_finalize_unknown_content_type () =
   | Ok _ -> Alcotest.fail "expected unknown content type to fail closed"
 ;;
 
-let test_finalize_invalid_tool_json () =
-  let acc = Streaming.create_stream_acc () in
-  Streaming.accumulate_event
-    acc
-    (Types.ContentBlockStart
-       { index = 0
-       ; content_type = "tool_use"
-       ; tool_id = Some "t1"
-       ; tool_name = Some "tool"
-       });
-  Streaming.accumulate_event
-    acc
-    (Types.ContentBlockDelta { index = 0; delta = Types.InputJsonDelta "not json{" });
-  Streaming.accumulate_event
-    acc
-    (Types.MessageDelta { stop_reason = Some Types.EndTurn; usage = None });
-  match Streaming.finalize_stream_acc acc with
-  | Error (Types.Stream_parse_failed { reason; raw }) ->
-    (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis; structural failures intentionally omit provider payloads. *)
-    Alcotest.(check string) "raw preserved" "not json{" raw;
-    Alcotest.(check bool)
-      "malformed tool args"
-      true
-      (String.starts_with ~prefix:"malformed_tool_use_arguments:index:0" reason)
-  | Error err -> fail_unexpected_stream_error err
-  | Ok _ -> Alcotest.fail "expected invalid tool JSON to fail closed"
-;;
-
 let test_finalize_multiple_blocks () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event
@@ -498,7 +469,6 @@ let () =
         ; Alcotest.test_case "with usage" `Quick test_finalize_with_usage
         ; Alcotest.test_case "no usage" `Quick test_finalize_no_usage
         ; Alcotest.test_case "unknown type" `Quick test_finalize_unknown_content_type
-        ; Alcotest.test_case "invalid tool json" `Quick test_finalize_invalid_tool_json
         ; Alcotest.test_case "multiple blocks" `Quick test_finalize_multiple_blocks
         ] )
     ; ( "sse_re_export"

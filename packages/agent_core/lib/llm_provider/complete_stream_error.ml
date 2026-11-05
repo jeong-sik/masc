@@ -728,7 +728,7 @@ let%test "stream incompleteness remains distinct from malformed payload" =
 ;;
 
 let%test "parse failure echoes the offending raw buffer for diagnosis" =
-  let reason = "malformed_tool_use_arguments:index:1:bad" in
+  let reason = "malformed_tool_use:index:1:missing_id" in
   let raw = {|{"location":"Tokyo"}{}|} in
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
@@ -738,7 +738,7 @@ let%test "parse failure echoes the offending raw buffer for diagnosis" =
 ;;
 
 let%test "parse failure raw excerpt is bounded" =
-  let reason = "malformed_tool_use_arguments:index:0:bad" in
+  let reason = "malformed_tool_use:index:0:missing_id" in
   let raw = String.make 1000 'x' in
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
@@ -748,7 +748,7 @@ let%test "parse failure raw excerpt is bounded" =
 ;;
 
 let%test "parse failure redacts authorization values in the echoed raw buffer" =
-  let reason = "malformed_tool_use_arguments:index:0:bad" in
+  let reason = "malformed_tool_use:index:0:missing_id" in
   let raw = {|{"auth":"Bearer opaque-token"}{}|} in
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->

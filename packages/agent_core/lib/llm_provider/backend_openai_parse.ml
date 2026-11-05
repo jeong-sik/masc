@@ -140,35 +140,43 @@ let parse_tool_call_function ~tool_index json =
     Error (Printf.sprintf "malformed_tool_call:index:%d:missing_function" tool_index)
 ;;
 
-let parse_tool_call_arguments ~tool_index raw =
-  match Tool_call_input.parse_object raw with
-  | Ok (input, _dropped) -> Ok input
-  | Error Tool_call_input.Not_object ->
-    Error (Printf.sprintf "malformed_tool_call_arguments:index:%d:not_object" tool_index)
-  | Error (Tool_call_input.Invalid_json message) ->
-    Error (Printf.sprintf "malformed_tool_call_arguments:index:%d:%s" tool_index message)
-;;
-
+(* A call with an id and a name whose argument text is not one JSON object is
+   something the model sent: it leaves [content] for [unreadable_tool_uses],
+   and the rest of the response stands. The text came whole in this body, so
+   there is no stream assembly to report. *)
 let parse_tool_call ~tool_index tc =
   let* id = parse_tool_call_string_field ~tool_index ~field:"id" tc in
   let* fn = parse_tool_call_function ~tool_index tc in
   let* name = parse_tool_call_string_field ~tool_index ~field:"name" fn in
   let* raw_arguments = parse_tool_call_string_field ~tool_index ~field:"arguments" fn in
-  let* input = parse_tool_call_arguments ~tool_index raw_arguments in
-  Ok (ToolUse { id; name; input })
+  match Tool_call_input.parse_object raw_arguments with
+  | Ok (input, _dropped) -> Ok (Either.Left (ToolUse { id; name; input }))
+  | Error arguments_problem ->
+    Ok
+      (Either.Right
+         ({ tool_use_id = id
+          ; tool_name = name
+          ; tool_use_ordinal = tool_index
+          ; arguments = raw_arguments
+          ; arguments_problem
+          ; arguments_assembly = None
+          }
+          : Types.unreadable_tool_use))
 ;;
 
 let parse_tool_calls_field = function
-  | `Null -> Ok []
+  | `Null -> Ok ([], [])
   | `List calls ->
-    let rec loop acc index = function
-      | [] -> Ok (List.rev acc)
+    let rec loop readable unreadable index = function
+      | [] -> Ok (List.rev readable, List.rev unreadable)
       | tc :: rest ->
         (match parse_tool_call ~tool_index:index tc with
-         | Ok tool_call -> loop (tool_call :: acc) (index + 1) rest
+         | Ok (Either.Left tool_call) ->
+           loop (tool_call :: readable) unreadable (index + 1) rest
+         | Ok (Either.Right call) -> loop readable (call :: unreadable) (index + 1) rest
          | Error _ as error -> error)
     in
-    loop [] 0 calls
+    loop [] [] 0 calls
   | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
     Error "malformed_tool_calls:not_list"
 ;;
@@ -393,7 +401,7 @@ let parse_openai_response_result_json_raw
       |> Result.map_error (fun () -> unreadable_response "malformed_openai_response:refusal_not_string")
     in
     let text_content = text_content_of_openai_content (msg |> member "content") in
-    let* tool_blocks =
+    let* tool_blocks, unreadable_tool_uses =
       parse_tool_calls_field (msg |> member "tool_calls")
       |> Result.map_error unreadable_response
     in
@@ -443,8 +451,14 @@ let parse_openai_response_result_json_raw
          here and in the streaming chunk handler with divergent guards). *)
       Stop_reason_wire.of_finish
         (Stop_reason_wire.wire_finish_of_string finish_reason)
-        ~has_tool_blocks:(tool_blocks <> [])
+        ~has_tool_blocks:(tool_blocks <> [] || unreadable_tool_uses <> [])
       |> Stop_reason_wire.with_refusal ~has_refusal
+    in
+    (* A call the length limit cut off is unfinished, not unreadable: telling
+       the model its arguments were not one JSON object would be false, so it
+       is dropped. The stop reason still says the response was cut. *)
+    let unreadable_tool_uses =
+      if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in
     let model = Cli_common_json.member_str "model" json in
     let delta_usage = delta_usage_of_openai_json json in
@@ -458,7 +472,7 @@ let parse_openai_response_result_json_raw
     Ok
       { id = Cli_common_json.member_str "id" json
       ; model
-      ; unreadable_tool_uses = []
+      ; unreadable_tool_uses
       ; stop_reason
       ; content
       ; usage = usage_of_openai_json json

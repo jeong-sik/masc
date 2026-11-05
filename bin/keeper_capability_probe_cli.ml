@@ -149,6 +149,13 @@ let invocation_json (invocation : Probe.invocation) =
       ; "invoked", `List (List.map (fun t -> `String t) invoked)
       ; "elapsed_s", `Float elapsed_s
       ]
+  | Probe.Tool_arguments_unreadable { tool; problem; elapsed_s } ->
+    `Assoc
+      [ "kind", `String "tool_arguments_unreadable"
+      ; "tool", `String tool
+      ; "problem", Probe.arguments_problem_json problem
+      ; "elapsed_s", `Float elapsed_s
+      ]
   | Probe.Replied_no_tool { reply_bytes; elapsed_s } ->
     `Assoc
       [ "kind", `String "replied_no_tool"

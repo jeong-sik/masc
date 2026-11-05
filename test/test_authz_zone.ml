@@ -320,6 +320,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Admission_unreadable _ -> "Admission_unreadable"
   | Authz_state.Admission _ -> "Admission"
   | Authz_state.Revocation_pending _ -> "Revocation_pending"
+  | Authz_state.Admin_assignment_unreadable _ -> "Admin_assignment_unreadable"
+  | Authz_state.Admin_assignment _ -> "Admin_assignment"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
 ;;

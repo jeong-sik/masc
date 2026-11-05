@@ -44,7 +44,7 @@ type refusal =
   | Already_revoked of Invite_id.t
   | Already_consumed of Invite_id.t
   | Local_operator_invites_only_admins
-  | Authenticated_author_not_read of Principal.t
+  | Author_is_not_an_admin of Principal.t
   | Not_an_invite_author of Author.t
 
 let author_label : Author.t -> string = function
@@ -67,9 +67,9 @@ let refusal_to_string = function
   | Already_consumed id ->
     Printf.sprintf "the invitation %s was spent by an admission" (Invite_id.to_string id)
   | Local_operator_invites_only_admins -> "the local operator invites only Admins"
-  | Authenticated_author_not_read principal ->
+  | Author_is_not_an_admin principal ->
     Printf.sprintf
-      "no layer of this server reads whether the principal %s may write invitations"
+      "the principal %s is not an Admin, and only an Admin writes invitations"
       (Principal.to_string principal)
   | Not_an_invite_author author -> author_label author ^ " does not write invitations"
 ;;
@@ -134,17 +134,20 @@ let consume t invite_id ~user_id ~at_ms =
 ;;
 
 (* The author is matched before the event, so a branch says what each author
-   may write, and the layer that reads the Admins changes only the branch of an
-   authenticated principal. *)
-let apply t ~(author : Author.t) (event : E.t) =
+   may write. *)
+let apply t ~(author : Author.t) ~is_admin (event : E.t) =
   match author, event with
   | Author.Local_operator, E.Issued { invite_id; token_digest; expires_at_ms; role = E.Admin } ->
     issue t ~invite_id ~token_digest ~expires_at_ms ~role:E.Admin
   | Author.Local_operator, E.Issued { role = E.Member; _ } ->
     Error Local_operator_invites_only_admins
   | Author.Local_operator, E.Revoked { invite_id } -> revoke t ~invite_id
+  | Author.Authenticated (Principal.Human id), E.Issued { invite_id; token_digest; expires_at_ms; role }
+    when is_admin id -> issue t ~invite_id ~token_digest ~expires_at_ms ~role
+  | Author.Authenticated (Principal.Human id), E.Revoked { invite_id } when is_admin id ->
+    revoke t ~invite_id
   | Author.Authenticated principal, (E.Issued _ | E.Revoked _) ->
-    Error (Authenticated_author_not_read principal)
+    Error (Author_is_not_an_admin principal)
   | ( (Author.System_cron | Author.System_maintenance | Author.System_migration)
     , (E.Issued _ | E.Revoked _) ) -> Error (Not_an_invite_author author)
 ;;

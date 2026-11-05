@@ -32,6 +32,7 @@ let invites =
       I.apply
         t
         ~author:Author.Local_operator
+        ~is_admin:(fun _ -> false)
         (E.Issued { invite_id; token_digest = E.Token_digest.of_token token; expires_at_ms; role = E.Admin })
     with
     | Ok t -> t
@@ -174,6 +175,81 @@ let refusals_are_told_apart () =
     (List.length (List.sort_uniq String.compare texts))
 ;;
 
+(* ---- Admin assignments ---- *)
+
+module R = Authz_admin_event
+
+(* alice and bob, both Admins through the two Admin invitations. *)
+let two_admins () =
+  let { P.principals; invites; _ } = alice_in () in
+  let { P.principals; _ } =
+    admitted_ok (admit principals ~invites ~user_id:bob ~identity:(google "222") ~invite_id:second)
+  in
+  principals
+;;
+
+let revoke ?(cause = R.Operational) t ~by user_id =
+  P.revoke_admin t ~author:(as_person by) (R.Revoked { user_id; cause })
+;;
+
+let check_revocation_refused label expected result =
+  match result with
+  | Ok _ -> Alcotest.failf "%s: the revocation was taken" label
+  | Error refusal -> Alcotest.(check string) label expected (P.revocation_refusal_to_string refusal)
+;;
+
+let an_admin_revokes_another () =
+  let t = two_admins () in
+  match revoke ~cause:R.Security_incident t ~by:alice bob with
+  | Error refusal -> Alcotest.failf "refused: %s" (P.revocation_refusal_to_string refusal)
+  | Ok after ->
+    Alcotest.(check bool) "bob is no longer an Admin" false (P.is_admin after bob);
+    Alcotest.(check bool) "alice still is" true (P.is_admin after alice);
+    Alcotest.(check bool) "bob is still a principal" true (Option.is_some (P.find after bob));
+    Alcotest.(check bool) "the state before is as it was" true (P.is_admin t bob);
+    check_revocation_refused
+      "bob revokes alice"
+      "the principal human:bob is not an Admin, and only an Admin revokes an Admin assignment"
+      (revoke after ~by:bob alice);
+    check_revocation_refused "twice" "bob has no Admin assignment" (revoke after ~by:alice bob);
+    check_revocation_refused
+      "the last Admin"
+      "alice is the last Admin, so the assignment stays"
+      (revoke after ~by:alice alice)
+;;
+
+let an_admin_revokes_their_own_while_another_remains () =
+  match revoke (two_admins ()) ~by:alice alice with
+  | Error refusal -> Alcotest.failf "refused: %s" (P.revocation_refusal_to_string refusal)
+  | Ok after ->
+    Alcotest.(check bool) "alice is no longer an Admin" false (P.is_admin after alice);
+    Alcotest.(check bool) "bob still is" true (P.is_admin after bob)
+;;
+
+let who_may_revoke () =
+  let t = two_admins () in
+  List.iter
+    (fun (label, author, expected) ->
+      check_revocation_refused
+        label
+        expected
+        (P.revoke_admin t ~author (R.Revoked { user_id = bob; cause = R.Operational })))
+    [ ( "the local operator"
+      , Author.Local_operator
+      , "the local operator is not an Admin, and only an Admin revokes an Admin assignment" )
+    ; ( "a service"
+      , Author.Authenticated (Principal.Service (get (Service_id.of_string "keeper-1")))
+      , "the principal service:keeper-1 is not an Admin, and only an Admin revokes an Admin assignment" )
+    ; ( "someone who never joined"
+      , as_person (get (User_id.of_string "carol"))
+      , "the principal human:carol is not an Admin, and only an Admin revokes an Admin assignment" )
+    ];
+  check_revocation_refused
+    "someone who is not an Admin"
+    "carol has no Admin assignment"
+    (revoke t ~by:alice (get (User_id.of_string "carol")))
+;;
+
 let () =
   Alcotest.run
     "authz_principal_state"
@@ -183,6 +259,11 @@ let () =
         ; Alcotest.test_case "refused" `Quick what_is_refused
         ; Alcotest.test_case "the order of the checks" `Quick the_order_of_the_checks
         ; Alcotest.test_case "refusals told apart" `Quick refusals_are_told_apart
+        ] )
+    ; ( "admin assignment"
+      , [ Alcotest.test_case "revokes another" `Quick an_admin_revokes_another
+        ; Alcotest.test_case "revokes their own" `Quick an_admin_revokes_their_own_while_another_remains
+        ; Alcotest.test_case "who may revoke" `Quick who_may_revoke
         ] )
     ]
 ;;

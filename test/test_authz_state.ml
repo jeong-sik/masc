@@ -55,7 +55,10 @@ let mode_record event workspace_id =
 
 (* The kinds that no layer reads yet. *)
 let other_kinds =
-  List.filter (fun kind -> kind <> K.Mode_event && kind <> K.Invite && kind <> K.Admission) K.all
+  List.filter
+    (fun kind ->
+      kind <> K.Mode_event && kind <> K.Invite && kind <> K.Admission && kind <> K.Admin_assignment)
+    K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
 
@@ -299,7 +302,7 @@ let test_an_invitation_that_is_refused () =
     "an invitation by an authenticated principal"
     (invite_record ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human user)) ())
     (function
-      | S.Invite (Invites.Authenticated_author_not_read _) -> true
+      | S.Invite (Invites.Author_is_not_an_admin _) -> true
       | _ -> false);
   let unreadable =
     match R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite
@@ -443,6 +446,93 @@ let test_an_admission_that_is_refused () =
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
 
+(* ---- Admin assignments ---- *)
+
+module Admin = Authz_admin_event
+
+let admin_record ~by ~user_id =
+  match Admin.to_body (Admin.Revoked { user_id; cause = Admin.Operational }) with
+  | Error _ -> Alcotest.fail "fixture revocation refused"
+  | Ok body ->
+    (match
+       R.make
+         ~head:R.genesis
+         ~at_ms
+         ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human by))
+         ~kind:K.Admin_assignment
+         ~body
+     with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture revocation record refused")
+;;
+
+(* user and bob, both Admins. *)
+let two_admins () =
+  let state = step_ok (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) in
+  step_ok state (admission_record ~user_id:bob ~identity:(identity_of "222") ~invite:second_invite ())
+;;
+
+let test_an_admin_revokes_an_admin () =
+  match S.apply (two_admins ()) (admin_record ~by:user ~user_id:bob) with
+  | Error refusal -> Alcotest.failf "the revocation was refused: %s" (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.(check (option string))
+      "the role epoch of bob for the store"
+      (Some "revoke of principal:human:user-2")
+      (Option.map Authz_external_store.Change.to_string high_water);
+    Alcotest.(check bool) "bob is no longer an Admin" false (People.is_admin state.S.principals bob);
+    (match S.step state (admin_record ~by:user ~user_id:user) with
+     | Error refusal ->
+       Alcotest.(check string)
+         "the last Admin"
+         "user-1 is the last Admin, so the assignment stays"
+         (S.refusal_to_string refusal)
+     | Ok _ -> Alcotest.fail "the last Admin was revoked")
+;;
+
+let test_an_admin_invites_a_member () =
+  let admitted = step_ok (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) in
+  let member_invite =
+    match
+      I.to_body
+        (I.Issued
+           { invite_id = id_of_string Authz_types.Invite_id.of_string "invite-3"
+           ; token_digest = I.Token_digest.of_token "token-3"
+           ; expires_at_ms = at_ms + 1000
+           ; role = I.Member
+           })
+    with
+    | Error _ -> Alcotest.fail "fixture invite refused"
+    | Ok body ->
+      (match
+         R.make
+           ~head:R.genesis
+           ~at_ms
+           ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human user))
+           ~kind:K.Invite
+           ~body
+       with
+       | Ok record -> record
+       | Error _ -> Alcotest.fail "fixture invite record refused")
+  in
+  (match S.step (invited ()) member_invite with
+   | Error (S.Invite (Invites.Author_is_not_an_admin _)) -> ()
+   | other -> Alcotest.failf "before user is an Admin: %s" (step_label other));
+  let state = step_ok admitted member_invite in
+  match Invites.find state.S.invites (id_of_string Authz_types.Invite_id.of_string "invite-3") with
+  | Some { Invites.status = Invites.Open; role = I.Member; _ } -> ()
+  | Some _ | None -> Alcotest.fail "the Member invitation is not open"
+;;
+
+let test_an_admin_assignment_by_mode () =
+  (match S.step S.empty (admin_record ~by:user ~user_id:bob) with
+   | Error (S.Before_bootstrap K.Admin_assignment) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) (admin_record ~by:user ~user_id:bob) with
+  | Error (S.Accounts_off K.Admin_assignment) -> ()
+  | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
 (* ---- the log of a real bootstrap ---- *)
 
 let rec remove_tree path =
@@ -509,6 +599,11 @@ let () =
       , [ Alcotest.test_case "through an Admin invitation" `Quick
             test_an_admission_through_an_admin_invitation
         ; Alcotest.test_case "refused" `Quick test_an_admission_that_is_refused
+        ] )
+    ; ( "admin assignments"
+      , [ Alcotest.test_case "an Admin revokes an Admin" `Quick test_an_admin_revokes_an_admin
+        ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
+        ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

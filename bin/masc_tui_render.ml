@@ -290,12 +290,11 @@ let render_overview (state : state) home =
            and passive health/history context follows it. Both use only spare
            rows, so opening Home starts with a decision or a place to resume. *)
         let reasons =
-          Masc_tui_overview_cards.plain_reasons
-            ~cells:(framed_inner_width cols - Message_layout.display_width row_indent)
-            ~rows:(budget - essential_rows) operator_actions
+          Masc_tui_overview_cards.plain_reasons ~indent:row_indent
+            ~inner:(framed_inner_width cols) ~rows:(budget - essential_rows)
+            operator_actions
         in
-        let reason_rows = Masc_tui_overview_cards.reasons_height reasons in
-        let spare = budget - essential_rows - reason_rows in
+        let spare = budget - essential_rows - List.length reasons in
         let candle = Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation
           |> List.concat_map (fun line ->
             Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
@@ -310,21 +309,17 @@ let render_overview (state : state) home =
           @ (if quiz = "" then [] else [Some (Theme.recede ()), quiz])
           @ (if candle_fits then candle else []) in
         let shown_readings = List.take spare readings in
-        let draw_context = List.iter (function
+        let draw_rows = List.iter (function
           | None, text -> c.push text
           | Some style, text -> c.push_styled ~style text) in
-        let draw_reasons { Masc_tui_overview_cards.shown; omitted } =
-          match shown with
-          | [] -> ()
-          | _ :: _ ->
-              c.push_styled ~style:Ansi.bold
-                (" " ^ Masc_tui_overview_cards.reasons_title (List.length operator_actions));
-              List.iter (List.iter (fun line -> c.push (row_indent ^ line))) shown;
-              if omitted > 0 then
-                c.push_styled ~style:(Theme.recede ())
-                  (row_indent ^ Masc_tui_card.more_text omitted)
+        (* A blank row sets off each block, as far as the spare rows go. *)
+        let blank_rows_left = ref (spare - List.length shown_readings) in
+        let blank_row () =
+          if !blank_rows_left > 0 then begin
+            decr blank_rows_left;
+            c.push_empty ()
+          end
         in
-        let gaps = spare - List.length shown_readings in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
              (if all_decisions = [] then " No decision is waiting on you."
@@ -335,19 +330,13 @@ let render_overview (state : state) home =
                 else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
                   (first + 1) (first + List.length decisions) (List.length all_decisions));
              List.iter draw_row decisions);
-        if gaps > 0 then c.push_empty ();
+        blank_row ();
         c.push_styled ~style:Ansi.bold " Continue";
         List.iter draw_row continuation;
-        (* A blank row sets off each block that follows, as far as the spare
-           rows go. *)
-        let blank_before_reasons = reason_rows > 0 && gaps > 1 in
-        let blank_before_readings =
-          shown_readings <> [] && gaps > (if blank_before_reasons then 2 else 1)
-        in
-        if blank_before_reasons then c.push_empty ();
-        draw_reasons reasons;
-        if blank_before_readings then c.push_empty ();
-        draw_context shown_readings
+        if reasons <> [] then blank_row ();
+        draw_rows reasons;
+        if shown_readings <> [] then blank_row ();
+        draw_rows shown_readings
       end else begin
         (* Extremely short terminals show destinations around the selected
            identity. j/k reaches every destination; this is a viewport limit,

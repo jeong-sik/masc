@@ -198,71 +198,97 @@ let test_the_title_names_how_many_reasons_there_are () =
          (contains_flat ~needle:(string_of_int count) (Cards.reasons_title count)))
     [ 0; 1; 3; 12 ]
 
-let height_of ~cells reasons ~omitted =
-  Cards.reasons_height
-    { Cards.shown = List.map (Cards.reason_lines ~cells) reasons; omitted }
+let indent = "  "
 
-let lines_in shown =
-  List.fold_left (fun sum lines -> sum + List.length lines) 0 shown
+(* The rows the plain layout is owed for the first [kept] of [given], counted
+   here from the lines of the reasons and not asked of the function under test:
+   a heading, the lines, and a row that says some were left out. *)
+let owed_height ~inner given kept =
+  let cells = inner - Layout.display_width indent in
+  let lines =
+    List.fold_left
+      (fun sum reason -> sum + List.length (Cards.reason_lines ~cells reason))
+      0 (take kept given)
+  in
+  1 + lines + if kept < List.length given then 1 else 0
 
-(* The rows the reasons take are counted here from the lines, not asked of
-   reasons_height: a heading, the lines, and a row that says some were left out. *)
-let test_the_height_is_the_heading_the_lines_and_the_note () =
+(* How many reasons the plain layout owes: the most that fit in [rows] together
+   with their note, none when not even the first does. *)
+let owed_count ~inner ~rows given =
+  let fits kept = owed_height ~inner given kept <= rows in
+  List.fold_left
+    (fun best kept -> if fits kept then kept else best)
+    0
+    (List.init (List.length given) (fun index -> index + 1))
+
+(* The rows themselves, built from the same pieces the layout is made of. *)
+let owed_rows ~inner given kept =
+  let cells = inner - Layout.display_width indent in
+  let omitted = List.length given - kept in
+  match kept with
+  | 0 -> []
+  | _ ->
+      (Some Masc_tui_ansi.Ansi.bold, " " ^ Cards.reasons_title (List.length given))
+      :: List.concat_map
+           (fun reason ->
+              List.map (fun line -> None, indent ^ line) (Cards.reason_lines ~cells reason))
+           (take kept given)
+      @ if omitted > 0 then
+          [ Some (Masc_tui_ansi.Theme.recede ()), indent ^ Masc_tui_card.more_text omitted ]
+        else []
+
+let rows_testable = pair (option string) string
+
+let plain ~inner ~rows given = Cards.plain_reasons ~indent ~inner ~rows given
+
+(* The rows are the heading, the lines of the first reasons that fit, and the
+   note, whatever the width and the number of rows. *)
+let test_the_rows_are_the_heading_the_first_reasons_and_the_note () =
   List.iter
-    (fun cells ->
+    (fun inner ->
        List.iter
          (fun rows ->
-            let drawn = Cards.plain_reasons ~cells ~rows reasons in
-            let expected =
-              match drawn.Cards.shown with
-              | [] -> 0
-              | shown -> 1 + lines_in shown + if drawn.Cards.omitted > 0 then 1 else 0
-            in
-            check int
-              (Printf.sprintf "height at %d cells and %d rows" cells rows)
-              expected (Cards.reasons_height drawn))
+            let kept = owed_count ~inner ~rows reasons in
+            check (list rows_testable)
+              (Printf.sprintf "rows at %d cells and %d rows" inner rows)
+              (owed_rows ~inner reasons kept) (plain ~inner ~rows reasons))
          (List.init 25 Fun.id))
-    [ 12; 24; 40; 80 ]
+    [ 14; 26; 42; 82 ]
 
 (* The edge of the rows: the whole list fits in exactly its height, and one row
    less leaves some out. *)
 let test_the_reasons_fit_exactly_at_their_height () =
   List.iter
-    (fun cells ->
-       let needed = height_of ~cells reasons ~omitted:0 in
-       let all = Cards.plain_reasons ~cells ~rows:needed reasons in
-       check int "all shown" (List.length reasons) (List.length all.Cards.shown);
-       check int "none left out" 0 all.Cards.omitted;
-       check int "no more rows than the height" needed (Cards.reasons_height all);
-       let short = Cards.plain_reasons ~cells ~rows:(needed - 1) reasons in
-       check bool "one row less leaves some out" true (short.Cards.omitted > 0))
-    [ 12; 24; 40; 80 ]
+    (fun inner ->
+       let needed = owed_height ~inner reasons (List.length reasons) in
+       let all = plain ~inner ~rows:needed reasons in
+       check int "as many rows as the height" needed (List.length all);
+       check (list rows_testable) "all shown, no note"
+         (owed_rows ~inner reasons (List.length reasons)) all;
+       let short = plain ~inner ~rows:(needed - 1) reasons in
+       check bool "one row less leaves some out" true
+         (List.length short < needed && short <> []))
+    [ 14; 26; 42; 82 ]
 
 let test_no_reason_draws_no_row () =
   List.iter
-    (fun rows ->
-       let none = Cards.plain_reasons ~cells:40 ~rows [] in
-       check int "nothing shown" 0 (List.length none.Cards.shown);
-       check int "nothing left out" 0 none.Cards.omitted;
-       check int "no rows" 0 (Cards.reasons_height none))
+    (fun rows -> check int "no rows" 0 (List.length (plain ~inner:40 ~rows [])))
     [ 0; 1; 5; 40 ]
 
-(* Not even the first reason fits with its heading: nothing is drawn, and the
-   count says all of them were left out. *)
-let test_rows_too_few_for_the_first_reason_draw_nothing () =
-  let cells = 40 in
-  let first_height = 1 + List.length (Cards.reason_lines ~cells (List.hd reasons)) in
+(* The note row is kept back before any reason is taken, so the rows that hold
+   the heading and the first reason alone still draw nothing while others are
+   left out. One row more draws the heading, the first reason and the note. *)
+let test_rows_too_few_for_the_first_reason_and_the_note_draw_nothing () =
+  let inner = 40 in
+  let first_with_note = owed_height ~inner reasons 1 in
   List.iter
-    (fun rows ->
-       let drawn = Cards.plain_reasons ~cells ~rows reasons in
-       check int "nothing shown" 0 (List.length drawn.Cards.shown);
-       check int "all left out" (List.length reasons) drawn.Cards.omitted;
-       check int "no rows" 0 (Cards.reasons_height drawn))
-    (List.init (first_height + 1) Fun.id)
+    (fun rows -> check int "no rows" 0 (List.length (plain ~inner ~rows reasons)))
+    (List.init first_with_note Fun.id);
+  check int "the first reason and its note" first_with_note
+    (List.length (plain ~inner ~rows:first_with_note reasons))
 
-(* Over many lists, widths and row counts: what is shown is the first reasons,
-   whole and in order, in no more rows than it was given, and a reason it left
-   out would not have fitted. *)
+(* Over many lists, widths and row counts: the rows are those owed, in no more
+   rows than were given, and a reason line fits the width. *)
 let words =
   [| "keeper_fleet_safety:no_executable_keeper_fibers"; "a"; "bb"
    ; "configured_keeper_without_runtime_meta"; "운영자가"; "확인해야"; "하는"
@@ -273,28 +299,27 @@ let random_reason state =
     (List.init (1 + Random.State.int state 6)
        (fun _ -> words.(Random.State.int state (Array.length words))))
 
-let test_the_reasons_shown_are_the_first_ones_whole_and_in_order () =
+let test_the_rows_owed_over_many_lists_widths_and_row_counts () =
   let state = Random.State.make [| 42 |] in
   let cases = ref 0 in
   for _ = 1 to 500 do
     let given = List.init (Random.State.int state 7) (fun _ -> random_reason state) in
-    (* From two cells: a letter two cells wide does not fit in one. *)
-    let cells = 2 + Random.State.int state 59 in
+    (* From four cells: the indent takes two and a letter two cells wide does
+       not fit in one. *)
+    let inner = 4 + Random.State.int state 59 in
     let rows = Random.State.int state 18 in
-    let drawn = Cards.plain_reasons ~cells ~rows given in
-    let count = List.length given and kept = List.length drawn.Cards.shown in
+    let drawn = plain ~inner ~rows given in
+    let kept = owed_count ~inner ~rows given in
     incr cases;
-    check bool "no more rows than it was given" true (Cards.reasons_height drawn <= rows);
-    check int "each reason is shown or counted as left out" count (kept + drawn.Cards.omitted);
-    check (list (list string)) "the first reasons, whole"
-      (List.map (Cards.reason_lines ~cells) (take kept given)) drawn.Cards.shown;
+    check bool "no more rows than it was given" true (List.length drawn <= rows);
+    check (list rows_testable) "the rows owed" (owed_rows ~inner given kept) drawn;
     List.iter
-      (List.iter (fun line ->
-         check bool "a line fits its cells" true (Layout.display_width (strip line) <= cells)))
-      drawn.Cards.shown;
-    if drawn.Cards.omitted > 0 then
-      check bool "the next reason would not have fitted" true
-        (height_of ~cells (take (kept + 1) given) ~omitted:(count - kept - 1) > rows)
+      (function
+        | None, text ->
+            check bool "a reason line fits its width" true
+              (Layout.display_width (strip text) <= inner)
+        | Some _, _ -> ())
+      drawn
   done;
   check bool "the cases ran" true (!cases > 0)
 
@@ -327,14 +352,14 @@ let () =
             test_a_reason_is_a_row_in_the_warning_colour
         ; test_case "the title names how many reasons there are" `Quick
             test_the_title_names_how_many_reasons_there_are
-        ; test_case "the height is the heading, the lines and the note" `Quick
-            test_the_height_is_the_heading_the_lines_and_the_note
+        ; test_case "the rows are the heading, the first reasons and the note" `Quick
+            test_the_rows_are_the_heading_the_first_reasons_and_the_note
         ; test_case "the reasons fit exactly at their height" `Quick
             test_the_reasons_fit_exactly_at_their_height
         ; test_case "no reason draws no row" `Quick test_no_reason_draws_no_row
-        ; test_case "rows too few for the first reason draw nothing" `Quick
-            test_rows_too_few_for_the_first_reason_draw_nothing
-        ; test_case "the reasons shown are the first ones, whole and in order" `Quick
-            test_the_reasons_shown_are_the_first_ones_whole_and_in_order
+        ; test_case "rows too few for the first reason and the note draw nothing" `Quick
+            test_rows_too_few_for_the_first_reason_and_the_note_draw_nothing
+        ; test_case "the rows owed over many lists, widths and row counts" `Quick
+            test_the_rows_owed_over_many_lists_widths_and_row_counts
         ] )
     ]

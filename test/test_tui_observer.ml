@@ -144,7 +144,8 @@ let summary = function
   | Observer.Event (Observer.Dataset_changed dataset) ->
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset
       ^ (match dataset with
-         | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
+         | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -959,7 +960,8 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
-                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Memory_health _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -1027,7 +1029,8 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
-                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Memory_health _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -1046,7 +1049,8 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
               | Masc.Workspace_dataset_event.Keeper_costs
-              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
+              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+              | Masc.Workspace_dataset_event.Memory_health _ )
           | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
@@ -1062,6 +1066,8 @@ let test_a_repository_push_reads_the_list () =
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\",\"keeper\":\"\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n"
     ];
   check (list string) "a harness push decodes by name"
     [ "dataset(harness_verdicts)" ]
@@ -1094,7 +1100,12 @@ let test_a_repository_push_reads_the_list () =
     [ "dataset(keeper_costs)" ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]))
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]));
+  check (list string) "a Keeper's memory health push decodes with the Keeper"
+    [ "dataset(memory_health:largo)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"largo\"}\n\n" ]))
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

@@ -1602,6 +1602,13 @@ let load_memory_health ~(host : string) ~(port : int) :
       decode_offloaded memo_memory_health ~name:"memory.health.decode_wait"
         Masc.Tui_decode_memory_health.decode_memory_health_snapshot json
 
+(** One Keeper's memory health row (RFC-0487). *)
+let load_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
+    (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result =
+  match fetch_keeper_memory_health_row ~host ~port ~keeper with
+  | Error err -> Error ("memory health row load failed: " ^ err)
+  | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_row ~keeper json
+
 let memo_memory_facts = json_memo ()
 
 (** Load one keeper's remembered facts, both stores. *)

@@ -1344,6 +1344,84 @@ let test_totals_count_the_rows () =
     (Totals.of_rows []).Totals.librarian_unread_turns
 ;;
 
+(* The TUI reads one Keeper's row after its push and merges it into the fleet
+   answer it holds (RFC-0487). The merged answer is the fleet answer read
+   after the write: the same rows, in the same order, with the same totals.
+   A Keeper that left loses its row, and another Keeper's refused row, whose
+   counts only the server has, stops the merge. *)
+let test_a_merged_row_is_the_fleet_read_after_the_write () =
+  let module Decode = Masc.Tui_decode_memory_health in
+  let base = fresh_dir "masc-memory-health-merge" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [ fact "A" ]);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"beta" [ fact "B1"; fact "B2" ]);
+  let fleet () =
+    match Decode.decode_memory_health_snapshot (Health.keeper_memory_health_http_json ~base_path:base) with
+    | Ok snapshot -> snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  let held = fleet () in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [ fact "A"; fact "A2"; fact "A3" ]);
+  let row_answer keeper =
+    match
+      Decode.decode_memory_health_row ~keeper
+        (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper)
+    with
+    | Ok answer -> answer
+    | Error detail -> Alcotest.fail detail
+  in
+  let answer = row_answer "alpha" in
+  let row =
+    match answer.Decode.mhr_keeper with
+    | Decode.Row_present row -> row
+    | Decode.Row_refused refusal -> Alcotest.fail refusal.Decode.mkr_reason
+    | Decode.Row_absent -> Alcotest.fail "a listed Keeper has no row"
+  in
+  let observed_now (snapshot : Decode.memory_health_snapshot) =
+    { snapshot with Decode.mhs_generated_at = 0.0 }
+  in
+  (match
+     Decode.with_keeper_row held ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha"
+       (Some row)
+   with
+   | Some merged ->
+     Alcotest.(check bool) "the merged answer is the fleet read after the write" true
+       (observed_now merged = observed_now (fleet ()));
+     Alcotest.(check bool) "it is observed when the row was" true
+       (merged.Decode.mhs_generated_at >= answer.Decode.mhr_generated_at)
+   | None -> Alcotest.fail "a row merges into an answer with no refused row");
+  (match Decode.with_keeper_row held ~generated_at:0.0 ~keeper_id:"beta" None with
+   | Some removed ->
+     Alcotest.(check (list string)) "a Keeper that left loses its row" [ "alpha" ]
+       (List.map (fun (keeper : Decode.memory_keeper_health) -> keeper.Decode.mkh_keeper_id)
+          removed.Decode.mhs_keepers);
+     Alcotest.(check int) "and the totals count the rows left"
+       (List.fold_left
+          (fun total (keeper : Decode.memory_keeper_health) -> total + keeper.Decode.mkh_facts)
+          0 removed.Decode.mhs_keepers)
+       removed.Decode.mhs_total_facts
+   | None -> Alcotest.fail "a removal merges into an answer with no refused row");
+  let refused name = { Decode.mkr_keeper_id = Some name; mkr_reason = "refused" } in
+  Alcotest.(check bool) "another Keeper's refused row stops the merge" true
+    (Option.is_none
+       (Decode.with_keeper_row
+          { held with Decode.mhs_refused_keepers = [ refused "gamma" ] }
+          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+  Alcotest.(check bool) "the Keeper's own refused row is replaced by its row" true
+    (Option.is_some
+       (Decode.with_keeper_row
+          { held with Decode.mhs_refused_keepers = [ refused "alpha" ] }
+          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+  Alcotest.(check bool) "a row answer for another Keeper is refused" true
+    (Result.is_error
+       (Decode.decode_memory_health_row ~keeper:"beta"
+          (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha")));
+  Alcotest.(check bool) "an unlisted Keeper's answer decodes as no row" true
+    (match (row_answer "absent").Decode.mhr_keeper with
+     | Decode.Row_absent -> true
+     | Decode.Row_present _ | Decode.Row_refused _ -> false)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
@@ -1351,6 +1429,8 @@ let () =
       , [ Alcotest.test_case "one Keeper's row is its fleet row" `Quick
             test_one_keepers_row_is_its_fleet_row
         ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
+        ; Alcotest.test_case "a merged row is the fleet read after the write" `Quick
+            test_a_merged_row_is_the_fleet_read_after_the_write
         ; Alcotest.test_case "unread evidence is observed without publication" `Quick
             test_unread_evidence_is_observed_without_publication
         ; Alcotest.test_case "saved versus prepared context" `Quick

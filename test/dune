@@ -3038,6 +3038,7 @@
 (include stanzas/test_tui_chat_skill_signal.inc)
 (include stanzas/test_tui_pending_confirms_signal.inc)
 (include stanzas/test_tui_workspace_dataset_signal.inc)
+(include stanzas/test_tui_memory_health_signal.inc)
 (include stanzas/test_tui_transport_signal.inc)
 (include stanzas/test_tui_usage_pushed_reads.inc)
 (include stanzas/test_tui_schedules_signal.inc)

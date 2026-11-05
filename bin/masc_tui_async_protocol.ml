@@ -268,6 +268,15 @@ type tools_read =
       ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
       }
 
+(* What a memory health read answered: the fleet, or one Keeper's row
+   (RFC-0487). *)
+type memory_health_read =
+  | Fleet_health_read of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
+  | Row_health_read of
+      { keeper : string
+      ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
+      }
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -472,7 +481,9 @@ type async_msg =
       int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
-  | Memory_loaded of (Masc.Tui_decode_memory_health.memory_health_snapshot, string) result
+  (* A fleet read and a one-Keeper row read share this constructor: the
+     message type is at the compiler's limit of non-constant constructors. *)
+  | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, string) result
   (* Carries the request it answers: the browser can be closed or pointed at

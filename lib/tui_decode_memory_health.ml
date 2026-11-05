@@ -929,3 +929,103 @@ let decode_memory_health_snapshot json =
     ; mhs_error_alerts
     ; mhs_starving_keepers
     }
+
+(* One Keeper's row as [?keeper=] answers it (RFC-0487): the row, a refusal
+   naming the Keeper asked for when this build cannot read the row (the way
+   the fleet decoder keeps it), or no row because the fleet does not list the
+   Keeper. *)
+type memory_health_row_keeper =
+  | Row_present of memory_keeper_health
+  | Row_refused of memory_keeper_refusal
+  | Row_absent
+
+type memory_health_row_answer = {
+  mhr_generated_at : float;
+  mhr_keeper : memory_health_row_keeper;
+}
+
+let decode_memory_health_row ~keeper json =
+  let* () =
+    require_exact_object_fields "memory health row" [ "schema"; "generated_at"; "keeper" ] json
+  in
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "keeper.memory_os.current_health.v8"
+    then Ok ()
+    else Error ("unsupported memory health schema: " ^ schema)
+  in
+  let* mhr_generated_at = Json_util.require_float json "generated_at" in
+  let* () =
+    if Float.is_finite mhr_generated_at && mhr_generated_at >= 0.0
+    then Ok ()
+    else Error "memory health observation metadata must be non-negative"
+  in
+  let* row = required_member json "keeper" in
+  let* mhr_keeper =
+    match row with
+    | `Null -> Ok Row_absent
+    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ ->
+      (match decode_memory_keeper_health row with
+       | Ok decoded when String.equal decoded.mkh_keeper_id keeper -> Ok (Row_present decoded)
+       | Ok decoded ->
+         Error
+           (Printf.sprintf "memory health row for %s names keeper %s" keeper decoded.mkh_keeper_id)
+       | Error reason -> Ok (Row_refused { mkr_keeper_id = Some keeper; mkr_reason = reason }))
+  in
+  Ok { mhr_generated_at; mhr_keeper }
+
+(* The fleet answer orders its rows by stored bytes, largest first, and keeps
+   the Keepers' sorted order between equals. *)
+let fleet_row_order (left : memory_keeper_health) (right : memory_keeper_health) =
+  match
+    compare
+      (right.mkh_snapshot_bytes + right.mkh_source_snapshot_bytes)
+      (left.mkh_snapshot_bytes + left.mkh_source_snapshot_bytes)
+  with
+  | 0 -> String.compare left.mkh_keeper_id right.mkh_keeper_id
+  | order -> order
+
+let with_keeper_row snapshot ~generated_at ~keeper_id row =
+  let others =
+    List.filter
+      (fun (keeper : memory_keeper_health) -> not (String.equal keeper.mkh_keeper_id keeper_id))
+      snapshot.mhs_keepers
+  in
+  let refused_others =
+    List.filter
+      (fun refusal -> not (Option.equal String.equal refusal.mkr_keeper_id (Some keeper_id)))
+      snapshot.mhs_refused_keepers
+  in
+  match refused_others with
+  | _ :: _ -> None
+  | [] ->
+    let keepers =
+      List.sort fleet_row_order
+        (match row with
+         | Some keeper -> keeper :: others
+         | None -> others)
+    in
+    let totals = Keeper_memory_health_totals.of_rows (List.map memory_keeper_totals_row keepers) in
+    Some
+      { mhs_generated_at = Float.max snapshot.mhs_generated_at generated_at
+      ; mhs_keepers = keepers
+      ; mhs_refused_keepers = []
+      ; mhs_total_facts = totals.Keeper_memory_health_totals.facts
+      ; mhs_total_observed_facts = totals.Keeper_memory_health_totals.observed_facts
+      ; mhs_total_derived_facts = totals.Keeper_memory_health_totals.derived_facts
+      ; mhs_total_support_invalidations = totals.Keeper_memory_health_totals.support_invalidations
+      ; mhs_total_snapshot_bytes = totals.Keeper_memory_health_totals.snapshot_bytes
+      ; mhs_total_source_facts = totals.Keeper_memory_health_totals.source_facts
+      ; mhs_total_source_invalidations = totals.Keeper_memory_health_totals.source_invalidations
+      ; mhs_total_source_snapshot_bytes = totals.Keeper_memory_health_totals.source_snapshot_bytes
+      ; mhs_total_librarian_failures = totals.Keeper_memory_health_totals.librarian_failures
+      ; mhs_total_librarian_unread_turns = totals.Keeper_memory_health_totals.librarian_unread_turns
+      ; mhs_total_librarian_continuity_unread_atoms = totals.Keeper_memory_health_totals.librarian_continuity_unread_atoms
+      ; mhs_total_librarian_continuity_unmeasured = totals.Keeper_memory_health_totals.librarian_continuity_unmeasured
+      ; mhs_total_vision_ingest_errors = totals.Keeper_memory_health_totals.vision_ingest_errors
+      ; mhs_total_read_errors = totals.Keeper_memory_health_totals.read_errors
+      ; mhs_total_source_read_errors = totals.Keeper_memory_health_totals.source_read_errors
+      ; mhs_warn_alerts = totals.Keeper_memory_health_totals.warn_alerts
+      ; mhs_error_alerts = totals.Keeper_memory_health_totals.error_alerts
+      ; mhs_starving_keepers = totals.Keeper_memory_health_totals.librarian_starving_keepers
+      }

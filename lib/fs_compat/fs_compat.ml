@@ -1583,8 +1583,7 @@ let load_owned_regular_file_range_with_sha256_blocking
 external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
   = "caml_masc_owned_entry_open"
 
-let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = false)
-    ?excluded_stat root path fn =
+let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?excluded_stat root path fn =
   let ownership_root = root.inventory_path in
   match owned_directory_paths ~ownership_root (Filename.dirname path) with
   | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
@@ -1653,7 +1652,8 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = 
           else
             let result = fn fd stat parent in
             if ancestors_current ()
-               && (may_remove || (current_entry path fd stat && same_file_snapshot stat (Unix.fstat fd)))
+               && current_entry path fd stat
+               && same_file_snapshot stat (Unix.fstat fd)
             then result
             else owned_file_error (Filesystem_identity_changed {path})
         end)
@@ -1751,27 +1751,6 @@ let with_owned_inventory_regular_file ~owner_uid root relative fn =
     if stat.Unix.st_kind <> Unix.S_REG then
       owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
     else Ok (fn ~file ~parent ~stat))
-;;
-
-external unlink_owned_inventory_entry : Unix.file_descr -> Unix.file_descr -> string -> unit
-  = "caml_masc_owned_inventory_unlink_checked"
-
-let remove_owned_inventory_regular_file ~expected root relative =
-  let path = owned_inventory_path root relative in
-  let owner_uid = Unix.geteuid () in
-  with_owned_inventory_entry ~owner_uid ~single_link:true ~may_remove:true root path
-    (fun file stat parent ->
-      if stat.Unix.st_kind <> Unix.S_REG then
-        owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
-      else if not (same_file_snapshot expected stat)
-              || stat.st_uid <> expected.st_uid || stat.st_perm <> expected.st_perm
-              || stat.st_nlink <> expected.st_nlink then
-        owned_file_error (Filesystem_identity_changed {path})
-      else begin
-        unlink_owned_inventory_entry parent file (Filename.basename path);
-        Unix.fsync parent;
-        Ok ()
-      end)
 ;;
 
 type owned_reader = Eio_unix.Fd.t

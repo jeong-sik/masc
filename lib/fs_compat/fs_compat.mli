@@ -276,17 +276,6 @@ val with_owned_inventory_regular_file
     callback may fsync those very descriptors; this scope does not itself make
     data durable. Run the complete enclosing root scope on a system thread. *)
 
-val remove_owned_inventory_regular_file
-  : expected:Unix.stats -> owned_inventory_root -> owned_relative_path
-  -> (unit, owned_regular_file_read_error) result
-(** Remove the regular, uniquely linked effective-UID-owned file only if it still matches
-    [expected]. The no-follow parent and file descriptors remain held through
-    unlink and parent fsync. Callers must exclude writers for the entire
-    decision and mutation: POSIX has no atomic compare-unlink against an actor
-    bypassing that exclusion. An error may follow unlink, including on fsync or
-    final ancestor verification; it is not proof that the file remains. The
-    enclosing inventory root and this operation are blocking. *)
-
 type owned_reader
 val open_owned_reader :
   sw:Eio.Switch.t -> parent:Eio.Fs.dir_ty Eio.Path.t -> leaf:string ->

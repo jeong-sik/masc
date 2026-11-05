@@ -2,14 +2,8 @@ module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 
 let lit text = Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)
 
-let cwd_scope ?cwd_base raw =
-  let cwd = Option.value cwd_base ~default:raw in
-  Some (Masc_exec.Path_scope.classify ~raw ~cwd)
-;;
-
 let simple_bin
       ?cwd_raw
-      ?cwd_base
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       bin
       args
@@ -17,7 +11,7 @@ let simple_bin
   let cwd =
     match cwd_raw with
     | None -> None
-    | Some raw -> cwd_scope ?cwd_base raw
+    | Some raw -> Some (Masc_exec.Path_scope.of_raw raw)
   in
   Masc_exec.Shell_ir.Simple
     { bin

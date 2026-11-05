@@ -539,7 +539,7 @@ let () =
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let dev_null =
-    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/dev/null"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Masc_exec.Sandbox_target.Ran
@@ -576,7 +576,7 @@ let () =
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let dev_null =
-    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/dev/null"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Masc_exec.Sandbox_target.Ran
@@ -615,7 +615,7 @@ let () =
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let runner_called = ref false in
   let unsupported_target =
-    Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-out" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/tmp/exec-dispatch-out"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
@@ -671,7 +671,7 @@ let () =
   let docker_sandbox =
     Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner ()
   in
-  let cwd = Some (Masc_exec.Path_scope.classify ~raw:"/tmp/pipeline" ~cwd:"/tmp/pipeline") in
+  let cwd = Some (Masc_exec.Path_scope.of_raw "/tmp/pipeline") in
   let stages =
     [
       Simple
@@ -777,7 +777,7 @@ let () =
   in
   let cwd =
     Some
-      (Masc_exec.Path_scope.classify ~raw:"/tmp/pipeline" ~cwd:"/tmp/pipeline")
+      (Masc_exec.Path_scope.of_raw "/tmp/pipeline")
   in
   let stages =
     [
@@ -901,7 +901,7 @@ let () =
   let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
   let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let dev_null =
-    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/dev/null"
   in
   let simple_runner_calls = ref [] in
   let pipeline_runner_called = ref false in

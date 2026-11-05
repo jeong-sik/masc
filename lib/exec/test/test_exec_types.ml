@@ -1,4 +1,4 @@
-(** Objective executable-name, parser-result, and path-scope smoke tests. *)
+(** Objective executable-name and parser-result smoke tests. *)
 
 open Masc_exec
 
@@ -31,45 +31,10 @@ let test_parsed_polymorphic () =
   | _ -> assert false
 ;;
 
-let test_path_scope_classify () =
-  let scope = Path_scope.classify ~raw:"/etc/passwd" ~cwd:"/tmp" in
-  assert (Path_scope.raw scope = "/etc/passwd");
-  match Path_scope.scope scope with
-  | Outside_workspace _ -> ()
-  | _ -> assert false
-;;
-
-let test_path_scope_classify_sandbox () =
-  let scope = Path_scope.classify ~raw:"/tmp/masc-keeper-xyz/foo" ~cwd:"/tmp" in
-  match Path_scope.scope scope with
-  | Inside_sandbox _ -> ()
-  | _ -> assert false
-;;
-
-let test_path_scope_classify_sandbox_escape () =
-  let scope =
-    Path_scope.classify ~raw:"/tmp/masc-keeper-xyz/../../etc/passwd" ~cwd:"/tmp"
-  in
-  match Path_scope.scope scope with
-  | Absolute_unknown _ -> ()
-  | _ -> assert false
-;;
-
-let test_path_scope_classify_unresolvable () =
-  let scope = Path_scope.classify ~raw:"/__nonexistent_root_xyz_42/foo" ~cwd:"/tmp" in
-  match Path_scope.scope scope with
-  | Absolute_unknown _ -> ()
-  | _ -> assert false
-;;
-
 let () =
   test_exec_program_of_string ();
   test_exec_program_preserves_exact_path ();
   test_exec_program_empty_rejected ();
   test_parsed_polymorphic ();
-  test_path_scope_classify ();
-  test_path_scope_classify_sandbox ();
-  test_path_scope_classify_sandbox_escape ();
-  test_path_scope_classify_unresolvable ();
   print_endline "[test_exec_types] all tests passed"
 ;;

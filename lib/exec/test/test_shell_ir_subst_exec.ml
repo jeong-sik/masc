@@ -282,8 +282,8 @@ let test_substitution_inherits_parent_cwd () =
      under this harness: the test env grants Eio capabilities for its own
      sandbox cwd only, so any cwd-holding spawn is refused before the
      inheritance could show.) *)
-  let parent_cwd = Path_scope.classify ~raw:"/writable/root" ~cwd:"/" in
-  let child_cwd = Path_scope.classify ~raw:"/writable/child" ~cwd:"/" in
+  let parent_cwd = Path_scope.of_raw "/writable/root" in
+  let child_cwd = Path_scope.of_raw "/writable/child" in
   let stage =
     { (simple "echo" []) with
       Shell_ir.cwd = Some parent_cwd

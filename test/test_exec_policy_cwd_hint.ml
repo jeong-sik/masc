@@ -79,9 +79,9 @@ let test_ignores_plain_files () =
 
 let lit value = Masc_exec.Shell_ir.Lit (value, Masc_exec.Shell_ir.default_meta)
 
-let shell_ir ?cwd ?(redirects = []) ~workdir args =
+let shell_ir ?cwd ?(redirects = []) args =
   let cwd =
-    Option.map (fun raw -> Masc_exec.Path_scope.classify ~raw ~cwd:workdir) cwd
+    Option.map (fun raw -> Masc_exec.Path_scope.of_raw raw) cwd
   in
   let bin =
     match Masc_exec.Exec_program.of_string "cat" with
@@ -100,7 +100,7 @@ let shell_ir ?cwd ?(redirects = []) ~workdir args =
 
 let test_positional_argv_is_not_inferred_as_path () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~workdir [ "/etc/passwd"; "../../opaque-token" ] in
+    let ir = shell_ir [ "/etc/passwd"; "../../opaque-token" ] in
     Alcotest.(check bool)
       "argv is opaque to exec policy"
       true
@@ -109,7 +109,7 @@ let test_positional_argv_is_not_inferred_as_path () =
 
 let test_explicit_cwd_outside_workdir_is_rejected () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~cwd:"/etc" ~workdir [] in
+    let ir = shell_ir ~cwd:"/etc" [] in
     Alcotest.(check bool)
       "typed cwd remains contained"
       true
@@ -118,7 +118,7 @@ let test_explicit_cwd_outside_workdir_is_rejected () =
 
 let test_explicit_redirect_outside_workdir_is_rejected () =
   with_temp_tree (fun workdir ->
-    let target = Masc_exec.Path_scope.classify ~raw:"/etc/passwd" ~cwd:workdir in
+    let target = Masc_exec.Path_scope.of_raw "/etc/passwd" in
     let redirect =
       Masc_exec.Redirect_scope.File
         { fd = 1
@@ -126,7 +126,7 @@ let test_explicit_redirect_outside_workdir_is_rejected () =
         ; mode = Masc_exec.Redirect_scope.Write
         }
     in
-    let ir = shell_ir ~redirects:[ redirect ] ~workdir [] in
+    let ir = shell_ir ~redirects:[ redirect ] [] in
     Alcotest.(check bool)
       "typed redirect remains contained"
       true
@@ -135,7 +135,7 @@ let test_explicit_redirect_outside_workdir_is_rejected () =
 
 let test_cwd_missing_on_host_is_rejected_by_default () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    let ir = shell_ir ~cwd:"repos/masc" [] in
     match Exec_policy.validate_shell_ir_paths ~extra_roots:[] ~workdir ir with
     | Error msg ->
       Alcotest.(check bool)
@@ -147,7 +147,7 @@ let test_cwd_missing_on_host_is_rejected_by_default () =
 
 let test_cwd_missing_on_host_is_allowed_when_requires_existing_dir_false () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    let ir = shell_ir ~cwd:"repos/masc" [] in
     match
       Exec_policy.validate_shell_ir_paths ~extra_roots:[]
         ~requires_existing_dir:false
@@ -180,7 +180,7 @@ let outside_whitelist_prefix =
 
 let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~cwd:"/etc" ~workdir [] in
+    let ir = shell_ir ~cwd:"/etc" [] in
     match
       Exec_policy.validate_shell_ir_paths ~extra_roots:[]
         ~requires_existing_dir:false
@@ -301,7 +301,7 @@ let dummy_ssh_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
 
 let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
   with_temp_tree (fun workdir ->
-    let ir = shell_ir ~cwd:"repos/masc" ~workdir [] in
+    let ir = shell_ir ~cwd:"repos/masc" [] in
     (match
        Keeper_tooling.Execute_shell_ir.validate_paths
          ~sandbox:(Masc_exec.Sandbox_target.host ())
@@ -360,7 +360,7 @@ let test_execute_shell_ir_validate_paths_respects_sandbox_target () =
        Alcotest.failf
          "ssh target must allow endpoint-owned directory, got: %s"
          msg);
-    let ir_escape = shell_ir ~cwd:"/etc" ~workdir [] in
+    let ir_escape = shell_ir ~cwd:"/etc" [] in
     match
       Keeper_tooling.Execute_shell_ir.validate_paths
         ~sandbox:
@@ -424,7 +424,7 @@ let test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target () =
       "ssh sh -c cd /app"
       declared
       (stage ~bin_name:"sh" ~workdir [ "-c"; "cd /app && ls" ]);
-    expect_outside "ssh cwd /etc" declared (shell_ir ~cwd:"/etc" ~workdir []);
+    expect_outside "ssh cwd /etc" declared (shell_ir ~cwd:"/etc" []);
     expect_outside
       "ssh cd /app/../etc"
       declared
@@ -441,7 +441,7 @@ let test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target () =
       "micro_vm cd /app"
       micro_vm_target
       (stage ~bin_name:"cd" ~workdir [ "/app" ]);
-    expect_outside "micro_vm cwd /etc" micro_vm_target (shell_ir ~cwd:"/etc" ~workdir []))
+    expect_outside "micro_vm cwd /etc" micro_vm_target (shell_ir ~cwd:"/etc" []))
 ;;
 
 (* An ssh command runs in the Keeper's own root on the endpoint, and Execute
@@ -515,14 +515,14 @@ let test_subst_child_redirect_is_jailed () =
     (* The jail descends into a substitution's child stages: their cwd and
        redirects are exactly what it exists to validate. *)
     let parent_of child =
-      match shell_ir ~workdir [] with
+      match shell_ir [] with
       | Masc_exec.Shell_ir.Simple s ->
         Masc_exec.Shell_ir.Simple
           { s with Masc_exec.Shell_ir.args = [ Masc_exec.Shell_ir.Subst child ] }
       | _ -> Alcotest.fail "shell_ir helper builds a Simple"
     in
     let child_with raw =
-      let target = Masc_exec.Path_scope.classify ~raw ~cwd:workdir in
+      let target = Masc_exec.Path_scope.of_raw raw in
       let redirect =
         Masc_exec.Redirect_scope.File
           { fd = 1
@@ -530,7 +530,7 @@ let test_subst_child_redirect_is_jailed () =
           ; mode = Masc_exec.Redirect_scope.Write
           }
       in
-      shell_ir ~redirects:[ redirect ] ~workdir []
+      shell_ir ~redirects:[ redirect ] []
     in
     Alcotest.(check bool)
       "subst child redirect inside workdir passes"

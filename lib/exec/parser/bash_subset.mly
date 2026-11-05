@@ -11,7 +11,7 @@ let file_redirect fd target mode =
      dispatch refuses it rather than opening whatever this host has. *)
   Redirect_scope.File
     { fd
-    ; target = Redirect_scope.In_command_namespace (Path_scope.classify ~raw:target ~cwd:".")
+    ; target = Redirect_scope.In_command_namespace (Path_scope.of_raw target)
     ; mode
     }
 ;;
@@ -74,8 +74,8 @@ part:
       let src, dst = pair in
       Redirect (Redirect_scope.Fd_to_fd { src; dst })
     }
-  (* The redirect target stays a literal: [Path_scope.classify] runs on
-     it at parse time and a substituted path has nothing to classify.
+  (* The redirect target stays a literal, so the path policy checks the path
+     the command will open. A substituted path has no value at parse time.
      [> $OUT] therefore fails to parse rather than passing unchecked. *)
   | item = FILE_REDIRECT_OP target = literal_word {
       let fd, mode = item in

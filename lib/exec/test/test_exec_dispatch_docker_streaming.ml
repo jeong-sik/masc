@@ -183,7 +183,7 @@ let test_docker_decomposed_final_redirect_does_not_stream_dropped_stdout () =
     | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
   in
   let dev_null =
-    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/dev/null"
   in
   let drop_stdout =
     Masc_exec.Redirect_scope.File
@@ -234,7 +234,7 @@ let test_docker_simple_redirect_does_not_stream_dropped_stdout () =
     | `Stderr chunk -> stderr_chunks := chunk :: !stderr_chunks
   in
   let dev_null =
-    Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/dev/null"
   in
   let drop_stdout =
     Masc_exec.Redirect_scope.File

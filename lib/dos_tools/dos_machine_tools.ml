@@ -35,6 +35,32 @@ let reject ?(data = `Null) ~tool_name ~start_time message =
     ~effect_disposition:Tool_result.Proven_pre_effect ~start_time ~data message
 ;;
 
+(* The machine pads its text page to a full grid: every row out to 80 columns
+   and the page down to 25 rows, all U+0020. A program that draws in a
+   graphics mode leaves that page blank, and the whole grid of spaces, about
+   2 KB, still went out with every observation. Dropping the spaces after a
+   row's last glyph and the empty rows after the last glyph moves no glyph:
+   each keeps its column and its row, and empty rows in the middle stay.
+   Only U+0020 counts as padding. The page is UTF-8 and no multibyte
+   sequence contains the byte 0x20, so a cut never lands inside a code
+   point. *)
+let trim_text_page page =
+  let rec padding_start row i =
+    if i > 0 && row.[i - 1] = ' ' then padding_start row (i - 1) else i
+  in
+  let trim_row row = String.sub row 0 (padding_start row (String.length row)) in
+  let rec drop_empty_head = function
+    | "" :: rest -> drop_empty_head rest
+    | rows -> rows
+  in
+  String.split_on_char '\n' page
+  |> List.map trim_row
+  |> List.rev
+  |> drop_empty_head
+  |> List.rev
+  |> String.concat "\n"
+;;
+
 let observation_fields (o : Dos_lane.observation) =
   [ ("steps", `Int o.steps)
   ; ("video_mode", `String (Printf.sprintf "%02xh" o.video_mode))
@@ -46,7 +72,7 @@ let observation_fields (o : Dos_lane.observation) =
   ; ("halted", `Bool o.halted)
   ; ("waiting_for_key", `Bool o.waiting_for_key)
   ; ("ticks", `Int o.ticks)
-  ; ("screen_text", `String o.screen_text)
+  ; ("screen_text", `String (trim_text_page o.screen_text))
   ; ("frame_nonblack", `Int o.frame_nonblack)
   ; ("frame_ascii", `String o.frame_ascii)
   ; ("program", match o.program with Some p -> `String p | None -> `Null)

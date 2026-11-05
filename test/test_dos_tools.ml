@@ -551,6 +551,60 @@ let test_load_runs_to_the_first_key_request () =
     check bool "and has not exited" false (bool_field "exited" result))
 ;;
 
+(* The tools hand over the text page without its padding. What the cut may
+   touch is the whole contract: only U+0020 after a row's last glyph and the
+   empty rows after the last glyph, so no glyph moves or goes missing. *)
+let test_trim_text_page_drops_only_padding () =
+  let blank_grid = String.concat "\n" (List.init 25 (fun _ -> String.make 80 ' ')) in
+  let glyph_in_grid =
+    String.concat "\n"
+      (List.init 25 (fun row ->
+         if row = 3 then String.make 10 ' ' ^ "XYZ" ^ String.make 67 ' '
+         else String.make 80 ' '))
+  in
+  List.iter
+    (fun (name, page, expected) ->
+      check string name expected (Dos_tools.trim_text_page page);
+      check string (name ^ ", trimmed again") expected
+        (Dos_tools.trim_text_page (Dos_tools.trim_text_page page)))
+    [ ("rows, then a blank tail", "HI   \nOK  \n\n   \n", "HI\nOK")
+    ; ("a blank grid", blank_grid, "")
+    ; ("an empty page", "", "")
+    ; ("only newlines", "\n\n", "")
+    ; ("empty rows in the middle stay", "A\n\n  \nB  ", "A\n\n\nB")
+    ; ("empty rows at the head stay", "\n\nA", "\n\nA")
+    ; ("leading spaces stay", "  A  ", "  A")
+    ; ("a tab is not padding", "A\t \n", "A\t")
+    ; ("a no-break space is not padding", "A\xc2\xa0 ", "A\xc2\xa0")
+    ; ( "multibyte glyphs stay whole"
+      , "\xe2\x94\x80\xe2\x94\x80  \n  \n"
+      , "\xe2\x94\x80\xe2\x94\x80" )
+    ; ("a glyph in a full grid keeps its row and column", glyph_in_grid, "\n\n\n          XYZ")
+    ; ("a glyph in the last column", String.make 79 ' ' ^ "Z\n   ", String.make 79 ' ' ^ "Z")
+    ]
+;;
+
+(* [screen_text] is the machine's own page minus its padding. The page is
+   read straight from the lane, so the check does not assume what the program
+   drew beyond the HI it is known to print. *)
+let test_screen_text_is_the_text_page_without_padding () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let result = load ~base_path "hello.com" in
+    check bool "load succeeds" true (is_completed result);
+    let page =
+      match Dos_lane.screen () with
+      | Ok observation -> observation.Dos_lane.screen_text
+      | Error _ -> fail "machine gone"
+    in
+    let text = string_field "screen_text" result in
+    check bool "the machine pads its text page" true
+      (String.length page > String.length text);
+    check string "the result is that page without the padding"
+      (Dos_tools.trim_text_page page) text;
+    check bool "the glyphs are still there" true (contains "HI" text))
+;;
+
 (* The load and the screen say which DOS core answered. Two servers built
    from one masc commit can link different cores; a black screen from the
    older one otherwise looks like a game bug. *)
@@ -2707,6 +2761,9 @@ let () =
         ; test_case "inventory directory replacement" `Quick
             test_inventory_directory_replacement_hides_child_names
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
+        ; test_case "text page trim" `Quick test_trim_text_page_drops_only_padding
+        ; test_case "screen text without padding" `Quick
+            test_screen_text_is_the_text_page_without_padding
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core
         ; test_case "meta names the core without a machine" `Quick

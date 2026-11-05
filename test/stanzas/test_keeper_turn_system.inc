@@ -6,4 +6,4 @@
  (modules test_keeper_turn_system)
  (deps
   (source_tree %{workspace_root}/config/prompts))
- (libraries alcotest masc masc_test_deps))
+ (libraries alcotest masc masc_test_deps eio_main))

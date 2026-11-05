@@ -271,6 +271,310 @@ let test_other_bytes_carry_no_amendments () =
   Alcotest.(check bool) "with no amendments" true (Option.is_none recorded.amendments)
 ;;
 
+(* The System a prepared turn sends ({!Keeper_run_context.prepare_run_context}):
+   the same rule over a real world, with the range predicted from the saved
+   history, the runtime's request ledger and the Librarian's position. *)
+
+let agent_core_runtime = "fixture.sample"
+let official_runtime = "official.held"
+
+let message role text : Agent_core.Types.message =
+  { origin = Llm_provider.Types.Conversation
+  ; role
+  ; content = [ Agent_core.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+(* Six exchanges: each user and assistant message opens an atom, so twelve. *)
+let history =
+  List.concat_map
+    (fun index ->
+      let text = Printf.sprintf "exchange %d" index in
+      [ message Agent_core.Types.User text; message Agent_core.Types.Assistant text ])
+    (List.init 6 Fun.id)
+;;
+
+let history_atoms = List.length history
+let digest_at = Runtime_model_input_tail_window.atom_opening_digest history
+let unwrap = function Ok value -> value | Error detail -> Alcotest.fail detail
+
+type world =
+  { config : Workspace.config
+  ; meta : Keeper_meta_contract.keeper_meta
+  ; trace_id : string
+  }
+
+let runtime_toml =
+  {|[runtime]
+default = "fixture.sample"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "turn-system-model"
+max-context = 4096
+[fixture.sample]
+[providers.official]
+protocol = "claude-code"
+command = "/bin/true"
+is-non-interactive = true
+[models.held]
+api-name = "turn-system-official"
+max-context = 400000
+tools-support = true
+[official.held]
+|}
+;;
+
+let with_world ~keeper_name f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () ->
+    Masc_test_deps.cleanup_test_workspace base_path;
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot;
+    Runtime.For_testing.restore runtime_snapshot;
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let write path contents =
+    Out_channel.with_open_bin path (fun out -> output_string out contents)
+  in
+  let catalog_path = Filename.concat base_path "models.toml" in
+  write catalog_path
+    "[[models]]\nmodel_id = \"turn-system-model\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 4096\nmax_output_tokens = 128\nsupports_tools = true\n";
+  Llm_provider.Model_catalog.load_file catalog_path
+  |> unwrap
+  |> (fun models ->
+       Llm_provider.Catalog_snapshot.publish
+         (Masc_test_deps.admit_catalogs ~models:(Some models) ~providers:None));
+  let config_path = Filename.concat base_path "runtime.toml" in
+  write config_path runtime_toml;
+  (match Runtime.init_default_degraded_report ~config_path with
+   | Ok Runtime.Initialized -> ()
+   | Ok (Runtime.Initialized_degraded _) -> Alcotest.fail "the fixture runtimes must materialize"
+   | Error error -> Alcotest.fail (Runtime.strict_init_error_to_string error));
+  let config = Workspace.default_config base_path in
+  let meta =
+    Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ]) |> unwrap
+  in
+  Keeper_meta_store.replace_snapshot config meta |> unwrap;
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id; agent_name = keeper_name; model = "turn-system-model"
+    ; system_prompt = None; messages = history; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1; created_at = 1000.; tools = []; tool_choice = None
+    ; disable_parallel_tool_use = false; temperature = None; top_p = None; top_k = None
+    ; min_p = None; reasoning_effort = None; enable_thinking = None
+    ; preserve_thinking = None; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false; context = Agent_core.Context.create_sync ()
+    ; pending_input = None; mcp_sessions = []; working_context = None
+    }
+  in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+       ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
+       ~history_retained:0 checkpoint
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  f { config; meta; trace_id }
+;;
+
+let append world entry =
+  let base_path = world.config.Workspace.base_path in
+  let ledger =
+    World_constitution_store.load ~base_path
+    |> Result.map_error World_constitution_store.read_error_to_string
+    |> unwrap
+  in
+  World_constitution_store.append_at ~base_path
+    ~expected_end_offset:ledger.World_constitution_store.end_offset entry
+  |> Result.map_error World_constitution_store.append_error_to_string
+  |> unwrap
+;;
+
+let write_article world text =
+  let written = article text in
+  append world (Types.Added written);
+  written
+;;
+
+let take_back world (taken : Types.t) =
+  append world (Types.Removed { id = taken.id; by = "critic"; at = 2.0; reason = None })
+;;
+
+(* The last request on [runtime_id] carried the whole saved history. *)
+let observe_request world ~runtime_id =
+  let module Ledger = Keeper_model_input_ledger in
+  let ends =
+    match digest_at 0, digest_at (history_atoms - 1) with
+    | Some front_digest, Some end_digest -> Ledger.Carried_atoms { front_digest; end_digest }
+    | None, (Some _ | None) | Some _, None -> Alcotest.fail "the fixture history opens its atoms"
+  in
+  let request : Ledger.request =
+    { prefix_digest = "turn-system-prefix"; first_atom = 0; atom_count = history_atoms; ends
+    ; tail_bytes = 0; turn_context = false; demote_before = 0 }
+  in
+  ignore
+    (Ledger.Table.observe ~keeper_name:world.meta.name ~runtime_id ~session_id:world.trace_id
+       ~digest_at ~request ~usage:None)
+;;
+
+(* The Librarian has read the first [end_atom] atoms, so the next range
+   opens there. *)
+let read_by_librarian world ~end_atom =
+  match digest_at (end_atom - 1) with
+  | None -> Alcotest.fail "the fixture history holds the read atom"
+  | Some last_atom_digest ->
+    Keeper_librarian_progress.write
+      ~keepers_dir:(Workspace.keepers_runtime_dir world.config)
+      ~keeper_id:world.meta.name
+      { Keeper_librarian_progress.position =
+          { Keeper_librarian_progress.trace_id = world.trace_id; end_atom; last_atom_digest }
+      ; boundary_lines_seen = 0
+      }
+    |> Result.map_error Keeper_librarian_progress.write_error_to_string
+    |> unwrap
+;;
+
+let prepare ?(instructions = "keeper fixture instructions") world ~runtime_id =
+  let profile_defaults =
+    { Keeper_types_profile_defaults.empty_keeper_profile_defaults with
+      Keeper_types_profile_defaults.instructions = Some instructions
+    }
+  in
+  match
+    Keeper_run_context.prepare_run_context ~config:world.config ~meta:world.meta
+      ~profile_defaults ~base_dir:(Keeper_types_support.session_base_dir_ world.config)
+      ~runtime_id ()
+  with
+  | Ok ctx -> ctx.Keeper_run_context.system
+  | Error (Keeper_run_context.Checkpoint_unread error) ->
+    Alcotest.fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Error (Keeper_run_context.Base_prompt_unavailable error) ->
+    Alcotest.fail (Keeper_run_context.base_prompt_error_to_string error)
+  | Error (Keeper_run_context.Prompt_unrenderable detail) -> Alcotest.fail detail
+;;
+
+let holds (system : System.t) (held : Types.t) = contains ~sub:(Render.articles [ held ]) system.text
+
+let check_composer label expected runtime_id =
+  let name = function
+    | Keeper_carried_front.Composes_from_the_history -> "agent core"
+    | Keeper_carried_front.Hands_over_its_own_list -> "official client"
+    | Keeper_carried_front.Not_materialized -> "not materialized"
+  in
+  Alcotest.(check string) label expected
+    (name (Keeper_carried_front.composer_of_runtime (Runtime.get_runtime_by_id runtime_id)))
+;;
+
+(* (a) and (d): the first turn has no basis and renders the article it finds;
+   an article written before the next turn rides that turn's end context while
+   its System keeps the first turn's bytes. *)
+let test_a_prepared_turn_keeps_its_system_when_an_article_is_written () =
+  with_world ~keeper_name:"turn-system-added" @@ fun world ->
+  check_composer "the fixture runtime composes from the history" "agent core" agent_core_runtime;
+  let kept = write_article world "open before you record" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let first = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check bool) "(d) the first System holds the article it found" true (holds first kept);
+  Alcotest.(check bool) "(d) with no amendments" true (Option.is_none first.amendments);
+  let written = write_article world "cite the ledger row, not the frame" in
+  let next = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check string) "(a) the System bytes are the previous turn's" first.text next.text;
+  match next.amendments with
+  | None -> Alcotest.fail "(a) the written article rides the end context"
+  | Some block ->
+    Alcotest.(check bool) "(a) the block lists the written article" true
+      (contains ~sub:(Render.articles [ written ]) block)
+;;
+
+let test_without_a_request_on_the_runtime_the_system_takes_every_article () =
+  with_world ~keeper_name:"turn-system-no-request" @@ fun world ->
+  let (_ : Types.t) = write_article world "open before you record" in
+  let (_ : System.t) = prepare world ~runtime_id:agent_core_runtime in
+  let written = write_article world "cite the ledger row, not the frame" in
+  let next = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check bool) "the System holds the written article" true (holds next written);
+  Alcotest.(check bool) "with no amendments" true (Option.is_none next.amendments)
+;;
+
+(* (b) The Librarian read past the front the last request opened, so the
+   range moves and the history cache is lost either way. *)
+let test_a_moved_front_renders_the_current_articles_on_the_wire () =
+  with_world ~keeper_name:"turn-system-moved" @@ fun world ->
+  let (_ : Types.t) = write_article world "open before you record" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let first = prepare world ~runtime_id:agent_core_runtime in
+  let written = write_article world "cite the ledger row, not the frame" in
+  read_by_librarian world ~end_atom:4;
+  let next = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check bool) "the System changed" false (String.equal first.text next.text);
+  Alcotest.(check bool) "it holds the written article" true (holds next written);
+  Alcotest.(check bool) "with no amendments" true (Option.is_none next.amendments)
+;;
+
+(* (c) Edited instructions change the System's bytes, so it is rebuilt with
+   the current articles. *)
+let test_changed_instructions_rebuild_the_prepared_system () =
+  with_world ~keeper_name:"turn-system-instructions" @@ fun world ->
+  let (_ : Types.t) = write_article world "open before you record" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let (_ : System.t) = prepare ~instructions:"first instructions" world ~runtime_id:agent_core_runtime in
+  let written = write_article world "cite the ledger row, not the frame" in
+  let next = prepare ~instructions:"second instructions" world ~runtime_id:agent_core_runtime in
+  Alcotest.(check bool) "the System carries the new instructions" true
+    (contains ~sub:"second instructions" next.text);
+  Alcotest.(check bool) "and the written article" true (holds next written);
+  Alcotest.(check bool) "with no amendments" true (Option.is_none next.amendments)
+;;
+
+(* (e) A taken-back article stays in the kept System; the block names it. *)
+let test_a_taken_back_article_is_named_in_the_prepared_block () =
+  with_world ~keeper_name:"turn-system-removed" @@ fun world ->
+  let (_ : Types.t) = write_article world "open before you record" in
+  let taken = write_article world "cite the ledger row, not the frame" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let first = prepare world ~runtime_id:agent_core_runtime in
+  take_back world taken;
+  let next = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check string) "the System bytes are the previous turn's" first.text next.text;
+  match next.amendments with
+  | None -> Alcotest.fail "the taken-back article rides the end context"
+  | Some block ->
+    Alcotest.(check bool) "the block names its id" true
+      (contains ~sub:(Printf.sprintf "- [%s]" (Types.Article_id.to_string taken.id)) block)
+;;
+
+(* (g) An official client's turn renders the current articles and leaves the
+   keeper's Agent Core basis as it was. *)
+let test_an_official_client_turn_takes_the_current_articles () =
+  with_world ~keeper_name:"turn-system-official" @@ fun world ->
+  check_composer "the official runtime hands over its own list" "official client" official_runtime;
+  let (_ : Types.t) = write_article world "open before you record" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let first = prepare world ~runtime_id:agent_core_runtime in
+  let written = write_article world "cite the ledger row, not the frame" in
+  let official = prepare world ~runtime_id:official_runtime in
+  Alcotest.(check bool) "the official System holds the written article" true (holds official written);
+  Alcotest.(check bool) "with no amendments" true (Option.is_none official.amendments);
+  let next = prepare world ~runtime_id:agent_core_runtime in
+  Alcotest.(check string) "the Agent Core System is still the first turn's" first.text next.text;
+  Alcotest.(check bool) "and its block lists the written article" true
+    (Option.fold ~none:false ~some:(contains ~sub:(Render.articles [ written ])) next.amendments)
+;;
+
 let () =
   Alcotest.run "keeper_turn_system"
     [ ( "front"
@@ -302,6 +606,20 @@ let () =
             test_an_official_client_turn_neither_reads_nor_writes_the_basis
         ; Alcotest.test_case "other bytes carry no amendments" `Quick
             test_other_bytes_carry_no_amendments
+        ] )
+    ; ( "prepared turn"
+      , [ Alcotest.test_case "(a)(d) a written article keeps the System" `Quick
+            test_a_prepared_turn_keeps_its_system_when_an_article_is_written
+        ; Alcotest.test_case "without a request the System takes every article" `Quick
+            test_without_a_request_on_the_runtime_the_system_takes_every_article
+        ; Alcotest.test_case "(b) a moved front renders the current articles" `Quick
+            test_a_moved_front_renders_the_current_articles_on_the_wire
+        ; Alcotest.test_case "(c) changed instructions rebuild the System" `Quick
+            test_changed_instructions_rebuild_the_prepared_system
+        ; Alcotest.test_case "(e) a taken-back article is named" `Quick
+            test_a_taken_back_article_is_named_in_the_prepared_block
+        ; Alcotest.test_case "(g) an official client takes the current articles" `Quick
+            test_an_official_client_turn_takes_the_current_articles
         ] )
     ]
 ;;

@@ -30,6 +30,7 @@ type step =
       { candidate_id : string
       ; detail : string
       }
+  | Registry_fenced
 
 type retry_reason =
   | Exact_claim_contended
@@ -60,6 +61,7 @@ type drain_outcome =
       { candidate_id : string
       ; progress : drain_progress
       }
+  | Awaiting_registry_fence of { progress : drain_progress }
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -465,6 +467,7 @@ let drain_outcome_label = function
   | Retry_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
   | Lane_deferred _ -> "deferred_lane_exhausted"
+  | Awaiting_registry_fence _ -> "awaiting_registry_fence"
 ;;
 
 (* The drain line derives its level from the outcome it reports. [Retry_later]
@@ -473,18 +476,21 @@ let drain_outcome_label = function
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
   | Drained _ -> Log.Info
-  | Retry_later _ | Lane_deferred _ -> Log.Warn
+  | Retry_later _ | Lane_deferred _ | Awaiting_registry_fence _ -> Log.Warn
 ;;
 
 let drain_outcome_progress = function
   | Drained progress -> progress
-  | Retry_later { progress; _ } | Lane_deferred { progress; _ } -> progress
+  | Retry_later { progress; _ }
+  | Lane_deferred { progress; _ }
+  | Awaiting_registry_fence { progress } -> progress
 ;;
 
 (* [Lane_deferred] uses the separate maintenance-pulse rearm, not the claim
-   contention timer. *)
+   contention timer. [Awaiting_registry_fence] needs neither: the end of the
+   configuration write wakes the worker through its lane subscription. *)
 let apply_drain_rearm (scheduler : rearm_scheduler) = function
-  | Drained _ | Lane_deferred _ ->
+  | Drained _ | Lane_deferred _ | Awaiting_registry_fence _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -1208,6 +1214,16 @@ let ready_root_work candidates (partition : Partition.t) =
         | Candidate.Suspended_quarantine _ -> Lane_free))
 ;;
 
+type 'prepared ready_selection =
+  | No_ready_root
+  | Registry_fenced_before_claim
+  | Ready_root of
+      { partition_id : string
+      ; generation : Partition.Generation.t
+      ; candidate_id : string
+      ; prepared : (string * 'prepared) option
+      }
+
 (* Lane-free roots go first. A root whose lane is resting is Ready again and
    the oldest, so claiming strictly oldest first would put every lane-free
    root behind it until a slot frees; a restart that returns cut runs to
@@ -1243,18 +1259,35 @@ let prepare_next_ready
       ([], [])
   in
   let selected (partition : Partition.t) prepared =
-    Ok (Some (partition.partition_id, partition.generation, partition.candidate_id, prepared))
+    Ok
+      (Ready_root
+         { partition_id = partition.partition_id
+         ; generation = partition.generation
+         ; candidate_id = partition.candidate_id
+         ; prepared
+         })
   in
   match ready_lane_free, ready_needs_lane with
   | partition :: _, _ -> selected partition None
   | [], (partition, candidate) :: _ ->
     (match prepare candidate with
      | Ok prepared -> selected partition (Some (candidate.Candidate.candidate_id, prepared))
-     | Error error ->
+     | Error Exact_flow.Registry_fenced -> Ok Registry_fenced_before_claim
+     | Error
+         (( Exact_flow.Network_unavailable
+          | Exact_flow.Candidate_not_pending
+          | Exact_flow.Prompt_contract_unavailable _
+          | Exact_flow.Registry_unavailable
+          | Exact_flow.Lane_unavailable
+          | Exact_flow.Lane_preference_unavailable _
+          | Exact_flow.Lane_resolved_without_slots
+          | Exact_flow.Candidate_invalid _
+          | Exact_flow.Flow_snapshot_failed
+          | Exact_flow.Flow_start_failed ) as error) ->
        Error
          ("Board attention exact setup unavailable before claim: "
           ^ setup_error_detail error))
-  | [], [] -> Ok None
+  | [], [] -> Ok No_ready_root
 ;;
 
 let confirm_requeue_transition ~base_path transition =
@@ -1730,8 +1763,9 @@ let process_next_with_claim_ready_exact_current
     prepare_next_ready ~base_path ~keeper_name ~prepare candidates
   in
   match selected with
-  | None -> Ok Idle
-  | Some (partition_id, generation, candidate_id, prepared) ->
+  | No_ready_root -> Ok Idle
+  | Registry_fenced_before_claim -> Ok Registry_fenced
+  | Ready_root { partition_id; generation; candidate_id; prepared } ->
     let rec claim_selected attempts_remaining =
       let* claimed =
         claim_ready_exact
@@ -2014,6 +2048,7 @@ let drain_available_with_process ~yield ~process =
       Ok
         (Lane_deferred
            { candidate_id; progress = { progress with steps = progress.steps + 1 } })
+    | Ok Registry_fenced -> Ok (Awaiting_registry_fence { progress })
     | Error detail -> Error detail
   in
   loop { judgments = 0; steps = 0 }
@@ -2136,9 +2171,26 @@ let run
     observe_error ~base_path ~keeper_name detail;
     Error { stage = Registration; detail }
   | Ok registration ->
+    (* A configuration write refuses registry readers while it holds the
+       fence, and its end wakes every lane subscriber. This is the wake that
+       runs a drain parked on [Awaiting_registry_fence] again. *)
+    let unsubscribe_lane =
+      Runtime_exact_output_registry.subscribe_lane_changes
+        ~lane_id:Exact_flow.lane_id
+        (fun () ->
+           match Wake.request ~base_path ~keeper_name with
+           | Ok (Wake.Signaled | Wake.Coalesced | Wake.Not_registered) -> ()
+           | Error detail ->
+             Log.Keeper.error
+               "board_attention_lane_change_wake_failed keeper=%s detail=%s"
+               keeper_name
+               detail)
+    in
     Fun.protect
       ~finally:(fun () ->
-        protect_process_recovery_release (fun () -> Wake.unregister registration))
+        protect_process_recovery_release (fun () ->
+          unsubscribe_lane ();
+          Wake.unregister registration))
       (fun () ->
          with_process_recovery_claim ~base_path ~keeper_name
          @@ fun owns_process_recovery ->
@@ -2231,7 +2283,8 @@ let run
              | Ok outcome ->
                (match outcome with
                 | Lane_deferred _ -> schedule_deferred_rearm deferred_rearm
-                | Drained _ | Retry_later _ -> reset_deferred_rearm deferred_rearm);
+                | Drained _ | Retry_later _ | Awaiting_registry_fence _ ->
+                  reset_deferred_rearm deferred_rearm);
                let progress = drain_outcome_progress outcome in
                Log.Keeper.emit
                  (drain_outcome_log_level outcome)

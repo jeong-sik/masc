@@ -7,6 +7,7 @@ type setup_error =
   | Network_unavailable
   | Candidate_not_pending
   | Prompt_contract_unavailable of string
+  | Registry_fenced
   | Registry_unavailable
   | Lane_unavailable
   | Lane_preference_unavailable of string
@@ -131,6 +132,22 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
+let registry_setup_error = function
+  | Runtime_exact_output_registry.Publication_busy -> Registry_fenced
+  | Runtime_exact_output_registry.Registry_not_published
+  | Runtime_exact_output_registry.Replacement_base_changed
+  | Runtime_exact_output_registry.Duplicate_lane_id _
+  | Runtime_exact_output_registry.Empty_lane _
+  | Runtime_exact_output_registry.Blank_lane_slot _
+  | Runtime_exact_output_registry.Duplicate_lane_slot _
+  | Runtime_exact_output_registry.Invalid_lane_slot _
+  | Runtime_exact_output_registry.Lane_thinking_not_encodable _
+  | Runtime_exact_output_registry.Required_lane_unavailable _
+  | Runtime_exact_output_registry.Required_lane_disabled _
+  | Runtime_exact_output_registry.Resolver_snapshot_rejected _ ->
+    Registry_unavailable
+;;
+
 let prepare ~base_path ~keeper_name ~net candidate =
   match
     ( Keeper_board_attention_candidate.status_view
@@ -170,7 +187,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
     let messages = [ message Agent_core.Types.User prompt ] in
     let* registry =
       Runtime_exact_output_registry.current ()
-      |> Result.map_error (fun _ -> Registry_unavailable)
+      |> Result.map_error registry_setup_error
     in
     let* resolved =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id

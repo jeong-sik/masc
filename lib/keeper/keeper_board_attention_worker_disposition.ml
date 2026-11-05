@@ -52,6 +52,7 @@ let setup_error_detail = function
   | Exact_flow.Candidate_not_pending -> "candidate is no longer pending"
   | Exact_flow.Prompt_contract_unavailable detail ->
     "prompt contract unavailable: " ^ detail
+  | Exact_flow.Registry_fenced -> "runtime registry held by a configuration write"
   | Exact_flow.Registry_unavailable -> "runtime registry unavailable"
   | Exact_flow.Lane_unavailable -> "board exact lane unavailable"
   | Exact_flow.Lane_preference_unavailable detail ->

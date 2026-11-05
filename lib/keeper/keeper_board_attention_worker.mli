@@ -33,6 +33,10 @@ type step =
           next generation and the candidate stays Pending, not quarantined.
           [detail] is the lane's sentence, the one its run record closed
           with. *)
+  | Registry_fenced
+      (** A runtime configuration write held the exact-output registry while
+          the oldest root that needs the lane prepared. Nothing was claimed
+          and the partition stays [Ready]. *)
 
 type retry_reason =
   | Exact_claim_contended
@@ -59,6 +63,7 @@ type drain_outcome =
       { candidate_id : string
       ; progress : drain_progress
       }
+  | Awaiting_registry_fence of { progress : drain_progress }
 (** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
     partition undrained and re-arms the contention timer, so the same worker
     re-inspects it (see [apply_drain_rearm]). A generation that moved under the
@@ -75,7 +80,12 @@ type drain_outcome =
     so they never wait behind it. One worker-owned delayed wake, using the
     existing maintenance pulse interval, reinspects the Ready root even if
     no further Board signal arrives. A Board signal, resume, or process start
-    may wake it sooner. *)
+    may wake it sooner.
+
+    [Awaiting_registry_fence] ends the drain at the first [Registry_fenced]
+    step and arms no timer. The worker subscribes to the Board lane for its
+    whole run, and the end of the configuration write wakes every subscriber
+    once {!Runtime_exact_output_registry.current} has refused a reader. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }

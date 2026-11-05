@@ -349,7 +349,8 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Rescan_later _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "worker exact callback chain did not complete");
   Alcotest.(check (list string))
     "durable callback order"
@@ -434,7 +435,9 @@ let test_a_cli_answer_after_every_http_slot_was_rejected_completes () =
    | W.Candidate_already_consumed _ ->
      Alcotest.fail "the CLI answer step returned Candidate_already_consumed"
    | W.Judgment_deferred _ ->
-     Alcotest.fail "the CLI answer step returned Judgment_deferred");
+     Alcotest.fail "the CLI answer step returned Judgment_deferred"
+   | W.Registry_fenced ->
+     Alcotest.fail "the CLI answer step returned Registry_fenced");
   match (load_one_partition ~base_path).state with
   | P.Completed { item; _ } ->
     Alcotest.(check string) "the answering client is recorded" cli_slot item.judgment.slot_id
@@ -474,7 +477,8 @@ let test_a_not_relevant_judgment_settles_without_an_owner_turn () =
    | W.Rescan_later _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "fixture did not complete the discard's judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
    | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
@@ -515,7 +519,8 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
     | W.Rescan_later _
     | W.Candidate_already_consumed _
     | W.Judgment_deferred _
-    | W.Partition_blocked _ -> Alcotest.fail "fixture did not complete a judgment"
+    | W.Partition_blocked _
+    | W.Registry_fenced -> Alcotest.fail "fixture did not complete a judgment"
   in
   let first = judge_next J.Not_relevant in
   let second = judge_next J.Relevant in
@@ -785,7 +790,9 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained _ | W.Retry_later _ | W.Lane_deferred _) ->
+   | Ok
+       ( W.Drained _ | W.Retry_later _ | W.Lane_deferred _
+       | W.Awaiting_registry_fence _ ) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -799,6 +806,47 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
   match (load_one_partition ~base_path).state with
   | P.Ready -> ()
   | _ -> Alcotest.fail "setup failure claimed or terminalized the partition"
+;;
+
+(* A runtime configuration write refuses registry readers while it holds the
+   fence. The drain parks on that refusal instead of failing the worker, and
+   leaves the candidate and its partition for the wake the fence's end sends. *)
+let test_registry_fence_parks_drain_before_claim () =
+  with_temp_base "board-attention-worker-registry-fence" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let calls = ref 0 in
+  let prepare _candidate =
+    incr calls;
+    Error E.Registry_fenced
+  in
+  (match
+     W.For_testing.drain_available
+       ~yield:(fun () -> ())
+       ~now:(fun () -> 3.0)
+       ~worker_epoch:(P.Worker_epoch.generate ())
+       ~base_path
+       ~keeper_name:"alpha"
+       ~prepare
+       ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+         Alcotest.fail "fenced setup reached execution")
+   with
+   | Ok (W.Awaiting_registry_fence { progress = { judgments = 0; steps = 0 } }) -> ()
+   | Ok
+       ( W.Awaiting_registry_fence _ | W.Drained _ | W.Retry_later _
+       | W.Lane_deferred _ ) ->
+     Alcotest.fail "fenced setup did not park the drain on the fence"
+   | Error detail -> Alcotest.failf "fenced setup stopped the worker: %s" detail);
+  Alcotest.(check int) "one setup attempt" 1 !calls;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending { last_delivery_failure = Some _ }
+   | A.Judged _
+   | A.Consumed _
+   | A.Quarantine _ ->
+     Alcotest.fail "fenced setup changed the Pending candidate");
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "fenced setup claimed or terminalized the partition"
 ;;
 
 let test_claim_generation_change_discards_without_sibling_selection () =
@@ -864,7 +912,8 @@ let test_claim_generation_change_discards_without_sibling_selection () =
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "claim retry exhaustion produced a terminal step");
   Alcotest.(check int) "selected target is prepared once" 1 !prepare_calls;
   Alcotest.(check int) "no prepared attempt was dispatched" 0 !execute_calls;
@@ -969,7 +1018,8 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
   Alcotest.(check int) "one prepared target" 1 !prepare_calls;
   Alcotest.(check int) "initial claim plus two retries" 3 !claim_calls;
@@ -1133,6 +1183,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained _
    | W.Lane_deferred _
+   | W.Awaiting_registry_fence _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
@@ -1495,7 +1546,8 @@ let test_drain_prunes_consumed_rows_behind_the_board_cursor () =
    | W.Idle -> ()
    | W.Contended _ | W.Rescan_later _
    | W.Judgment_completed _ | W.Candidate_already_consumed _
-   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+   | W.Judgment_deferred _ | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "a consumed-only ledger produced partition work");
   let kept =
     ok "load without cursor" (A.load_candidates ~base_path ~keeper_name:"alpha")
@@ -1512,7 +1564,8 @@ let test_drain_prunes_consumed_rows_behind_the_board_cursor () =
    | W.Idle -> ()
    | W.Contended _ | W.Rescan_later _
    | W.Judgment_completed _ | W.Candidate_already_consumed _
-   | W.Judgment_deferred _ | W.Partition_blocked _ ->
+   | W.Judgment_deferred _ | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "a pruned ledger produced partition work");
   let remaining =
     ok "load after pruned drain" (A.load_candidates ~base_path ~keeper_name:"alpha")
@@ -1538,7 +1591,8 @@ let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
    | W.Judgment_completed { candidate_id; _ }
      when String.equal candidate_id discarded.candidate_id -> ()
    | W.Judgment_completed _ | W.Idle | W.Contended _ | W.Rescan_later _
-   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "fixture did not complete the discard's judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
    | A.Consumed _, P.Settled _ -> ()
@@ -1547,7 +1601,8 @@ let test_drain_drops_the_settled_receipt_of_a_consumed_candidate () =
   (match ok "next wake" (process ~base_path ~prepare ~execute) with
    | W.Idle -> ()
    | W.Contended _ | W.Rescan_later _ | W.Judgment_completed _
-   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _ ->
+   | W.Candidate_already_consumed _ | W.Judgment_deferred _ | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "a settled-only ledger produced partition work");
   Alcotest.(check int) "the candidate was judged once" 1 !judged;
   Alcotest.(check int)
@@ -2204,7 +2259,8 @@ let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
   (match drain spent with
    | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 1 } }
      when String.equal candidate_id persisted.candidate_id -> ()
-   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _
+   | W.Awaiting_registry_fence _ ->
      Alcotest.fail "a spent lane did not end the drain as deferred");
   Alcotest.(check int)
     "the drain stopped instead of claiming the deferred root again"
@@ -2229,7 +2285,8 @@ let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
   in
   (match drain answered with
    | W.Drained { judgments = 1; steps = 1 } -> ()
-   | W.Drained _ | W.Lane_deferred _ | W.Retry_later _ ->
+   | W.Drained _ | W.Lane_deferred _ | W.Retry_later _
+   | W.Awaiting_registry_fence _ ->
      Alcotest.fail "the next drain did not judge the deferred candidate");
   (match (load_one_candidate ~base_path).status with
    | A.Consumed { delivery = A.Not_relevant; _ } -> ()
@@ -2345,7 +2402,8 @@ let test_a_root_that_needs_no_lane_is_not_held_behind_a_spent_one () =
   (match outcome with
    | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 2 } }
      when String.equal candidate_id waiting.candidate_id -> ()
-   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ ->
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _
+   | W.Awaiting_registry_fence _ ->
      Alcotest.fail "the drain did not settle the lane-free root before deferring");
   Alcotest.(check (list string))
     "only the waiting candidate needed the lane"
@@ -3265,7 +3323,8 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "blocked partition was exposed before authorization");
   Alcotest.(check int) "no exact dispatch before authorization" 0 !execute_calls;
   (match (load_one_partition ~base_path).state with
@@ -3461,7 +3520,8 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Rescan_later _
    | W.Candidate_already_consumed _
    | W.Judgment_deferred _
-   | W.Partition_blocked _ ->
+   | W.Partition_blocked _
+   | W.Registry_fenced ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
    | A.Quarantine { phase = A.Requeued _; _ }, P.Completed _ -> ()
@@ -4691,6 +4751,10 @@ let () =
             "setup error stops before claim"
             `Quick
             test_setup_error_stops_before_claim_without_hot_retry
+        ; Alcotest.test_case
+            "registry fence parks the drain before claim"
+            `Quick
+            test_registry_fence_parks_drain_before_claim
         ; Alcotest.test_case
             "claim generation change discards without sibling selection"
             `Quick

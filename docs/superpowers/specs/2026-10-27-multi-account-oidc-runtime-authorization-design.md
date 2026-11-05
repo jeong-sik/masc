@@ -16,7 +16,7 @@
 - Dashboard는 `dashboard/src/api/core.ts:194-208`에서 저장한 bearer를 `Authorization`에 붙인다. Keeper 외부 서비스 OAuth(`lib/server/server_keeper_oauth.mli:1-12`)는 Dashboard 사용자의 Google OIDC 로그인과 다른 기능이다.
 - 공식 계정 로그인은 `dashboard/src/api/setup-login.ts:22-29`에 있지만 `lib/server/server_setup_account_login.mli:1-4`가 `CanAdmin`을 요구한다. 일반 사용자의 개인 구독 등록 모델과 맞지 않는다.
 - `lib/auth/auth.ml:204-225,303-318`은 `auth disabled` 또는 `workspace secret`을 Admin으로 허용한다. 초대받은 principal만 허용하는 모델과 충돌한다.
-- `lib/auth/auth_strict_mode.ml:17-20`과 `lib/mcp_server_eio_caller_identity.ml:176-192`는 Strict라고 항상 거부하지 않고 로그 후 caller alias를 유지한다.
+- `lib/mcp_server_eio_caller_identity.ml:166-178`은 token 해석이 실패해도 거부하지 않고 로그를 남긴 뒤 caller alias를 유지한다.
 - `lib/server/server_mcp_transport_http_headers.ml:267-270`은 MCP cookie에 `Secure`와 `HttpOnly`가 없고 `SameSite=Lax`다.
 - official client는 모델 호출과 내장 도구 루프를 소유하고 account-home을 사용한다. MASC가 중개하는 단일 provider 요청 모델을 그대로 적용할 수 없다.
 - 자격 증명 레코드 `Types_auth.agent_credential`(`lib/types/types_auth.mli:98-107`)은 token 해시와 `role`을 가지며 `role`이 유일한 역할 권위다. 진행 중인 MCP OAuth(`docs/rfc/RFC-mcp-dual-bearer-oauth.md`)도 정적 bearer와 OAuth token을 같은 `agent_credential` 투영으로 풀고, loopback 승인 화면에서 기존 bearer를 한 번 제시하게 한다.
@@ -304,7 +304,7 @@ GitHub 사용자 로그인은 OIDC가 아니라서 ID token이 없다. 신원은
 - 요청 하나는 `Browser_session`, `Scoped_pat`, `Service_credential`, `Mcp_oauth_token` 중 정확히 하나로 인증하고, 모두 같은 인증 투영(principal + `auth_binding` + `Pat_scope`)으로 풀어 §6.2 판정을 거친다. 두 번째 권한표를 두지 않는다. `Service_credential`은 `Not_pat`이고 범위는 Delegated grant와 DelegatePolicy가 정한다. PAT·Service·OAuth token의 레코드는 `principal`과 `Pat_scope`를 가진 새 형식이고, `agent_name`과 `role`을 가진 `agent_credential`은 다계정에서 읽지 않고, 옛 bearer를 든 요청은 `Legacy_credential_forbidden`으로 Reject한다. Admin은 `Admin_assignment`에서만 온다.
 - MCP OAuth는 loopback 전용 승인 화면에서 기존 bearer를 제시하게 한다. 다계정에서는 이 승인을 해당 Human의 OIDC session에 결속하고, 발급한 token은 `Pat_scope`와 같은 범위 필터를 가진다. 이 결속은 OAuth 스택이 main에 들어간 뒤 별도 층에서 구현한다. 그 층이 들어오기 전까지 `Mcp_oauth_token`은 Reject한다.
 - `auth disabled`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`는 다계정 부팅·활성화를 거부한다. 이 검사는 기존 기능이 아니라 새 요구사항이다.
-- HTTP `http_auth_strict_enabled`와 MCP caller strict를 `Auth_gate.decide = Allow(principal) | Reject(reason) | Log_only(evidence)`로 통합한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로는 제거한다. 다계정에서 `Log_only` 처분은 금지한다. route 표의 모든 항목이 `Reject`를 반환함을 보이는 시험이 있어야 다계정을 연다. `MASC_AUTH_STRICT=strict` 값만으로는 통과하지 않는다.
+- HTTP `http_auth_strict_enabled`와 MCP 호출자 token 해석을 `Auth_gate.decide = Allow(principal) | Reject(reason) | Log_only(evidence)`로 통합한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로는 제거한다. 다계정에서 `Log_only` 처분은 금지한다. route 표의 모든 항목이 `Reject`를 반환함을 보이는 시험이 있어야 다계정을 연다.
 - session cookie가 조금이라도 있으면 bearer 유무와 무관하게 same-origin과 session-bound CSRF token을 모두 요구한다. `Option.is_some token` 우회와 GET mutation은 금지한다. credentialed cross-origin CORS는 기본 거부다.
 - agent query/header와 `x-masc-keeper-name`은 Actor_hint다. 제시한 service hint가 credential의 service_id와 다르면 거부한다. 익명 rate-limit은 직접 접속 peer IP이며 Actor_hint로 나누지 않는다. 인증 진단 endpoint는 Admin 전용이며 token·hash·credential 본문을 반환하지 않는다.
 - route 표에 모든 HTTP/WS/SSE/MCP 경로의 인증·인가·CSRF·query credential 처분을 열거하고, legacy workspace secret을 쓰는 기존 호출자와 대체 `InternalServiceCredential.service_id`도 열거한다. legacy 사용 목록이 0이어야 다계정을 연다.

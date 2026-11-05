@@ -32,7 +32,7 @@ main은 그 사이 `83e86ad154f`까지 7커밋 앞으로 갔어요. 그 7커밋�
 ### 1. 자격이 없는 요청과 틀린 bearer
 
 main으로 만든 서버와 이 브랜치로 만든 서버에 A1 기준선(`run.sh`)을 돌렸어요.
-설정은 기본과 엄격(`MASC_HTTP_AUTH_STRICT=true MASC_AUTH_STRICT=strict`) 두 가지예요.
+설정은 기본과 엄격(`MASC_HTTP_AUTH_STRICT=true`) 두 가지예요.
 설정마다 main을 두 번, 이 브랜치를 한 번 돌려서 모두 여섯 번이에요. main을 두 번 돌리는 까닭은 2번에서 설명해요.
 
 - (메서드, 경로) 조합 387개 × 요청 4개(HTTP/1.1과 HTTP/2, 자격 없음과 틀린 bearer) × 설정 2개, 3,096개 상태 코드가 모두 같아요. 이 가운데 4개는 3초 안에 답이 없었는데(기본 설정에서 `/api/dashboard/execute-output/`와 `/api/v1/dashboard/execute-output/`의 HTTP/1 요청), 두 빌드가 똑같았어요.
@@ -191,7 +191,7 @@ main으로 만든 서버와 이 브랜치로 만든 서버에 A1 기준선(`run.
 
    ```
    AUTH_BASELINE_CREDENTIALS=1 scripts/auth-route-baseline/run.sh <main_eio.exe> <auth_route_inventory.exe> <port> <work-dir> <out>/before/default
-   AUTH_BASELINE_CREDENTIALS=1 scripts/auth-route-baseline/run.sh <main_eio.exe> <auth_route_inventory.exe> <port> <work-dir> <out>/before/strict MASC_HTTP_AUTH_STRICT=true MASC_AUTH_STRICT=strict
+   AUTH_BASELINE_CREDENTIALS=1 scripts/auth-route-baseline/run.sh <main_eio.exe> <auth_route_inventory.exe> <port> <work-dir> <out>/before/strict MASC_HTTP_AUTH_STRICT=true
    (같은 명령을 main 빌드로 한 번 더 <out>/before2에, 이 브랜치 빌드로 <out>/after에)
 
    scripts/auth-route-baseline/compare.py <out>/before <out>/after --noise <out>/before2 \

@@ -323,7 +323,7 @@ registry 와 핸들러 사이의 이름 어긋남은 찾지 못했다. descripto
 
 ## W2 배선 점검 2: TOML 키·환경변수 ↔ 읽는 코드, 하드코딩
 
-스냅샷 e1f1429890 기준으로 P2 9건, P3 10줄을 적었습니다. P0·P1 은 못 찾았습니다. 가장 큰 것은 세 가지입니다. (1) runtime.toml 로 줄 수 있다고 안내하는 Keeper 설정 키 8개가 서버가 뜰 때 이미 계산된 값만 읽습니다. 그래서 TOML 로 바꿔도 효과가 없는데 설정 화면은 "applied" 라고 합니다(W2-02). (2) 라이브 runtime.toml 에 아무도 읽지 않는 키가 2개 있습니다. [health] 와 [tui] 같은 표는 모르는 키가 있어도 거절하지 않고, 저장 검사도 11개 표 중 4개만 합니다(W2-01, W2-08). (3) 이름만 "strict" 인 MASC_AUTH_STRICT=strict 는 요청을 거절하지 않고 로그만 남깁니다(W2-04). 이번 주(09-29 20:55 이후) 새로 생긴 MASC_* 환경변수는 0개이고 280개 그대로입니다.
+스냅샷 e1f1429890 기준으로 P2 9건, P3 9줄을 적었습니다. P0·P1 은 못 찾았습니다. 가장 큰 것은 두 가지입니다. (1) runtime.toml 로 줄 수 있다고 안내하는 Keeper 설정 키 8개가 서버가 뜰 때 이미 계산된 값만 읽습니다. 그래서 TOML 로 바꿔도 효과가 없는데 설정 화면은 "applied" 라고 합니다(W2-02). (2) 라이브 runtime.toml 에 아무도 읽지 않는 키가 2개 있습니다. [health] 와 [tui] 같은 표는 모르는 키가 있어도 거절하지 않고, 저장 검사도 11개 표 중 4개만 합니다(W2-01, W2-08). 이번 주(09-29 20:55 이후) 새로 생긴 MASC_* 환경변수는 0개이고 280개 그대로입니다.
 
 | id | sev | file:line | 열린 PR · 09-29 | 한 줄 결함 | 고치는 방향 | 판정 |
 |---|---|---|---|---|---|---|
@@ -332,7 +332,6 @@ registry 와 핸들러 사이의 이름 어긋남은 찾지 못했다. descripto
 | W2-03 | P2 | `lib/keeper_runtime/keeper_runtime_config.ml:413-445` | 열린 PR 없음. | 설정 화면의 effective_value 는 Runtime_params 를 안 봐서, 같은 설정 7개가 설정 화면과 실제 값이 다를 수 있다 | 화면에 값을 하나만 보이게 한다. Runtime_params 에 쌍이 있는 행은 effective 칸에 Runtime_params 값을 쓰고 source 에 'runtime_param' 을 더한다. | 확인 |
 | W2-06 | P2 | `lib/http_server_eio.ml:18-30` | 열린 PR 없음. | 카탈로그에는 있고 읽는 코드가 없거나 읽고 버리는 환경변수가 3개다. 라이브 프로세스는 읽는 곳 없는 MASC_KEEPER_BOOTSTRAP_ENABLED 를 쥐고 있다 | 카탈로그 행 3개(MASC_HTTP_HOST, MASC_WS_PORT, MASC_KEEPER_AUTONOMOUS_MAX_TOKENS)와 http_server_eio.ml 의 host 필드를 지운다(host 는 make_http_config 의 인자만 쓴다). | 확인 |
 | W2-08 | P2 | `lib/runtime/runtime.ml:3440-3447,3463-3496,3672-3680,4221-4231` | #40213, #40223 (저장 편집과 검증을 순수 함수로 분리하는 리팩터링, 제목만 확인). 이 문제를 다루는지는 확인 못 함. | runtime.toml 저장 검사는 11개 표 중 4개 안팎만 보고, 나머지는 쓰는 쪽이 처음 읽을 때 터진다 | 표마다 '문자열을 받아 Result 를 돌려주는' 검사 함수를 소유 모듈에 두고(voice, browser, slack, discord, board 는 이미 있다), validate_save_text 가 Runtime_toml_namespace.all 을 돌며 그 함수를 부르게 한다. | 확인 |
-| W2-04 | P3 | `lib/auth/auth_strict_mode.ml:5-20` | 열린 PR 없음. | MASC_AUTH_STRICT=strict 는 요청을 거절하지 않는다. 2026-04 부터 '다음 단계'로 미룬 로그 전용 설정이다 | 둘 중 하나로 정한다. (a) Strict 를 실제 거절로 만든다: Result 로 실패를 돌려주고 호출자가 처리한다. (b) 이 설정을 지운다: Auth_strict_mode 모듈, metric, 이 환경변수를 함께 지우고 MASC_HTTP_AUTH_STRICT 하나만 남긴다. | 확인 |
 | W2-05 | P3 | `lib/config/env_config_core.ml:79-110,767-772` | 열린 PR 없음(보존 정책으로 이 파일들을 바꾸는 PR 을 못 찾음). | 보존 기간이 환경변수 6개와 리터럴 3개로 흩어져 있고 기본값이 서로 다르다. 둘은 기본이 '영원히'다 | 보존 기간을 한 곳(닫힌 variant 와 TOML 표 하나, 예: [retention])에 선언하고 저장소마다 그 선언을 읽게 한다. '영원히'는 variant 의 한 값으로 명시한다. 리터럴 30, 16, 7 을 그 선언의 기본값으로 옮기고 이유를 주석에 적는다. | 확인 |
 | W2-07 | P3 | `lib/config/env_setting.mli:1-12` | 열린 PR 없음.; 09-29 DM-BD-8, MM-M4 | 운영자가 조절해야 하는 한도가 환경변수로만 바뀌고, 환경변수 카탈로그에는 82개가 빠져 있다 (env_var_sprawl) | 정책이 되는 한도부터 Env_setting 구성자나 레지스트리 행으로 올리고(보존 4개, comment cap, facts 한도, HITL 동시성), TOML 키를 준다. 테스트·개발용 이름(MASC_TEST_*, MASC_TUI_*, MASC_TLC_*)은 카탈로그에서 뺀다고 명시한다. | 확인 |
 

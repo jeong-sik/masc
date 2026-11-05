@@ -916,6 +916,23 @@ let test_a_verification_or_run_push_reads_the_requests () =
     ; "data: {\"type\":\"internal_agent_runs_changed\",\"registry\":\"elsewhere\"}\n\n"
     ]
 
+let test_browser_observation_decodes_the_exact_scope () =
+  let frame =
+    "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"browser_observation\",\
+     \"source\":\"live\",\"clientId\":\"01a16363-ef67-7000-ad62-05bcd0320d99\",\
+     \"tabId\":2,\"view\":\"read\",\"revision\":\"" ^ String.make 64 'a' ^ "\"}\n\n"
+  in
+  match decode_all [ frame ] with
+  | [ Observer.Event (Observer.Dataset_changed
+        (Masc.Workspace_dataset_event.Browser_observation observation)) ] ->
+      check string "the exact Browser client survives" "01a16363-ef67-7000-ad62-05bcd0320d99"
+        (Option.get observation.scope.client_id);
+      check int "the exact tab survives" 2 observation.scope.tab_id;
+      check string "the revision survives" (String.make 64 'a') observation.revision
+  | decoded ->
+      fail ("a matching Browser observation did not decode: "
+        ^ String.concat ", " (List.map summary decoded))
+
 let event_queue_frame =
   {|data: {"type":"keeper_event_queue_changed","keeper":"alpha"}
 
@@ -1611,6 +1628,8 @@ let () =
             test_memory_health_pushes_require_their_keeper
         ; test_case "Machine live pushes name their machine" `Quick
             test_machine_live_pushes_scope_the_machine
+        ; test_case "Browser observation pushes decode their exact scope" `Quick
+            test_browser_observation_decodes_the_exact_scope
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
         ; test_case "only a confirmation change reads the confirmations" `Quick

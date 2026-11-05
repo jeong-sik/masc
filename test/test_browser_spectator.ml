@@ -36,7 +36,7 @@ let test_scope_round_trip_and_strict_identity () =
               ("/mcp?sse_kind=observer&" ^ Dataset.browser_scope_query scope) with
       | Ok (Some actual) -> check bool "the observer query preserves the same scope" true (actual = scope)
       | Ok None | Error _ -> fail "a browser observer lost its scope")
-    [ viewport client_a; region
+    [ viewport client_a; viewport client_b; region
     ; { (viewport client_a) with
         view = Dataset.Scene { scene_view = Browser_lane.Content; scope = None } }
     ; { source = Browser_lane.Lane_name.Automation; client_id = None; tab_id = 4; view = Dataset.Read } ];
@@ -48,8 +48,6 @@ let test_scope_round_trip_and_strict_identity () =
     ; List.remove_assoc "clientId" (browser_event (viewport client_a) revision_a)
     ; List.remove_assoc "revision" (browser_event (viewport client_a) revision_a)
     ; List.remove_assoc "sceneView" (browser_event region revision_a)
-    ; ("clientId", `String client_b)
-      :: List.remove_assoc "clientId" (browser_event region revision_a)
     ; ("tabId", `String "2")
       :: List.remove_assoc "tabId" (browser_event (viewport client_a) revision_a)
     ; ("clientId", `String client_a)

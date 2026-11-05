@@ -1,0 +1,55 @@
+(** One HTTP/1.1 server-sent-events response (RFC-0493 §3.1).
+
+    A frame is written only by {!send}. [send] returns once httpun has handed
+    the frame to the socket, once the response has closed, or once
+    [stalled_after_s] has passed. A client that stops reading therefore holds
+    each sending fiber at its frame, and the bytes the server keeps for that
+    client are at most one frame per sending fiber. The writer itself is not
+    reachable from outside this module, so no caller can write a frame
+    without waiting for it.
+
+    A response belongs to the domain that runs its connection. httpun's
+    writer is not domain-safe, and the connection's write loop uses it
+    without any lock of ours. *)
+
+type t
+
+type outcome =
+  | Written  (** The frame reached the socket. *)
+  | Closed
+  (** The response was closed before the frame reached the socket: by
+      {!close}, by an earlier [send] that did not end [Written], or by httpun
+      when the connection failed. *)
+  | Stalled
+  (** The frame did not reach the socket within [stalled_after_s]. A client
+      that went away while the frame was waiting ends here too: httpun closes
+      the body of a failed connection without answering its flush (httpun
+      reqd.ml [report_error], gluten-eio [writev]). *)
+
+val respond :
+  clock:_ Eio.Time.clock ->
+  stalled_after_s:float ->
+  Httpun.Reqd.t ->
+  Httpun.Response.t ->
+  t
+(** [respond ~clock ~stalled_after_s reqd response] starts the streaming
+    response. Production routes pass
+    {!Server_mcp_transport_http_headers.sse_stalled_after_s}. *)
+
+val send : t -> string -> outcome
+(** [send t frame] writes the whole [frame] and waits for it. Several fibers
+    may send on one response; each frame is written whole and in the order
+    the writes happened. A frame that reaches the socket just as the time runs
+    out is [Written]. Unless the outcome is [Written], the response is closed
+    when [send] returns, and a [Stalled] frame is logged with the request
+    path.
+
+    A waiting [send] can be cancelled. Its frame stays in the response and is
+    still written if the client reads on. *)
+
+val close : t -> unit
+(** Ends the response. A [send] waiting at that moment returns [Closed]
+    unless its frame reached the socket first, and every later [send] returns
+    [Closed]. Closing twice is the same as closing once. *)
+
+val is_closed : t -> bool

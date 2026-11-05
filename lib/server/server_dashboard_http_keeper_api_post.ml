@@ -50,18 +50,18 @@ let github_login_stream_headers origin =
      @ Server_auth.cors_headers origin)
 ;;
 
-let github_login_stream_send_with ~write ~flush event json =
-  write (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json));
-  flush ()
+let github_login_stream_frame event json =
+  Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json)
 ;;
 
-let github_login_stream_send writer =
-  github_login_stream_send_with
-    ~write:(Httpun.Body.Writer.write_string writer)
-    ~flush:(fun () -> Httpun.Body.Writer.flush writer (fun _ -> ()))
+(* A response that did not take the frame is closed, so [is_closed] reports it
+   and the login ends there. *)
+let github_login_stream_send response event json =
+  match Server_sse_response.send response (github_login_stream_frame event json) with
+  | Server_sse_response.Written | Closed | Stalled -> ()
 ;;
 
-let handle_keeper_github_login_post state req reqd =
+let handle_keeper_github_login_post ~clock state req reqd =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
   let config = Mcp_server.workspace_config state in
@@ -89,10 +89,13 @@ let handle_keeper_github_login_post state req reqd =
       | Error message -> respond_error ~status:`Bad_request reqd message
       | Ok scopes ->
       let headers = github_login_stream_headers (Server_auth.get_origin req) in
-      let response = Httpun.Response.create ~headers `OK in
-      let writer = Httpun.Reqd.respond_with_streaming reqd response in
+      let response =
+        Server_sse_response.respond ~clock
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          reqd (Httpun.Response.create ~headers `OK)
+      in
       Fun.protect
-        ~finally:(fun () -> Httpun.Body.Writer.close writer)
+        ~finally:(fun () -> Server_sse_response.close response)
         (fun () ->
            match
              Keeper_github_identity.stream_login
@@ -104,13 +107,13 @@ let handle_keeper_github_login_post state req reqd =
                   a request that had not answered at all. *)
                ~make_lane:(fun () ->
                  Keeper_github_login_lane.for_keeper ~config ~meta ~hostname)
-               ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
-               ~send_event:(github_login_stream_send writer)
+               ~is_closed:(fun () -> Server_sse_response.is_closed response)
+               ~send_event:(github_login_stream_send response)
            with
            | Ok () -> ()
-           | Error message when not (Httpun.Body.Writer.is_closed writer) ->
+           | Error message when not (Server_sse_response.is_closed response) ->
              github_login_stream_send
-               writer
+               response
                "error"
                (`Assoc [ "message", `String message ])
            | Error _ -> ())
@@ -1578,7 +1581,7 @@ let parse_bulk_directive_json json =
 
 module For_testing = struct
   let github_login_stream_headers = github_login_stream_headers
-  let github_login_stream_send_with = github_login_stream_send_with
+  let github_login_stream_frame = github_login_stream_frame
   let respond_config_refusal = respond_config_refusal
 
   let parse_resume_request json =

@@ -125,6 +125,7 @@ val handle_keeper_secrets_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
 val handle_keeper_github_login_post :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val handle_keeper_github_token_post :
@@ -192,12 +193,7 @@ module For_testing : sig
     unit
 
   val github_login_stream_headers : string -> Httpun.Headers.t
-  val github_login_stream_send_with :
-    write:(string -> unit) ->
-    flush:(unit -> unit) ->
-    string ->
-    Yojson.Safe.t ->
-    unit
+  val github_login_stream_frame : string -> Yojson.Safe.t -> string
 
   val parse_resume_request :
     Yojson.Safe.t -> (string, string) result

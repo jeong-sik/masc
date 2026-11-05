@@ -294,11 +294,15 @@ let sse_comment_with_retry ~comment =
 
 let sse_ping_interval_s = 30.0
 
-(* Match the terminal fleet observer's allowance of three missed keepalives.
-   The response advertises the resulting deadline so browser clients do not
+(* A reading client takes each frame at once. One that has taken none for
+   three keepalive intervals has stopped reading, or its connection is half
+   open. The terminal fleet observer allows the same three. *)
+let sse_stalled_after_s = 3.0 *. sse_ping_interval_s
+
+(* The response advertises the resulting deadline so browser clients do not
    need their own copy of the server heartbeat interval. *)
 let observer_idle_timeout_header = "x-masc-sse-idle-timeout-ms"
-let observer_idle_timeout_ms = int_of_float (sse_ping_interval_s *. 3_000.0)
+let observer_idle_timeout_ms = int_of_float (sse_stalled_after_s *. 1000.0)
 
 type last_event_id_error =
   | Malformed_last_event_id

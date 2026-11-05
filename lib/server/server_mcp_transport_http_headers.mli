@@ -185,9 +185,13 @@ val sse_ping_interval_s : float
     duplicated in {!Server_mcp_transport_http_agui} (the duplicate
     is intentional — see that module's contract). *)
 
+val sse_stalled_after_s : float
+(** Three {!sse_ping_interval_s}. An SSE frame that has not reached the socket
+    after this long closes its response (RFC-0493 §3.3). *)
+
 val observer_idle_timeout_header : string
 val observer_idle_timeout_ms : int
-(** Observer transport deadline, derived from the server keepalive interval. *)
+(** Observer transport deadline: {!sse_stalled_after_s} in milliseconds. *)
 
 type last_event_id_error =
   | Malformed_last_event_id

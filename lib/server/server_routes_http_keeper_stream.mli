@@ -554,6 +554,7 @@ val handle_keeper_ask_answer :
     the ask was already answered or withdrawn. *)
 
 val handle_keeper_asks_list :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
 

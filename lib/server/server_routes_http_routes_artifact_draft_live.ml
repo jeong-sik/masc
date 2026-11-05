@@ -21,25 +21,25 @@ let stream ~sw ~clock ~session request reqd =
     (Http.Response.scoped_headers () @
      ["content-type", "text/event-stream"; "cache-control", "private, no-store";
       "x-accel-buffering", "no"] @ public_read_cors_headers request) in
-  let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
-  let mutex = Eio.Mutex.create () in
+  let response =
+    Server_sse_response.respond ~clock
+      ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+      reqd (Httpun.Response.create ~headers `OK) in
   let closed = Atomic.make false in
   let stopped, stop = Eio.Promise.create () in
   let request_close () =
     if Atomic.compare_and_set closed false true then (
       Live.leave session; Eio.Promise.resolve stop ()) in
-  let send frame = Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-    if Atomic.get closed || Httpun.Body.Writer.is_closed writer then request_close ()
-    else (
-      Httpun.Body.Writer.write_string writer frame;
-      let flushed, resolve = Eio.Promise.create () in
-      Httpun.Body.Writer.flush writer (fun outcome -> Eio.Promise.resolve resolve outcome);
-      match Eio.Promise.await flushed with `Written -> () | `Closed -> request_close ())) in
+  let send frame =
+    if not (Atomic.get closed) then
+      match Server_sse_response.send response frame with
+      | Server_sse_response.Written -> ()
+      | Closed | Stalled -> request_close () in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run (fun connection ->
       Eio.Switch.on_release connection (fun () ->
         request_close ();
-        Eio.Mutex.use_rw ~protect:true mutex (fun () -> Httpun.Body.Writer.close writer));
+        Server_sse_response.close response);
       let guarded f () =
         (try f () with Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Log.Server.debug "Artifact draft stream closed: %s" (Printexc.to_string exn));

@@ -1,0 +1,334 @@
+open Alcotest
+module Sse = Server_sse_response
+
+let patience_s = 10.0
+let poll_s = 0.002
+
+(* Long enough that a loaded machine does not make a slow frame look stalled. *)
+let kept_stalled_after_s = 600.0
+
+(* Short enough for a test to wait through. *)
+let short_stalled_after_s = 0.3
+
+(* How long a send has to stay unanswered before the test calls it pending. *)
+let pending_for_s = 0.2
+
+(* Long enough to see a send pending and close the client before it stalls. *)
+let client_leaves_stalled_after_s = 2.0
+
+(* A bound on the mock clock, which moves only when the test moves it. *)
+let mock_stalled_after_s = 100.0
+
+let frame_bytes = 64 * 1024
+let frame = "data: " ^ String.make (frame_bytes - 8) 'x' ^ "\n\n"
+
+(* 64 MiB: more than the client's receive buffer and the server's send buffer
+   hold together on Linux and macOS loopback. A send that is still [Written]
+   after this many frames is not waiting for the socket. *)
+let frames_beyond_socket_buffers = 1024
+
+let outcome_name = function
+  | Sse.Written -> "Written"
+  | Closed -> "Closed"
+  | Stalled -> "Stalled"
+;;
+
+let outcome_t = testable (fun ppf outcome -> Format.pp_print_string ppf (outcome_name outcome)) ( = )
+
+exception Server_stopped
+
+type server =
+  { port : int
+  ; stop : unit -> unit  (** Returns once the listening socket is closed. *)
+  }
+
+(* The real accept loop and httpun connection, on a loopback port. Each request
+   gets one SSE response, handed to [on_response] in a fiber of its own. *)
+let start_server ~sw env ~stalled_after_s ~on_response =
+  let clock = Eio.Stdenv.clock env in
+  let listening, resolve_listening = Eio.Promise.create () in
+  let finished, resolve_finished = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    (match
+       Eio.Switch.run (fun server_sw ->
+         let socket =
+           Eio.Net.listen ~reuse_addr:true ~backlog:16 ~sw:server_sw (Eio.Stdenv.net env)
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let port =
+           match Eio.Net.listening_addr socket with
+           | `Tcp (_, port) -> port
+           | `Unix _ -> fail "the test listens on TCP"
+         in
+         Eio.Promise.resolve resolve_listening
+           { port
+           ; stop =
+               (fun () ->
+                  Eio.Switch.fail server_sw Server_stopped;
+                  Eio.Promise.await finished)
+           };
+         Server_bootstrap_http.serve ~sw:server_sw ~clock ~socket ~addr_label:"sse response test"
+           ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
+             let headers =
+               Httpun.Headers.of_list
+                 [ "content-type", "text/event-stream"; "connection", "close" ]
+             in
+             let response =
+               Sse.respond ~clock ~stalled_after_s gluten_reqd.Gluten.Reqd.reqd
+                 (Httpun.Response.create ~headers `OK)
+             in
+             Eio.Fiber.fork ~sw:server_sw (fun () -> on_response response)))
+     with
+     | () -> ()
+     | exception Server_stopped -> ());
+    Eio.Promise.resolve resolve_finished ());
+  Eio.Promise.await listening
+;;
+
+let connect ~sw env ~port =
+  let flow = Eio.Net.connect ~sw (Eio.Stdenv.net env) (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  Eio.Flow.copy_string "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" flow;
+  flow
+;;
+
+let contains ~needle text =
+  let n = String.length needle and m = String.length text in
+  let rec at i = i + n <= m && (String.sub text i n = needle || at (i + 1)) in
+  at 0
+;;
+
+(* Reads until [needle] has arrived, then reads no more. *)
+let read_until flow needle =
+  let buf = Cstruct.create 4096 and seen = Buffer.create 4096 in
+  while not (contains ~needle (Buffer.contents seen)) do
+    let n = Eio.Flow.single_read flow buf in
+    Buffer.add_string seen (Cstruct.to_string ~len:n buf)
+  done
+;;
+
+let within env what f =
+  match Eio.Time.with_timeout (Eio.Stdenv.clock env) patience_s (fun () -> Ok (f ())) with
+  | Ok value -> value
+  | Error `Timeout -> failf "gave up waiting for %s" what
+;;
+
+type refusal =
+  | Kept_written
+  | Refused of Sse.outcome
+
+(* Sends whole frames until one is not [Written]. *)
+let send_until_refused response =
+  let rec go written =
+    if written >= frames_beyond_socket_buffers
+    then Kept_written
+    else
+      match Sse.send response frame with
+      | Sse.Written -> go (written + 1)
+      | (Closed | Stalled) as refused -> Refused refused
+  in
+  go 0
+;;
+
+let refusal_name = function
+  | Kept_written -> Printf.sprintf "still Written after %d frames" frames_beyond_socket_buffers
+  | Refused outcome -> outcome_name outcome
+;;
+
+let refusal_t = testable (fun ppf refusal -> Format.pp_print_string ppf (refusal_name refusal)) ( = )
+
+let with_env f = Eio_main.run (fun env -> Eio.Switch.run (fun sw -> f env sw))
+
+let test_a_frame_the_socket_takes_is_written () =
+  with_env (fun env sw ->
+    let sent, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
+        Eio.Promise.resolve resolve (Sse.send response "data: one\n\n"))
+    in
+    let flow = connect ~sw env ~port:server.port in
+    within env "the frame" (fun () -> read_until flow "data: one");
+    check outcome_t "the frame reached the socket" Sse.Written
+      (within env "the send" (fun () -> Eio.Promise.await sent));
+    server.stop ())
+;;
+
+let test_a_client_that_stops_reading_ends_the_response_as_stalled () =
+  with_env (fun env sw ->
+    let ended, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:short_stalled_after_s ~on_response:(fun response ->
+        let refusal = send_until_refused response in
+        Eio.Promise.resolve resolve (refusal, Sse.send response frame, Sse.is_closed response))
+    in
+    let flow = connect ~sw env ~port:server.port in
+    within env "the response head" (fun () -> read_until flow "200 OK");
+    let refusal, next, closed = within env "the sender to stop" (fun () -> Eio.Promise.await ended) in
+    check refusal_t "the frame the socket did not take stalled" (Refused Sse.Stalled) refusal;
+    check outcome_t "a send after the stall writes nothing" Sse.Closed next;
+    check bool "the stall closed the response" true closed;
+    server.stop ())
+;;
+
+type sender =
+  { started : int Atomic.t
+  ; returned : int Atomic.t
+  ; last : Sse.outcome Eio.Promise.t
+  }
+
+(* Sends whole frames until one is not [Written], in a fiber of its own. *)
+let start_sender ~sw response =
+  let started = Atomic.make 0 and returned = Atomic.make 0 in
+  let last, resolve = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec go () =
+      Atomic.incr started;
+      let outcome = Sse.send response frame in
+      Atomic.incr returned;
+      match outcome with
+      | Sse.Written -> go ()
+      | (Closed | Stalled) as last -> Eio.Promise.resolve resolve last
+    in
+    go ());
+  { started; returned; last }
+;;
+
+(* Returns once every sender has had one send unanswered for [pending_for_s]. *)
+let await_all_pending env senders =
+  let clock = Eio.Stdenv.clock env in
+  within env "every send to stay pending" (fun () ->
+    let rec settled () =
+      let before = List.map (fun sender -> Atomic.get sender.returned) senders in
+      Eio.Time.sleep clock pending_for_s;
+      let pending sender returned =
+        Atomic.get sender.started = returned + 1 && Atomic.get sender.returned = returned
+      in
+      if not (List.for_all2 pending senders before) then settled ()
+    in
+    settled ())
+;;
+
+(* httpun closes the body of a failed connection without answering the flush
+   that waits (httpun reqd.ml [report_error]), so a frame waiting when the
+   client goes away ends at the stall bound. The client stops reading first,
+   so a frame is waiting when it leaves. *)
+let test_a_frame_waiting_when_the_client_goes_away_ends_at_the_stall_bound () =
+  with_env (fun env sw ->
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:client_leaves_stalled_after_s
+        ~on_response:(fun response -> Eio.Promise.resolve resolve response)
+    in
+    let sender =
+      Eio.Switch.run (fun client_sw ->
+        let flow = connect ~sw:client_sw env ~port:server.port in
+        let response = within env "the response" (fun () -> Eio.Promise.await opened) in
+        let sender = start_sender ~sw response in
+        within env "the response head" (fun () -> read_until flow "200 OK");
+        await_all_pending env [ sender ];
+        sender)
+    in
+    check outcome_t "the waiting frame stalled" Sse.Stalled
+      (within env "the waiting send" (fun () -> Eio.Promise.await sender.last));
+    server.stop ())
+;;
+
+(* The flush answer and the end of the time arrive in one scheduler pass. The
+   frame reached the socket, so it is [Written]. An in-memory httpun
+   connection lets the test answer the write by hand right after the bound
+   came due, before any fiber runs. *)
+let test_a_frame_answered_as_the_time_runs_out_is_written () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let outcome, resolve = Eio.Promise.create () in
+    Eio.Switch.run (fun sw ->
+      let connection =
+        Httpun.Server_connection.create (fun reqd ->
+          let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream" ] in
+          let response =
+            Sse.respond ~clock ~stalled_after_s:mock_stalled_after_s reqd
+              (Httpun.Response.create ~headers `OK)
+          in
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Promise.resolve resolve (Sse.send response "data: one\n\n")))
+      in
+      let raw = "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" in
+      let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+      ignore (Httpun.Server_connection.read connection input ~off:0 ~len:(String.length raw) : int);
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let length =
+          List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len) 0 iovecs
+        in
+        Eio_mock.Clock.set_time clock mock_stalled_after_s;
+        Httpun.Server_connection.report_write_result connection (`Ok length);
+        check outcome_t "the frame that reached the socket is Written" Sse.Written
+          (Eio.Promise.await outcome)
+      | `Yield | `Close _ -> fail "the frame was not offered to the socket"))
+;;
+
+let test_close_ends_every_waiting_send () =
+  with_env (fun env sw ->
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
+        Eio.Promise.resolve resolve response)
+    in
+    let flow = connect ~sw env ~port:server.port in
+    let response = within env "the response" (fun () -> Eio.Promise.await opened) in
+    let senders = [ start_sender ~sw response; start_sender ~sw response ] in
+    within env "the response head" (fun () -> read_until flow "200 OK");
+    (* The client reads no more. *)
+    await_all_pending env senders;
+    Sse.close response;
+    List.iter
+      (fun sender ->
+         check outcome_t "the waiting send ends as Closed" Sse.Closed
+           (within env "the waiting send" (fun () -> Eio.Promise.await sender.last)))
+      senders;
+    check outcome_t "a send after close writes nothing" Sse.Closed
+      (Sse.send response "data: late\n\n");
+    server.stop ())
+;;
+
+let test_a_waiting_send_can_be_cancelled () =
+  with_env (fun env sw ->
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
+        Eio.Promise.resolve resolve response)
+    in
+    let flow = connect ~sw env ~port:server.port in
+    let response = within env "the response" (fun () -> Eio.Promise.await opened) in
+    let sender_ended, sender_end = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      (match
+         Eio.Switch.run (fun sender_sw ->
+           let sender = start_sender ~sw:sender_sw response in
+           within env "the response head" (fun () -> read_until flow "200 OK");
+           await_all_pending env [ sender ];
+           Eio.Switch.fail sender_sw Exit)
+       with
+       | () -> ()
+       | exception Exit -> ());
+      Eio.Promise.resolve sender_end ());
+    within env "the waiting send to be cancelled" (fun () -> Eio.Promise.await sender_ended);
+    check bool "cancelling a send does not close the response" false (Sse.is_closed response);
+    server.stop ())
+;;
+
+let () =
+  run "Server SSE response"
+    [ ( "loopback"
+      , [ test_case "a frame the socket takes is Written" `Quick
+            test_a_frame_the_socket_takes_is_written
+        ; test_case "a client that stops reading ends the response as Stalled" `Quick
+            test_a_client_that_stops_reading_ends_the_response_as_stalled
+        ; test_case "a frame waiting when the client goes away ends at the stall bound" `Quick
+            test_a_frame_waiting_when_the_client_goes_away_ends_at_the_stall_bound
+        ; test_case "a frame answered as the time runs out is Written" `Quick
+            test_a_frame_answered_as_the_time_runs_out_is_written
+        ; test_case "close ends every waiting send" `Quick test_close_ends_every_waiting_send
+        ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
+        ] )
+    ]
+;;

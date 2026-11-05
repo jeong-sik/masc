@@ -52,11 +52,6 @@ let kata_runtime_ids =
   default_shim_runtime_id :: [ runtime_id_of Qemu; runtime_id_of Cloud_hypervisor;
                                runtime_id_of Dragonball ]
 
-let vmm_name = function
-  | Qemu -> "qemu"
-  | Cloud_hypervisor -> "cloud-hypervisor"
-  | Dragonball -> "dragonball"
-
 (* Keeper-visible choice: only these three, spelled exactly.  Any other wire
    value is refused here rather than reaching containerd. *)
 let vmm_of_choice = function

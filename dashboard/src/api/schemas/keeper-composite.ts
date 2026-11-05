@@ -134,15 +134,6 @@ const KeeperBoardCursorSchema = object({
   post_id: nullable(string()),
 })
 
-const KeeperCompositeClaimAttemptSchema = object({
-  present: boolean(),
-  source: string(),
-  status: string(),
-  result: nullable(string()),
-  claimed_task_id: nullable(string()),
-  claimed_goal_id: nullable(string()),
-})
-
 // One deferred runtime lane: the runtime it names, and why the failure that
 // deferred it is continuable. `unreadable` marks a receipt written before the
 // field split: the server does not guess what the older shape meant, and the
@@ -187,7 +178,6 @@ const KeeperCompositeExecutionSchema = object({
       degraded_retry_deferred: nullable(DegradedRetryLaneSchema),
     }),
   ),
-  claim_attempt: KeeperCompositeClaimAttemptSchema,
   config_drift: optional(unknown()),
 })
 

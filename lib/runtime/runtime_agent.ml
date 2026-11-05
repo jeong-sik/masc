@@ -232,9 +232,9 @@ let transport_for_provider
           ?body_timeout_s
           ()))
 
-(* Typed field first (RFC-0371 B12): the id used to be recovered by parsing
-   the "runtime:<id>/runtime" spelling the producer had printed into the
-   human-facing [description]. The description is display-only now. *)
+(* Typed field first (RFC-0371 B12), then the config name. The id is not
+   parsed out of the "runtime:<id>/runtime" spelling in the human-facing
+   [description], which is display-only. *)
 let runtime_id_of_config (config : config) =
   match config.runtime_id with
   | Some runtime_id -> runtime_id

@@ -378,11 +378,9 @@ let absent_primary_message path =
   Printf.sprintf "primary ledger file does not exist: %s" path
 ;;
 
-(* Probe result for the primary ledger. [Primary_absent] used to be an [if]
-   above the recovery match rather than a constructor, which split one decision
-   over two axes into two separate nested matches. The halves then drifted:
-   recovering from the mirror logged a warning when the primary was absent and
-   said nothing when the primary was corrupt — the more alarming of the two. *)
+(* Probe result for the primary ledger. [Primary_absent] is a constructor, not
+   an [if] above the recovery match: the decision has two axes, and one match
+   over both keeps the two halves from drifting apart. *)
 type primary_failure =
   | Primary_absent
   | Primary_unparseable of string

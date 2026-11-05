@@ -573,10 +573,8 @@ let test_validation_refusals_keep_the_captured_endpoint_namespace () =
         let json = refuse args in
         let open Yojson.Safe.Util in
         check bool "typed admission refusal" true (member "typed" json = `Bool true);
-        check string "refusal cwd names the endpoint" expected_cwd
-          (member "cwd" json |> to_string);
         let location = member "execution_location" json in
-        check string "nested cwd names the same endpoint" expected_cwd
+        check string "refusal cwd names the endpoint" expected_cwd
           (member "cwd" location |> to_string);
         check string "the captured endpoint owns the root" root
           (member "playground_root" location |> to_string))
@@ -592,7 +590,8 @@ let test_validation_refusals_keep_the_captured_endpoint_namespace () =
       let open Yojson.Safe.Util in
       check string "the cwd refusal stays authoritative" "cwd_outside_sandbox"
         (member "code" rejected |> to_string);
-      check bool "an unsafe cwd is not invented" true (member "cwd" rejected = `Null);
+      check bool "an unsafe cwd is not invented" true
+        (member "cwd" (member "execution_location" rejected) = `Null);
       let reason = match Keeper_remote_path.host_to_remote
         ~base_path ~remote_workspace_root:root ~keeper:meta.name outside with
         | Ok _ -> fail "the out-of-jail fixture unexpectedly projected"

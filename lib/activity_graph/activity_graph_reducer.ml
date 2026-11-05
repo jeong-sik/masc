@@ -129,11 +129,8 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
           meta;
         }
 
-(* The graph anchor a broadcast points at. It used to be minted from
-   [event.workspace_id], which every writer set to the literal "default", so
-   the field distinguished nothing and the belongs_to edge it produced said
-   only that every node belongs to the one place. The field is gone; the
-   anchor stays because "broadcast" needs a target (#29396 A14). *)
+(* The graph anchor a broadcast points at: one fixed workspace node, because
+   "broadcast" needs a target (#29396 A14). *)
 let broadcast_anchor_node_id = "workspace:default"
 
 let reduce_event ~nodes ~edges (value : event) =

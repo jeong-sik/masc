@@ -53,12 +53,9 @@ let guarded name ?description ?input_schema handler server =
     server
 
 let schemas () = List.map (fun tool ->
-  let name = Controller.dos_tool_name tool in
-  match Embedded_config.read ("tools/" ^ name ^ ".toml") with
-  | None -> invalid_arg ("missing DOS tool definition: " ^ name)
-  | Some contents -> match Tool_definition_toml.load ~name ~contents with
-    | Ok definition -> tool, definition.Tool_definition_toml.schema
-    | Error message -> invalid_arg message) Controller.all_of_dos_tool
+  match Tool_definition_embedded.find (Controller.dos_tool_name tool) with
+  | Ok definition -> tool, definition.Tool_definition_toml.schema
+  | Error message -> invalid_arg message) Controller.all_of_dos_tool
 
 (* One classification gives both answers: MCP [readOnlyHint] for any client,
    and the observation effect the host reads on the private effect port before

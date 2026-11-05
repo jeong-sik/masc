@@ -17,15 +17,7 @@
     against its owner. [test_keeper_schema_toml_parity] pins all fifteen
     against what the list published before any of this moved. *)
 
-let schema_of_name name : Masc_domain.tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-;;
+let schema_of_name = Tool_definition_embedded.schema
 
 let sandbox_start = schema_of_name Keeper_tool_name.(to_string Keeper_sandbox_start)
 let sandbox_stop = schema_of_name Keeper_tool_name.(to_string Keeper_sandbox_stop)

@@ -37,9 +37,6 @@
   masc_log
   masc_workspace
   masc.masc_tool_dispatch
-  ; tool_task_schemas_toml reads config/tools/masc_*.toml from the
-  ; binary-embedded config tree.
-  masc.embedded_config
   masc.masc_tool_surface
   masc.tool_types
   ; anti_rationalization projects verifier lookup results through the shared

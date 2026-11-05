@@ -41,6 +41,17 @@
   keeper_gate_auto_judge_recovery
   keeper_skill_activation_types
   keeper_skill_activation_summary
+  keeper_skill_activation_ledger_errors
+  keeper_skill_activation_ledger_model
+  keeper_skill_activation_ledger_encode
+  keeper_skill_activation_ledger_decode_parts
+  keeper_skill_activation_ledger_decode_activation
+  keeper_skill_activation_ledger_decode_ledger
+  keeper_skill_activation_ledger_events
+  keeper_skill_activation_ledger_replay
+  keeper_skill_activation_ledger_load
+  keeper_skill_activation_ledger_commit
+  keeper_skill_activation_ledger_observe
   keeper_board_attention_partition_types
   keeper_board_attention_partition_wire
   keeper_reaction_ledger_wire

@@ -907,3 +907,112 @@ let status_snapshot_at ?timeout_sec ~local_path () =
   with
   | Stdlib.Error msg, _ | _, Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok files, Stdlib.Ok branch -> Stdlib.Ok (files, branch)
+
+type grep_match = {
+  gm_path : string;
+  gm_line : int;
+  gm_text : string;
+}
+
+type grep_result = {
+  gr_matches : grep_match list;
+  gr_truncated : bool;
+}
+
+(* Per file, so one generated file cannot fill the answer by itself. *)
+let grep_max_matches_per_file = 20
+
+(* One row of [git grep -n -z] starting at [pos]: [path NUL line NUL text LF].
+   Git prints the path verbatim under [-z], so a path may hold a newline; only
+   the text is a single source line. The row is therefore framed by its two NULs
+   and ends at the first newline after the second one. Returns the row and the
+   offset of the next one. *)
+let grep_row_at output pos =
+  let length = String.length output in
+  let describe () = String.escaped (String.sub output pos (min 80 (length - pos))) in
+  match String.index_from_opt output pos '\000' with
+  | None ->
+      Stdlib.Error (Printf.sprintf "git grep row has no path separator: %s" (describe ()))
+  | Some first ->
+      (match String.index_from_opt output (first + 1) '\000' with
+       | None ->
+           Stdlib.Error
+             (Printf.sprintf "git grep row has no line separator: %s" (describe ()))
+       | Some second ->
+           let path = String.sub output pos (first - pos) in
+           let line_field = String.sub output (first + 1) (second - first - 1) in
+           let text_end =
+             match String.index_from_opt output (second + 1) '\n' with
+             | Some newline -> newline
+             | None -> length
+           in
+           let text = String.sub output (second + 1) (text_end - second - 1) in
+           (match int_of_string_opt line_field with
+            | Some line when line > 0 && String.length path > 0 ->
+                Stdlib.Ok
+                  ({ gm_path = path; gm_line = line; gm_text = text }, min length (text_end + 1))
+            | Some _ | None ->
+                Stdlib.Error
+                  (Printf.sprintf "git grep row has a bad line number: %S" line_field)))
+
+(* Reads rows until [max_matches] are held. A row after that proves the answer
+   was cut. So does a file that reached the per-file cap, since git stops
+   reading it there. A malformed row is an error, never a skipped one: the
+   captured output can carry a truncation marker when it exceeds the process
+   capture, and a silent skip would present a partial list as the whole
+   answer. *)
+let grep_result_of_z_output ~max_matches output =
+  let length = String.length output in
+  let per_path = Hashtbl.create 16 in
+  let rec take acc count capped pos =
+    if pos >= length then Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = capped }
+    else if count >= max_matches then
+      Stdlib.Ok { gr_matches = List.rev acc; gr_truncated = true }
+    else
+      match grep_row_at output pos with
+      | Stdlib.Error msg -> Stdlib.Error msg
+      | Stdlib.Ok (found, next) ->
+          let seen =
+            1 + Option.value ~default:0 (Hashtbl.find_opt per_path found.gm_path)
+          in
+          Hashtbl.replace per_path found.gm_path seen;
+          take (found :: acc) (count + 1)
+            (capped || seen >= grep_max_matches_per_file)
+            next
+  in
+  if max_matches < 1 then Stdlib.Error "git grep needs max_matches of at least 1"
+  else take [] 0 false 0
+
+let grep_at
+    ?(timeout_sec = inspection_timeout_sec)
+    ~local_path
+    ~pathspec
+    ~pattern
+    ~ignore_case
+    ~max_matches
+    ()
+  =
+  if String.equal pattern "" then Stdlib.Error "git grep needs a non-empty pattern"
+  else
+    let args =
+      [ "--no-optional-locks"; "--literal-pathspecs"; "grep"; "-n"; "-I"; "-z"
+      ; "-F"; "--no-color"; "--untracked"; "--exclude-standard"; "-m"
+      ; string_of_int grep_max_matches_per_file
+      ]
+      @ (if ignore_case then [ "-i" ] else [])
+      @ [ "-e"; pattern ]
+      @ (if String.equal pathspec "" then [] else [ "--"; pathspec ])
+    in
+    let status, stdout, stderr =
+      Process_eio.run_argv_with_status_split
+        ~env:(merge_env read_only_git_env)
+        ~timeout_sec
+        ("git" :: "-C" :: local_path :: args)
+    in
+    match status with
+    | Unix.WEXITED 0 -> grep_result_of_z_output ~max_matches stdout
+    | Unix.WEXITED 1 when String.equal (String.trim stderr) "" ->
+        (* git grep exits 1 when nothing matched; that is an answer. *)
+        Stdlib.Ok { gr_matches = []; gr_truncated = false }
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        Stdlib.Error (git_failure_detail args status stdout stderr)

@@ -658,6 +658,130 @@ let test_worktrees_at_reads_a_checkout () =
                Alcotest.fail
                  (Printf.sprintf "expected two worktrees, got %d" (List.length other))))
 
+let grep_rows rows = String.concat "\n" rows ^ "\n"
+let grep_row path line text = Printf.sprintf "%s\000%d\000%s" path line text
+
+let test_grep_rows_keep_the_first_matches_and_say_when_cut () =
+  let output =
+    grep_rows
+      [ grep_row "lib/a.ml" 3 "let x = 1"
+      ; grep_row "lib/b file.ml" 10 "tab\tand : colon"
+      ; grep_row "lib/c.ml" 1 "third"
+      ]
+  in
+  (match Repo_git.grep_result_of_z_output ~max_matches:5 output with
+   | Ok { gr_matches = [ first; second; _ ]; gr_truncated = false } ->
+       Alcotest.(check string) "path" "lib/a.ml" first.gm_path;
+       Alcotest.(check int) "line" 3 first.gm_line;
+       Alcotest.(check string) "a path keeps its space" "lib/b file.ml" second.gm_path;
+       Alcotest.(check string) "text keeps tabs and colons" "tab\tand : colon"
+         second.gm_text
+   | Ok _ -> Alcotest.fail "expected three untruncated matches"
+   | Error e -> Alcotest.fail e);
+  match Repo_git.grep_result_of_z_output ~max_matches:2 output with
+  | Ok { gr_matches = [ _; _ ]; gr_truncated = true } -> ()
+  | Ok _ -> Alcotest.fail "a third row must mark the answer truncated"
+  | Error e -> Alcotest.fail e
+
+let test_grep_rows_survive_a_newline_in_a_path () =
+  let output =
+    grep_rows [ grep_row "b\nc.txt" 4 "needle k"; grep_row "lib/a.ml" 1 "needle" ]
+  in
+  match Repo_git.grep_result_of_z_output ~max_matches:5 output with
+  | Ok { gr_matches = [ first; second ]; gr_truncated = false } ->
+      Alcotest.(check string) "a path keeps its newline" "b\nc.txt" first.gm_path;
+      Alcotest.(check int) "line" 4 first.gm_line;
+      Alcotest.(check string) "text" "needle k" first.gm_text;
+      Alcotest.(check string) "next row" "lib/a.ml" second.gm_path
+  | Ok _ -> Alcotest.fail "expected two untruncated matches"
+  | Error e -> Alcotest.fail e
+
+let test_a_file_at_the_per_file_cap_marks_the_answer_cut () =
+  let rows count path = List.init count (fun i -> grep_row path (i + 1) "needle") in
+  let truncated output =
+    match Repo_git.grep_result_of_z_output ~max_matches:100 output with
+    | Ok { gr_truncated; _ } -> gr_truncated
+    | Error e -> Alcotest.fail e
+  in
+  Alcotest.(check bool) "19 rows in one file" false (truncated (grep_rows (rows 19 "a.ml")));
+  Alcotest.(check bool) "20 rows in one file" true (truncated (grep_rows (rows 20 "a.ml")));
+  Alcotest.(check bool) "20 rows spread over two files" false
+    (truncated (grep_rows (rows 10 "a.ml" @ rows 10 "b.ml")))
+
+let test_grep_rows_refuse_what_they_cannot_read () =
+  let reject label output =
+    Alcotest.(check bool) label true
+      (Result.is_error (Repo_git.grep_result_of_z_output ~max_matches:5 output))
+  in
+  reject "a row without separators" "[... output truncated ...]\n";
+  reject "a row without a line separator" "lib/a.ml\0005\n";
+  reject "a non-numeric line" "lib/a.ml\000one\000text\n";
+  reject "line zero" "lib/a.ml\0000\000text\n";
+  reject "an empty path" "\0001\000text\n";
+  Alcotest.(check bool) "a marker after the kept rows is not reached" true
+    (Result.is_ok
+       (Repo_git.grep_result_of_z_output ~max_matches:1
+          (grep_rows [ grep_row "lib/a.ml" 1 "x"; "[... output truncated ...]" ])));
+  Alcotest.(check bool) "no rows is an empty answer" true
+    (match Repo_git.grep_result_of_z_output ~max_matches:5 "" with
+     | Ok { gr_matches = []; gr_truncated = false } -> true
+     | Ok _ | Error _ -> false);
+  Alcotest.(check bool) "max_matches below one is refused" true
+    (Result.is_error (Repo_git.grep_result_of_z_output ~max_matches:0 ""))
+
+let test_grep_at_reads_a_checkout () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match run_cmd ~cwd:source [ "git"; "checkout"; "-b"; "grep-test" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git checkout grep-test failed: " ^ e));
+      let git args =
+        match run_cmd ~cwd:source ("git" :: args) with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("git " ^ String.concat " " args ^ " failed: " ^ e)
+      in
+      Unix.mkdir (Filename.concat source "lib") 0o755;
+      write_file (Filename.concat source "lib/a file.ml") "first\nNeedle here\nlast\n";
+      write_file (Filename.concat source "top.txt") "a needle at the top\n--flag needle\n";
+      write_file (Filename.concat source ".gitignore") "ignored.txt\n";
+      git [ "add"; "lib/a file.ml"; "top.txt"; ".gitignore" ];
+      git [ "commit"; "-m"; "files" ];
+      write_file (Filename.concat source "untracked.txt") "needle untracked\n";
+      write_file (Filename.concat source "ignored.txt") "needle ignored\n";
+      let search ?(pathspec = "") ?(ignore_case = false) pattern =
+        match
+          Repo_git.grep_at ~local_path:source ~pathspec ~pattern ~ignore_case
+            ~max_matches:50 ()
+        with
+        | Ok result -> result
+        | Error e -> Alcotest.fail ("grep failed: " ^ e)
+      in
+      let paths result = List.map (fun m -> m.Repo_git.gm_path) result.Repo_git.gr_matches in
+      Alcotest.(check (list string)) "case sensitive finds only the lower-case rows"
+        [ "top.txt"; "top.txt"; "untracked.txt" ]
+        (List.sort String.compare (paths (search "needle")));
+      Alcotest.(check (list string)) "ignore_case adds the capitalised row, and never an ignored file"
+        [ "lib/a file.ml"; "top.txt"; "top.txt"; "untracked.txt" ]
+        (List.sort String.compare (paths (search ~ignore_case:true "needle")));
+      Alcotest.(check (list string)) "a pathspec limits the search to that directory"
+        [ "lib/a file.ml" ]
+        (paths (search ~pathspec:"lib" ~ignore_case:true "needle"));
+      (match (search ~pathspec:"lib" ~ignore_case:true "needle").gr_matches with
+       | [ m ] ->
+           Alcotest.(check int) "line numbers are 1-based" 2 m.gm_line;
+           Alcotest.(check string) "the line text is returned" "Needle here" m.gm_text
+       | _ -> Alcotest.fail "expected one match under lib");
+      Alcotest.(check int) "a pattern that looks like an option is searched, not run" 1
+        (List.length (search "--flag").gr_matches);
+      let none = search "no-such-text-anywhere" in
+      Alcotest.(check bool) "no match is an empty answer, not an error" true
+        (none.gr_matches = [] && not none.gr_truncated);
+      Alcotest.(check bool) "an empty pattern is refused" true
+        (Result.is_error
+           (Repo_git.grep_at ~local_path:source ~pathspec:"" ~pattern:""
+              ~ignore_case:false ~max_matches:5 ())))
+
 let test_status_files_preserve_paths_and_axes () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -817,6 +941,19 @@ let () =
 	            test_worktree_rows_refuse_what_they_cannot_read;
 	          Alcotest.test_case "reads a real checkout" `Quick
 	            test_worktrees_at_reads_a_checkout;
+	        ] );
+	      ( "grep",
+	        [
+	          Alcotest.test_case "keeps the first matches and says when cut" `Quick
+	            test_grep_rows_keep_the_first_matches_and_say_when_cut;
+	          Alcotest.test_case "survives a newline in a path" `Quick
+	            test_grep_rows_survive_a_newline_in_a_path;
+	          Alcotest.test_case "a file at the per-file cap marks the answer cut" `Quick
+	            test_a_file_at_the_per_file_cap_marks_the_answer_cut;
+	          Alcotest.test_case "refuses what it cannot read" `Quick
+	            test_grep_rows_refuse_what_they_cannot_read;
+	          Alcotest.test_case "reads a real checkout" `Quick
+	            test_grep_at_reads_a_checkout;
 	        ] );
 	      ( "origin_head_branch",
 	        [

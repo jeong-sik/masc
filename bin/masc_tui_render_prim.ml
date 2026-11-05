@@ -3061,6 +3061,20 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
       ]
     else []
   in
+  (* The key that leaves this screen and, on the roster, the key that opens a
+     Keeper. They are spelled the way the key table and every other footer
+     spell them. The roster wrote [right/enter] in lowercase, which
+     [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
+     to the Dashboard at all. *)
+  let way =
+    if offers_back then
+      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
+    else
+      [ "Right / Enter",
+        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "Right / Enter" ^ Ansi.reset ^ ":detail"
+      ; "Esc", "Esc:" ^ Ansi.dim ^ "dashboard" ^ Ansi.reset
+      ]
+  in
   let items =
       view_and_order
       @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
@@ -3094,11 +3108,11 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
                between surfaces reads as a key that does not exist. *)
           ; "c", (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
-          ; (if offers_back then "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
-             else "right/enter", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
-          ; "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
-          ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
+      @ way
+      @ [ "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
+        ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
+        ]
   in
   items
   |> List.filter (fun (key, _) ->

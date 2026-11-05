@@ -2679,6 +2679,69 @@ let test_fetch_reports_inspection_failure () =
   | Ok None -> Alcotest.fail "structural store failure was reported as missing"
   | Ok (Some _) -> Alcotest.fail "structural store failure returned bytes"
 
+(* Every writer refuses a symbolic link at the blob root or at a shard before
+   it writes anything, so no directory or byte lands where the link points. *)
+let test_writers_refuse_symbolic_link_root_and_shard () =
+  let payload = "bytes that must stay inside the blob root" in
+  let prefix =
+    with_temp_dir (fun dir ->
+      let reference =
+        B.put (B.create ~base_path:dir) ~bytes:payload ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      String.sub reference.sha256 0 2)
+  in
+  let writers =
+    [ ( "put"
+      , fun store _source ->
+          ignore (B.put store ~bytes:payload ~mime:"text/plain" : O.t) )
+    ; ( "put_durable"
+      , fun store _source ->
+          ignore (B.put_durable store ~bytes:payload ~mime:"text/plain" : O.artifact_ref) )
+    ; ( "put_durable_reuse"
+      , fun store _source ->
+          ignore
+            (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref) )
+    ; ( "put_file_durable"
+      , fun store source ->
+          ignore (B.put_file_durable store ~path:source ~mime:"text/plain" : O.artifact_ref) )
+    ]
+  in
+  let link_root store =
+    Fs_compat.mkdir_p (Filename.dirname (B.root_dir store));
+    B.root_dir store
+  in
+  let link_shard store =
+    Fs_compat.mkdir_p (B.root_dir store);
+    Filename.concat (B.root_dir store) prefix
+  in
+  List.iter
+    (fun (link_name, link_path) ->
+       List.iter
+         (fun (writer_name, write) ->
+            with_temp_dir (fun dir ->
+              let store = B.create ~base_path:dir in
+              let outside = Filename.concat dir "outside" in
+              Unix.mkdir outside 0o755;
+              let source = Filename.concat dir "source.txt" in
+              Out_channel.with_open_bin source (fun channel ->
+                output_string channel payload);
+              let link = link_path store in
+              Unix.symlink outside link;
+              Fun.protect
+                ~finally:(fun () -> Unix.unlink link)
+                (fun () ->
+                   let label = writer_name ^ " with a symbolic-link " ^ link_name in
+                   (match write store source with
+                    | () -> Alcotest.failf "%s returned a reference" label
+                    | exception Sys_error _ -> ());
+                   Alcotest.(check (array string))
+                     (label ^ " wrote nothing behind the link")
+                     [||]
+                     (Sys.readdir outside))))
+         writers)
+    [ "root", link_root; "shard", link_shard ]
+
 let test_fetch_rejects_symbolic_link_parent () =
   with_temp_dir (fun dir ->
     let outside = Filename.concat dir "outside" in
@@ -2937,6 +3000,8 @@ let () =
             test_fetch_reports_inspection_failure;
           Alcotest.test_case "fetch rejects symbolic-link parent" `Quick
             test_fetch_rejects_symbolic_link_parent;
+          Alcotest.test_case "writers refuse symbolic-link root and shard" `Quick
+            test_writers_refuse_symbolic_link_root_and_shard;
           Alcotest.test_case "fetch reports integrity mismatch" `Quick
             test_fetch_reports_integrity_mismatch;
           Alcotest.test_case "sha256 rejects path component" `Quick

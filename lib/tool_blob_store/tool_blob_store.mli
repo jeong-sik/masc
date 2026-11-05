@@ -70,6 +70,11 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     forgets the address and the next put writes it again. {!put_durable}
     writes on every call and does not count as a write here.
 
+    The blob root and the shard directory are checked from the ownership root
+    down without following symbolic links, as {!put_durable} checks them; a
+    link, another owner, or a group- or world-writable directory raises
+    [Sys_error] before any byte is written.
+
     @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
     must handle this at their typed boundary and must not emit a marker for
     bytes that were never persisted. A provider projection must not put an
@@ -124,7 +129,10 @@ val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 val put_durable_reuse : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strictly publish once per process, then reuse the address only after a
     successful integrity-checked read. Ordinary [put] does not establish this
-    durability evidence. Missing or damaged bytes are strictly republished. *)
+    durability evidence. Missing or damaged bytes are strictly republished.
+    Each publication checks and syncs the owned directory chain as
+    {!put_durable} does, so an unsafe chain raises [Sys_error] before any
+    payload is written. *)
 
 val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** The same durable file ingestion, executed synchronously on the caller.

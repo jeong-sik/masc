@@ -188,19 +188,72 @@ let shard_path t sha256 =
   let prefix = String.sub sha256 0 2 in
   Filename.concat (Filename.concat t.root prefix) sha256
 
-let rec mkdir_p p =
-  if Sys.file_exists p then ()
-  else begin
-    mkdir_p (Filename.dirname p);
-    try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
+type parent_durability =
+  | Durable
+  | Volatile
 
-(* [store_addressed] fixes one failure contract for every way a put can fail:
-   the atomic replacement already raises [Sys_error], so a parent directory it
-   cannot create must not escape as a raw [Unix.Unix_error] only because it
-   failed earlier. Same convention as [Fs_compat]'s one-catch normalization. *)
-let ensure_parent_dir path =
-  try mkdir_p (Filename.dirname path) with
+(* Every blob writer reaches its shard directory through this one owned chain.
+   Each component from the ownership root down is looked at with [lstat], so a
+   symbolic link, another owner, or a group- or world-writable directory at the
+   blob root or a shard stops the write before any byte is written behind it.
+   [lstat] is as strong as what follows: the atomic writers resolve the same
+   pathname again, and the caller keeps this subtree process-owned while
+   writing. The ownership root must already exist; it is never created here.
+
+   [Durable] also syncs every directory and the ownership root, existing ones
+   included, because an earlier failed preparation may have created a name
+   without durably linking it.
+
+   Every failure is [Sys_error], the failure contract of the atomic replacement
+   that comes next, so a directory that cannot be prepared does not escape as a
+   raw [Unix.Unix_error] only because it failed earlier. *)
+let prepare_owned_parent ~durability ~ownership_root path =
+  let parent = Filename.dirname path in
+  let owner_uid = Unix.geteuid () in
+  let require_owned directory (stat : Unix.stats) =
+    if stat.st_kind <> Unix.S_DIR
+       || stat.st_uid <> owner_uid
+       || stat.st_perm land 0o022 <> 0
+    then
+      raise
+        (Sys_error
+           (Printf.sprintf
+              "tool_blob_store: %s is not a private owned directory (kind %s, uid %d, mode %o)"
+              directory
+              (Fs_compat.file_kind_to_string stat.st_kind)
+              stat.st_uid
+              (stat.st_perm land 0o7777)))
+  in
+  let sync directory =
+    let fd = Unix.openfile directory [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+    match Unix.fsync fd with
+    | () -> Unix.close fd
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (try Unix.close fd with Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  try
+    let descendants =
+      match Fs_compat.owned_directory_paths ~ownership_root parent with
+      | Ok paths -> paths
+      | Error rejection ->
+        raise (Sys_error (Fs_compat.owned_directory_chain_rejection_to_string rejection))
+    in
+    require_owned ownership_root (Unix.lstat ownership_root);
+    List.iter
+      (fun directory ->
+         match Unix.lstat directory with
+         | stat -> require_owned directory stat
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+           (try Unix.mkdir directory 0o755 with
+            | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+           require_owned directory (Unix.lstat directory))
+      descendants;
+    match durability with
+    | Volatile -> ()
+    | Durable -> List.iter sync (List.rev (ownership_root :: descendants))
+  with
   | Unix.Unix_error (code, fn, arg) ->
     raise
       (Sys_error
@@ -381,6 +434,7 @@ type rewrite =
 type addressed =
   { addressed_bytes : string
   ; addressed_path : string
+  ; addressed_ownership_root : string
   ; addressed_ref : Tool_output.artifact_ref
   }
 
@@ -396,6 +450,7 @@ let address_with ~operation t ~bytes ~mime =
   | Ok artifact_ref ->
     { addressed_bytes = bytes
     ; addressed_path = shard_path t sha256
+    ; addressed_ownership_root = t.ownership_root
     ; addressed_ref = artifact_ref
     }
   | Error err ->
@@ -403,10 +458,10 @@ let address_with ~operation t ~bytes ~mime =
       (Printf.sprintf "tool_blob_store.%s: %s" operation
          (Tool_output.make_error_to_string err))
 
-let store_addressed ~rewrite ~atomic_replace ~operation addressed =
+let store_addressed ~rewrite ~durability ~atomic_replace ~operation addressed =
   let path = addressed.addressed_path in
   let write () =
-    ensure_parent_dir path;
+    prepare_owned_parent ~durability ~ownership_root:addressed.addressed_ownership_root path;
     (* An authoritative atomic rewrite avoids reading and hashing a second
        full copy, and repairs any corrupt prior bytes at this content
        address. Concurrent writers have byte-identical payloads. *)
@@ -432,6 +487,7 @@ let put_addressed addressed =
   Tool_output.Stored
     (store_addressed
        ~rewrite:Skip_address_this_process_wrote
+       ~durability:Volatile
        ~atomic_replace:Fs_compat.save_file_atomic
        ~operation:"put"
        addressed)
@@ -443,41 +499,12 @@ let put_addressed addressed =
    leaves the bytes at their address. *)
 let put t ~bytes ~mime = put_addressed (address_with ~operation:"put" t ~bytes ~mime)
 
-let prepare_owned_durable_parent t path =
-  let parent = Filename.dirname path in
-  let check () =
-    match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
-      ~ownership_root:t.ownership_root parent with
-    | Ok entries -> entries
-    | Error error ->
-      raise (Sys_error (Fs_compat.owned_regular_file_read_error_to_string error)) in
-  ignore (check ());
-  let descendants = match Fs_compat.owned_directory_paths
-    ~ownership_root:t.ownership_root parent with
-    | Ok paths -> paths
-    | Error error ->
-      raise (Sys_error (Fs_compat.owned_directory_chain_rejection_to_string error)) in
-  ensure_parent_dir path;
-  let require_directory () = match check () with
-    | Some _ -> ()
-    | None -> raise (Sys_error "tool_blob_store.put_durable: directory creation not observed") in
-  require_directory ();
-  (* Sync all ancestors, including existing directories: a previous failed
-     preparation may have created a name without durably linking it. *)
-  List.iter (fun directory ->
-    let fd = Unix.openfile directory [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
-    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd))
-    (List.rev (t.ownership_root :: descendants));
-  require_directory ()
-
 let put_durable t ~bytes ~mime =
   let addressed = address_with ~operation:"put_durable" t ~bytes ~mime in
   Eio_guard.run_in_systhread ~label:"tool-blob-put-durable" (fun () ->
-    (try prepare_owned_durable_parent t addressed.addressed_path with
-     | Unix.Unix_error (code, fn, arg) ->
-       raise (Sys_error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))));
     store_addressed
       ~rewrite:Rewrite_every_put
+      ~durability:Durable
       ~atomic_replace:Fs_compat.save_file_atomic_strict
       ~operation:"put_durable"
       addressed)
@@ -514,7 +541,8 @@ let put_durable_reuse t ~bytes ~mime =
   if reusable then addressed.addressed_ref
   else
     let written_identity = ref None in
-    ensure_parent_dir path;
+    Eio_guard.run_in_systhread ~label:"tool-blob-put-durable-reuse-parent" (fun () ->
+      prepare_owned_parent ~durability:Durable ~ownership_root:t.ownership_root path);
     (match Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
        output_string channel bytes;
        flush channel;
@@ -610,7 +638,7 @@ let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~sourc
               ("tool_blob_store.put_file_durable: " ^ Tool_output.make_error_to_string error)
         in
         let target = shard_path t sha256 in
-        ensure_parent_dir target;
+        prepare_owned_parent ~durability:Durable ~ownership_root:t.ownership_root target;
         seek_in source 0;
         let publication =
           Fs_compat.write_file_atomic_strict_staged_blocking target ~write:(fun output_channel ->

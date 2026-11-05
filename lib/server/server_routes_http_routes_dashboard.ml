@@ -3493,7 +3493,7 @@ let add_routes ~sw ~clock router =
          in
          let json =
            `Assoc
-             [ ("schema", `String "masc.dashboard.clients.v1")
+             [ ("schema", `String "masc.dashboard.clients.v2")
              ; ("generated_at", `String (Masc_domain.now_iso ()))
              ; ("observation_only", `Bool true)
              ; ("clients", `List (List.map Server_dashboard_http_core_entities.dashboard_client_json agents))

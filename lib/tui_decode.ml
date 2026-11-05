@@ -3836,7 +3836,7 @@ let decode_client_row json =
 let decode_clients_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "masc.dashboard.clients.v1" then Ok ()
+    if String.equal schema "masc.dashboard.clients.v2" then Ok ()
     else Error ("clients: unsupported schema " ^ schema)
   in
   let* cls_observed_at = required_string_field json "generated_at" in

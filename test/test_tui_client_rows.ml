@@ -60,7 +60,7 @@ let test_a_registry_row_reads_without_times () =
   let snapshot times =
     Masc.Tui_decode.decode_clients_snapshot
       (`Assoc
-        [ "schema", `String "masc.dashboard.clients.v1"
+        [ "schema", `String "masc.dashboard.clients.v2"
         ; "generated_at", `String "2026-11-04T04:00:00Z"
         ; "observation_only", `Bool true
         ; "clients", `List [ row times ]

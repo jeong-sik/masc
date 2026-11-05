@@ -1,9 +1,13 @@
 (** Rows for a block of text that was written with line breaks.
 
     Each line is read through [Masc.Tui_terminal_text.sanitize_terminal_text] and wrapped
-    to [max_cells]. A break in the middle keeps the blank row the author
-    wrote; a run of them at either end is dropped, because a leading blank
-    would take the row a caller puts its label on. *)
+    to [max_cells]; {!preformatted_styled_rows} alone skips that reading,
+    because its text carries its own colour. A break in the middle keeps the
+    blank row the author wrote; a run of them at either end is dropped,
+    because a leading blank would take the row a caller puts its label on.
+    The edges are those of the whole text, so lines that belong together go
+    in as one text: handed one at a time, every blank line is an edge and
+    none of them is kept. *)
 
 val rows : max_cells:int -> string -> string list
 

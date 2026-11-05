@@ -1286,7 +1286,7 @@ let%test "openai compat does not infer ZAI thinking from bare GLM model or URL" 
       ~model_id:"glm-5"
       ~base_url:Zai_catalog.coding_base_url
       ~enable_thinking:true
-      ~clear_thinking:false
+      ~preserve_thinking:true
       ()
   in
   let body = build_request ~config ~messages:[] () in

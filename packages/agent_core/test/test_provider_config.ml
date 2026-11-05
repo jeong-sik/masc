@@ -39,7 +39,6 @@ let test_make_defaults () =
   check_bool "enable_thinking None" true (cfg.enable_thinking = None);
   check_bool "preserve_thinking None" true (cfg.preserve_thinking = None);
   check_bool "reasoning_effort None" true (cfg.reasoning_effort = None);
-  check_bool "clear_thinking None" true (cfg.clear_thinking = None);
   check_bool "tool_stream false" false cfg.tool_stream;
   check_bool "tool_choice None" true (cfg.tool_choice = None);
   check_bool "no parallel tool use" false cfg.disable_parallel_tool_use;
@@ -210,7 +209,6 @@ let test_make_with_all_options () =
       ~enable_thinking:true
       ~preserve_thinking:true
       ~reasoning_effort:Reasoning_effort.Low
-      ~clear_thinking:false
       ~tool_stream:true
       ~disable_parallel_tool_use:true
       ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
@@ -227,7 +225,6 @@ let test_make_with_all_options () =
   check_bool "enable_thinking" true (cfg.enable_thinking = Some true);
   check_bool "preserve_thinking" true (cfg.preserve_thinking = Some true);
   check_bool "reasoning_effort" true (cfg.reasoning_effort = Some Reasoning_effort.Low);
-  check_bool "clear_thinking" true (cfg.clear_thinking = Some false);
   check_bool "tool_stream" true cfg.tool_stream;
   check_bool "disable_parallel" true cfg.disable_parallel_tool_use;
   let expected_schema = `Assoc [ "type", `String "object" ] in
@@ -1552,58 +1549,6 @@ let test_validate_reasoning_effort_fails_closed_without_declaration () =
       "unexpected rejection: %s"
       (Provider_config.reasoning_effort_request_rejection_to_message rejection)
   | Ok () -> Alcotest.fail "undeclared effort capability must fail closed"
-;;
-
-let test_clear_thinking_object_request_field () =
-  let resolve
-        ?(preserve_thinking_control_format = Capabilities.Thinking_object_clear_thinking)
-        ?(supports_reasoning = true)
-        ?enable_thinking
-        ?clear_thinking
-        ?preserve_thinking
-        ()
-    =
-    Provider_config.clear_thinking_object_request_field
-      ~preserve_thinking_control_format
-      ~supports_reasoning
-      ~enable_thinking
-      ~clear_thinking
-      ~preserve_thinking
-  in
-  Alcotest.(check (option bool))
-    "reasoning row explicitly sends the client's clear default"
-    (Some true)
-    (resolve ());
-  Alcotest.(check (option bool))
-    "non-reasoning row keeps an all-omitted request absent"
-    None
-    (resolve ~supports_reasoning:false ());
-  Alcotest.(check (option bool))
-    "explicit thinking uses the declared clear default"
-    (Some true)
-    (resolve ~enable_thinking:true ());
-  Alcotest.(check (option bool))
-    "preserve disables clear"
-    (Some false)
-    (resolve ~preserve_thinking:true ());
-  Alcotest.(check (option bool))
-    "explicit clear wins"
-    (Some true)
-    (resolve ~clear_thinking:true ~preserve_thinking:true ());
-  (* Every other preserve wire omits it, whatever the provider kind or model
-     id is. *)
-  List.iter
-    (fun (label, preserve_thinking_control_format) ->
-       Alcotest.(check (option bool))
-         label
-         None
-         (resolve ~preserve_thinking_control_format ~enable_thinking:true
-            ~preserve_thinking:true ()))
-    [ "no preserve wire omits", Capabilities.No_preserve_thinking_control
-    ; "thinking_object_keep_all omits", Capabilities.Thinking_object_keep_all
-    ; "chat_template_kwargs omits", Capabilities.Chat_template_kwargs_preserve_thinking
-    ; "always_preserved omits", Capabilities.Always_preserved_thinking
-    ]
 ;;
 
 let test_structured_output_name_of_schema () =
@@ -3265,10 +3210,6 @@ let () =
             "an auto-enabling wire needs a declared effort"
             `Quick
             test_an_auto_enabling_wire_needs_a_declared_effort
-        ; Alcotest.test_case
-            "clear_thinking object request field"
-            `Quick
-            test_clear_thinking_object_request_field
         ; Alcotest.test_case
             "structured output names"
             `Quick

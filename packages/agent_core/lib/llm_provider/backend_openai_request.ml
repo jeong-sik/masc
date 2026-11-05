@@ -460,17 +460,6 @@ let build_request_assoc_artifact
     | None -> body
   in
   let body =
-    (* Gated on the declared preserve wire (SSOT:
-       [Provider_config.clear_thinking_object_request_field]), so the request
-       body and the reasoning-replay gate read the same typed capability. *)
-    let clear_thinking_object =
-      Provider_config.clear_thinking_object_request_field
-        ~preserve_thinking_control_format:caps.preserve_thinking_control_format
-        ~supports_reasoning:caps.supports_reasoning
-        ~enable_thinking:config.enable_thinking
-        ~clear_thinking:config.clear_thinking
-        ~preserve_thinking:config.preserve_thinking
-    in
     (match Provider_config.validate_reasoning_effort_request config with
      | Ok () -> ()
      | Error reason ->
@@ -484,7 +473,6 @@ let build_request_assoc_artifact
           ~enable_thinking:config.enable_thinking
           ~preserve_thinking:config.preserve_thinking
           ~reasoning_effort:config.reasoning_effort
-          ?clear_thinking_object
           ()
       with
       | Ok artifact -> artifact

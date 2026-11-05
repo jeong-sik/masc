@@ -1156,7 +1156,7 @@ let test_glm_preserved_reasoning_replay_and_preserves_auto_tool_choice () =
       ~model_id:"glm-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~enable_thinking:true
-      ~clear_thinking:false
+      ~preserve_thinking:true
       ~tool_stream:true
       ~tool_choice:Auto
       ()

@@ -171,15 +171,19 @@ val ignores_sampling_param
     This is the single source of truth for both request-body fields and typed
     admission receipts. The low-level [Provider_config]-based builder, the
     high-level Agent API builder, the Responses builder, and Complete preflight
-    all consume projections of this artifact. [clear_thinking_object] carries
-    the resolved [thinking.clear_thinking] member for rows whose
-    {!Capabilities.preserve_thinking_control_format} is
-    [Thinking_object_clear_thinking]. The member can accompany an ordinary
-    thinking toggle or a wire with inherently enabled thinking. An omitted
-    toggle leaves [thinking.type] absent and uses the declared enabled default.
-    Reasoning rows still emit the client's resolved [clear_thinking] default
-    so request bytes agree with replay selection. The caller resolves it from
-    typed capabilities, never from a provider identity.
+    all consume projections of this artifact, so none of them passes a
+    member the others would not encode.
+
+    A dialect whose [preserve_wire] is [Thinking_object_clear_thinking] carries
+    [thinking.clear_thinking = not p] for a declared [preserve_thinking = Some p]
+    and no member for an undeclared one: its replay then keeps every assistant
+    message as sent, so whichever default the endpoint applies agrees with the
+    request (RFC-0488 §3.2). On that wire a row without a toggle wire of its own
+    writes an explicit enable as [thinking.type = "enabled"] in the same
+    object, and its receipt is [Explicit_enable_not_encoded]: such a row is
+    admitted by [supports_reasoning], not by a toggle it does not declare. An
+    omitted toggle leaves [thinking.type] absent and uses the declared enabled
+    default. Only the typed wire participates, never a provider identity.
 
     On the categorical wire ([toggle_wire = Reasoning_effort]) an explicit
     [enable_thinking = Some false] is rendered as [reasoning_effort = "none"]
@@ -191,7 +195,6 @@ val request_control_fields
   -> enable_thinking:bool option
   -> preserve_thinking:bool option
   -> reasoning_effort:Reasoning_effort.t option
-  -> ?clear_thinking_object:bool
   -> unit
   -> (request_control_artifact, request_control_rejection) result
 

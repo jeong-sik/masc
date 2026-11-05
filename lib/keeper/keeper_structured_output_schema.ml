@@ -226,6 +226,5 @@ let for_deterministic_subcall ~max_tokens (provider_cfg : Llm_provider.Provider_
   ; disable_parallel_tool_use = true
   ; enable_thinking = Some false
   ; preserve_thinking = Some false
-  ; clear_thinking = Some true
   }
 ;;

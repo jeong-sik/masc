@@ -278,7 +278,7 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
    disable request is fail-closed by the agent_core guard (Disable_not_encodable),
    which broke every image analysis. Leaving enable_thinking=None lets the guard
    admit the call (complete_common: None -> admitted); the reply is still kept
-   clean by preserve_thinking=false + clear_thinking=true, which strip any
+   clean by preserve_thinking=false, which strips any
    reasoning the model emits without requesting an impossible disable. *)
 let test_provider_for_vision_leaves_thinking_uncontrolled () =
   let base =
@@ -290,8 +290,7 @@ let test_provider_for_vision_leaves_thinking_uncontrolled () =
   in
   let configured = Vt.provider_for_vision base in
   assert (configured.enable_thinking = None);
-  assert (configured.preserve_thinking = Some false);
-  assert (configured.clear_thinking = Some true)
+  assert (configured.preserve_thinking = Some false)
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->

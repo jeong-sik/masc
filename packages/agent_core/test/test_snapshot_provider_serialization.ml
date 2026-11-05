@@ -551,11 +551,10 @@ let test_raw_openai_compat_does_not_infer_glm_thinking_or_replay () =
 ;;
 
 (* Native [kind:Glm] reasoning_content replay gate (agent-core boundary). Typed [Glm] is
-   the sole positive native GLM path: replay historical reasoning_content only
-   under Preserved Thinking (clear_thinking=false). Before the gate the native
-   path replayed unconditionally, contradicting the default
-   clear_thinking=true contract. *)
-let native_glm_cfg ?(enable_thinking = Some true) ?preserve_thinking ?clear_thinking () =
+   the sole positive native GLM path. Historical reasoning_content is dropped
+   only when the row declares [preserve_thinking = false]; a declared or an
+   undeclared preservation replays it as sent (RFC-0488 §3.2). *)
+let native_glm_cfg ?(enable_thinking = Some true) ?preserve_thinking () =
   Provider_config.make
     ~kind:Glm
     ~model_id:"glm-5"
@@ -567,7 +566,6 @@ let native_glm_cfg ?(enable_thinking = Some true) ?preserve_thinking ?clear_thin
     ~disable_parallel_tool_use:true
     ?enable_thinking
     ?preserve_thinking
-    ?clear_thinking
     ()
 ;;
 
@@ -585,7 +583,7 @@ let test_native_glm_replays_reasoning_when_preserve_thinking () =
     body
 ;;
 
-let test_native_glm_drops_reasoning_by_default () =
+let test_native_glm_replays_reasoning_when_undeclared () =
   let config = native_glm_cfg () in
   let body =
     Backend_openai_request.build_request
@@ -594,7 +592,21 @@ let test_native_glm_drops_reasoning_by_default () =
       ()
   in
   check_reasoning_content
-    "native GLM omits reasoning_content with default clear_thinking=true"
+    "native GLM replays reasoning_content when the row declares nothing"
+    true
+    body
+;;
+
+let test_native_glm_drops_reasoning_when_clearing_declared () =
+  let config = native_glm_cfg ~preserve_thinking:false () in
+  let body =
+    Backend_openai_request.build_request
+      ~config
+      ~messages:(zai_glm_messages_with_reasoning ~config)
+      ()
+  in
+  check_reasoning_content
+    "native GLM omits reasoning_content when the row declares clearing"
     false
     body
 ;;
@@ -977,9 +989,13 @@ let () =
             `Quick
             test_native_glm_replays_reasoning_when_preserve_thinking
         ; test_case
-            "native-glm drops reasoning by default (clear_thinking=true)"
+            "native-glm replays reasoning when the row declares nothing"
             `Quick
-            test_native_glm_drops_reasoning_by_default
+            test_native_glm_replays_reasoning_when_undeclared
+        ; test_case
+            "native-glm drops reasoning when the row declares clearing"
+            `Quick
+            test_native_glm_drops_reasoning_when_clearing_declared
         ; test_case
             "native-glm drops reasoning when thinking disabled"
             `Quick

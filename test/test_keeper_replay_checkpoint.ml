@@ -1331,24 +1331,22 @@ let test_default_thinking_preservation_survives_restore () =
         [ "preserve with default thinking",
           {config with enable_thinking = restored.enable_thinking;
             preserve_thinking = restored.preserve_thinking}
-        ; "retain with default thinking", {config with clear_thinking = Some false}
-        ; "explicit retain overrides preserve=false",
-          {config with clear_thinking = Some false; preserve_thinking = Some false}
         ];
-      let cleared = check "explicit clear overrides preserve=true" []
-          {config with clear_thinking = Some true; preserve_thinking = Some true} in
-      Alcotest.(check bool) "explicit clear reaches the wire" true
+      let cleared = check "declared clearing excludes completed-turn reasoning" []
+          {config with preserve_thinking = Some false} in
+      Alcotest.(check bool) "declared clearing reaches the wire" true
         (cleared |> member "clear_thinking" |> to_bool);
-      let omitted = check "no preservation request excludes completed-turn reasoning" [] config in
-      Alcotest.(check bool) "client clear default reaches both endpoint families" true
-        (omitted |> member "clear_thinking" |> to_bool);
-      Alcotest.(check bool) "omitted toggle preserves the provider thinking default" true
-        (member "type" omitted = `Null);
+      (* RFC-0488 §3.2: a row that declares no preservation keeps the restored
+         reasoning as sent and sends no [thinking] object, so the endpoint's
+         documented default applies. *)
+      let omitted = check "undeclared preservation keeps completed-turn reasoning"
+          [reasoning] config in
+      Alcotest.(check bool) "undeclared preservation sends no thinking object" true
+        (omitted = `Null);
       match model_id with
       | "glm-5.2" ->
         let disabled = check "explicit disable overrides retained thinking" []
-            {config with enable_thinking = Some false; clear_thinking = Some false;
-              preserve_thinking = Some true} in
+            {config with enable_thinking = Some false; preserve_thinking = Some true} in
         Alcotest.(check string) "disable reaches the supported toggle" "disabled"
           (disabled |> member "type" |> to_string);
         Alcotest.(check bool) "disable suppresses the preserve field" true

@@ -310,6 +310,25 @@ let chat_template_kwargs_preserve_field dialect ~preserve_thinking =
   | Always_preserved_thinking -> None
 ;;
 
+(* The [thinking.clear_thinking] member of the [Thinking_object_clear_thinking]
+   wire (RFC-0488 §3.2). A declared [preserve_thinking] travels as its inverse.
+   An undeclared one sends no member, so the endpoint's documented default
+   applies: Z.AI keeps prior reasoning on the Coding Plan endpoint and clears
+   it on the standard endpoint. Either answer agrees with the request, because
+   an undeclared row replays every assistant message as sent
+   ([apply_clear_thinking_replay_gate]).
+   Ref: https://docs.z.ai/api-reference/llm/chat-completion and
+   https://docs.z.ai/guides/capabilities/thinking-mode (2026-11-05). *)
+let clear_thinking_member dialect ~preserve_thinking =
+  match dialect.preserve_wire with
+  | Thinking_object_clear_thinking ->
+    Option.map (fun preserve -> not preserve) preserve_thinking
+  | No_preserve_thinking_control
+  | Thinking_object_keep_all
+  | Chat_template_kwargs_preserve_thinking
+  | Always_preserved_thinking -> None
+;;
+
 let ignores_sampling_param dialect ~enable_thinking parameter =
   List.mem parameter dialect.sampling_policy.ignored_always
   || (thinking_enabled ~enable_thinking
@@ -386,7 +405,6 @@ let request_control_fields
       ~enable_thinking
       ~preserve_thinking
       ~reasoning_effort
-      ?clear_thinking_object
       ()
   =
   let reasoning_effort =
@@ -522,7 +540,7 @@ let request_control_fields
              if control.keep_all then fields @ [ "keep", `String "all" ] else fields
            in
            let fields =
-             match control.enabled, clear_thinking_object with
+             match control.enabled, clear_thinking_member dialect ~preserve_thinking with
              | (Some true | None), Some clear_thinking ->
                fields @ [ "clear_thinking", `Bool clear_thinking ]
              | Some false, _ | (Some true | None), None -> fields
@@ -532,16 +550,36 @@ let request_control_fields
               | fields -> [ "thinking", `Assoc fields ])
            , explicit_field_encoding )
          | Chat_completions, No_toggle ->
-           (match clear_thinking_object, enable_thinking with
-            | Some clear_thinking, (Some true | None) ->
-              let fields = [ "clear_thinking", `Bool clear_thinking ] in
-              let fields =
+           (* The [Thinking_object_clear_thinking] wire carries the toggle in
+              the same [thinking] object as its [clear_thinking] member, so a
+              row without a toggle wire of its own writes an explicit enable
+              there whether or not it declares [preserve_thinking]. The row
+              declares no toggle wire, so the receipt claims no encoding:
+              admission reads [supports_reasoning] as it does for every
+              [No_thinking_control] row ([Complete_common]), admitting
+              inherent reasoning and refusing an enable on a row without it. *)
+           (match dialect.preserve_wire, enable_thinking with
+            | Thinking_object_clear_thinking, (Some true | None) ->
+              let type_field =
                 match enable_thinking with
-                | Some true -> ("type", `String "enabled") :: fields
-                | Some false | None -> fields
+                | Some true -> [ "type", `String "enabled" ]
+                | Some false | None -> []
               in
-              [ "thinking", `Assoc fields ], explicit_field_encoding
-            | Some _, Some false | None, _ -> [], None)
+              let clear_field =
+                match clear_thinking_member dialect ~preserve_thinking with
+                | Some clear_thinking -> [ "clear_thinking", `Bool clear_thinking ]
+                | None -> []
+              in
+              ( (match type_field @ clear_field with
+                 | [] -> []
+                 | fields -> [ "thinking", `Assoc fields ])
+              , None )
+            | Thinking_object_clear_thinking, Some false
+            | ( ( No_preserve_thinking_control
+                | Thinking_object_keep_all
+                | Chat_template_kwargs_preserve_thinking
+                | Always_preserved_thinking )
+              , _ ) -> [], None)
          | Chat_completions, (Anthropic_thinking | Gemini_thinking_config) -> [], None
        in
        let output_fields =
@@ -642,11 +680,18 @@ let base_for_provider_config (config : Provider_config.t) =
      | None -> provider_capabilities_of_kind config.kind |> of_capabilities)
 ;;
 
-(* [clear_thinking] controls reasoning across completed user turns. Interleaved
-   tool calls still return their assistant reasoning with the tool results when
-   thinking is enabled; clearing completed turns must not clear that exchange.
-   Preserved Thinking additionally replays all prior assistant reasoning.
-   Ref: https://docs.z.ai/guides/capabilities/thinking-mode (2026-11-01).
+(* [preserve_thinking] decides reasoning across completed user turns on the
+   [Thinking_object_clear_thinking] wire (RFC-0488 §3.2). Only a declared
+   [Some false] removes it. On the two toggle wires whose request carries the
+   member (none of the row's own, and [Thinking_object_only]) the request then
+   also carries [clear_thinking = true], so the provider and the request
+   agree. An undeclared row replays every assistant message as it was sent,
+   and the request carries no [clear_thinking] member
+   ([clear_thinking_member]).
+   Interleaved tool calls keep their assistant reasoning with the tool results
+   whenever thinking is enabled; clearing completed turns does not clear that
+   exchange.
+   Ref: https://docs.z.ai/guides/capabilities/thinking-mode (2026-11-05).
 
    Agent Core contract S1.1/S3.1: the branch predicate is the typed capability the
    catalog row declares, exactly like the [Thinking_object] arm of
@@ -658,17 +703,14 @@ let apply_clear_thinking_replay_gate (config : Provider_config.t) dialect =
     let caps, _ = Provider_config.resolve_request_capabilities config in
     { dialect with
       replay_policy =
-        (if not caps.supports_reasoning
-         then No_replay
-         else if
-           Provider_config.preserved_thinking_active
-             ~enable_thinking:config.enable_thinking
-             ~clear_thinking:config.clear_thinking
-             ~preserve_thinking:config.preserve_thinking
-         then All_assistant_messages
-         else if thinking_enabled ~enable_thinking:config.enable_thinking
-         then Tool_call_assistant_messages_latest_user_turn
-         else No_replay)
+        (match
+           caps.supports_reasoning,
+           thinking_enabled ~enable_thinking:config.enable_thinking,
+           config.preserve_thinking
+         with
+         | false, _, _ | true, false, _ -> No_replay
+         | true, true, (Some true | None) -> All_assistant_messages
+         | true, true, Some false -> Tool_call_assistant_messages_latest_user_turn)
     }
   | No_preserve_thinking_control
   | Thinking_object_keep_all
@@ -1029,19 +1071,68 @@ let%test "request_control_fields emits thinking object with explicitly supported
 let%test "request_control_fields preserves inherent reasoning without granting a disable" =
   request_control_fields
     Chat_completions
-    default
+    { default with preserve_wire = Thinking_object_clear_thinking }
     ~enable_thinking:(Some true)
     ~preserve_thinking:(Some true)
     ~reasoning_effort:None
-    ~clear_thinking_object:false
     ()
   = Ok
       { fields =
           [ ( "thinking"
             , `Assoc [ "type", `String "enabled"; "clear_thinking", `Bool false ] )
           ]
-      ; explicit_enable_receipt = Explicit_enable_encoded Request_control_field
+      ; explicit_enable_receipt = Explicit_enable_not_encoded
       }
+;;
+
+(* RFC-0488 §3.2: the clear-thinking wire sends [clear_thinking] only for a
+   declared [preserve_thinking], as its inverse, and still writes an explicit
+   enable without one. The receipt claims no encoding, because a row without a
+   toggle wire is admitted by [supports_reasoning]. Every other preserve wire
+   sends no member. *)
+let%test "clear-thinking wire sends the member only for a declared preserve_thinking" =
+  let clear_wire = { default with preserve_wire = Thinking_object_clear_thinking } in
+  let control dialect ~enable_thinking ~preserve_thinking =
+    request_control_fields
+      Chat_completions
+      dialect
+      ~enable_thinking
+      ~preserve_thinking
+      ~reasoning_effort:None
+      ()
+  in
+  let fields dialect ~enable_thinking ~preserve_thinking =
+    match control dialect ~enable_thinking ~preserve_thinking with
+    | Ok artifact -> Some artifact.fields
+    | Error _ -> None
+  in
+  control clear_wire ~enable_thinking:(Some true) ~preserve_thinking:None
+  = Ok
+      { fields = [ "thinking", `Assoc [ "type", `String "enabled" ] ]
+      ; explicit_enable_receipt = Explicit_enable_not_encoded
+      }
+  && fields clear_wire ~enable_thinking:None ~preserve_thinking:None = Some []
+  && fields clear_wire ~enable_thinking:None ~preserve_thinking:(Some true)
+     = Some [ "thinking", `Assoc [ "clear_thinking", `Bool false ] ]
+  && fields clear_wire ~enable_thinking:(Some true) ~preserve_thinking:(Some false)
+     = Some
+         [ ( "thinking"
+           , `Assoc [ "type", `String "enabled"; "clear_thinking", `Bool true ] )
+         ]
+  && fields clear_wire ~enable_thinking:(Some false) ~preserve_thinking:(Some true)
+     = Some []
+  && List.for_all
+       (fun preserve_wire ->
+          fields
+            { default with preserve_wire }
+            ~enable_thinking:(Some true)
+            ~preserve_thinking:(Some true)
+          = Some [])
+       [ No_preserve_thinking_control
+       ; Thinking_object_keep_all
+       ; Chat_template_kwargs_preserve_thinking
+       ; Always_preserved_thinking
+       ]
 ;;
 
 let%test "explicit enable receipt follows the selected OpenAI request wire" =

@@ -1,7 +1,8 @@
 (** ZhipuAI Glm native backend.
 
     Uses OpenAI-compatible wire format with Glm-specific extensions:
-    - [thinking] parameter: [{"type":"enabled","clear_thinking":true}]
+    - [thinking] parameter: [{"type":"enabled"}], with [clear_thinking] only
+      when the row declares [preserve_thinking] (RFC-0488)
     - [reasoning_content] in response and streaming delta
     - String error codes (e.g., ["1305"])
 

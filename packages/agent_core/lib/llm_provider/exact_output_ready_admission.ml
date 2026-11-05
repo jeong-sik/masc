@@ -299,7 +299,6 @@ let exact_config (target : request_target) response_format =
        accepts away from the rows that give it: those rows name no effort
        because they ride the provider's default, and with the stance erased
        they could say neither (#37674). *)
-  ; clear_thinking = None
   ; tool_stream = false
   ; tool_choice = None
   ; disable_parallel_tool_use = false

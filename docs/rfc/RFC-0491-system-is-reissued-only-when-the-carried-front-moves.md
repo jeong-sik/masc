@@ -100,7 +100,12 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 - 첫 round: `assemble_request_context` 가 partition 에서 `Completion_authority` layer 를 떼어 `Prompt_block_id.Completion_authority` 블록으로 둔다. System 에는 붙이지 않는다.
 - 뒤 round: 앞 assembly 의 `Completion_authority` 블록을 그대로 다시 싣는다. #45853 이 지킨 "같은 턴의 뒤 요청도 그 관측을 본다"는 그대로다.
 - `Keeper_context_assembly.system_observation` 에서 `Completion_authority` 생성자를 지운다.
-- official client 는 이미 이 관측을 Start/Resume User carrier 로 보낸다(#45853). 바뀌지 않는다.
+- official client 가 이 관측을 받는 자리는 그대로다. Start 에서는 Start prompt 앞, Resume 에서는 매번 User 다(#45853). 바뀌는 것은 떼어 내는 곳이다.
+  - official client 는 System 역할 carrier 를 vendor 가 세션 내내 쥐는 System 에 넣는다. Claude Code 는 첫 실행 때 기록한 `--system-prompt` 를, Codex 는 `developerInstructions` 를 계속 쓴다.
+  - 그 carrier 에 authority 블록이 남으면 판정이 그 턴을 넘어 남는다. #45853 이 막은 결함이다.
+  - 그래서 official turn 은 `prepare_turn` 에서 carrier 의 authority 블록을 한 번 떼어 낸다(`Keeper_context_assembly.split_block`). 나머지 carrier 와 조립은 그 블록 없이 다시 만든 것이다.
+  - 떼어 낸 블록의 출처 증명은 원래 carrier 의 그 블록 span 이다. 지금은 issued System 의 span 이다.
+  - 표시 머리는 `USER:` 에서 `SYSTEM:` 으로 바뀐다. Resume 이 carrier 블록에 붙이는 머리와 같다.
 
 관측이 있는 턴은 요청마다 블록 바이트(11-05 평균 2,285B, 11-04 평균 817B)를 캐시 없이 보낸다. 지금은 블록이 생긴 턴과 빠진 턴의 첫 요청이 대화 기록 전체를 다시 읽는다.
 
@@ -138,11 +143,11 @@ Keeper 마다 세 값을 프로세스 메모리에 든다. System 을 만들 때
 - 조항이 바뀐 뒤 범위 앞부분이 움직일 때까지, Keeper 는 System 의 옛 조항과 끝 문맥의 차이를 함께 읽는다. 11-05 범위 앞부분은 턴 쌍의 11.0% 에서 움직였다. 평균 9턴쯤 뒤에 System 이 지금 조항으로 다시 만들어진다.
 - 끝 문맥은 요청마다 차이 바이트만큼 커진다. 조항 하나는 300~500B 다.
 - 서버 재시작 뒤 첫 턴은 지금 조항으로 만든다. 직전 System 을 만든 뒤 조항이 바뀌었으면 그 턴의 첫 요청이 기록 전체를 다시 읽는다. 지금은 조항이 바뀔 때마다 모든 Keeper 가 그렇다.
-- official client Keeper 는 vendor 세션의 System 을 따로 다룬다. 이 RFC 는 에이전트 코어 경로만 바꾼다.
+- official client Keeper 는 §3.1 의 authority 를 지금과 같은 자리에서 받는다. §3.2·§3.3 의 System 기준점은 에이전트 코어 경로만 바꾼다. official client 는 vendor 세션이 System 을 따로 쥔다.
 
 ## 6. 검증
 
-- 시험: `assemble_request_context` 가 `Completion_authority` 를 System 이 아닌 블록으로 내고, 뒤 round 에도 같은 블록을 싣는다. 조항이 바뀐 턴에서 범위 앞부분이 같으면 System 바이트가 같고 차이 layer 가 생긴다. 앞부분이 다르면 System 이 지금 조항을 담고 차이 layer 가 없다. 지시문이 바뀌면 System 이 바로 바뀐다.
+- 시험: `assemble_request_context` 가 `Completion_authority` 를 System 이 아닌 블록으로 내고, 뒤 round 에도 같은 블록을 싣는다. official Start 의 System 과 carrier 에는 그 블록이 없고, Start prompt 앞과 Resume 마다 carrier span 증명과 함께 실린다. 조항이 바뀐 턴에서 범위 앞부분이 같으면 System 바이트가 같고 차이 layer 가 생긴다. 앞부분이 다르면 System 이 지금 조항을 담고 차이 layer 가 없다. 지시문이 바뀌면 System 이 바로 바뀐다.
 - 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다.
 
 ## 7. 층

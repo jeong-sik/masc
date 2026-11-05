@@ -1,8 +1,7 @@
-(** Neutral runtime observation bus for agent activity.
+(** Neutral vocabulary for agent activity.
 
-    Producers in Keeper/Tooling emit here without depending on any UI/IDE
-    storage module. Consumers register process-local sinks that translate
-    these neutral records into their own persistence or streaming surfaces. *)
+    Producers in Keeper/Tooling say where a tool fact belongs and which kind
+    an annotation has without depending on any UI/IDE storage module. *)
 
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string into a
@@ -115,30 +114,6 @@ type attribution =
   | File of file_attribution
   | Pathless
 
-type tool_event =
-  { base_path : string
-  ; attribution : attribution
-        (** RFC-0378 §5.1: the address is minted where the write is
-            attributed and carried as a parsed value. Producers must not
-            hand consumers the raw tool argument — the resolver is the
-            only thing that knows which root the argument was relative
-            to, and a consumer re-deriving the path from [input] produced
-            three incompatible shapes in one store (masc#28582). *)
-  ; tool_name : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; outcome : string
-  ; typed_outcome : string
-  ; duration_ms : float
-  ; output_text : string
-  ; input : Yojson.Safe.t
-  }
-
-(** A turn is a keeper-timeline fact (RFC-0378): its durable record is
-    the keeper turn-records store, and the per-codebase timeline is
-    derived by joining addressed tool facts on [turn_id]. The
-    observation bus carries no turn events. *)
-
 type annotation_kind =
   | Comment
   | Decision
@@ -148,19 +123,3 @@ type annotation_kind =
 val all_annotation_kinds : annotation_kind list
 (** Every kind, in constructor order. The words a kind is spelled with live
     in [Ide_memo], the one grammar that carries a kind. *)
-
-type tool_event_sink = tool_event -> unit
-
-val register_tool_event_sink : tool_event_sink -> unit
-
-val emit_tool_event : tool_event -> unit
-
-type snapshot
-
-val peek_snapshot : unit -> snapshot
-(** Return accumulated observations without resetting the accumulator. *)
-
-val snapshot_to_json : snapshot -> Yojson.Safe.t
-
-val reset_for_testing : unit -> unit
-(** Reset sinks and accumulated observations. Intended for isolated tests only. *)

@@ -3809,21 +3809,43 @@ let post_repository_add ~(host : string) ~(port : int)
     ~(declaration_json : string) : (Yojson.Safe.t, string) result =
   post_json ~host ~port ~path:"/api/v1/repositories" ~body:declaration_json
 
-(** Fetch /api/v1/dashboard/logs. The server caps [limit] at 3000; the TUI asks
-    for a screenful's worth of history rather than the whole ring. [level] is
-    the route's minimum-level floor in its own lowercase spelling; absent, the
-    server serves everything (its default floor is debug), and an invalid
-    spelling is the route's 400 to give, not this client's to pre-judge. *)
-let fetch_dashboard_logs ~(host : string) ~(port : int) ?level ~(limit : int)
-    () : (Yojson.Safe.t, string) result =
-  let level_query =
-    match level with None -> "" | Some level -> "&level=" ^ level
+(* The log stream sends a keepalive comment every SSE ping interval; this many
+   missed in a row close it from this side, as the Execute output stream does. *)
+let system_log_stream_idle_timeout_sec =
+  stream_missed_keepalives *. Server_mcp_transport_http_headers.sse_ping_interval_s
+
+(** Follow [GET /api/v1/dashboard/logs/stream] until it ends. [since_seq] is the
+    newest entry already held, so the server sends only newer ones; without it
+    the first frame is a whole page. [on_chunk] gets the raw SSE bytes. The
+    stream has no normal end: what returns is why it ended (a refusal, a
+    response that is not an event stream, a dropped or idle connection), and
+    the caller reconnects. *)
+let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?since_seq
+    ~(limit : int) ~(on_chunk : string -> unit) () : string =
+  let exception Invalid_stream_response of string in
+  let query =
+    Printf.sprintf "limit=%d%s%s" (max 1 (min 3000 limit))
+      (match level with None -> "" | Some level -> "&level=" ^ level)
+      (match since_seq with None -> "" | Some seq -> Printf.sprintf "&since_seq=%d" seq)
   in
-  get_json ~host ~port
-    ~path:
-      (Printf.sprintf "/api/v1/dashboard/logs?limit=%d%s"
-         (max 1 (min 3000 limit))
-         level_query)
+  let url = url_of ~host ~port ~path:("/api/v1/dashboard/logs/stream?" ^ query) in
+  let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  let on_response ~status ~headers =
+    if Masc.Tui_decode.is_success_http_status status then
+      match validate_sse_response ~status ~headers with
+      | Ok () -> ()
+      | Error detail -> raise (Invalid_stream_response detail)
+  in
+  match
+    Masc_http_client.get_stream ~clock ~idle_timeout_sec:system_log_stream_idle_timeout_sec
+      ~url ~headers ~on_response ~on_chunk ()
+  with
+  | exception Invalid_stream_response detail -> "log stream: " ^ detail
+  | Error detail -> report_err "Log stream failed" detail
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      named_refusal "log stream" ~status ~body
+  | Ok (Masc_http_client.Pool.Streamed _) -> "log stream ended"
+
 
 (** Fetch /api/v1/dashboard/tools, optionally including one Keeper's exact
     effective turn surface beside the global registered catalog. *)

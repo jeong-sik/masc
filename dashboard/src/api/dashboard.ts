@@ -123,12 +123,6 @@ export type { AgentTimelineEvent, AgentTimelineResponse }
 
 export { fetchAgentTimeline } from './dashboard-agent'
 
-export type {
-  AgentRelation,
-  AgentRelationsResponse,
-} from './schemas/agent-relations'
-export { fetchAgentRelations } from './dashboard-agent'
-
 // Re-export from the hot-path API barrel where the SSOT definition lives
 // alongside `fetchDashboardShell` / `fetchDashboardBootstrap` (all three
 // share the same hot/bootstrap consumer profile). Until 2026-05-27 the

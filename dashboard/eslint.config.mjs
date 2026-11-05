@@ -111,7 +111,6 @@ const DEFAULT_PROJECT_FILES = [
 // forbidden from importing Valibot; remove a path in the same PR that moves
 // that boundary to Effect Schema.
 const LEGACY_VALIBOT_FILES = [
-  'src/api/schemas/agent-relations.ts',
   'src/api/schemas/agent-timeline.ts',
   'src/api/schemas/drift-error.test.ts',
   'src/api/schemas/drift-error.ts',

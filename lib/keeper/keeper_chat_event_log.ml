@@ -770,14 +770,15 @@ let operation_settlement_of_json = function
   | _ -> Error "operation settlement has an invalid shape"
 ;;
 
-let journaled_event_to_json { seq; ts; event } =
-  `Assoc
-    [ "v", `Int codec_version
-    ; "seq", `Int seq
-    ; "ts", `Float ts
-    ; "event", keeper_chat_event_to_json event
-    ]
+let journaled_event_fields { seq; ts; event } =
+  [ "v", `Int codec_version
+  ; "seq", `Int seq
+  ; "ts", `Float ts
+  ; "event", keeper_chat_event_to_json event
+  ]
 ;;
+
+let journaled_event_to_json journaled = `Assoc (journaled_event_fields journaled)
 
 let journaled_event_payload_of_json json =
   let open Yojson.Safe.Util in
@@ -989,12 +990,11 @@ let append_journaled_result ?operation_settlement journal ~seq ~ts event =
       Error (Printf.sprintf
         "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
     else begin
-      let envelope = journaled_event_to_json {seq;ts;event} in
-      let envelope = match operation_settlement, envelope with
-        | Some settlement, `Assoc fields ->
+      let fields = journaled_event_fields {seq;ts;event} in
+      let envelope = match operation_settlement with
+        | Some settlement ->
             `Assoc (fields @ ["operation_settlement", operation_settlement_to_json settlement])
-        | None, _ -> envelope
-        | Some _, _ -> assert false in
+        | None -> `Assoc fields in
       let line = Yojson.Safe.to_string envelope ^ "\n" in
       let validate_first_row row =
         Result.map (fun (_ : journaled_event) -> ()) (journaled_event_of_string row)

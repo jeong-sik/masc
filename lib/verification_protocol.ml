@@ -175,10 +175,9 @@ let create_submit_request ~(config : Workspace.config)
     ~authority:(Verification_collaboration_evidence.Task_producer assignee)
     ~references:collaboration_refs |> Result.map_error Verification_collaboration_evidence.error_to_string in
   let evidence_snapshot =
-    match Workspace_verification_store.snapshot_submitted_evidence_json
-      ?artifact_read ~request_id:verification_id ~base_path ~worker:assignee other_refs with
-    | `List items -> `List (items @ List.map Workspace_verification_store.submitted_evidence_item_to_yojson collaboration)
-    | _ -> assert false
+    Workspace_verification_store.snapshot_submitted_evidence_json
+      ?artifact_read ~request_id:verification_id ~collaboration ~base_path
+      ~worker:assignee other_refs
   in
   warn_oversized_evidence ~task ~snapshot:evidence_snapshot;
   let output =

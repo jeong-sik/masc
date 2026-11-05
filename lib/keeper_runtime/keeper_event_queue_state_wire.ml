@@ -365,6 +365,10 @@ let projected_kind_of_yojson json =
   let context = "event queue projected disposition kind" in
   let* fields = assoc_fields ~context json in
   let* kind = string_field ~context "kind" fields in
+  let kind_only disposition =
+    let* () = exact_fields ~context ~expected:[ "kind" ] fields in
+    Ok disposition
+  in
   match kind with
   | "cancel" ->
     let* () = exact_fields ~context ~expected:[ "kind"; "reason_ref" ] fields in
@@ -392,14 +396,9 @@ let projected_kind_of_yojson json =
     else if String.equal from_keeper to_keeper
     then Error "projected transfer endpoints must differ"
     else Ok (Projected_transfer { from_keeper; to_keeper; target_trace_id })
-  | "fusion_terminal" | "hitl_terminal" | "turn_completed" ->
-    let* () = exact_fields ~context ~expected:[ "kind" ] fields in
-    Ok
-      (match kind with
-       | "fusion_terminal" -> Projected_fusion_terminal
-       | "hitl_terminal" -> Projected_hitl_terminal
-       | "turn_completed" -> Projected_turn_completed
-       | _ -> assert false)
+  | "fusion_terminal" -> kind_only Projected_fusion_terminal
+  | "hitl_terminal" -> kind_only Projected_hitl_terminal
+  | "turn_completed" -> kind_only Projected_turn_completed
   | other -> Error (Printf.sprintf "unknown projected disposition kind: %s" other)
 ;;
 

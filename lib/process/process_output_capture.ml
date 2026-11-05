@@ -121,15 +121,22 @@ let close_state ~complete state =
 let end_of_stream t ~stream =
   blocking (fun () -> close_state ~complete:true (select t stream))
 
+(* What a state holds now: its closed form, or what an open file has
+   written so far. *)
+let source_of_state state =
+  match !state with
+  | Closed source -> source
+  | Open file ->
+    Incomplete_file { path = file.path; byte_length = file.byte_length }
+
 let unavailable t ~message =
   blocking (fun () ->
     let invalidate state =
       close_state ~complete:false state;
-      match !state with
-      | Closed (Capture_failed _) -> ()
-      | Closed (Complete_file { path; _ } | Incomplete_file { path; _ }) ->
+      match source_of_state state with
+      | Capture_failed _ -> ()
+      | Complete_file { path; _ } | Incomplete_file { path; _ } ->
         state := Closed (Capture_failed { path = Some path; message; limit_exceeded = false })
-      | Open _ -> assert false
     in
     invalidate t.stdout;
     invalidate t.stderr)
@@ -140,13 +147,7 @@ let close t =
     close_state ~complete:false t.stderr)
 
 let files t : files =
-  let source state =
-    match !state with
-    | Closed source -> source
-    | Open file ->
-      Incomplete_file { path = file.path; byte_length = file.byte_length }
-  in
-  { stdout = source t.stdout; stderr = source t.stderr }
+  { stdout = source_of_state t.stdout; stderr = source_of_state t.stderr }
 
 let with_capture ?stdout_limit ?stderr_limit ~capture_dir f =
   let owned = ref None in

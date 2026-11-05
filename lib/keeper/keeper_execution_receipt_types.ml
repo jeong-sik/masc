@@ -51,7 +51,7 @@ type tool_surface =
 (* Receipt-level summary of how the in-turn runtime attempt sequence
    ended.  Closed set across two producer paths:
     - [Keeper_agent_error.runtime_outcome_of_observation] — 4 values
-       sourced from [Runtime_legacy_runner.runtime_observation].
+       sourced from [Runtime_observation.runtime_observation].
      - [keeper_turn_helpers.build_pending_receipt] — emits
        [Runtime_not_dispatched] for pre-dispatch pending receipts.
    JSON wire form is the lowercase string via

@@ -74,7 +74,7 @@ let execute_tool_eio
       ~name
       ~arguments
   =
-  (* clock parameter used for Session_eio.wait_for_message *)
+  (* clock parameter used for wait_for_message_eio *)
   (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
   (* Defensive: bind fiber-local request switch and refresh ambient clock for
      downstream helpers that consult them during a request, without overwriting

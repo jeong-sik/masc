@@ -213,9 +213,7 @@ let run_keeper_cycle
   | Ok (entry_profile_defaults, meta) ->
   let channel = turn_decision.channel in
   (* 0. Phase gate + state-aware runtime routing.
-     The gate owns turn executability; select_runtime remains a total helper
-     so dashboards/tests can inspect the same routing contract for blocked
-     phases. *)
+     The gate owns turn executability. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
   (* Quota expiry is wall-clock provider evidence. Freeze this observation so

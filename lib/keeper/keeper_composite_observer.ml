@@ -306,9 +306,7 @@ let compute_invariants (entry : Keeper_registry.registry_entry) : invariants_che
 
 (* Otel_metric_store bump — one counter tick per violated invariant per snapshot.
    Called from [observe]. Backend rate/increase queries distinguish transient
-   from steady-state violations. Labels are keeper and the measured invariant.
-   Mirrors the naming pattern in
-   [Runtime_strategy_trace.bump_otel_metric_store_counter]. *)
+   from steady-state violations. Labels are keeper and the measured invariant. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then

@@ -38,8 +38,17 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
       Server_bootstrap_http.with_cleanups_on_release
         ~sw:stream_sw
         [ (fun () -> Server_sse_response.close response) ];
+      let queue = Server_sse_pump.Queue.create ~max_queued_events in
+      (* Nothing between subscribing and registering the removal can be
+         cancelled, so a cancelled stream cannot leave its subscription
+         behind. *)
+      let unsubscribe = subscribe ~on_event:(Server_sse_pump.Queue.push queue) in
+      Eio.Switch.on_release stream_sw unsubscribe;
       let pump () =
-        Server_sse_pump.run ~subscribe ~frame ~clock ~ping_interval_s ~max_queued_events ~send
+        Server_sse_pump.run ~queue
+          ~step:(fun event -> Server_sse_pump.Send (frame event))
+          ~idle:(fun () -> Server_sse_pump.Keepalive)
+          ~clock ~ping_interval_s ~send
       in
       match
         (match scope_replaced with
@@ -50,7 +59,8 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
                (fun () -> `Ended (pump ())))
       with
       (* [Server_sse_response.send] logs a stalled frame with the request path. *)
-      | `Scope_replaced | `Ended (Server_sse_pump.Client_gone | Server_sse_pump.Stalled) -> ()
+      | `Scope_replaced
+      | `Ended (Server_sse_pump.Client_gone | Server_sse_pump.Stalled | Server_sse_pump.Finished) -> ()
       | `Ended Server_sse_pump.Fell_behind ->
         Log.Server.warn
           "Fleet stream closed: the client was %d events behind"

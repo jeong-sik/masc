@@ -43,9 +43,6 @@ let default_workspace_state config = {
   pause_reason = None;
   paused_by = None;
   paused_at = None;
-  search_strategy_default = Some "best_first_v1";
-  speculation_enabled = false;
-  speculation_budget = None;
 }
 
 (* Pull a counter that fell behind the store back up to it.

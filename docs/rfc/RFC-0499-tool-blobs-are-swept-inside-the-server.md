@@ -32,9 +32,9 @@ related: ["durable-tool-result-markers", "0476"]
 
 ## 1. 결정
 
-- D1. 정리는 서버 안에서 돈다. 서버의 maintenance 루프가 앞 스캔이 시작된 뒤 24시간이 지나면 다음 스캔을 연다. 앞 스캔 시작 시각은 후보 기록 파일에 있어서, 서버를 다시 켜도 주기가 처음부터 다시 시작하지 않는다.
+- D1. 정리는 서버 안에서 돈다. 서버의 정리 fiber 가 앞 스캔이 시작된 뒤 24시간이 지나면 다음 스캔을 연다. 앞 스캔 시작 시각은 표지 파일의 mtime 이라서, 서버를 다시 켜도 주기가 처음부터 다시 시작하지 않는다.
 - D2. 두 번 스캔 규칙은 그대로다. 지울 수 있는 것은 "앞 스캔의 후보 ∩ 이번 스캔의 후보"다.
-- D3. 그 집합에서 "건드린 주소"를 뺀다. 건드린 주소는 둘이다. 이 프로세스가 앞 스캔 시작 뒤(프로세스가 그 뒤에 떴으면 프로세스 시작 뒤) `Tool_blob_store` 의 쓰기·읽기 함수로 다룬 주소, 그리고 파일 mtime 이 앞 스캔 시작 뒤인 주소다(§4.2).
+- D3. 그 집합에서 "건드린 주소"를 뺀다. 건드린 주소는 둘이다. 이 프로세스가 앞 스캔을 열기 전부터(프로세스가 그 뒤에 떴으면 프로세스 시작 뒤) `Tool_blob_store` 의 쓰기·읽기 함수로 다룬 주소, 그리고 파일 mtime 이 앞 스캔 시작 뒤인 주소다(§4.2).
 - D4. 지우기는 `written_addresses` 에서 주소를 빼고, 파일을 다른 이름으로 옮긴 뒤, 건드린 주소인지와 옮긴 파일이 확인한 그 파일인지(inode·mtime) 다시 본다. 하나라도 어긋나면 되돌리고, 아니면 지운다. 잠금은 쓰지 않는다(§4.3).
 - D5. 스캔과 지우기는 Eio 메인 domain 밖에서 돈다. 스캔이 실패하면 지금처럼 후보를 기록하지 않고, 아무것도 지우지 않는다.
 - D6. 1층은 지우지 않는다. 후보 수, 지울 수 있는 수와 크기, 지웠다면 깨졌을 참조 수, 스캔 시간, 실패 종류를 로그와 후보 기록에 남긴다(§5).
@@ -120,23 +120,26 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 
 ### 4.1 언제 도나
 
-서버의 maintenance 루프(`server_bootstrap_maintenance.ml`, 24시간 JSONL 보존 pass 가 있는 곳)가 tick 마다 후보 기록의 `scan_started_at` 을 본다. 24시간이 지났으면 정리 pass 를 연다. 후보 기록이 없으면 첫 tick 에 연다.
+서버가 정리용 fiber 하나를 띄운다(`server_tool_blob_sweep.ml`, `start_background_maintenance` 에서 시작). 이 fiber 는 표지 파일 `<base>/.masc/tool_blob_maintenance/scan-opened` 의 mtime 을 본다. 표지가 없거나 mtime 에서 24시간이 지났으면 정리 pass 를 연다. 아니면 그때까지 잔다. 서버를 다시 띄워도 같은 표지를 보므로 하루를 건너뛰거나 두 번 돌지 않는다.
 
-정리 pass 는 한 번에 하나만 돈다. 앞 pass 가 아직 돌면 tick 은 아무것도 하지 않는다.
+pass 는 표지를 가장 먼저 쓴다. 그래서 앞 기록을 못 읽거나 스캔이 실패한 pass 도 연 것으로 친다. 다음 pass 는 그 pass 를 연 때부터 24시간 뒤다. 표지조차 못 쓴 pass 뒤에는 하루를 자고 다시 연다.
+
+pass 는 한 fiber 안에서 차례로 돌므로 한 번에 하나만 돈다.
 
 ### 4.2 건드린 주소
 
 `Tool_blob_store` 가 프로세스 전역 값 하나를 둔다.
 
 ```
-type touched = { current : Touch_map.t; previous : Touch_map.t }   (* sha256 -> { put : bool; read : bool } *)
-val touched : touched Atomic.t
+type touch = { put : bool; read : bool }
+type touches = { current : touch Touch_map.t; previous : touch Touch_map.t }   (* sha256 -> touch *)
+val touch_ledger : touches Atomic.t
 ```
 
-- `current`: 이번 스캔 시작 뒤 건드린 주소
-- `previous`: 앞 스캔 시작부터 이번 스캔 시작까지 건드린 주소
+- `current`: 마지막 후보 기록을 쓴 뒤 건드린 주소
+- `previous`: 그 앞 기록을 쓴 뒤부터 마지막 기록을 쓸 때까지 건드린 주소
 
-스캔을 열 때 `{ current = empty; previous = old.current }` 로 한 번에 바꾼다(CAS). 두 집합을 따로 두고 옮긴 뒤 비우면, 그 사이에 기록된 건드림을 잃는다. 건드림 기록도 같은 값에 CAS 로 더한다. 프로세스가 앞 스캔 뒤에 떴으면 `previous` 는 비어 있고 `current` 가 프로세스 시작부터 채운 집합이다.
+스캔이 후보 기록을 다 쓴 뒤 `{ current = empty; previous = old.current }` 로 한 번에 바꾼다(CAS). 기록을 못 쓰고 끝난 스캔은 바꾸지 않는다. 그래서 두 집합을 합치면 늘 앞 스캔을 열기 전부터 건드린 주소를 덮는다. 스캔을 열 때 바꾸면, 실패한 스캔 하나가 그 앞 세대를 버려 다음 스캔이 앞 스캔 사이의 건드림을 못 본다. 두 집합을 따로 두고 옮긴 뒤 비우면, 그 사이에 기록된 건드림을 잃는다. 건드림 기록도 같은 값에 CAS 로 더한다. 프로세스가 앞 기록 뒤에 떴으면 `previous` 는 비어 있고 `current` 가 프로세스 시작부터 채운 집합이다.
 
 건드림을 기록하는 함수는 `put`, `put_addressed`, `put_durable`, `put_durable_reuse`, `put_file_durable*`, `fetch`, `fetch_bounded`, `fetch_range` 다. 쓰기는 `put`, 읽기는 `read` 표시를 켠다. 한 주소의 표시는 덮지 않고 합친다. 읽은 뒤 쓴 주소가 `read` 로만 남으면 §5.2 의 분류가 틀어진다. 기록은 파일을 보기 **전에** 한다. 이 모듈 밖에서 blob 파일 경로를 직접 쓰거나 읽는 코드는 lib·bin 에 없다(`root_dir` 은 시험에서만 쓴다).
 
@@ -158,18 +161,18 @@ val touched : touched Atomic.t
 
 ```
 put h:                               fetch h:
-  touched += (h, Put)    (atomic)      touched += (h, Read)   (atomic)
+  mark_put h             (atomic)      mark_read h            (atomic)
   if written_addresses has h: return   read file h
   write file h (temp + rename)
   written_addresses += h
 
 delete h:
   written_addresses -= h
-  if h in touched: skip
+  if touch_of h <> None: skip
   st1 = lstat h;  if st1.mtime >= previous_scan_started_at: skip
   rename h -> h.deleting
   st2 = lstat h.deleting
-  if h in touched or st2.ino <> st1.ino or st2.mtime <> st1.mtime:
+  if touch_of h <> None or st2.ino <> st1.ino or st2.mtime <> st1.mtime:
     rename h.deleting -> h; skip
   unlink h.deleting
 ```
@@ -188,7 +191,7 @@ delete h:
 - 서버 밖 프로세스가 `lstat` 과 `rename` 사이에 파일을 바꿔 썼으면, 옮긴 파일의 inode 나 mtime 이 첫 `lstat` 과 다르다. 되돌린다. `rename` 뒤에 썼으면 새 `h` 가 생기고 `unlink` 는 `h.deleting` 만 지운다.
 - `rename` 과 되돌리기 사이에 온 `fetch` 는 파일이 없어 `Ok None` 을 받는다. 되돌린 뒤에도 그 `fetch` 의 답은 바뀌지 않는다. 눈에 보이는 실패지만 지우지 않은 blob 에서 생긴다. 2층은 되돌린 횟수를 로그에 남겨 이 창이 얼마나 생기는지 잰다.
 
-`touched` 는 §4.2 의 `Atomic` 값이다. OCaml 5 `Atomic` 은 순차 일관이라, 한 thread 의 기록이 다른 thread 의 확인에 순서대로 보인다.
+`touch_ledger` 는 §4.2 의 `Atomic` 값이다. OCaml 5 `Atomic` 은 순차 일관이라, 한 thread 의 기록이 다른 thread 의 확인에 순서대로 보인다.
 
 서버가 `rename` 과 `unlink` 사이에 죽으면 `h.deleting` 이 남는다. 서버는 시작할 때, Keeper 와 요청을 받기 전에 남은 `h.deleting` 을 모두 `h` 로 되돌린다. 정리 pass 가 아니라 시작 단계에서 하는 이유는, 그 전에 오는 `fetch` 가 `Ok None` 을 받지 않게 하려는 것이다. 되돌린 주소는 다음 스캔에서 같은 규칙으로 다시 판정된다. blob 목록(`list_all_result`)은 `.deleting` 이름을 blob 으로 세지 않는다.
 
@@ -223,15 +226,15 @@ u <sha256>
 
 앞 스캔의 `d` 중 이번 스캔에서 참조되는 주소를 센다. 2층이었다면 이 주소들은 앞 스캔 끝에 지워졌다. 그 뒤에 무슨 일이 있었는지로 셋으로 나눈다.
 
-- 다시 썼다: 이 프로세스의 `touched_previous`·`touched_current` 에 `Put` 이 있거나, 파일 mtime 이 앞 스캔 시작 뒤다. 2층이었어도 `put` 이 파일을 다시 써서 괜찮았다.
-- 읽으려 했다: `Read` 만 있다. 2층이었다면 `fetch` 가 `Ok None` 을 돌려줘서 그 기능이 눈에 보이게 실패했다(Board 첨부면 `Missing_artifact`).
+- 다시 썼다: 이 프로세스의 `previous`·`current` 에 `put` 표시가 있거나, 파일 mtime 이 앞 스캔 시작 뒤다. 2층이었어도 `put` 이 파일을 다시 써서 괜찮았다.
+- 읽으려 했다: `read` 표시만 있다. 2층이었다면 `fetch` 가 `Ok None` 을 돌려줘서 그 기능이 눈에 보이게 실패했다(Board 첨부면 `Missing_artifact`).
 - 아무 흔적이 없다: 2층이었다면 파일 없이 참조만 남았다. §3.3 의 "blob 을 쓰지 않고 참조를 다시 쓰는 길"이 실제로 있다는 뜻이다.
 
 서버를 다시 켜면 건드림 집합이 비므로, 앞 프로세스가 읽은 경우는 "아무 흔적이 없다"로 셈한다. 위험 쪽으로 더 센다.
 
 이 셈의 한계:
 
-- 참조를 기록하지 않고 메모리에서만 쓰고 버린 경우는 이번 스캔에 나타나지 않는다. 그래서 `d` 중 `Read` 가 기록된 주소는 참조가 있든 없든 따로 센다. 2층이었다면 그 `fetch` 가 모두 `Ok None` 을 받았다.
+- 참조를 기록하지 않고 메모리에서만 쓰고 버린 경우는 이번 스캔에 나타나지 않는다. 그래서 `d` 중 `read` 표시가 있는 주소는 참조가 있든 없든 따로 센다. 2층이었다면 그 `fetch` 가 모두 `Ok None` 을 받았다.
 - 1층은 앞 스캔 끝의 `d` 로 센다. 2층은 지우는 순간에 건드림과 mtime 을 다시 본다. 그래서 2층이 실제로 지우는 수는 `d` 보다 적거나 같다.
 
 셋째 묶음은 sha256 을 후보 기록 파일에 `u <sha256>` 줄로 남긴다. 스캔이 모으는 참조에는 어느 파일에서 나왔는지가 없다. 그래서 운영자가 그 sha256 으로 참조 범위를 검색해 어느 producer 인지 찾는다. 내용은 남기지 않는다.

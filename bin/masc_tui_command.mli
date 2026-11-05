@@ -258,9 +258,6 @@ val hint_spans : hint -> hint_span list
 (** The hint as coloured pieces, in reading order. Empty for
     {!No_command}. *)
 
-val hint_span_text : hint_span -> string
-(** The glyphs a span carries, whatever kind it is. *)
-
 val hint : string -> hint
 (** What to show while the operator is typing. A half-typed word lists its
     candidates rather than describing one, because {!parse} does no prefix

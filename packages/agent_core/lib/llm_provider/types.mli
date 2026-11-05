@@ -901,10 +901,15 @@ val tool_argument_assembly_to_string : tool_argument_assembly -> string
     replayed call needs an input object. [arguments] is the argument text as
     the response delivered it, kept whole for whoever has to judge whether the
     model or the transport broke it. [arguments_assembly] is how a stream built
-    that text; it is [None] when the text arrived as one value. *)
+    that text; it is [None] when the text arrived as one value.
+    [tool_use_ordinal] is the call's place among all tool calls of the
+    response, readable or not, from 0 in the order the response sent them. A
+    consumer that counted the tool calls on the wire, such as a keeper's stream
+    projection, matches calls by this place. *)
 type unreadable_tool_use =
   { tool_use_id : string
   ; tool_name : string
+  ; tool_use_ordinal : int
   ; arguments : string
   ; arguments_problem : Tool_call_input.parse_error
   ; arguments_assembly : tool_argument_assembly option

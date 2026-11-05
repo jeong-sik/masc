@@ -1276,6 +1276,7 @@ let tool_argument_assembly_to_string { last_pieces; piece_count } =
 type unreadable_tool_use =
   { tool_use_id : string
   ; tool_name : string
+  ; tool_use_ordinal : int
   ; arguments : string
   ; arguments_problem : Tool_call_input.parse_error
   ; arguments_assembly : tool_argument_assembly option

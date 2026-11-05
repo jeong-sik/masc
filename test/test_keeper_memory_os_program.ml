@@ -109,6 +109,28 @@ let test_exact_partition () =
   let changed = source 1 "different message bytes" in
   create ~sources:[first_source;changed] ~unread:[hole] [first] |> refused
 
+let test_source_keys_name_a_message_by_its_place () =
+  let same label expected a b =
+    check bool label expected Source.Source_key.(equal (of_source a) (of_source b)) in
+  let atom_at_the_same_numbers = Source.Atom
+    {trace_id="program-source";history_start_boundary_line=3;atom=7;message_in_atom=0;
+     message_sha256=Source.source_digest first_source} in
+  let in_next_turn = Source.Official_turn
+    {turn_ref=Ids.Turn_ref.make ~trace_id:"program-source" ~absolute_turn:4;boundary_line=7;
+     message_in_turn=0;message_sha256=Source.source_digest first_source} in
+  same "a source names itself" true first_source first_source;
+  same "another hash at the same place is the same key" true first_source (source 0 "different message bytes");
+  same "another message of the turn is another key" false first_source second_source;
+  same "the next turn is another key" false first_source in_next_turn;
+  same "an atom never shares a key with an official turn" false first_source atom_at_the_same_numbers;
+  check string "an official turn source reports its message hash"
+    (Source.message_digest (message "first observation")) (Source.source_digest first_source);
+  let keys = Source.Source_keys.singleton (Source.Source_key.of_source first_source) in
+  check bool "a set finds the place under another hash" true
+    (Source.Source_keys.mem (Source.Source_key.of_source (source 0 "different message bytes")) keys);
+  check bool "a set does not find another place" false
+    (Source.Source_keys.mem (Source.Source_key.of_source second_source) keys)
+
 let test_forged_codec_outcomes () =
   let program = chain () in
   let forged = {program with Program.final_facts=[a]} in
@@ -130,4 +152,5 @@ let () = run "keeper_memory_os_program"
     test_case "public forged records are revalidated" `Quick test_forged_public_program;
     test_case "contradictory retirement and lineage reject" `Quick test_relationships;
     test_case "processed sources and holes exactly partition the manifest" `Quick test_exact_partition;
+    test_case "a source key is the place of one message, not its hash" `Quick test_source_keys_name_a_message_by_its_place;
     test_case "codec recomputes program and locked outcomes" `Quick test_forged_codec_outcomes]]

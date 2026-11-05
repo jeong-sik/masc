@@ -232,7 +232,7 @@ let test_full_profile_lists_the_browser_host_tools () =
   List.iter
     (fun name -> check bool (name ^ " is listed without include_hidden") true (List.mem name listed))
     [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_session"; "masc_browser_goto"
-    ; "masc_browser_act"; "masc_browser_interact"; "masc_browser_instruct" ]
+    ; "masc_browser_act"; "masc_browser_interact" ]
 ;;
 
 let () =

@@ -356,30 +356,6 @@ let test_goto_answer_satisfies_output_contract () = with_upload_context (fun con
         fail ("BrowserGoto's declared output rejects its own answer: "
           ^ Yojson.Safe.to_string (Tool_result.data result)))))
 
-let test_public_locate_retains_browser () = with_upload_context (fun config _meta ->
-  fixture (fun env _driver _calls _matches _extra ->
-    let sent=ref [] in
-    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route verb ->
-      sent:=(route,verb)::!sent;
-      Lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ["tabId",`Int 3;"matches",`List []]])) (fun _ ->
-      let invoke fields=Masc.Browser_addon_tools.handle ~config
-        ~access:Masc.Lane_addon_sources.Operator_configuration
-        ~principal:(Lane_addon_call_context.Host_actor "browser-reader") ~reserved:[]
-        ~keeper_name:None ~tool:Masc.Browser_capabilities.Instruct ~tool_name:"masc_browser_instruct"
-        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
-      let fields=["action",`String "observe";"instruction",`String "Find the menu";"tabId",`Int 3] in
-      check bool "a bound locate without its lane is rejected" true
-        (Tool_result.is_failed (invoke fields));
-      check int "a missing binding sends no browser command" 0 (List.length !sent);
-      check bool "public observe reaches the native Add-on" true
-        (Tool_result.is_success (invoke (("lane",`String "automation")::fields)));
-      check bool "the observed browser and tab are preserved" true
-        (!sent=[Lane.Automation_route,Lane.Page_locate {tab_id=3;instruction=Some "Find the menu"}]);
-      check bool "automation act is refused before native dispatch" true
-        (Tool_result.is_failed (invoke ["lane",`String "automation";"action",`String "act";
-          "instruction",`String "Click the menu";"tabId",`Int 3]));
-      check int "unsupported act cannot become an observe or switch browsers" 1 (List.length !sent))))
-
 (* An extension built before [within] answers a scoped read with every control.
    The tool refuses an answer that does not carry the page's own match count. *)
 let test_public_scoped_elements () = with_upload_context (fun config _meta ->
@@ -432,7 +408,6 @@ let test_public_scoped_elements () = with_upload_context (fun config _meta ->
       check int "refused arguments send no browser command" 4 (List.length !sent))))
 
 let () = run "Firefox controls" ["behavior",[
-  test_case "public locate keeps its owned browser through native routing" `Quick test_public_locate_retains_browser;
   test_case "a scoped elements read needs the page's own match count" `Quick test_public_scoped_elements;
   test_case "navigation answer satisfies its output contract" `Quick test_goto_answer_satisfies_output_contract;
   test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;

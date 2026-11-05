@@ -36,7 +36,7 @@ let test_the_split_over_the_real_catalogue () =
   check (slist string String.compare) "public tools with no additional chat approval"
     [ "Execute"; "Edit"; "Write"; "Grep"; "Read"; "WebFetch"; "WebSearch"
     ; "BrowserTabs"; "BrowserRead"; "BrowserSession"; "BrowserGoto"
-    ; "BrowserAct"; "BrowserInteract"; "BrowserInstruct" ] ran
+    ; "BrowserAct"; "BrowserInteract" ] ran
 
 let test_reading_is_never_asked_about () =
   (* Reading to answer a question is the bulk of what a keeper does. *)

@@ -12,9 +12,9 @@ type operation =
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
+  | Read_console | Read_storage | Write_storage | Emulate_environment
 [@@deriving enumerate]
-type tool = Tabs | Read | Interact | Act | Session | Goto | Instruct
+type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation
   | Conditional of { invocation : invocation; constraints : string list }
@@ -385,10 +385,7 @@ let support backend operation = match backend with
       | Owned_gecko | Owned_chromium | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
           gecko_only backend (invoke ~mode:"downloads" Read)
             [observed;"Explicit tabId and a functioning BiDi download connection; reports observed pending/completed/canceled/interrupted state."])
-    | Sentence_action -> (match backend with
-      | Owned_chromium -> conditional ~action:"act" Instruct
-          [observed;"Model-mediated sentence action; not a substitute for guaranteed native keyboard, double-click or zoom support. observe/extract are separate read actions."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Safari_unavailable -> missing)
+
     | Resize_viewport -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
           [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
@@ -453,7 +450,7 @@ let operation_name = function
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Read_network -> "read_network" | Intercept_network -> "intercept_network" | Read_console -> "read_console"
-  | Read_storage -> "read_storage" | Write_storage -> "write_storage" | Emulate_environment -> "emulate_environment" | Sentence_action -> "sentence_action"
+  | Read_storage -> "read_storage" | Write_storage -> "write_storage" | Emulate_environment -> "emulate_environment"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->
@@ -470,7 +467,7 @@ let missing_operations backend operations = List.filter (fun operation -> match 
   | Available _ | Conditional _ -> false | Unsupported _ -> true) operations
 let tool_name = function Tabs -> "masc_browser_tabs" | Read -> "masc_browser_read"
   | Interact -> "masc_browser_interact" | Act -> "masc_browser_act" | Session -> "masc_browser_session"
-  | Goto -> "masc_browser_goto" | Instruct -> "masc_browser_instruct"
+  | Goto -> "masc_browser_goto"
 let invocation_fields invocation = ["tool",`String (tool_name invocation.tool)]
   @ (match invocation.action with None -> [] | Some value -> ["action",`String value])
   @ (match invocation.mode with None -> [] | Some value -> ["mode",`String value])

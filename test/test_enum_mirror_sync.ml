@@ -472,12 +472,10 @@ let test_capability_table_names_advertised_values () =
     | Cap.Act -> Schemas.browser_act_schema
     | Cap.Session -> Schemas.browser_session_schema
     | Cap.Goto -> Schemas.browser_goto_schema
-    | Cap.Instruct -> Schemas.browser_instruct_schema
   in
   let tool_label = function
     | Cap.Tabs -> "BrowserTabs" | Cap.Read -> "BrowserRead" | Cap.Interact -> "BrowserInteract"
     | Cap.Act -> "BrowserAct" | Cap.Session -> "BrowserSession" | Cap.Goto -> "BrowserGoto"
-    | Cap.Instruct -> "BrowserInstruct"
   in
   let backends =
     [ Cap.Connected Browser_lane.Web_extension

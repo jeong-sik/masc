@@ -11,7 +11,6 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   match handler with
   | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_execute
-  | Keeper_tool_descriptor.Tool_browser_instruct
   (* An unconfirmed owned-job launch may have started its process. A failed
      call cannot authorize issuing a replacement command in this turn. *)
   | Keeper_tool_descriptor.Tool_keeper_job_dispatch

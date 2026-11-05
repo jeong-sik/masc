@@ -525,7 +525,6 @@ let execute_tool_eio
                     | (Some (Tool_schemas_misc.Misc_browser_goto), None)
                     | (Some (Tool_schemas_misc.Misc_browser_act), None)
                     | (Some (Tool_schemas_misc.Misc_browser_interact), None)
-                    | (Some (Tool_schemas_misc.Misc_browser_instruct), None)
                     | (Some (Tool_schemas_misc.Misc_msx _), None)
                     | (Some (Tool_schemas_misc.Misc_candle_balance), None)
                     | (Some (Tool_schemas_misc.Misc_candle_catalog), None)

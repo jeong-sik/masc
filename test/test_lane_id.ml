@@ -147,11 +147,7 @@ let test_browser_tools_follow_the_lane_argument () =
        [ Browser_lane.Lane_name.Automation; Browser_lane.Lane_name.Stagehand ]);
   check (list string) "the live browser is read and acted on"
     [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_act"; "masc_browser_interact" ]
-    (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live));
-  check (list string) "sentence instructions reach only stagehand"
-    [ "browser/stagehand" ]
-    (List.map wire_of_builtin
-       (Lane_manifest.lanes_of_misc_operation Tool_schemas_misc.Misc_browser_instruct))
+    (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live))
 ;;
 
 let test_machine_tools_belong_to_their_machine () =

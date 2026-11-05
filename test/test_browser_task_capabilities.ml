@@ -79,7 +79,7 @@ let admitted names route =
   | Ok selected ->
     (match Selection.target ~verb:Lane.Tabs_list ~snapshot selected.route with
      | Error _ -> fail "the explicit browser is connected"
-     | Ok browser -> Selection.require ~snapshot (operations names) browser)
+     | Ok browser -> Selection.require (operations names) browser)
 let unsupported = function
   | Error (Selection.Unsupported_required_actions _) -> true
   | Ok () | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
@@ -112,18 +112,6 @@ let test_session_open_choice () = with_browsers ~sessions:Lane.Browser_closed (f
     (chosen (automatic ~verb:opening ["read_frames"]) = Some Lane.Automation_route);
   check bool "no owned browser zooms, so opening cannot fall to the operator's extension" true
     (none_serves (automatic ~verb:opening ["page_zoom"])))
-
-let test_sentence_actions_need_the_model () =
-  with_browsers ~models:false (fun ~extension:_ ~bidi:_ ->
-    check bool "with Stagehand's models off no browser is chosen for a sentence action" true
-      (none_serves (automatic ["sentence_action"]));
-    check bool "an explicit Stagehand without models is refused" true
-      (unsupported (admitted ["sentence_action"] Lane.Stagehand_route)));
-  with_browsers ~models:true (fun ~extension:_ ~bidi:_ ->
-    check bool "with its models on Stagehand serves a sentence action" true
-      (chosen (automatic ["sentence_action"]) = Some Lane.Stagehand_route);
-    check bool "and the explicit Stagehand is admitted" true
-      (admitted ["sentence_action"] Lane.Stagehand_route = Ok ()))
 
 (* Required actions are parsed before any browser is chosen. A refused list
    fails as the caller's input, before the tool looks for a browser Add-on;
@@ -337,7 +325,6 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "an impossible combination lists candidates and an explicit browser is kept" `Quick
     test_impossible_and_explicit;
   test_case "session open chooses an owned browser that serves the task" `Quick test_session_open_choice;
-  test_case "a sentence action needs Stagehand's models" `Quick test_sentence_actions_need_the_model;
   test_case "invalid required actions reach no browser" `Quick test_invalid_required_actions_reach_no_browser;
   test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table;
   test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table;

@@ -13,7 +13,6 @@ val browser_session : Masc_domain.tool_schema
 val browser_goto : Masc_domain.tool_schema
 val browser_act : Masc_domain.tool_schema
 val browser_interact : Masc_domain.tool_schema
-val browser_instruct : Masc_domain.tool_schema
 
 
 (** An MSX lane tool's schema (RFC-0439 §3.5), read from

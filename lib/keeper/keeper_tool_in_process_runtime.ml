@@ -520,10 +520,6 @@ let handle_browser_goto_with_outcome ~config ~meta ~args =
   |> Keeper_tool_execution.of_tool_result
 ;;
 
-let handle_browser_instruct_with_outcome ~config ~meta ~args =
-  browser_tool ~config ~meta ~tool:Browser_capabilities.Instruct ~tool_name:"masc_browser_instruct" args
-  |> Keeper_tool_execution.of_tool_result
-;;
 
 let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.config) ~meta ~args =
   let invoke ?upload_paths () =
@@ -1857,7 +1853,6 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | (Some (Tool_schemas_misc.Misc_browser_goto), None)
    | (Some (Tool_schemas_misc.Misc_browser_act), None)
    | (Some (Tool_schemas_misc.Misc_browser_interact), None)
-   | (Some (Tool_schemas_misc.Misc_browser_instruct), None)
    | (Some (Tool_schemas_misc.Misc_msx _), None)
    | (Some (Tool_schemas_misc.Misc_candle_balance), None)
    | (Some (Tool_schemas_misc.Misc_candle_catalog), None)

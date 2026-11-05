@@ -383,7 +383,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
                 ~tool_name:Browser_addon_tool.definition.name ~start_time
                 ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail)
         | Owned_automation|Owned_stagehand -> Ok () in
-      let* ()=Browser_selection.require ~snapshot required_actions browser
+      let* ()=Browser_selection.require required_actions browser
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* served=served_for t gathered browser |> Result.fold ~ok:Result.ok ~error:refuse in
       Ok (Browser_binding.of_browser selected browser,served)

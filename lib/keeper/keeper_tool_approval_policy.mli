@@ -10,13 +10,11 @@
     paths. No other tool's approval authorizes these filesystem calls.
     Other calls retain their descriptor and input-based interactive policy. *)
 
-(** Why a call was or was not put to an operator. Carried rather than reduced
-    to a bool so a decision can be explained where it is shown or logged. *)
+(** Whether a call is put to an operator. An [Ask] carries the reason the
+    approval question shows beside the call. *)
 type verdict =
   | Ask of { because : string }
-  | Run of { because : string }
-
-val verdict_because : verdict -> string
+  | Run
 
 val verdict_for :
   identity_tool_index:Keeper_identity_tool_index.t ->

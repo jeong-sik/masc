@@ -6,11 +6,14 @@ module Descriptor = Masc.Keeper_tool_descriptor
 let asks ~composition_plan_index ~tool_name ~input =
   match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input with
   | Policy.Ask _ -> true
-  | Policy.Run _ -> false
+  | Policy.Run -> false
 
 let because ~composition_plan_index ~tool_name ~input =
-  Policy.verdict_because
-    (Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input)
+  match
+    Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index ~tool_name ~input
+  with
+  | Policy.Ask { because } -> because
+  | Policy.Run -> fail (tool_name ^ " ran; only an Ask carries a reason")
 
 let no_input = `Assoc []
 
@@ -38,9 +41,7 @@ let test_the_split_over_the_real_catalogue () =
 let test_reading_is_never_asked_about () =
   (* Reading to answer a question is the bulk of what a keeper does. *)
   check bool "reading a file" false
-    (asks ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
-  check string "and the reason says why" "this call only reads"
-    (because ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
+    (asks ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
 
 let test_writes_and_execute_delegate () =
   check bool "editing delegates to its resolved filesystem boundary" false
@@ -50,7 +51,7 @@ let test_writes_and_execute_delegate () =
   check bool "running a program delegates to its execution Gate" false
     (asks ~composition_plan_index:None ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
 
-let test_execute_delegation_does_not_claim_readonly () =
+let test_execute_delegates_whatever_its_input () =
   let cases =
     [ `Assoc [ "argv", `List [ `String "ls" ]; "cwd", `String "." ]
     ; `Assoc [ "argv", `List [ `String "rg"; `String "--pre=program"; `String "needle" ] ]
@@ -58,10 +59,7 @@ let test_execute_delegation_does_not_claim_readonly () =
   List.iter (fun input ->
       List.iter (fun tool_name ->
           check bool "one execution permission authority" false
-            (asks ~composition_plan_index:None ~tool_name ~input);
-          check string "reason names the authority, not a fabricated read proof"
-            "the execution Gate decides this call with its resolved context"
-            (because ~composition_plan_index:None ~tool_name ~input))
+            (asks ~composition_plan_index:None ~tool_name ~input))
         [ "Execute"; "tool_execute" ]) cases
 
 let test_an_unclassifiable_tool_is_asked_about () =
@@ -113,12 +111,7 @@ let test_a_plan_of_reads_runs_unasked () =
   with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun index ->
     check bool "a composition that only reads is not asked about" false
       (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_reading"
-         ~input:no_input);
-    check bool "the reason counts the nodes it cleared" true
-      (String.length
-         (because ~composition_plan_index:(Some index)
-            ~tool_name:"keeper_compose_reading" ~input:no_input)
-       > 0))
+         ~input:no_input))
 ;;
 
 let test_execute_composition_delegates_to_its_node_gate () =
@@ -215,7 +208,7 @@ let test_an_in_process_write_runs () =
            ~tool_name
            ~input:no_input
        with
-       | Policy.Run _ -> ()
+       | Policy.Run -> ()
        | Policy.Ask { because } ->
          failf "%s must run without asking, got Ask: %s" tool_name because)
     [ "keeper_memory_retract"; "keeper_memory_write" ]
@@ -226,7 +219,7 @@ let test_internal_filesystem_name_delegates () =
           ~tool_name:"tool_edit_file"
           ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
   with
-  | Policy.Run _ -> ()
+  | Policy.Run -> ()
   | Policy.Ask { because } ->
     failf "tool_edit_file must reach its producer, got Ask: %s" because
 ;;
@@ -263,8 +256,8 @@ let () =
             test_reading_is_never_asked_about
         ; test_case "filesystem writes and Execute delegate" `Quick
             test_writes_and_execute_delegate
-        ; test_case "Execute delegates rather than claiming read-only" `Quick
-            test_execute_delegation_does_not_claim_readonly
+        ; test_case "Execute delegates whatever its input" `Quick
+            test_execute_delegates_whatever_its_input
         ] )
     ; ( "unknowns"
       , [ test_case "an unclassifiable tool is asked about" `Quick

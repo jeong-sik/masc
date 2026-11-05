@@ -2,7 +2,7 @@ module Descriptor = Keeper_tool_descriptor
 
 type verdict =
   | Ask of { because : string }
-  | Run of { because : string }
+  | Run
 
 (* The reason a name nothing owns comes back with. Named so the bundle gate
    can tell "could not classify" from a real classification. *)
@@ -12,15 +12,11 @@ let unclassifiable_because = "no descriptor declares what this tool does"
    tool added to the bundle stops the build here rather than falling into
    the reject and asking the operator a question they cannot act on. *)
 type undescribed =
-  | Control of verdict
+  | Control
   | Composition of string list
-  | Attached_service of bool option
-      (** A tool from a work service this Keeper is attached to, carrying
-          what that service said about whether it only reads. *)
+  | Attached_service
+      (** A tool from a work service this Keeper is attached to. *)
   | Unknown
-
-let verdict_because = function
-  | Ask { because } | Run { because } -> because
 
 (* Which families of tools change something outside the turn.
 
@@ -36,16 +32,16 @@ let descriptor_for ?composition_plan_index tool_name =
       | descriptor :: _ -> Some descriptor
       | [] -> Descriptor.find_public tool_name
 
-type authorization_owner = Execution_gate | Filesystem_boundary
-
 (* The host filesystem producer resolves its confined capability before
    authorizing own-playground writes or consulting the durable Gate. Its
    endpoint-owned sibling only admits that playground and refuses external
-   paths. This hook cannot replace either producer's resolved authority. *)
-let producer_authorization_owner descriptor =
+   paths. This hook cannot replace either producer's resolved authority.
+   Execute likewise belongs to its execution Gate, which decides with the
+   call's resolved cwd, sandbox profile and grants. *)
+let producer_authorizes descriptor =
   match descriptor.Descriptor.runtime_handler with
-  | Descriptor.Tool_execute -> Some Execution_gate
-  | Descriptor.Tool_write_file | Descriptor.Tool_edit_file -> Some Filesystem_boundary
+  | Descriptor.Tool_execute
+  | Descriptor.Tool_write_file | Descriptor.Tool_edit_file -> true
   | Keeper_tool_descriptor.Tool_search_files | Keeper_tool_descriptor.Tool_read_file
   | Keeper_tool_descriptor.Tool_lane_status | Keeper_tool_descriptor.Tool_tools_list
   | Keeper_tool_descriptor.Tool_capability_search | Keeper_tool_descriptor.Tool_context_status
@@ -84,22 +80,16 @@ let producer_authorization_owner descriptor =
   | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
   | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image
-  | Keeper_tool_descriptor.Tool_lane_addon _ -> None
-
-let owner_reason = function
-  | Execution_gate -> "the execution Gate decides this call with its resolved context"
-  | Filesystem_boundary -> "the filesystem producer authorizes this call with its resolved capability and Gate"
+  | Keeper_tool_descriptor.Tool_lane_addon _ -> false
 
 let rec verdict_for ~identity_tool_index ~composition_plan_index ~tool_name ~input =
   match descriptor_for ?composition_plan_index tool_name with
   | None -> verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input
   | Some descriptor -> (
-      match producer_authorization_owner descriptor with
-      | Some owner -> Run { because = owner_reason owner }
-      | None ->
+      if producer_authorizes descriptor then Run
+      else
       match Descriptor.readonly_for_input descriptor ~input with
-      | Some true ->
-          Run { because = "this call only reads" }
+      | Some true -> Run
       | Some false | None ->
           (* A write that only moves masc's own durable rows is visible in the
              workspace and undoable there, so it runs. One that leaves — the
@@ -108,7 +98,7 @@ let rec verdict_for ~identity_tool_index ~composition_plan_index ~tool_name ~inp
              was read off the tool's group. *)
           if descriptor.Descriptor.policy.Descriptor.leaves_masc then
             Ask { because = "this call reaches outside masc" }
-          else Run { because = "this call stays inside masc" })
+          else Run)
 
 (* A name with no descriptor is either a composition, whose nodes each have
    one, or something this build cannot classify at all.
@@ -143,9 +133,8 @@ and node_asks_for_approval ~composition_plan_index node =
      because "no descriptor" is exactly the case this whole arm exists for. *)
   | None -> Some (node, "no descriptor declares what this tool does")
   | Some descriptor ->
-    match producer_authorization_owner descriptor with
-    | Some _ -> None
-    | None ->
+    if producer_authorizes descriptor then None
+    else
     (match Descriptor.readonly_static_hint descriptor with
      | Some true -> None
      | Some false | None ->
@@ -160,29 +149,22 @@ and node_asks_for_approval ~composition_plan_index node =
    place the name at all. Splitting that into two predicates is how one grows
    an arm the other does not have, and the gate then passes while the tool
    still asks with a reason nobody can act on. *)
+(* The control tools run unasked. Prepare validates and stores a read-only
+   plan without executing nodes; run executes only the prepared Keeper-bound
+   read-only plan, and each leaf keeps its own permissions; status reads a
+   composition request this keeper made; cancel ends one inside masc; the
+   skill tool reads an instruction Skill this keeper already carries. The
+   attached-tool search names the attached tools this keeper already holds
+   and makes one of them callable; it reaches no service, and the call to the
+   attached tool itself is what the Gate still decides. *)
 and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
   if String.equal tool_name Keeper_tool_composition_catalog.prepare_tool_name
-  then Control (Run { because = "validates and stores a read-only plan without executing nodes" })
-  else if String.equal tool_name Keeper_tool_composition_catalog.run_tool_name
-  then Control (Run { because = "executes only the prepared Keeper-bound read-only plan; leaf permissions still apply" })
-  else if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
-  then Control (Run { because = "reads a composition request this keeper made" })
-  else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
-  then Control (Run { because = "cancels a request inside masc" })
-  else if String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name
-  then
-    Control
-      (Run { because = "reads one instruction skill this keeper already carries" })
-  else if String.equal tool_name Keeper_identity_tool_search.tool_name
-  then
-    (* Names the attached tools this keeper already holds and makes one of
-       them callable. It reaches no service; the call to the attached tool
-       itself is what the Gate still decides. *)
-    Control
-      (Run
-         { because =
-             "reads the list of tools this keeper's attached services offer"
-         })
+     || String.equal tool_name Keeper_tool_composition_catalog.run_tool_name
+     || String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
+     || String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
+     || String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name
+     || String.equal tool_name Keeper_identity_tool_search.tool_name
+  then Control
   else
     match
       Option.bind composition_plan_index (fun index ->
@@ -190,36 +172,23 @@ and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
     with
     | Some node_tools -> Composition node_tools
     | None ->
-      (match
-         Keeper_identity_tool_index.read_only
-           identity_tool_index
-           ~tool_name
-       with
-       | Some read_only -> Attached_service read_only
-       | None -> Unknown)
+      if Keeper_identity_tool_index.mem identity_tool_index ~tool_name
+      then Attached_service
+      else Unknown
 
 and verdict_of_nodes ~composition_plan_index node_tools =
   match List.find_map (node_asks_for_approval ~composition_plan_index) node_tools with
   | Some (node, because) ->
     Ask { because = Printf.sprintf "node %s: %s" node because }
-  | None ->
-    Run
-      { because =
-          Printf.sprintf "its %d nodes need no additional chat approval; executor permissions still apply"
-            (List.length node_tools)
-      }
+  | None -> Run
 
 and verdict_for_undescribed ~identity_tool_index ~composition_plan_index ~tool_name ~input =
   match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with
-  | Control verdict -> verdict
-  (* The stream policy delegates every attached tool to the durable Gate.
-     Provider annotations do not independently authorize an external call. *)
-  | Attached_service (Some true | Some false | None) ->
-    Run
-      { because =
-          "the durable Gate decides this external call; unapproved calls defer to \
-           the approvals queue"
-      }
+  | Control -> Run
+  (* The stream policy delegates every attached tool to the durable Gate,
+     and unapproved calls defer to the approvals queue. Provider annotations
+     do not independently authorize an external call. *)
+  | Attached_service -> Run
   | Composition node_tools -> verdict_of_nodes ~composition_plan_index node_tools
   | Unknown ->
     (* Not a safe tool -- one this build cannot classify. Running it unasked
@@ -232,7 +201,7 @@ let classifies ~identity_tool_index ~composition_plan_index ~tool_name =
   | Some _ -> true
   | None ->
     (match undescribed_kind ~identity_tool_index ?composition_plan_index tool_name with
-     | Control _ | Composition _ | Attached_service _ -> true
+     | Control | Composition _ | Attached_service -> true
      | Unknown -> false)
 ;;
 

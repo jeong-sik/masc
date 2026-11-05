@@ -118,13 +118,40 @@ let test_retired_read () =
   let _, held = View.poll (View.retire_read t) ~now:5. ~machine:Masc.Machine_lane.Dos in
   check bool "retiring reads keeps a send's receipt" true (Option.is_none held)
 
+let test_successful_read_stops_polling () =
+  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:1. (Ok empty) in
+  let _, early = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
+  let _, late = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  check bool "a successful active read has no two-second successor" true (Option.is_none early);
+  check bool "a successful active read stays settled" true (Option.is_none late)
+
+let test_failed_read_retries_then_stops () =
+  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:1. (Error "connection lost") in
+  let _, early = View.poll t ~now:2. ~machine:Masc.Machine_lane.Dos in
+  check bool "a failed read waits for its retry deadline" true (Option.is_none early);
+  let t, retry = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request retry) ~now:3. (Ok empty) in
+  let _, settled = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  check bool "a successful retry ends the cadence" true (Option.is_none settled)
+
+let test_successful_send_stops_polling () =
+  let t, send = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request send) ~now:1. (Ok empty) in
+  let _, later = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  check bool "a successful send does not restart reads" true (Option.is_none later)
+
 let test_revalidate_marks_pending_for_trailing_read () =
   let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
   let t = View.revalidate t in
   let t = View.receive t (request read) ~now:1. (Ok empty) in
-  let _, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
   check bool "the changed read is followed by one trailing read" true
-    (View.is_read (request trailing))
+    (View.is_read (request trailing));
+  let t = View.receive t (request trailing) ~now:1. (Ok empty) in
+  let _, settled = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  check bool "the trailing read settles without another cadence" true (Option.is_none settled)
 
 let test_retired_first_read_keeps_presence () =
   let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
@@ -180,6 +207,7 @@ let test_authenticated_viewer_origin () =
   let t = View.receive ~viewer:"operator" t read ~now:0. (Ok snapshot) in
   check (list origin) "identical text from another participant stays the peer's"
     [View.Viewer; View.Peer; View.Keeper] (origins t);
+  let t = View.revalidate t in
   let t, _ = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
   let t = View.receive ~viewer:"guest" t read ~now:3. (Ok snapshot) in
   check (list origin) "a stale response cannot replace the authenticated viewer"
@@ -204,6 +232,9 @@ let () = run "TUI public room" ["room", [
   test_case "unknown send can be retried with an empty composer" `Quick test_unknown_send_with_empty_next_draft;
   test_case "workspace withdrawal invalidates receipts" `Quick test_withdrawal;
   test_case "a retired reading releases only the room read" `Quick test_retired_read;
+  test_case "successful read stops polling" `Quick test_successful_read_stops_polling;
+  test_case "failed read retries then stops" `Quick test_failed_read_retries_then_stops;
+  test_case "successful send stops polling" `Quick test_successful_send_stops_polling;
   test_case "revalidation retains a trailing read" `Quick test_revalidate_marks_pending_for_trailing_read;
   test_case "a retired first read keeps presence to release" `Quick test_retired_first_read_keeps_presence;
   test_case "safe paste and Korean editing" `Quick test_paste_and_keys;

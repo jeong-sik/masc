@@ -1258,6 +1258,53 @@ let test_failed_health_reads_are_retried () =
       Alcotest.(check int) "the failed health read was retried" 2 !attempts)
 ;;
 
+let test_cold_health_read_and_commit_do_not_deadlock () =
+  let base = fresh_dir "masc-memory-health-lock-order" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "before commit"]);
+  let read_started = Atomic.make false in
+  let allow_return = Atomic.make false in
+  let writer_finished = Atomic.make false in
+  let attempts = ref 0 in
+  let wait_for_commit () =
+    let deadline = Unix.gettimeofday () +. 2.0 in
+    let rec wait () =
+      if Atomic.get writer_finished then true
+      else if Unix.gettimeofday () >= deadline then false
+      else (Unix.sleepf 0.005; wait ())
+    in
+    wait ()
+  in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      if !attempts = 1 then begin
+        Atomic.set read_started true;
+        while not (Atomic.get allow_return) do Unix.sleepf 0.001 done
+      end;
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      let reader = Domain.spawn (fun () ->
+        Health.keeper_memory_health_http_json ~base_path:base)
+      in
+      while not (Atomic.get read_started) do Unix.sleepf 0.001 done;
+      let writer = Domain.spawn (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Atomic.set writer_finished true)
+          (fun () ->
+            ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha"
+              [fact "before commit"; fact "after commit"])))
+      in
+      let finished_before_return = wait_for_commit () in
+      Atomic.set allow_return true;
+      Domain.join writer;
+      let json = Domain.join reader in
+      Alcotest.(check bool) "commit finished before the cold read resumed" true finished_before_return;
+      Alcotest.(check int) "the newer commit wins over the cold read" 2
+        (int_field "revision" (keeper_obj "alpha" json));
+      Alcotest.(check int) "the superseded read was retried" 2 !attempts)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
@@ -1266,6 +1313,8 @@ let () =
             test_memory_health_reloads_only_the_changed_keeper
         ; Alcotest.test_case "failed health reads are retried" `Quick
             test_failed_health_reads_are_retried
+        ; Alcotest.test_case "cold health read and commit do not deadlock" `Quick
+            test_cold_health_read_and_commit_do_not_deadlock
         ; Alcotest.test_case "unread evidence is observed without publication" `Quick
             test_unread_evidence_is_observed_without_publication
         ; Alcotest.test_case "saved versus prepared context" `Quick

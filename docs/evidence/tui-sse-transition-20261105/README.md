@@ -51,6 +51,8 @@ TUI 렌더링 최적화는 별도 완료 증거인 [`tui-smoothness-20261104`](.
 - Browser 실패 상태를 매 loop마다 다시 실패 처리해 2·4·8·16·30초 backoff가 실제 응답 없이도 증가했다. `browser-retry-red.json`은 첫 실패 후 `now=7.932`의 `retry_at=9.915`가 이어 `11.932`, `15.949`, `23.967`로 밀린 진단을 보존한다. 최종 코드는 `Settled/Reading`에서만 실패 전이하고 `Owed/Waiting`을 보존한다. 권한 미확인 동안 `Reading`으로 표시하지도 않는다.
 - Machine fixture는 scope 교체를 서버 재시작으로 잘못 알려 두 번째 F5 전에 machine 화면을 닫게 했다. scope 교체는 같은 instance로 수정하고, 명시적 reconnect의 재시작 시나리오는 남겼다.
 - 여러 observer가 하나의 queue를 공유해 취소된 연결이 알림을 가로채던 fixture는 구독자별 broadcast queue로 바꿨다. palette Enter, Add-ons `o`, 초기 detail 읽기와 변경 읽기의 수도 실제 키/요청 계약에 맞췄다.
+- Skill은 첫 ledger 읽기 실패를 영구 캐시해 복구 후에도 재시도하지 않았다. `41965753071`에서 RED를 확인하고 `bea45f2c591`에서 실패 cold read만 재시도하도록 고쳤다. GREEN `41966485936`은 **성공**이다. 이전 type-check `41966489387`은 최신 head로 자동 취소됐고, 최종 head 검사로 대체한다.
+- Memory도 첫 `read_error`가 남아 유효한 스냅샷 복구를 보지 못했다. `41966147270`에서 RED를 확인하고 `881854d58d2`에서 `read_error=None`인 health만 재사용하도록 고쳤다. GREEN `41966803734`과 type-check `41966807144`는 **성공**이다.
 
 ## native proof의 한계
 

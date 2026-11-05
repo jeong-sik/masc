@@ -1640,6 +1640,50 @@ let test_a_failed_session_load_is_retried () =
       check int "the failed session was retried" 2 !attempts)
 ;;
 
+let test_cold_read_and_commit_do_not_deadlock () =
+  with_session @@ fun config trace _session_dir ->
+  let read_started = Atomic.make false in
+  let allow_return = Atomic.make false in
+  let writer_finished = Atomic.make false in
+  let wait_for_commit () =
+    let deadline = Unix.gettimeofday () +. 2.0 in
+    let rec wait () =
+      if Atomic.get writer_finished then true
+      else if Unix.gettimeofday () >= deadline then false
+      else (Unix.sleepf 0.005; wait ())
+    in
+    wait ()
+  in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config ~trace_id ->
+      Atomic.set read_started true;
+      while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
+      Ledger.load ~config ~trace_id)
+    (fun () ->
+      let reader = Domain.spawn (fun () ->
+        Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ])
+      in
+      while not (Atomic.get read_started) do Unix.sleepf 0.001 done;
+      let writer = Domain.spawn (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Atomic.set writer_finished true)
+          (fun () -> Ledger.record ~keeper_name:"alpha" ~config ~trace_id (activation ())))
+      in
+      let finished_before_return = wait_for_commit () in
+      Atomic.set allow_return true;
+      let writer_result = Domain.join writer in
+      let loaded, unavailable = Domain.join reader in
+      check bool "commit finished before the cold read resumed" true finished_before_return;
+      (match writer_result with
+       | Ok _ -> ()
+       | Error error -> fail (Ledger.store_error_to_string error));
+      check (list string) "the committed read has no error" [] unavailable;
+      check int "the newer commit wins over the cold read" 1
+        (match loaded with
+         | [ _, ledger ] -> (Ledger.summarize ledger).instruction_invocations
+         | _ -> 0))
+;;
+
 let () =
   run
     "keeper skill activation ledger"
@@ -1648,6 +1692,8 @@ let () =
             test_usage_reads_only_the_committed_session
         ; test_case "a failed session load is retried" `Quick
             test_a_failed_session_load_is_retried
+        ; test_case "cold read and commit do not deadlock" `Quick
+            test_cold_read_and_commit_do_not_deadlock
         ; test_case "a committed row announces its Keeper" `Quick
             test_a_committed_row_announces_its_keeper
         ; test_case "legacy composition identifies its row and refuses later append" `Quick

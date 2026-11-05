@@ -138,6 +138,28 @@
     ],
     "use_of_artifact": "Exact-source macOS executable for isolated PTY measurements only; not an all-suite green claim or installation proof."
   },
+  "cache_regressions": {
+    "skill": {
+      "red_run": 41965753071,
+      "red_result": "the recovered session loads failed",
+      "fix_source": "bea45f2c591ed1aa7250bfab9ce8081d5a5b03ec",
+      "green_run": 41966485936,
+      "green_result": "success",
+      "type_check_run": 41966489387,
+      "type_check_result": "cancelled_superseded_by_newer_head",
+      "rule": "Failed cold session loads remain retryable; committed ledgers and projections stay cached."
+    },
+    "memory": {
+      "red_run": 41966147270,
+      "red_result": "the recovered read has no old error failed",
+      "fix_source": "881854d58d27d9a8096fd79b31cfc4765fed18fd",
+      "green_run": 41966803734,
+      "green_result": "success",
+      "type_check_run": 41966807144,
+      "type_check_result": "success",
+      "rule": "Only health with no read_error is reused; failed health reads remain retryable and write invalidation is unchanged."
+    }
+  },
   "rendering_performance": {
     "evidence": "docs/evidence/tui-smoothness-20261104/summary.json",
     "scroll_samples": 80,

@@ -2116,6 +2116,7 @@ let truncated_json_response ~stop_reason : Agent_core.Types.api_response =
      structured parse fails. This is what a MaxTokens budget cut produces. *)
   { id = "vision-test"
   ; model = "vision-test-model"
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content = [ Llm_provider.Types.Text {|{"text":"a red circle on a white backg|} ]
   ; usage = None

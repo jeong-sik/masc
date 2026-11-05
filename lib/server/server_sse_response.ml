@@ -46,20 +46,25 @@ let send t frame =
     Httpun.Body.Writer.write_string t.writer frame;
     let flushed, resolve = Eio.Promise.create () in
     Httpun.Body.Writer.flush t.writer (Eio.Promise.resolve resolve);
+    (* Both ways the response can end without the frame wait on the watcher
+       side. A race nested inside the work would raise the outer race's
+       cancellation even after the flush answered (eio core fiber.ml
+       [any_gen]), and a frame that reached the socket as the time ran out
+       would come back [Stalled]. *)
     let outcome =
       Watched_work.run
         ~watcher:(fun () ->
-          t.stall ();
-          Stalled)
-        (fun () ->
-           Watched_work.run
-             ~watcher:(fun () ->
+          Eio.Fiber.first
+            (fun () ->
+               t.stall ();
+               Stalled)
+            (fun () ->
                Eio.Promise.await t.closed;
-               Closed)
-             (fun () ->
-                match Eio.Promise.await flushed with
-                | `Written -> Written
-                | `Closed -> Closed))
+               Closed))
+        (fun () ->
+           match Eio.Promise.await flushed with
+           | `Written -> Written
+           | `Closed -> Closed)
     in
     (match outcome with
      | Written -> ()

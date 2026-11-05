@@ -13,6 +13,12 @@ let short_stalled_after_s = 0.3
 (* How long a send has to stay unanswered before the test calls it pending. *)
 let pending_for_s = 0.2
 
+(* Long enough to see a send pending and close the client before it stalls. *)
+let client_leaves_stalled_after_s = 2.0
+
+(* A bound on the mock clock, which moves only when the test moves it. *)
+let mock_stalled_after_s = 100.0
+
 let frame_bytes = 64 * 1024
 let frame = "data: " ^ String.make (frame_bytes - 8) 'x' ^ "\n\n"
 
@@ -163,27 +169,6 @@ let test_a_client_that_stops_reading_ends_the_response_as_stalled () =
     server.stop ())
 ;;
 
-(* A client that goes away is seen only when a write to it fails, and httpun
-   then closes the body without answering the flush that waits (httpun reqd.ml
-   [report_error], gluten-eio [writev]). The waiting frame ends at the stall
-   bound. *)
-let test_a_client_that_goes_away_while_a_frame_waits_ends_at_the_stall_bound () =
-  with_env (fun env sw ->
-    let ended, resolve = Eio.Promise.create () in
-    let server =
-      start_server ~sw env ~stalled_after_s:short_stalled_after_s ~on_response:(fun response ->
-        let refusal = send_until_refused response in
-        Eio.Promise.resolve resolve (refusal, Sse.is_closed response))
-    in
-    Eio.Switch.run (fun client_sw ->
-      let flow = connect ~sw:client_sw env ~port:server.port in
-      within env "the response head" (fun () -> read_until flow "200 OK"));
-    let refusal, closed = within env "the sender to stop" (fun () -> Eio.Promise.await ended) in
-    check refusal_t "the waiting frame stalled" (Refused Sse.Stalled) refusal;
-    check bool "the response is closed" true closed;
-    server.stop ())
-;;
-
 type sender =
   { started : int Atomic.t
   ; returned : int Atomic.t
@@ -220,6 +205,65 @@ let await_all_pending env senders =
       if not (List.for_all2 pending senders before) then settled ()
     in
     settled ())
+;;
+
+(* httpun closes the body of a failed connection without answering the flush
+   that waits (httpun reqd.ml [report_error]), so a frame waiting when the
+   client goes away ends at the stall bound. The client stops reading first,
+   so a frame is waiting when it leaves. *)
+let test_a_frame_waiting_when_the_client_goes_away_ends_at_the_stall_bound () =
+  with_env (fun env sw ->
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:client_leaves_stalled_after_s
+        ~on_response:(fun response -> Eio.Promise.resolve resolve response)
+    in
+    let sender =
+      Eio.Switch.run (fun client_sw ->
+        let flow = connect ~sw:client_sw env ~port:server.port in
+        let response = within env "the response" (fun () -> Eio.Promise.await opened) in
+        let sender = start_sender ~sw response in
+        within env "the response head" (fun () -> read_until flow "200 OK");
+        await_all_pending env [ sender ];
+        sender)
+    in
+    check outcome_t "the waiting frame stalled" Sse.Stalled
+      (within env "the waiting send" (fun () -> Eio.Promise.await sender.last));
+    server.stop ())
+;;
+
+(* The flush answer and the end of the time arrive in one scheduler pass. The
+   frame reached the socket, so it is [Written]. An in-memory httpun
+   connection lets the test answer the write by hand right after the bound
+   came due, before any fiber runs. *)
+let test_a_frame_answered_as_the_time_runs_out_is_written () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let outcome, resolve = Eio.Promise.create () in
+    Eio.Switch.run (fun sw ->
+      let connection =
+        Httpun.Server_connection.create (fun reqd ->
+          let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream" ] in
+          let response =
+            Sse.respond ~clock ~stalled_after_s:mock_stalled_after_s reqd
+              (Httpun.Response.create ~headers `OK)
+          in
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Promise.resolve resolve (Sse.send response "data: one\n\n")))
+      in
+      let raw = "GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" in
+      let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
+      ignore (Httpun.Server_connection.read connection input ~off:0 ~len:(String.length raw) : int);
+      match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let length =
+          List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len) 0 iovecs
+        in
+        Eio_mock.Clock.set_time clock mock_stalled_after_s;
+        Httpun.Server_connection.report_write_result connection (`Ok length);
+        check outcome_t "the frame that reached the socket is Written" Sse.Written
+          (Eio.Promise.await outcome)
+      | `Yield | `Close _ -> fail "the frame was not offered to the socket"))
 ;;
 
 let test_close_ends_every_waiting_send () =
@@ -279,8 +323,10 @@ let () =
             test_a_frame_the_socket_takes_is_written
         ; test_case "a client that stops reading ends the response as Stalled" `Quick
             test_a_client_that_stops_reading_ends_the_response_as_stalled
-        ; test_case "a client that goes away while a frame waits ends at the stall bound" `Quick
-            test_a_client_that_goes_away_while_a_frame_waits_ends_at_the_stall_bound
+        ; test_case "a frame waiting when the client goes away ends at the stall bound" `Quick
+            test_a_frame_waiting_when_the_client_goes_away_ends_at_the_stall_bound
+        ; test_case "a frame answered as the time runs out is Written" `Quick
+            test_a_frame_answered_as_the_time_runs_out_is_written
         ; test_case "close ends every waiting send" `Quick test_close_ends_every_waiting_send
         ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
         ] )

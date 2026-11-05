@@ -9,7 +9,9 @@ let connection_patience_s = 10.0
    over a client that sends [raw] and then closes its side. The handler runs on
    the read side while the write side drains, so a streaming handler that waits
    for each frame is driven as on a socket, and the exchange ends only when
-   httpun ends both sides. *)
+   httpun ends both sides. As gluten-eio does, a reader that closes while the
+   writer still runs reports the end of input, which ends a streaming body
+   (gluten_eio.ml [`Close] branch). *)
 let wire_raw_response ~clock ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
@@ -21,13 +23,15 @@ let wire_raw_response ~clock ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") 
     let ready, resolve = Eio.Promise.create () in
     register connection (fun () -> Eio.Promise.resolve resolve ());
     Eio.Promise.await ready in
+  let write_closed = ref false in
   let rec read_loop off = match Httpun.Server_connection.next_read_operation connection with
     | `Read ->
       let consumed = Httpun.Server_connection.read_eof connection input ~off
           ~len:(Bigstringaf.length input - off) in
       read_loop (off + consumed)
     | `Yield -> await_wakeup Httpun.Server_connection.yield_reader; read_loop off
-    | `Close -> () in
+    | `Close ->
+      if not !write_closed then Httpun.Server_connection.report_exn connection End_of_file in
   let rec write_loop () = match Httpun.Server_connection.next_write_operation connection with
     | `Write iovecs ->
       let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
@@ -36,7 +40,7 @@ let wire_raw_response ~clock ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") 
       Httpun.Server_connection.report_write_result connection (`Ok written);
       write_loop ()
     | `Yield -> await_wakeup Httpun.Server_connection.yield_writer; write_loop ()
-    | `Close _ -> () in
+    | `Close _ -> write_closed := true in
   (match Eio.Time.with_timeout clock connection_patience_s (fun () ->
      Ok (Eio.Fiber.both (fun () -> read_loop 0) write_loop)) with
    | Ok () -> ()

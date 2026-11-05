@@ -83,8 +83,7 @@ val failure_class_of_error_code : error_code -> Tool_result.tool_failure_class
 
 (** {1 Raw JSON String Builders}
 
-    These produce plain JSON strings without [Tool_result.result] wrapping.
-    Used by [get_string_required] error paths and other low-level callers. *)
+    These produce plain JSON strings without [Tool_result.result] wrapping. *)
 
 (** [{"status":"error", <fields>}] as a [`Assoc] node.  Caller-supplied
     [status] fields are discarded so duplicate JSON keys cannot override
@@ -133,15 +132,6 @@ val error_result_typed :
 
 val ok_result :
   ?tool_name:string -> start_time:Tool_timing.started -> (string * Yojson.Safe.t) list -> Tool_result.result
-
-(** {1 Required field extractors (Parse, Don't Validate)}
-
-    Return [Ok value] on success, [Error message] on missing / empty input.
-    Messages are opaque text; callers that need typed failure fields must use
-    {!error_result_typed}. *)
-
-(** Trim whitespace; reject empty. *)
-val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
 
 (** {1 Structured field validation}
 

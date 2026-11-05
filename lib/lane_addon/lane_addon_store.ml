@@ -931,14 +931,6 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
 let fold_startup_tool_request_owners t ~init ~f =
   fold_tool_request_owner_inventory_all_with ~check_staged:true ~serialize_scopes:false t ~init ~f
 
-let tool_request_owner_inventory_all t =
-  let* rows =
-    fold_tool_request_owner_inventory_all t ~init:[]
-      ~f:(fun rows ~directory_name ~file_name json ->
-        Ok ((directory_name,file_name,json)::rows))
-  in
-  Ok (List.rev rows)
-
 (* These inventories are used only while the caller excludes all original
    request writers. The complete read finishes before any cleanup effect. *)
 let inventory_directory ~owner_uid ~parent ~path f =

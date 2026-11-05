@@ -214,13 +214,16 @@ let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitte
 let encoded_system_observation ~block ~assembly message =
   encode_with_evidence (system_observation_source ~block assembly message) message
 
+(* Each piece starts where the previous one and the separator end. The offset
+   is threaded through [List.fold_left_map], whose calls each take the previous
+   call's result; [List.map] does not document the order it calls [f] in. *)
 let concat ~separator pieces =
-  let offset = ref 0 in
-  let occurrences = List.mapi (fun i piece ->
-    if i > 0 then offset := !offset + String.length separator;
-    let shifted = List.map (fun occurrence -> {occurrence with offset = !offset + occurrence.offset}) piece.occurrences in
-    offset := !offset + String.length piece.text; shifted) pieces |> List.concat in
-  { text = String.concat separator (List.map text pieces); occurrences;
+  let separator_bytes = String.length separator in
+  let _, shifted = List.fold_left_map (fun (index, offset) piece ->
+    let start = if index > 0 then offset + separator_bytes else offset in
+    let shifted = List.map (fun occurrence -> {occurrence with offset = start + occurrence.offset}) piece.occurrences in
+    (index + 1, start + String.length piece.text), shifted) (0, 0) pieces in
+  { text = String.concat separator (List.map text pieces); occurrences = List.concat shifted;
     omitted = List.concat_map (fun p -> p.omitted) pieces;
     acquisitions = List.concat_map (fun p -> p.acquisitions) pieces }
 

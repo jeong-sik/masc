@@ -140,6 +140,32 @@ class RunTests(unittest.TestCase):
         self.assertEqual([row["rounds"] for row in spins], [150])
         self.assertEqual(spins[0]["top_tool"], "masc_board_list")
         self.assertTrue(str(spins[0]["ended_by"]).startswith("Rate limited"))
+        self.assertEqual(spins[0]["rows_arrived_inside"], 2)
+
+    def test_a_spin_run_counts_only_the_rows_that_arrived_inside_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            spin = ["masc_board_list"] * 150
+            write_run(base, "alpha", "turn-a1.jsonl", DAY1 + 1000, DAY1 + 4600, 150, spin, spacing=24.0)
+            write_run(base, "beta", "turn-b1.jsonl", DAY1 + 1000, DAY1 + 5200, 150, spin, spacing=24.0)
+            write_run(base, "alpha", "turn-a2.jsonl", DAY1 + 6000, DAY1 + 6100, 2, ["x"])
+            write_acks(
+                base,
+                "alpha",
+                [
+                    json.dumps(ack_row("in-1", DAY1 + 1500, DAY1 + 5000, "normal", "board_signal")),
+                    json.dumps(ack_row("in-2", DAY1 + 4000, DAY1 + 5000, "normal", "board_attention")),
+                    # Between the two runs of alpha, inside the run of beta: not a row of either spin run.
+                    json.dumps(ack_row("between", DAY1 + 5000, DAY1 + 5100, "normal", "board_signal")),
+                ],
+            )
+            spins = {
+                str(row["keeper"]): row
+                for row in cast("list[JsonObject]", m.measure(base, None, None, 150, 0.85)["spin_runs"])
+            }
+        self.assertEqual(sorted(spins), ["alpha", "beta"])
+        self.assertEqual(obj(spins["alpha"])["rows_arrived_inside"], 2)
+        self.assertEqual(obj(spins["beta"])["rows_arrived_inside"], 0)
 
     def test_the_day_table_splits_rounds_at_the_run_size(self) -> None:
         days = {row["day"]: row for row in cast("list[JsonObject]", measured()["by_day"])}
@@ -166,6 +192,15 @@ class ArrivalTests(unittest.TestCase):
         small = obj(obj(arrivals["by_run_size"])["0-9 rounds"])
         self.assertEqual(small["rows"], 1)
         self.assertEqual(small["blocked_minutes_p50"], round(50 / 60, 1))
+
+    def test_all_sums_the_rows_of_every_run_size_and_is_empty_when_no_row_arrived_inside_a_run(self) -> None:
+        everything = obj(obj(measured()["arrivals_during_runs"])["all"])
+        self.assertEqual(everything["rows"], 3)
+        self.assertEqual(everything["immediate"], 1)
+        self.assertEqual(everything["blocked_hours"], round((3100 + 600 + 50) / 3600, 1))
+        self.assertEqual(everything["blocked_hours_max"], round(3100 / 3600, 2))
+        day2 = date(2026, 11, 2)
+        self.assertEqual(obj(measured((day2, day2))["arrivals_during_runs"])["all"], {"rows": 0})
 
     def test_a_row_before_the_first_trace_of_its_keeper_is_not_counted(self) -> None:
         arrivals = obj(measured()["arrivals_during_runs"])

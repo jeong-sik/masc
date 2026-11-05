@@ -3,38 +3,38 @@
     "first_run_utc": "2026-10-17",
     "last_run_utc": "2026-11-05"
   },
-  "read_at_utc": "2026-11-05T19:53Z",
+  "read_at_utc": "2026-11-05T20:24Z",
   "unreadable_lines": 0,
   "unreadable_files": 0,
   "runs": {
-    "runs": 5394,
-    "runs_without_rounds": 2761,
-    "runs_without_rounds_with_client_context_submission": 2738,
-    "rounds": 32622,
+    "runs": 5409,
+    "runs_without_rounds": 2775,
+    "runs_without_rounds_with_client_context_submission": 2752,
+    "rounds": 32286,
     "rounds_per_run_of_runs_with_rounds": {
       "p50": 5.0,
-      "p90": 29.0,
+      "p90": 28.0,
       "p99": 111.0,
       "max": 903.0
     },
     "ge_100": {
       "runs": 35,
       "rounds": 7344,
-      "share_of_all_rounds": 0.2251,
+      "share_of_all_rounds": 0.2275,
       "wall_hours": 39.63
     },
     "ge_400": {
       "runs": 5,
       "rounds": 3012,
-      "share_of_all_rounds": 0.0923,
+      "share_of_all_rounds": 0.0933,
       "wall_hours": 11.95
     }
   },
   "by_profile": [
     {
       "profile": "opencode-go-deepseek-flash",
-      "runs": 551,
-      "rounds": 11621,
+      "runs": 543,
+      "rounds": 11364,
       "runs_ge_100": 13,
       "runs_ge_400": 0,
       "spin_runs": 1,
@@ -42,8 +42,8 @@
     },
     {
       "profile": "glm-5.3-flash",
-      "runs": 1074,
-      "rounds": 10894,
+      "runs": 1080,
+      "rounds": 10881,
       "runs_ge_100": 10,
       "runs_ge_400": 5,
       "spin_runs": 6,
@@ -51,8 +51,8 @@
     },
     {
       "profile": "ollama-cloud-deepseek-v4-1-flash",
-      "runs": 287,
-      "rounds": 5675,
+      "runs": 285,
+      "rounds": 5594,
       "runs_ge_100": 7,
       "runs_ge_400": 0,
       "spin_runs": 0,
@@ -60,8 +60,8 @@
     },
     {
       "profile": "glm-5-3",
-      "runs": 419,
-      "rounds": 3174,
+      "runs": 422,
+      "rounds": 3185,
       "runs_ge_100": 3,
       "runs_ge_400": 0,
       "spin_runs": 0,
@@ -132,7 +132,7 @@
     },
     {
       "profile": "music-sensei",
-      "runs": 47,
+      "runs": 48,
       "rounds": 31,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -177,8 +177,8 @@
     },
     {
       "profile": "masc-productor-owner",
-      "runs": 42,
-      "rounds": 16,
+      "runs": 44,
+      "rounds": 20,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
       "spin_runs": 0,
@@ -213,7 +213,7 @@
     },
     {
       "profile": "build-maniac",
-      "runs": 40,
+      "runs": 41,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -222,7 +222,7 @@
     },
     {
       "profile": "code-reviewer",
-      "runs": 144,
+      "runs": 154,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -258,7 +258,7 @@
     },
     {
       "profile": "code-reviewer-sister",
-      "runs": 157,
+      "runs": 161,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -276,7 +276,7 @@
     },
     {
       "profile": "e-masc-the-leader",
-      "runs": 133,
+      "runs": 131,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -572,22 +572,22 @@
     },
     {
       "day": "2026-11-03",
-      "runs": 429,
-      "rounds": 1703,
+      "runs": 425,
+      "rounds": 1622,
       "runs_ge_100": 2,
       "rounds_in_ge_100": 260
     },
     {
       "day": "2026-11-04",
-      "runs": 1503,
-      "rounds": 10714,
+      "runs": 1495,
+      "rounds": 10516,
       "runs_ge_100": 14,
       "rounds_in_ge_100": 2623
     },
     {
       "day": "2026-11-05",
-      "runs": 2021,
-      "rounds": 11689,
+      "runs": 2048,
+      "rounds": 11632,
       "runs_ge_100": 11,
       "rounds_in_ge_100": 3410
     }
@@ -602,6 +602,7 @@
       "top_tool": "masc_board_list",
       "top_tool_calls": 901,
       "tool_calls": 904,
+      "rows_arrived_inside": 0,
       "ended_by": "Rate limited: Usage limit reached for 5 "
     },
     {
@@ -613,6 +614,7 @@
       "top_tool": "Execute",
       "top_tool_calls": 661,
       "tool_calls": 665,
+      "rows_arrived_inside": 0,
       "ended_by": "Rate limited: Usage limit reached for 5 "
     },
     {
@@ -624,6 +626,7 @@
       "top_tool": "masc_board_list",
       "top_tool_calls": 487,
       "tool_calls": 507,
+      "rows_arrived_inside": 13,
       "ended_by": "the model answered"
     },
     {
@@ -635,6 +638,7 @@
       "top_tool": "Execute",
       "top_tool_calls": 473,
       "tool_calls": 473,
+      "rows_arrived_inside": 0,
       "ended_by": "Rate limited: Usage limit reached for 5 "
     },
     {
@@ -646,6 +650,7 @@
       "top_tool": "keeper_memory_write",
       "top_tool_calls": 456,
       "tool_calls": 460,
+      "rows_arrived_inside": 5,
       "ended_by": "the model answered"
     },
     {
@@ -657,6 +662,7 @@
       "top_tool": "Execute",
       "top_tool_calls": 283,
       "tool_calls": 291,
+      "rows_arrived_inside": 1,
       "ended_by": "Network error (connection_reset): Eio.Io"
     },
     {
@@ -668,19 +674,28 @@
       "top_tool": "masc_board_list",
       "top_tool_calls": 131,
       "tool_calls": 150,
+      "rows_arrived_inside": 20,
       "ended_by": "Provider 'glm-coding' timeout phase=firs"
     }
   ],
   "arrivals_during_runs": {
-    "acked_rows_in_coverage": 3542,
-    "arrived_during_a_run": 1787,
+    "acked_rows_in_coverage": 3534,
+    "arrived_during_a_run": 1773,
     "acked_before_run_end": 0,
+    "all": {
+      "rows": 1773,
+      "immediate": 375,
+      "blocked_hours": 379.8,
+      "blocked_minutes_p50": 5.6,
+      "blocked_minutes_p90": 34.7,
+      "blocked_hours_max": 3.41
+    },
     "visible_at_next_round": {
-      "rows": 1386,
-      "rows_in_runs_without_rounds": 222,
-      "rows_after_the_last_round": 179,
+      "rows": 1374,
+      "rows_in_runs_without_rounds": 221,
+      "rows_after_the_last_round": 178,
       "rows_per_next_round": {
-        "rounds": 1048,
+        "rounds": 1037,
         "p50": 1.0,
         "p90": 2.0,
         "p99": 7.0,
@@ -689,14 +704,14 @@
         "rounds_over_limit": 7,
         "rows_in_rounds_over_limit": 89
       },
-      "seconds_to_next_round_p50": 23.4,
-      "seconds_to_next_round_p90": 258.3,
+      "seconds_to_next_round_p50": 23.7,
+      "seconds_to_next_round_p90": 260.9,
       "seconds_to_next_round_max": 1795.3,
-      "hours_earlier_than_the_run_end": 334.7
+      "hours_earlier_than_the_run_end": 334.2
     },
     "by_run_size": {
       "0-9 rounds": {
-        "rows": 634,
+        "rows": 633,
         "immediate": 170,
         "blocked_hours": 36.9,
         "blocked_minutes_p50": 1.6,
@@ -704,11 +719,11 @@
         "blocked_hours_max": 1.0
       },
       "10-49 rounds": {
-        "rows": 813,
-        "immediate": 190,
-        "blocked_hours": 194.2,
-        "blocked_minutes_p50": 7.2,
-        "blocked_minutes_p90": 37.5,
+        "rows": 800,
+        "immediate": 179,
+        "blocked_hours": 193.6,
+        "blocked_minutes_p50": 7.4,
+        "blocked_minutes_p90": 37.8,
         "blocked_hours_max": 2.84
       },
       "50-99 rounds": {
@@ -730,7 +745,7 @@
     },
     "by_kind": {
       "board_attention": {
-        "rows": 746,
+        "rows": 745,
         "immediate": 0,
         "blocked_hours": 172.2,
         "blocked_minutes_p50": 7.2,
@@ -746,19 +761,19 @@
         "blocked_hours_max": 3.41
       },
       "schedule_due": {
-        "rows": 174,
+        "rows": 172,
         "immediate": 0,
-        "blocked_hours": 31.8,
+        "blocked_hours": 31.7,
         "blocked_minutes_p50": 2.6,
         "blocked_minutes_p90": 26.4,
         "blocked_hours_max": 2.84
       },
       "keeper_delegate_completed": {
-        "rows": 64,
-        "immediate": 44,
-        "blocked_hours": 11.8,
-        "blocked_minutes_p50": 3.0,
-        "blocked_minutes_p90": 31.9,
+        "rows": 54,
+        "immediate": 34,
+        "blocked_hours": 11.4,
+        "blocked_minutes_p50": 3.7,
+        "blocked_minutes_p90": 33.9,
         "blocked_hours_max": 1.18
       },
       "task_outcome": {
@@ -777,14 +792,6 @@
         "blocked_minutes_p90": 10.6,
         "blocked_hours_max": 0.22
       },
-      "completion_authority_rejected": {
-        "rows": 15,
-        "immediate": 15,
-        "blocked_hours": 2.0,
-        "blocked_minutes_p50": 1.2,
-        "blocked_minutes_p90": 27.7,
-        "blocked_hours_max": 0.8
-      },
       "workspace_message": {
         "rows": 14,
         "immediate": 14,
@@ -792,6 +799,14 @@
         "blocked_minutes_p50": 2.1,
         "blocked_minutes_p90": 8.8,
         "blocked_hours_max": 0.3
+      },
+      "completion_authority_rejected": {
+        "rows": 14,
+        "immediate": 14,
+        "blocked_hours": 2.0,
+        "blocked_minutes_p50": 3.3,
+        "blocked_minutes_p90": 27.7,
+        "blocked_hours_max": 0.8
       },
       "tool_result_ready": {
         "rows": 3,
@@ -916,20 +931,20 @@
       {
         "day": "2026-11-03",
         "acked_rows": 2987,
-        "arrived_during_a_run": 70,
+        "arrived_during_a_run": 68,
         "blocked_hours": 19.0
       },
       {
         "day": "2026-11-04",
         "acked_rows": 3444,
-        "arrived_during_a_run": 733,
-        "blocked_hours": 142.3
+        "arrived_during_a_run": 731,
+        "blocked_hours": 142.2
       },
       {
         "day": "2026-11-05",
-        "acked_rows": 2043,
-        "arrived_during_a_run": 893,
-        "blocked_hours": 189.2
+        "acked_rows": 2052,
+        "arrived_during_a_run": 883,
+        "blocked_hours": 188.7
       }
     ]
   }

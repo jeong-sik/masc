@@ -20,16 +20,17 @@ Reported:
   record is counted apart, with how many of those record a
   `client_context_submission` hook.
 - `spin_runs`: runs of at least `--spin-min-rounds` rounds where one tool makes at
-  least `--spin-top-share` of the tool calls. The thresholds describe the runs
+  least `--spin-top-share` of the tool calls, with `rows_arrived_inside`: the
+  acknowledged rows that arrived inside each. The thresholds describe the runs
   in this report; nothing at runtime reads them.
 - `arrivals_during_runs`: acknowledged rows that arrived inside a run, by the
-  rounds of that run and by row kind, with `blocked_hours` (arrival to run end)
-  and `acked_before_run_end`, the rows acknowledged before that run ended. The
-  queue is drained between turns, so that count is expected to be 0. Its
-  `by_day` table has, per UTC day of arrival, every acknowledged row, those that
-  arrived inside a run, and their wait. A day with acknowledged rows and none
-  inside a run may be a day whose raw traces are gone; the chart marks the days
-  that have no round record.
+  rounds of that run and by row kind, with `blocked_hours` (arrival to run end),
+  summed over all of them in `all`, and `acked_before_run_end`, the rows
+  acknowledged before that run ended. The queue is drained between turns, so
+  that count is expected to be 0. Its `by_day` table has, per UTC day of
+  arrival, every acknowledged row, those that arrived inside a run, and their
+  wait. A day with acknowledged rows and none inside a run may be a day whose
+  raw traces are gone; the chart marks the days that have no round record.
 
 Only rows that arrived inside the span a Keeper's raw traces cover count. Older
 raw traces are rotated away, and a row whose run is gone would look like a row
@@ -350,7 +351,9 @@ def day_table(runs: list[Run]) -> list[JsonObject]:
     return table
 
 
-def spin_rows(runs: list[Run], min_rounds: int, top_share: float) -> list[JsonObject]:
+def spin_rows(
+    runs: list[Run], min_rounds: int, top_share: float, arrived: Counter[Run]
+) -> list[JsonObject]:
     rows: list[JsonObject] = []
     for run in sorted(runs, key=lambda item: -item.rounds):
         if not is_spin(run, min_rounds, top_share):
@@ -365,6 +368,7 @@ def spin_rows(runs: list[Run], min_rounds: int, top_share: float) -> list[JsonOb
                 "top_tool": run.top_tool,
                 "top_tool_calls": run.top_tool_calls,
                 "tool_calls": run.tool_calls,
+                "rows_arrived_inside": arrived[run],
                 "ended_by": run.error_kind or "the model answered",
             }
         )
@@ -394,7 +398,10 @@ def run_containing(runs: list[Run], ts: float) -> Run | None:
     return None
 
 
-def arrivals_during_runs(runs: list[Run], acks: list[Ack], first_day: date | None, last_day: date | None) -> JsonObject:
+def rows_inside_runs(
+    runs: list[Run], acks: list[Ack], first_day: date | None, last_day: date | None
+) -> tuple[int, list[tuple[Ack, Run]]]:
+    """The acknowledged rows inside the span their Keeper's traces cover, and the (row, run) pairs among them."""
     by_keeper: dict[str, list[Run]] = defaultdict(list)
     for run in runs:
         by_keeper[run.keeper].append(run)
@@ -410,6 +417,17 @@ def arrivals_during_runs(runs: list[Run], acks: list[Ack], first_day: date | Non
         run = run_containing(keeper_runs, ack.arrived)
         if run is not None:
             during.append((ack, run))
+    return considered, during
+
+
+def arrivals_during_runs(
+    runs: list[Run],
+    acks: list[Ack],
+    considered: int,
+    during: list[tuple[Ack, Run]],
+    first_day: date | None,
+    last_day: date | None,
+) -> JsonObject:
     by_bucket: dict[str, list[tuple[Ack, Run]]] = defaultdict(list)
     by_kind: dict[str, list[tuple[Ack, Run]]] = defaultdict(list)
     for ack, run in during:
@@ -431,6 +449,7 @@ def arrivals_during_runs(runs: list[Run], acks: list[Ack], first_day: date | Non
         "acked_rows_in_coverage": considered,
         "arrived_during_a_run": len(during),
         "acked_before_run_end": sum(1 for ack, run in during if ack.acked < run.end),
+        "all": summarize(during) if during else {"rows": 0},
         "visible_at_next_round": visible_at_next_round(during),
         "by_run_size": {name: summarize(by_bucket[name]) for name in bucket_names() if name in by_bucket},
         "by_kind": {
@@ -531,6 +550,7 @@ def measure(
     unreadable = Unreadable()
     runs = [run for run in read_runs(base, unreadable) if in_window(run.start, first_day, last_day)]
     acks = read_acks(base, unreadable)
+    considered, during = rows_inside_runs(runs, acks, first_day, last_day)
     window = (
         {"first_run_utc": day_of(min(run.start for run in runs)), "last_run_utc": day_of(max(run.end for run in runs))}
         if runs
@@ -547,8 +567,8 @@ def measure(
         },
         "by_profile": profile_table(runs, spin_min_rounds, spin_top_share),
         "by_day": day_table(runs),
-        "spin_runs": spin_rows(runs, spin_min_rounds, spin_top_share),
-        "arrivals_during_runs": arrivals_during_runs(runs, acks, first_day, last_day),
+        "spin_runs": spin_rows(runs, spin_min_rounds, spin_top_share, Counter(run for _, run in during)),
+        "arrivals_during_runs": arrivals_during_runs(runs, acks, considered, during, first_day, last_day),
     }
 
 

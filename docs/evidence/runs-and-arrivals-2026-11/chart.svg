@@ -14,8 +14,8 @@
 <rect x="124" y="179.6" width="30" height="2.4" fill="#6b8fb5"/>
 <rect x="124" y="179.6" width="30" height="0.0" fill="#d9822b"/>
 <text x="124" y="194" font-size="8" fill="#000000" transform="rotate(60 124 194)">10-19</text>
-<rect x="158" y="169.4" width="30" height="12.6" fill="#6b8fb5"/>
-<rect x="158" y="164.8" width="30" height="4.6" fill="#d9822b"/>
+<rect x="158" y="169.3" width="30" height="12.7" fill="#6b8fb5"/>
+<rect x="158" y="164.7" width="30" height="4.6" fill="#d9822b"/>
 <text x="158" y="194" font-size="8" fill="#000000" transform="rotate(60 158 194)">10-20</text>
 <rect x="192" y="162.2" width="30" height="19.8" fill="#6b8fb5"/>
 <rect x="192" y="162.2" width="30" height="0.0" fill="#d9822b"/>
@@ -29,14 +29,14 @@
 <rect x="294" y="177.3" width="30" height="4.7" fill="#6b8fb5"/>
 <rect x="294" y="177.3" width="30" height="0.0" fill="#d9822b"/>
 <text x="294" y="194" font-size="8" fill="#000000" transform="rotate(60 294 194)">10-24</text>
-<rect x="328" y="175.6" width="30" height="6.4" fill="#6b8fb5"/>
+<rect x="328" y="175.5" width="30" height="6.5" fill="#6b8fb5"/>
 <rect x="328" y="173.0" width="30" height="2.5" fill="#d9822b"/>
 <text x="328" y="194" font-size="8" fill="#000000" transform="rotate(60 328 194)">10-25</text>
 <rect x="362" y="178.4" width="30" height="3.6" fill="#6b8fb5"/>
 <rect x="362" y="178.4" width="30" height="0.0" fill="#d9822b"/>
 <text x="362" y="194" font-size="8" fill="#000000" transform="rotate(60 362 194)">10-26</text>
-<rect x="396" y="164.1" width="30" height="17.9" fill="#6b8fb5"/>
-<rect x="396" y="159.3" width="30" height="4.8" fill="#d9822b"/>
+<rect x="396" y="164.0" width="30" height="18.0" fill="#6b8fb5"/>
+<rect x="396" y="159.2" width="30" height="4.8" fill="#d9822b"/>
 <text x="396" y="194" font-size="8" fill="#000000" transform="rotate(60 396 194)">10-27</text>
 <rect x="430" y="177.0" width="30" height="5.0" fill="#6b8fb5"/>
 <rect x="430" y="177.0" width="30" height="0.0" fill="#d9822b"/>
@@ -54,16 +54,16 @@
 <text x="566" y="194" font-size="8" fill="#000000" transform="rotate(60 566 194)">11-01</text>
 <rect x="600" y="179" width="30" height="3" fill="#b8b8b8"/>
 <text x="600" y="194" font-size="8" fill="#8a8a8a" transform="rotate(60 600 194)">11-02</text>
-<rect x="634" y="165.7" width="30" height="16.3" fill="#6b8fb5"/>
-<rect x="634" y="162.8" width="30" height="2.9" fill="#d9822b"/>
+<rect x="634" y="166.5" width="30" height="15.5" fill="#6b8fb5"/>
+<rect x="634" y="163.6" width="30" height="3.0" fill="#d9822b"/>
 <text x="634" y="194" font-size="8" fill="#000000" transform="rotate(60 634 194)">11-03</text>
-<rect x="668" y="90.6" width="30" height="91.4" fill="#6b8fb5"/>
-<rect x="668" y="61.0" width="30" height="29.6" fill="#d9822b"/>
+<rect x="668" y="92.4" width="30" height="89.6" fill="#6b8fb5"/>
+<rect x="668" y="62.7" width="30" height="29.8" fill="#d9822b"/>
 <text x="668" y="194" font-size="8" fill="#000000" transform="rotate(60 668 194)">11-04</text>
-<rect x="702" y="88.5" width="30" height="93.5" fill="#6b8fb5"/>
-<rect x="702" y="50.0" width="30" height="38.5" fill="#d9822b"/>
+<rect x="702" y="88.7" width="30" height="93.3" fill="#6b8fb5"/>
+<rect x="702" y="50.0" width="30" height="38.7" fill="#d9822b"/>
 <text x="702" y="194" font-size="8" fill="#000000" transform="rotate(60 702 194)">11-05</text>
-<text x="4" y="58">11689</text>
+<text x="4" y="58">11632</text>
 <text x="4" y="182">0</text>
 <text x="56" y="234" font-weight="600">Hours queue rows waited at least, behind the run that was going on</text>
 <rect x="56" y="379" width="30" height="3" fill="#b8b8b8"/>
@@ -102,7 +102,7 @@
 <text x="600" y="394" font-size="8" fill="#8a8a8a" transform="rotate(60 600 394)">11-02</text>
 <rect x="634" y="368.7" width="30" height="13.3" fill="#b5483a"/>
 <text x="634" y="394" font-size="8" fill="#000000" transform="rotate(60 634 394)">11-03</text>
-<rect x="668" y="282.7" width="30" height="99.3" fill="#b5483a"/>
+<rect x="668" y="282.5" width="30" height="99.5" fill="#b5483a"/>
 <text x="668" y="394" font-size="8" fill="#000000" transform="rotate(60 668 394)">11-04</text>
 <rect x="702" y="250.0" width="30" height="132.0" fill="#b5483a"/>
 <text x="702" y="394" font-size="8" fill="#000000" transform="rotate(60 702 394)">11-05</text>

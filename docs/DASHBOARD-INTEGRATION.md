@@ -123,8 +123,6 @@ status: reference
   - Tool Monitor evidence-log lens and source freshness metadata
 - `GET /api/v1/dashboard/agent_core/telemetry/recent`, `GET /api/v1/dashboard/agent_core/telemetry/summary`
   - in-process agent core runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `agent_core_event` replay
-- `GET /api/v1/dashboard/memory-subsystems`
-  - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
 - `GET /api/v1/dashboard/transport-health`
@@ -139,10 +137,6 @@ status: reference
   - runtime provider inventory
 - `GET /api/v1/runtime/config`, `GET /api/v1/runtime/config/raw`
   - runtime runtime config inspector read models
-- `GET /api/v1/runtime/client_capacity`, `GET /api/v1/runtime/client_capacity/history`, `GET /api/v1/runtime/slo`
-  - runtime runtime capacity + SLO view
-- `GET /api/v1/runtime/strategy_trace`, `GET /api/v1/runtime/health`
-  - runtime inspector view
 - `GET /api/v1/operator/digest`
   - operations read model
 - `GET /api/v1/gate/connectors`

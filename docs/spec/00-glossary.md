@@ -3168,8 +3168,8 @@ status: reference
   단계 `recording(%d/%d)` 도 네 자리 수 둘이면 스무 칸이다. 칸 폭은
   `bin/masc_tui_render_schedule.ml` 의 `fusion_state_width = 20` 이고, 셋 중 가장 긴
   값이 이 수를 넘으면 `Table.cell` 이 그 값을 칸 폭에 맞춰 접고(`Fold`의 셀 글자 접기 —
-  STATE 칸은 `~fold` 를 주지 않아 기본값 `Fold_middle`), 경고나 실패는 없다. 전체 오류
-  문장은 고른 실행의 줄에 남는다.
+  STATE 칸은 `~fold` 를 주지 않아 기본값 `Fold_middle`), 경고나 실패는 없다. 이 스무 칸을
+  자동으로 지키는 검사는 없다. 전체 오류 문장은 고른 실행의 줄에 남는다.
   → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 

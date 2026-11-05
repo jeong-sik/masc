@@ -514,8 +514,7 @@ let run_turn
   (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
      [Eio.Switch.on_release], so cleanup runs under cooperative cancellation
      and does not mask the outer [Eio.Cancel.Cancelled]. The turn's durable
-     record is the keeper turn-records store (RFC-0378 §5.2); the
-     observation bus carries no turn events. *)
+     record is the keeper turn-records store (RFC-0378 §5.2). *)
   let safe_emit_turn_end () = Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name () in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->

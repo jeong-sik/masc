@@ -52,14 +52,6 @@ let read_regular_file path st =
     with
     | Sys_error _ | End_of_file -> None
 
-let strip_one_final_newline value =
-  let len = String.length value in
-  if len >= 2 && Char.equal value.[len - 2] '\r' && Char.equal value.[len - 1] '\n'
-  then String.sub value 0 (len - 2)
-  else if len >= 1 && (Char.equal value.[len - 1] '\n' || Char.equal value.[len - 1] '\r')
-  then String.sub value 0 (len - 1)
-  else value
-
 let add_value value acc =
   let trimmed = String.trim value in
   if String.length trimmed >= min_secret_len then trimmed :: acc else acc
@@ -208,7 +200,11 @@ let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction
   match read_regular_file source_path st with
   | None -> acc
   | Some value ->
-      let acc = acc |> add_value (strip_one_final_newline value) |> add_lines value in
+      let acc =
+        acc
+        |> add_value (Keeper_secret_projection.strip_one_final_newline value)
+        |> add_lines value
+      in
       (match extraction with
        | Whole_and_lines -> acc
        | Whole_lines_and_mapping_scalars ->

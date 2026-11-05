@@ -78,6 +78,40 @@ let test_snapshot_redacts_env_and_file_values () =
   not_contains "file exact value hidden" redacted file_secret;
   contains "redaction marker present" redacted "[REDACTED]"
 
+(* A secret saved with Windows line endings reaches a Keeper without the line
+   ending, and the redactor masks that value. *)
+let test_snapshot_masks_the_value_projection_delivers () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "acme-sandbox" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "crlf.secret!value" in
+  write_file (Filename.concat (Filename.concat root "env") "SERVICE_TOKEN")
+    (secret ^ "\r\n");
+  let prefix = "SERVICE_TOKEN=" in
+  let delivered =
+    match
+      Masc.Keeper_secret_projection.local_env_for_keeper
+        ~host_env:[| "PATH=/usr/bin" |] ~base_path:base ~keeper_name ()
+    with
+    | Ok (Some env) ->
+        Array.to_list env
+        |> List.find_map (fun entry ->
+             if String.starts_with ~prefix entry
+             then
+               Some
+                 (String.sub entry (String.length prefix)
+                    (String.length entry - String.length prefix))
+             else None)
+    | Ok None | Error _ -> None
+  in
+  Alcotest.(check (option string)) "delivered without the line ending"
+    (Some secret) delivered;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  not_contains "delivered value hidden"
+    (R.redact_text redaction ("token=" ^ secret)) secret
+
 (* The snapshot is memoised per domain on the identity of its source files.
    Unchanged files serve the same compiled patterns; a changed file rebuilds. *)
 let test_snapshot_is_reused_until_a_source_changes () =
@@ -804,6 +838,8 @@ let () =
     [ ("thinking replacement",[Alcotest.test_case "split secret" `Quick test_thinking_snapshot_keeps_split_secret_private]); ( "snapshot",
         [ Alcotest.test_case "redacts env and file exact values" `Quick
             test_snapshot_redacts_env_and_file_values;
+          Alcotest.test_case "masks the value projection delivers" `Quick
+            test_snapshot_masks_the_value_projection_delivers;
           Alcotest.test_case "does not exact-redact short values" `Quick
             test_short_values_are_not_exact_redacted;
           Alcotest.test_case "redacts base secret values" `Quick

@@ -1,0 +1,128 @@
+{
+  "window": {
+    "from": "2026-10-29",
+    "to": "2026-11-04"
+  },
+  "stored_requests": 5479,
+  "body_bytes": 11533469199,
+  "tool_messages": 96085,
+  "dos_results": 4764,
+  "dos_carried_results": 128016,
+  "blank_pages": 4764,
+  "changed_pages": 0,
+  "content_bytes": 753485817,
+  "page_bytes": 266145264,
+  "trimmed_page_bytes": 512064,
+  "saved_bytes": 265633200,
+  "files_bytes": 86026752,
+  "files_distinct_lists": 1,
+  "unattributed_pages": 0,
+  "tools": [
+    {
+      "tool": "masc_dos_screen",
+      "results": 2133,
+      "blank_pages": 2133,
+      "changed_pages": 0,
+      "carried_results": 54916,
+      "content_bytes": 329827921,
+      "page_bytes": 114170364,
+      "trimmed_page_bytes": 219664,
+      "files_bytes": 36903552,
+      "saved_bytes": 113950700
+    },
+    {
+      "tool": "masc_dos_press",
+      "results": 2007,
+      "blank_pages": 2007,
+      "changed_pages": 0,
+      "carried_results": 54007,
+      "content_bytes": 313623235,
+      "page_bytes": 112280553,
+      "trimmed_page_bytes": 216028,
+      "files_bytes": 36292704,
+      "saved_bytes": 112064525
+    },
+    {
+      "tool": "masc_dos_step",
+      "results": 268,
+      "blank_pages": 268,
+      "changed_pages": 0,
+      "carried_results": 8223,
+      "content_bytes": 47770578,
+      "page_bytes": 17095617,
+      "trimmed_page_bytes": 32892,
+      "files_bytes": 5525856,
+      "saved_bytes": 17062725
+    },
+    {
+      "tool": "masc_dos_save",
+      "results": 199,
+      "blank_pages": 199,
+      "changed_pages": 0,
+      "carried_results": 6408,
+      "content_bytes": 36336977,
+      "page_bytes": 13322232,
+      "trimmed_page_bytes": 25632,
+      "files_bytes": 4306176,
+      "saved_bytes": 13296600
+    },
+    {
+      "tool": "masc_dos_type",
+      "results": 123,
+      "blank_pages": 123,
+      "changed_pages": 0,
+      "carried_results": 3308,
+      "content_bytes": 19210061,
+      "page_bytes": 6877332,
+      "trimmed_page_bytes": 13232,
+      "files_bytes": 2222976,
+      "saved_bytes": 6864100
+    },
+    {
+      "tool": "masc_dos_restore",
+      "results": 33,
+      "blank_pages": 33,
+      "changed_pages": 0,
+      "carried_results": 1122,
+      "content_bytes": 6525845,
+      "page_bytes": 2332638,
+      "trimmed_page_bytes": 4488,
+      "files_bytes": 753984,
+      "saved_bytes": 2328150
+    },
+    {
+      "tool": "masc_dos_load",
+      "results": 1,
+      "blank_pages": 1,
+      "changed_pages": 0,
+      "carried_results": 32,
+      "content_bytes": 191200,
+      "page_bytes": 66528,
+      "trimmed_page_bytes": 128,
+      "files_bytes": 21504,
+      "saved_bytes": 66400
+    }
+  ],
+  "video_modes": [
+    {
+      "video_mode": "12h",
+      "results": 4763,
+      "blank_pages": 4763
+    },
+    {
+      "video_mode": "03h",
+      "results": 1,
+      "blank_pages": 1
+    }
+  ],
+  "skipped": {
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "unplaced_files": 0,
+    "unidentified_calls": 0,
+    "unreadable_blobs": 0,
+    "invalid_blobs": 0,
+    "size_disagreements": 0,
+    "reserialization_mismatch": 0
+  }
+}

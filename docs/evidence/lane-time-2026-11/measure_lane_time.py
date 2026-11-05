@@ -21,14 +21,21 @@ Definitions:
 - inside seconds: the part of a call or of a gap that lies in the turn time of
   the call's Keeper. The ledger and the trace files are written by different
   code, so a call can lie outside every run interval of its Keeper: its turn
-  wrote no trace file (`direct` turns, which serve chat and delegated
-  operations, mostly write none), or the call began before the file's first
-  event or ended after its last. Shares of turn time use inside seconds only.
+  wrote no trace file, or the call began before the file's first event or
+  ended after its last. Shares of turn time use inside seconds only.
   The sums in `tool_time_s` and `between_calls` keep every call.
 - trace file: `keeper_turn_events/<keeper>/trace-<id>-<run>-<turn>-<hash>.jsonl`.
   A call has one when a file of its Keeper is named for its `trace_id` and
   `keeper_turn_id`. Only the file names are read, so a file pruned after the
-  window makes its calls look untraced.
+  window makes its calls look untraced. In the 2026-11 code the only writer is
+  `Keeper_autonomous_stream.create` (lib/keeper/keeper_autonomous_stream.ml),
+  so a `direct` turn (`Keeper_turn.run_direct_turn_with_fsm`, the turn that
+  answers a `masc_keeper_msg` message) writes none.
+- traced call outside the turn time: a call whose turn has a trace file and
+  of which more than 0.05 s lies outside the turn time of its Keeper.
+  `traced_calls_outside_turns` counts them and their outside seconds, in total
+  and by `turn_kind`, and `turns_that_also_have_autonomous_calls` counts the
+  turns among them whose key also carries an `autonomous` call.
 - between-calls time: inside one turn (`trace_id`, `keeper_turn_id`), calls sorted
   by start (`ts` minus duration). The gap before every call after the first is
   its start minus the previous call's end. Overlapping calls count as 0.
@@ -97,6 +104,8 @@ LONG_EXECUTE_SEC = 60.0
 REREAD_WINDOW_SEC = 3600.0
 TRACE_TAIL_BYTES = 65536
 TRACE_FILE_NAME = re.compile(r"^(trace-\d+-\d+)-(\d+)-[0-9a-f]+\.jsonl$")
+AUTONOMOUS_TURN_KIND = "autonomous"
+OUTSIDE_TOLERANCE_S = 0.05
 SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
@@ -592,6 +601,38 @@ def summarize_untraced(calls: list[Call], trace_keys: frozenset[str], clocks: Ma
     }
 
 
+def summarize_traced_outside(calls: list[Call], trace_keys: frozenset[str], clocks: Mapping[str, TurnClock]) -> dict[str, object]:
+    """The calls of turns that have a trace file but lie partly outside the turn time of their Keeper."""
+    kinds_of_turn: dict[str, set[str]] = defaultdict(set)
+    for call in calls:
+        kinds_of_turn[call.turn].add(call.turn_kind)
+    hits: list[tuple[Call, float]] = []
+    for call in calls:
+        if call.turn not in trace_keys:
+            continue
+        outside_s = (call.end - call.start) - seconds_inside(clocks, call.keeper, call.start, call.end)
+        if outside_s > OUTSIDE_TOLERANCE_S:
+            hits.append((call, outside_s))
+    by_kind: dict[str, list[tuple[Call, float]]] = defaultdict(list)
+    for hit in hits:
+        by_kind[hit[0].turn_kind].append(hit)
+    turns = {call.turn for call, _ in hits}
+
+    def block(members: list[tuple[Call, float]]) -> dict[str, object]:
+        return {
+            "calls": len(members),
+            "tool_time_outside_turns_s": round(sum(outside_s for _, outside_s in members), 1),
+            "execute_time_outside_turns_s": round(sum(outside_s for call, outside_s in members if call.tool == EXECUTE_TOOL), 1),
+        }
+
+    return {
+        **block(hits),
+        "turns": len(turns),
+        "turns_that_also_have_autonomous_calls": sum(1 for turn in turns if AUTONOMOUS_TURN_KIND in kinds_of_turn[turn]),
+        "by_turn_kind": {kind: block(members) for kind, members in sorted(by_kind.items())},
+    }
+
+
 def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict[str, object]:
     by_turn: dict[str, list[Call]] = defaultdict(list)
     for call in calls:
@@ -825,6 +866,7 @@ def main() -> int:
         if call.end - call.start >= LONG_EXECUTE_SEC:
             long_execute[call.keeper].append((call.start, call.end))
     operations = read_operations(base, since, args.until)
+    trace_keys = read_trace_keys(base)
     summary = {
         "window": {
             "from": args.from_date.isoformat(),
@@ -836,7 +878,8 @@ def main() -> int:
         "turn_time": {
             **summarize_calls(calls, busy_by_keeper),
             "inside_turns": summarize_inside_turns(calls, clocks),
-            "calls_without_trace_file": summarize_untraced(calls, read_trace_keys(base), clocks),
+            "calls_without_trace_file": summarize_untraced(calls, trace_keys, clocks),
+            "traced_calls_outside_turns": summarize_traced_outside(calls, trace_keys, clocks),
         },
         "chat_operations": summarize_operations(operations, long_execute, runs),
         "cancelled_turns": summarize_cancelled_turns(operations, execute_calls),

@@ -138,21 +138,21 @@
       "sum_s": 86997.0
     },
     "latency": {
-      "mean_s": 487.5,
-      "n": 3561,
+      "mean_s": 497.8,
+      "n": 3562,
       "p50_s": 3.7,
-      "p90_s": 494.3,
-      "sum_s": 1736033.9
+      "p90_s": 494.9,
+      "sum_s": 1773180.0
     },
-    "no_turn_started": 20,
+    "no_turn_started": 19,
     "stimuli": 5307,
-    "total_wait_s": 1736033.9,
-    "turn_started": 3561,
-    "wait_overlapping_a_run_of_the_same_keeper_s": 980533.9,
+    "total_wait_s": 1773180.0,
+    "turn_started": 3562,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 982198.3,
     "wait_overlapping_long_execute_s": 77832.6,
     "waited_at_least_30_min": {
-      "n": 185,
-      "sum_s": 1442731.3,
+      "n": 186,
+      "sum_s": 1479877.4,
       "top_keepers": [
         {
           "keeper": "e-masc-the-leader",
@@ -499,6 +499,20 @@
           }
         ]
       }
+    },
+    "traced_calls_outside_turns": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 1063,
+          "execute_time_outside_turns_s": 5187.4,
+          "tool_time_outside_turns_s": 5543.3
+        }
+      },
+      "calls": 1063,
+      "execute_time_outside_turns_s": 5187.4,
+      "tool_time_outside_turns_s": 5543.3,
+      "turns": 67,
+      "turns_that_also_have_autonomous_calls": 59
     },
     "turn_time_s": 2851807.9,
     "turns": 11212

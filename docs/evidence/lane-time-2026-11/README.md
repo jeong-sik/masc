@@ -26,7 +26,8 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 - 호출 사이 시간: 한 턴(`trace_id`, `keeper_turn_id`) 안에서 첫 호출 뒤의 호출마다 "앞 호출이 끝난 뒤 이 호출이 시작되기까지"를 더해요. 호출 시작은 `ts` 에서 `duration_ms` 를 뺀 값이에요. 겹치는 호출은 0으로 잡아요.
 - 턴 안의 시간: 호출 구간과 호출 사이 구간 중에서 그 Keeper 의 턴 구간과 겹친 초만 세요. 턴 시간에 대한 몫은 모두 이 값으로 구해요. 원장 전체를 그대로 턴 시간으로 나누면 턴 구간 밖의 시간이 섞여서 몫이 부풀어요.
 - 나머지: 턴 시간에서 턴 안의 도구 시간과 턴 안의 호출 사이 시간을 뺀 값이에요.
-- trace 파일이 없는 턴: 호출의 `trace_id`, `keeper_turn_id` 와 맞는 trace 파일이 없는 턴이에요. 파일 이름이 `<trace_id>-<keeper_turn_id>-<해시>.jsonl` 꼴이라서 이름만 보고 맞춰요. 이런 턴의 호출이 Keeper 의 턴 구간에 얼마나 드는지는 `turn_time.calls_without_trace_file.tool_time_inside_turns_s` 에 적어요.
+- trace 파일이 없는 턴: 호출의 `trace_id`, `keeper_turn_id` 와 맞는 trace 파일이 없는 턴이에요. 파일 이름이 `<trace_id>-<keeper_turn_id>-<해시>.jsonl` 꼴이라서 이름만 보고 맞춰요(`keeper_turn_id` 는 코드의 `Turn_ref.absolute_turn` 이에요). 이런 턴의 호출이 Keeper 의 턴 구간에 얼마나 드는지는 `turn_time.calls_without_trace_file.tool_time_inside_turns_s` 에 적어요. 측정 시점의 코드에서 trace 파일을 여는 곳은 `Keeper_autonomous_stream.create`(`lib/keeper/keeper_autonomous_stream.ml`) 하나예요. `masc_keeper_msg` 에 답하는 `direct` 턴(`Keeper_turn.run_direct_turn_with_fsm`)은 파일을 쓰지 않아요.
+- 파일은 있는데 턴 구간 밖으로 걸친 호출: 호출의 턴에 trace 파일이 있고, 호출 시간 중 0.05초를 넘는 부분이 그 Keeper 의 턴 구간 밖에 있는 호출이에요. `turn_time.traced_calls_outside_turns` 가 호출 수, 턴 수, 구간 밖 도구 시간을 `turn_kind` 별로 적고, `turns_that_also_have_autonomous_calls` 에 그 턴 중 `autonomous` 호출도 같이 가진 턴 수를 적어요.
 - 같은 결과 재조회: 같은 Keeper 가 같은 도구에 같은 입력(`input_fingerprint`)을 보내 1시간 안에 같은 결과(`output_fingerprint`)를 받은 호출이에요. `scripts/measure-tool-efficiency.py` 와 같은 규칙인데, 이 스크립트는 자정을 넘어서도 1시간을 이어서 세요.
 - 긴 Execute: 60초 이상 걸린 Execute 예요. 명령에 `sleep`, `for ... in`, `while`, `until` 이 있으면 폴링으로 세요. 명령 문장은 이 판정에만 써요.
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
@@ -46,7 +47,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | 호출 사이 시간(134,311개 호출, 평균 13.7초, 중앙값 1.1초, p90 21.9초) | 510.1시간 | 404.3시간 | 57.0% |
 | 나머지(첫 호출 전, 호출 없는 턴, 턴 끝) | | 226.1시간 | 31.9% |
 
-- 원장 전체와 턴 안의 차이는 도구 시간 21.9시간, 호출 사이 시간 105.8시간이에요. 도구 시간 중 20.4시간은 trace 파일이 없는 턴의 호출(23,115개, 턴 1,101개)이고, 이 호출들은 1초도 턴 구간에 들지 않아요. 나머지 1.5시간은 trace 파일이 있는 턴의 호출이 파일의 첫 줄과 마지막 줄 사이 밖으로 걸친 부분이에요. 이 1.5시간의 원인은 확인하지 못했어요.
+- 원장 전체와 턴 안의 차이는 도구 시간 21.9시간, 호출 사이 시간 105.8시간이에요. 도구 시간 중 20.4시간은 trace 파일이 없는 턴의 호출(23,115개, 턴 1,101개)이고, 이 호출들은 1초도 턴 구간에 들지 않아요. 나머지 1.5시간은 trace 파일이 있는 턴의 호출 993개가 파일의 첫 줄과 마지막 줄 사이 밖으로 걸친 부분이에요(`turn_time.traced_calls_outside_turns`). 이 호출은 모두 `direct` 예요. 파일은 `autonomous` 턴의 것이라서, `direct` 호출이 그 턴과 같은 `keeper_turn_id` 를 달고 파일 구간 밖에 놓여요. 걸친 턴 64개 중 58개는 `autonomous` 호출도 같이 가져요.
 - 호출이 있는 턴 중 trace 파일이 없는 턴은 `direct` 가 1,075개 중 1,003개(93.3%)이고, `autonomous` 는 8,863개 중 98개(1.1%)예요. 그래서 이 표의 턴 시간에는 `direct` 턴이 거의 들어 있지 않아요.
 - 같은 결과 재조회 32,545개(첫 호출 뒤의 호출만)가 쓴 시간은 원장 전체로 20.8시간이고, 턴 안에서는 19.3시간(2.7%)이에요. 이 호출들은 앞 호출 바로 뒤에 이어져서 호출 사이 시간이 짧아요.
 - 한 턴(9,872개)의 호출 수는 평균 14.6, 중앙값 5, p90 31, p99 152, 최대 1,388이에요.

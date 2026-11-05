@@ -1,6 +1,5 @@
 "use strict";
 // Execute the product resolver against observed rectangles and hit-test results.
-// Native Chromium integration is covered by stagehand_browser_probe.ml.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");

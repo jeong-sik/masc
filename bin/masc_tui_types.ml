@@ -19662,6 +19662,16 @@ let ui_text (state : state) ~ko ~en =
   | Lang_ko -> ko
   | Lang_en -> en
 
+(* The server's own list of what needs the operator. The footer's ACTION
+   NEEDED row and the terminal title count it, and the Dashboard lists it. An
+   older server, or one before its first snapshot, cannot say and counts as
+   none. *)
+let operator_actions (state : state) =
+  match state.server_identity with
+  | None -> []
+  | Some identity ->
+      Option.value identity.Tui_decode.sid_operator_action ~default:[]
+
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
   state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;

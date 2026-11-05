@@ -695,13 +695,11 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
         @
-        (* The server's rollup, from the probe it serves on every refresh.
-           An older server, or one before its first snapshot, cannot say
-           (None) and draws nothing. *)
-        (match identity.Tui_decode.sid_operator_action with
-         | Some (first :: rest) ->
+        (* The server's rollup, from the probe it serves on every refresh. *)
+        (match Masc_tui_types.operator_actions state with
+         | first :: rest ->
            [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
-         | Some [] | None -> [])
+         | [] -> [])
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"

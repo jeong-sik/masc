@@ -28602,16 +28602,8 @@ let terminal_title_runtime state keeper_name =
         | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
 ;;
 
-(* The server's own list of what needs the operator, which the footer's
-   ACTION NEEDED row counts. An older server, or one before its first
-   snapshot, cannot say and counts as none. *)
 let terminal_title_attention state =
-  match state.server_identity with
-  | None -> 0
-  | Some identity ->
-      (match identity.Tui_decode.sid_operator_action with
-       | Some alerts -> List.length alerts
-       | None -> 0)
+  List.length (Masc_tui_types.operator_actions state)
 ;;
 
 let terminal_title_snapshot state =

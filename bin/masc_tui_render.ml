@@ -270,6 +270,7 @@ let render_overview (state : state) home =
             ~decisions
             ~decisions_whole:(List.length decisions = List.length all_decisions)
             ~continuation ~status
+            ~actions:(Masc_tui_types.operator_actions state)
         in
         match card_rows with
         | Some rows -> List.iter c.push rows

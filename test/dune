@@ -7271,3 +7271,5 @@
 (include stanzas/test_forked_map.inc)
 
 (include stanzas/test_task_history_page_cursor.inc)
+
+(include stanzas/test_list_util.inc)

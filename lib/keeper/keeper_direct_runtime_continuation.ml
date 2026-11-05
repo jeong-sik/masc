@@ -28,11 +28,6 @@ let load_owned ~operation_id ~session_dir ~session_id =
   let* () = validate_scope ~operation_id (Checkpoint.exact_snapshot_checkpoint snapshot) in
   Ok snapshot
 
-let rec original_prefix original current = match original, current with
-  | [], _ -> true
-  | first :: rest, current :: tail when first = current -> original_prefix rest tail
-  | _ :: _, [] | _ :: _, _ :: _ -> false
-
 let current_assignment keeper_name =
   match Runtime.runtime_id_for_keeper keeper_name with
   | Some assignment -> assignment
@@ -120,7 +115,9 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
     let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "current direct runtime checkpoint is unavailable") in
     let checkpoint = Checkpoint.exact_snapshot_checkpoint current in
-    let* () = if original_prefix original_checkpoint.messages checkpoint.messages then Ok ()
+    let* () =
+      if List_util.is_prefix ~equal:( = ) original_checkpoint.messages checkpoint.messages
+      then Ok ()
       else Error "current history no longer retains the original direct runtime input and effects" in
     let* source = Keeper_repetition_scope.load original_checkpoint.context
       |> Result.map_error Snapshot.error_to_string in

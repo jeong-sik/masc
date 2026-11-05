@@ -75,10 +75,6 @@ let kept_messages ~preserve_system messages =
   if not preserve_system then [] else List.filter (fun (message : Agent_core.Types.message) ->
     match message.role with System -> true | User | Assistant | Tool -> false) messages
 
-let rec prefix expected actual = match expected,actual with
-  | [],_ -> true
-  | x::xs,y::ys -> x=y && prefix xs ys
-  | _::_,[] -> false
 let json checkpoint = Agent_core.Checkpoint.to_json_result checkpoint
   |> Result.map_error (fun error -> Invalid_clear (Agent_core.Error.to_string error))
 let boundary context = Keeper_repetition_judged.read_opt context
@@ -118,7 +114,7 @@ let baseline ~input ~current =
   if input.Agent_core.Checkpoint.turn_count > current.Agent_core.Checkpoint.turn_count then Ok input
   else
     let* () = if input.turn_count=current.turn_count then same_turn_body ~input ~current else Ok () in
-    if prefix input.messages current.messages
+    if List_util.is_prefix ~equal:( = ) input.messages current.messages
        || current.messages=kept_messages ~preserve_system:true input.messages
        || current.messages=[]
     then Ok current

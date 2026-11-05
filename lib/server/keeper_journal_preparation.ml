@@ -318,10 +318,6 @@ let names_reference ~base_path (reference : Keeper_checkpoint_ref.t) bytes =
 let same_pending left right = Option.equal (fun left right -> Yojson.Safe.equal
   (Agent_core.Agent_input_request.pending_to_json left)
   (Agent_core.Agent_input_request.pending_to_json right)) left right
-let rec preserves_messages prefix messages = match prefix,messages with
-  | [],_ -> true
-  | expected::prefix,actual::messages -> expected=actual && preserves_messages prefix messages
-  | _::_,[] -> false
 let read_reference ~base_path ~path reference =
   let* file = read ~base_path ~absent:(Input_history_unresolved path) path in
   let* snapshot = decode_checkpoint ~base_path ~trace_id:reference.Keeper_checkpoint_ref.trace_id file.content in
@@ -379,7 +375,7 @@ let continuation_evidence (bundle : receipt) snapshot =
           let latest_path = retained_path bundle.base_path call.checkpoint in
           let* seed_file,seed = read_reference ~base_path:bundle.base_path ~path:seed_path call.seed_checkpoint in
           let* latest_file,latest = read_reference ~base_path:bundle.base_path ~path:latest_path call.checkpoint in
-          if preserves_messages (Checkpoint.exact_snapshot_checkpoint seed).messages
+          if List_util.is_prefix ~equal:( = ) (Checkpoint.exact_snapshot_checkpoint seed).messages
               (Checkpoint.exact_snapshot_checkpoint latest).messages
           then Ok ((seed_path,seed_file)::(latest_path,latest_file)::acc)
           else error (Input_history_unresolved "native continuation does not preserve its admission seed history") in
@@ -392,7 +388,7 @@ let continuation_evidence (bundle : receipt) snapshot =
             let* file,known = read_reference ~base_path:bundle.base_path ~path retained in
             let known = Checkpoint.exact_snapshot_checkpoint known in
             if same_pending known.pending_input selected.pending_input
-                && preserves_messages known.messages selected.messages
+                && List_util.is_prefix ~equal:( = ) known.messages selected.messages
             then capture ((path,file)::acc) remaining
             else error (Input_history_unresolved "selected canonical input conflicts with retained pending/history evidence") in
       capture acc (Semantic.continuation_checkpoints execution) in

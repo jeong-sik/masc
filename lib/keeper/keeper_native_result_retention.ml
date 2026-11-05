@@ -1,9 +1,3 @@
-let rec after_seed seed messages =
-  match seed, messages with
-  | [], suffix -> Some suffix
-  | expected :: rest, actual :: tail when expected = actual -> after_seed rest tail
-  | _ :: _, ([] | _ :: _) -> None
-
 let remove_once expected blocks =
   let rec loop earlier = function
     | [] -> None
@@ -13,7 +7,7 @@ let remove_once expected blocks =
   loop [] blocks
 
 let retains ~seed ~messages ~results =
-  match results, after_seed seed messages with
+  match results, List_util.strip_prefix ~equal:( = ) seed messages with
   | [], _ -> Ok true
   | _ :: _, None -> Ok false
   | _ :: _, Some suffix ->

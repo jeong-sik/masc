@@ -78,9 +78,6 @@ let installation_error_to_string = function
   | Response_refused (Resume_refused error) -> Agent_core.Agent_checkpoint.resume_error_to_string error
   | Installation_unconfirmed _ -> "response file installation is unconfirmed; preserve evidence and reconcile before retry"
   | Installation_mismatch _ -> "response canonical installation differs from its retained bytes; preserve both references and reconcile"
-let rec prefix expected actual = match expected,actual with
-  | [],_ -> true | x::xs,y::ys when x=y -> prefix xs ys
-  | _::_,([] | _::_) -> false
 let same_pending expected = function
   | None -> false
   | Some actual -> Yojson.Safe.equal (Agent_core.Agent_input_request.pending_to_json expected)
@@ -110,7 +107,8 @@ let retained authority reference = Store.load_retained_exact_snapshot
   ~session_dir:authority.session_dir ~reference |> Result.map_error (fun error -> Retained_unavailable error)
 let validate_source authority original (source:Agent_core.Checkpoint.t) =
   let* () = if source.turn_count >= original.Agent_core.Checkpoint.turn_count
-      && same_pending authority.waiting.pending source.pending_input && prefix original.messages source.messages
+      && same_pending authority.waiting.pending source.pending_input
+      && List_util.is_prefix ~equal:( = ) original.messages source.messages
     then Ok () else Error (Invalid_response "response source disagrees with its original retained wait") in
   let* () = validate_scope authority source in
   let* retained_body = nonhistory original in

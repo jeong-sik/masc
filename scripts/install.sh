@@ -1317,8 +1317,8 @@ log "platform: $ASSET"
 # --- 2. resolve version -------------------------------------------------------
 # The web page /releases/latest redirects to the tag GitHub calls the latest
 # release (published, not a draft or prerelease), the same one the API names.
-# It is not an api.github.com call, so the anonymous limit of 60 API requests
-# an hour per IP, which a few retried installs used up, does not apply.
+# It is not an api.github.com call, so the anonymous API limit of 60 requests
+# an hour per IP does not apply.
 resolve_version() {
   if [ -n "$VERSION" ]; then echo "$VERSION"; return; fi
   log "resolving latest release from github.com/$REPO ..." >&2

@@ -204,6 +204,6 @@ type refusal =
 ## 6. 열린 질문
 
 1. 2.5 의 규약 확장이 다른 사용처에 닿는가. `Successor_intended` 는 Task 검증, Librarian, workspace memory, original body inventory 도 쓴다. 그 코드가 `Subdividing` 의 refusal stage 를 `Execution` 으로 가정하는지 4층 전에 확인한다.
-2. lease 디렉터리는 `MASC_BASE_PATH_LEASE_DIR` 가 없으면 TMPDIR 를 따른다(`host_config.ml:93-94`). TMPDIR 가 다른 두 프로세스는 같은 base path 의 lease 를 둘 다 쥘 수 있다. 그러면 2.6 이 다른 프로세스의 살아 있는 검토를 끊는다. 커밋이 두 번 나지는 않는다. 파일 잠금이 막고, `Rejected` 에서 `Judged` 로 갈 수 없기 때문이다. lease 위치는 이 RFC 밖에서 따로 다룬다.
+2. lease 디렉터리는 `MASC_BASE_PATH_LEASE_DIR` 가 없으면 TMPDIR 를 따른다(`host_config.ml:93-94`). TMPDIR 가 다른 두 프로세스는 같은 base path 의 lease 를 둘 다 쥘 수 있다. 그러면 2.6 이 다른 프로세스의 살아 있는 검토를 끊는다. 커밋이 두 번 나지는 않는다. 파일 잠금이 막고, `Rejected` 에서 `Judged` 로 갈 수 없기 때문이다. lease 위치는 #48709 에서 따로 다룬다.
 3. Librarian admission, workspace memory curator, browser add-on 의 LLM 호출도 판정만 하는가. 그렇다면 같은 정지가 있는지 따로 본다.
 4. 운영자 Drop·Reopen 도 검토 fiber 를 취소한다(`goal_verification_agent.ml:811`). 그 원본은 `Run_ended Cancelled` 로 남고, 요청이 바뀌어 새 시도는 생기지 않는다. 기록 이름이 사실과 맞는지만 확인한다.

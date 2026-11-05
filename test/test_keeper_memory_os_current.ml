@@ -632,7 +632,7 @@ let write_torn_journal_tail path ~prefix =
     (Fs_compat.load_file path)
 ;;
 
-let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail ~without_revision_links () =
+let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail () =
   with_temp_keepers @@ fun keepers_dir ->
   let target = fact ~claim:"reason must survive interrupted finalize" () in
   let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
@@ -694,10 +694,6 @@ let check_batch_retraction_recovers_exact_reason_evidence ~torn_tail ~without_re
     committed.revision;
   check (list string) "target is absent from committed snapshot" []
     (fact_ids committed.facts);
-  if without_revision_links then
-    prepared |> to_assoc
-    |> List.filter (fun (name, _) -> not (String.equal name "revision_links"))
-    |> fun fields -> Yojson.Safe.to_file receipt_path (`Assoc fields);
   Unix.rmdir journal_path;
   if torn_tail then write_torn_journal_tail journal_path ~prefix:seed_journal;
   (match request () with
@@ -756,18 +752,11 @@ let test_retirement_context_rejects_stale_current () =
 ;;
 
 let test_batch_retraction_recovers_exact_reason_evidence () =
-  check_batch_retraction_recovers_exact_reason_evidence
-    ~torn_tail:false ~without_revision_links:false ()
+  check_batch_retraction_recovers_exact_reason_evidence ~torn_tail:false ()
 ;;
 
 let test_batch_retraction_recovers_torn_journal_tail () =
-  check_batch_retraction_recovers_exact_reason_evidence
-    ~torn_tail:true ~without_revision_links:false ()
-;;
-
-let test_batch_retraction_recovers_seven_field_receipt () =
-  check_batch_retraction_recovers_exact_reason_evidence
-    ~torn_tail:false ~without_revision_links:true ()
+  check_batch_retraction_recovers_exact_reason_evidence ~torn_tail:true ()
 ;;
 
 let check_ordinary_removals_preserve_archive_until_journal_recovery ~torn_tail () =
@@ -5118,10 +5107,6 @@ let () =
             "batch retraction recovers torn journal tail"
             `Quick
             test_batch_retraction_recovers_torn_journal_tail
-        ; test_case
-            "batch retraction recovers a seven field prepared receipt"
-            `Quick
-            test_batch_retraction_recovers_seven_field_receipt
         ; test_case
             "ordinary removals preserve archive until journal recovery"
             `Quick

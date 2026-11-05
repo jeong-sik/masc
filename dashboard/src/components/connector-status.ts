@@ -386,87 +386,7 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
     pid: 0,
     configured_bindings: [],
     recent_audit: [],
-    storage_paths: {
-      status_path: '',
-      binding_store_path: '',
-      audit_path: '',
-    },
-    runtime_summary: {
-      available: false,
-      connected: false,
-      stale: false,
-      stale_after_sec: 0,
-      status: 'offline',
-      error: '',
-      updated_at: '',
-      reply_mode: '',
-      self_chat_guid: '',
-      last_ready_at: '',
-      bot_user_name: '',
-      bot_user_id: '',
-      guild_count: 0,
-      gate_base_url: '',
-      gate_healthy: null,
-      gate_health_checked_at: '',
-      pid: 0,
-    },
-    binding_summary: {
-      binding_source: '',
-      runtime_bindings_count: 0,
-      configured_bindings_count: 0,
-    },
-    source_health: {
-      storage_paths: 'fallback',
-      runtime_summary: 'fallback',
-      binding_summary: 'fallback',
-      observed_channel: 'missing',
-    },
-    observed_channel: null,
   }
-}
-
-type ConnectorSourceHealthKey = keyof GateConnectorInfo['source_health']
-
-const CONNECTOR_SOURCE_HEALTH_ROWS: Array<{ key: ConnectorSourceHealthKey; label: string }> = [
-  { key: 'storage_paths', label: 'storage paths' },
-  { key: 'runtime_summary', label: 'runtime summary' },
-  { key: 'binding_summary', label: 'binding summary' },
-  { key: 'observed_channel', label: 'observed channel' },
-]
-
-function connectorSourceHealthClass(state: GateConnectorInfo['source_health'][ConnectorSourceHealthKey]): string {
-  switch (state) {
-    case 'present':
-      return 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
-    case 'missing':
-      return 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)]'
-    case 'fallback':
-      return 'border-[var(--color-status-warn)] text-[var(--color-status-warn)]'
-  }
-}
-
-function ConnectorSourceHealthStrip({ connector }: { connector: GateConnectorInfo | null }) {
-  const sourceHealth = connector?.source_health
-  return html`
-    <div
-      class="mt-2 flex flex-wrap items-center gap-1.5 text-3xs"
-      data-testid="connector-source-health"
-      aria-label="Connector source health"
-    >
-      <span class="uppercase tracking-4 text-[var(--color-fg-disabled)]">source health</span>
-      ${CONNECTOR_SOURCE_HEALTH_ROWS.map(row => {
-        const state = sourceHealth?.[row.key] ?? 'missing'
-        return html`
-          <span
-            key=${row.key}
-            class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 ${connectorSourceHealthClass(state)}`}
-            data-connector-source-health=${row.key}
-            data-connector-source-health-state=${state}
-          >${row.label} ${state}</span>
-        `
-      })}
-    </div>
-  `
 }
 
 /** Returns true only when the bind POST succeeded. Errors are surfaced
@@ -697,7 +617,6 @@ function ConnectorLivePanel({
           },
         )}
       />
-      <${ConnectorSourceHealthStrip} connector=${connector} />
 
 
       ${connector?.available === true && keepers.length > 0

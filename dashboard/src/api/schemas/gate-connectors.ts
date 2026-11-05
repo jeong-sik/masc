@@ -1,21 +1,8 @@
 // Gate connectors schema — schema-at-boundary for
 // `GET /api/v1/gate/connectors`.
 //
-// Largest connector-describing endpoint on the dashboard: 5 nested
-// object shapes + 2 arrays + 1 optional observed-channel. Each string
-// field falls back to `''` and each number to `0` (matches the prior
-// `asString(raw.X, '')` / `asNumber(raw.X, 0)` defaulting). Three
-// nested decoders (storage_paths / connector_names / runtime_summary)
-// are guaranteed to return a shaped object even when the input is
-// entirely missing — we preserve that "never null, always a record"
-// contract via `fallback(schema, {...})`.
-//
-// `binding_summary.configured_bindings_count` has a cross-field
-// default: the prior decoder passed `configuredBindings.length` as the
-// fallback. Preserved via a post-parse transform.
-//
-// `connectors[].observed_channel` delegates to
-// `schemas/gate-status.ts` (same `ChannelInfo` shape). Lenient
+// Each string field falls back to `''` and each number to `0` (matches the
+// prior `asString(raw.X, '')` / `asNumber(raw.X, 0)` defaulting). Lenient
 // per-entry is maintained for the connectors list itself.
 //
 // Uses the shared `SchemaDriftError` base landed in #7732.
@@ -38,8 +25,6 @@ import {
 } from 'valibot'
 
 import { SchemaDriftError, parseOrThrow } from './drift-error'
-import { safeParseChannelInfo, type ChannelInfo } from './gate-status'
-import { isRecord } from '../../lib/type-guards'
 
 // --- Nested schemas ---
 
@@ -62,91 +47,6 @@ const DiscordAuditEntrySchema = object({
 })
 
 export type DiscordAuditEntry = InferOutput<typeof DiscordAuditEntrySchema>
-
-// Nested decoders below used `const record = isRecord(raw) ? raw : {}`
-// — i.e. they always returned a shaped object. `fallback(object({...}),
-// {...})` reproduces that exactly: missing or wrong-typed input yields
-// the default shape instead of drift.
-
-const DEFAULT_STORAGE_PATHS = {
-  status_path: '',
-  binding_store_path: '',
-  audit_path: '',
-} as const
-
-const ConnectorStoragePathsSchema = fallback(
-  object({
-    status_path: fallback(string(), ''),
-    binding_store_path: fallback(string(), ''),
-    audit_path: fallback(string(), ''),
-  }),
-  { ...DEFAULT_STORAGE_PATHS },
-)
-
-export type ConnectorStoragePaths = InferOutput<typeof ConnectorStoragePathsSchema>
-
-const ConnectorRuntimeSummarySchema = object({
-  available: fallback(boolean(), false),
-  connected: fallback(boolean(), false),
-  stale: fallback(boolean(), false),
-  stale_after_sec: fallback(number(), 0),
-  status: fallback(string(), ''),
-  error: fallback(string(), ''),
-  updated_at: fallback(string(), ''),
-  reply_mode: fallback(string(), ''),
-  self_chat_guid: fallback(string(), ''),
-  last_ready_at: fallback(string(), ''),
-  bot_user_name: fallback(string(), ''),
-  bot_user_id: fallback(string(), ''),
-  guild_count: fallback(number(), 0),
-  gate_base_url: fallback(string(), ''),
-  // `asBoolean(x) ?? null` — absent/undefined → null, not undefined.
-  gate_healthy: fallback(nullable(boolean()), null),
-  gate_health_checked_at: fallback(string(), ''),
-  pid: fallback(number(), 0),
-})
-
-export type ConnectorRuntimeSummary = InferOutput<typeof ConnectorRuntimeSummarySchema>
-
-const DEFAULT_RUNTIME_SUMMARY: ConnectorRuntimeSummary = {
-  available: false,
-  connected: false,
-  stale: false,
-  stale_after_sec: 0,
-  status: '',
-  error: '',
-  updated_at: '',
-  reply_mode: '',
-  self_chat_guid: '',
-  last_ready_at: '',
-  bot_user_name: '',
-  bot_user_id: '',
-  guild_count: 0,
-  gate_base_url: '',
-  gate_healthy: null,
-  gate_health_checked_at: '',
-  pid: 0,
-}
-
-const ConnectorBindingSummarySchema = object({
-  binding_source: fallback(string(), ''),
-  runtime_bindings_count: fallback(number(), 0),
-  // `configured_bindings_count` falls back to `configuredBindings.length`
-  // at the connector level, not here. A placeholder `0` is used as the
-  // inner default; the connector transform fills the real value.
-  configured_bindings_count: fallback(number(), 0),
-})
-
-export type ConnectorBindingSummary = InferOutput<typeof ConnectorBindingSummarySchema>
-
-export type ConnectorSourceHealthState = 'present' | 'fallback' | 'missing'
-
-export interface ConnectorSourceHealth {
-  storage_paths: ConnectorSourceHealthState
-  runtime_summary: ConnectorSourceHealthState
-  binding_summary: ConnectorSourceHealthState
-  observed_channel: ConnectorSourceHealthState
-}
 
 // --- Connector info ---
 
@@ -187,10 +87,6 @@ const GateConnectorInfoRawSchema = object({
   pid: fallback(number(), 0),
   configured_bindings: optional(unknown()),
   recent_audit: optional(unknown()),
-  storage_paths: optional(unknown()),
-  runtime_summary: optional(unknown()),
-  binding_summary: optional(unknown()),
-  observed_channel: optional(unknown()),
 })
 
 export interface GateConnectorInfo {
@@ -225,11 +121,6 @@ export interface GateConnectorInfo {
   pid: number
   configured_bindings: DiscordConfiguredBinding[]
   recent_audit: DiscordAuditEntry[]
-  storage_paths: ConnectorStoragePaths
-  runtime_summary: ConnectorRuntimeSummary
-  binding_summary: ConnectorBindingSummary
-  source_health: ConnectorSourceHealth
-  observed_channel?: ChannelInfo | null
 }
 
 function parseConnectorsArray<TSchema extends typeof DiscordConfiguredBindingSchema
@@ -244,48 +135,6 @@ function parseConnectorsArray<TSchema extends typeof DiscordConfiguredBindingSch
     if (parsed.success) out.push(parsed.output as InferOutput<TSchema>)
   }
   return out
-}
-
-function parseRuntimeSummary(raw: unknown): ConnectorRuntimeSummary {
-  const parsed = safeParse(ConnectorRuntimeSummarySchema, raw, { abortEarly: true })
-  return parsed.success ? parsed.output : { ...DEFAULT_RUNTIME_SUMMARY }
-}
-
-function parseBindingSummary(raw: unknown, configuredBindingsCount: number): ConnectorBindingSummary {
-  const parsed = safeParse(ConnectorBindingSummarySchema, raw, { abortEarly: true })
-  if (!parsed.success) {
-    return {
-      binding_source: '',
-      runtime_bindings_count: 0,
-      configured_bindings_count: configuredBindingsCount,
-    }
-  }
-  // Cross-field default preserved: if the backend omitted
-  // configured_bindings_count, fall back to the decoded array length.
-  const hasField = isRecord(raw)
-    && typeof raw.configured_bindings_count === 'number'
-  return {
-    ...parsed.output,
-    configured_bindings_count: hasField
-      ? parsed.output.configured_bindings_count
-      : configuredBindingsCount,
-  }
-}
-
-function parseObservedChannel(raw: unknown): ChannelInfo | null {
-  if (raw === undefined || raw === null) return null
-  const parsed = safeParseChannelInfo(raw)
-  return parsed.success ? parsed.output : null
-}
-
-function sourceHealthForObject(raw: unknown): ConnectorSourceHealthState {
-  return isRecord(raw) ? 'present' : 'fallback'
-}
-
-function sourceHealthForObservedChannel(raw: unknown): ConnectorSourceHealthState {
-  if (raw === undefined || raw === null) return 'missing'
-  const parsed = safeParseChannelInfo(raw)
-  return parsed.success ? 'present' : 'fallback'
 }
 
 function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
@@ -333,25 +182,7 @@ function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
     pid: outer.output.pid,
     configured_bindings,
     recent_audit,
-    storage_paths: parseStoragePaths(outer.output.storage_paths),
-    runtime_summary: parseRuntimeSummary(outer.output.runtime_summary),
-    binding_summary: parseBindingSummary(
-      outer.output.binding_summary,
-      configured_bindings.length,
-    ),
-    source_health: {
-      storage_paths: sourceHealthForObject(outer.output.storage_paths),
-      runtime_summary: sourceHealthForObject(outer.output.runtime_summary),
-      binding_summary: sourceHealthForObject(outer.output.binding_summary),
-      observed_channel: sourceHealthForObservedChannel(outer.output.observed_channel),
-    },
-    observed_channel: parseObservedChannel(outer.output.observed_channel),
   }
-}
-
-function parseStoragePaths(raw: unknown): ConnectorStoragePaths {
-  const parsed = safeParse(ConnectorStoragePathsSchema, raw, { abortEarly: true })
-  return parsed.success ? parsed.output : { ...DEFAULT_STORAGE_PATHS }
 }
 
 // --- Outer shape ---
@@ -399,7 +230,3 @@ export function parseGateConnectorsData(data: unknown): GateConnectorsData {
     generated_at: outer.generated_at,
   }
 }
-
-// Re-export helper for the `ChannelInfo` dependency to keep the public
-// surface of this module cohesive.
-export type { ChannelInfo }

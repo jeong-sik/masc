@@ -95,7 +95,6 @@ let lane_specs =
     ; Standalone_lane.Hitl_auto_judge
     ; Standalone_lane.Librarian
     ; Standalone_lane.Verifier
-    ; Standalone_lane.Browser_stagehand
     ; Standalone_lane.Candle_appraiser
     ]
 ;;
@@ -758,8 +757,7 @@ let lane_json
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Verifier
-    | Standalone_lane.Browser_stagehand -> []
+    | Standalone_lane.Verifier -> []
   in
   `Assoc
     ([ "lane_id", `String lane_id
@@ -857,7 +855,7 @@ let live_lane_configuration registry lane_id =
             else None)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok ({ selected_slots; cli_slots } as resolved) ->
+  | Ok { selected_slots; cli_slots } ->
     (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
        can actually judge through are a shorter list than the declaration
        whenever one names a binding that takes no inline tools or no system
@@ -872,8 +870,7 @@ let live_lane_configuration registry lane_id =
         selected_slots
     in
     let typed_lane = Standalone_lane.of_id lane_id in
-    let admitted_catalog_slots, admitted_cli_slots, slot_rejections,
-        stagehand_dropped_slots, stagehand_error =
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
       match
         typed_lane,
         Runtime_exact_output_registry.declared_lane registry ~lane_id
@@ -884,29 +881,7 @@ let live_lane_configuration registry lane_id =
         in
         ( lane.Runtime.admitted_catalog_slot_ids
         , lane.Runtime.admitted_cli_slot_ids
-        , lane.Runtime.slot_rejections
-        , []
-        , None )
-      | Some Runtime.Browser_stagehand, _ ->
-        (match Browser_stagehand_model.admit_lane resolved with
-         | Ok admitted ->
-           ( List.map
-               (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-               admitted.http_slots
-           , admitted.cli_slots
-           , []
-           , List.map
-               (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)
-               admitted.refused_slots
-           , None )
-         | Error refusal ->
-           ( []
-           , cli_slots
-           , []
-           , []
-           , Some
-               (Browser_stagehand_model.refusal_to_string
-                  (Browser_stagehand_model.Lane_refused refusal)) ))
+        , lane.Runtime.slot_rejections )
       | Some Runtime.Verifier, None
       | Some
           ( Runtime.Librarian
@@ -914,7 +889,7 @@ let live_lane_configuration registry lane_id =
           | Runtime.Board_attention
           | Runtime.Candle_appraiser )
         , _
-      | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
     in
     let dropped_slots =
       dropped_slots
@@ -922,7 +897,6 @@ let live_lane_configuration registry lane_id =
           (fun (rejection : Runtime.verifier_slot_rejection) ->
              rejection.Runtime.slot_id)
           slot_rejections
-      @ stagehand_dropped_slots
     in
     Configured
       { admitted_slots = admitted_catalog_slots
@@ -931,9 +905,6 @@ let live_lane_configuration registry lane_id =
       ; declared_slots
       ; declared_cli_slots
       ; admission_error =
-          (match stagehand_error with
-           | Some _ as error -> error
-           | None ->
           (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
              (match slot_rejections with
@@ -943,7 +914,7 @@ let live_lane_configuration registry lane_id =
                   (String.concat
                      "; "
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
-           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None))
+           | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ -> None)
       }
   | Error (Runtime_exact_output_registry.Exact_lane_off _) ->
     Disabled { declared_slots; declared_cli_slots }

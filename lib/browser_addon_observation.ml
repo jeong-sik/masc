@@ -68,7 +68,6 @@ type published = {
   space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list;
   client_rows : Yojson.Safe.t list;
   automation : Browser_selection.work_browser;
-  stagehand : Browser_selection.work_browser;
   unavailable : unavailable list;
 }
 
@@ -77,7 +76,7 @@ let decode_snapshot = function
       (match List.assoc_opt "state" fields,List.assoc_opt "owned_backends" fields,
          List.assoc_opt "clients" fields with
        | Some (`String "serving"),Some owned,Some (`List rows) ->
-           let* automation,stagehand=Browser_addon_inventory.owned_of_json owned in
+           let* automation=Browser_addon_inventory.owned_of_json owned in
            let rec decode acc = function
              | [] -> Ok (List.rev acc)
              | `Assoc row::rest ->
@@ -122,7 +121,7 @@ let decode_snapshot = function
              | None -> Ok []
              | Some (`List rows) -> unavailable [] rows
              | Some _ -> Error "invalid unavailable browser backends" in
-           Ok {clients;space_presence;client_rows=rows;automation;stagehand;unavailable}
+           Ok {clients;space_presence;client_rows=rows;automation;unavailable}
        | Some (`String "retired"),(None|Some _),(None|Some _) -> Error "the browser worker is retired"
        | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
   | _ -> Error "browser inventory is unavailable"
@@ -194,5 +193,4 @@ let merge ~among workers =
     space_presence=List.concat_map (fun published -> List.filter (fun (id,_) -> has_id id) published.space_presence) live;
     client_rows=List.concat_map rows live;
     unavailable=List.concat_map (fun published -> published.unavailable) live;
-    automation=owned Browser_lane.Backend.Automation (fun published -> published.automation);
-    stagehand=owned Browser_lane.Backend.Stagehand (fun published -> published.stagehand) }
+    automation=owned Browser_lane.Backend.Automation (fun published -> published.automation) }

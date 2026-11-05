@@ -262,7 +262,7 @@ let selection_id = function
   | Manual_instance {instance_id;_} -> "instance/" ^ instance_id
 let compatible selection state = match selection,state with
   | Exact _,Exact_state _ | Browser Browser_lane.Lane_name.Live,Browser_clients _
-  | Browser (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand),Browser_executor _
+  | Browser Browser_lane.Lane_name.Automation,Browser_executor _
   | Machine _,Machine_state _ -> true
   | Declaration _,Package_state {declaration=Some _;instances} ->
       List.for_all (fun (item : instance) -> Option.is_some item.applied_revision) instances
@@ -270,7 +270,7 @@ let compatible selection state = match selection,state with
       item.instance_id=instance_id && item.incarnation=incarnation && item.applied_revision=None
   | Exact _,(Browser_clients _ | Browser_executor _ | Machine_state _ | Package_state _)
   | Browser Browser_lane.Lane_name.Live,(Exact_state _ | Browser_executor _ | Machine_state _ | Package_state _)
-  | Browser (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand),
+  | Browser Browser_lane.Lane_name.Automation,
     (Exact_state _ | Browser_clients _ | Machine_state _ | Package_state _)
   | Machine _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _)
   | Declaration _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _

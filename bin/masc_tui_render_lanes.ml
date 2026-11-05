@@ -1063,8 +1063,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Lane_run_identity.Hitl_auto_judge
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
-    | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Browser_stagehand -> "ACTOR"
+    | Lane_run_identity.Candle_appraiser -> "ACTOR"
   in
   (* The slot takes what the drawn columns leave. *)
   let run_layout =

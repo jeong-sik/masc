@@ -2,8 +2,7 @@
     domain work executed through an Addon. Input/output values are exact.
     A logical lane identity does not select or enable a current executor. *)
 
-(** A run's lane. Verifier reviews have separate Task and Goal registries;
-    Browser Stagehand requests do not yet create retained run records. Both
+(** A run's lane. Verifier reviews have separate Task and Goal registries and
     are excluded here, including on replay. *)
 type lane =
   | Librarian
@@ -20,12 +19,11 @@ val lane_id : lane -> string
 (** Wire/storage key of {!run_lane}. *)
 
 val lane_of_standalone : Standalone_lane.t -> lane option
-(** [None] for [Standalone_lane.Verifier] and
-    [Standalone_lane.Browser_stagehand], whose runs this registry does not
+(** [None] for [Standalone_lane.Verifier], whose runs this registry does not
     record. *)
 
 val lane_of_run_lane : Lane_run_identity.t -> lane option
-(** [None] for Verifier and Browser Stagehand. This registry's replay uses
+(** [None] for Verifier. This registry's replay uses
     the observation vocabulary, not the set of currently configurable routes. *)
 
 type outcome =

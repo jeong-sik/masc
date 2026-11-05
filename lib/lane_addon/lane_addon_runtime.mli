@@ -339,10 +339,10 @@ val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) resu
 val native_claims_directory : string
 (** The directory below the Lane Add-on store root that holds the native claim
     slots. *)
-type native_claim_slot = Installation_slot | Chrome_child_slot | Live_bidi_child_slot
+type native_claim_slot = Installation_slot | Live_bidi_child_slot
 (** Who reads a native claim slot: the host recovering an installation reads
-    its cleanup descriptor through {!Browser_addon_socket}; a Chrome or live
-    BiDi child slot is compared with the descriptor its parent recomputes. *)
+    its cleanup descriptor through {!Browser_addon_socket}; a live BiDi child
+    slot is compared with the descriptor its parent recomputes. *)
 val native_claim_slot_of_name : string -> native_claim_slot option
 (** The slot a directory name below {!native_claims_directory} names, as this
     module creates it; [None] for a name it never creates. *)

@@ -1551,13 +1551,12 @@ let run ~sw ~read_browser_document backend m e =
 let native_claims_directory = "native-claims"
 let native_claim_root store = Filename.concat (Lane_addon_store.root store) native_claims_directory
 (* Every directory under [native_claim_root] is one claim slot: an
-   installation's, or the Chrome or live BiDi child slot of one instance. Its
+   installation's, or the live BiDi child slot of one instance. Its
    name is the digest of that id after the slot's prefix. *)
-type native_claim_slot = Installation_slot | Chrome_child_slot | Live_bidi_child_slot
+type native_claim_slot = Installation_slot | Live_bidi_child_slot
 [@@deriving enumerate]
 let native_claim_slot_prefix = function
   | Installation_slot -> ""
-  | Chrome_child_slot -> "browser-"
   | Live_bidi_child_slot -> "live-bidi-"
 let native_claim_directory store slot ~id =
   Filename.concat (native_claim_root store) (native_claim_slot_prefix slot ^ Lane_addon_store.digest id)
@@ -1729,12 +1728,6 @@ let backend ~store ~artifact_store () = match !override with
                       let root=Browser_gecko_profile.root ~lane_addon_root:(Lane_addon_store.root store) in
                       let* profiles=Browser_gecko_profile.prepare_instance ~root ~instance_id in
                       Ok (Browser_addon_socket.Automation {Browser_addon_automation.driver;binary;profiles},None)
-                    | Browser_lane.Backend.Stagehand ->
-                      let* browser=table Browser_configuration.Stagehand in
-                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
-                      let* configuration=Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id) in
-                      Ok (Browser_addon_socket.Stagehand configuration,None)
                     | Browser_lane.Backend.Owned_firefox ->
                       let* browser=table Browser_configuration.Live_bidi in
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
@@ -2326,7 +2319,6 @@ let document_route_services ~services ~unready ~backend ~clients route =
   let knowledge=Browser_addon_observation.ego_identity_knowledge identities in
   match route with
   | Browser_lane.Automation_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Automation) services)
-  | Stagehand_route -> Ok (List.filter (fun service -> backend service=Browser_lane.Backend.Stagehand) services)
   | Live_route None -> (match knowledge,live with
       | Browser_addon_observation.Unknown_ego_identities,_ ->
           Error "live browser controller identities are incomplete; the document read requires an explicit observed non-Ego client"

@@ -30,14 +30,12 @@ let list parse = function
   | _ -> Error "expected array"
 let route_to_json = function
   | B.Automation_route -> `Assoc ["lane",string "automation"]
-  | B.Stagehand_route -> `Assoc ["lane",string "stagehand"]
   | B.Live_route client -> `Assoc ["lane",string "live";"clientId",nullable (fun id -> string (B.client_id_to_string id)) client]
 let route_of_json value =
   let* fields = object_fields ["lane";"clientId"] value in
   let* lane = text_field fields "lane" in
   match lane,fields with
   | "automation",[_] -> Ok B.Automation_route
-  | "stagehand",[_] -> Ok B.Stagehand_route
   | "live",_ ->
       let* _ = exact ["lane";"clientId"] value in
       let* client = required fields "clientId" in
@@ -142,15 +140,9 @@ let verb_of_json ~route value =
         | "frames",None,None,None -> Ok `Frames | "dialog",None,None,None -> Ok `Dialog
         | _ -> Error "invalid context read mode" in
       Ok (B.Page_context {tab_id;frame_path;mode})
-  | "page.instruct" -> let* fields = fields ["tabId";"instruction"] in
-      let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = text_field fields "instruction" in
-      Ok (B.Page_instruct {tab_id;instruction})
   | "page.locate" -> let* fields = fields ["tabId";"instruction"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = optional_field fields "instruction" text in
       Ok (B.Page_locate {tab_id;instruction})
-  | "page.extract" -> let* fields = fields ["tabId";"instruction";"schema"] in
-      let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = text_field fields "instruction" in
-      Ok (B.Page_extract {tab_id;instruction;schema=List.assoc_opt "schema" fields})
   | _ -> Error "unknown browser verb"
 
 type command = Snapshot | Retire
@@ -175,9 +167,9 @@ let ends_with_caller = function
      | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _
      | Page_snapshot _ | Page_native_workflow _ | Page_interact _
      | Session_open _ | Session_close | Session_status | Page_goto _
-     | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
-     | Page_locate _ | Page_extract _ -> true)
-  | Issue {route=(B.Automation_route | B.Stagehand_route | B.Live_route None);_}
+     | Page_elements _ | Page_act _ | Page_context _
+     | Page_locate _ -> true)
+  | Issue {route=(B.Automation_route | B.Live_route None);_}
   | Snapshot | Retire | Upload_stage _ | Upload_discard _ | Download_claim _
   | Download_commit _ | Download_release _ | Model_requests | Model_result _
   | Model_wait _ | Extension _ | Poll _ | Deliver _ | Disconnect _ -> false
@@ -265,7 +257,7 @@ let of_json value =
         let* raw = required fields "timeout_sec" in let* timeout_sec = positive raw in
         let* raw = required fields "only_if_idle" in let* only_if_idle = boolean raw in
         let* () = if only_if_idle then (match verb with B.Page_document _ -> Ok ()
-          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "idle admission supports document reads only") else Ok () in
+          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_locate _ -> Error "idle admission supports document reads only") else Ok () in
         Ok (Issue {route;verb;actor;timeout_sec;only_if_idle})
     | _ -> Error "unknown browser worker operation" in
   Ok {incarnation;command}

@@ -5726,22 +5726,15 @@
  (modules test_browser_bidi_downloads_reply_window)
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
-(include stanzas/test_browser_cdp.inc)
-(include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_selection.inc)
 (include stanzas/test_browser_task_capabilities.inc)
-(include stanzas/test_browser_stagehand_model.inc)
-(include stanzas/test_browser_addon_chrome_profile.inc)
-(include stanzas/test_browser_stagehand_executor.inc)
+(include stanzas/test_browser_addon_decoders.inc)
 (include stanzas/test_browser_keyboard.inc)
 (include stanzas/test_browser_console.inc)
 (include stanzas/test_browser_network.inc)
 (include stanzas/test_browser_cookies.inc)
-(include stanzas/test_browser_stagehand_backend.inc)
-(include stanzas/test_browser_extension_companion.inc)
 (include stanzas/test_lane_addon_companion_broker.inc)
 (include stanzas/test_lane_addon_companion_allocation.inc)
-(include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -6243,21 +6236,6 @@
  (deps (source_tree ../addons/browser/automation)
        (source_tree %{workspace_root}/config/prompts))
  (action (run %{test} %{dep:../addons/browser/automation/lane.toml})))
-
-(test
- (name test_browser_addon_stagehand_model)
- (modules test_browser_addon_stagehand_model)
- (libraries masc_test_deps masc.server exact_output_fixture masc.browser_lane mirage-crypto-rng.unix)
- (deps (source_tree ../addons/browser/stagehand) fixtures/stagehand/llm-generate-params.json)
- (action (run %{test} %{dep:../addons/browser/stagehand/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
-
-(test
- (name test_browser_addon_stagehand)
- (modules test_browser_addon_stagehand)
- (libraries masc_test_deps masc.browser_lane masc.browser_configuration masc.native_addon_lease
-  masc.browser_process_owner masc_process)
- (deps ../bin/masc_native_addon_launcher.exe ../bin/masc_browser_process_owner.exe)
- (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe} %{dep:../bin/masc_browser_process_owner.exe})))
 
 (test
  (name test_lane_addon_worker)

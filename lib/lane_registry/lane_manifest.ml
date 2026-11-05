@@ -2,7 +2,6 @@ let label : Lane_id.builtin -> string = function
   | Lane_id.Exact lane -> Lane_run_identity.label (Standalone_lane.run_identity lane)
   | Lane_id.Browser Browser_lane.Lane_name.Live -> "Browser Lane (live)"
   | Lane_id.Browser Browser_lane.Lane_name.Automation -> "Browser Lane (automation)"
-  | Lane_id.Browser Browser_lane.Lane_name.Stagehand -> "Browser Lane (stagehand)"
   | Lane_id.Machine Machine_lane.Msx -> "MSX"
   | Lane_id.Machine Machine_lane.Dos -> "DOS"
 ;;
@@ -16,9 +15,6 @@ let purpose : Lane_id.builtin -> string = function
     "Selects the next Memory OS snapshot from immutable Keeper history."
   | Lane_id.Exact Standalone_lane.Verifier ->
     "Reviews Task completion and Goal proof evidence."
-  | Lane_id.Exact Standalone_lane.Browser_stagehand ->
-    "Answers structured model requests from the Stagehand browser lane; run records are not \
-     retained yet."
   | Lane_id.Exact Standalone_lane.Candle_appraiser ->
     "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights."
   | Lane_id.Browser Browser_lane.Lane_name.Live ->
@@ -26,9 +22,6 @@ let purpose : Lane_id.builtin -> string = function
      and host."
   | Lane_id.Browser Browser_lane.Lane_name.Automation ->
     "Drives a Firefox the server starts through geckodriver."
-  | Lane_id.Browser Browser_lane.Lane_name.Stagehand ->
-    "Drives a Chromium the server starts with the Stagehand extension; sentence verbs are \
-     answered there."
   | Lane_id.Machine Machine_lane.Msx ->
     "The one MSX machine in the server; masc_msx_* tools put keys in and read its screen."
   | Lane_id.Machine Machine_lane.Dos ->

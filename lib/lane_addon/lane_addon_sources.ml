@@ -45,14 +45,10 @@ let kind_of_string s = List.find_opt (fun v -> String.equal (kind_to_string v) s
 type document_observer =
   | Operator_client_observer
   | Automation_observer
-  | No_idle_document_observer
 
 let document_observer = function
   | Browser_lane.Lane_name.Live -> Operator_client_observer
   | Browser_lane.Lane_name.Automation -> Automation_observer
-  (* The Stagehand backend has no idle document observer; the optional source
-     is unavailable there, as it is for a busy browser. *)
-  | Browser_lane.Lane_name.Stagehand -> No_idle_document_observer
 
 let kind_of_machine = function
   | Machine_lane.Msx -> Msx_capture_kind
@@ -62,12 +58,11 @@ let offers : Lane_id.builtin -> kind list = function
   | Lane_id.Exact
       ( Standalone_lane.Librarian | Standalone_lane.Hitl_auto_judge
       | Standalone_lane.Board_attention
-      | Standalone_lane.Verifier | Standalone_lane.Browser_stagehand
+      | Standalone_lane.Verifier
       | Standalone_lane.Candle_appraiser ) -> []
   | Lane_id.Browser lane ->
     (match document_observer lane with
-     | Operator_client_observer | Automation_observer -> [ Browser_document_kind ]
-     | No_idle_document_observer -> [])
+     | Operator_client_observer | Automation_observer -> [ Browser_document_kind ])
   | Lane_id.Machine machine -> [ kind_of_machine machine ]
 
 let observable_browser_lanes =
@@ -130,10 +125,7 @@ let parse_source = function
                 | Operator_client_observer, Some client -> Ok (Live client)
                 | Operator_client_observer, None -> Error "live browser observation requires an explicit client_id"
                 | Automation_observer, None -> Ok Automation
-                | Automation_observer, Some _ -> Error "automation does not use a live client_id"
-                | No_idle_document_observer, _ ->
-                  Error ("a lane addon cannot observe the " ^ Browser_lane.Lane_name.to_wire lane
-                         ^ " lane: it has no idle document observer")) in
+                | Automation_observer, Some _ -> Error "automation does not use a live client_id") in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value
              | _ -> Error "tab_id requires a nonnegative integer" in

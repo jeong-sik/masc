@@ -27,7 +27,7 @@ let expected command reply = match command,reply with
 let issue_policy t route verb =
   let open Browser_lane in
   match route with
-  | Automation_route | Stagehand_route -> Ok (reply_policy verb)
+  | Automation_route -> Ok (reply_policy verb)
   | Live_route selected ->
     match reply_policy verb with
     | Executor_owned -> Ok Executor_owned
@@ -77,15 +77,12 @@ let raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
           | Error _ -> Error (Outcome_unknown "invalid browser service reply"))) in
       try (match command with
         | W.Retire | W.Model_wait _ | W.Extension _ -> exchange ()
-        | W.Issue {route;verb;timeout_sec;_} ->
-          let owned_startup=match route with
-            | Browser_lane.Stagehand_route -> Option.is_none (Browser_lane.stagehand_server_deadline verb ~timeout_sec)
-            | Browser_lane.Automation_route | Browser_lane.Live_route _ -> false in
+        | W.Issue {verb;_} ->
           (* Policy was fixed before dispatch from the original worker's
              validated metadata, never from a caller-supplied transport. *)
           let executor_owned = match policy with
             | Executor_owned -> true | Reply_window -> false in
-          if owned_startup || executor_owned || Browser_lane.verb_uses_model verb then exchange ()
+          if executor_owned || Browser_lane.verb_uses_model verb then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange
         | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with

@@ -424,6 +424,129 @@ let test_branch_status_at_reads_a_checkout () =
       | Ok _ -> Alcotest.fail "a detached checkout must read as Detached"
       | Error e -> Alcotest.fail ("branch status failed: " ^ e))
 
+let branch_record ?(head = " ") ?(upstream = "") ?(track = "") ?(epoch = "1787000000")
+    ?(subject = "subject") name =
+  String.concat "\000" [ head; name; upstream; track; epoch; subject ]
+
+let branch_rows records = String.concat "\n" records ^ "\n"
+
+let test_branch_rows_read_every_upstream_relation () =
+  let output =
+    branch_rows
+      [ branch_record ~head:"*" ~upstream:"origin/main" "main"
+      ; branch_record ~upstream:"origin/a" ~track:"ahead 2" "a"
+      ; branch_record ~upstream:"origin/b" ~track:"behind 1" "b"
+      ; branch_record ~upstream:"origin/c" ~track:"ahead 2, behind 1" "feat/c"
+      ; branch_record ~upstream:"origin/d" ~track:"gone" "d"
+      ; branch_record ~subject:"fix: tab\tand : colon" "e"
+      ]
+  in
+  match Repo_git.branch_list_of_for_each_ref ~max_entries:10 output with
+  | Error e -> Alcotest.fail e
+  | Ok { bl_entries; bl_truncated } ->
+      Alcotest.(check bool) "not truncated" false bl_truncated;
+      let by_name name =
+        match List.find_opt (fun (e : Repo_git.branch_entry) -> String.equal e.be_name name) bl_entries with
+        | Some entry -> entry
+        | None -> Alcotest.fail ("missing " ^ name)
+      in
+      Alcotest.(check (list string)) "order is git's"
+        [ "main"; "a"; "b"; "feat/c"; "d"; "e" ]
+        (List.map (fun (e : Repo_git.branch_entry) -> e.be_name) bl_entries);
+      Alcotest.(check bool) "the HEAD mark" true (by_name "main").be_current;
+      Alcotest.(check bool) "others are not current" false (by_name "a").be_current;
+      Alcotest.(check bool) "in step is zero counts, not no upstream" true
+        ((by_name "main").be_upstream
+         = Repo_git.Tracking { upstream = "origin/main"; ahead = 0; behind = 0 });
+      Alcotest.(check bool) "ahead only" true
+        ((by_name "a").be_upstream
+         = Repo_git.Tracking { upstream = "origin/a"; ahead = 2; behind = 0 });
+      Alcotest.(check bool) "behind only" true
+        ((by_name "b").be_upstream
+         = Repo_git.Tracking { upstream = "origin/b"; ahead = 0; behind = 1 });
+      Alcotest.(check bool) "both" true
+        ((by_name "feat/c").be_upstream
+         = Repo_git.Tracking { upstream = "origin/c"; ahead = 2; behind = 1 });
+      Alcotest.(check bool) "gone keeps the name" true
+        ((by_name "d").be_upstream = Repo_git.Upstream_gone "origin/d");
+      Alcotest.(check bool) "no upstream" true
+        ((by_name "e").be_upstream = Repo_git.No_upstream);
+      Alcotest.(check string) "subject keeps tabs and colons" "fix: tab\tand : colon"
+        (by_name "e").be_subject;
+      Alcotest.(check int) "commit time" 1787000000 (by_name "e").be_commit_epoch
+
+let test_branch_rows_refuse_what_they_cannot_read () =
+  let reject label output =
+    Alcotest.(check bool) label true
+      (Result.is_error (Repo_git.branch_list_of_for_each_ref ~max_entries:5 output))
+  in
+  reject "five fields" "*\000main\000\000\0001787000000\n";
+  reject "an unknown HEAD mark" (branch_rows [ branch_record ~head:"?" "main" ]);
+  reject "an empty name" (branch_rows [ branch_record "" ]);
+  reject "a non-numeric time" (branch_rows [ branch_record ~epoch:"yesterday" "main" ]);
+  reject "a negative time" (branch_rows [ branch_record ~epoch:"-1" "main" ]);
+  reject "an unreadable track" (branch_rows [ branch_record ~upstream:"o/m" ~track:"ahead x" "m" ]);
+  reject "a zero count" (branch_rows [ branch_record ~upstream:"o/m" ~track:"ahead 0" "m" ]);
+  reject "behind before ahead"
+    (branch_rows [ branch_record ~upstream:"o/m" ~track:"behind 1, ahead 2" "m" ]);
+  reject "two aheads" (branch_rows [ branch_record ~upstream:"o/m" ~track:"ahead 1, ahead 2" "m" ]);
+  reject "counts without an upstream" (branch_rows [ branch_record ~track:"ahead 2" "m" ]);
+  reject "gone without an upstream" (branch_rows [ branch_record ~track:"gone" "m" ]);
+  Alcotest.(check bool) "max_entries below one is refused" true
+    (Result.is_error (Repo_git.branch_list_of_for_each_ref ~max_entries:0 ""));
+  Alcotest.(check bool) "no branches is an empty list" true
+    (match Repo_git.branch_list_of_for_each_ref ~max_entries:5 "" with
+     | Ok { bl_entries = []; bl_truncated = false } -> true
+     | Ok _ | Error _ -> false);
+  let three = branch_rows [ branch_record "a"; branch_record "b"; branch_record "c" ] in
+  Alcotest.(check bool) "a record past the limit marks the list cut" true
+    (match Repo_git.branch_list_of_for_each_ref ~max_entries:2 three with
+     | Ok { bl_entries = [ _; _ ]; bl_truncated = true } -> true
+     | Ok _ | Error _ -> false)
+
+let test_branches_at_reads_a_checkout () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      let base =
+        match Repo_git.branch_status_at ~local_path:source () with
+        | Ok (Repo_git.On_branch { name; _ }) -> name
+        | Ok Repo_git.Detached | Error _ -> Alcotest.fail "fixture has no branch"
+      in
+      let git args =
+        match run_cmd ~cwd:source ("git" :: args) with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("git " ^ String.concat " " args ^ " failed: " ^ e)
+      in
+      git [ "checkout"; "-b"; "feat/tracked" ];
+      write_file (Filename.concat source "extra.txt") "extra\n";
+      git [ "add"; "extra.txt" ];
+      git [ "commit"; "-m"; "work on the branch" ];
+      git [ "branch"; "--set-upstream-to=" ^ base ];
+      git [ "branch"; "loose" ; base ];
+      match Repo_git.branches_at ~local_path:source ~max_entries:10 () with
+      | Error e -> Alcotest.fail ("branches failed: " ^ e)
+      | Ok { bl_entries; bl_truncated } ->
+          Alcotest.(check bool) "not truncated" false bl_truncated;
+          let find name =
+            List.find_opt (fun (e : Repo_git.branch_entry) -> String.equal e.be_name name) bl_entries
+          in
+          (match find "feat/tracked" with
+           | Some entry ->
+               Alcotest.(check bool) "the checked-out branch" true entry.be_current;
+               Alcotest.(check string) "its tip subject" "work on the branch" entry.be_subject;
+               Alcotest.(check bool) "one commit ahead of its upstream" true
+                 (entry.be_upstream
+                  = Repo_git.Tracking { upstream = base; ahead = 1; behind = 0 })
+           | None -> Alcotest.fail "feat/tracked is missing");
+          (match find "loose" with
+           | Some entry ->
+               Alcotest.(check bool) "another branch is not current" false entry.be_current;
+               Alcotest.(check bool) "a fresh branch has no upstream" true
+                 (entry.be_upstream = Repo_git.No_upstream)
+           | None -> Alcotest.fail "loose is missing");
+          Alcotest.(check bool) "the base branch is listed" true (Option.is_some (find base)))
+
 let test_status_files_preserve_paths_and_axes () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -565,6 +688,15 @@ let () =
 	            test_branch_status_detached_and_malformed;
 	          Alcotest.test_case "reads a real checkout" `Quick
 	            test_branch_status_at_reads_a_checkout;
+	        ] );
+	      ( "branches",
+	        [
+	          Alcotest.test_case "reads every upstream relation" `Quick
+	            test_branch_rows_read_every_upstream_relation;
+	          Alcotest.test_case "refuses what it cannot read" `Quick
+	            test_branch_rows_refuse_what_they_cannot_read;
+	          Alcotest.test_case "reads a real checkout" `Quick
+	            test_branches_at_reads_a_checkout;
 	        ] );
 	      ( "origin_head_branch",
 	        [

@@ -607,6 +607,122 @@ let branch_status_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok output -> branch_status_of_porcelain_v2_z output
 
+type branch_entry = {
+  be_name : string;
+  be_current : bool;
+  be_upstream : upstream_state;
+  be_commit_epoch : int;
+  be_subject : string;
+}
+
+type branch_list = {
+  bl_entries : branch_entry list;
+  bl_truncated : bool;
+}
+
+type branch_track =
+  | Track_in_step
+  | Track_gone
+  | Track_counts of int * int
+
+(* [%(upstream:track,nobracket)] is one of: empty (in step with the upstream),
+   [gone], [ahead N], [behind M] or [ahead N, behind M]. Any other text is an
+   error, never read as "in step". *)
+let branch_track_of_field field =
+  let count prefix part =
+    let length = String.length prefix in
+    if String.length part > length && String.equal (String.sub part 0 length) prefix then
+      match int_of_string_opt (String.sub part length (String.length part - length)) with
+      | Some n when n > 0 -> Some n
+      | Some _ | None -> None
+    else None
+  in
+  match String.split_on_char ',' field |> List.map String.trim with
+  | [ "" ] -> Stdlib.Ok Track_in_step
+  | [ "gone" ] -> Stdlib.Ok Track_gone
+  | [ part ] ->
+      (match count "ahead " part, count "behind " part with
+       | Some ahead, None -> Stdlib.Ok (Track_counts (ahead, 0))
+       | None, Some behind -> Stdlib.Ok (Track_counts (0, behind))
+       | Some _, Some _ | None, None ->
+           Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field))
+  | [ first; second ] ->
+      (match count "ahead " first, count "behind " second with
+       | Some ahead, Some behind -> Stdlib.Ok (Track_counts (ahead, behind))
+       | Some _, None | None, Some _ | None, None ->
+           Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field))
+  | _ ->
+      Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field)
+
+(* One record of the [for-each-ref] format used by [branches_at]:
+   [HEAD NUL name NUL upstream NUL track NUL epoch NUL subject]. A record is one
+   line because a ref name and a subject hold no newline. *)
+let branch_entry_of_record record =
+  match String.split_on_char '\000' record with
+  | [ head; name; upstream; track; epoch; subject ] ->
+      let ( let* ) = Stdlib.Result.bind in
+      let* be_current =
+        match head with
+        | "*" -> Stdlib.Ok true
+        | " " -> Stdlib.Ok false
+        | other -> Stdlib.Error (Printf.sprintf "git branch has an unreadable HEAD mark: %S" other)
+      in
+      let* be_commit_epoch =
+        match int_of_string_opt epoch with
+        | Some value when value >= 0 -> Stdlib.Ok value
+        | Some _ | None ->
+            Stdlib.Error (Printf.sprintf "git branch has an unreadable commit time: %S" epoch)
+      in
+      let* track = branch_track_of_field track in
+      let* be_upstream =
+        match upstream, track with
+        | "", Track_in_step -> Stdlib.Ok No_upstream
+        | "", (Track_gone | Track_counts (_, _)) ->
+            Stdlib.Error "git branch reports tracking counts without an upstream"
+        | upstream, Track_in_step ->
+            Stdlib.Ok (Tracking { upstream; ahead = 0; behind = 0 })
+        | upstream, Track_gone -> Stdlib.Ok (Upstream_gone upstream)
+        | upstream, Track_counts (ahead, behind) ->
+            Stdlib.Ok (Tracking { upstream; ahead; behind })
+      in
+      if String.equal name "" then Stdlib.Error "git branch row has an empty name"
+      else Stdlib.Ok { be_name = name; be_current; be_upstream; be_commit_epoch; be_subject = subject }
+  | fields ->
+      Stdlib.Error
+        (Printf.sprintf "git branch row has %d fields, expected 6" (List.length fields))
+
+(* Keeps the first [max_entries] records. A record after that proves the list was
+   cut. A malformed record is an error, never a skipped one. *)
+let branch_list_of_for_each_ref ~max_entries output =
+  if max_entries < 1 then Stdlib.Error "git branch listing needs max_entries of at least 1"
+  else
+    let records =
+      match List.rev (String.split_on_char '\n' output) with
+      | "" :: rest -> List.rev rest
+      | _ -> String.split_on_char '\n' output
+    in
+    let rec take acc count = function
+      | [] -> Stdlib.Ok { bl_entries = List.rev acc; bl_truncated = false }
+      | _ :: _ when count >= max_entries ->
+          Stdlib.Ok { bl_entries = List.rev acc; bl_truncated = true }
+      | record :: rest ->
+          (match branch_entry_of_record record with
+           | Stdlib.Error msg -> Stdlib.Error msg
+           | Stdlib.Ok entry -> take (entry :: acc) (count + 1) rest)
+    in
+    take [] 0 records
+
+let branches_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entries () =
+  match
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+      [ "--no-optional-locks"; "for-each-ref"; "--sort=-committerdate"
+      ; "--format=%(HEAD)%00%(refname:lstrip=2)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(contents:subject)"
+      ; "refs/heads/"
+      ]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok output -> branch_list_of_for_each_ref ~max_entries output
+
 let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
     run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec

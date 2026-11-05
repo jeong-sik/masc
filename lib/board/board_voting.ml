@@ -166,8 +166,17 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                         Board_vote_transition.apply_counts transition
                           ~votes_up:post.votes_up ~votes_down:post.votes_down
                       in
+                      (* [ts] was taken before the vote's log row was written,
+                         outside the lock. An edit that committed in between
+                         moved [updated_at] past it, and the Board scan reads
+                         [updated_at] as the newest change it has seen. The
+                         vote-log replay on load applies the same rule. *)
                       let updated =
-                        { post with votes_up; votes_down; updated_at = ts }
+                        { post with
+                          votes_up
+                        ; votes_down
+                        ; updated_at = Stdlib.Float.max post.updated_at ts
+                        }
                       in
                       Hashtbl.replace store.posts post_key updated;
                       reindex_hot_post store ~previous:post ~updated:updated;

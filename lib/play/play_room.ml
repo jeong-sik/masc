@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS members (
  who TEXT NOT NULL, client_id TEXT NOT NULL, speaker TEXT NOT NULL,
  machine TEXT NOT NULL, seen_at REAL NOT NULL, PRIMARY KEY(who, client_id));
+CREATE TABLE IF NOT EXISTS presence_observation (
+ id INTEGER PRIMARY KEY CHECK(id=1), observed_at REAL NOT NULL);
 |}
 let with_db ~base_path fn =
   let work () =
@@ -175,9 +177,18 @@ let public_membership snapshot =
   |> List.map (fun (member : member) -> member.name, member.speaker, member.machine)
   |> List.sort_uniq compare
 
+let previous_observation db ~now =
+  let* rows = rows db "SELECT observed_at FROM presence_observation WHERE id=1" []
+      (fun stmt -> Ok (Sqlite3.column_double stmt 0)) in
+  match rows with
+  | [] -> Ok now
+  | [previous] -> Ok previous
+  | _ -> Error (Unavailable "game room storage: invalid presence observation")
+
 let perform_with_change ~base_path ~who ~speaker ~now action = with_db ~base_path (fun db ->
   transaction db (fun () ->
-    let* before = snapshot db ~now ~before:None in
+    let* previous = previous_observation db ~now in
+    let* before = snapshot db ~now:previous ~before:None in
     let* message_committed = match action.operation with
       | Say {message_id; text = body} ->
         let* existing = rows db
@@ -202,6 +213,9 @@ let perform_with_change ~base_path ~who ~speaker ~now action = with_db ~base_pat
       | Read _ | Say _ -> Ok () in
     let* () = update db "DELETE FROM members WHERE seen_at <= ?" [FLOAT (now -. presence_seconds)] in
     let* after = snapshot db ~now ~before:(match action.operation with Read before -> before | Join | Say _ | Leave -> None) in
+    let* () = update db
+        "INSERT INTO presence_observation(id,observed_at) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET observed_at=excluded.observed_at"
+        [FLOAT now] in
     let change =
       { machine = action.machine
       ; message_committed

@@ -31,7 +31,8 @@ val perform : base_path:string -> who:string -> speaker:speaker -> now:float ->
 val perform_with_change : base_path:string -> who:string -> speaker:speaker -> now:float ->
   action -> (snapshot * change, error) result
 (** As {!perform}, with the actual transaction effects. Public per-name
-    membership excludes seen_at, so invisible raw-row churn is not a change. *)
+    membership excludes seen_at. Expiry is measured from the previous committed
+    action's public projection, so already-invisible raw-row cleanup is silent. *)
 val read : base_path:string -> now:float -> before:int option -> (snapshot, error) result
 (** Read only; does not renew presence. [None] reads the most recent page. *)
 val snapshot_json : ?viewer:string -> snapshot -> Yojson.Safe.t

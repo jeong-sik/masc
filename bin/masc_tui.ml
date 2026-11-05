@@ -16670,9 +16670,10 @@ let apply_http_scoped_data state ~datasets results =
     (Mtime_clock.elapsed_ns ()) (Yojson.Safe.to_string (`List (List.rev !outcomes)));
   roster_refreshed
 
-(* A dataset published early is not in its bundle's answer any more, so this
-   is the only answer that settles its pushed source's owed read. Left in
-   flight, the next loop iteration finds no read pending, owes the source
+(* Taking a dataset early ([take_early_surface_dataset]) ends its bundle's
+   ownership of it, so the bundle's [apply_http_scoped_data] skips it and
+   this is the only answer that settles its pushed source's owed read. Left
+   in flight, the next loop iteration finds no read pending, owes the source
    again and reads it at once, every frame. *)
 let apply_http_dataset state dataset =
   let application = match dataset with

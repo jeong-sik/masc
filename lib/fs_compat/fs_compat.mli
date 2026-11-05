@@ -1194,6 +1194,12 @@ val fold_jsonl_lines
   -> string
   -> 'acc
 
+(** [read_slice ~path ~from ~len] returns the byte slice
+    [[from, from+len)] of the file, clamped to its current size.
+    Missing file or empty clamped range returns [""]. Callers bound
+    [len], so one call never scales with file size (RFC-0228 P1). *)
+val read_slice : path:string -> from:int -> len:int -> string
+
 (** [fold_appended_lines ~path ~from ~init ~f] folds [f] over the raw
     non-blank, newline-terminated lines whose bytes start at offset
     [from], returning [(acc, boundary)] where [boundary] is the offset
@@ -1208,30 +1214,12 @@ val fold_jsonl_lines
     truncated or rotated) restarts the scan from byte 0. Returns
     [(init, 0)] when [path] does not exist. Lines are raw strings;
     callers parse (and decide how to surface malformed rows). *)
-(** [read_slice ~path ~from ~len] returns the byte slice
-    [[from, from+len)] of the file, clamped to its current size.
-    Missing file or empty clamped range returns [""]. Callers bound
-    [len], so one call never scales with file size (RFC-0228 P1). *)
-val read_slice : path:string -> from:int -> len:int -> string
-
 val fold_appended_lines
   :  path:string
   -> from:int
   -> init:'acc
   -> f:('acc -> string -> 'acc)
   -> 'acc * int
-
-val fold_appended_lines_with_offsets
-  :  path:string
-  -> from:int
-  -> init:'acc
-  -> f:('acc -> offset:int -> string -> 'acc)
-  -> 'acc * int
-(** {!fold_appended_lines} with the byte offset each line starts at. A caller
-    building an index records [offset] and the line's length, and reads the
-    row back with [read_slice ~from:offset ~len]. Same skipping and boundary
-    rules: blank lines advance the boundary without being folded, bytes after
-    the last newline are excluded, and a [from] past EOF rescans from zero. *)
 
 module Private_jsonl_slice : sig
   type t =

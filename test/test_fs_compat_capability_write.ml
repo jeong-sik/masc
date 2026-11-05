@@ -1710,8 +1710,7 @@ let test_create_exclusive_refuses_postcheck_intruder ~fs () =
           check bool "real no-replace publication refused" true
             (failure.stage = Fs_compat.Publish_exclusive);
           (match failure.cause with
-           | Fs_compat.Operation_failed
-               { exception_ = Unix.Unix_error (Unix.EEXIST, _, _); _ } -> ()
+           | Fs_compat.Target_already_exists -> ()
            | _ -> fail "did not exercise the actual no-replace syscall");
           check bool "EEXIST has a known unchanged target effect" true
             (error.target_effect = Fs_compat.Target_unchanged);
@@ -2593,7 +2592,7 @@ let test_directory_publication_private_and_no_replace ~fs () =
      let failure = require_write_primary_failure error in
      check bool "actual rename refused" true (failure.stage = Fs_compat.Publish_exclusive);
      (match failure.cause with
-      | Fs_compat.Operation_failed {exception_ = Unix.Unix_error (Unix.EEXIST, _, _); _} -> ()
+      | Fs_compat.Target_already_exists -> ()
       | _ -> fail "directory test did not exercise no-replace syscall");
      check int "sealed payload cleanup succeeded" 0 (List.length error.cleanup_failures));
   check (option int) "foreign directory inode retained" !foreign (Some (Unix.stat target).st_ino);

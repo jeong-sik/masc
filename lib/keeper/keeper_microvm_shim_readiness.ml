@@ -215,15 +215,10 @@ let competing_create (error : Fs_compat.capability_write_error) =
   && error.cleanup_failures = []
   && match error.primary_failure with
      | Recovery_primary_failure _ | Recovery_access_primary_failure _ -> false
-     | Write_primary_failure {stage; cause} ->
+     | Write_primary_failure {stage = _; cause} ->
        (match cause with
         | Target_already_exists -> true
-        | Operation_failed {exception_; _} ->
-          stage = Fs_compat.Publish_exclusive
-          && (match exception_ with
-              | Unix.Unix_error (os_error, _, _) -> os_error = Unix.EEXIST
-              | _ -> false)
-        | Invalid_recovery_target _ | Mutation_contended
+        | Operation_failed _ | Invalid_recovery_target _ | Mutation_contended
         | Posix_descriptor_unavailable | Unexpected_resource_kind _
         | Resource_identity_unavailable | Resource_identity_changed
         | Payload_write_failed _ -> false)

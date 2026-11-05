@@ -243,6 +243,52 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
   check Alcotest.bool "expiry remains present" true
     (form |> member "expires_at_unix" <> `Null)
 
+(* The update replaces the whole definition, so a form that leaves the run
+   watch out would remove it when the operator saves an edit of the message. *)
+let test_schedule_update_form_keeps_the_run_watch () =
+  let open Yojson.Safe.Util in
+  let url = "https://github.com/jeong-sik/masc/actions/runs/987654321/attempts/2" in
+  let target =
+    match Masc.Schedule_run_watch.target_of_run_url url with
+    | Ok target -> target
+    | Error detail -> Alcotest.fail detail
+  in
+  let body_with fields =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; ( "body"
+        , `Assoc
+            ([ "keeper_name", `String "edgar.a.poe"
+             ; "message", `String "inspect the latest work"
+             ]
+             @ fields) )
+      ]
+  in
+  let form row =
+    Masc_tui_types.schedule_update_form_json row |> Yojson.Safe.from_string
+  in
+  let watched =
+    form
+      { schedule_form_row with
+        sch_recurrence = `Assoc [ "kind", `String "one_shot" ]
+      ; sch_payload =
+          body_with
+            [ ( Masc.Schedule_run_watch.watch_field
+              , Masc.Schedule_run_watch.target_to_yojson target )
+            ]
+      }
+  in
+  let carried =
+    watched |> member Masc.Schedule_run_watch.watch_field |> to_string_option
+  in
+  check (Alcotest.option str) "the form carries the run URL" (Some url) carried;
+  check Alcotest.bool "the URL parses back to the stored run" true
+    (Option.map Masc.Schedule_run_watch.target_of_run_url carried = Some (Ok target));
+  check Alcotest.bool "a row without a watch gets no field" true
+    (form { schedule_form_row with sch_payload = body_with [] }
+     |> member Masc.Schedule_run_watch.watch_field
+     = `Null)
+
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
   { Masc.Tui_decode_memory_facts.mf_keeper = "alpha"
   ; mf_claim = claim
@@ -2444,6 +2490,8 @@ let () =
             test_modify_leaves_an_unnamed_status_to_the_server
         ; Alcotest.test_case "schedule update form preserves definition" `Quick
             test_schedule_update_form_preserves_exact_editable_definition
+        ; Alcotest.test_case "schedule update form keeps the run watch" `Quick
+            test_schedule_update_form_keeps_the_run_watch
         ; Alcotest.test_case "Memory fact rows follow the category filter"
             `Quick test_memory_fact_rows_follow_the_category_filter
         ; Alcotest.test_case "Memory category cycle returns to All" `Quick

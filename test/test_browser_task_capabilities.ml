@@ -79,7 +79,7 @@ let admitted names route =
   | Ok selected ->
     (match Selection.target ~verb:Lane.Tabs_list ~snapshot selected.route with
      | Error _ -> fail "the explicit browser is connected"
-     | Ok browser -> Selection.require ~snapshot (operations names) browser)
+     | Ok browser -> Selection.require (operations names) browser)
 let unsupported = function
   | Error (Selection.Unsupported_required_actions _) -> true
   | Ok () | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _

@@ -343,23 +343,44 @@ type surface = {
   param_keys : string list;
 }
 
+(* The first field of each [meta] literal below is qualified: [surface] above
+   also has a [description] field, and it would claim an unqualified literal. *)
 let keeper_build_cleanup_enabled =
-  register_bool ~key:"keeper_build_cleanup_enabled" ~default:(fun () -> true) ()
+  register_bool ~key:"keeper_build_cleanup_enabled" ~default:(fun () -> true)
+    ~meta:{ Runtime_params.description =
+              "쉬고 있는 키퍼의 Apple 마이크로VM 게스트(실행 중인 것만) 안에서 \
+               오래 안 쓴 Dune 빌드 디렉터리(_build)를 주기적으로 지울지. 끄면 \
+               주기가 되어도 키퍼를 훑지 않고 아무것도 지우지 않는다. _build \
+               옆에 .masc-keep-build 파일을 두면 켜 둬도 그 빌드는 남는다";
+            value_type = "bool";
+            min_value = None; max_value = None; choices = [] }
+    ()
 
-let register_cleanup_duration ~key ~default =
+let register_cleanup_duration ~key ~default ~meta =
   Runtime_params.register ~key ~default
     ~validate:(fun value ->
       if Float.is_finite value && value > 0. then Ok ()
       else Error (key ^ " must be finite and positive"))
-    ~serialize:(fun value -> `Float value) ~deserialize:deserialize_float ()
+    ~serialize:(fun value -> `Float value) ~deserialize:deserialize_float ~meta ()
 
 let keeper_build_cleanup_interval_sec =
   register_cleanup_duration ~key:"keeper_build_cleanup_interval_sec"
     ~default:(fun () -> Masc_time_constants.hour)
+    ~meta:{ Runtime_params.description =
+              "빌드 디렉터리 정리 점검 주기(초). 켜져 있으면 한 번 돌 때 모든 \
+               키퍼를 훑고, 쉬고 있는 키퍼만 정리한다. 바꾼 값은 지금 기다리는 \
+               중인 주기가 끝난 뒤부터 적용된다. 0 보다 커야 한다";
+            value_type = "float";
+            min_value = None; max_value = None; choices = [] }
 
 let keeper_build_cleanup_retention_sec =
   register_cleanup_duration ~key:"keeper_build_cleanup_retention_sec"
     ~default:(fun () -> Masc_time_constants.day)
+    ~meta:{ Runtime_params.description =
+              "빌드 디렉터리 안에서 가장 최근에 바뀐 항목이 이 시간(초)보다 \
+               오래됐을 때만 지운다. 0 보다 커야 한다";
+            value_type = "float";
+            min_value = None; max_value = None; choices = [] }
 
 let surfaces =
   [

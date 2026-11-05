@@ -542,20 +542,6 @@ let run_turn
     Keeper_registry.clear_turn_switch_if_current ~base_path:config.base_path meta.name turn_sw);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  (* The spawn registry is bound for the same span as the turn switch, and on
-     the same fiber, so a handle means something exactly as long as the process
-     it names can still be running. A registry that outlived the turn would
-     keep answering for processes the switch already ended, and would need a
-     retention bound to stop its table growing -- a cap with nothing to say.
-     [runtime_id] is the turn's own identity, so a handle issued here cannot
-     collide with one from any other turn. *)
-  let spawn_registry =
-    Spawn_registry.create
-      ~run:runtime_id
-      ~output_limit_bytes:Env_config_keeper.KeeperSpawn.spawn_output_buffer_bytes
-  in
-  Spawn_turn_registry.with_turn_registry spawn_registry
-  @@ fun () ->
   (* The language servers a code query starts belong to this turn, for the
      reason lsp_turn_pool.mli measures: starting one costs 11-60 ms, keeping
      one costs 12-155 MB, and every keeper has its own sandbox root. Binding

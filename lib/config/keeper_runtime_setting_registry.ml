@@ -40,7 +40,6 @@ type effective =
 
 (* The operator-facing group a row is listed under. *)
 type category =
-  | Spawn
   | Turn
   | Bootstrap
   | Lifecycle
@@ -140,16 +139,6 @@ let setting
    then an unknown key to boot/save validation, like any other. *)
 let all =
   [ setting
-      ~range:(int_range ~min:4096 ())
-      ~effective:(Reader (fun () -> display_int Env_config_keeper.KeeperSpawn.spawn_output_buffer_bytes))
-      ~env_name:"MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"1048576"
-      ~consumers:[ "Keeper_agent_run spawn registry" ]
-      ~category:Spawn
-      "Bytes of each spawned process stream kept for reading"
-  ; setting
       (* The clamp in Env_config_keeper.KeeperLaneGate is [0.001, 600], which
          is what this range repeats. Its doc comment says "(0, 600]"; the code
          is the one an operator meets. *)
@@ -994,7 +983,6 @@ let value_range_label = function
 ;;
 
 let category_label = function
-  | Spawn -> "spawn"
   | Turn -> "turn"
   | Bootstrap -> "bootstrap"
   | Lifecycle -> "lifecycle"

@@ -847,12 +847,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         Unix.putenv "HOME" base_path;
         unsetenv "DEEPSEEK_API_KEY";
         Eio_context.with_turn_switch sw @@ fun () ->
-        let registry =
-          match Spawn_registry.create ~run:"matrix-turn" ~output_limit_bytes:(1 lsl 16) with
-          | Some registry -> registry
-          | None -> failwith "valid matrix spawn registry was rejected"
-        in
-        Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
         try
           let case = case_for_name schema.Masc_domain.name in
           let meta = make_meta () in

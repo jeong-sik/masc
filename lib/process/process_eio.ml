@@ -722,16 +722,6 @@ let stage_holds_a_file { stdin; stdout; stderr; _ } =
   source_is_a_file || sink_is_a_file stdout || sink_is_a_file stderr
 ;;
 
-(* The single place a caller's [cwd] string becomes a path. [Spawn_registry]
-   needs the rule the run/capture paths already use -- an absolute path
-   replaces the default, a relative one appends to it -- and a second copy of
-   that rule would be a second answer to the same question. *)
-let cwd_path cwd =
-  match get_cwd_default () with
-  | Error _ as error -> error
-  | Ok default -> Ok (effective_cwd default cwd)
-;;
-
 let pipeline_status statuses =
   List.fold_left
     (fun acc status ->

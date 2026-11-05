@@ -8,8 +8,6 @@ val take : int -> 'a list -> 'a list
 
 val visibility_to_string : visibility -> string
 val visibility_of_string : string -> visibility option
-val all_visibilities : visibility list
-val valid_visibility_strings : string list
 
 val post_kind_to_string : post_kind -> string
 val post_kind_of_string : string -> post_kind option

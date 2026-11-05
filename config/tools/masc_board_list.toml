@@ -17,9 +17,10 @@ default = 20
 minimum = 1
 maximum = 100
 
-# The enum mirrors Board_core_classify.valid_visibility_strings (issue
-# #8392: hand-rolled enums drop constructors); test_enum_mirror_sync
-# compares the published values against the handler.
+# Every value of the enum has to decode through
+# Board_core_classify.visibility_of_string (issue #8392: hand-rolled enums
+# drop constructors); test_enum_mirror_sync checks the published values
+# against that decoder.
 [[params]]
 name = "visibility"
 type = "string"

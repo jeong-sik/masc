@@ -3,13 +3,14 @@
     "first_run_utc": "2026-10-17",
     "last_run_utc": "2026-11-05"
   },
-  "read_at_utc": "2026-11-05T19:39Z",
+  "read_at_utc": "2026-11-05T19:53Z",
   "unreadable_lines": 0,
-  "unreadable_files": 1,
+  "unreadable_files": 0,
   "runs": {
-    "runs": 5392,
-    "runs_without_rounds": 2757,
-    "rounds": 32759,
+    "runs": 5394,
+    "runs_without_rounds": 2761,
+    "runs_without_rounds_with_client_context_submission": 2738,
+    "rounds": 32622,
     "rounds_per_run_of_runs_with_rounds": {
       "p50": 5.0,
       "p90": 29.0,
@@ -17,24 +18,24 @@
       "max": 903.0
     },
     "ge_100": {
-      "runs": 36,
-      "rounds": 7449,
-      "share_of_all_rounds": 0.2274,
-      "wall_hours": 40.45
+      "runs": 35,
+      "rounds": 7344,
+      "share_of_all_rounds": 0.2251,
+      "wall_hours": 39.63
     },
     "ge_400": {
       "runs": 5,
       "rounds": 3012,
-      "share_of_all_rounds": 0.0919,
+      "share_of_all_rounds": 0.0923,
       "wall_hours": 11.95
     }
   },
   "by_profile": [
     {
       "profile": "opencode-go-deepseek-flash",
-      "runs": 554,
-      "rounds": 11759,
-      "runs_ge_100": 14,
+      "runs": 551,
+      "rounds": 11621,
+      "runs_ge_100": 13,
       "runs_ge_400": 0,
       "spin_runs": 1,
       "spin_rounds": 215
@@ -159,7 +160,7 @@
     {
       "profile": "github-pr-checker",
       "runs": 105,
-      "rounds": 22,
+      "rounds": 23,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
       "spin_runs": 0,
@@ -221,7 +222,7 @@
     },
     {
       "profile": "code-reviewer",
-      "runs": 141,
+      "runs": 144,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -257,7 +258,7 @@
     },
     {
       "profile": "code-reviewer-sister",
-      "runs": 155,
+      "runs": 157,
       "rounds": 0,
       "runs_ge_100": 0,
       "runs_ge_400": 0,
@@ -571,22 +572,22 @@
     },
     {
       "day": "2026-11-03",
-      "runs": 432,
+      "runs": 429,
       "rounds": 1703,
       "runs_ge_100": 2,
       "rounds_in_ge_100": 260
     },
     {
       "day": "2026-11-04",
-      "runs": 1506,
-      "rounds": 10852,
-      "runs_ge_100": 15,
-      "rounds_in_ge_100": 2728
+      "runs": 1503,
+      "rounds": 10714,
+      "runs_ge_100": 14,
+      "rounds_in_ge_100": 2623
     },
     {
       "day": "2026-11-05",
-      "runs": 2013,
-      "rounds": 11688,
+      "runs": 2021,
+      "rounds": 11689,
       "runs_ge_100": 11,
       "rounds_in_ge_100": 3410
     }
@@ -671,17 +672,27 @@
     }
   ],
   "arrivals_during_runs": {
-    "acked_rows_in_coverage": 3544,
-    "arrived_during_a_run": 1791,
+    "acked_rows_in_coverage": 3542,
+    "arrived_during_a_run": 1787,
     "acked_before_run_end": 0,
     "visible_at_next_round": {
-      "rows": 1390,
+      "rows": 1386,
       "rows_in_runs_without_rounds": 222,
       "rows_after_the_last_round": 179,
+      "rows_per_next_round": {
+        "rounds": 1048,
+        "p50": 1.0,
+        "p90": 2.0,
+        "p99": 7.0,
+        "max": 16,
+        "limit": 8,
+        "rounds_over_limit": 7,
+        "rows_in_rounds_over_limit": 89
+      },
       "seconds_to_next_round_p50": 23.4,
       "seconds_to_next_round_p90": 258.3,
       "seconds_to_next_round_max": 1795.3,
-      "hours_earlier_than_the_run_end": 337.1
+      "hours_earlier_than_the_run_end": 334.7
     },
     "by_run_size": {
       "0-9 rounds": {
@@ -709,11 +720,11 @@
         "blocked_hours_max": 3.41
       },
       "100+ rounds": {
-        "rows": 152,
-        "immediate": 12,
-        "blocked_hours": 78.2,
-        "blocked_minutes_p50": 25.3,
-        "blocked_minutes_p90": 64.6,
+        "rows": 148,
+        "immediate": 10,
+        "blocked_hours": 75.7,
+        "blocked_minutes_p50": 25.0,
+        "blocked_minutes_p90": 65.5,
         "blocked_hours_max": 2.22
       }
     },
@@ -727,11 +738,11 @@
         "blocked_hours_max": 3.37
       },
       "board_signal": {
-        "rows": 741,
-        "immediate": 295,
-        "blocked_hours": 160.5,
+        "rows": 737,
+        "immediate": 293,
+        "blocked_hours": 158.1,
         "blocked_minutes_p50": 5.4,
-        "blocked_minutes_p90": 34.5,
+        "blocked_minutes_p90": 34.2,
         "blocked_hours_max": 3.41
       },
       "schedule_due": {
@@ -911,12 +922,12 @@
       {
         "day": "2026-11-04",
         "acked_rows": 3444,
-        "arrived_during_a_run": 737,
-        "blocked_hours": 144.7
+        "arrived_during_a_run": 733,
+        "blocked_hours": 142.3
       },
       {
         "day": "2026-11-05",
-        "acked_rows": 2039,
+        "acked_rows": 2043,
         "arrived_during_a_run": 893,
         "blocked_hours": 189.2
       }

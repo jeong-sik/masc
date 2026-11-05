@@ -16,7 +16,9 @@ least: from their arrival to the end of that run.
 Reported:
 
 - `runs`: rounds per run, the runs of at least 100 and at least 400 rounds, and
-  per runtime profile and per UTC day (of the run's start).
+  per runtime profile and per UTC day (of the run's start). A run with no round
+  record is counted apart, with how many of those record a
+  `client_context_submission` hook.
 - `spin_runs`: runs of at least `--spin-min-rounds` rounds where one tool makes at
   least `--spin-top-share` of the tool calls. The thresholds describe the runs
   in this report; nothing at runtime reads them.
@@ -39,7 +41,9 @@ that arrived while the Keeper was idle.
   (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). A row that arrived
   after the run's last request has no later round and is counted apart
   (`rows_after_the_last_round`), and so is a row inside a run that has no round
-  records at all (`rows_in_runs_without_rounds`).
+  records at all (`rows_in_runs_without_rounds`). `rows_per_next_round` counts how
+  many rows would be listed by each request that has one, and how often that
+  reaches the limit of 8 rows a request.
 
 Reads the two stores and never writes to them. A line that is not a JSON object
 is counted under `unreadable_lines`. A file that is listed and gone before it is
@@ -66,6 +70,7 @@ from typing import cast
 JsonObject = dict[str, object]
 
 BEFORE_TURN_PARAMS = "before_turn_params"
+CLIENT_CONTEXT_HOOK = "client_context_submission"
 RECORD_HOOK = "hook_invoked"
 RECORD_TOOL_STARTED = "tool_execution_started"
 RECORD_RUN_STARTED = "run_started"
@@ -80,6 +85,8 @@ P50 = 0.5
 P90 = 0.9
 P99 = 0.99
 IMMEDIATE = "immediate"
+# Keeper_arrived_stimuli.max_rows_per_round. The script only counts how often a request would reach it.
+ROUND_ROW_LIMIT = 8
 ERROR_KIND_CHARS = 40
 
 
@@ -95,6 +102,7 @@ class Run:
     top_tool: str | None
     top_tool_calls: int
     error_kind: str | None
+    client_context: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +151,7 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
     last_ts: float | None = None
     agent: str | None = None
     error: str | None = None
+    client_context = False
     with path.open("rb") as handle:
         for line in handle:
             try:
@@ -160,6 +169,8 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
             if kind == RECORD_HOOK and row.get("hook_name") == BEFORE_TURN_PARAMS:
                 if ts is not None:
                     round_times.append(ts)
+            elif kind == RECORD_HOOK and row.get("hook_name") == CLIENT_CONTEXT_HOOK:
+                client_context = True
             elif kind == RECORD_RUN_STARTED:
                 agent = as_text(row.get("agent_name"))
             elif kind == RECORD_TOOL_STARTED:
@@ -180,6 +191,7 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
         top_tool=top[0][0] if top else None,
         top_tool_calls=top[0][1] if top else 0,
         error_kind=error[:ERROR_KIND_CHARS] if error else None,
+        client_context=client_context,
     )
 
 
@@ -261,14 +273,20 @@ def is_spin(run: Run, min_rounds: int, top_share: float) -> bool:
 
 
 def round_stats(runs: list[Run]) -> JsonObject:
-    """Runs with no `before_turn_params` hook (an official client runs its own loop) have no rounds to count."""
+    """Runs with no `before_turn_params` hook have no rounds to count. Most of them record a
+    `client_context_submission` hook instead; `runs_without_rounds_with_client_context_submission` counts those."""
     with_rounds = [run for run in runs if run.rounds > 0]
+    without_rounds = [run for run in runs if run.rounds == 0]
+    apart: JsonObject = {
+        "runs_without_rounds": len(without_rounds),
+        "runs_without_rounds_with_client_context_submission": sum(1 for run in without_rounds if run.client_context),
+    }
     if not with_rounds:
-        return {"runs": len(runs), "runs_without_rounds": len(runs)}
+        return {"runs": len(runs), **apart}
     rounds = sorted(float(run.rounds) for run in with_rounds)
     return {
         "runs": len(runs),
-        "runs_without_rounds": len(runs) - len(with_rounds),
+        **apart,
         "rounds": sum(run.rounds for run in with_rounds),
         "rounds_per_run_of_runs_with_rounds": {
             "p50": percentile(rounds, P50),
@@ -435,6 +453,7 @@ def visible_at_next_round(during: list[tuple[Ack, Run]]) -> JsonObject:
     """The wait to the next round against the wait to the run's end, for the same rows."""
     waits: list[float] = []
     saved: list[float] = []
+    per_round: Counter[tuple[str, float, float]] = Counter()
     in_runs_without_rounds = 0
     after_the_last_round = 0
     for ack, run in during:
@@ -447,6 +466,7 @@ def visible_at_next_round(during: list[tuple[Ack, Run]]) -> JsonObject:
             continue
         waits.append(later - ack.arrived)
         saved.append(run.end - later)
+        per_round[(run.keeper, run.start, later)] += 1
     apart: JsonObject = {
         "rows_in_runs_without_rounds": in_runs_without_rounds,
         "rows_after_the_last_round": after_the_last_round,
@@ -454,9 +474,20 @@ def visible_at_next_round(during: list[tuple[Ack, Run]]) -> JsonObject:
     if not waits:
         return {"rows": 0, **apart}
     waits.sort()
+    rows_per_round = sorted(per_round.values())
     return {
         "rows": len(waits),
         **apart,
+        "rows_per_next_round": {
+            "rounds": len(rows_per_round),
+            "p50": percentile([float(count) for count in rows_per_round], P50),
+            "p90": percentile([float(count) for count in rows_per_round], P90),
+            "p99": percentile([float(count) for count in rows_per_round], P99),
+            "max": rows_per_round[-1],
+            "limit": ROUND_ROW_LIMIT,
+            "rounds_over_limit": sum(1 for count in rows_per_round if count > ROUND_ROW_LIMIT),
+            "rows_in_rounds_over_limit": sum(count for count in rows_per_round if count > ROUND_ROW_LIMIT),
+        },
         "seconds_to_next_round_p50": round(percentile(waits, P50), 1),
         "seconds_to_next_round_p90": round(percentile(waits, P90), 1),
         "seconds_to_next_round_max": round(waits[-1], 1),

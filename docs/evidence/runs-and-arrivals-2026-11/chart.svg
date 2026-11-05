@@ -57,13 +57,13 @@
 <rect x="634" y="165.7" width="30" height="16.3" fill="#6b8fb5"/>
 <rect x="634" y="162.8" width="30" height="2.9" fill="#d9822b"/>
 <text x="634" y="194" font-size="8" fill="#000000" transform="rotate(60 634 194)">11-03</text>
-<rect x="668" y="90.3" width="30" height="91.7" fill="#6b8fb5"/>
-<rect x="668" y="59.4" width="30" height="30.8" fill="#d9822b"/>
+<rect x="668" y="90.6" width="30" height="91.4" fill="#6b8fb5"/>
+<rect x="668" y="61.0" width="30" height="29.6" fill="#d9822b"/>
 <text x="668" y="194" font-size="8" fill="#000000" transform="rotate(60 668 194)">11-04</text>
 <rect x="702" y="88.5" width="30" height="93.5" fill="#6b8fb5"/>
 <rect x="702" y="50.0" width="30" height="38.5" fill="#d9822b"/>
 <text x="702" y="194" font-size="8" fill="#000000" transform="rotate(60 702 194)">11-05</text>
-<text x="4" y="58">11688</text>
+<text x="4" y="58">11689</text>
 <text x="4" y="182">0</text>
 <text x="56" y="234" font-weight="600">Hours queue rows waited at least, behind the run that was going on</text>
 <rect x="56" y="379" width="30" height="3" fill="#b8b8b8"/>
@@ -102,7 +102,7 @@
 <text x="600" y="394" font-size="8" fill="#8a8a8a" transform="rotate(60 600 394)">11-02</text>
 <rect x="634" y="368.7" width="30" height="13.3" fill="#b5483a"/>
 <text x="634" y="394" font-size="8" fill="#000000" transform="rotate(60 634 394)">11-03</text>
-<rect x="668" y="281.0" width="30" height="101.0" fill="#b5483a"/>
+<rect x="668" y="282.7" width="30" height="99.3" fill="#b5483a"/>
 <text x="668" y="394" font-size="8" fill="#000000" transform="rotate(60 668 394)">11-04</text>
 <rect x="702" y="250.0" width="30" height="132.0" fill="#b5483a"/>
 <text x="702" y="394" font-size="8" fill="#000000" transform="rotate(60 702 394)">11-05</text>

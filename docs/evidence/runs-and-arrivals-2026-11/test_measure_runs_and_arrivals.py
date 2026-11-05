@@ -20,8 +20,11 @@ DAY2 = DAY1 + 86_400.0
 PROFILE_AGENT = "agent_core-glm-coding.glm-5.3-flash"
 
 
-def trace_rows(start: float, rounds: int, tools: list[str], agent: str | None, spacing: float) -> list[JsonObject]:
+def trace_rows(
+    start: float, rounds: int, tools: list[str], agent: str | None, spacing: float, hooks: list[str]
+) -> list[JsonObject]:
     rows: list[JsonObject] = [{"record_type": "run_started", "ts": start, "agent_name": agent}]
+    rows.extend({"record_type": "hook_invoked", "ts": start, "hook_name": hook} for hook in hooks)
     for index in range(rounds):
         rows.append({"record_type": "hook_invoked", "ts": start + index * spacing, "hook_name": "before_turn_params"})
         rows.append({"record_type": "hook_invoked", "ts": start + index * spacing, "hook_name": "after_turn"})
@@ -41,10 +44,11 @@ def write_run(
     agent: str | None = PROFILE_AGENT,
     error: str | None = None,
     spacing: float = 1.0,
+    hooks: list[str] | None = None,
 ) -> None:
     folder = base / ".masc" / "keepers" / keeper / "raw-traces"
     folder.mkdir(parents=True, exist_ok=True)
-    rows = trace_rows(start, rounds, tools, agent, spacing)
+    rows = trace_rows(start, rounds, tools, agent, spacing, hooks or [])
     rows.append({"record_type": "run_finished", "ts": end, "error": error})
     folder.joinpath(file).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
@@ -221,6 +225,41 @@ def day_labels(svg: str) -> list[str]:
         for text in ET.fromstring(svg).findall(f"{SVG}text")
         if text.get("transform", "").startswith("rotate")
     ]
+
+
+class ClientContextTests(unittest.TestCase):
+    def test_runs_without_rounds_are_split_by_the_client_context_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(base, "alpha", "turn-a1.jsonl", DAY1 + 1000, DAY1 + 1100, 0, [], hooks=["client_context_submission"])
+            write_run(base, "alpha", "turn-a2.jsonl", DAY1 + 2000, DAY1 + 2100, 0, [])
+            write_run(base, "alpha", "turn-a3.jsonl", DAY1 + 3000, DAY1 + 3100, 2, ["x"])
+            runs = obj(m.measure(base, None, None, 150, 0.85)["runs"])
+        self.assertEqual(runs["runs"], 3)
+        self.assertEqual(runs["runs_without_rounds"], 2)
+        self.assertEqual(runs["runs_without_rounds_with_client_context_submission"], 1)
+
+
+class RowsPerRoundTests(unittest.TestCase):
+    def test_a_request_that_would_list_more_rows_than_the_limit_is_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            # Rounds at 0, 10 and 20 s. Nine rows arrive between the second and the third round, one before the second.
+            write_run(base, "alpha", "turn-a1.jsonl", DAY1 + 1000, DAY1 + 1030, 3, ["x"], spacing=10.0)
+            rows = [json.dumps(ack_row("first", DAY1 + 1005, DAY1 + 1100, "normal", "board_signal"))]
+            rows += [
+                json.dumps(ack_row(f"burst-{index}", DAY1 + 1011 + index * 0.5, DAY1 + 1100, "normal", "board_signal"))
+                for index in range(9)
+            ]
+            write_acks(base, "alpha", rows)
+            replay = obj(obj(m.measure(base, None, None, 150, 0.85)["arrivals_during_runs"])["visible_at_next_round"])
+        per_round = obj(replay["rows_per_next_round"])
+        self.assertEqual(replay["rows"], 10)
+        self.assertEqual(per_round["rounds"], 2)
+        self.assertEqual(per_round["max"], 9)
+        self.assertEqual(per_round["limit"], 8)
+        self.assertEqual(per_round["rounds_over_limit"], 1)
+        self.assertEqual(per_round["rows_in_rounds_over_limit"], 9)
 
 
 class RunsWithoutRoundsTests(unittest.TestCase):

@@ -4,7 +4,7 @@
  (name tool_metrics_store)
  (public_name masc.tool_metrics_store)
  (wrapped false)
- (modules tool_metrics_store)
+ (modules tool_metrics_store tool_metrics_series)
  (libraries
   fs_compat
   masc.config

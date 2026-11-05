@@ -138,6 +138,9 @@ CREATE TABLE IF NOT EXISTS tool_metric_events (
 )
 |}
 
+let busy_timeout_ms = 5000
+let busy_timeout_sql = Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms
+
 let configure db =
   let* journal_mode =
     single_text db ~operation:"set WAL journal mode" "PRAGMA journal_mode=WAL"
@@ -154,9 +157,7 @@ let configure db =
     if synchronous <> 1
     then Error "SQLite synchronous mode is not NORMAL"
     else
-      let* () =
-        exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000"
-      in
+      let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
       let* () = exec db ~operation:"create tool metric table" schema_sql in
       exec
         db
@@ -395,6 +396,90 @@ let read_recent ~masc_root ?since_ts ?until_ts ~n () =
               | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "read recent tool metrics" rc)
             in
             loop []))
+
+(* The series is read on a connection of its own. A scan over a month of rows
+   then neither holds [store_lock] nor makes [insert] wait, and WAL mode lets
+   the reader run beside the writer. *)
+let with_read_only_db ~path f =
+  let run db =
+    let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
+    f db
+  in
+  match Sqlite3.db_open ~mode:`READONLY path with
+  | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
+  | db ->
+    let result =
+      try run db with
+      | Sqlite3.Error detail -> Error ("SQLite read: " ^ detail)
+    in
+    let closed = close_db db in
+    (match result, closed with
+     | Ok _, false -> Error "close read-only database: SQLite kept the handle open"
+     | Ok _, true | Error _, (true | false) -> result)
+;;
+
+(* Calls [f] for every row [statement] yields and returns how many rows it
+   yielded. *)
+let fold_statement db statement ~operation ~f =
+  let rec loop count =
+    match Sqlite3.step statement with
+    | Sqlite3.Rc.ROW ->
+      let* () = f statement in
+      loop (count + 1)
+    | Sqlite3.Rc.DONE -> Ok count
+    | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db operation rc)
+  in
+  loop 0
+;;
+
+let series_select =
+  "SELECT ts, tool_name, disposition, duration_ms FROM tool_metric_events \
+   WHERE ts >= ?1 AND ts < ?2"
+;;
+
+let series_sql = function
+  | None -> series_select
+  | Some _ -> series_select ^ " AND tool_name = ?3"
+;;
+
+let sample_of_statement statement =
+  let* disposition =
+    Tool_metrics_series.disposition_of_string (Sqlite3.column_text statement 2)
+  in
+  Ok
+    { Tool_metrics_series.ts = Sqlite3.column_double statement 0
+    ; tool_name = Sqlite3.column_text statement 1
+    ; disposition
+    ; duration_ms = Sqlite3.column_double statement 3
+    }
+;;
+
+let read_series ~masc_root ~window ?tool_name () =
+  let builder = Tool_metrics_series.builder window in
+  let path = database_path ~masc_root in
+  if not (Sys.file_exists path)
+  then Ok (Tool_metrics_series.finish builder)
+  else (
+    let since, until = Tool_metrics_series.window_bounds window in
+    let bounds = [ Sqlite3.Data.FLOAT since; Sqlite3.Data.FLOAT until ] in
+    let values =
+      match tool_name with
+      | None -> bounds
+      | Some name -> bounds @ [ Sqlite3.Data.TEXT name ]
+    in
+    let operation = "read tool metric series" in
+    let* _row_count =
+      with_read_only_db ~path (fun db ->
+        with_statement db ~operation (series_sql tool_name) (fun statement ->
+          let* () =
+            bind_all db statement ~operation:"bind tool metric series filters" values
+          in
+          fold_statement db statement ~operation ~f:(fun row ->
+            let* sample = sample_of_statement row in
+            Tool_metrics_series.add builder sample)))
+    in
+    Ok (Tool_metrics_series.finish builder))
+;;
 
 let row_to_json row =
   `Assoc

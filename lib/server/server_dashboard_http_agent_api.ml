@@ -110,6 +110,131 @@ let agent_activity_http_json ~(config : Workspace.config) ~hours : Yojson.Safe.t
         ]))
 ;;
 
+(* [utc_offset_min] is signed, unlike the other numeric query values here: a
+   viewer west of Greenwich sends a negative one. *)
+let signed_int_param ~name ~default = function
+  | None -> Ok default
+  | Some raw ->
+    let negative = String.length raw > 0 && Char.equal raw.[0] '-' in
+    let digits = if negative then String.sub raw 1 (String.length raw - 1) else raw in
+    (match
+       if String.length digits > 0 && String.for_all is_ascii_digit digits
+       then int_of_string_opt digits
+       else None
+     with
+     | Some value -> Ok (if negative then -value else value)
+     | None -> Error (name ^ " must be an integer"))
+;;
+
+(* [GET /api/v1/tool-metrics/series]: hourly or daily totals of the retained
+   tool calls, for the charts on the Tools page. *)
+let tool_series_default_hours = 24.0
+let tool_series_max_tool_name_bytes = 128
+
+(* The cache key trims each value and reads an empty one as absent, while the
+   scan filters on the text as sent. A name with surrounding whitespace would
+   share a key with another request and match different rows, so such a name is
+   refused instead of trimmed. *)
+let tool_name_param = function
+  | None -> Ok None
+  | Some raw ->
+    if String.length raw > 0
+       && String.length raw <= tool_series_max_tool_name_bytes
+       && String.trim raw = raw
+    then Ok (Some raw)
+    else
+      Error
+        (Printf.sprintf
+           "tool must be 1 to %d bytes with no leading or trailing whitespace"
+           tool_series_max_tool_name_bytes)
+;;
+
+type tool_series_request =
+  { since_hours : float
+  ; width : Tool_metrics_series.width
+  ; utc_offset_min : int
+  ; tool_name : string option
+  }
+
+let tool_series_window request ~until =
+  Tool_metrics_series.window
+    ~since:(until -. (request.since_hours *. Masc_time_constants.hour))
+    ~until
+    ~width:request.width
+    ~utc_offset_min:request.utc_offset_min
+;;
+
+(* The window depends on the clock, so a request is checked against the clock
+   once here, and the read builds its window again from the clock it runs at.
+   The same request gives the same verdict at both times. *)
+let tool_series_request req =
+  let open Result.Syntax in
+  let* since_hours =
+    positive_float_param
+      ~name:"since_hours"
+      ~default:tool_series_default_hours
+      (Server_utils.query_param req "since_hours")
+  in
+  let* width =
+    match Server_utils.query_param req "bucket" with
+    | None -> Ok Tool_metrics_series.Hour
+    | Some raw -> Tool_metrics_series.width_of_string raw
+  in
+  let* utc_offset_min =
+    signed_int_param
+      ~name:"utc_offset_min"
+      ~default:0
+      (Server_utils.query_param req "utc_offset_min")
+  in
+  let* tool_name = tool_name_param (Server_utils.query_param req "tool") in
+  let request = { since_hours; width; utc_offset_min; tool_name } in
+  let* (_ : Tool_metrics_series.window) =
+    tool_series_window request ~until:(Time_compat.now ())
+  in
+  Ok request
+;;
+
+exception Tool_series_failed of string
+
+(* The scan reads up to a month of rows, about a second of CPU, so it runs on
+   the executor pool behind the same 30 s cache as the other live rollups.
+   A failed read raises, and the cache keeps nothing of it. *)
+let tool_series_http_json ~(config : Workspace.config) request : Yojson.Safe.t =
+  let cache_key =
+    Server_dashboard_http_core_cache.dashboard_query_cache_key
+      config
+      "tool_metrics_series"
+      [ "since_hours", Some (string_of_float request.since_hours)
+      ; "bucket", Some (Tool_metrics_series.string_of_width request.width)
+      ; "utc_offset_min", Some (string_of_int request.utc_offset_min)
+      ; "tool", request.tool_name
+      ]
+  in
+  Dashboard_cache.get_or_compute
+    cache_key
+    ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
+    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+       let until = Time_compat.now () in
+       match tool_series_window request ~until with
+       | Error detail -> raise (Tool_series_failed detail)
+       | Ok window ->
+         (match
+            Tool_metrics_store.read_series
+              ~masc_root:(Workspace.masc_dir config)
+              ~window
+              ?tool_name:request.tool_name
+              ()
+          with
+          | Error detail -> raise (Tool_series_failed detail)
+          | Ok series ->
+            Tool_metrics_series.to_json
+              ~generated_at:until
+              ?tool_name:request.tool_name
+              ~public_names:
+                Keeper_tool_descriptor_resolution.public_names_for_internal
+              series)))
+;;
+
 let add_agent_api_routes router =
   router
   (* Agent activity -- per-agent tool call stats from telemetry *)
@@ -141,6 +266,26 @@ let add_agent_api_routes router =
              ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
+       )
+
+  (* Tool call series -- hourly or daily totals for the Tools page charts *)
+  |> Server_route.get Server_route.Public_read "/api/v1/tool-metrics/series" (fun state req reqd ->
+         match tool_series_request req with
+         | Error detail ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             (`Assoc [ "error", `String detail ])
+             reqd
+         | Ok request ->
+           (match
+              tool_series_http_json ~config:(Mcp_server.workspace_config state) request
+            with
+            | json -> Http.Response.json_value ~compress:true ~request:req json reqd
+            | exception Tool_series_failed detail ->
+              Http.Response.json_value
+                ~status:`Internal_server_error
+                (`Assoc [ "error", `String detail ])
+                reqd)
        )
 
   (* Agent timeline -- per-agent activity timeline for Observatory detail *)

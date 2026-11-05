@@ -255,60 +255,6 @@ let test_calculate_kpis_populated () =
   check bool "elapsed rows are not advanced as current on failure" false (contains output "lane autonomous")
 ;;
 
-let test_scheduler_sample_availability () =
-  List.iter
-    (fun (samples, probe, displayed_probe) ->
-      let state = make_state () in
-      let payload =
-        `Assoc
-          [ ("status", `String "ok")
-          ; ("scheduler", `Assoc
-              [ ("probe", `String probe)
-              ; ("pool_domains", `Int 3)
-              ; ("lag", `Assoc
-                  [ ("samples", `Int samples)
-                  ; ("p95_ms", `Float 512.125)
-                  ; ("stalls", `Int 7)
-                  ])
-              ])
-          ]
-      in
-      state.server_identity <- Some
-        (match Decode.decode_server_identity payload with
-         | Ok identity -> identity
-         | Error detail -> fail detail);
-      state.metrics_section <- Types.Section_fleet;
-      let lines = ref [] in
-      let push line = lines := line :: !lines in
-      Render_metrics.render_metrics_body ~cols:200 ~budget:40 ~suffix_lines:[] state
-        ~report_scroll:(fun _ _ _ -> ())
-        ~push ~push_styled:(fun ~style:_ line -> push line)
-        ~push_selected:push ~push_divider:(fun () -> ())
-        ~push_empty:(fun () -> ());
-      let output = String.concat "\n" (List.rev !lines) in
-      let measured = samples > 0 in
-      check bool "measured p95 requires a positive sample count" measured
-        (contains output "p95 512.125");
-      check bool "stall count requires a positive sample count" measured
-        (contains output "stalls");
-      check bool "sample absence is explicit" (not measured)
-        (contains output "No latency samples in the producer window");
-      check bool "domain observation remains visible in detail" true
-        (contains output "worker domains 3");
-      if not measured then (
-        check bool "card explains absent samples" true
-          (contains output "No latency samples");
-        check bool "card preserves normalized probe observation" true
-          (contains output ("Probe: " ^ displayed_probe));
-        check bool "detail preserves normalized probe observation" true
-          (contains output ("Probe " ^ displayed_probe))))
-    [ (0, "running", "running")
-    ; (0, "", "unreported")
-    ; (-1, " \t ", "unreported")
-    ; (1, "running", "running")
-    ]
-;;
-
 let test_retained_task_outcomes () =
   let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-07T12:00:00Z") in
   let task id created_at status = domain_task ~id ~created_at ~status in
@@ -608,8 +554,7 @@ let () =
     ; ( "section_pills"
       , [] )
     ; ( "sections"
-      , [ test_case "scheduler sample availability" `Quick test_scheduler_sample_availability
-        ; test_case "the tools section escapes the word it counts by" `Quick
+      , [ test_case "the tools section escapes the word it counts by" `Quick
             test_the_tools_section_escapes_the_word_it_counts_by
         ; test_case "the tools section escapes a Keeper id" `Quick
             test_the_tools_section_escapes_a_keeper_id

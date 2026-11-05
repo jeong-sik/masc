@@ -30,7 +30,7 @@ import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
-import { formatIndependentCounters, formatRatioPair } from './counter-format'
+import { formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type {
@@ -989,37 +989,6 @@ function runtimeTraceEventIds(trace: KeeperRuntimeTraceResponse): string {
   ].join(' · ')
 }
 
-function runtimeTraceMemoryEvidence(trace: KeeperRuntimeTraceResponse): string {
-  const memory = trace.memory
-  // inj present/injected is a true ratio pair: scan increments
-  // memory_injected_count unconditionally and memory_injected_present_count
-  // only when content is present, so present ≤ injected always holds.
-  // (see server_dashboard_http_keeper_runtime_manifest_scan.ml:152-154)
-  //
-  // flush success/error are independent monotonic counters; rendering as
-  // "N/M" would falsely imply a ratio. Use formatIndependentCounters.
-  //
-  // ep/proc episodes_flushed/procedures_flushed are also independent.
-  return [
-    `inj ${formatRatioPair({
-      numerator: memory.memory_injected_present_count,
-      denominator: memory.memory_injected_count,
-    })}`,
-    `flush ${formatIndependentCounters({
-      leftLabel: 'success',
-      leftValue: memory.memory_flush_success_count,
-      rightLabel: 'error',
-      rightValue: memory.memory_flush_error_count,
-    })}`,
-    `ep/proc ${formatIndependentCounters({
-      leftLabel: 'ep',
-      leftValue: memory.episodes_flushed,
-      rightLabel: 'proc',
-      rightValue: memory.procedures_flushed,
-    })}`,
-  ].join(' · ')
-}
-
 function runtimeManifestDiagnosticsValue(trace: KeeperRuntimeTraceResponse): string {
   const diagnostics = trace.manifest_scan_diagnostics
   if (diagnostics.state === 'unavailable') return 'unavailable'
@@ -1308,7 +1277,6 @@ export function RuntimeLensSection({
   const lens = trace.runtime_lens
   const lane = lens.axes.provider_lane
   const drift = lens.axes.config_drift
-  const memory = lens.axes.memory
   const clock = lens.turn_clock
   const artifacts = trace.linked_artifacts
   const clockEdges = lens.clock_edges
@@ -1337,7 +1305,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
-        <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />
         <${SignalRow}
           label="manifest file"
@@ -1375,7 +1342,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="clock edges" value=${clockEdges.length} />
         <${SignalRow} label="clock groups" value=${clockGroups.length} />
         <${SignalRow} label="event ids" value=${runtimeTraceEventIds(trace)} />
-        <${SignalRow} label="memory evidence" value=${runtimeTraceMemoryEvidence(trace)} />
         <${SignalRow} label="stale reason" value=${compactToken(trace.stale_reason, 'none')} />
       </div>
 

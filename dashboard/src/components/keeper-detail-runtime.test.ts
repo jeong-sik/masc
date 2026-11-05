@@ -639,8 +639,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('edge-runtime-routed')).toBeInTheDocument()
     expect(screen.getByText('event ids')).toBeInTheDocument()
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
-    expect(screen.getByText('memory evidence')).toBeInTheDocument()
-    expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
   })
 

@@ -51,8 +51,6 @@ export interface JourneyWaterfallRuntimeEvidence {
   runtimeCompletedCount: number
   runtimeFailedCount: number
   eventBusCorrelatedCount: number
-  memoryInjectedCount: number
-  memoryFlushedCount: number
 }
 
 export interface JourneyWaterfallTurn {
@@ -196,8 +194,6 @@ export function summarizeRuntimeTrace(
     runtimeCompletedCount: trace.turn_identity.runtime_completed_count,
     runtimeFailedCount: trace.turn_identity.runtime_failed_count,
     eventBusCorrelatedCount: trace.event_bus.event_bus_correlated_count,
-    memoryInjectedCount: trace.memory.memory_injected_count,
-    memoryFlushedCount: trace.memory.memory_flushed_count,
   }
 }
 

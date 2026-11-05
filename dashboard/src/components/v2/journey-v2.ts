@@ -211,7 +211,6 @@ function EvidenceStrip({
           dispatched === 0 ? 'dim' : ev.runtimeCompletedCount > 0 ? 'ok' : 'bad',
         ],
         ['event bus 상관', ev.eventBusCorrelatedCount, 'dim'],
-        ['memory', `주입 ${ev.memoryInjectedCount} · flush ${ev.memoryFlushedCount}`, 'dim'],
       ]
     : [
         ['상태', isHealthy(ev.health) ? '정상' : '오래된 기록', isHealthy(ev.health) ? 'ok' : 'warn'],
@@ -230,7 +229,6 @@ function EvidenceStrip({
               : `실패 ${ev.runtimeFailedCount}건`,
           dispatched === 0 ? 'dim' : ev.runtimeCompletedCount > 0 ? 'ok' : 'bad',
         ],
-        ['기억', `불러옴 ${ev.memoryInjectedCount} · 저장 ${ev.memoryFlushedCount}`, 'dim'],
       ]
 
   return html`

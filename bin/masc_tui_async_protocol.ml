@@ -66,7 +66,6 @@ type http_dataset =
   | Dataset_board_posts of board_posts_receipt
   | Dataset_board_hearths of ((string * int) list, string) result
   | Dataset_planning of (planning_snapshot, string) result
-  | Dataset_system_logs of (system_log_snapshot, string) result
   | Dataset_runtime_quota of
       (Masc.Tui_decode.runtime_option list, string) result
       * (Masc.Tui_decode_usage.provider_usage_windows, string) result
@@ -88,7 +87,6 @@ let http_dataset_key = function
   | Dataset_board_posts _ -> Surface_read_order.Board_posts
   | Dataset_board_hearths _ -> Surface_read_order.Board_hearths
   | Dataset_planning _ -> Surface_read_order.Planning_data
-  | Dataset_system_logs _ -> Surface_read_order.System_logs_data
   | Dataset_runtime_quota _ -> Surface_read_order.Runtime_quota_data
   | Dataset_keeper_usage _ -> Surface_read_order.Keeper_usage_data
   | Dataset_provider_history _ -> Surface_read_order.Provider_history_data
@@ -100,7 +98,6 @@ let http_dataset_received = function
   | Dataset_board_posts receipt -> Result.is_ok receipt.bpr_result
   | Dataset_board_hearths result -> Result.is_ok result
   | Dataset_planning result -> Result.is_ok result
-  | Dataset_system_logs result -> Result.is_ok result
   | Dataset_runtime_quota (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota
   | Dataset_keeper_usage result -> Result.is_ok result
   | Dataset_provider_history reading -> Result.is_ok reading.phr_result
@@ -127,7 +124,6 @@ type 'identity http_scoped_surface_readings = {
      available while its fresh reader is pending or failed. *)
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
-  http_system_logs: (system_log_snapshot, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
   http_keeper_roster: keeper_roster_observation option;
@@ -651,7 +647,7 @@ type async_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
-  | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
+  | System_log_streamed of system_log_follow * system_log_follow_event
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result
@@ -1030,7 +1026,7 @@ let rec workspace_message_is_read = function
   | Schedules_loaded _
   | Schedule_wake_history_loaded _
   | Keeper_schedules_loaded _
-  | System_logs_loaded _
+  | System_log_streamed _
   | Ask_followup_observed _ | Ask_followup_finished _
   | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded _
   | Goal_timeline_loaded _ | Goal_candle_loaded _
@@ -1218,7 +1214,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Runtime_form_save_changed _ | Keeper_creation_changed _ | Keeper_action_done _
   | Board_publication_done _ | Board_comment_done _ | Board_vote_done _ | Goal_transition_done _
   | Goal_confirmation_submitted _ | Goal_confirmation_loaded _ | Schedules_loaded _
-  | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_logs_loaded _
+  | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_log_streamed _
   | Schedule_cancel_done _ | Verification_verdict_done _ | Harness_label_done _
   | Chat_call_loaded _ | Board_attachment_loaded _ | Board_attachment_prepared _
   | Keeper_calls_loaded _ | Goal_timeline_loaded _ | Goal_candle_loaded _
@@ -1371,7 +1367,7 @@ let retired_operation_observation state ~authority ~reading message =
     | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
-    | System_logs_loaded _ | Schedule_cancel_done (_, _)
+    | System_log_streamed _ | Schedule_cancel_done (_, _)
     | Verification_verdict_done _ | Harness_label_done _
     | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
@@ -1509,7 +1505,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
-  | System_logs_loaded _ | Schedule_cancel_done (_, _)
+  | System_log_streamed _ | Schedule_cancel_done (_, _)
   | Verification_verdict_done _ | Harness_label_done _
   | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)

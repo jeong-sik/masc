@@ -172,7 +172,10 @@ val run_sse_pumps :
     runs both pumps as daemons, and blocks on [info.stop_promise]; resolving
     that promise ({!close_sse_conn} does) releases the child switch and
     cancels both pumps — including a drain fiber blocked in
-    [Eio.Stream.take] or in a waiting send (#21548).
+    [Eio.Stream.take] or in a waiting send (#21548).  A pump that returns
+    before the stop (one that logged an exception it caught, such as a prime
+    or replay send that raised) stops the connection the same way, so a
+    stream never stays open with one pump.
 
     When both pumps have ended, the switch's release hook removes [info]
     from the registry with {!stop_sse_conn_if_current} and closes

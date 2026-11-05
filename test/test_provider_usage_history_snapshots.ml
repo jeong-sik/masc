@@ -232,6 +232,78 @@ let damaged_journal_keeps_readable_history () = fixture (fun config scope day ->
   | Utilization_usd { limit = Some _; _ } | Utilization_fraction _
   | Utilization_percent _ -> fail "later report lost its uncapped USD amount")
 
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then (mkdir_p (Filename.dirname dir); Unix.mkdir dir 0o755)
+
+let rec copy_tree src dst =
+  if Sys.is_directory src then begin
+    mkdir_p dst;
+    Array.iter (fun name -> copy_tree (Filename.concat src name) (Filename.concat dst name))
+      (Sys.readdir src)
+  end else
+    Out_channel.with_open_bin dst (fun oc ->
+      output_string oc (In_channel.with_open_bin src In_channel.input_all))
+
+let journal_dir config =
+  Dated_jsonl.Store.dir
+    (Dated_jsonl.Store.at (Workspace_utils.dated_store_root config) Provider_usage_history)
+
+(* The history keeps each day file's fold between reads. Reads taken between
+   reports, then one more, answer what a single pass over the same journal
+   answers in a workspace no read has kept anything for. *)
+let kept_reads_answer_what_one_pass_does () = fixture (fun config scope day ->
+  let cap = decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":0}}|} in
+  let uncapped = decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|} in
+  let read config = match History.read config ~now:(day +. 100.) ~window:History.Seven_days with
+    | Ok json -> Yojson.Safe.to_string json | Error detail -> fail detail in
+  Usage.record ~scope ~observed_at:(day -. 1.) cap;
+  ignore (read config);
+  Usage.record ~scope ~observed_at:(day +. 10.) cap;
+  ignore (read config);
+  Usage.record ~scope ~observed_at:(day +. 20.) uncapped;
+  Usage.record ~scope ~observed_at:(day +. 30.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|});
+  let kept = read config in
+  let fresh_base = Filename.temp_dir "provider-usage-history-fresh-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree fresh_base) (fun () ->
+    let fresh = Workspace.default_config fresh_base in
+    copy_tree (journal_dir config) (journal_dir fresh);
+    check string "a kept read equals one pass over the journal" (read fresh) kept))
+
+(* The kept fold is the widest window's; a narrower window must not read the
+   wide window's earlier days, and a wide read after a narrow one must not
+   have dropped them. Alternating windows answer what one pass answers for
+   each window. *)
+let alternating_windows_answer_one_pass_each () = fixture (fun config scope day ->
+  let cap = decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":0}}|} in
+  let uncapped = decode Usage.decode_openrouter_key {|{"data":{"limit":null,"usage":21.5}}|} in
+  let read config window =
+    match History.read config ~now:(day +. 100.) ~window with
+    | Ok json -> Yojson.Safe.to_string json
+    | Error detail -> fail detail in
+  (* The wide window's first day falls outside a one-day window. *)
+  Usage.record ~scope ~observed_at:(day -. 1.) cap;
+  ignore (read config History.One_day);
+  Usage.record ~scope ~observed_at:(day +. 10.) uncapped;
+  ignore (read config History.Fourteen_days);
+  ignore (read config History.One_day);
+  Usage.record ~scope ~observed_at:(day +. 20.) cap;
+  ignore (read config History.Seven_days);
+  ignore (read config History.One_day);
+  let fresh_base = Filename.temp_dir "provider-usage-history-fresh-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree fresh_base) (fun () ->
+    let fresh = Workspace.default_config fresh_base in
+    copy_tree (journal_dir config) (journal_dir fresh);
+    List.iter
+      (fun window ->
+         check string
+           (Printf.sprintf "an alternating %s read equals one pass"
+              (match window with
+               | History.One_day -> "one-day" | History.Seven_days -> "seven-day"
+               | History.Fourteen_days -> "fourteen-day"))
+           (read fresh window) (read config window))
+      [ History.One_day; History.Seven_days; History.Fourteen_days ]))
+
 let () = run "provider usage durable snapshots" ["history", [
   test_case "damaged journal retains readable history through the typed decoder" `Quick
     damaged_journal_keeps_readable_history;
@@ -248,4 +320,8 @@ let () = run "provider usage durable snapshots" ["history", [
   test_case "overlapping source windows survive another source's empty report" `Quick overlapping_sources;
   test_case "empty-only day, recovery and another reporting source" `Quick empty_day_and_recovery;
   test_case "removed cap, empty report, prior day and delayed journal" `Quick removed_cap_and_empty_snapshot;
-  test_case "complete bucket omission and sparse event semantics" `Quick complete_and_sparse_sources]]
+  test_case "complete bucket omission and sparse event semantics" `Quick complete_and_sparse_sources;
+  test_case "kept reads answer what one pass over the journal does" `Quick
+    kept_reads_answer_what_one_pass_does;
+  test_case "alternating windows answer one pass each" `Quick
+    alternating_windows_answer_one_pass_each]]

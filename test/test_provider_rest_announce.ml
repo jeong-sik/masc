@@ -1,5 +1,7 @@
 (* RFC-0481 §3.2: a provider rest record tells the workspace's roster readers
-   which Keepers' shown rest moved, and only those. *)
+   which Keepers' shown rest moved, and only those. A record that changes a
+   runtime's standing in the resolved document announces that standing, and a
+   record that changes nothing announces nothing. *)
 
 open Alcotest
 open Masc
@@ -84,16 +86,25 @@ let test_moved_rests_announce_their_keepers () =
         | None -> fail "the default runtime is not loaded"
       in
       let heard = Eio.Stream.create max_int in
+      let standings = Eio.Stream.create max_int in
       let id = "provider-rest-announce" in
+      let standing_name =
+        Workspace_dataset_event.dataset_to_wire Workspace_dataset_event.Provider_standing
+      in
       Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
         ~callback:(fun (event : Sse.external_event) ->
           match
             Json_util.assoc_string_opt "type" event.ext_payload,
-            Json_util.assoc_string_opt "name" event.ext_payload
+            Json_util.assoc_string_opt "name" event.ext_payload,
+            Json_util.assoc_string_opt "dataset" event.ext_payload
           with
-          | Some kind, Some name when String.equal kind Keeper_row_broadcast.row_changed_event ->
+          | Some kind, Some name, _ when String.equal kind Keeper_row_broadcast.row_changed_event ->
             Eio.Stream.add heard name
-          | (Some _ | None), (Some _ | None) -> ())
+          | Some kind, _, Some dataset
+            when String.equal kind Workspace_dataset_event.event_type
+                 && String.equal dataset standing_name ->
+            Eio.Stream.add standings ()
+          | (Some _ | None), (Some _ | None), (Some _ | None) -> ())
         ();
       Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
         Eio.Switch.run @@ fun sw ->
@@ -103,9 +114,15 @@ let test_moved_rests_announce_their_keepers () =
           | Ok name -> check string label "alpha" name
           | Error `Timeout -> failf "%s: no row signal" label
         in
+        let expect_standing label =
+          match Eio.Time.with_timeout clock signal_wait_s (fun () -> Ok (Eio.Stream.take standings)) with
+          | Ok () -> ()
+          | Error `Timeout -> failf "%s: no standing announced" label
+        in
         Runtime_candidate_backpressure.note_rate_limit ~candidate
           ~retry_after:(Some rest_retry_after_s);
         expect_row "a rate limit rests the Keeper's walk";
+        expect_standing "a rate limit changes the runtime's standing";
         Runtime_candidate_backpressure.note_failed_attempt ~candidate
           ~failure:Runtime_candidate_backpressure.Server_error
           ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
@@ -118,6 +135,18 @@ let test_moved_rests_announce_their_keepers () =
            attempt, so the shown rest does not move. *)
         (match Eio.Time.with_timeout clock quiet_wait_s (fun () -> Ok (Eio.Stream.take heard)) with
          | Ok name -> failf "a record that moves nothing announced %s" name
+         | Error `Timeout -> ());
+        (* Every standing announced so far is taken; a signal that changed no
+           record leaves the standing as it was. *)
+        let rec drain () =
+          match Eio.Stream.take_nonblocking standings with
+          | Some () -> drain ()
+          | None -> ()
+        in
+        drain ();
+        Runtime_path_rest_signal.recorded ();
+        (match Eio.Time.with_timeout clock quiet_wait_s (fun () -> Ok (Eio.Stream.take standings)) with
+         | Ok () -> fail "a signal that changed no standing announced one"
          | Error `Timeout -> ())))
 ;;
 

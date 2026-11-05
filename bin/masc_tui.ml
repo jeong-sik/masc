@@ -8151,11 +8151,32 @@ let set_pushed_read state source read =
 let owe_pushed_read state source =
   set_pushed_read state source (Masc_tui_owed_read.changed (pushed_read state source))
 
+(* The Usage view's provider windows and runtime quota standing read again
+   when the server announces a usage report or a standing change; the
+   provider history reads again on a usage report and once the UTC day a
+   history request started on has ended. Both read on a revalidation and
+   after a failed read (RFC-0480 §3.4). *)
+let owe_provider_usage_reads state =
+  owe_pushed_read state Surface_read_source.Runtime_quota;
+  owe_pushed_read state Surface_read_source.Provider_history
+
+let owe_provider_standing_read state =
+  owe_pushed_read state Surface_read_source.Runtime_quota
+
+let owe_provider_history_day state ~now =
+  match state.provider_history_reread_at with
+  | Some at when at <= now ->
+      state.provider_history_reread_at <- None;
+      owe_pushed_read state Surface_read_source.Provider_history
+  | Some _ | None -> ()
+
 (* runtime.toml reads when the server says it committed a text of it, on
    arrival and on a revalidation, and again after a failed read (RFC-0482
    L4). *)
 let owe_runtime_config_read state =
-  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed
+  state.runtime_config_owed <- Masc_tui_owed_read.changed state.runtime_config_owed;
+  (* The Usage view draws a quota row for each runtime the file declares. *)
+  owe_pushed_read state Surface_read_source.Runtime_quota
 
 (* The panes that draw runtime.toml. *)
 let runtime_config_on_screen state =
@@ -8184,6 +8205,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
   | Masc.Workspace_dataset_event.Account_emails ->
       owe_pushed_read state Surface_read_source.Account_emails
+  | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
+  | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
 
@@ -15929,8 +15952,16 @@ let apply_account_emails_load state = function
       state.overview_account_emails <- Account_emails_read { emails; unreadable_rows }
   | Error err -> state.overview_account_emails <- Account_emails_failed err
 
-let apply_provider_history_load state (days, result) =
-  if days = state.provider_history_days then
+let seconds_per_day = 86_400.0
+
+(* The first instant of the UTC day after [now]. *)
+let next_utc_day ~now = (Float.floor (now /. seconds_per_day) +. 1.0) *. seconds_per_day
+
+let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_result = result } =
+  if days = state.provider_history_days then begin
+    (* The history window starts at a UTC day, so the reading is owed again
+       once the day this request started on has ended. *)
+    state.provider_history_reread_at <- Some (next_utc_day ~now:phr_requested_at);
     match result with
     | Ok (history : Masc.Tui_decode_usage.provider_usage_history)
       when history.puh_days = days ->
@@ -15942,6 +15973,7 @@ let apply_provider_history_load state (days, result) =
         state.provider_history <- Provider_history_error
             "history response window differs from request"
     | Error reason -> state.provider_history <- Provider_history_error reason
+  end
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
@@ -16398,15 +16430,18 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   in
   let read_provider_history () =
     when_needed ~source:Surface_read_order.Provider_history
-      ~dataset:(fun (days, result) -> Dataset_provider_history (days, result))
-      ~outcome:(fun (_, result) -> Http_refresh_progress.of_result result)
+      ~dataset:(fun reading -> Dataset_provider_history reading)
+      ~outcome:(fun reading -> Http_refresh_progress.of_result reading.phr_result)
       needs.needs_provider_history (fun () ->
-      match Masc_tui_loader.load_provider_usage_history ~host ~port
-              ~days:provider_history_days with
-      | result -> provider_history_days, result
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-          provider_history_days, Error (Printexc.to_string exn))
+      let phr_requested_at = Unix.gettimeofday () in
+      let phr_result =
+        match Masc_tui_loader.load_provider_usage_history ~host ~port
+                ~days:provider_history_days with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn)
+      in
+      { phr_days = provider_history_days; phr_requested_at; phr_result })
   in
   let read_overview_goals () =
     when_needed ~source:Surface_read_order.Overview_goals ~outcome:Http_refresh_progress.of_result
@@ -16620,7 +16655,7 @@ let apply_http_scoped_data state ~datasets results =
   apply Surface_read_order.Runtime_quota_data
     ~received:(fun (runtimes, quota) -> Result.is_ok runtimes && Result.is_ok quota) (apply_runtime_quota_load state) results.http_runtime_quota;
   apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
-  apply Surface_read_order.Provider_history_data ~received:(fun (_, result) -> Result.is_ok result) (apply_provider_history_load state) results.http_provider_history;
+  apply Surface_read_order.Provider_history_data ~received:(fun reading -> Result.is_ok reading.phr_result) (apply_provider_history_load state) results.http_provider_history;
   apply Surface_read_order.Account_emails_data ~received:Result.is_ok (apply_account_emails_load state) results.http_account_emails;
   let request = results.http_surface_request in
   Log.Transport.info "tui_surface_read_applied request=%d started_ns=%Ld applied_ns=%Ld sources=%s"
@@ -16639,7 +16674,7 @@ let apply_http_dataset state = function
   | Dataset_system_logs result -> apply_system_logs_load state result; None
   | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
   | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
-  | Dataset_provider_history (days, result) -> apply_provider_history_load state (days, result); None
+  | Dataset_provider_history reading -> apply_provider_history_load state reading; None
   | Dataset_overview_goals result -> apply_overview_goals_load state result; None
   | Dataset_account_emails result -> apply_account_emails_load state result; None
 
@@ -19770,6 +19805,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
    finish first. The due sources go out together in one surface bundle. *)
 let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
+  owe_provider_history_day state ~now:(Unix.gettimeofday ());
   let wanted = Surface_read_order.sources (current_surface_needs state) in
   let now = monotonic_now_s () in
   let due =

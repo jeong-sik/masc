@@ -9,7 +9,6 @@ let dashboard_model_metrics_cache = Cache.create ()
 let dashboard_runtime_metrics_cache = Cache.create ()
 let dashboard_cost_latency_cache = Cache.create ()
 let dashboard_keeper_costs_cache = Cache.create ()
-let dashboard_provider_history_cache = Cache.create ()
 let dashboard_keeper_decisions_cache = Cache.create ()
 let dashboard_keeper_practice_cache = Cache.create ()
 
@@ -184,32 +183,27 @@ let add_routes ~sw router =
            match window with
            | Some window ->
                let config = Mcp_server.workspace_config state in
-               let days = Server_provider_usage_history.days_of_window window in
-               let key = cache_key [ config.base_path; string_of_int days ] in
-               let json =
-                 Cache.read ~sw ~sync_first:false
-                   ~cache:dashboard_provider_history_cache ~key
-                   ~placeholder:(`Assoc [ "state", `String "loading" ])
-                   ~compute:(fun () ->
-                     let result =
-                       (* NDT-OK: compute time bounds this read-only history
-                          after an asynchronous cache refresh starts. *)
-                       let compute_now = Unix.gettimeofday () in
-                       try Server_provider_usage_history.read config
-                             ~now:compute_now ~window
-                       with Eio.Cancel.Cancelled _ as exn -> raise exn
-                          | exn ->
-                              Log.Server.warn "provider usage history crashed: %s"
-                                (Printexc.to_string exn);
-                              Error "provider usage history store unavailable"
-                     in
-                     match result with
-                     | Ok json -> json
-                     | Error detail ->
-                         `Assoc [ "state", `String "unavailable"
-                                ; "reason", `String detail ])
+               (* The history keeps its day files' folds between reads, so a
+                  read after a usage report folds only what the journal gained
+                  and answers it; the first read of a file reads it whole, on
+                  a worker. *)
+               let result =
+                 try
+                   Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+                     (* NDT-OK: request-time clock for a read-only history window. *)
+                     Server_provider_usage_history.read config ~now:(Unix.gettimeofday ())
+                       ~window)
+                 with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                     Log.Server.warn "provider usage history crashed: %s"
+                       (Printexc.to_string exn);
+                     Error "provider usage history store unavailable"
                in
-               `OK, redact_provider_history_cache_error json
+               (match result with
+                | Ok json -> `OK, json
+                | Error detail ->
+                    `OK, `Assoc [ "state", `String "unavailable"; "reason", `String detail ])
            | None ->
                `Bad_request,
                `Assoc [ "ok", `Bool false

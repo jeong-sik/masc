@@ -10,6 +10,8 @@ module Kind = struct
     | Harness_verdicts
     | Clients
     | Account_emails
+    | Provider_usage
+    | Provider_standing
     | Keeper_oauth_attempts
 
   let to_wire = function
@@ -18,6 +20,8 @@ module Kind = struct
     | Harness_verdicts -> "harness_verdicts"
     | Clients -> "clients"
     | Account_emails -> "account_emails"
+    | Provider_usage -> "provider_usage"
+    | Provider_standing -> "provider_standing"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
   ;;
 
@@ -27,6 +31,8 @@ module Kind = struct
     | "harness_verdicts" -> Some Harness_verdicts
     | "clients" -> Some Clients
     | "account_emails" -> Some Account_emails
+    | "provider_usage" -> Some Provider_usage
+    | "provider_standing" -> Some Provider_standing
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
     | _ -> None
   ;;
@@ -38,6 +44,8 @@ type dataset =
   | Harness_verdicts
   | Clients
   | Account_emails
+  | Provider_usage
+  | Provider_standing
   | Keeper_oauth_attempts of { keeper : string }
 
 let kind = function
@@ -46,6 +54,8 @@ let kind = function
   | Harness_verdicts -> Kind.Harness_verdicts
   | Clients -> Kind.Clients
   | Account_emails -> Kind.Account_emails
+  | Provider_usage -> Kind.Provider_usage
+  | Provider_standing -> Kind.Provider_standing
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
 ;;
 
@@ -55,7 +65,8 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
    one Keeper carries its name; the others carry nothing. A later dataset can
    name an instance instead, and joins here. *)
 let subject_fields = function
-  | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails -> []
+  | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
+  | Provider_usage | Provider_standing -> []
   | Keeper_oauth_attempts { keeper } -> [ ("keeper", `String keeper) ]
 ;;
 
@@ -76,6 +87,8 @@ let of_fields fields =
      | Some Kind.Harness_verdicts -> Ok Harness_verdicts
      | Some Kind.Clients -> Ok Clients
      | Some Kind.Account_emails -> Ok Account_emails
+     | Some Kind.Provider_usage -> Ok Provider_usage
+     | Some Kind.Provider_standing -> Ok Provider_standing
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

@@ -43,13 +43,13 @@ that all event transitions now consolidate correctly.
 Dry-run renders exactly the frozen requests without network access:
 
 ```sh
-python3 experiments/memory-transition-evidence/run.py --output /tmp/memory-requests.json
+python3 docs/evidence/2026-10-09-memory-transition-evidence/run.py --output /tmp/memory-requests.json
 ```
 
 To make paid calls, supply the existing `TYPESAFEAI_API_KEY` securely and run:
 
 ```sh
-python3 experiments/memory-transition-evidence/run.py --execute --output /tmp/memory-results.json
+python3 docs/evidence/2026-10-09-memory-transition-evidence/run.py --execute --output /tmp/memory-results.json
 ```
 
 The frozen question is deliberate: changing current production source does not

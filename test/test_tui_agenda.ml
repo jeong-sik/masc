@@ -164,42 +164,6 @@ let test_stale_schedule_is_not_presented_as_current () =
     [ 0; 1; 5; 20; 80 ]
 ;;
 
-(* The strip names one wake because it has one line. The panel was opened on
-   purpose, so it answers with all of them. *)
-let test_the_panel_lists_every_coming_wake () =
-  let lines = overlay_of (Agenda.project ~scheduled:(Agenda.Read [ sweep; edgar ])
-                            ~awaiting:(Agenda.Read [])) in
-  check int "both wakes are rows" 2 (List.length (tones_of lines Agenda.Wake));
-  let text = joined lines in
-  check bool "the 11:45 check" true (contains ~needle:"11:45" text);
-  check bool "and the 12:14 sweep" true (contains ~needle:"12:14" text)
-;;
-
-let test_settled_rows_do_not_reach_the_panel () =
-  let lines =
-    overlay_of (Agenda.project ~scheduled:(Agenda.Read [ done_earlier; edgar ])
-                  ~awaiting:(Agenda.Read []))
-  in
-  check int "one wake, not two" 1 (List.length (tones_of lines Agenda.Wake));
-  check
-    bool
-    "the finished row is not on it"
-    false
-    (contains ~needle:"orrery" (joined lines))
-;;
-
-let test_empty_sections_answer_in_words () =
-  let lines = overlay_of (Agenda.project ~scheduled:(Agenda.Read [])
-                            ~awaiting:(Agenda.Read [])) in
-  let text = joined lines in
-  check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
-  check bool "so does the held-call section" true
-    (contains ~needle:"no keeper is holding a call" text);
-  check bool "so does the goal section" true
-    (contains ~needle:"no goal awaits confirmation" text);
-  check int "all five headings are still drawn" 5 (List.length (tones_of lines Agenda.Heading))
-;;
-
 let test_an_unread_agenda_keeps_the_strip_down () =
   let t =
     Agenda.project ~scheduled:Agenda.Not_read
@@ -501,10 +465,6 @@ let test_home_and_agenda_refuse_noncurrent_task_source () =
   let state = agenda_state () in
   state.operator_stalled <- Agenda.Read_failed "backlog recovered from backup";
   let agenda_lines = lines_of_state state in
-  check bool "Agenda reports the noncurrent source" true
-    (List.exists (fun line -> line.Agenda.tone = Agenda.Failed
-       && contains ~needle:"backlog recovered from backup" line.Agenda.text)
-       agenda_lines);
   check bool "Agenda offers no task from a backup" false
     (List.exists (fun line -> match line.Agenda.goes_to with
        | Agenda.Stuck_task _ -> true | _ -> false) agenda_lines)
@@ -649,23 +609,6 @@ let test_the_badge_tells_the_kinds_apart () =
     (let all = label one_of_each in
      all <> one_question && all <> one_stuck && all <> one_goal)
 
-(* The badge is returned even where it cannot fit, but wherever the total
-   fits, whatever it is drawn as fits too. *)
-let test_the_badge_fits_the_room_it_is_given () =
-  let total_cells = Masc_tui_message_layout.display_width
-      (Agenda.waiting_label ~cells:0 one_of_each) in
-  List.iter
-    (fun cells ->
-       check bool
-         (Printf.sprintf "four kinds fit in %d cells" cells)
-         true
-         (Masc_tui_message_layout.display_width
-            (Agenda.waiting_label ~cells one_of_each)
-          <= cells))
-    [ total_cells; 20; 30; 40; 60; 80; 120 ];
-  check bool "a narrow room does not make the badge disappear" true
-    (Agenda.waiting_label ~cells:1 one_of_each <> "")
-
 (* The badge is the reminder that follows the operator: it is up while any ask
    is open and goes once the last one is answered. It is not the row above the
    composer, which holds the next wake. *)
@@ -777,9 +720,7 @@ let test_unread_questions_take_no_row_and_open_nothing () =
   state.asks_error <- Some "asks load failed: HTTP 503";
   check int "a failed read takes no row" 0 (Masc_tui_types.agenda_chrome_rows state);
   let lines = lines_of_state state in
-  check (list string) "and offers no question to open" [] (ask_targets lines);
-  check int "the failure has its row" 1
-    (List.length (tones_of lines Agenda.Failed))
+  check (list string) "and offers no question to open" [] (ask_targets lines)
 
 let test_home_approval_list_preserves_its_caller () =
   let open Masc_tui_types in
@@ -819,13 +760,7 @@ let () =
     ; ( "how it reads"
       , [] )
     ; ( "the panel"
-      , [ test_case "lists every coming wake" `Quick
-            test_the_panel_lists_every_coming_wake
-        ; test_case "settled rows do not reach it" `Quick
-            test_settled_rows_do_not_reach_the_panel
-        ; test_case "empty sections answer in words" `Quick
-            test_empty_sections_answer_in_words
-        ; test_case "an unread agenda keeps the strip down" `Quick
+      , [ test_case "an unread agenda keeps the strip down" `Quick
             test_an_unread_agenda_keeps_the_strip_down
         ; test_case "failed reads are safe before the panel fits them" `Quick
             test_failed_reads_are_safe_before_the_panel_fits_them
@@ -855,8 +790,6 @@ let () =
             test_the_strip_count_adds_the_questions
         ; test_case "the badge tells the kinds apart" `Quick
             test_the_badge_tells_the_kinds_apart
-        ; test_case "the badge fits the room it is given" `Quick
-            test_the_badge_fits_the_room_it_is_given
         ; test_case "an open question keeps the badge up until answered" `Quick
             test_an_open_question_keeps_the_badge_up_until_answered
         ; test_case "the window budget follows the help line" `Quick

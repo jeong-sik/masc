@@ -58,11 +58,6 @@ let non_blank_json_string = function
     None
 ;;
 
-let assoc_field_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let reasoning_detail_of_json ~index = function
   | `Assoc fields as raw ->
     let text =
@@ -76,7 +71,7 @@ let reasoning_detail_of_json ~index = function
 ;;
 
 let reasoning_details_of_message msg =
-  match assoc_field_opt "reasoning_details" msg with
+  match Json_util.assoc_member_opt "reasoning_details" msg with
   | None -> Ok None
   | Some (`List details) ->
     let rec loop index acc = function

@@ -1,5 +1,10 @@
 (** Shared JSON helpers for the llm_provider library. *)
 
+(** The value of field [name] when the JSON value is an object that has one, [None] for a
+    missing field and for every other kind of value. With a repeated key the first
+    occurrence wins. *)
+val assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+
 (** Return a human-readable JSON type name.
 
     Uses JSON-schema vocabulary: [object], [array], [string], [number],

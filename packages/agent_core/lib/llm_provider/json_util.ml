@@ -1,5 +1,10 @@
 (** Shared JSON helpers for the llm_provider library. *)
 
+let assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
 let json_type_name = function
   | `Assoc _ -> "object"
   | `List _ -> "array"

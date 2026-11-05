@@ -509,11 +509,6 @@ let chunk_has_non_empty_delta (c : openai_chunk) : bool =
    the Responses-API trailer. *)
 let openai_done_sentinel = "[DONE]"
 
-let assoc_field_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let non_blank_json_string = function
   | `String s when String.trim s <> "" -> Ok (Some s)
   | `String _ -> Ok None
@@ -546,7 +541,7 @@ let undeclared_reasoning_member ~declared delta =
     (fun member ->
        (not (String.equal member declared))
        &&
-       match assoc_field_opt member delta with
+       match Json_util.assoc_member_opt member delta with
        | None -> false
        | Some value ->
          (match non_blank_json_string value with
@@ -598,7 +593,7 @@ let parse_stream_reasoning_details = function
 ;;
 
 let parse_optional_delta_string ~position ~field json =
-  match assoc_field_opt field json with
+  match Json_util.assoc_member_opt field json with
   | None | Some `Null -> Ok None
   | Some (`String value) when not (Api_common.string_is_blank value) -> Ok (Some value)
   | Some (`String _) -> Ok None
@@ -611,7 +606,7 @@ let parse_optional_delta_string ~position ~field json =
 ;;
 
 let parse_delta_tool_call_type ~position json =
-  match assoc_field_opt "type" json with
+  match Json_util.assoc_member_opt "type" json with
   | None | Some `Null | Some (`String "function") -> Ok ()
   | Some (`String _) ->
     Error
@@ -622,7 +617,7 @@ let parse_delta_tool_call_type ~position json =
 ;;
 
 let parse_delta_tool_call_index ~position json =
-  match assoc_field_opt "index" json with
+  match Json_util.assoc_member_opt "index" json with
   | Some (`Int index) when index >= 0 -> Ok index
   | Some (`Intlit raw) ->
     (match int_of_string_opt raw with
@@ -649,7 +644,7 @@ let parse_delta_tool_call_index ~position json =
    the way it judges a fragment that does not parse, so one call with such
    arguments does not fail the stream. *)
 let parse_delta_tool_call_arguments function_json =
-  match assoc_field_opt "arguments" function_json with
+  match Json_util.assoc_member_opt "arguments" function_json with
   | None | Some `Null -> Ok None
   | Some (`String arguments) -> Ok (Some (Args_fragment arguments))
   | Some arguments ->
@@ -666,7 +661,7 @@ let parse_openai_delta_tool_call ~position = function
     let* () = parse_delta_tool_call_type ~position tool_call in
     let* tc_id = parse_optional_delta_string ~position ~field:"id" tool_call in
     let* tc_name, tc_arguments =
-      match assoc_field_opt "function" tool_call with
+      match Json_util.assoc_member_opt "function" tool_call with
       | None | Some `Null -> Ok (None, None)
       | Some (`Assoc _ as function_json) ->
         let* tc_name =
@@ -686,7 +681,7 @@ let parse_openai_delta_tool_call ~position = function
 ;;
 
 let parse_openai_delta_tool_calls delta =
-  match assoc_field_opt "tool_calls" delta with
+  match Json_util.assoc_member_opt "tool_calls" delta with
   | None | Some `Null -> Ok []
   | Some (`List calls) ->
     let rec loop position acc = function
@@ -715,12 +710,12 @@ let openai_provider_error_of_json ~raw json =
   Option.map
     (openai_provider_error_of_envelope ~raw)
     (Option.bind
-       (assoc_field_opt "error" json)
+       (Json_util.assoc_member_opt "error" json)
        Openai_error_envelope.of_error_value)
 ;;
 
 let choice_finished_with_provider_error choice =
-  match assoc_field_opt "finish_reason" choice with
+  match Json_util.assoc_member_opt "finish_reason" choice with
   | Some (`String finish_reason) -> Stop_reason_wire.is_provider_error_finish finish_reason
   | None | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
     false
@@ -792,7 +787,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                      ; cache_n = int_field "cache_n"
                      })
                in
-               match assoc_field_opt "choices" json with
+               match Json_util.assoc_member_opt "choices" json with
                | Some (`List []) ->
                  (match chunk_usage with
                   | None -> Openai_empty
@@ -832,7 +827,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                         a mirrored text detail. Reading only one member drops
                         the other model's reasoning entirely. *)
                      let reasoning_content_result =
-                       match assoc_field_opt field delta with
+                       match Json_util.assoc_member_opt field delta with
                        | None -> Ok None
                        | Some value ->
                          (match non_empty_json_string value with
@@ -845,7 +840,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                      in
                      let details_result =
                        parse_stream_reasoning_details
-                         (assoc_field_opt "reasoning_details" delta)
+                         (Json_util.assoc_member_opt "reasoning_details" delta)
                      in
                      (match reasoning_content_result, details_result with
                       | Ok reasoning_content, Ok details ->
@@ -2629,11 +2624,6 @@ type gemini_sse_parse_result =
 
 type gemini_chunk_to_events_error = { reason : string }
 
-let gemini_assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let gemini_field ~path key json =
   match json with
   | `Assoc fields ->
@@ -2657,7 +2647,7 @@ let gemini_list ~path = function
 ;;
 
 let gemini_optional_string ~path key json =
-  match gemini_assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some value ->
@@ -2684,7 +2674,7 @@ let gemini_required_string ~path key json =
 ;;
 
 let gemini_optional_int_default_zero ~path key json =
-  match gemini_assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok 0
   | Some (`Int value) -> Ok value
   | Some (`Intlit raw) ->
@@ -2711,7 +2701,7 @@ let gemini_part_metadata_fields =
 let validate_gemini_part_metadata ~path part =
   let ( let* ) = Result.bind in
   let* () =
-    match gemini_assoc_field "thought" part with
+    match Json_util.assoc_member_opt "thought" part with
     | None | Some `Null | Some (`Bool _) -> Ok ()
     | Some value ->
       Error
@@ -2721,7 +2711,7 @@ let validate_gemini_part_metadata ~path part =
            (Json_util.json_type_name value))
   in
   let* () =
-    match gemini_assoc_field "thoughtSignature" part with
+    match Json_util.assoc_member_opt "thoughtSignature" part with
     | None | Some `Null -> Ok ()
     | Some (`String value) when not (Api_common.string_is_blank value) -> Ok ()
     | Some (`String _) -> Error (Printf.sprintf "%s.thoughtSignature:blank" path)
@@ -2735,7 +2725,7 @@ let validate_gemini_part_metadata ~path part =
   let rec validate_objects = function
     | [] -> Ok ()
     | key :: rest ->
-      (match gemini_assoc_field key part with
+      (match Json_util.assoc_member_opt key part with
        | None | Some `Null | Some (`Assoc _) -> validate_objects rest
        | Some value ->
          Error
@@ -2776,7 +2766,7 @@ let validate_gemini_part ~position part =
   let payloads =
     List.filter_map
       (fun key ->
-         match gemini_assoc_field key part with
+         match Json_util.assoc_member_opt key part with
          | None -> None
          | Some value -> Some (key, value))
       gemini_supported_part_payloads
@@ -2802,7 +2792,7 @@ let validate_gemini_part ~position part =
     let* _id = gemini_optional_string ~path:(path ^ ".functionCall") "id" function_call in
     let* _ = gemini_required_string ~path:(path ^ ".functionCall") "name" function_call in
     let* () =
-      match gemini_assoc_field "args" function_call with
+      match Json_util.assoc_member_opt "args" function_call with
       | None | Some `Null | Some (`Assoc _) -> Ok ()
       | Some value ->
         Error
@@ -2812,7 +2802,7 @@ let validate_gemini_part ~position part =
              (Json_util.json_type_name value))
     in
     let* () =
-      match gemini_assoc_field "willContinue" function_call with
+      match Json_util.assoc_member_opt "willContinue" function_call with
       | None | Some `Null | Some (`Bool _) -> Ok ()
       | Some value ->
         Error
@@ -2923,7 +2913,7 @@ let gemini_object_fields ~path = function
 ;;
 
 let gemini_optional_object ~path key json =
-  match gemini_assoc_field key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null | Some (`Assoc _) -> Ok ()
   | Some value ->
     Error
@@ -2988,7 +2978,7 @@ let gemini_unsupported_part_of_json ~position part =
             gemini_optional_object ~path:function_call_path "args" function_call
           in
           let* () =
-            match gemini_assoc_field "partialArgs" function_call with
+            match Json_util.assoc_member_opt "partialArgs" function_call with
             | None | Some `Null | Some (`List _) -> Ok ()
             | Some value ->
               Error
@@ -2998,7 +2988,7 @@ let gemini_unsupported_part_of_json ~position part =
                    (Json_util.json_type_name value))
           in
           let* () =
-            match gemini_assoc_field "willContinue" function_call with
+            match Json_util.assoc_member_opt "willContinue" function_call with
             | None | Some `Null | Some (`Bool _) -> Ok ()
             | Some value ->
               Error
@@ -3170,7 +3160,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
   in
   let* model_version = gemini_optional_string ~path:"gemini" "modelVersion" json in
   let* candidates =
-    match gemini_assoc_field "candidates" json with
+    match Json_util.assoc_member_opt "candidates" json with
     | None | Some `Null -> Ok []
     | Some candidates -> gemini_list ~path:"gemini.candidates" candidates
   in
@@ -3201,12 +3191,12 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
   in
   let terminal_without_content = Option.is_some gem_finish_reason in
   let* parts =
-    match gemini_assoc_field "content" candidate with
+    match Json_util.assoc_member_opt "content" candidate with
     | (None | Some `Null) when terminal_without_content -> Ok []
     | None -> Error (Gemini_payload_malformed "gemini.candidates[0].content:missing")
     | Some content ->
       let* content = gemini_object ~path:"gemini.candidates[0].content" content in
-      (match gemini_assoc_field "parts" content with
+      (match Json_util.assoc_member_opt "parts" content with
        | (None | Some `Null) when terminal_without_content -> Ok []
        | None ->
          Error (Gemini_payload_malformed "gemini.candidates[0].content.parts:missing")
@@ -3237,7 +3227,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     | Some part -> Error (Gemini_payload_unsupported_part part)
   in
   let* gem_usage =
-    match gemini_assoc_field "usageMetadata" json with
+    match Json_util.assoc_member_opt "usageMetadata" json with
     | None | Some `Null -> Ok None
     | Some (`Assoc _ as usage) ->
       let* input_tokens =
@@ -3287,7 +3277,7 @@ let gemini_provider_error_of_json ~raw json =
         ; raw
         })
     (Option.bind
-       (assoc_field_opt "error" json)
+       (Json_util.assoc_member_opt "error" json)
        Openai_error_envelope.of_error_value)
 ;;
 
@@ -3303,7 +3293,9 @@ let sse_error_event_of_bodiless_body ~raw body =
   | exception (Yojson.Json_error _ | Invalid_argument _) -> None
   | (`Assoc _ as json) ->
     (match
-       Option.bind (assoc_field_opt "error" json) Openai_error_envelope.of_error_value
+       Option.bind
+         (Json_util.assoc_member_opt "error" json)
+         Openai_error_envelope.of_error_value
      with
      | None -> None
      | Some envelope ->

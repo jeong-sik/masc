@@ -23,13 +23,8 @@ let states_provider_condition code =
   code = too_many_requests || (code >= server_error_min && code <= server_error_max)
 ;;
 
-let member name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let string_member name json =
-  match member name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`String value) -> Some value
   | None | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
     None
@@ -39,7 +34,8 @@ let string_member name json =
 let error_type_of_object error =
   match string_member "type" error with
   | Some _ as error_type -> error_type
-  | None -> Option.bind (member "metadata" error) (string_member "error_type")
+  | None ->
+    Option.bind (Json_util.assoc_member_opt "metadata" error) (string_member "error_type")
 ;;
 
 (* The error object alone, at the top level where [Retry.classify_error] reads
@@ -49,7 +45,7 @@ let error_type_of_object error =
 let error_body error = Yojson.Safe.to_string (`Assoc [ "error", error ])
 
 let provider_status_of_object error =
-  match member "code" error with
+  match Json_util.assoc_member_opt "code" error with
   | Some (`Int code) when states_provider_condition code ->
     Some { Types.status = code; error_body = error_body error }
   | None
@@ -86,7 +82,7 @@ let without_error_object =
 ;;
 
 let of_errored_choice choice =
-  match Option.bind (member "error" choice) of_error_value with
+  match Option.bind (Json_util.assoc_member_opt "error" choice) of_error_value with
   | Some envelope -> envelope
   | None -> without_error_object
 ;;

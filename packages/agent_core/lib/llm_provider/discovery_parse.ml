@@ -17,15 +17,13 @@ type slot_status =
   ; idle : int
   }
 
-let field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
 let parse_models json =
   let parse_model index = function
     | `Assoc _ as item ->
-      (match field "id" item, field "owned_by" item with
+      (match
+         ( Json_util.assoc_member_opt "id" item
+         , Json_util.assoc_member_opt "owned_by" item )
+       with
        | Some (`String id), Some (`String owned_by)
          when String.trim id <> "" && String.trim owned_by <> "" -> Ok { id; owned_by }
        | Some (`String id), _ when String.trim id = "" ->
@@ -40,7 +38,7 @@ let parse_models json =
        | None, _ -> Error (Printf.sprintf "data[%d].id is missing" index))
     | _ -> Error (Printf.sprintf "data[%d] must be a JSON object" index)
   in
-  match field "data" json with
+  match Json_util.assoc_member_opt "data" json with
   | Some (`List items) ->
     let rec loop index acc = function
       | [] -> Ok (List.rev acc)
@@ -55,9 +53,15 @@ let parse_models json =
 ;;
 
 let parse_props json =
-  match field "total_slots" json, field "default_generation_settings" json with
+  match
+    ( Json_util.assoc_member_opt "total_slots" json
+    , Json_util.assoc_member_opt "default_generation_settings" json )
+  with
   | Some (`Int total_slots), Some (`Assoc _ as settings) when total_slots > 0 ->
-    (match field "n_ctx" settings, field "model" settings with
+    (match
+       ( Json_util.assoc_member_opt "n_ctx" settings
+       , Json_util.assoc_member_opt "model" settings )
+     with
      | Some (`Int ctx_size), Some (`String model)
        when ctx_size > 0 && String.trim model <> "" -> Ok { total_slots; ctx_size; model }
      | Some (`Int ctx_size), _ when ctx_size <= 0 -> Error "n_ctx must be positive"
@@ -77,7 +81,7 @@ let parse_props json =
 let parse_slots json =
   let parse_busy index = function
     | `Assoc _ as slot ->
-      (match field "is_processing" slot with
+      (match Json_util.assoc_member_opt "is_processing" slot with
        | Some (`Bool processing) -> Ok processing
        | Some _ ->
          Error (Printf.sprintf "slots[%d].is_processing must be a boolean" index)

@@ -3179,7 +3179,7 @@ let test_completion_delivery_failure_and_restart () =
   check bool "typed completion survives the queue wire" true
     (Keeper_event_queue.stimulus_identity_equal selection.source decoded);
   let inspect () = Intake.pending_board_events_of_stimulus_result
-      ~base_path:fixture.base_path ~meta_after_triage:fixture.meta selection.source in
+      ~config:(Workspace.default_config fixture.base_path) ~meta_after_triage:fixture.meta selection.source in
   let event = match inspect () with
     | Intake.Stimulus_consumed [event] -> event
     | _ -> fail "complete original result was not admitted to the next prompt" in
@@ -3208,7 +3208,7 @@ let test_completion_delivery_failure_and_restart () =
   (match inspect () with Intake.Stimulus_consumed [_] -> () | _ -> fail "restored original owner cannot resume intake");
   let forged = {completion with oj_source={completion.oj_source with task_id=Some "task-B"}} in
   let forged_source = {selection.source with payload=Owned_job_completed forged} in
-  (match Intake.pending_board_events_of_stimulus_result ~base_path:fixture.base_path
+  (match Intake.pending_board_events_of_stimulus_result ~config:(Workspace.default_config fixture.base_path)
      ~meta_after_triage:fixture.meta forged_source with
    | Intake.Stimulus_job_unavailable _ -> () | _ -> fail "a different Task authorized the original result");
   Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection

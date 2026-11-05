@@ -117,11 +117,11 @@ let completion_rejection_intake ~config ~(meta_after_triage : keeper_meta) stim
 (* A Board read that answers no row names a swept post or an id that does not
    parse, and reading again gives the same answer. The stimulus is consumed so
    it cannot be reselected on every snapshot. *)
-let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
+let pending_board_events_of_stimulus_result ~(config : Workspace_utils.config) ~meta_after_triage stim =
+  let base_path = config.base_path in
   match stim.Keeper_event_queue.payload with
   | Keeper_event_queue.Completion_authority_rejected rejection ->
-    completion_rejection_intake ~config:(Workspace.default_config base_path)
-      ~meta_after_triage stim rejection
+    completion_rejection_intake ~config ~meta_after_triage stim rejection
   | Keeper_event_queue.Addon_operation_changed change ->
     (match Keeper_world_observation.pending_board_event_of_addon_operation_change
        ~base_path ~keeper_name:meta_after_triage.name ~arrived_at:stim.arrived_at change with
@@ -286,7 +286,7 @@ let consume_single_heartbeat_stimulus
   let intake_result =
     match stim.payload with
     | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ ->
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Fusion_completed c ->
       (* RFC-0266: an async fusion deliberation finished and woke this keeper.
          Surface the resolved answer as a pending_board_event so this turn acts
@@ -300,16 +300,16 @@ let consume_single_heartbeat_stimulus
       Log.Keeper.info
         "turn entry: fusion result delivered run_id=%s terminal=%s (keeper=%s)"
         c.run_id terminal meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Schedule_due sw ->
       Log.Keeper.info
         "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
         sw.schedule_id
         sw.due_at
         meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
-    | Keeper_event_queue.Completion_authority_rejected rejection ->
-      completion_rejection_intake ~config:ctx.config ~meta_after_triage stim rejection
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
+    | Keeper_event_queue.Completion_authority_rejected _ ->
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Task_cancelled cancellation ->
       Log.Keeper.info
         "turn entry: task cancellation delivered task_id=%s cancelled_by=%s \
@@ -317,7 +317,7 @@ let consume_single_heartbeat_stimulus
         cancellation.tc_task_id
         cancellation.tc_cancelled_by
         meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Ask_answered answered ->
       (* The ask_id is a pointer only; the answer stays in Keeper_ask_store.
          Load it here and promote it to a pending observation, the same split
@@ -407,9 +407,9 @@ let consume_single_heartbeat_stimulus
          | Keeper_event_queue.Delegate_no_reply -> "no_reply"
          | Keeper_event_queue.Delegate_failed _ -> "failed")
         meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Composition_completed cc ->
       (* Same shape as [Delegate_completed]: work this Keeper started and did
          not wait for has settled, surfaced as a pending_board_event so this
@@ -427,7 +427,7 @@ let consume_single_heartbeat_stimulus
          | Keeper_event_queue.Composition_failed _ -> "failed"
          | Keeper_event_queue.Composition_cancelled _ -> "cancelled")
         meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Task_outcome outcome ->
       (* The approval twin of the rejection log line beside it: a verdict the
          Keeper submitted evidence for has landed, surfaced as a
@@ -440,7 +440,7 @@ let consume_single_heartbeat_stimulus
         outcome.to_verification_id
         (Masc_domain.completion_authority_kind outcome.to_authority)
         meta_after_triage.name;
-      pending_board_events_of_stimulus_result ~base_path:ctx.config.base_path ~meta_after_triage stim
+      pending_board_events_of_stimulus_result ~config:ctx.config ~meta_after_triage stim
     | Keeper_event_queue.Workspace_message message ->
       (* The transcript row committed at the delivery boundary carries the
          content and the message lane reads it, so there is no observation to

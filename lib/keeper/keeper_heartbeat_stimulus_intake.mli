@@ -56,8 +56,9 @@ val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
 
-(** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
-    [stim] into zero-or-one pending board events. An unavailable posts source
+(** [pending_board_events_of_stimulus_result ~config ~meta_after_triage stim]
+    renders [stim] into zero-or-one pending board events, reading every store
+    through the intake's own [config]. An unavailable posts source
     returns [Stimulus_board_unavailable]; established absence is logged,
     counted and consumed. Original job
     completions instead require the canonical owner and return
@@ -65,7 +66,7 @@ val classify_pending_board_event_result
     Add-on notices likewise return [Stimulus_addon_unavailable] rather than
     consuming an unreadable, unsafe or differently sourced publication. *)
 val pending_board_events_of_stimulus_result
-  :  base_path:string
+  :  config:Workspace_utils.config
   -> meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result

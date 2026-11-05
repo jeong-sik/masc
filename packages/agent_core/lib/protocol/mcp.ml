@@ -366,10 +366,7 @@ type server_spec =
 
 (** Transport backend for a managed MCP connection. *)
 type transport =
-  | Stdio of
-      { client : t
-      ; spec : server_spec
-      }
+  | Stdio of { client : t }
   | Http of
       { close_fn : unit -> unit
       ; base_url : string
@@ -408,7 +405,7 @@ let merge_env extras =
 (** Close a single managed MCP connection (transport-aware). *)
 let close_managed m =
   match m.transport with
-  | Stdio { client; _ } ->
+  | Stdio { client } ->
     (try close client with
      | Eio.Io _ | Unix.Unix_error _ | Failure _ -> ())
   | Http { close_fn; _ } ->
@@ -451,7 +448,7 @@ let connect_and_load ~sw ~mgr (spec : server_spec) =
               { tools
               ; skipped_tools
               ; name = spec.name
-              ; transport = Stdio { client; spec }
+              ; transport = Stdio { client }
               })
      with
      | Out_of_memory ->
@@ -487,23 +484,6 @@ let connect_all ~sw ~mgr specs =
        | Ok m -> loop (m :: acc) rest)
   in
   loop [] specs
-;;
-
-(** Reconnect a managed MCP server by closing the old connection
-    and starting a fresh one from its spec.
-    Returns the new managed value on success.
-    Only stdio transports can be reconnected (HTTP has no persistent spec). *)
-let reconnect ~sw ~mgr (m : managed) =
-  match m.transport with
-  | Stdio { client; spec } ->
-    (try close client with
-     | Eio.Io _ | Unix.Unix_error _ | Failure _ -> ());
-    connect_and_load ~sw ~mgr spec
-  | Http _ ->
-    Error
-      (Error.Mcp
-         (InitializeFailed
-            { detail = Printf.sprintf "Cannot reconnect HTTP MCP server '%s'" m.name }))
 ;;
 
 [@@@coverage off]

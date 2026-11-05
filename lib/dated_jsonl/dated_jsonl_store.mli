@@ -110,12 +110,6 @@ type retention =
 
 val retention : t -> retention
 
-val locations_on_disk : root -> t -> location list
-(** Every directory of the store that exists now. A store kept per keeper
-    yields one location for each keeper directory found on disk, so the
-    files of a keeper that is gone are still found. The reaction ledger
-    also yields one per generation directory. *)
-
 val with_retention_root : root -> (Fs_compat.Retention_directory.t -> 'a) -> 'a option
 (** Admit the physical BasePath (allowing its configured aliases), then bind
     the runtime-root entry without following it. No descendant is realpathed.

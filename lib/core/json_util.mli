@@ -135,13 +135,6 @@ val assoc_object_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
     returning [None] when the field is missing, null, or not an object.
     Same result as {!get_object} with the arguments in assoc-family order. *)
 
-val find_assoc_row_by_string_field :
-  field:string -> value:string -> Yojson.Safe.t -> Yojson.Safe.t option
-(** [find_assoc_row_by_string_field ~field ~value json] returns the first
-    [`Assoc] row of the JSON array [json] whose [field] member is the
-    string [value].  Returns [None] when [json] is not an array or when
-    no row matches. *)
-
 val json_string_list_member : string -> Yojson.Safe.t -> string list
 (** [json_string_list_member name json] extracts a list of non-empty
     trimmed strings from the JSON array at field [name]. Returns [[]]

@@ -28,7 +28,7 @@ python3 -B -m unittest discover -s docs/evidence/dos-input-then-screen-2026-11
 
 - 입력 2,469개 중 1,707개(69.1%)가 화면 읽기로 이어졌어요. `masc_dos_screen` 1,940개의 88.0%예요. 쌍은 모두 입력이 자기 배치에 혼자 있었어요.
 - 프로필별로 이어지는 비율이 달라요. `ollama_cloud.ollama-cloud-deepseek-v4-1-flash` 는 입력 1,624개 중 1,238개(76.2%), `glm-coding.glm-5.3-flash` 는 383개 중 235개(61.4%)예요. 나머지 프로필 값은 결과 파일에 있어요.
-- `masc_dos_*` 호출 4,704개는 모두 `msx-retro-mania` 한 Keeper 의 것이에요(`dos_calls_by_keeper`). 호출은 UTC 날짜별로 11-01 308, 11-02 1,935, 11-03 1,082, 11-04 1,379, 11-05 1이고, 마지막 호출이 11-05T10:17Z 예요.
+- `masc_dos_*` 호출 4,704개는 모두 `msx-retro-mania` 한 Keeper 의 것이에요(`dos_calls_by_keeper`). 호출은 UTC 날짜별로 11-01 308, 11-02 1,935, 11-03 1,082, 11-04 1,379, 11-05 1이에요(`--from-date` 와 `--to-date` 를 같은 날로 줘서 셌어요). 마지막 호출 시각 11-05T10:17Z 는 원장 행의 `ts` 를 따로 읽어서 얻었어요.
 - `with_frame` 열은 모두 0이에요. 지금 도구에는 `include_frame` 이 없어요.
 
 ## 읽을 때 주의

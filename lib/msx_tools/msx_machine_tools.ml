@@ -216,11 +216,7 @@ let resolve_cart ~base_path name =
 ;;
 
 (* Case-insensitive .dsk — the extension picks the drive over the slot. *)
-(* Case-insensitive .dsk — the extension picks the drive over the slot. *)
-let is_dsk_path path =
-  let lower = String.lowercase_ascii path in
-  String.length lower >= 4
-  && String.sub lower (String.length lower - 4) 4 = ".dsk"
+let is_dsk_path path = String.ends_with ~suffix:".dsk" (String.lowercase_ascii path)
 ;;
 
 (* The board hears about a change of medium, not about a load: a keeper that

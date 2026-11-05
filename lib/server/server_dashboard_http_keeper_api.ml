@@ -882,9 +882,8 @@ let handle_keeper_get_subroutes state req request reqd =
   let plen = String.length prefix in
   let tlen = String.length req_path in
   let ends_with suffix =
-    let slen = String.length suffix in
-    tlen > plen + slen
-    && String.sub req_path (tlen - slen) slen = suffix
+    tlen > plen + String.length suffix
+    && String.ends_with ~suffix req_path
   in
   let extract_name suffix =
     let slen = String.length suffix in

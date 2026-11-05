@@ -195,14 +195,6 @@ let blocked_destination_reason url =
                   Some "numeric host is not a canonical IP literal"
                 else None (* DNS name; resolution is out of scope here *)))
 
-let ends_with ~suffix value =
-  let value_length = String.length value in
-  let suffix_length = String.length suffix in
-  suffix_length <= value_length
-  && String.equal
-       (String.sub value (value_length - suffix_length) suffix_length)
-       suffix
-
 let horizontal_space_re = Re.Pcre.re "[ \t\r]+" |> Re.compile
 let blank_lines_re = Re.Pcre.re "\n{3,}" |> Re.compile
 
@@ -324,18 +316,18 @@ let content_kind_of_content_type = function
       if String.equal base "" then Ok Html
       else if String.equal base "text/html"
               || String.equal base "application/xhtml+xml"
-              || ends_with ~suffix:"+html" base
+              || String.ends_with ~suffix:"+html" base
       then Ok Html
       else if String.equal base "text/plain"
               || String.equal base "text/markdown"
               || String.equal base "text/csv"
       then Ok Plain_text
       else if String.equal base "application/json"
-              || ends_with ~suffix:"+json" base
+              || String.ends_with ~suffix:"+json" base
       then Ok Json_text
       else if String.equal base "text/xml"
               || String.equal base "application/xml"
-              || ends_with ~suffix:"+xml" base
+              || String.ends_with ~suffix:"+xml" base
       then Ok Xml_text
       else if String.starts_with ~prefix:"text/" base then Ok Plain_text
       else Error raw

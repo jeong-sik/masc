@@ -46,7 +46,7 @@ Query는 `play_client_id`와 `play_machine`을 사용한다. Control `machine`�
 
 `Server_play_room_events`는 `(base_path, agent_name, play_client_id)`를 key로 `sse_client_id`와 `play_machine`을 보관한다.
 
-- connect: Join 성공 후 lease를 등록한다. 실패하면 lease 없이 Observer 등록도 취소한다.
+- connect: Join 성공 후 lease를 등록하고 `Connected`를 반환한다. 더 낮은 `sse_client_id`의 늦은 connect는 `Stale`을 반환하고 Observer를 성공으로 진행시키지 않는다. storage/permission 실패는 lease 없이 Observer 등록도 취소한다.
 - ping renewal: key와 `sse_client_id`가 모두 일치할 때만 Join한다. 실패하면 로그를 남기고 Observer는 유지한다. 다음 ping을 기다리며, 갱신이 없으면 기존 60초 expiry가 적용된다.
 - disconnect: key와 `sse_client_id`가 모두 일치할 때만 lease를 제거하고 Leave한다. registry removal과 Leave는 cancellation 보호 아래 완료하고, 실패는 로그와 expiry로 남긴다. 원래 cancellation은 숨기지 않는다.
 
@@ -54,7 +54,9 @@ Eio mutex로 key 교체와 DB 효과를 순서화한다. Sse registry·다른 st
 
 ### reconnect는 새 lease를 먼저 만든다
 
-기존 transport는 이전 session을 먼저 닫고 새 connection을 등록해 Leave/Join gap이 생긴다. 이를 바꿔 새 Observer와 새 presence lease를 먼저 만들고, 아직 새 connection이 transport registry에 게시되기 전에 이전 connection을 닫는다. 이전 disconnect callback은 새 `sse_client_id`와 다륵므로 replacement를 지우지 않는다. 일반 SSE handoff와 queue의 기존 동작은 유지한다.
+새 Observer와 새 presence lease를 먼저 만들고, 아직 새 connection이 transport registry에 게시되기 전에 이전 connection을 닫는다. stop과 publish는 모두 `sse_client_id` 순서로 제한해 낮은 id의 늦은 요청이 높은 id의 successor를 닫거나 교체하지 못하게 한다. `Stale` connect는 successor를 정리하지 않고 요청을 중단한다.
+
+Abort가 successor를 만들지 못한 경우에는 register에서 보존한 이전 same-session client 중 id가 더 낮은 predecessor의 exact cleanup hook을 호출해 presence를 정리한다. disconnect가 lease 설치보다 먼저 일어나면 connect를 걸러내고, connect 직후에도 다시 확인한다. callback 전체를 cancellation 보호하고 cleanup 뒤 `Eio.Fiber.check`로 원래 cancellation을 재전달한다. 일반 SSE handoff와 queue의 기존 동작은 유지한다.
 
 ### TUI는 성공한 polling을 멈춘다
 

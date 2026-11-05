@@ -81,19 +81,19 @@
 
 **Files:**
 - Create: `lib/server/server_play_room_events.ml`, `lib/server/server_play_room_events.mli`
-- Modify: `lib/server/server_mcp_transport_http.ml`, `lib/server/server_routes_http_routes_play_room.ml`, `lib/server/server_routes_http_routes_play_room.mli`, `lib/server/server_h2_gateway.ml`
+- Modify: `lib/server/server_mcp_transport_http.ml`, `lib/server/server_mcp_transport_http.mli`, `lib/server/server_mcp_transport_http_conn.ml`, `lib/server/server_mcp_transport_http_conn.mli`, `lib/server/server_routes_http_routes_play_room.ml`, `lib/server/server_routes_http_routes_play_room.mli`, `lib/server/server_h2_gateway.ml`
 - Modify: `lib/sse.ml`, `lib/sse.mli`, preserving `Sse.register` while returning the exact client through `register_with_client`
 - Modify: `lib/play/play_room.ml`, `lib/play/play_room.mli` with a typed Join/Leave client projection
-- Create: `test/test_server_play_room_events.ml`, `test/stanzas/test_server_play_room_events.inc`
+- Create: `test/test_server_play_room_events.ml`, `test/stanzas/test_server_play_room_events.inc`, `test/play_observer_fixture.ml`
 - Modify: `test/test_tui_execute_stream_http.ml` for the real Observer handoff contract
 - Modify: `test/dune` only if the generated stanza include is not automatic
 
 **Interfaces:**
 - Produces: `Server_play_room_events.room_scope_of_request_target : string -> (room_scope option, string) result`; `play_client_id` requires valid `play_machine`, and absence of both returns `Ok None`.
 - `room_scope` contains only `play_client` and `machine`, using the existing identifier and machine decoders.
-- Produces: `connect`, `renew`, `disconnect`, each taking `~base_path ~agent_name ~role ~scope ~sse_client_id` and returning `(unit, Play_room.error) result`.
+- Produces: `connect`, returning `(Connected | Stale, Play_room.error) result`; `renew` and `disconnect` retain `(unit, Play_room.error) result`. A stale connect cannot close or publish over its successor.
 - Produces: `perform_http ~base_path ~agent_name ~role ~action`, allowing Join only without an active lease and Leave only without an active lease; Read/Say call `Play_room.perform_with_change` without membership upsert.
-- `Sse.register_with_client` returns the exact committed `Sse.client`; transport passes its `agent_name`, `role`, `event_stream`, and `id`, not a current-session lookup.
+- `Sse.register_with_client` returns the exact committed `Sse.client`, the replaced same-session client, and any cap eviction; transport passes the current client's `agent_name`, `role`, `event_stream`, and `id`, not a current-session lookup. An abort invokes only an older replaced client's exact cleanup hook.
 - `Play_room.presence` exposes only the typed Join/Leave operation and client identity needed by the HTTP lease guard.
 
 - [ ] **Step 1: Write failing tests**
@@ -113,6 +113,8 @@
   - `who` comes from `Sse.client.agent_name`; enforce `Masc_domain.has_permission role CanPlayMachine` and fail closed. Add a narrow `For_testing` permission seam instead of a false role claim.
   - Start presence only after workspace/readiness admission. Renew from the existing 30-second ping and cleanup from the existing disconnect hook, preserving the original hook and queues.
   - Create the new Observer/lease before closing the old connection, and close the old connection before publishing the new transport connection. Keep `client_id`-guarded unregister so old cleanup cannot remove the new connection.
+  - Order stop and publication by `sse_client_id`; a stale connect aborts without closing or publishing over a successor. Recheck `disconnected` before and after lease installation.
+  - On abort, invoke only the older replaced client's exact cleanup hook. Protect the entire disconnect callback and recheck cancellation after protected cleanup.
   - Guard HTTP Join/Leave against the active lease; Read/Say use Task 1's no-membership-upsert path.
 
 - [ ] **Step 4: Verify GREEN remotely**

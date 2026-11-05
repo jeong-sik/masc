@@ -1095,6 +1095,82 @@ let test_missing_cli_is_not_reported_as_logout () =
   | Ok _ -> fail "missing Claude CLI was reported as a valid login"
 ;;
 
+(* The CLI of a host whose pipes hold 512 bytes leaves a reader of a pipe with
+   the first 512 bytes of its status document and exits 0. This script does
+   the same to any stdout that is not a regular file, so only a probe that
+   reads the CLI's stdout from a file gets the document. *)
+let status_script_cut_off_a_pipe ~exit_code ~document =
+  let path = Filename.temp_file "masc-claude-auth-pipe-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output
+    (Printf.sprintf
+       "if [ -f /dev/stdout ]; then printf '%%s\\n' %s; else printf '%%.20s' %s; fi\n"
+       (shell_quote document)
+       (shell_quote document));
+  output_string output (Printf.sprintf "exit %d\n" exit_code);
+  close_out output;
+  Unix.chmod path 0o700;
+  path
+;;
+
+let probe_status_script path =
+  Eio_main.run (fun env ->
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:"/tmp") with cli_path = path }
+    in
+    Runtime_claude_code.probe_subscription
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+      config)
+;;
+
+let test_auth_status_is_read_through_a_file () =
+  let script = status_script_cut_off_a_pipe ~exit_code:0 ~document:auth_subscription in
+  Fun.protect
+    ~finally:(fun () -> Sys.remove script)
+    (fun () ->
+       match probe_status_script script with
+       | Ok subscription ->
+         check string "authentication" "claude.ai"
+           (Runtime_claude_code.authentication_to_string subscription.authentication);
+         check (option string) "plan" (Some "team") subscription.subscription_type
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+(* The probe's stdout file is named in the temporary directory, which the
+   test points at a directory of its own: whatever the CLI did, nothing is left
+   in it afterwards. *)
+let test_auth_status_file_does_not_outlive_the_probe () =
+  let scripts =
+    [ "answers whole", status_script_cut_off_a_pipe ~exit_code:0 ~document:auth_subscription
+    ; "logged out", status_script_cut_off_a_pipe ~exit_code:1 ~document:auth_subscription
+    ; "fails", status_script_cut_off_a_pipe ~exit_code:3 ~document:auth_subscription
+    ; ( "cut off"
+      , status_script_cut_off_a_pipe ~exit_code:0 ~document:"{\"loggedIn\":true," )
+    ]
+  in
+  let directory = Filename.temp_file "masc-claude-auth-files-" "" in
+  Sys.remove directory;
+  Unix.mkdir directory 0o700;
+  let previous = Filename.get_temp_dir_name () in
+  Fun.protect
+    ~finally:(fun () ->
+      Filename.set_temp_dir_name previous;
+      List.iter (fun (_, script) -> Sys.remove script) scripts;
+      Unix.rmdir directory)
+    (fun () ->
+       List.iter
+         (fun (label, script) ->
+            Filename.set_temp_dir_name directory;
+            let _ : (_, _) result = probe_status_script script in
+            Filename.set_temp_dir_name previous;
+            check (array string) (label ^ ": nothing left behind") [||]
+              (Sys.readdir directory))
+         scripts)
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
@@ -4674,6 +4750,14 @@ let () =
             "missing CLI differs from logout"
             `Quick
             test_missing_cli_is_not_reported_as_logout
+        ; test_case
+            "auth status is read through a file"
+            `Quick
+            test_auth_status_is_read_through_a_file
+        ; test_case
+            "auth status file does not outlive the probe"
+            `Quick
+            test_auth_status_file_does_not_outlive_the_probe
         ] )
     ; ( "terminal"
       , [ test_case

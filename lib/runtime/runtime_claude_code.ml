@@ -593,6 +593,38 @@ let note_cut_document ~bytes = function
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) ) as result -> result
 
+(* [claude auth status --json] prints one document and exits. A Node or Bun
+   process that exits with output still queued drops the queued tail, and a
+   pipe is where the output queues: on a host that has used up its pipe memory
+   every new pipe holds 512 bytes, so a reader that is not already draining
+   gets the first 512 bytes of a longer document and exit status 0. A regular
+   file takes the whole write whenever the reader looks, so the child writes
+   into a private file in the temporary directory and the file is read after
+   the child exits. [cwd] carries the filesystem capability that every caller
+   derives from [Eio.Stdenv.fs]; the file is not created under [cwd]. *)
+let probe_stdout_prefix = "masc-claude-auth-status-"
+
+let read_stdout_through_file ~mgr ~cwd ~stderr ~env ~is_success argv =
+  Eio.Switch.run (fun sw ->
+    let path =
+      Filename.concat
+        (Filename.get_temp_dir_name ())
+        (Random_id.prefixed ~prefix:probe_stdout_prefix ~bytes:8)
+    in
+    let target = fst cwd, path in
+    let file = Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) target in
+    Eio.Switch.on_release sw (fun () ->
+      try Sys.remove path with
+      | Sys_error detail ->
+        Log.Runtime_agent.warn "auth probe could not remove its stdout file: %s" detail);
+    let child = Eio.Process.spawn ~sw mgr ~cwd ~stdout:file ~stderr ~env argv in
+    (* The child writes through its own descriptor, so this one has no use
+       left. *)
+    Eio.Flow.close file;
+    Eio.Process.await_exn ~is_success child;
+    Eio.Path.load target)
+;;
+
 (* The boolean is true when the CLI exited cleanly but its stdout was not a
    complete JSON document. *)
 let probe_auth_status ~mgr ~cwd config =
@@ -616,19 +648,18 @@ let probe_auth_status ~mgr ~cwd config =
   | Ok environment ->
     try
     let stdout =
-      Eio.Process.parse_out
-        mgr
-        Eio.Buf_read.take_all
-        ~is_success:(fun code -> code = 0 || code = 1)
+      read_stdout_through_file
+        ~mgr
         ~cwd
         ~stderr:(Eio.Flow.buffer_sink stderr_buf)
         ~env:environment
+        ~is_success:(fun code -> code = 0 || code = 1)
         [ config.cli_path
         ; Runtime_native_tools.claude_setting_sources_arg
         ; "auth"; "status"; "--json" ]
     in
-    (* parse_out joins its stderr copier before it returns, so the buffer is
-       drained here. *)
+    (* The switch in [read_stdout_through_file] joins its stderr copier before
+       it returns, so the buffer is drained here. *)
     let excerpt = subscription_stderr_excerpt stderr_buf in
     let parsed = parse_json_value ~stage:"auth status" (String.trim stdout) in
     let cut_document = Result.is_error parsed in

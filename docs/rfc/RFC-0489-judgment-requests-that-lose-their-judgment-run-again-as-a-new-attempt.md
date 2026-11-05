@@ -1,16 +1,16 @@
 ---
 rfc: "0489"
-title: "판정만 하는 LLM 요청이 판정 없이 끝나면 새 시도로 다시 판정한다"
+title: "Goal 검증이 판정 없이 끝나면 새 시도로 다시 판정한다"
 status: Draft
 created: 2026-11-05
 updated: 2026-11-05
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0387", "goal-candle-ledger"]
+related: ["0387"]
 ---
 
-# RFC-0489 — 판정을 잃은 요청은 새 시도로 다시 판정한다
+# RFC-0489 — 판정을 잃은 Goal 검증은 새 시도로 다시 판정한다
 
 ## 0. 요약
 
@@ -18,9 +18,8 @@ related: ["0387", "goal-candle-ledger"]
 - 그 뒤 25시간 동안 검사가 21번 이 줄만 남기고 지나갔다: `goal verifier deferred ... gate=Original_pending reason=Goal reviewer may have dispatched; no automatic replay`.
 - Goal 은 `verifying` 에 머물렀고 알림은 없었다. 11-05 10:25Z 에 운영자가 Reopen 하고 다시 요청하자 5분 만에 판정이 나왔다.
 - 같은 모양이 10-30~11-01 에 `goal-1790248232808-05fe959c` 에서 26번 있었다.
-- Candle 등급도 같다. 10-30 의 등급 요청이 Claude Code 429 를 223번 받다가 재시작에 끊겼다. 결과 모름이 영구 거절이 되어 `goal-1793171092272-a46df693` 의 지급이 6일째 멈춰 있다.
-- 두 요청은 판정만 한다. 판정은 저장한 뒤 커밋으로만 기록에 들어간다. 그래서 같은 입력으로 다시 판정해도 기록이 겹치지 않는다.
-- 그런데 두 요청은 부작용이 있는 요청의 규칙을 따른다. "결과를 모르면 다시 보내지 않는다."
+- Goal 검증은 판정만 한다. 판정은 저장한 뒤 커밋으로만 기록에 들어간다. 그래서 같은 입력으로 다시 판정해도 기록이 겹치지 않는다.
+- 그런데 Goal 검증은 부작용이 있는 요청의 규칙을 따른다. "결과를 모르면 다시 보내지 않는다."
 - 이 RFC 는 하나를 제안한다. 판정을 보낸 실행이 판정을 저장하지 않고 끝났으면 그 사실을 거절로 기록한다. 그리고 같은 입력으로 다음 시도(attempt+1)를 만든다. 새 상태와 Gate 는 없다.
 
 ## 1. 지금
@@ -42,17 +41,12 @@ related: ["0387", "goal-candle-ledger"]
 - #48000 이 정체를 알리던 Board 글을 지웠다. 남는 신호는 WARN 줄과 실행 원장 행뿐이다.
 - 시험 `test/test_goal_verifier_worker.ml:336-348` 은 취소된 원본을 다시 돌리지 않는다고 단언한다.
 
-### 1.2 Candle 등급이 멈추는 길
-
-- `server_candle_appraiser.ml:179-181` 은 add-on 의 `Exact.Outcome_unknown` 을 `Execution_rejected` 로 바꾼다. 문구는 "the original request will not be dispatched again" 이다.
-- `candle_appraisal_intent.ml:25-29` 는 요청 id 를 입력만으로 만든다. 시각도 난수도 들어가지 않는다. 같은 입력은 같은 id 가 되어 새 시도가 생기지 않는다.
-
-### 1.3 지금 규칙이 지키는 것
+### 1.2 지금 규칙이 지키는 것
 
 - 공용 규약 `lane_addon_request_progress.mli:63-64` 는 대기·결과 모름·worker 없음이면 같은 원본을 다시 보내지 않게 한다. 보낸 요청이 바깥에 효과를 냈을 수 있는 경우에 맞는 규칙이다.
 - #47530 은 Goal 재요청을 막으며 이유를 적었다. "pending 기록만으로는 이전 실행이 끝났다는 걸 알 수 없다."
 
-### 1.4 판정만 하는 요청에서 맞는 사실
+### 1.3 Goal 검증에서 맞는 사실
 
 - Goal 판정은 같은 프로세스 안의 콜백 하나로만 들어온다(`goal_verifier_worker.ml:684-685` 의 `~on_verdict:retain_reply`).
 - 판정을 저장하지 못한 원본은 커밋할 수 없다. 규약은 `Dispatch_pending` 에서만 `Judged` 로 가게 한다(`lane_addon_request_progress.ml:158-161`).
@@ -103,15 +97,7 @@ type judgment_lost =
 - 근거: lease 를 쥔 이 프로세스는 아직 검토를 시작하지 않았다. 그러니 남은 `Dispatch_intended` 는 이전 프로세스가 쓴 것이다.
 - 이 단계는 이미 멈춘 원본도 같은 규칙으로 푼다. 옛 기록을 옮기는 코드는 따로 쓰지 않는다.
 
-### 2.4 Candle 등급
-
-- 등급 요청 id 에 시도 번호를 넣는다. id 는 `digest(입력, attempt)` 다.
-- `Exact.Outcome_unknown` 이 오면 Candle 원장에 `appraisal_lost {intent_id, attempt}` 사실을 덧붙인다. 다음 pass 는 attempt+1 의 id 로 다시 보낸다.
-- 원장 사실이 필요한 이유: 재시작 뒤에도 몇 번째 시도인지 원장에서 계산해야 한다. 그렇지 않으면 같은 id 를 다시 보내다 `Request_id_reused` 로 막히거나, 다시는 보내지 않는다.
-- `Input_refused`·`Not_allowed`·`Invalid_output` 처럼 확정된 거절은 지금처럼 둔다.
-- id 를 만드는 방식이 바뀐다. 이 변경은 hard cut 이다. 끝난 지급은 원장에서 종단이라 영향이 없다.
-
-### 2.5 시험
+### 2.4 시험
 
 기능 단위로 본다.
 
@@ -120,21 +106,19 @@ type judgment_lost =
 - `Raised` → 자동 시도가 없다. `request_complete` 로 다시 요청하면 attempt 1 이 돈다.
 - 시작 때 남은 `Dispatch_pending` → `Previous_owner_exited` → attempt 1 이 돈다.
 - 판정을 잃은 원본은 커밋할 수 없다(`Rejected` 에서 `Judged` 로 못 간다).
-- Candle: `Exact.Outcome_unknown` → `appraisal_lost` 기록 → attempt 1 로 판정 → 지급이 기록된다.
 
 ## 3. 하지 않는 것
 
 - 공용 규약의 "같은 원본을 다시 보내지 않는다"는 바꾸지 않는다. 같은 원본이 아니라 다음 원본을 만든다.
 - Task 검증(`verifier_review_worker.ml`, `completion_authority_agent.ml`)은 바꾸지 않는다. 실행 기록에서 늦게 도착한 판정을 다시 읽는다(`verifier_review_execution.ml:94-131`). "판정이 다시 오지 않는다"가 맞지 않는다.
 - 시도 횟수 상한, cooldown, 정체 알림 글을 넣지 않는다.
-- `goal-1793171092272-a46df693` 지급에 걸린 다른 보류(fence 이전 후보 기록)는 이 RFC 범위 밖이다. Candle 후보 규칙 RFC 에서 다룬다.
+- Goal 검증 말고 다른 판정 요청은 이 RFC 에서 바꾸지 않는다.
 
 ## 4. 층
 
-1. Goal: `judgment_lost` 합, `run` 종료 기록, 거절 증거 디코드 일원화, 시험. 확인: CI Core type-check 와 `test_goal_verifier_worker`.
-2. Goal: 서버 시작 단계와 재시도 타이머. 확인: 시작 시나리오 시험.
-3. Candle: `appraisal_lost` 사실과 시도 번호가 든 id. 확인: Candle 지급 시험.
-4. 배포 뒤 실측: 검토 중에 한 번 재시작한다. `goal-verification-runs.jsonl` 에 attempt 1 의 `committed` 가 남는지 본다.
+1. `judgment_lost` 합, `run` 종료 기록, 거절 증거 디코드 일원화, 시험. 확인: CI Core type-check 와 `test_goal_verifier_worker`.
+2. 서버 시작 단계와 재시도 타이머. 확인: 시작 시나리오 시험.
+3. 배포 뒤 실측: 검토 중에 한 번 재시작한다. `goal-verification-runs.jsonl` 에 attempt 1 의 `committed` 가 남는지 본다.
 
 ## 5. 열린 질문
 

@@ -16,7 +16,8 @@ let memory_health_keeper (payload : Yojson.Safe.t) =
      | ( Some _ | None )
      , Ok
          Workspace_dataset_event.(
-           ( Repositories | Verification_requests | Harness_verdicts
+           ( Repositories | Verification_requests | Harness_verdicts | Clients
+           | Account_emails | Provider_usage | Provider_standing | Keeper_costs
            | Keeper_oauth_attempts _ | Memory_health _ ))
      | (Some _ | None), Error _ -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None

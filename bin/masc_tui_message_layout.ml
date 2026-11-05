@@ -1224,28 +1224,30 @@ let word_separators = "_:/.-"
 let least_fill_divisor = 2
 
 (* The byte offset just past the last separator of [row], where [row] may end
-   so the next row starts a new part of the same name. None when [row] holds no
-   separator, when ending there leaves it under half of [max_cells], or when a
-   combining mark after the separator would be parted from it. *)
+   so the next row starts a new part of the same name. A separator is looked for
+   piece by piece, a piece being what the terminal draws in one place: a mark
+   that follows a separator is part of its piece, so the row ends after both,
+   and the bytes of an escape are not text. None when no piece opens with a
+   separator, or when ending after the last one leaves [row] under half of
+   [max_cells]. *)
 let separator_cut ~max_cells row =
-  let length = String.length row in
-  let rec last index =
-    if index < 0 then None
-    else if String.contains word_separators row.[index] then Some (index + 1)
-    else last (index - 1)
+  let cells = ref 0 and cut = ref None in
+  let is_separator offset = String.contains word_separators row.[offset] in
+  let piece start_offset end_offset cell_width _ =
+    cells := !cells + cell_width;
+    if is_separator start_offset then cut := Some (end_offset, !cells)
   in
-  match last (length - 1) with
-  | None -> None
-  | Some stop ->
-      let on_boundary =
-        stop >= length
-        || printable_ascii_range row stop (stop + 1)
-        || List.mem stop (input_boundaries row)
-      in
-      if on_boundary
-         && display_width (String.sub row 0 stop) * least_fill_divisor >= max_cells
-      then Some stop
-      else None
+  let ascii start_offset end_offset =
+    for offset = start_offset to end_offset - 1 do
+      incr cells;
+      if is_separator offset then cut := Some (offset + 1, !cells)
+    done
+  in
+  iter_display_pieces row ~piece ~ascii;
+  match !cut with
+  | Some (stop, cells_at_stop) when cells_at_stop * least_fill_divisor >= max_cells ->
+      Some stop
+  | Some _ | None -> None
 
 (* The rows a word wider than [max_cells] takes. A name still has parts, and a
    row that stops after one reads as the start of the same name:
@@ -1253,11 +1255,13 @@ let separator_cut ~max_cells row =
    leaves [keeper_identity_drift:configured_keeper_without_] and
    [runtime_meta], where a cut at the width leaves [...without_runtim] and
    [e_meta]. Each row ends after the last separator that fits, and a stretch
-   with none is cut at the width as {!split_cells} does. Text holding an escape
-   is cut at the width: the escape's own bytes hold separators. The rows
-   concatenate to [word]. *)
+   with none is cut at the width as {!split_cells} does. The separators are
+   those of the text: an escape's own bytes are skipped. A word that is not
+   valid UTF-8 is cut at the width: {!split_cells} measures its bytes scalar by
+   scalar, and a valid stretch of it by grapheme, so rows cut from the two
+   readings would disagree about their width. The rows concatenate to [word]. *)
 let split_word ~max_cells word =
-  if String.contains word '\x1B' then split_cells ~max_cells word
+  if not (String.is_valid_utf_8 word) then split_cells ~max_cells word
   else begin
     (* [buffer] is the text not yet in a row. The chunks of the word arrive one
        at a time, so a long word costs one pass and not a pass for every row. *)

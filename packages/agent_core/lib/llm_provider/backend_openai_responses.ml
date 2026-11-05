@@ -256,20 +256,12 @@ let assistant_output_item_of_block ?phase = function
    error flag enclose the ordered child parts. The canonical checkpoint stays
    unchanged.
    https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_function_call_output_item_list_param.py *)
-let rec tool_output_has_image = function
-  | Image _ -> true
-  | ToolResult { content_blocks = Some blocks; _ } ->
-    List.exists tool_output_has_image blocks
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-  | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false
-;;
-
 let rec tool_output_parts = function
   | Text text -> [ input_text_content_part text ]
   | Image { media_type; source } ->
     [ input_image_content_part ~media_type ~source ]
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ }
-    when List.exists tool_output_has_image blocks ->
+    when content_has_image blocks ->
     let identity =
       Yojson.Safe.to_string
         (`Assoc [ "tool_use_id", `String tool_use_id
@@ -286,7 +278,7 @@ let rec tool_output_parts = function
 
 let function_call_output_content ~content ~content_blocks =
   match content_blocks with
-  | Some blocks when List.exists tool_output_has_image blocks ->
+  | Some blocks when content_has_image blocks ->
     `List (List.concat_map tool_output_parts blocks)
   | Some _ | None -> `String (content_string_of_tool_result ~content ~content_blocks)
 ;;

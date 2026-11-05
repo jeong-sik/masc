@@ -181,14 +181,6 @@ let messages projection = projection
 let original_message resolved = resolved.original
 let content resolved = resolved.content
 
-
-let rec contains_image = function
-  | Image _ -> true
-  | ToolResult { content_blocks = Some blocks; _ } -> List.exists contains_image blocks
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-  | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false
-;;
-
 let result_label tool_use_id outcome =
   Text
     ("Media from tool result "
@@ -223,7 +215,7 @@ let with_image_followups messages =
              match block with
              | ToolResult { tool_use_id; content = summary; outcome; json
                           ; content_blocks = Some blocks }
-               when List.exists contains_image blocks ->
+               when content_has_image blocks ->
                let followup = result_label tool_use_id outcome :: List.concat_map media_parts blocks in
                (ToolResult { tool_use_id; content = summary; outcome; json; content_blocks = None } :: content,
                 List.rev_append followup pending)

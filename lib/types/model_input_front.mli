@@ -12,6 +12,9 @@ type t =
           history it made untenable. A floor seed stands at a past-end
           position; [Keeper_carried_front.for_history] drops it. *)
 
+val equal : t -> t -> bool
+(** Same kind with the same digest. *)
+
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val validate : transmitted_atoms:int -> total_atoms:int -> t -> (unit, string) result

@@ -159,6 +159,7 @@ type step =
   | Skip               (** 이 이벤트는 쓰지 않는다. *)
   | Send of string     (** frame 을 쓰고 이어 간다. *)
   | Send_last of string  (** frame 을 쓰고 끝낸다. *)
+  | Stop               (** 쓰지 않고 끝낸다. *)
 
 type idle =
   | Keepalive  (** keepalive 주석을 쓴다. *)
@@ -183,7 +184,7 @@ val run :
 
 - producer 는 `Queue.push` 로 넣고 바로 돌아간다. 자리는 `Atomic` 카운터로 예약한다. 그래서 여러 producer 가 여러 domain 에서 동시에 넣어도 `Eio.Stream.add` 가 기다리지 않는다. 자리가 없으면 뒤처짐만 표시한다.
 - 송신 fiber 하나가 queue 에서 꺼내 `step` 에 따라 쓴다. ping 간격 동안 이벤트가 없으면 `idle` 에 따라 쓴다.
-- `send` 가 `Closed` 면 `Client_gone`, `Stalled` 면 `Stalled` 로 끝난다. `Send_last` 를 쓰거나 `idle` 이 `Finish` 면 `Finished` 로 끝난다.
+- `send` 가 `Closed` 면 `Client_gone`, `Stalled` 면 `Stalled` 로 끝난다. `Send_last` 를 쓰거나, `step` 이 `Stop` 이거나, `idle` 이 `Finish` 면 `Finished` 로 끝난다.
 - `stalled_after_s` 는 `Server_sse_response.respond` 가 받는다. pump 는 `send` 의 시간을 재지 않는다.
 - 구독은 route 가 맡는다. route 는 queue 를 만들고 `Queue.push` 로 구독한 뒤 구독 해제를 switch 에 건다. 그다음 앞서 보낼 frame 을 같은 fiber 에서 `send` 하고 `run` 을 부른다. 그동안 들어온 이벤트는 queue 에서 기다린다.
 - fleet 과 MCP listen 의 `step` 은 늘 `Send`, `idle` 은 늘 `Keepalive` 다.
@@ -196,7 +197,7 @@ val run :
 | Keeper chat | `register_operation_live_sink` | `since_seq` 로 다시 붙어서 journal replay 를 받는다(RFC-0412 §3.2) |
 | MCP `subscriptions/listen` | `Mcp_subscriptions.register_after_ack` 의 `send` 가 `on_event` 다 | 다시 구독한다. `tools/list_changed` 와 `resources/updated` 는 바뀌었다는 신호만 싣고 내용은 싣지 않는다. 놓친 알림은 클라이언트가 목록과 resource 를 다시 읽어야 메워진다. 클라이언트가 다시 구독한 뒤 다시 읽는지는 확인 필요 |
 
-Keeper chat 에서는 acceptance frame 과 replay frame 을 송신 fiber 가 `run` 을 부르기 전에 같은 fiber 에서 보낸다. 그동안 들어온 live 이벤트는 queue 에서 기다린다. `Server_keeper_stream_handoff` 는 이 순서를 지키려고 있었으므로 지운다. replay 가 이미 쓴 seq 의 live 이벤트는 `Skip`, `Run_finished`·`Run_error` 는 `Send_last` 다. `idle` 은 지금 heartbeat 처럼 operation 기록을 읽고 `Keepalive`(아직 도는 중), `Finish`(terminal 없이 끝남), `Quiet`(기록을 읽지 못함)를 고른다.
+Keeper chat 에서는 acceptance frame 과 replay frame 을 송신 fiber 가 `run` 을 부르기 전에 같은 fiber 에서 보낸다. 그동안 들어온 live 이벤트는 queue 에서 기다린다. `Server_keeper_stream_handoff` 는 이 순서를 지키려고 있었으므로 지운다. replay 가 이미 쓴 seq 의 live 이벤트는 `Skip`, `Run_finished`·`Run_error` 는 `Send_last` 다. replay 가 끝나면 송신 fiber 가 queue 에 두 가지를 넣는다. operation 기록에만 있는 terminal 은 `Send_last` 가 되고, operation 이 이미 끝났거나 replay 가 terminal 을 썼다는 표시는 `Stop` 이 된다. 둘 다 replay 동안 들어온 live 이벤트 뒤에 선다. 그래서 지금처럼 쌓인 live 이벤트를 먼저 보내고 끝낸다. queue 가 차서 닫힌 클라이언트는 `since_seq` 로 journal 에 있는 이벤트를 다시 받는다. journal 쓰기가 실패한 이벤트는 journal 에 없으므로 돌아오지 않는다. 지금은 queue 에 상한이 없어서 이런 이벤트도 남는다. 메모리 상한을 두는 대가로 이 손실을 받는다. `idle` 은 지금 heartbeat 처럼 operation 기록을 읽고 `Keepalive`(아직 도는 중), `Finish`(terminal 없이 끝남), `Quiet`(기록을 읽지 못함)를 고른다.
 
 `Mcp_subscriptions` 는 `masc_transport_protocol` 라이브러리에 있다. 이 라이브러리는 바꾸지 않는다. transport 가 넘기는 `send` 는 queue 에 넣고 바로 돌아온다. pump 가 이미 끝났으면 `false` 를 돌려주고, `deliver` 는 그 구독을 지운다. 그래서 `deliver` 는 느린 구독을 기다리지 않는다.
 

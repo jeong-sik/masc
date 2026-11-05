@@ -95,6 +95,8 @@ let refused_as label expected session_dir =
   match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:"session", expected with
   | Error Store.Ref_not_found, `Absent
   | Error (Store.Ref_read_failed (Store.Io_error _)), `Io_error
+  | Error (Store.Ref_read_failed (Store.Read_failed { cause = Store.Os_error Unix.EACCES; _ })),
+    `Read_failed_eacces
   | Error (Store.Ref_read_failed (Store.Parse_error _)), `Parse_error -> ()
   | Error error, _ -> failf "%s: refused as %s" label (Store.checkpoint_ref_load_error_to_string error)
   | Ok _, _ -> failf "%s: the canonical was accepted" label
@@ -129,12 +131,16 @@ let test_a_directory_at_the_canonical_path_is_refused () = with_session (fun ses
   Unix.mkdir (canonical_path session_dir) 0o700;
   refused_as "a directory canonical" `Io_error session_dir)
 
+(* An unreadable-but-present canonical fails the read itself: open(2)
+   raises EACCES, which load_canonical_bytes_strict reports as
+   Read_failed { Os_error EACCES }. Io_error is only for a path that is
+   not a regular file, where the path, not the read, is at fault. *)
 let test_an_unreadable_canonical_is_refused () = with_session (fun session_dir ->
   save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"unreadable");
   let path = canonical_path session_dir in
   Unix.chmod path 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
-    refused_as "an unreadable canonical" `Io_error session_dir))
+    refused_as "an unreadable canonical" `Read_failed_eacces session_dir))
 
 let test_a_truncated_canonical_is_a_parse_error () = with_session (fun session_dir ->
   save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:several_reads_marker);

@@ -49,7 +49,6 @@ interface DashboardWsDiscovery {
   listening?: boolean
   reachable?: boolean
   ws_url?: string | null
-  unavailable_reason?: string | null
   same_origin_upgrade_enabled?: boolean
   same_origin_upgrade_path?: string | null
   same_origin_ws_url?: string | null
@@ -224,8 +223,6 @@ function nonBlankString(value: unknown): string | null {
 }
 
 function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
-  const serverReason = nonBlankString(data.unavailable_reason)
-  if (serverReason) return serverReason
   if (data.enabled !== true) return 'disabled'
   if (data.listening !== true) return 'not listening'
   if (!nonBlankString(data.ws_url)) return 'websocket URL unavailable'

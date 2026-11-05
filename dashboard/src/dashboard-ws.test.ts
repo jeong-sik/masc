@@ -430,7 +430,6 @@ describe('dashboard websocket route subscriptions', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({
         enabled: false,
         listening: false,
-        unavailable_reason: 'disabled_by_config',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -440,7 +439,7 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
     expect(dashboardWsLastError.value).toBe(
-      'dashboard websocket unavailable: disabled_by_config',
+      'dashboard websocket unavailable: disabled',
     )
 
     await vi.advanceTimersByTimeAsync(60_000)
@@ -531,7 +530,6 @@ describe('dashboard websocket route subscriptions', () => {
         enabled: true,
         listening: true,
         ws_url: null,
-        unavailable_reason: 'standalone_ws_loopback_only',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -542,7 +540,7 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
     expect(dashboardWsLastError.value).toBe(
-      'dashboard websocket unavailable: standalone_ws_loopback_only',
+      'dashboard websocket unavailable: websocket URL unavailable',
     )
 
     await vi.advanceTimersByTimeAsync(60_000)

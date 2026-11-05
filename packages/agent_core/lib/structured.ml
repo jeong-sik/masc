@@ -264,48 +264,6 @@ let text_extractor (parse : string -> 'a option) : 'a extractor =
   parse text |> Option.to_result ~none:"text extractor returned None"
 ;;
 
-(** Extract structured output with SSE streaming.
-    Like [extract] but streams via {!Llm_provider.Complete.complete_stream}. *)
-let extract_stream
-      ~sw
-      ~net
-      ~provider_config
-      ?clock
-      ~config
-      ~(schema : 'a schema)
-      ~on_event
-      prompt
-  : ('a * api_response, Error.t) result
-  =
-  let messages : Llm_provider.Types.message list =
-    [ { origin = Llm_provider.Types.Conversation;  role = User
-      ; content = [ Text prompt ]
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      }
-    ]
-  in
-  let* provider_cfg = provider_config_for_schema ~provider_config ~config ~schema in
-  let provider =
-    Llm_provider.Provider_config.capability_provider_label provider_cfg
-  in
-  let* response =
-    (Llm_provider.Complete.complete_stream
-      ~sw
-      ~net
-      ?clock
-      ~config:provider_cfg
-      ~messages
-      ~tools:[]
-      ~on_event
-      ()).Llm_provider.Completion_outcome.result
-    |> Result.map_error (core_error_of_http_error ~provider)
-  in
-  let* value = extract_response ~schema response in
-  Ok (value, response)
-;;
-
 [@@@coverage off]
 (* === Inline tests === *)
 

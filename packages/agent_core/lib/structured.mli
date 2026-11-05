@@ -88,19 +88,3 @@ val schema_extractor : 'a schema -> 'a extractor
 
 val json_extractor : (Yojson.Safe.t -> 'a) -> 'a extractor
 val text_extractor : (string -> 'a option) -> 'a extractor
-
-(** {1 Agent-level structured output} *)
-
-
-(** {1 Streaming extraction} *)
-
-val extract_stream
-  :  sw:Eio.Switch.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> provider_config:Llm_provider.Provider_config.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> config:agent_config
-  -> schema:'a schema
-  -> on_event:(sse_event -> unit)
-  -> string
-  -> ('a * api_response, Error.t) result

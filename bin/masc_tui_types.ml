@@ -20939,7 +20939,7 @@ let code_search_current (state : state) =
            Some (key, observation)
        | Some _ | None -> None)
   | Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
-  | Palette_choice _ | Palette_branches _ | Palette_worktrees _ -> Masc_tui_fetched.Absent
+  | Palette_choice _ | Palette_branches _ | Palette_worktrees _ -> None
 
 (* Opens the branch palette over the Code pane, in the directory and over the
    file it is looking at. *)

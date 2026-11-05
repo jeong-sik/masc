@@ -4662,6 +4662,83 @@ let test_recovery_settles_an_orphaned_child_row_without_replay () =
         (List.map Chat_operation.Operation_id.to_string !executed))
 ;;
 
+(* The child bound a native call, ran, and reported success. Closing that call
+   is the commit the outage refused, so the row is Running with the call still
+   Active. A restart would resume it from its checkpoint; this process already
+   ran it, so recovery closes it as an unknown effect and fails the row, and
+   the call is not run a second time. *)
+let test_recovery_closes_an_active_native_call_instead_of_running_it () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner_ref = ref None in
+  let started, resolve_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let executed = ref [] in
+  let settled = ref [] in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = Option.get (owner_ok (claim ())) in
+    executed := operation.Chat_operation.operation_id :: !executed;
+    let owner = Option.get !owner_ref in
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
+      ~trace_id:(Keeper_id.Trace_id.of_string "recovery-native-trace" |> Result.get_ok)
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "recovery native seed")
+      |> Result.get_ok in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version", `Int 1; "run_id", `String "execution-run-recovery-native"]) |> Result.get_ok in
+    let call = Keeper_native_call.create
+      ~call_id:"019a0010-1000-7000-8000-000000000030" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+      ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+    Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
+      ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
+    |> owner_ok;
+    ignore (Eio.Promise.try_resolve resolve_started () : bool);
+    Eio.Promise.await release;
+    Owner.Operation_succeeded {outcome_ref="native-call-effect-already-completed"} in
+  let on_execution_settled ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution =
+    settled := (claimed_operation_id, execution) :: !settled in
+  with_recovery_store ~sw ~keeper_name:"recovery-native-call"
+    ~runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true); execute; on_execution_settled})
+    ~on_turn_slot_released:None
+    (fun owner _path ->
+      owner_ref := Some owner;
+      let original = operation_id "kmsg-recovery-native-call" in
+      ignore (owner_ok (Owner.submit_operation owner ~operation_id:original
+        ~source:operation_source ~input:(operation_input "run the native call once")));
+      Eio.Promise.await started;
+      inject_operation_failure owner (operation_id "kmsg-native-call-rollback");
+      let active_wake = Owner.wake_operation_drain owner in
+      Eio.Promise.resolve resolve_release ();
+      active_wake |> expect_store_unavailable;
+      await_child_slot_empty owner 1_000;
+      ignore (owner_ok (Owner.wake_operation_drain owner));
+      let durable = Option.get (owner_ok (Owner.exact_operation owner original)) in
+      (match durable.state with
+       | Chat_operation.Failed
+           { failure = { Chat_operation.kind = Chat_operation.Store_unavailable; _ }; _ } -> ()
+       | _ -> fail "the row with an active native call did not fail as Store_unavailable");
+      (match owner_ok (Owner.direct_native_call owner ~operation_id:original) with
+       | Keeper_native_call.Terminal_unacknowledged
+           (_, { Agent_core.Agent.recovery =
+                   Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown
+               ; _ }) -> ()
+       | Keeper_native_call.Terminal_unacknowledged
+           (_, { Agent_core.Agent.recovery = Agent_core.Agent.Retire; _ })
+       | Keeper_native_call.Active _ | Keeper_native_call.No_native_call ->
+         fail "the active native call was not closed as an unknown effect");
+      (match !settled with
+       | [ (Some id, Owner.Operation_failed { kind = Chat_operation.Store_unavailable; _ }) ]
+         when Chat_operation.Operation_id.equal id original -> ()
+       | _ -> fail "the recovered failure was not projected once through the runner");
+      let next = operation_id "kmsg-after-native-call" in
+      ignore (owner_ok (Owner.submit_operation owner ~operation_id:next
+        ~source:operation_source ~input:(operation_input "new work")));
+      ignore (await_terminal owner next 1_000 : Chat_operation.t);
+      check (list string) "the native call ran once, then only the new request"
+        (List.map Chat_operation.Operation_id.to_string [next; original])
+        (List.map Chat_operation.Operation_id.to_string !executed))
+;;
+
 (* msx-retro-mania, 2026-09-14 16:45 KST: an operation-store fault landed while
    the autonomous lane held the turn, and the any-child recovery guard refused
    to reopen for the 25 minutes that lane ran without pause. Every meta commit
@@ -6869,6 +6946,8 @@ let () =
             test_recovery_keeps_integrity_failure_fenced
         ; test_case "recovery settles an orphaned child row without replay" `Quick
             test_recovery_settles_an_orphaned_child_row_without_replay
+        ; test_case "recovery closes an active native call instead of running it" `Quick
+            test_recovery_closes_an_active_native_call_instead_of_running_it
         ; test_case "availability recovers under an autonomous child" `Quick
             test_availability_recovers_under_an_autonomous_child
         ; test_case

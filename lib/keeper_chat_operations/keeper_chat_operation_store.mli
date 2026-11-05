@@ -419,16 +419,21 @@ val resume_direct_runtime_retry :
 (** What left [Running] rows without a live executor. *)
 type running_settlement =
   | After_process_restart
-      (** Boot: no executor survives a restart. Rows fail as
+      (** Boot: no executor survives a restart. An active native call resumes
+          from its checkpoint; rows that cannot resume fail as
           [Interrupted_by_restart]. *)
   | After_store_recovery
       (** The store was reopened by the same process after an outage, with no
           chat child in flight. The child's terminal commit was lost to the
-          outage, so rows fail as [Store_unavailable]. *)
+          outage, so rows fail as [Store_unavailable]. This process ran any
+          call still active, and the lost commit may be the Owner closing it,
+          so that call is closed with
+          {!Keeper_native_call.unknown_effect_disposition} instead of resumed. *)
 
 (** Settle every [Running] operation that has no executor. A row with a durable
-    continuation (checkpoint, runtime retry, Gate, active native call) goes
-    back to [Queued]; every other row fails with the kind [cause] names. Returns
+    continuation (checkpoint, runtime retry, Gate, and after a restart an
+    active native call) goes back to [Queued]; every other row fails with the
+    kind [cause] names. Returns
     the failed operations as they were read, so the caller can leave an
     operator-visible failure row for each: without one, a request cut off this
     way vanished from the transcript with no answer (msx-retro-mania, three

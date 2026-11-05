@@ -911,13 +911,6 @@ type active_native_call_policy =
   | Close_active_call
   | Leave_active_call_for_restart
 
-let native_call_unknown_effect_disposition =
-  { Agent_core.Agent.outcome = Agent_core.Agent.Terminal_cancelled
-  ; recovery =
-      Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown
-  }
-;;
-
 let native_call_unknown_effect_success_detail =
   "turn reported success, but its native call has an unknown effect; recorded as failed"
 ;;
@@ -1149,12 +1142,13 @@ let recover_operation_availability t =
         | Ok () ->
        (* No Chat_operation child is in flight, so nothing in this process
           will commit a Running row: either the outage refused its child's
-          terminal commit, or the child left an Active native call for
-          restart recovery. Boot settles both, and this settles them the same
-          way. A row with a durable continuation goes back to the queue and
-          resumes; the rest fail as [Store_unavailable], which names what took
-          the result away without claiming completion or that no external
-          effect happened. *)
+          terminal commit, or the child left its native call Active. A row
+          with a durable continuation goes back to the queue and resumes. An
+          Active call does not: this process ran it, and the refused commit
+          may be this Owner closing it, so the store closes it as an unknown
+          effect. Those rows and the rest fail as [Store_unavailable], which
+          names what took the result away without claiming completion or that
+          no external effect happened. *)
        (match
           run_operation_store ~label:"settle Keeper chat operations after store recovery"
             (fun () ->
@@ -1651,7 +1645,7 @@ let start
                  ~execution_digest:operation.Chat_operation.execution_digest
                  (Keeper_native_call.Terminal
                     { call_id = call.Keeper_native_call.call_id
-                    ; disposition = native_call_unknown_effect_disposition
+                    ; disposition = Keeper_native_call.unknown_effect_disposition
                     })
              in
              Ok Native_call_closed_without_disposition))

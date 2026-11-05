@@ -64,9 +64,7 @@ type content_transport = Codex | Mcp
 
 (* The media types an official-client image item accepts. Both transports
    close on the same set: the Codex app-server item and the Claude Code MCP
-   ImageContent. The initial-image validators
-   ([Runtime_codex_app_server.validate_images],
-   [Runtime_claude_code.validate_images]) read it from here so a turn image and
+   ImageContent. [validate_image_inputs] reads it from here so a turn image and
    a tool-result image are never judged by two lists that drift apart. *)
 let official_client_image_media_types =
   [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
@@ -78,6 +76,36 @@ let validate_base64_image_data data =
   else match Base64.decode data with
     | Ok _ -> Ok ()
     | Error _ -> Error "must contain valid Base64 data"
+;;
+
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+(* Fail closed before the client starts. A malformed image reaches the provider
+   as a 400, or comes back as a turn rejection, several seconds later with the
+   turn already started and the error attributed to the model or the thread
+   rather than to the caller that built the image. *)
+let validate_image_inputs images =
+  let rec loop index = function
+    | [] -> Ok ()
+    | image :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      if not (List.mem image.media_type official_client_image_media_types)
+      then
+        Error
+          (Printf.sprintf
+             "%s.media_type %S is not one of %s"
+             where
+             image.media_type
+             (String.concat ", " official_client_image_media_types))
+      else (
+        match validate_base64_image_data image.base64_data with
+        | Error detail -> Error (where ^ ".base64_data " ^ detail)
+        | Ok () -> loop (index + 1) rest)
+  in
+  loop 0 images
 ;;
 
 let project_content transport ~content ~content_blocks =

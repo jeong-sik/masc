@@ -85,7 +85,7 @@ val runs_on_environment_credential : account -> bool
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the
     stream-json image block takes. *)
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }

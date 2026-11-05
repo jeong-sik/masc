@@ -72,7 +72,7 @@ val default_config : unit -> config
 (** One image attached to a turn. [base64_data] is the raw base64 payload with
     no data-URL prefix and no newlines; the app-server [image] input variant
     takes an inline data URL, which this module builds. *)
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }

@@ -990,6 +990,13 @@ let live_references ~base_path ~board_posts_file =
   expand_artifact_manifests ~store:(Tool_blob_store.create ~base_path) direct_live
 ;;
 
+let fold_live_sha256 references ~init ~f =
+  Live_reference_set.fold
+    (fun reference acc -> f acc (live_reference_sha256 reference))
+    references
+    init
+;;
+
 (* History sources sort after every artifact and among themselves by digest,
    so the first element at or past [sha256] is the only one that can match. *)
 let holds_history_media references ~sha256 =

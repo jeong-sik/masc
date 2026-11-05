@@ -104,8 +104,3 @@ let request_of_json = function
        let* limit = limit in
        Ok { request_id; query; limit })
   | _ -> Error "a web_search request must be an object"
-
-(* A package displays what it plans, not the plan summary's identity. *)
-let plan_summary ?limit query =
-  `Assoc [ "query", `String query;
-           "limit", match limit with Some limit -> `Int limit | None -> `Null ]

@@ -109,14 +109,6 @@ describe('fsm-hub derived state', () => {
         degraded_retry_applied: applied,
         degraded_retry_deferred: deferred,
       },
-      claim_attempt: {
-        present: false,
-        source: 'keeper_task_claim_tool_call',
-        status: 'not_observed',
-        result: null,
-        claimed_task_id: null,
-        claimed_goal_id: null,
-      },
     }) as KeeperCompositeSnapshot['execution']
 
   it('says queued, not applied, for a lane this turn only deferred', () => {

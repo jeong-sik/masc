@@ -128,6 +128,8 @@ val decide :
 - 세 함수는 각자 응답과 본문 상태를 `decide` 에 넘긴다. `with_client` 는 `f` 가 응답 헤더와 본문 상태를 같이 돌려주게 바뀐다. 그래야 응답을 보지 않고 돌려놓는 일이 없다.
 - `response_connection_is_reusable` 는 `decide` 의 `Not_persistent` 판정이 된다. 규칙은 RFC 9112 §9.3 대로다. 요청이나 응답이 `close` 를 보냈으면 그 연결로 더 보내지 않는다(§9.6).
 - `close_reason` 은 `Http_client_cache.stats` 에 이유별 닫은 수로 남긴다. 저장하지 않는다.
+- 꺼낸 연결은 출처를 같이 든다(4층). `checkout` 은 `lease`(연결과 `Reused | Created`)를 돌려주고, `release` 는 그 `lease` 를 받는다. `stats` 는 다시 쓴 연결의 이유별 닫은 수를 한 벌 더 센다(`closed_after_reuse`). §6 은 다시 쓴 연결의 실패를 이것으로 센다.
+- `http_client` 는 요청의 연결을 닫힌 합타입 하나로 든다. 요청 하나만 쓰는 연결(`One_shot`)과 캐시에서 빌린 연결(`Leased`)이다. 요청 하나만 쓰는 연결을 캐시에 돌려놓거나, 빌린 연결을 캐시 모르게 닫는 코드는 타입이 받지 않는다.
 
 ### 3.3 다시 쓴 연결이 끊겨도 http_client 는 다시 보내지 않는다
 
@@ -157,7 +159,8 @@ val decide :
 - 시험: `decide` 의 모든 입력 조합. `with_client`·`dispatch_sync_request`·`with_post_stream` 이 `connection: close` 응답, 본문을 덜 읽은 응답, 전송층 EOF 에서 연결을 돌려놓지 않는다. 같은 origin 의 연속 요청이 연결 하나를 다시 쓴다(`stats.reuse_count_total`).
 - 배포 뒤: 캐시 `stats` 의 재사용 수와 새로 연 수, 이유별 닫은 수를 본다. 3층이 이 값을 `/health?full=1` 의 snapshot 필드 `provider_connection_cache` 로 낸다.
   - `/health` 는 인증 없이 열린 집계 화면이다. 그래서 origin 이름은 내지 않는다(RFC-0132). `max_idle_per_host` 를 다시 볼 값으로 origin 하나의 최대 idle 수만 낸다.
-  - 다시 쓴 연결의 응답 전 `NetworkError` 수는 지금 셀 곳이 없다. `checkout` 이 연결의 출처를 돌려주지 않아서다(#48933).
+  - 다시 쓴 연결의 실패는 `closed_after_reuse` 의 `request_failed`·`transport_ended` 로 센다. `closed_total` 의 같은 이유 수에서 빼면 새 연결의 수다(#48933).
+  - 이유별 수는 응답 전과 후를 나누지 않는다. 타임아웃도 `request_failed` 에 든다. 그래서 다시 쓴 연결과 새 연결의 실패율을 견준 차이로 다시 쓴 연결만의 실패를 본다.
 - 비용 원장 `per_request` 행에는 `request_latency_ms` 만 있고 첫 바이트 시간이 없다. 그래서 첫 바이트가 얼마나 빨라졌는지는 원장으로 직접 재지 못한다. 요청 시간이 짧은 ollama_cloud(중앙값 2.9초)의 `request_latency_ms` 를 배포 전 같은 시간대와 견주는 것이 간접 확인이다.
 
 ## 7. 층
@@ -165,3 +168,4 @@ val decide :
 1. 이 문서.
 2. #48633 병합 뒤: `Reuse_verdict` 와 `Http_client_cache.release`, 세 함수의 판정 교체와 시험(agent_core).
 3. `Provider_connection_cache_ref` 설치와 `Runtime_agent.transport_for_provider` 배선, runtime health 응답의 캐시 `stats`(masc).
+4. 꺼낸 연결의 출처(`lease`), `http_client` 의 연결 합타입, 다시 쓴 연결의 이유별 닫은 수와 health 응답의 `closed_after_reuse`(agent_core·masc, #48933).

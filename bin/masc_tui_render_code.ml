@@ -908,13 +908,7 @@ let render_code (state : state) =
    end
    else if state.code_focus_file = Right_pane then content_pane ~split buf cols
    else list_pane ~framed:false buf cols);
-  let code_pane =
-    if state.code_focus_file <> Right_pane then Masc_tui_keys.Code_tree
-    else if state.code_notes_open then Masc_tui_keys.Code_notes
-    else if state.code_history_open then Masc_tui_keys.Code_history
-    else if state.code_diff_open then Masc_tui_keys.Code_diff
-    else Masc_tui_keys.Code_file
-  in
+  let code_pane = Masc_tui_keys.code_pane_of state in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover

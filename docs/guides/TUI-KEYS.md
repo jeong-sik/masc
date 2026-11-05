@@ -245,7 +245,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `H` | recorded clone writes by Keeper and Task in the last day |
 | `d` | show the selected repository's current working-tree changes |
 | `a` | register a repository; opens $EDITOR |
-| `Left / Esc` | leave Git changes, or return to Dashboard |
+| `Esc` | return to Dashboard; inside Git changes, close the diff, then Git changes (Left does the same there) |
 | `/` | jump the cursor to a matching repository, or to a changed path while Git changes is open |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |

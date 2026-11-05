@@ -12,5 +12,6 @@
   masc.keeper_runtime
   masc.keeper_toml
   masc.runtime
+  masc.string_util
   masc.toml_line_editor
   uri))

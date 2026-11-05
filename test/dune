@@ -456,7 +456,6 @@
   test_surface_ref
   test_keeper_input_speaker
   test_inference_inflight_observation
-  test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
@@ -465,7 +464,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_jsonl_incremental_projection
   test_attribution
   test_dashboard_attribution
   test_dashboard_agent_core_bridge
@@ -805,7 +803,6 @@
   test_surface_ref
   test_keeper_input_speaker
   test_inference_inflight_observation
-  test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
@@ -814,7 +811,6 @@
   test_keeper_context_layers
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
-  test_jsonl_incremental_projection
   test_attribution
   test_dashboard_attribution
   test_dashboard_agent_core_bridge

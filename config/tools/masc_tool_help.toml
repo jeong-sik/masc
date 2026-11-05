@@ -16,4 +16,4 @@ when_to_use = "Use when you need the concise description, visibility, and detail
 details_markdown = "Returns the canonical short description, visibility metadata, and detailed help for a specific tool."
 doc_refs = ["docs/KEEPER-USER-MANUAL.md"]
 prompt_hints = ["Pair with prompt 'tool_help' when you want a ready-to-use explanation."]
-examples = ["name='keeper_task_done'", "name='masc_plan_set_task'"]
+examples = ["tool_name='keeper_task_done'", "tool_name='masc_transition'"]

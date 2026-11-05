@@ -3698,10 +3698,6 @@ let keeper_github_login_scope_arg =
   in
   Arg.(value & opt_all (enum choices) [] & info [ "scope" ] ~docv:"SCOPE" ~doc)
 
-let keeper_github_token_arg =
-  let doc = "Personal access token (PAT). If omitted, read from standard input." in
-  Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
-
 let keeper_github_cmd =
   let login =
     let run ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ~scopes =
@@ -3738,7 +3734,7 @@ let keeper_github_cmd =
         $ keeper_github_login_scope_arg)
   in
   let set_token =
-    let invoke base_path keeper_name hostname token_opt =
+    let invoke base_path keeper_name hostname =
       let config = Workspace_utils.default_config base_path in
       if not (Keeper_config.validate_name keeper_name)
       then (
@@ -3746,16 +3742,11 @@ let keeper_github_cmd =
         1)
       else
         let token =
-          match token_opt with
-          | Some tok -> String.trim tok
-          | None ->
-            if Unix.isatty Unix.stdin then (
-              prerr_string "Enter GitHub personal access token (PAT): ";
-              flush stderr;
-              String.trim (read_line ()))
-            else
-              let ch = In_channel.input_all stdin in
-              String.trim ch
+          if Unix.isatty Unix.stdin then (
+            prerr_string "Enter GitHub personal access token (PAT): ";
+            flush stderr;
+            String.trim (read_line ()))
+          else String.trim (In_channel.input_all stdin)
         in
         if String.equal token "" then (
           prerr_endline "token must not be empty";
@@ -3787,13 +3778,13 @@ let keeper_github_cmd =
                 ~token
     in
     Cmd.v
-      (Cmd.info "set-token" ~doc:"Set a personal access token (e.g. Fine-grained PAT) for a Keeper.")
+      (Cmd.info "set-token"
+         ~doc:"Set a personal access token (e.g. Fine-grained PAT) for a Keeper, read from standard input.")
       Term.(
         const invoke
         $ base_path
         $ keeper_github_keeper_arg
-        $ keeper_github_hostname_arg
-        $ keeper_github_token_arg)
+        $ keeper_github_hostname_arg)
   in
   (* Status reads the machine the login was written to, so a Remote_ssh
      Keeper answers from its endpoint and needs the same runtime [login] opens.

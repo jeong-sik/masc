@@ -20,15 +20,31 @@ let section_rows ~width title =
 
 let history_heading_rows ~width = section_rows ~width "상태 전환 이력 (HISTORY)"
 
-(* A note that is JSON is drawn with its keys and values coloured. Any other
-   note is prose and keeps the one colour. *)
+(* The colours the chat gives a served JSON document, out of the reader's own
+   theme. A note's colours are chosen when its rows are prepared, like the
+   Body's headings. *)
+let document_palette () : Masc_tui_tool_detail.palette =
+  { Masc_tui_tool_detail.plain with
+    key = Theme.Syntax.json_key
+  ; string_ = Theme.Syntax.string
+  ; number = Theme.Syntax.json_number
+  ; literal = Theme.Syntax.json_literal
+  ; punctuation = Theme.Syntax.json_punctuation
+  ; reset = Ansi.reset
+  }
+
+(* A note that is a JSON document is drawn as the chat draws one, with its
+   keys, strings, numbers and literals in their own colours. Any other note is
+   prose and keeps the one colour. [Document_row] already carries its colour
+   and is safe to draw; [Plain_row] is neither. *)
 type history_row =
   | Plain_row of string
-  | Json_row of string
+  | Document_row of string
 
 let history_rows = function
         | [] -> [ Plain_row "    (no events in the observed prefix)" ]
         | events ->
+            let palette = document_palette () in
             List.concat_map
               (fun (event : Tui_decode.task_history_event) ->
                 let transition =
@@ -55,14 +71,15 @@ let history_rows = function
                      event.th_label transition actor provenance)
                 :: (match event.th_note with
                     | Some note ->
-                        (* The note is pretty-printed JSON: every line takes
-                           the note's indent, not only the first. *)
-                        let json = Masc_tui_json_colour.parses note in
-                        let row line =
-                          if json then Json_row line else Plain_row line
-                        in
-                        List.map (fun line -> row ("      " ^ line))
-                          (Masc_tui_text_block.lines note)
+                        (* Every line takes the note's indent, not only the
+                           first. *)
+                        (match Masc_tui_tool_detail.document ~palette note with
+                         | Some document ->
+                             List.map (fun line -> Document_row ("      " ^ line))
+                               (String.split_on_char '\n' document)
+                         | None ->
+                             List.map (fun line -> Plain_row ("      " ^ line))
+                               (Masc_tui_text_block.lines note))
                     | None -> []))
               events
 
@@ -226,9 +243,8 @@ let prepare_input = function
       let max_cells = max 1 (framed_inner_width cols) in
       history_rows events |> List.concat_map (function
         | Plain_row line -> Masc_tui_text_block.preformatted_rows ~max_cells line
-        | Json_row line ->
-            Masc_tui_text_block.preformatted_styled_rows
-              ~style:Masc_tui_json_colour.colour_line ~max_cells line)
+        | Document_row line ->
+            Masc_tui_text_block.preformatted_styled_rows ~max_cells line)
   | Body_input (cols,goals,task) ->
       let field ?(style = "") label text =
         let prefix="  " ^ label ^ ": " in

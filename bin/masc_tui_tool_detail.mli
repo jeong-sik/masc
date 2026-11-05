@@ -46,6 +46,13 @@ type field = {
           why it is the caller's to choose and not this module's. *)
 }
 
+val document : ?palette:palette -> string -> string option
+(** [document value] is [value] re-served as {!structured} serves a JSON
+    object or array, and [None] for anything else: a scalar, a bare word, a
+    payload that does not parse. A caller that reads the rest its own way
+    asks this instead of {!structured}. Every character of the text is
+    terminal-safe, so the only escapes in it are the palette's. *)
+
 val structured : ?palette:palette -> string -> string
 (** [structured value] re-serves a whole JSON object or array with one member
     per line, for reading rather than for parsing back:

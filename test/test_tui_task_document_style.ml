@@ -159,7 +159,13 @@ let check_every_style_closes_in_its_row rows =
       check bool "no style is left open at the end of a row" false !is_open)
     rows
 
+(* A terminal that is told not to draw colour gets none from the theme, so
+   there is nothing for a JSON note to carry. *)
+let colours_are_drawn =
+  not (String.equal Masc_tui_ansi.Theme.Syntax.json_key "")
+
 let test_a_json_note_is_coloured_and_a_prose_note_is_not () =
+  if not colours_are_drawn then skip ();
   List.iter
     (fun cols ->
       check bool "a JSON note carries colour" true

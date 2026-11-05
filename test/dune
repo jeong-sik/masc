@@ -5108,7 +5108,6 @@
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
 (include stanzas/test_tui_wrap_words.inc)
-(include stanzas/test_tui_json_colour.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_tab_strip.inc)
 

@@ -87,7 +87,8 @@ type refusal =
           of its invitation with its own time, so this time cannot go back.
           Every other kind is judged with no time, and is read whatever its
           time is: a clock that ran ahead and came back holds no revocation,
-          disable, or [off] until it catches up. *)
+          disable, or [off] until it catches up. It holds every admission until
+          then, and nothing lifts that early. *)
 
 val refusal_to_string : refusal -> string
 

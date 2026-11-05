@@ -45,13 +45,14 @@ let other_workspace = get (Authz_types.Workspace_id.of_string "workspace-2")
 let user = Author.Authenticated (Principal.Human (get (User_id.of_string "alice")))
 let at_ms = 1_700_000_000_000
 
-(* The clock of every zone that this file opens from paths. A zone reads its
-   clock inside its locks, so a case sets it right before it commits, with the
-   time of a {!timed}. *)
+(* The clock of every zone that this file opens from paths. A case sets it
+   to the time of a {!timed} when it calls the commit, and the zone reads it
+   once it holds its locks. Fibers that wait on the locks may move it between
+   the two, so their records can get the time of a later fiber. *)
 let clock = ref at_ms
 let now_ms () = !clock
 
-(* A draft, and what the clock reads when it is committed. *)
+(* A draft, and what the clock is set to when it is committed. *)
 type timed =
   { at_ms : int
   ; draft : Z.draft

@@ -18,7 +18,6 @@ type stimulus_kind =
   | Composition_completed  (* An async composition this Keeper submitted has settled *)
   | Owned_job_completed
   | Tool_result_ready
-  | Addon_operation_changed
 [@@deriving enumerate]
 
 type reaction_kind =
@@ -31,7 +30,7 @@ type reaction_decode_error = Unknown_reaction_kind of string
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v7"
+let storage_generation = "v8"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -50,7 +49,6 @@ let stimulus_kind_to_string = function
   | Composition_completed -> "keeper_composition_completed"
   | Owned_job_completed -> "owned_job_completed"
   | Tool_result_ready -> "tool_result_ready"
-  | Addon_operation_changed -> "addon_operation_changed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -504,7 +502,7 @@ let decode_current_row ~keeper_name row =
         | Task_cancelled
         | Workspace_message
         | Delegate_completed
-        | Composition_completed | Owned_job_completed | Addon_operation_changed | Tool_result_ready ),
+        | Composition_completed | Owned_job_completed | Tool_result_ready ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in

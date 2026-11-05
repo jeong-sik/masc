@@ -1095,6 +1095,37 @@ let test_missing_cli_is_not_reported_as_logout () =
   | Ok _ -> fail "missing Claude CLI was reported as a valid login"
 ;;
 
+(* Claude Code exits before a non-blocking pipe write drains, so a pipe
+   stdout received the first 512 bytes of a longer auth status document
+   (2026-11-05: 241 probes). The stand-in answers only when its stdout is a
+   regular file, the one sink that takes the CLI's writes whole. *)
+let test_auth_status_reaches_a_regular_file () =
+  let path = Filename.temp_file "masc-claude-auth-file-" ".sh" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun output ->
+      output_string output "#!/bin/sh\n";
+      output_string output "[ \"${2-}\" = auth ] || exit 80\n";
+      output_string output "[ -f /dev/stdout ] || exit 81\n";
+      output_string output ("printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n"));
+    Unix.chmod path 0o700;
+    let outcome =
+      Eio_main.run (fun env ->
+        let config =
+          { (Runtime_claude_code.default_config ~cwd:"/tmp") with cli_path = path }
+        in
+        Runtime_claude_code.probe_subscription
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          config)
+    in
+    match outcome with
+    | Ok subscription ->
+      check string "the whole document was read" "claude.ai"
+        (Runtime_claude_code.authentication_to_string subscription.authentication)
+    | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
@@ -4674,6 +4705,10 @@ let () =
             "missing CLI differs from logout"
             `Quick
             test_missing_cli_is_not_reported_as_logout
+        ; test_case
+            "auth status reaches a regular file"
+            `Quick
+            test_auth_status_reaches_a_regular_file
         ] )
     ; ( "terminal"
       , [ test_case

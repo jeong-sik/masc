@@ -593,6 +593,27 @@ let note_cut_document ~bytes = function
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) ) as result -> result
 
+(* HIGH-RISK-UNREVIEWED: puts an account's login status in a private
+   temporary file for the length of one probe.
+
+   Claude Code exits before a write to a non-blocking pipe drains. On macOS
+   (Claude Code 2.1.318, 2026-11-06) its [--help] reached a pipe as 1024 or
+   2048 of its 22,344 bytes, and each of the 241 cut [auth status] documents
+   of 2026-11-05 stopped at exactly 512 bytes. A regular file takes each
+   write whole, so the CLI's stdout is one: created 0600 in the temporary
+   directory and unlinked before the CLI starts, then read back through a
+   second descriptor once it exits. [cwd] names that path, so it must reach
+   the temporary directory, as one built from [Eio.Stdenv.fs] does. *)
+let open_stdout_capture ~sw ~cwd =
+  let path = Filename.temp_file "masc-claude-auth-status-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      let file = Eio.Path.(cwd / path) in
+      let reader = Eio.Path.open_in ~sw file in
+      reader, Eio.Path.open_out ~sw ~create:`Never file)
+;;
+
 (* The boolean is true when the CLI exited cleanly but its stdout was not a
    complete JSON document. *)
 let probe_auth_status ~mgr ~cwd config =
@@ -616,19 +637,22 @@ let probe_auth_status ~mgr ~cwd config =
   | Ok environment ->
     try
     let stdout =
-      Eio.Process.parse_out
-        mgr
-        Eio.Buf_read.take_all
-        ~is_success:(fun code -> code = 0 || code = 1)
-        ~cwd
-        ~stderr:(Eio.Flow.buffer_sink stderr_buf)
-        ~env:environment
-        [ config.cli_path
-        ; Runtime_native_tools.claude_setting_sources_arg
-        ; "auth"; "status"; "--json" ]
+      Eio.Switch.run (fun sw ->
+        let reader, writer = open_stdout_capture ~sw ~cwd in
+        Eio.Process.run
+          mgr
+          ~is_success:(fun code -> code = 0 || code = 1)
+          ~cwd
+          ~stdout:writer
+          ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+          ~env:environment
+          [ config.cli_path
+          ; Runtime_native_tools.claude_setting_sources_arg
+          ; "auth"; "status"; "--json" ];
+        Eio.Buf_read.parse_exn ~max_size:max_int Eio.Buf_read.take_all reader)
     in
-    (* parse_out joins its stderr copier before it returns, so the buffer is
-       drained here. *)
+    (* [Process.run] joins its stderr copier before it returns, so the buffer
+       is drained here. *)
     let excerpt = subscription_stderr_excerpt stderr_buf in
     let parsed = parse_json_value ~stage:"auth status" (String.trim stdout) in
     let cut_document = Result.is_error parsed in
@@ -661,10 +685,10 @@ let probe_auth_status ~mgr ~cwd config =
        | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)), false)
 ;;
 
-(* [auth status] only reads. A CLI that exits cleanly with a cut document is
-   usually a transient failure (two probes racing on one account home, or the
-   process dying mid-write), so one more probe is cheaper than failing the
-   Keeper request. A second cut document is reported as the failure it is. *)
+(* [auth status] only reads. A CLI that exits cleanly after writing a cut
+   document into a regular file stopped writing early, so one more probe is
+   cheaper than failing the Keeper request. A second cut document is reported
+   as the failure it is. *)
 let read_subscription ~mgr ~cwd config =
   let first, cut_document = probe_auth_status ~mgr ~cwd config in
   if cut_document

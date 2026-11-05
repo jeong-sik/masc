@@ -16670,20 +16670,26 @@ let apply_http_scoped_data state ~datasets results =
     (Mtime_clock.elapsed_ns ()) (Yojson.Safe.to_string (`List (List.rev !outcomes)));
   roster_refreshed
 
-let apply_http_dataset state = function
-  | Dataset_transport result ->
-      apply_transport_load state result;
-      settle_pushed_dataset state Surface_read_order.Transport_data ~received:(Result.is_ok result);
-      None
-  | Dataset_board_posts board -> Some (apply_board_list_load state board)
-  | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
-  | Dataset_planning result -> apply_planning_load state result; None
-  | Dataset_system_logs result -> apply_system_logs_load state result; None
-  | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
-  | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
-  | Dataset_provider_history reading -> apply_provider_history_load state reading; None
-  | Dataset_overview_goals result -> apply_overview_goals_load state result; None
-  | Dataset_account_emails result -> apply_account_emails_load state result; None
+(* Taking a dataset early ([take_early_surface_dataset]) ends its bundle's
+   ownership of it, so the bundle's [apply_http_scoped_data] skips it and
+   this is the only answer that settles its pushed source's owed read. Left
+   in flight, the next loop iteration finds no read pending, owes the source
+   again and reads it at once, every frame. *)
+let apply_http_dataset state dataset =
+  let application = match dataset with
+    | Dataset_transport result -> apply_transport_load state result; None
+    | Dataset_board_posts board -> Some (apply_board_list_load state board)
+    | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
+    | Dataset_planning result -> apply_planning_load state result; None
+    | Dataset_system_logs result -> apply_system_logs_load state result; None
+    | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
+    | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
+    | Dataset_provider_history reading -> apply_provider_history_load state reading; None
+    | Dataset_overview_goals result -> apply_overview_goals_load state result; None
+    | Dataset_account_emails result -> apply_account_emails_load state result; None in
+  settle_pushed_dataset state (http_dataset_key dataset)
+    ~received:(http_dataset_received dataset);
+  application
 
 (* Revoke the whole workspace-owned detail population before any successor
    starts. Queued plain replies carry the old authority token; fetched reads

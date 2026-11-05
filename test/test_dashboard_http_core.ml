@@ -209,7 +209,17 @@ let test_keeper_name_extractors_use_shared_grammar () =
        let path = "/api/v1/keepers/" ^ reserved ^ suffix in
        check string (reserved ^ " remains reserved") ""
          (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
-    [ "."; ".." ]
+    [ "."; ".." ];
+  (* The HTTP/2 arms enter on [starts_with] and [ends_with] alone, and these
+     paths pass both with no name segment left between them. *)
+  List.iter
+    (fun suffix ->
+       let path = "/api/v1/keepers" ^ suffix in
+       check string (path ^ " has no keeper name") ""
+         (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path suffix))
+    [ Server_dashboard_http_keeper_api.keeper_suffix_github_identity
+    ; Server_dashboard_http_keeper_api.keeper_suffix_github_login
+    ]
 
 let test_keeper_paused_work_route_is_admin_exact () =
   let path = "/api/v1/keepers/fixture-keeper/paused-work" in

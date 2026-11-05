@@ -469,7 +469,7 @@ resource_epoch   : Runtime/ProviderAccount Disable/Block/Quarantine/Purge/정책
 
 ### 8.2 고수위와 Intent/Committed
 
-backup 밖 append-only 저장소에는 객체의 scoped epoch 최고값·artifact별 `credential_generation`·Intent 상태를 기록한다. 이 저장소와 아래 Intent/Committed 규칙은 **scoped epoch를 올리거나 `credential_generation`을 바꾸는 사건**(Grant·Revoke·Disable·Delete·Block·Purge·정책 회수·credential 교체)과 모드 사건(`Fresh_bootstrap`, `off`, `reactivate`. §5.1)에만 적용한다. lease 발급·`Lease_dispatched`·`Completed`·`Revoked`는 `authz.jsonl`에만 쓰고 발급 때 읽은 epoch에 결속한다. replay 값과 외부 고수위가 다르거나 외부 저장소를 읽지 못하면 `AuthorizationUncertain`으로 시작하고 옛 lease·점유·grant를 승인하지 않는다. 고수위 일치는 무결성 조건이지 실행 승인 조건이 아니다.
+backup 밖 append-only 저장소에는 객체의 scoped epoch 최고값·artifact별 `credential_generation`·Intent 상태를 기록한다. 이 저장소와 아래 Intent/Committed 규칙은 **scoped epoch를 올리거나 `credential_generation`을 바꾸는 사건**(Grant·Revoke·Disable·Delete·Block·Purge·정책 회수·credential 교체)과 모드 사건(`Fresh_bootstrap`, `off`, `reactivate`. §5.1)에만 적용한다. 초대 token 취소도 credential 무효화로 보고 `Revoke`(subject는 그 초대)로 쓴다. token을 가진 사람은 만료나 취소 전까지 들어오므로(§5.1-4), 복원이 취소를 되감으면 그 초대가 다시 열린다. 초대 발급은 epoch를 올리지 않아 이 규칙을 따르지 않는다. lease 발급·`Lease_dispatched`·`Completed`·`Revoked`는 `authz.jsonl`에만 쓰고 발급 때 읽은 epoch에 결속한다. replay 값과 외부 고수위가 다르거나 외부 저장소를 읽지 못하면 `AuthorizationUncertain`으로 시작하고 옛 lease·점유·grant를 승인하지 않는다. 고수위 일치는 무결성 조건이지 실행 승인 조건이 아니다.
 
 ```text
 Intent_pending {

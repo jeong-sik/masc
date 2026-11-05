@@ -250,6 +250,29 @@ let test_an_invitation_after_the_bootstrap () =
      | Some _ | None -> Alcotest.fail "the invitation is not open with the role Admin")
 ;;
 
+let test_a_revocation_is_an_intent () =
+  let revoked =
+    match I.to_body (I.Revoked { invite_id }) with
+    | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
+    | Ok body ->
+      (match
+         R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite ~body
+       with
+       | Ok record -> record
+       | Error _ -> Alcotest.fail "fixture revocation record refused")
+  in
+  match S.apply (step_ok (bootstrapped ()) (invite_record ())) revoked with
+  | Error refusal -> Alcotest.failf "the revocation was refused: %s" (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.(check (option string))
+      "a revocation of the invitation for the store"
+      (Some "revoke of invite:invite-1")
+      (Option.map Authz_external_store.Change.to_string high_water);
+    (match Invites.find state.S.invites invite_id with
+     | Some { Invites.status = Invites.Revoked; _ } -> ()
+     | Some _ | None -> Alcotest.fail "the invitation is not revoked")
+;;
+
 let test_an_invitation_by_mode () =
   (match S.step S.empty (invite_record ()) with
    | Error (S.Before_bootstrap K.Invite) -> ()
@@ -346,6 +369,7 @@ let () =
         ] )
     ; ( "invitations"
       , [ Alcotest.test_case "after the bootstrap" `Quick test_an_invitation_after_the_bootstrap
+        ; Alcotest.test_case "a revocation is an intent" `Quick test_a_revocation_is_an_intent
         ; Alcotest.test_case "by mode" `Quick test_an_invitation_by_mode
         ; Alcotest.test_case "refused" `Quick test_an_invitation_that_is_refused
         ] )

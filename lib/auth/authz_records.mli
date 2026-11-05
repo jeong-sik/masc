@@ -84,13 +84,16 @@ module Runtime_grant : sig
     }
 end
 
-(** What a revocation or intent is about (design 4.5). *)
+(** What a revocation or intent is about (design 4.5). [Invite] is the token of
+    an invitation, which lets its holder in until it expires or is revoked
+    (design 5.1-4), so its revocation is an intent like that of a credential. *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
     | Credential of Provider_account_id.t
     | Principal of Principal.t
     | Runtime of Runtime_id.t
+    | Invite of Invite_id.t
 
   val equal : t -> t -> bool
   val to_string : t -> string

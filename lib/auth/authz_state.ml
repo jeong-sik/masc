@@ -53,13 +53,26 @@ let mode_event state (record : R.t) =
 ;;
 
 (* An invitation raises no scoped epoch (design 8.1), so the external store
-   takes no intent for it (design 8.2). *)
+   takes no intent for its issue. Its revocation closes what the token opens
+   (design 5.1-4), so it is a [Revoke] intent: a log restored from before it
+   then disagrees with the store, and the invitation does not come back open. *)
 let invite state (record : R.t) =
   match Authz_invite_event.of_body record.R.body with
   | Error error -> Error (Invite_unreadable error)
   | Ok event ->
     (match Authz_invite_state.apply state.invites ~author:record.R.author event with
-     | Ok invites -> Ok { state = { state with invites }; high_water = None }
+     | Ok invites ->
+       let high_water =
+         match event with
+         | Authz_invite_event.Issued _ -> None
+         | Authz_invite_event.Revoked { invite_id } ->
+           Some
+             (Authz_external_store.Change.Authz
+                { event = Authz_external_store.Change.Revoke
+                ; subject = Authz_records.Subject.Invite invite_id
+                })
+       in
+       Ok { state = { state with invites }; high_water }
      | Error refusal -> Error (Invite refusal))
 ;;
 

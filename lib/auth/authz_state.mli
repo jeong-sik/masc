@@ -23,8 +23,8 @@
     appended (design 8.2): a mode event is an intent, and so will be every event
     that raises a scoped epoch or replaces a credential. The writer zone
     ({!Authz_zone}) writes that intent, the record and its answer, in this
-    order. A record that changes no epoch, an invitation for one, has no intent,
-    and the zone appends it alone.
+    order. A record that changes no epoch, the issue of an invitation for one,
+    has no intent, and the zone appends it alone.
 
     The first record of every log is a [Fresh_bootstrap] mode event (design
     8.4), so any other record before it is refused. {!apply} matches every kind
@@ -56,9 +56,11 @@ val refusal_to_string : refusal -> string
 
 (** What one record does to the state. [high_water] is the change that the
     external store takes as [Intent_pending] before the record is appended. A
-    mode event has one. An invite record has none, because an invitation raises
+    mode event has one. The issue of an invitation has none, because it raises
     no scoped epoch (design 8.1 and 8.2): the zone appends it with no intent and
-    no answer in the store. *)
+    no answer in the store. Its revocation has one, a [Revoke] of the invitation,
+    so a log restored from before the revocation does not open the invitation
+    again (design 5.1-4). *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

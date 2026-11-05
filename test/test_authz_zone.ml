@@ -720,10 +720,10 @@ let an_invite_is_appended_with_no_intent () =
       ~pending:None
       ~last_committed:completed.B.record_hash
       ~aborted:[];
-    let off = commit_ok zone (mode_draft ~at_ms:(at_ms + 2) M.Off) in
-    check_settled "the mode change after it closes nothing" "Nothing_to_settle" off;
-    let opened = check_restart "a restart after both" dirs ~mode:off ~head:off.Z.record_hash in
-    check_store "after both" opened ~pending:None ~last_committed:off.Z.record_hash ~aborted:[])
+    let switched = commit_ok zone (mode_draft ~at_ms:(at_ms + 2) M.Off) in
+    check_settled "the mode change after it closes nothing" "Nothing_to_settle" switched;
+    let opened = check_restart "a restart after both" dirs ~mode:off ~head:switched.Z.record_hash in
+    check_store "after both" opened ~pending:None ~last_committed:switched.Z.record_hash ~aborted:[])
 ;;
 
 (* An append moves the head, so an intent that an earlier commit left is
@@ -750,6 +750,28 @@ let an_invite_settles_the_intent_left_before_it () =
       ~pending:None
       ~last_committed:completed.B.record_hash
       ~aborted:[ left ])
+;;
+
+let revoke_draft ~at_ms : Z.draft =
+  match Invite_event.to_body (Invite_event.Revoked { invite_id }) with
+  | Ok body -> { Z.at_ms; author = Author.Local_operator; kind = R.Kind.Invite; body }
+  | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
+;;
+
+(* A revocation closes what the token of the invitation opens, so the store
+   holds its answer, and a log cut back to before it no longer matches the
+   store: the invitation does not come back open on a restart. *)
+let a_revoked_invite_has_an_intent () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let revoked = commit_ok zone (revoke_draft ~at_ms:(at_ms + 2)) in
+    check_settled "nothing to close" "Nothing_to_settle" revoked;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:revoked.Z.record_hash in
+    check_store "a restart" opened ~pending:None ~last_committed:revoked.Z.record_hash ~aborted:[];
+    drop_last_line (log_file dirs);
+    check_judgment "a log cut back to before the revocation" dirs "Mismatch Commit_not_in_log")
 ;;
 
 let a_refused_invite_writes_nothing () =
@@ -1198,6 +1220,7 @@ let () =
             "an invite settles the intent left before it"
             `Quick
             an_invite_settles_the_intent_left_before_it
+        ; Alcotest.test_case "a revoked invite has an intent" `Quick a_revoked_invite_has_an_intent
         ; Alcotest.test_case "a refused invite writes nothing" `Quick a_refused_invite_writes_nothing
         ] )
     ; ( "refusals"

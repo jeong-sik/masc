@@ -84,9 +84,3 @@ module Dashboard_config : sig
   val fixture_opt : unit -> string option
 
 end
-
-(** {1 Model routing defaults} *)
-
-module Model_defaults : sig
-  val default_runtime_opt : unit -> string option
-end

@@ -1002,23 +1002,27 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             if scope_is_current () then send_raw info data
             else (stop_sse_conn_if_current info; false)
           in
-          if not (send_if_current (sse_prime_event ())) then
-            Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-          let replayed =
-            match replay with
-            | Some { Sse.deliveries; continuity = _ } ->
-              deliveries
-              |> List.filter (fun delivery ->
-                if send_if_current delivery.Sse.frame
-                then true
-                else (
-                  Log.Server.debug
-                    "SSE replay send failed for session %s"
-                    info.session_id;
-                  false))
-            | None -> []
+          (* The drain pump sends the first frames, under the supervisor, so
+             a stop cancels one that waits for the socket (RFC-0493 §3.2). *)
+          let send_first_frames () =
+            if not (send_if_current (sse_prime_event ())) then
+              Log.Server.debug "SSE prime send failed for session %s" info.session_id;
+            let replayed =
+              match replay with
+              | Some { Sse.deliveries; continuity = _ } ->
+                deliveries
+                |> List.filter (fun delivery ->
+                  if send_if_current delivery.Sse.frame
+                  then true
+                  else (
+                    Log.Server.debug
+                      "SSE replay send failed for session %s"
+                      info.session_id;
+                    false))
+              | None -> []
+            in
+            Sse.create_replay_handoff replayed
           in
-          let replay_handoff = Sse.create_replay_handoff replayed in
               let sw = runtime.sw in
               let clock = runtime.clock in
               Option.iter (fun (_, scope) ->
@@ -1031,7 +1035,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                   `Stop_daemon)) observer_scope;
               run_sse_pumps ~sw info
                 ~drain:(fun () ->
-                  let rec drain () =
+                  let rec drain replay_handoff =
                     let delivery = Sse.take_delivery event_stream in
                     (try
                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
@@ -1044,9 +1048,9 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                       Log.Server.error "drain write error: %s"
                         (Printexc.to_string exn);
                       stop_sse_conn_if_current info);
-                    if not (Atomic.get info.stop) then drain ()
+                    if not (Atomic.get info.stop) then drain replay_handoff
                   in
-                  try drain ()
+                  try drain (send_first_frames ())
                   with Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->
                        Log.Server.error "drain loop error: %s"

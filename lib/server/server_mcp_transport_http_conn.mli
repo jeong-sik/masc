@@ -178,8 +178,13 @@ val run_sse_pumps :
     from the registry with {!stop_sse_conn_if_current} and closes
     [info.response].  It runs on the domain that called [run_sse_pumps],
     so call it from the connection's domain.  The hook also runs when
-    [sw] is cancelled, so every response handed to [run_sse_pumps] is
-    closed. *)
+    [sw] is cancelled.  When [sw] is already off, no supervisor starts and
+    [run_sse_pumps] does the same release before it returns.  So every
+    response handed to [run_sse_pumps] is closed.
+
+    [drain] sends the stream's first frames (prime, replay) before its live
+    events, so a stop also cancels a first frame that waits for the
+    socket. *)
 
 (** {1 Connect-rate guard} *)
 

@@ -95,8 +95,8 @@ let guard_deadline state =
 let guard_expired ~now ~session_id state =
   not (SMap.mem session_id (Atomic.get sse_conn_by_session)) && now >= guard_deadline state
 
-(** Register an SSE connection under [sse_registry_mutex].
-    All call sites must use this instead of direct [Hashtbl.replace]. *)
+(** Register an SSE connection in the session registry. All call sites use
+    this instead of updating [sse_conn_by_session] directly. *)
 let register_sse_conn ~session_id ~info =
   Atomic_util.update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
@@ -225,20 +225,30 @@ let send_raw info data =
    both pumps have ended, on the connection's domain, and also when [sw] is
    cancelled before anyone closed [info]. If [info] is already closed
    (connection torn down before the pumps started), the promise is already
-   resolved and the supervisor returns immediately. *)
+   resolved and the supervisor returns immediately.
+
+   [Eio.Fiber.fork] runs nothing on a switch that is already off, so then no
+   supervisor exists and the response is released here. On a live switch the
+   fork runs the supervisor at once, so its release hook is registered before
+   [sw] can be cancelled. *)
+let release_sse_conn info =
+  stop_sse_conn_if_current info;
+  Server_sse_response.close info.response
+
 let run_sse_pumps ~sw info ~(drain : unit -> unit) ~(ping : unit -> unit) =
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run (fun conn_sw ->
-      Eio.Switch.on_release conn_sw (fun () ->
-        stop_sse_conn_if_current info;
-        Server_sse_response.close info.response);
-      Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
-        drain ();
-        `Stop_daemon);
-      Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
-        ping ();
-        `Stop_daemon);
-      Eio.Promise.await info.stop_promise))
+  match Eio.Switch.get_error sw with
+  | Some (_ : exn) -> release_sse_conn info
+  | None ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Switch.run (fun conn_sw ->
+        Eio.Switch.on_release conn_sw (fun () -> release_sse_conn info);
+        Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
+          drain ();
+          `Stop_daemon);
+        Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
+          ping ();
+          `Stop_daemon);
+        Eio.Promise.await info.stop_promise))
 
 let prune_connect_times ~now times =
   let window_s = sse_connect_window_s () in

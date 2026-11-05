@@ -1,17 +1,10 @@
 (** Runtime_agent — Config, build, and run for AGENT_CORE agent execution.
 
-    Contains the [config] type, [build], [run], and [run_with_masc_tools]
-    functions. All model-selection and runtime logic lives in
+    Contains the [config] type and the [build] and [run] functions.
+    All model-selection and runtime logic lives in
     {!Runtime_observation} and {!Keeper_turn_driver}.
 
     This module is the MASC execution boundary for Agent Core. *)
-
-type agent_core_tool_projector =
-  name:string ->
-  description:string ->
-  input_schema:Yojson.Safe.t ->
-  (Yojson.Safe.t -> Tool_result.result) ->
-  Agent_core.Tool.t
 
 (* The runner reads a caught exception exactly as the HTTP client does. An
    exception the client does not treat as transport, or a Unix/Eio error it
@@ -142,14 +135,8 @@ let label_resolution_error_to_core_error =
 let resolve_provider_config_of_label =
   Runtime_transport.resolve_provider_config_of_label
 
-let invalid_runtime_config =
-  Runtime_transport.invalid_runtime_config
-
 let provider_caps_of_config =
   Runtime_transport.provider_caps_of_config
-
-let provider_supports_inline_tools =
-  Runtime_transport.provider_supports_inline_tools
 
 let provider_label =
   Runtime_transport.provider_label
@@ -1559,38 +1546,3 @@ let run
   : (run_result, Agent_core.Error.t) result =
   run_blocks ~sw ~net ~config ?agent_core_checkpoint ?on_event ?on_yield ?on_resume
     ?agent_ref ?cooperative_yield_probe ?input_metadata [Agent_core.Types.Text goal]
-
-(* ================================================================ *)
-(* Convenience: run_with_masc_tools                                  *)
-(* ================================================================ *)
-
-let run_with_masc_tools
-    ~(sw : Eio.Switch.t)
-    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(config : config)
-    ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ~(agent_core_tool_of_masc : agent_core_tool_projector)
-    ?on_event
-    ?on_yield
-    ?on_resume
-    (goal : string)
-  : (run_result, Agent_core.Error.t) result =
-  match masc_tools with
-  | [] ->
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
-  | _ when provider_supports_inline_tools config.provider_cfg ->
-      (let agent_core_tools =
-           List.map
-             (fun (td : Masc_domain.tool_schema) ->
-               agent_core_tool_of_masc
-                 ~name:td.name
-                 ~description:td.description
-                 ~input_schema:td.input_schema
-                 (fun input -> dispatch ~name:td.name ~args:input))
-             masc_tools
-         in
-         let config = { config with tools = agent_core_tools @ config.tools } in
-         run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
-  | _ ->
-    Error (invalid_runtime_config "tools" "provider lacks inline tool support")

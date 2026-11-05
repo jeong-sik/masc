@@ -7,5 +7,3 @@ val label_resolution_error_to_core_error : label_resolution_error -> Agent_core.
 
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t, label_resolution_error) result
-
-val invalid_runtime_config : string -> string -> Agent_core.Error.t

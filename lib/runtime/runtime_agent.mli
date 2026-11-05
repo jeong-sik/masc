@@ -11,9 +11,7 @@
     {!Runtime_observation} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
-    ([invalid_runtime_config],
-    [provider_supports_inline_tools],
-    [build_checkpoint],
+    ([build_checkpoint],
     [partial_response_of_stop]). *)
 
 (** {1 Stop reason} *)
@@ -514,33 +512,3 @@ val continue_from_checkpoint :
     every completed tool result. This is for same-turn continuation after a
     typed incomplete provider terminal, not for starting a new Keeper turn.
     [on_event] follows the same streaming-capability rule as {!run}. *)
-
-type agent_core_tool_projector =
-  name:string ->
-  description:string ->
-  input_schema:Yojson.Safe.t ->
-  (Yojson.Safe.t -> Tool_result.result) ->
-  Agent_core.Tool.t
-(** Turns one MASC tool schema into the inline [Agent_core.Tool.t] a provider
-    call carries. [Tool_bridge] owns the projection and this library must not
-    depend on it, so the direction is inverted by passing the function in.
-
-    It is an argument, not a process-global [Atomic.t] that [Tool_bridge] fills
-    from a module initializer: "was the bridge linked and did its initializer
-    run" would be a runtime question, answered by an [Internal] error at the
-    point of use. As an argument the question is the compiler's. *)
-
-val run_with_masc_tools :
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  config:config ->
-  masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  agent_core_tool_of_masc:agent_core_tool_projector ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?on_yield:(unit -> unit) ->
-  ?on_resume:(unit -> unit) ->
-  string ->
-  (run_result, Agent_core.Error.t) result
-(** Variant of {!run} that projects the supplied MASC schemas into exact inline
-    [Agent_core.Tool.t] values through [dispatch]. *)

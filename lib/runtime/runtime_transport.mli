@@ -20,10 +20,6 @@ val label_resolution_error_to_core_error :
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t, label_resolution_error) result
 
-(** Construct an [Agent_core.Error.InvalidConfig] with the supplied [field] name and
-    [detail] text. *)
-val invalid_runtime_config : string -> string -> Agent_core.Error.t
-
 (** AGENT_CORE capability snapshot for a provider config.  Alias for
     {!Provider_tool_support.agent_core_capabilities_of_config}. *)
 val provider_caps_of_config :

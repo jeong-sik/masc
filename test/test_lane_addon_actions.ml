@@ -888,10 +888,10 @@ let test_private_addon_events_are_scoped_to_their_readers () =
           [ owner_only; operator_only; shared ]);
       check int "an external subscriber without identity sees shared" 1 !shared_external;
       check int "an external subscriber without identity sees no private event" 0 !private_external;
-      let replay (session_id, _client_id) =
+      let replay (session_id, client_id) =
         (Sse.replay_after_for_session
           ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
-          ~session_id ~kind:Sse.Observer 0).deliveries
+          ~client_id ~session_id ~kind:Sse.Observer 0).deliveries
         |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
       in
       check (list bool) "replay keeps owner-only identity" [ true; false ]
@@ -923,7 +923,7 @@ let test_replay_rejects_replaced_session_identity () =
     | Ok (client_id, _, _) -> client_id
     | Error error -> fail (Sse.registration_error_to_string error)
   in
-  let _owner_client_id = register owner_auth in
+  let owner_client_id = register owner_auth in
   let _replacement_client_id = register admin_auth in
   Fun.protect
     ~finally:(fun () ->
@@ -955,7 +955,7 @@ let test_replay_rejects_replaced_session_identity () =
       let replay =
         (Sse.replay_after_for_session
           ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
-          ~session_id ~kind:Sse.Observer 0).deliveries
+          ~client_id:owner_client_id ~session_id ~kind:Sse.Observer 0).deliveries
         |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
       in
       check (list bool) "a replaced session cannot inherit the next credential" [ false; false; true ]

@@ -256,12 +256,18 @@ type replay = { deliveries : delivery list; continuity : replay_continuity }
 val replay_after_for_session :
   ?runtime_authority:runtime_authority ->
   ?observer_instance_id:string ->
+  ?client_id:int ->
   session_id:string -> kind:session_kind -> int -> replay
 (** Replay-buffer lookup for one exact session, read from one snapshot.
     Targeted deliveries are visible only to their named agent-stream session;
     broadcasts use the same target and JSON-RPC filtering rules as live
     fan-out. Without a runtime authority, scoped events are excluded. An
-    instance-scoped event also requires its Observer instance. *)
+    instance-scoped event also requires its Observer instance.
+
+    Private Add-on deliveries require the exact [client_id] returned by
+    {!register}, still registered under this session and [kind]. An absent or
+    stale id, or a session replaced by different credentials, receives only
+    unrestricted/shared events. *)
 
 type replay_handoff
 

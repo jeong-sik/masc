@@ -422,13 +422,17 @@ type replay = { deliveries : delivery list; continuity : replay_continuity }
 
 (* One snapshot answers both: read apart, an eviction in between could drop
    an event from the deliveries while the continuity still said none was. *)
-let replay_after_for_session ?runtime_authority ?observer_instance_id ~session_id ~kind last_id =
+let replay_after_for_session ?runtime_authority ?observer_instance_id ?client_id ~session_id ~kind last_id =
   let observer_scope = match runtime_authority, observer_instance_id with
     | Some runtime_authority, Some instance_id -> Some (observer_scope ~runtime_authority ~instance_id)
     | (None, _ | _, None) -> None in
-  let identity = match SMap.find_opt session_id (Atomic.get clients).entries with
-    | Some client when client.kind = kind -> Some (client.agent_name, client.role)
-    | Some _ | None -> None in
+  let identity = match client_id with
+    | Some client_id ->
+        (match SMap.find_opt session_id (Atomic.get clients).entries with
+         | Some client when client.id = client_id && client.kind = kind ->
+             Some (client.agent_name, client.role)
+         | Some _ | None -> None)
+    | None -> None in
   let state = Atomic.get event_buffer in
   let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
   let deliveries =

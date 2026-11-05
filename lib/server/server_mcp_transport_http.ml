@@ -960,7 +960,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 Option.map
                   (Sse.replay_after_for_session
                      ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
-                     ?observer_instance_id ~session_id ~kind:sse_kind)
+                     ?observer_instance_id ~client_id ~session_id ~kind:sse_kind)
                   last_event_id
               in
               let observer_headers =

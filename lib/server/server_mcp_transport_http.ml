@@ -34,14 +34,7 @@ let scope_challenge_cors_headers ~request_authority request =
            else name, value)
 
 let tool_allowed_in_profile state profile name =
-  let policy_profile =
-    match profile with
-    | Full -> Mcp_server_eio_tool_profile.Full
-    | Managed_agent -> Mcp_server_eio_tool_profile.Managed_agent
-    | Operator_remote -> Mcp_server_eio_tool_profile.Operator_remote
-    | Seat -> Mcp_server_eio_tool_profile.Seat
-  in
-  Mcp_server_eio_tool_profile.tool_allowed_in_profile state policy_profile name
+  Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name
 
 include Server_mcp_transport_http_protocol
 include Server_mcp_transport_http_conn

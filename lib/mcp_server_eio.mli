@@ -20,7 +20,7 @@
 type server_state = Mcp_server.server_state
 
 (** Tool exposure profile for streamable HTTP endpoints. *)
-type tool_profile =
+type tool_profile = Mcp_server_eio_types.tool_profile =
   | Full
   | Managed_agent
   | Operator_remote

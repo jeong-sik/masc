@@ -107,8 +107,7 @@ val prepare_agent_setup
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ctx_work:working_context
   -> session:Keeper_types.session_context
-  -> base_system_prompt:string
-  -> turn_system_prompt:string
+  -> turn_system:Keeper_turn_system.t
   -> user_message:string
   -> dynamic_context:string
   -> history_messages:Agent_core.Types.message list

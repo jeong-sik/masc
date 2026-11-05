@@ -231,8 +231,7 @@ let prepare_agent_setup
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
-      ~(base_system_prompt : string)
-      ~(turn_system_prompt : string)
+      ~(turn_system : Keeper_turn_system.t)
       ~(user_message : string)
       ~(dynamic_context : string)
       ~(history_messages : Agent_core.Types.message list)
@@ -655,7 +654,7 @@ let prepare_agent_setup
   let user_message = model_message.Keeper_gate_replay.text in
   let prompt_metrics =
     Keeper_agent_prompt_metrics.build_prompt_metrics
-      ~system_prompt:turn_system_prompt
+      ~system_prompt:turn_system.Keeper_turn_system.text
       ~dynamic_context
       ~user_message
   in
@@ -913,7 +912,7 @@ let prepare_agent_setup
     ?observation_token
     ?dynamic_context_for_tools
     ?repetition_execution
-    ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context
+    ~ctx ~session ~turn_system ~model_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count
     ~runtime_id_string

@@ -2,62 +2,9 @@
 
 let sprintf = Printf.sprintf
 open Result.Syntax
+open Toml_access
 
 (* ── TOML value accessors ─────────────────────────────────────────────── *)
-
-let toml_shape = function
-  | Otoml.TomlString _ -> "a string"
-  | Otoml.TomlInteger _ -> "an integer"
-  | Otoml.TomlFloat _ -> "a float"
-  | Otoml.TomlBoolean _ -> "a boolean"
-  | Otoml.TomlOffsetDateTime _ -> "an offset datetime"
-  | Otoml.TomlLocalDateTime _ -> "a local datetime"
-  | Otoml.TomlLocalDate _ -> "a local date"
-  | Otoml.TomlLocalTime _ -> "a local time"
-  | Otoml.TomlArray _ -> "an array"
-  | Otoml.TomlTable _ -> "a table"
-  | Otoml.TomlInlineTable _ -> "an inline table"
-  | Otoml.TomlTableArray _ -> "an array of tables"
-;;
-
-let as_non_empty_string ~context = function
-  | Otoml.TomlString value ->
-    if String.equal (String.trim value) ""
-    then Error (sprintf "%s must not be empty" context)
-    else Ok value
-  | ( Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as
-    other -> Error (sprintf "%s must be a string, got %s" context (toml_shape other))
-;;
-
-let as_bool ~context = function
-  | Otoml.TomlBoolean value -> Ok value
-  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-    | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as
-    other -> Error (sprintf "%s must be a boolean, got %s" context (toml_shape other))
-;;
-
-let as_table_pairs ~context = function
-  | Otoml.TomlTable pairs | Otoml.TomlInlineTable pairs -> Ok pairs
-  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
-    | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) as other ->
-    Error (sprintf "%s must be a table, got %s" context (toml_shape other))
-;;
-
-let as_table_array ~context = function
-  | Otoml.TomlTableArray tables -> Ok tables
-  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
-    | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ) as other ->
-    Error (sprintf "%s must be an array of tables, got %s" context (toml_shape other))
-;;
 
 let required_string ~context pairs key =
   match List.assoc_opt key pairs with
@@ -170,7 +117,7 @@ let surface_of_pairs pairs =
              | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
              | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as other) ->
           Error
-            (sprintf "tool_help.name_suffix must be a string, got %s" (toml_shape other))
+            (sprintf "tool_help.name_suffix must be a string, got %s" (shape other))
       in
       let* () = only_known_keys ~context:"tool_help" [ "name_suffix" ] tool_help in
       Ok suffix
@@ -219,7 +166,7 @@ let load_resources ~contents =
         | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
         | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _
         | Otoml.TomlTableArray _ ) as other ) ->
-    Error (sprintf "mcp/resources.toml: top level must be a table, got %s" (toml_shape other))
+    Error (sprintf "mcp/resources.toml: top level must be a table, got %s" (shape other))
 ;;
 
 (* ── prompts.toml ─────────────────────────────────────────────────────── *)
@@ -304,7 +251,7 @@ let load_prompts ~contents =
         | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
         | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _
         | Otoml.TomlTableArray _ ) as other ) ->
-    Error (sprintf "mcp/prompts.toml: top level must be a table, got %s" (toml_shape other))
+    Error (sprintf "mcp/prompts.toml: top level must be a table, got %s" (shape other))
 ;;
 
 (* ── Embedded decode at module init ───────────────────────────────────── *)

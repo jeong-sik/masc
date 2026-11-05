@@ -1327,6 +1327,142 @@ one_of = [{ type = "string", enum = ["all"] }, { type = "array", unique_items = 
     ]
 ;;
 
+(* ── Toml_access ──────────────────────────────────────────────────────── *)
+
+(* One value per [Otoml.t] constructor, with the phrase [Toml_access.shape]
+   must give it. A constructor added to [Otoml.t] makes [shape] fail to build
+   and belongs in this list as well. *)
+let toml_kinds =
+  [ "string", Otoml.TomlString "s", "a string"
+  ; "integer", Otoml.TomlInteger 7, "an integer"
+  ; "float", Otoml.TomlFloat 1.5, "a float"
+  ; "boolean", Otoml.TomlBoolean true, "a boolean"
+  ; ( "offset datetime"
+    , Otoml.TomlOffsetDateTime "2026-01-02T03:04:05Z"
+    , "an offset datetime" )
+  ; ( "local datetime"
+    , Otoml.TomlLocalDateTime "2026-01-02T03:04:05"
+    , "a local datetime" )
+  ; "local date", Otoml.TomlLocalDate "2026-01-02", "a local date"
+  ; "local time", Otoml.TomlLocalTime "03:04:05", "a local time"
+  ; "array", Otoml.TomlArray [ Otoml.TomlInteger 1 ], "an array"
+  ; "table", Otoml.TomlTable [ "k", Otoml.TomlInteger 1 ], "a table"
+  ; ( "inline table"
+    , Otoml.TomlInlineTable [ "k", Otoml.TomlInteger 1 ]
+    , "an inline table" )
+  ; "array of tables", Otoml.TomlTableArray [ Otoml.TomlTable [] ], "an array of tables"
+  ]
+;;
+
+let test_toml_access_names_every_kind () =
+  List.iter
+    (fun (kind, value, phrase) -> check string kind phrase (Toml_access.shape value))
+    toml_kinds
+;;
+
+(* Each reader takes exactly the kinds listed and refuses every other kind
+   with the message a declaration author reads. *)
+let test_toml_access_readers_take_only_their_kind () =
+  let reader ~expects ~accepts read =
+    expects, accepts, fun value -> Result.map ignore (read ~context:"ctx" value)
+  in
+  let readers =
+    [ reader ~expects:"a string" ~accepts:[ "string" ] Toml_access.as_string
+    ; reader ~expects:"a string" ~accepts:[ "string" ] Toml_access.as_non_empty_string
+    ; reader ~expects:"a boolean" ~accepts:[ "boolean" ] Toml_access.as_bool
+    ; reader ~expects:"an integer" ~accepts:[ "integer" ] Toml_access.as_int
+    ; reader ~expects:"a float" ~accepts:[ "float" ] Toml_access.as_float
+    ; reader
+        ~expects:"a table"
+        ~accepts:[ "table"; "inline table" ]
+        Toml_access.as_table_pairs
+    ; reader
+        ~expects:"an array of tables"
+        ~accepts:[ "array of tables" ]
+        Toml_access.as_table_array
+    ]
+  in
+  List.iter
+    (fun (expects, accepts, read) ->
+       List.iter
+         (fun (kind, value, phrase) ->
+            let expected =
+              if List.mem kind accepts
+              then Ok ()
+              else Error (Printf.sprintf "ctx must be %s, got %s" expects phrase)
+            in
+            check
+              (result unit string)
+              (Printf.sprintf "%s read as %s" kind expects)
+              expected
+              (read value))
+         toml_kinds)
+    readers
+;;
+
+let test_toml_access_returns_the_value () =
+  let context = "ctx" in
+  check (result string string) "string" (Ok "s")
+    (Toml_access.as_string ~context (Otoml.TomlString "s"));
+  check (result bool string) "boolean" (Ok true)
+    (Toml_access.as_bool ~context (Otoml.TomlBoolean true));
+  check (result int string) "integer" (Ok 7)
+    (Toml_access.as_int ~context (Otoml.TomlInteger 7));
+  check (result (float 0.0) string) "float" (Ok 1.5)
+    (Toml_access.as_float ~context (Otoml.TomlFloat 1.5));
+  let members = [ "b", Otoml.TomlInteger 1; "a", Otoml.TomlInteger 2 ] in
+  check (result (list string) string) "table members keep document order"
+    (Ok [ "b"; "a" ])
+    (Result.map (List.map fst) (Toml_access.as_table_pairs ~context (Otoml.TomlTable members)));
+  check (result (list string) string) "inline table members keep document order"
+    (Ok [ "b"; "a" ])
+    (Result.map
+       (List.map fst)
+       (Toml_access.as_table_pairs ~context (Otoml.TomlInlineTable members)));
+  check (result int string) "array of tables"
+    (Ok 2)
+    (Result.map List.length
+       (Toml_access.as_table_array ~context
+          (Otoml.TomlTableArray [ Otoml.TomlTable []; Otoml.TomlTable [] ])))
+;;
+
+let test_toml_access_refuses_blank_strings () =
+  check (result string string) "blank text"
+    (Error "ctx must not be empty")
+    (Toml_access.as_non_empty_string ~context:"ctx" (Otoml.TomlString "  "));
+  check (result string string) "padded text is returned as written"
+    (Ok " a ")
+    (Toml_access.as_non_empty_string ~context:"ctx" (Otoml.TomlString " a "))
+;;
+
+let test_toml_access_lists_name_the_failing_element () =
+  let strings items = Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) items) in
+  check (result (list string) string) "strings"
+    (Ok [ "a"; "b" ])
+    (Toml_access.as_string_list ~context:"ctx" (strings [ "a"; "b" ]));
+  check (result (list string) string) "second element is not a string"
+    (Error "ctx[1] must be a string, got an integer")
+    (Toml_access.as_string_list
+       ~context:"ctx"
+       (Otoml.TomlArray [ Otoml.TomlString "a"; Otoml.TomlInteger 2 ]));
+  check (result (list string) string) "not an array"
+    (Error "ctx must be an array of strings, got a table")
+    (Toml_access.as_string_list ~context:"ctx" (Otoml.TomlTable []));
+  check (result (list int) string) "integers"
+    (Ok [ 1; 2 ])
+    (Toml_access.as_int_list
+       ~context:"ctx"
+       (Otoml.TomlArray [ Otoml.TomlInteger 1; Otoml.TomlInteger 2 ]));
+  check (result (list int) string) "second element is not an integer"
+    (Error "ctx[1] must be an integer, got a string")
+    (Toml_access.as_int_list
+       ~context:"ctx"
+       (Otoml.TomlArray [ Otoml.TomlInteger 1; Otoml.TomlString "x" ]));
+  check (result (list int) string) "not an array"
+    (Error "ctx must be an array of integers, got a string")
+    (Toml_access.as_int_list ~context:"ctx" (Otoml.TomlString "x"))
+;;
+
 let () =
   run "tool_definition_toml"
     [ ( "load"
@@ -1452,6 +1588,15 @@ let () =
             test_board_search_description_names_its_scope
         ; test_case "web fetch names the reader" `Quick
             test_web_fetch_description_names_the_reader
+        ] )
+    ; ( "toml access"
+      , [ test_case "shape names every kind" `Quick test_toml_access_names_every_kind
+        ; test_case "each reader takes only its kind" `Quick
+            test_toml_access_readers_take_only_their_kind
+        ; test_case "readers return the value" `Quick test_toml_access_returns_the_value
+        ; test_case "blank strings are refused" `Quick test_toml_access_refuses_blank_strings
+        ; test_case "list readers name the failing element" `Quick
+            test_toml_access_lists_name_the_failing_element
         ] )
     ]
 ;;

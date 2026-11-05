@@ -14,7 +14,8 @@ module Request_id : sig
 end
 type workspace
 val observe_workspace : base_path:string -> (workspace, string) result
-(** Blocking descriptor-bound path/device/inode observation. Run the complete
+(** Blocking descriptor-bound path/inode observation ({!Fs_compat.Durable_file_identity},
+    so a reboot that renumbers the device keeps the identity). Run the complete
     scope on a system thread in Eio contexts. Missing/replaced roots are errors.
     A successful observation is not a process lease or permission to execute. *)
 type destination = {
@@ -75,7 +76,7 @@ val to_json : t -> Yojson.Safe.t
     whose summary differs. *)
 module Summary : sig
   val schema : string
-  (** [workspace.memory.execution-summary.v1]. A summary naming another
+  (** [workspace.memory.execution-summary.v2]. A summary naming another
       schema is refused. *)
   type batch =
     | Classification of { up_to : Workspace_memory_request.size; selected : Workspace_memory_ledger.fact_ref list }

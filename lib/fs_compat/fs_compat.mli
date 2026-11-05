@@ -6,6 +6,7 @@
 open Fs_compat_internal
 
 module Atomic_orphan_size_class = Atomic_orphan_size_class
+module Durable_file_identity = Durable_file_identity
 
 (** #9921: raised by mutating [Fs_compat] entry points
     ([append_file], [save_file], [mkdir_p]) when the target path falls

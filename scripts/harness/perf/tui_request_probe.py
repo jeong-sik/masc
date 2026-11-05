@@ -7,12 +7,15 @@ one TUI child and an already running server. The probe sends only the keys
 each step names, waits the step's seconds, and finally sends SIGTERM so the
 TUI exits. For every window it reports the requests that started in it, by
 method, path and query names, and the server-sent events that arrived in it,
-by name. Header values, query values and bodies are not kept.
+by name. Header values, query values and bodies are not kept. It also
+reports which surface the TUI showed in each window, from the frames its
+terminal received and the surface runs in its frame-timing report
+(`tui_request_surfaces.py`).
 
-It counts requests, not frames, and does not measure input or display
-latency. Reads the TUI makes from base-path files on local disk do not pass
-through the relay and are not counted. `tui_request_summary.py` turns the
-relay's log into the per-window summaries.
+It does not measure input or display latency. Reads the TUI makes from
+base-path files on local disk do not pass through the relay and are not
+counted. `tui_request_summary.py` turns the relay's log into the per-window
+summaries.
 """
 import argparse
 from collections.abc import Mapping, Sequence
@@ -39,6 +42,7 @@ import time
 import tui_request_events as events
 import tui_request_log as record
 import tui_request_proxy as proxy
+import tui_request_surfaces as surfaces
 from tui_request_summary import (
     FaultRow, Window, index_entries, print_table, stream_rows, summarize_window,
 )
@@ -65,6 +69,8 @@ EXEC_FAILED = 127
 # across exec.
 RESTORED_SIGNALS = (signal.SIGPIPE, signal.SIGXFSZ)
 TERM = 'xterm-256color'
+FRAME_TIMING_ENV = 'MASC_TUI_FRAME_TIMING'
+FRAME_TIMING_FILE = 'frame-timing.txt'
 RESULT_FILE = 'result.json'
 SCREEN_FILE = 'screen.ansi'
 STARTUP = 'startup'
@@ -288,6 +294,9 @@ class Run:
     forced_kill: bool
     error: str | None
     screen: bytes
+    frame_starts: tuple[float, ...]
+    step_frames: tuple[surfaces.FrameSpan, ...]
+    frames_error: str | None
 
 
 def drain(master: int, timeout: float) -> tuple[bytes, bool]:
@@ -325,6 +334,7 @@ def drive(child: Gated, options: Options) -> Run:
     A window closes when the next one opens, so the windows leave no gap."""
     started = time.monotonic()
     screen = bytearray()
+    frames = surfaces.FrameClock()
     ready: float | None = None
     first_step_at = math.inf
     pending = list(options.steps)
@@ -335,16 +345,21 @@ def drive(child: Gated, options: Options) -> Run:
     closed = False
     error: str | None = None
     status: int | None = None
+    current_first = 0
+    step_frames: list[surfaces.FrameSpan] = []
+    frames_error: str | None = None
     try:
         release(child)
         while status is None:
             if closed:
                 time.sleep(POLL_INTERVAL_S)
+                now = time.monotonic()
             else:
                 output, closed = drain(child.master, POLL_INTERVAL_S)
+                now = time.monotonic()
+                frames.feed(output, now)
                 if ready is None or options.capture_screen:
                     screen.extend(output)
-            now = time.monotonic()
             if terminated is None:
                 if ready is None and frame_complete(screen):
                     ready = now
@@ -353,6 +368,7 @@ def drive(child: Gated, options: Options) -> Run:
                     terminated = terminate(child.pid)
                 if current is not None and now >= current.end:
                     steps.append(replace(current, end=now))
+                    step_frames.append(surfaces.FrameSpan(current_first, len(frames.starts)))
                     current = None
                 if terminated is None and current is None and now >= first_step_at:
                     if pending:
@@ -360,6 +376,7 @@ def drive(child: Gated, options: Options) -> Run:
                         if step.sent:
                             os.write(child.master, step.sent)
                         current = Window(step.label, step.keys, now, now + step.seconds, True)
+                        current_first = len(frames.starts)
                     else:
                         terminated = terminate(child.pid)
             elif not forced and now - terminated >= options.termination_grace:
@@ -375,12 +392,25 @@ def drive(child: Gated, options: Options) -> Run:
             os.kill(child.pid, signal.SIGKILL)
             forced = True
             _, status = os.waitpid(child.pid, 0)
-        os.close(child.master)
+        try:
+            if not closed:
+                # What the child wrote before it exited, so every frame it wrote is counted.
+                output, closed = drain(child.master, 0)
+                frames.feed(output, time.monotonic())
+                if options.capture_screen:
+                    screen.extend(output)
+        except OSError as exc:
+            # Only the frame count needs this last read, so a failure here
+            # leaves the observation as it was and names no surface.
+            frames_error = f'{type(exc).__name__}: {exc}'
+        finally:
+            os.close(child.master)
     exited = time.monotonic()
     if current is not None:
         steps.append(replace(current, end=min(current.end, exited), finished=False))
+        step_frames.append(surfaces.FrameSpan(current_first, len(frames.starts)))
     return Run(started, ready, tuple(steps), terminated, exited, status, forced, error,
-               bytes(screen))
+               bytes(screen), tuple(frames.starts), tuple(step_frames), frames_error)
 
 
 def startup_window(run: Run) -> Window:
@@ -390,9 +420,26 @@ def startup_window(run: Run) -> Window:
     return Window(STARTUP, '', run.started, end, False)
 
 
+def startup_frames(run: Run) -> surfaces.FrameSpan:
+    """The frames that arrived before the first step, or all of them."""
+    return surfaces.FrameSpan(0, run.step_frames[0].first if run.step_frames
+                              else len(run.frame_starts))
+
+
 def digest(path: Path) -> str:
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def surface_runs(path: Path, frames_received: int) -> surfaces.Runs | str:
+    """The TUI's surface runs, or why the windows' surfaces are unknown."""
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return 'the TUI wrote no frame-timing report'
+    except (OSError, UnicodeError) as exc:
+        return f'frame-timing report: {exc}'
+    return surfaces.read_runs(text, frames_received)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -405,12 +452,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if mismatch is not None:
         parser.error(mismatch)
     options.output_dir.mkdir(parents=True, exist_ok=False)
+    timing_path = options.output_dir / FRAME_TIMING_FILE
     log = record.Log()
     listener = proxy.listen_socket()
     relay_port = proxy.bound_port(listener)
     child_argv = (str(options.binary), '--base-path', str(options.base_path),
                   '--port', str(relay_port))
-    env = {**os.environ, 'TERM': TERM}
+    env = {**os.environ, 'TERM': TERM, FRAME_TIMING_ENV: str(timing_path)}
     sha_before = digest(options.binary)
     child = spawn_gated(child_argv, env, options.rows, options.columns)
     released = False
@@ -441,6 +489,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     index = index_entries(log.entries())
     windows = (startup_window(run), *run.steps)
     summaries = tuple(summarize_window(index, window, run.started) for window in windows)
+    runs = (f"the TUI's last output could not be read: {run.frames_error}"
+            if run.frames_error is not None
+            else surface_runs(timing_path, len(run.frame_starts)))
+    shown = tuple(
+        None if isinstance(runs, str)
+        else surfaces.shown(run.frame_starts, runs, frames, window.start, window.end)
+        for window, frames in zip(windows, (startup_frames(run), *run.step_frames), strict=True))
     measured_until = run.terminated if run.terminated is not None else run.exited
     faults = tuple(FaultRow(t - run.started, detail) for t, detail in index.faults
                    if run.started <= t < measured_until)
@@ -475,7 +530,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         'notes': notes,
         'observation_complete': complete,
         'relayed_requests': relayed,
-        'windows': [asdict(summary) for summary in summaries],
+        'windows': [{**asdict(summary),
+                     'surfaces': None if rows is None else [asdict(row) for row in rows]}
+                    for summary, rows in zip(summaries, shown)],
+        'surface_record': surfaces.record(runs, len(run.frame_starts)),
         'streams': [asdict(row) for row in stream_rows(index, run.started)],
         'faults': [asdict(fault) for fault in faults],
         'faults_after_termination': sum(1 for t, _ in index.faults if t >= measured_until),
@@ -488,6 +546,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                       'ready_after_s': result['ready_after_s'], 'exit_code': exit_code,
                       'forced_kill': run.forced_kill, 'faults': len(faults)}))
     print_table(summaries)
+    for window, rows in zip(windows, shown):
+        print(f'{window.label:<16} on screen: {surfaces.describe(rows)}')
     return 0 if complete else 1
 
 

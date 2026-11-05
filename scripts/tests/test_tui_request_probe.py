@@ -21,6 +21,7 @@ PERF = TESTS.parent / 'harness' / 'perf'
 PROBE = PERF / 'tui_request_probe.py'
 sys.path[:0] = [str(PERF), str(TESTS)]
 events = importlib.import_module('tui_request_events')
+surfaces = importlib.import_module('tui_request_surfaces')
 probe = importlib.import_module('tui_request_probe')
 fakes = importlib.import_module('tui_request_fakes')
 
@@ -32,19 +33,42 @@ FORK_WARNING = 'is multi-threaded'
 
 # FAKE_TUI_MODE: normal; never-ready draws nothing; silent draws and sends no
 # request; fault first sends bytes the relay cannot frame; exit-on-key exits 0
-# at the first key.
+# at the first key; no-report writes no frame-timing report. As the TUI's
+# presenter does, each frame opens with the frame start and ends with the
+# autowrap-on sequence, and leaving writes autowrap-on twice and no frame
+# start. Frames show `home` until a key makes them `pressed`. SIGTERM waits
+# while a frame is written, so the report counts every frame.
 FAKE_TUI = '''#!{python}
-import http.client, os, select, signal, socket, sys, threading, time, tty
+import http.client, json, os, select, signal, socket, sys, threading, time, tty
 mode = os.environ.get({mode_env!r}, 'normal')
 port = int(sys.argv[sys.argv.index('--port') + 1])
 open({started!r}, 'w').close()
 tty.setraw(0)
-signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+START, END = {frame_start!r}, {frame_end!r}
+runs, written, surface = [], 0, None
+def frame(text, shows):
+    global written, surface
+    signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])
+    os.write(1, START + text + END)
+    written += 1
+    if shows != surface:
+        runs.append(dict(schema={run_schema!r}, surface=shows, first_written_frame=written))
+        surface = shows
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGTERM])
+def leave(*_):
+    os.write(1, END + END)
+    path = os.environ.get('MASC_TUI_FRAME_TIMING')
+    if path and mode != 'no-report':
+        count = dict(schema={count_schema!r}, written_frames=written, runs=len(runs), omitted=0,
+                     unknown_from_written_frame=None)
+        with open(path, 'a') as out:
+            out.write(''.join(json.dumps(row) + chr(10) for row in runs + [count]))
+    os._exit(0)
+signal.signal(signal.SIGTERM, leave)
 if mode == 'never-ready':
     while True:
         time.sleep(1)
-sys.stdout.write('MASC Dashboard\\x1b[?7h')
-sys.stdout.flush()
+frame(b'MASC Dashboard', 'home')
 if mode == 'silent':
     while True:
         time.sleep(1)
@@ -63,9 +87,11 @@ reads = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
 while True:
     reads.request('GET', '/json?tick=1')
     reads.getresponse().read()
+    frame(b'tick', surface)
     if select.select([0], [], [], 0.1)[0] and os.read(0, 16):
         if mode == 'exit-on-key':
             os._exit(0)
+        frame(b'pressed', 'pressed')
         reads.request('GET', '/json?pressed=1')
         reads.getresponse().read()
 '''
@@ -99,8 +125,11 @@ class ProbeTest(unittest.TestCase):
         self.upstream.base_path = str(self.base.resolve())
         self.started = self.tmp / 'fake-tui-started'
         self.fake = self.tmp / 'fake-tui'
-        self.fake.write_text(FAKE_TUI.format(python=sys.executable, mode_env=MODE_ENV,
-                                             started=str(self.started)))
+        self.fake.write_text(FAKE_TUI.format(
+            python=sys.executable, mode_env=MODE_ENV, started=str(self.started),
+            frame_start=surfaces.FRAME_START, frame_end=probe.READY_SUFFIX,
+            run_schema=surfaces.RUN_SCHEMA,
+            count_schema=surfaces.COUNT_SCHEMA))
         self.fake.chmod(0o755)
         self.out = self.tmp / 'out'
 
@@ -144,6 +173,24 @@ class ProbeTest(unittest.TestCase):
         (stream,) = result['streams']
         self.assertEqual((stream['request'], stream['status']), ('GET /hold?since', 200))
         self.assertIn(stream['ending'], ('client_closed', 'stopped'))
+        shown = {window['label']: [row['surface'] for row in window['surfaces']]
+                 for window in result['windows']}
+        self.assertEqual(shown, {'startup': ['home'], 'rest': ['home'], 'press': ['home', 'pressed']})
+        record = result['surface_record']
+        self.assertIsNone(record['error'])
+        self.assertEqual(record['frames_received'], record['frames_written'])
+        for window in result['windows'][1:]:
+            with self.subTest(window=window['label']):
+                self.assertAlmostEqual(sum(row['seconds'] for row in window['surfaces']),
+                                       window['seconds'], places=9)
+        self.assertLessEqual(sum(row['frames'] for window in result['windows']
+                                 for row in window['surfaces']), record['frames_received'])
+
+    def test_a_tui_that_writes_no_surface_runs_leaves_every_window_unknown(self):
+        result = self.result(self.run_probe('rest::0.5', mode='no-report'), 0)
+        self.assertTrue(result['observation_complete'])
+        self.assertEqual(result['surface_record']['error'], 'the TUI wrote no frame-timing report')
+        self.assertEqual([window['surfaces'] for window in result['windows']], [None, None])
 
     def test_a_tui_that_never_draws_is_stopped_at_the_ready_timeout(self):
         result = self.result(self.run_probe('rest::0.5', mode='never-ready', ready_timeout='1'), 1)

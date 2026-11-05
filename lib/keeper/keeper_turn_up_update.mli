@@ -101,6 +101,11 @@ val update_keeper :
   Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile.tool_result
 
+val config_revision_conflict_data :
+  Keeper_turn_up_config_persistence.conflict -> Yojson.Safe.t
+(** The tool-result data of a revision conflict: [code] with both revisions.
+    Every keeper-up path that loses the revision check answers with it. *)
+
 val config_revision_conflict_code : string
 (** The wire code a CAS revision conflict carries — written by the tool-result
     data here and by the dashboard's 409 body, matched by the TUI client and

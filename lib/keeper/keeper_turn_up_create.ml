@@ -325,7 +325,18 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            (published, revision))
            ()
        with
-       | Error e ->
+       | Error (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
+         (* Another write committed this name after the pre-check passed. The
+            caller retries a conflict by its code, the same one the pre-check
+            and an update commit answer with. *)
+         Progress.stop_tracking task_id;
+         tool_result_error_data ~class_:Tool_result.Workflow_rejection
+           (Keeper_turn_up_update.config_revision_conflict_data conflict)
+       | Error
+           (( Keeper_turn_up_config_persistence.Io_error _
+            | Keeper_turn_up_config_persistence.Reconciliation_required _
+            | Keeper_turn_up_config_persistence.Composite_reconciliation_required _
+            | Keeper_turn_up_config_persistence.Publication_exception _ ) as e) ->
          let detail = Keeper_turn_up_config_persistence.error_to_string e in
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)

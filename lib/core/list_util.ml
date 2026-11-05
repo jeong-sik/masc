@@ -11,15 +11,6 @@
 let count_if pred xs =
   List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
 
-(** [take_first n xs] returns the first [n] elements of [xs].
-    Returns [[]] when [n <= 0] and [xs] when [List.length xs <= n]. *)
-let rec take_first n xs =
-  if n <= 0 then []
-  else
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take_first (n - 1) rest
-
 (** [strip_prefix ~equal prefix xs] is [Some rest] when [xs] is the elements of
     [prefix] followed by [rest], each pair compared with [equal]. It is [None]
     when [xs] is shorter than [prefix] or an element differs. *)

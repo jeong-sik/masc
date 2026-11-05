@@ -5,10 +5,6 @@ val count_if : ('a -> bool) -> 'a list -> int
     but does not allocate the intermediate filter list. Single fold,
     O(n) time, O(1) extra space. *)
 
-val take_first : int -> 'a list -> 'a list
-(** [take_first n xs] returns the first [n] elements of [xs].
-    Returns [[]] when [n <= 0] and [xs] when [List.length xs <= n]. *)
-
 val strip_prefix : equal:('a -> 'b -> bool) -> 'a list -> 'b list -> 'b list option
 (** [strip_prefix ~equal prefix xs] is [Some rest] when [xs] is the elements of
     [prefix] followed by [rest], each pair compared with [equal prefix_element

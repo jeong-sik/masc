@@ -210,9 +210,6 @@ val is_valid_filename : string -> bool
 (** Yield the Eio fiber if running under Eio; no-op otherwise. *)
 val safe_yield : unit -> unit
 
-(** [take_first n xs] returns the first [n] elements of [xs]. *)
-val take_first : int -> 'a list -> 'a list
-
 (** How far back a message read walks. [Newest_window] stops at [limit] names
     because each one is an answer; [Matching] keeps walking until [limit]
     messages satisfy the predicate. *)

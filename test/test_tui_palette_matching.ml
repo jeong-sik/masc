@@ -461,9 +461,10 @@ let test_metrics_is_one_row_that_answers_its_other_names () =
    decided, so a destination cannot be added and left unreachable by name --
    which is how Runtime and Changes went without a row.
 
-   Connectors is the one surface decided the other way, for now. Its list
-   half has no path in at all (#35662), and whether that half is retired or
-   given a path is still open there; a palette row here would answer it. *)
+   Connectors is the one surface whose row is not a [Palette_goto]. Its row is
+   [Palette_connectors], which hides the Browser Lane before it goes, because
+   Connectors draws the lane whenever the lane is on screen. The case after
+   the one below holds that row. *)
 let every_surface =
   [ Overview; Acting; Metrics; Keepers Keeper_list; Memory; Lanes; Clients
   ; Board; Approvals; Planning; Schedules; Verification; Harness; Fusion
@@ -476,7 +477,7 @@ let _every_surface_is_decided : surface -> unit = function
   | Approvals | Planning | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Runtime | Config | Resources | Tools
   | System_logs -> ()
-  | Connectors -> (* #35662 *) ()
+  | Connectors -> (* its row is [Palette_connectors] *) ()
 
 let test_every_surface_and_config_pane_has_a_row () =
   let state =
@@ -516,6 +517,21 @@ let test_every_surface_and_config_pane_has_a_row () =
   match palette_matches state with
   | ("go System", Palette_goto Config) :: _ -> ()
   | _ -> Alcotest.fail "\"go system\" no longer leads with the System surface"
+;;
+
+let test_connectors_has_a_row_that_arrives_on_it () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  check_bool "a row goes to Connectors" true
+    (List.exists
+       (function "go Connectors", Palette_connectors -> true | _ -> false)
+       (palette_entries state));
+  state.palette_query <- "go Connectors";
+  check_bool "typing its name finds the row" true
+    (List.exists
+       (function _, Palette_connectors -> true | _ -> false)
+       (palette_matches state))
 ;;
 
 let test_addons_do_not_require_a_keeper () =
@@ -650,6 +666,8 @@ let () =
             test_an_installation_that_asked_has_one_results_row
         ; Alcotest.test_case "every surface and Config pane has a row" `Quick
             test_every_surface_and_config_pane_has_a_row
+        ; Alcotest.test_case "Connectors has a row that arrives on it" `Quick
+            test_connectors_has_a_row_that_arrives_on_it
         ; Alcotest.test_case "Korean aliases and UI language entries" `Quick
             test_korean_aliases_and_ui_language_entries
         ] )

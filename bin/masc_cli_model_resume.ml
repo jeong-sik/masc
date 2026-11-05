@@ -45,9 +45,9 @@ let run ~base_path ~port ~agent =
       Eio_context.set_clock (Eio.Stdenv.clock env);
       Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         let clock = Eio.Stdenv.clock env in
-        let origin = Printf.sprintf "http://127.0.0.1:%d" port in
+        let origin = Masc_network_defaults.masc_http_loopback_origin ~port in
         (* Validate the workspace before sending its private operator token. *)
-        match Masc_http_client.get_sync ~clock ~url:(origin ^ "/health?full=1") ~headers:[] () with
+        match Masc_http_client.get_sync ~clock ~url:(origin ^ Server_health_paths.full) ~headers:[] () with
         | Ok (200, health) when Masc_cli_setup.health_state ~base_path health ->
           (match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
            | None -> Refused "Local operator sign-in is missing. Complete sign-in before resuming setup."

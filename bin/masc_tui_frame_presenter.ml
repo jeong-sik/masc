@@ -42,6 +42,12 @@ let begin_synchronized_output = "\027[?2026h"
 let end_synchronized_output = "\027[?2026l"
 let disable_autowrap = "\027[?7l"
 let enable_autowrap = "\027[?7h"
+
+(* Autowrap off and straight back on, which is how every frame written here
+   leaves it, so writing this changes nothing on screen. It opens with the
+   frame start the request probe counts; the TUI writes it when a picture
+   drawn outside the presenter takes the terminal and frame timing is on. *)
+let external_frame_start = disable_autowrap ^ enable_autowrap
 let reset_style = "\027[0m"
 let clear_screen = "\027[2J"
 
@@ -291,6 +297,11 @@ let present presenter ?(force_present = false) ~invalidate_before ~write ~flush 
     Buffer.clear buffer;
     if presenter.synchronized_output then
       Buffer.add_string buffer begin_synchronized_output;
+    (* Once at the start of every frame written here, and nowhere else the
+       presenter writes: the request probe counts written frames by it
+       (scripts/harness/perf/tui_request_surfaces.py). The machine screen
+       opens each of its batches with it too, and frame timing records those
+       batches as frames of their own. *)
     Buffer.add_string buffer disable_autowrap;
     if full_redraw then Buffer.add_string buffer clear_screen;
     let repaint =

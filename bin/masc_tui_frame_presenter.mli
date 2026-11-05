@@ -28,6 +28,12 @@ type present_result =
 type t
 
 val create : synchronized_output:bool -> unit -> t
+
+val external_frame_start : string
+(** The frame start every frame written here opens with, followed at once by
+    the autowrap state every frame leaves behind, so writing it changes
+    nothing on screen. Written when a picture drawn outside the presenter
+    takes the terminal, so frame timing can count that picture as a frame. *)
 val invalidate : t -> unit
 val last_frame_is_compact : t -> bool
 (** Whether the last successfully presented frame was the compact fallback.

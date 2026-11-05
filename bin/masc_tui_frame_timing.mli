@@ -18,6 +18,9 @@ val max_stage_samples : int
     4096 stage records. They explicitly count omissions once these short-run
     limits are reached. *)
 
+val max_surface_runs : int
+(** Opt-in reports keep the first 4096 surface runs ({!Surface_runs}). *)
+
 val enabled : bool
 (** Whether the environment asked for timing. When false, timer helpers read no
     clocks and retain no samples. Caller checks and helper calls still have
@@ -66,6 +69,41 @@ module Ask_samples : sig
   (** Retain the first {!max_frames_per_phase} application/reset events with
       actual ordered identities. Omitted metadata makes later Builds Unknown.
       [before_build] uses the next Build ordinal, avoiding clock-tie inference. *)
+end
+
+val note_presented : surface:string -> unit
+(** Record that a frame of [surface] reached the terminal. A frame is a write
+    that opens with the presenter's frame start: each frame the presenter
+    wrote, each batch the machine screen wrote, and each {!note_external}
+    write. Call it once for each, in the order written; a frame the presenter
+    found unchanged wrote nothing and is not one. UI-domain use only. Does
+    nothing when timing is off. *)
+
+val note_external : surface:string -> write:(string -> unit) -> frame_start:string -> unit
+(** A surface drawn outside the presenter has the terminal. When timing is on
+    and the last frame recorded showed another surface, or none, write
+    [frame_start], a frame start that draws nothing, and record a frame of
+    [surface]. Otherwise do nothing, so a loop that calls it on every pass
+    while the surface has the terminal records it once. UI-domain use only. *)
+
+(** The surface of each written frame, as runs, so a reader that counts the
+    frames the terminal received can tell which surface each one showed. *)
+module Surface_runs : sig
+  type t
+  val empty : t
+  val add : t -> surface:string -> t
+  (** The next written frame. It extends the current run when it shows the
+      same surface, and starts a run otherwise. *)
+  val showing : t -> surface:string -> bool
+  (** Whether the last frame added showed [surface], also past
+      {!max_surface_runs}. *)
+  val raw_lines : t -> string list
+  (** One [masc.tui.surface_run.v1] line per kept run, in order, with its
+      surface and the ordinal of its first written frame, then one
+      [masc.tui.surface_runs.v1] line with the number of written frames, kept
+      runs and omitted runs. Once {!max_surface_runs} runs are kept, later
+      runs are omitted and that line names the written frame from which the
+      surface is unknown; otherwise that field is [null]. *)
 end
 
 val time : phase -> (unit -> 'a) -> 'a

@@ -513,6 +513,57 @@ let test_alternate_screen_is_taken_and_given_back () =
     (contains (output captured) "\027[2J")
 ;;
 
+let occurrences text needle =
+  let pattern = Str.regexp_string needle in
+  let rec from offset found =
+    match Str.search_forward pattern text offset with
+    | exception Not_found -> found
+    | at -> from (at + String.length needle) (found + 1)
+  in
+  from 0 0
+
+(* The request probe counts the frames the terminal received by this
+   sequence, so it must open every written frame once and appear nowhere else
+   the presenter writes. *)
+let test_every_written_frame_opens_with_the_one_autowrap_off () =
+  let autowrap_off = "\027[?7l" in
+  List.iter
+    (fun synchronized_output ->
+      let presenter = Presenter.create ~synchronized_output () in
+      let captured = sink () in
+      Presenter.setup presenter ~write:(write captured) ~flush:(flush captured);
+      check int "setup writes none" 0 (occurrences (output captured) autowrap_off);
+      let opening = if synchronized_output then "\027[?2026h" ^ autowrap_off else autowrap_off in
+      List.iter
+        (fun next ->
+          reset_sink captured;
+          match present_result presenter captured next with
+          | Presenter.Presented _ ->
+              let written = output captured in
+              check int "one per written frame" 1 (occurrences written autowrap_off);
+              check bool "at the frame's start" true
+                (String.starts_with ~prefix:opening written)
+          | Presenter.Unchanged -> check string "an unchanged frame writes nothing" "" (output captured))
+        [ frame [ "top"; "bottom" ];
+          frame [ "top"; "changed" ];
+          frame [ "top"; "changed" ];
+          frame ~surface_key:"board" [ "board" ];
+          frame ~surface_key:"board" ~cursor:(Presenter.Visible_at { row = 0; column = 2 }) [ "board" ] ];
+      reset_sink captured;
+      Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured) (Some solarized_dark);
+      Presenter.sync_scheme ~write:(write captured) ~flush:(flush captured) None;
+      check int "schemes write none" 0 (occurrences (output captured) autowrap_off);
+      reset_sink captured;
+      Presenter.cleanup presenter ~write:(write captured) ~flush:(flush captured);
+      check int "cleanup writes none" 0 (occurrences (output captured) autowrap_off))
+    [ true; false ];
+  check int "the external frame start holds one" 1
+    (occurrences Presenter.external_frame_start autowrap_off);
+  check bool "it opens with it and leaves autowrap on" true
+    (String.starts_with ~prefix:autowrap_off Presenter.external_frame_start
+     && String.ends_with ~suffix:"\027[?7h" Presenter.external_frame_start)
+;;
+
 let test_repeated_identical_frames_retain_zero_alloc_unchanged () =
   let presenter = Presenter.create ~synchronized_output:true () in
   let captured = sink () in
@@ -637,6 +688,8 @@ let () =
             test_a_scheme_with_no_slots_sends_no_osc_4
         ; test_case "cleanup returns the background first" `Quick
             test_cleanup_returns_the_background_before_the_screen
+        ; test_case "every written frame opens with the one autowrap-off" `Quick
+            test_every_written_frame_opens_with_the_one_autowrap_off
         ] )
     ]
 

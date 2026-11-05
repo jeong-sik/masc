@@ -29290,6 +29290,7 @@ let main
     with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
+        Masc_tui_frame_timing.note_presented ~surface:frame.Frame_presenter.surface_key;
         (match task_detail_of_reader reader, state.task_detail_id with
          | Some (offset, Some (count, height)), Some task_id
            when String.equal frame.surface_key "task-detail"
@@ -41936,6 +41937,14 @@ Use relative paths for resources already held in the package. -->
         && (owned_frame || Option.is_some (queue_owner_of_reader (!presented).reader)
             || Option.is_some (play_card_of_reader (!presented).reader)
             || help_is_presented (!presented).reader || panel_changed) in
+      (* A picture drawn outside the presenter has the terminal. With frame
+         timing on, a frame start that draws nothing marks where it took
+         over, so the request probe can tell it from the surface underneath
+         (scripts/harness/perf/tui_request_surfaces.py). The machine screen
+         records its own batches. *)
+      if state.image_open && not state.msx_open then
+        Masc_tui_frame_timing.note_external ~surface:"image" ~write:write_terminal_text
+          ~frame_start:Frame_presenter.external_frame_start;
       (match
          Render_schedule.take
            ~input_pending:ready_input

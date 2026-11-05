@@ -407,6 +407,85 @@ let test_residual_matches_cell_oracle () =
       [1,Int64.of_int expected] (residual_values stages frames)
   ) intervals) intervals
 
+let surface_runs surfaces =
+  List.fold_left (fun t surface -> Timing.Surface_runs.add t ~surface)
+    Timing.Surface_runs.empty surfaces
+;;
+
+let surface_run_lines surfaces = Timing.Surface_runs.raw_lines (surface_runs surfaces)
+
+let test_surface_runs_start_where_the_written_surface_changes () =
+  Alcotest.(check (list string)) "one line per run at its first written frame, then the count"
+    [ {|{"schema":"masc.tui.surface_run.v1","surface":"overview","first_written_frame":1}|};
+      {|{"schema":"masc.tui.surface_run.v1","surface":"planning-list","first_written_frame":3}|};
+      {|{"schema":"masc.tui.surface_run.v1","surface":"overview","first_written_frame":5}|};
+      {|{"schema":"masc.tui.surface_runs.v1","written_frames":6,"runs":3,"omitted":0,"unknown_from_written_frame":null}|} ]
+    (surface_run_lines
+       [ "overview"; "overview"; "planning-list"; "planning-list"; "overview"; "overview" ]);
+  Alcotest.(check (list string)) "no written frame, no run"
+    [ {|{"schema":"masc.tui.surface_runs.v1","written_frames":0,"runs":0,"omitted":0,"unknown_from_written_frame":null}|} ]
+    (surface_run_lines []);
+  let showing surfaces surface = Timing.Surface_runs.showing (surface_runs surfaces) ~surface in
+  Alcotest.(check (list bool)) "only the last frame's surface is showing"
+    [ false; true; false; true ]
+    [ showing [] "a"; showing [ "a" ] "a"; showing [ "a"; "b" ] "a"; showing [ "a"; "b" ] "b" ]
+;;
+
+let test_surface_runs_past_the_cap_say_where_the_surface_is_unknown () =
+  let alternating =
+    List.init Timing.max_surface_runs (fun i -> if i mod 2 = 0 then "a" else "b")
+  in
+  let past_the_cap = alternating @ [ "a"; "b"; "b" ] in
+  let lines = surface_run_lines past_the_cap in
+  Alcotest.(check int) "kept runs and the count"
+    (Timing.max_surface_runs + 1) (List.length lines);
+  Alcotest.(check string) "the last kept run"
+    (Printf.sprintf {|{"schema":"masc.tui.surface_run.v1","surface":"b","first_written_frame":%d}|}
+       Timing.max_surface_runs)
+    (List.nth lines (Timing.max_surface_runs - 1));
+  Alcotest.(check string) "omitted runs and the first written frame of unknown surface"
+    (Printf.sprintf
+       {|{"schema":"masc.tui.surface_runs.v1","written_frames":%d,"runs":%d,"omitted":2,"unknown_from_written_frame":%d}|}
+       (Timing.max_surface_runs + 3) Timing.max_surface_runs (Timing.max_surface_runs + 1))
+    (List.nth lines Timing.max_surface_runs);
+  Alcotest.(check (pair bool bool)) "the last frame's surface is still known"
+    (true, false)
+    (let runs = surface_runs past_the_cap in
+     Timing.Surface_runs.(showing runs ~surface:"b", showing runs ~surface:"a"))
+;;
+
+let test_presented_frames_reach_the_report () =
+  match Sys.getenv_opt "MASC_TUI_FRAME_TIMING" with
+  | None -> Alcotest.fail "the test stanza names a report file"
+  | Some path ->
+      let written = Buffer.create 16 in
+      let picture () =
+        Timing.note_external ~surface:"picture-check" ~write:(Buffer.add_string written)
+          ~frame_start:"<frame start>"
+      in
+      Timing.note_presented ~surface:"report-check";
+      picture ();
+      picture ();
+      Timing.note_presented ~surface:"report-check";
+      picture ();
+      Timing.report ();
+      Alcotest.(check string) "one frame start each time the picture takes the terminal"
+        "<frame start><frame start>" (Buffer.contents written);
+      let lines = In_channel.with_open_text path In_channel.input_lines in
+      List.iter (fun (surface, first) ->
+          let line =
+            Printf.sprintf
+              {|{"schema":"masc.tui.surface_run.v1","surface":"%s","first_written_frame":%d}|}
+              surface first
+          in
+          Alcotest.(check bool) line true (List.mem line lines))
+        [ "report-check", 1; "picture-check", 2; "report-check", 3; "picture-check", 4 ];
+      let count =
+        {|{"schema":"masc.tui.surface_runs.v1","written_frames":4,"runs":4,"omitted":0,"unknown_from_written_frame":null}|}
+      in
+      Alcotest.(check bool) count true (List.mem count lines)
+;;
+
 let () =
   Alcotest.run
     "tui frame timing"
@@ -441,7 +520,13 @@ let () =
           Alcotest.test_case "incomplete timer windows stay unknown" `Quick
             test_residual_rejects_incomplete_windows;
           Alcotest.test_case "coverage agrees with occupancy oracle" `Quick
-            test_residual_matches_cell_oracle
+            test_residual_matches_cell_oracle;
+          Alcotest.test_case "surface runs start where the written surface changes" `Quick
+            test_surface_runs_start_where_the_written_surface_changes;
+          Alcotest.test_case "surface runs past the cap say where the surface is unknown" `Quick
+            test_surface_runs_past_the_cap_say_where_the_surface_is_unknown;
+          Alcotest.test_case "presented frames reach the report" `Quick
+            test_presented_frames_reach_the_report
         ] )
     ]
 ;;

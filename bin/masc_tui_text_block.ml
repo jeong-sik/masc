@@ -5,7 +5,9 @@
    four characters "\x0A" so a one-row field cannot swallow one. A block has
    rows, so handing it the whole text spelled every break into the sentence
    instead of taking the row it asks for. Each line goes through that reader
-   on its own, which keeps the neutralising and drops the spelling. *)
+   on its own, which keeps the neutralising and drops the spelling. Text that
+   already carries its colour is the one exception: see
+   [preformatted_styled_rows]. *)
 
 module Message_layout = Masc_tui_message_layout
 
@@ -45,7 +47,7 @@ let leading_spaces line =
    what it returns. Prose has no use for them. Pretty-printed JSON, code and
    an indented list are made of them, so [keep_indent] gives them back: the
    line keeps its own indent, and so does every row it wraps to. *)
-let rows_of_line ~keep_indent ~max_cells line =
+let rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells line =
   let line = drop_line_terminator line in
   let opening = if keep_indent then leading_spaces line else 0 in
   (* Half the width is the most an indent can take, so a deeply nested line
@@ -55,10 +57,7 @@ let rows_of_line ~keep_indent ~max_cells line =
     if opening = 0 then line
     else String.sub line opening (String.length line - opening)
   in
-  match
-    Message_layout.wrap_words ~max_cells:(max_cells - indent)
-      (Masc.Tui_terminal_text.sanitize_terminal_text text)
-  with
+  match wrap ~max_cells:(max_cells - indent) (sanitize text) with
   (* [wrap_words] answers nothing for a line with no words. The break was
      written, so the blank row it asks for is drawn. *)
   | [] -> [ "" ]
@@ -67,12 +66,25 @@ let rows_of_line ~keep_indent ~max_cells line =
       let margin = String.make indent ' ' in
       List.map (fun row -> margin ^ row) wrapped
 
-let rows_with ~keep_indent ~max_cells text =
+let rows_with ~sanitize ~wrap ~keep_indent ~max_cells text =
   String.split_on_char '\n' text
-  |> List.concat_map (rows_of_line ~keep_indent ~max_cells)
+  |> List.concat_map (rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells)
   |> trim_blank_edges
 
-let rows ~max_cells text = rows_with ~keep_indent:false ~max_cells text
+let sanitize = Masc.Tui_terminal_text.sanitize_terminal_text
+
+let rows ~max_cells text =
+  rows_with ~sanitize ~wrap:Message_layout.wrap_words ~keep_indent:false
+    ~max_cells text
 
 let preformatted_rows ~max_cells text =
-  rows_with ~keep_indent:true ~max_cells text
+  rows_with ~sanitize ~wrap:Message_layout.wrap_words ~keep_indent:true
+    ~max_cells text
+
+(* The text already carries its colour, so it cannot go through the sanitiser:
+   the escapes are what it would spell out. Its writer made it safe and put
+   those escapes there. A wrapped row opens the style it continues and closes
+   it, as {!Message_layout.wrap_styled_words} does. *)
+let preformatted_styled_rows ~max_cells text =
+  rows_with ~sanitize:Fun.id ~wrap:Message_layout.wrap_styled_words
+    ~keep_indent:true ~max_cells text

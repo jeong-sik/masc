@@ -3901,7 +3901,7 @@
 (test
  (name test_tui_task_document_style)
  (modules test_tui_task_document_style)
- (libraries alcotest masc.masc_types masc_tui_ansi masc_tui_task_document))
+ (libraries alcotest masc masc.masc_types masc_tui_ansi masc_tui_task_document))
 
 (test
  (name test_tui_overview_tasks)
@@ -4967,7 +4967,7 @@
  (name test_tui_text_block)
  (modules test_tui_text_block)
  ; masc_tui_message_layout so a wrapped row's width is asked in display cells.
- (libraries alcotest astring masc_tui_message_layout masc_tui_text_block))
+ (libraries alcotest astring masc_tui_ansi masc_tui_message_layout masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)

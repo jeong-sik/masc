@@ -163,20 +163,24 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
    the document arrives as structure instead of as one line the terminal
    wraps at column zero -- which is what a single-line payload did, dropping
    the branch glyph from every wrapped row. A scalar or a payload that does
-   not parse is its own best rendering, and goes out as one terminal-safe
-   block: it is the only path here that the tree's own escaping does not
-   cover. *)
-let structured ?(palette = plain) value =
-  (* The tree sanitizes serialized JSON leaves before styling them, while
-     block lines use [terminal_safe_text]. The fallback is the payload itself,
-     so it must be made safe before it reaches a terminal row too. *)
-  let served text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
+   not parse is not a document here: [document] answers [None] for it. *)
+let document ?(palette = plain) value =
   match Yojson.Safe.from_string value with
   | (`Assoc _ | `List _) as json ->
-    String.concat "\n"
-      (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json))
-  | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> served value
-  | exception Yojson.Json_error _ -> served value
+    Some (String.concat "\n" (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json)))
+  | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
+(* The rest goes out as one terminal-safe block: it is the only path here
+   that the tree's own escaping does not cover. The tree sanitizes serialized
+   JSON leaves before styling them, while block lines use
+   [terminal_safe_text]. The fallback is the payload itself, so it must be
+   made safe before it reaches a terminal row too. *)
+let structured ?(palette = plain) value =
+  match document ~palette value with
+  | Some text -> text
+  | None -> Keeper_chat.terminal_safe_text ~preserve_newlines:true value
 ;;
 
 (* A detail is a small tree rather than another flat table. Values keep every

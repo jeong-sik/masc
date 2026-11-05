@@ -21,9 +21,9 @@ end
 type t
 
 (** Connections that {!release} closed on a [Close] verdict, by
-    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full or the
-    cache stopped closes the connection without a reason and is not counted
-    here. *)
+    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full, the
+    cache stopped, or the connection's owner switch off (see {!checkout})
+    closes the connection without a reason and is not counted here. *)
 type close_counts =
   { request_failed : int
   ; not_persistent : int
@@ -71,11 +71,22 @@ type lease
 val lease_connection : lease -> connection
 
 (** A lease on a parked connection for the origin idle for at most the TTL;
-    otherwise on the connection [create] opens, on the given switch. The
-    caller holds the lease until {!release}. Expired connections for the
-    origin are closed on the way. Counts a reuse for the first case and a
-    created connection for a [create] that returns [Ok], whose [Error] is
-    returned as it is. Always runs [create] once the cache is stopped. *)
+    otherwise on the connection [create] opens. The caller holds the lease
+    until {!release}. Expired connections for the origin are closed on the
+    way. Counts a reuse for the first case and a created connection for a
+    [create] that returns [Ok], whose [Error] is returned as it is.
+
+    [create] runs in the calling fiber with an owner switch of the new
+    connection's own. A daemon on the cache's switch runs that switch until
+    the connection is closed. A fiber [create] forks there outlives the
+    request. If such a fiber raises, it fails the owner switch only: the
+    failure is logged, the cache's switch keeps running, and the connection
+    is closed instead of being handed out or parked again. Cancelling the
+    cache's switch cancels every owner switch.
+
+    Once the cache is stopped no parked connection is handed out. When the
+    cache's switch is cancelled or finished, a checkout that would open a
+    connection raises as [Eio.Switch.check] does. *)
 val checkout
   :  t
   -> Key.t
@@ -83,8 +94,8 @@ val checkout
   -> (lease, 'e) result
 
 (** Ends a lease. [Park] parks its connection for later reuse, or closes it
-    when the origin already holds [max_idle_per_host] idle connections or the
-    cache is stopped. [Close reason] closes it and counts [reason] in
+    when the origin already holds [max_idle_per_host] idle connections, the
+    cache is stopped, or its owner switch is off. [Close reason] closes it and counts [reason] in
     [closed_total], and also in [closed_after_reuse] when the connection was
     parked before. Cancellation does not interrupt it.
 

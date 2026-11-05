@@ -5,8 +5,8 @@
     idle connections from it, so Keepers that call the same origin share
     connections.
 
-    A new cached connection is owned by a fiber on the cache's switch, and
-    Eio refuses a switch from another domain. A transport built on any other domain gets no
+    A new cached connection is opened on a switch that a daemon on the
+    cache's switch runs, and Eio refuses a switch from another domain. A transport built on any other domain gets no
     cache: each of its requests opens its own connection and closes it, as
     every request does when no cache is installed. *)
 

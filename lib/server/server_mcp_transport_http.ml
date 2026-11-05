@@ -709,7 +709,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     in
                                     safe_respond_chunked reqd response body
                             with
-                            | Eio.Cancel.Cancelled _ as e -> raise e
+                            | Eio.Cancel.Cancelled _ as e ->
+                                (* A cancelled call still ends its stream, so
+                                   the client sees the end instead of an open
+                                   response. Closing does not suspend. *)
+                                Option.iter stream_post_sse_finish !inline_sse;
+                                raise e
                             | exn ->
                                 (match !inline_sse with
                                 | Some response ->

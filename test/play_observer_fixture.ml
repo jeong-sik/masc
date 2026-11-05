@@ -72,10 +72,15 @@ let with_server env ~handler body =
       Masc_http_client.with_scoped_pool ~sw:pool_sw ~env (fun () -> body ~port)))
 
 let with_fixture env ?(ready = fun () -> true) fn =
+  let previous = Sys.getenv_opt "MASC_SSE_RECONNECT_MIN_INTERVAL_S" in
+  Unix.putenv "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "0";
   let workspace = Masc_test_deps.setup_test_workspace () in
   let session_id = "play-observer-race-" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () ->
+      (match previous with
+       | Some value -> Unix.putenv "MASC_SSE_RECONNECT_MIN_INTERVAL_S" value
+       | None -> Unix.unsetenv "MASC_SSE_RECONNECT_MIN_INTERVAL_S");
       Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id);
       Masc_test_deps.cleanup_test_workspace workspace)
     (fun () -> Eio.Switch.run (fun sw ->

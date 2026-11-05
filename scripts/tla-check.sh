@@ -222,14 +222,6 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskOwnership.tla" \
 run_tlc "$REPO_ROOT/specs/server-state" "ServerState.tla"
 run_tlc_buggy "$REPO_ROOT/specs/server-state" "ServerState.tla"
 
-# Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
-run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
-run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
-
-# Cycle 27 — Multimodal hydrator provenance DAG (Tier B9 catch-up).
-run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
-run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
-
 # RFC-0160 G6 — Shell IR carries decision invariant.
 run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
 run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"

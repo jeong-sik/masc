@@ -1,7 +1,13 @@
 name = "keeper_candle_equip"
 description = "Equip an owned portrait accessory in one slot for the current Keeper. Use item=default to restore that slot's name-derived starting accessory. This does not spend Candle or change other slots."
 additional_properties = false
-defer_loading = false
+# 2026-10-29 ~ 11-04 에 저장된 agent-core 요청 5,479개(Keeper 28명)가 이 정의 567 B 를
+# 매번 실었다. 이 도구를 부른 서로 다른 Keeper 턴은 1개(2회)다. 지연의 손익은
+# 호출 수가 아니라 필요했던 턴 수로 가른다(masc #32062): 실으면 3.1 MB, 지연하면
+# 1턴 x 표면 91,483 B = 0.09 MB 라서 34.0배다. 잔액 조회와 구매 도구는
+# RFC-goal-candle-ledger §3.7 에 따라 계속 싣는다. 이 도구는 거기에 들지 않는다.
+# 지연돼도 keeper_tool_search 목록에 이름이 남고, 부르면 그 턴에 스키마가 붙는다.
+defer_loading = true
 
 [[params]]
 name = "slot"

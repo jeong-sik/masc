@@ -138,6 +138,28 @@ let test_the_same_ids_have_no_amendments () =
   Alcotest.(check bool) "an empty world against an empty System is no change" true
     (Option.is_none (Render.amendments ~built_with:[] []))
 
+(* The block the end context carries: the added line as the System renders
+   it, the removed id, and nothing for the side that did not change. *)
+let test_the_amendments_block_carries_the_changed_articles () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let amendments ~built_with current =
+    match Render.amendments ~built_with current with
+    | Some amendments -> KP.constitution_amendments_block amendments
+    | None -> Alcotest.fail "a changed article set has amendments"
+  in
+  let added = amendments ~built_with:[ kept ] [ kept; written ] in
+  Alcotest.(check bool) "the added article's line is in the block" true
+    (contains ~sub:(Render.articles [ written ]) added);
+  Alcotest.(check bool) "the kept article is not" false
+    (contains ~sub:(Types.Article_id.to_string kept.id) added);
+  let removed = amendments ~built_with:[ kept; written ] [ kept ] in
+  Alcotest.(check bool) "the removed article's id is in the block" true
+    (contains ~sub:(Printf.sprintf "- [%s]" (Types.Article_id.to_string written.id)) removed);
+  Alcotest.(check bool) "its text is not" false (contains ~sub:written.text removed);
+  Alcotest.(check bool) "the two blocks differ only by what changed" false
+    (String.equal added removed)
+
 let () =
   Alcotest.run "world_constitution_prompt"
     [ ( "render",
@@ -159,5 +181,7 @@ let () =
             test_article_text_is_escaped;
           Alcotest.test_case "the world block precedes the keeper blocks" `Quick
             test_the_world_block_precedes_the_keeper_blocks;
+          Alcotest.test_case "the amendments block carries the changed articles" `Quick
+            test_the_amendments_block_carries_the_changed_articles;
         ] );
     ]

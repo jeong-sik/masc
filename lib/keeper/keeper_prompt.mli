@@ -26,3 +26,9 @@ val build_keeper_system_prompt :
     [constitution] is the world's own articles, already rendered
     ({!World_constitution_render.articles}); an empty one renders nothing at
     all. *)
+
+val constitution_amendments_block : World_constitution_render.amendments -> string
+(** The [Constitution_amendments] end-context block (RFC-0491 §3.2): the
+    articles added since a System's [<norms>] were rendered, with their text,
+    and the ids of the ones removed. Raises [Invalid_argument] when a slot is
+    missing or cannot render, under the same contract as the System's slots. *)

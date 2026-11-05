@@ -95,14 +95,11 @@ let contains_substring_ci haystack needle =
     in
     loop 0
 
-(* Labeled-arg wrappers.  Keeper/runtime modules use [~needle] to
+(* Labeled-arg wrapper.  Keeper/runtime modules use [~needle] to
    avoid positional-argument mistakes at call sites with multiple
    string parameters. *)
 let string_contains_substring ~(needle : string) (haystack : string) : bool =
   contains_substring haystack needle
-
-let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
-  contains_substring_ci haystack needle
 
 (* ASCII case-insensitive prefix check.  No allocation; lowercases
    byte by byte during compare. *)

@@ -764,7 +764,11 @@ val message_viewport_supported :
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
-    Words wider than the budget are split between complete UTF-8 scalars. *)
+    A word wider than the budget breaks after its last [_], [:], [/], [.] or
+    [-] that leaves the row at least half full, so the parts of a name stay
+    whole: [configured_keeper_without_runtime_meta] in 30 cells wraps as
+    [configured_keeper_without_] and [runtime_meta]. A stretch with no such
+    break is split between complete UTF-8 scalars, as {!split_cells} does. *)
 
 val boxed_rows : inner:int -> string -> string list
 (** The rows a box body spends on [content] at inner width [inner]: one row per

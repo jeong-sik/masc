@@ -524,6 +524,125 @@ let test_stream_typed_error_closes_unconsumed_connection () =
    Draining it proves the body was fully read; it proves nothing about whether
    the socket may serve another request. Parking it would hand the next caller
    a dead connection. *)
+let pp_verdict fmt (verdict : Reuse_verdict.t) =
+  Format.pp_print_string
+    fmt
+    (match verdict with
+     | Park -> "Park"
+     | Close Request_failed -> "Close Request_failed"
+     | Close Not_persistent -> "Close Not_persistent"
+     | Close Body_not_drained -> "Close Body_not_drained"
+     | Close Transport_ended -> "Close Transport_ended")
+;;
+
+let verdict = Alcotest.testable pp_verdict ( = )
+
+(* RFC-0492 §3.2: only a persistent exchange whose body was read to its end
+   parks, and a body that did not end closes for its own reason whatever the
+   headers say. *)
+let test_reuse_verdict_cases () =
+  let framed = [ "content-length", "2" ] in
+  let closing = ("connection", "close") :: framed in
+  let decide ?(request = []) ~response body =
+    Reuse_verdict.decide
+      ~request_headers:(Http.Header.of_list request)
+      ~response:(Http.Response.make ~headers:(Http.Header.of_list response) ())
+      ~body
+  in
+  Alcotest.check verdict "drained and persistent" Park (decide ~response:framed `Drained);
+  Alcotest.check verdict "the response closes" (Close Not_persistent)
+    (decide ~response:closing `Drained);
+  Alcotest.check verdict "the request closes" (Close Not_persistent)
+    (decide ~request:[ "connection", "close" ] ~response:framed `Drained);
+  Alcotest.check verdict "no framing" (Close Not_persistent) (decide ~response:[] `Drained);
+  List.iter
+    (fun response ->
+       Alcotest.check verdict "a failed read" (Close Request_failed) (decide ~response `Failed);
+       Alcotest.check verdict "an unread body" (Close Body_not_drained)
+         (decide ~response `Not_drained);
+       Alcotest.check verdict "a transport end of file" (Close Transport_ended)
+         (decide ~response `Transport_ended))
+    [ framed; closing ]
+;;
+
+(* A server that answers every request on a connection with [response] and
+   counts the connections it accepted. *)
+let start_raw_server ~sw ~net response =
+  let port = fresh_port () in
+  let accepted = ref 0 in
+  let handler flow _addr =
+    incr accepted;
+    let reader = Eio.Buf_read.of_flow flow ~max_size:8192 in
+    try
+      while true do
+        drain_request_headers reader;
+        Eio.Flow.copy_string response flow
+      done
+    with
+    | End_of_file | Eio.Io _ | Unix.Unix_error _ -> ()
+  in
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Net.run_server socket handler ~on_error:(fun _ -> ()) ~max_connections:4);
+  Printf.sprintf "http://127.0.0.1:%d" port, accepted
+;;
+
+let get_ok ~sw ~net ~cache url =
+  match Http_client.get_sync ~cache ~sw ~net ~url ~headers:[] () with
+  | Ok { status = 200; body = "ok"; _ } -> ()
+  | Ok { status; body; _ } -> Alcotest.failf "expected 200/ok, got %d/%S" status body
+  | Error _ -> Alcotest.fail "expected Ok response"
+;;
+
+(* Before RFC-0492, [get_sync] parked its connection whenever the request
+   succeeded, without reading the response's [connection] header. *)
+let test_get_sync_does_not_park_a_closing_response () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url, accepted =
+      start_raw_server ~sw ~net:env#net
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+    in
+    let cache = Http_client.create_cache ~sw () in
+    get_ok ~sw ~net:env#net ~cache url;
+    let stats = Http_client.cache_stats cache in
+    Alcotest.(check int) "nothing parked" 0 stats.total_idle;
+    Alcotest.(check int) "closed as not persistent" 1 stats.closed_total.not_persistent;
+    get_ok ~sw ~net:env#net ~cache url;
+    Alcotest.(check int) "the second request opened a connection" 2
+      (Http_client.cache_stats cache).create_count_total;
+    Alcotest.(check int) "the server saw two connections" 2 !accepted;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let test_get_sync_reuses_a_persistent_response () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url, accepted =
+      start_raw_server ~sw ~net:env#net "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    in
+    let cache = Http_client.create_cache ~sw () in
+    get_ok ~sw ~net:env#net ~cache url;
+    get_ok ~sw ~net:env#net ~cache url;
+    let stats = Http_client.cache_stats cache in
+    Alcotest.(check int) "one connection opened" 1 stats.create_count_total;
+    Alcotest.(check int) "reused once" 1 stats.reuse_count_total;
+    Alcotest.(check int) "the server saw one connection" 1 !accepted;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_stream_connection_close_does_not_park () =
   Eio_main.run
   @@ fun env ->
@@ -1279,6 +1398,13 @@ let () =
             "one-shot timeout closes connection"
             `Quick
             test_one_shot_get_timeout_closes_connection
+        ] )
+    ; ( "reuse verdict"
+      , [ Alcotest.test_case "every body state and persistence" `Quick test_reuse_verdict_cases
+        ; Alcotest.test_case "get_sync does not park a closing response" `Quick
+            test_get_sync_does_not_park_a_closing_response
+        ; Alcotest.test_case "get_sync reuses a persistent response" `Quick
+            test_get_sync_reuses_a_persistent_response
         ] )
     ; ( "headers"
       , [ Alcotest.test_case

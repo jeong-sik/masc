@@ -32886,15 +32886,6 @@ Use relative paths for resources already held in the package. -->
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted _) when state.about_open -> ()
-       (* The sheet's filter takes a paste the way typing it would, on one line.
-          With no filter open nothing on the sheet reads one. *)
-       | Some (Pasted paste) when help_owns_input
-                                  && help_filter_typing state.help_filter ->
-           state.help_filter <-
-             Help_filter_typing
-               (help_filter_query state.help_filter
-                ^ Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text);
-           state.help_scroll <- 0
        | Some (Pasted paste) when text_target = Some Text_account_login ->
            Option.iter (fun view ->
              if paste.Masc_tui_paste.dropped > 0 then

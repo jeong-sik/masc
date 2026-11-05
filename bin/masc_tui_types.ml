@@ -6346,10 +6346,6 @@ let help_filter_query = function
   | Help_filter_off -> ""
   | Help_filter_typing query | Help_filter_kept query -> query
 
-let help_filter_typing = function
-  | Help_filter_typing _ -> true
-  | Help_filter_off | Help_filter_kept _ -> false
-
 (* Browser reads remain separate from connector routing. A request generation
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)

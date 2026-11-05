@@ -13,15 +13,25 @@ val internal_error : string -> Agent_core.Error.t
 (** Build the [Internal] error for a failure that is neither configuration nor
     provider behaviour. *)
 
+type turn_observation
+(** The Completion Authority block an official turn takes out of its context
+    carrier (RFC-0491 §3.1): an event the vendor's persistent System must not
+    keep. It is delivered as current-turn User input on Start and on every
+    Resume, with the issuer's carrier span as its source. *)
+
 type prepared_turn =
   { messages : Agent_core.Types.message list
+    (** The turn's messages; the context carrier among them no longer holds
+        [turn_observation]. *)
   ; system_prompt : string
   ; start_context : Keeper_context_submission_link.t
     (** Current-turn User observations kept out of the vendor's standing System
         and the canonical history. Each Start adapter must use [start_prompt]. *)
   ; composed_context : Keeper_context_assembly.t option
     (** The issuer snapshot read once after the hook, shared by Start and Resume.
-        A stale issued System invalidates the snapshot for both projections. *)
+        A stale issued System invalidates the snapshot for both projections.
+        It is the issuer re-issued without [turn_observation]'s block. *)
+  ; turn_observation : turn_observation option
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
@@ -287,6 +297,7 @@ type resume_delivery =
   }
 
 val start_held_context :
+  ?turn_observation:turn_observation ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   Keeper_official_client_session_store.held_context list
@@ -309,6 +320,7 @@ type carried_summary =
     its block is sent on every resume. *)
 
 val carried_summaries :
+  ?turn_observation:turn_observation ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   carried_summary list
@@ -319,6 +331,7 @@ val carried_summaries :
 val resume_prompt :
   goal:string ->
   held:Keeper_official_client_session_store.held_context list ->
+  ?turn_observation:turn_observation ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   resume_delivery

@@ -215,6 +215,7 @@ type prepared_turn =
   ; system_prompt : string
   ; start_context : Keeper_context_submission_link.t
   ; composed_context : Keeper_context_assembly.t option
+  ; turn_observation : turn_observation option
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
@@ -1033,7 +1034,8 @@ let required_frame_label = function
 
 let framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : prepared_turn) =
   if is_resume
-  then Ok (resume_prompt ~goal ~held ?composed_context prepared.messages).prompt
+  then Ok (resume_prompt ~goal ~held ?turn_observation:prepared.turn_observation
+             ?composed_context prepared.messages).prompt
   else
     let* history = render_messages prepared.messages in
     Ok (start_prompt prepared
@@ -1202,12 +1204,14 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
       ~enable_thinking:turn_params.enable_thinking
       ~reasoning_effort:turn_params.reasoning_effort
   in
-  let system_prompt, start_context, composed_context = project_start_system ~system_prompt ~composed_context in
+  let messages, start_context, composed_context, turn_observation =
+    project_start_system ~system_prompt ~composed_context messages in
   Ok
     { messages
     ; system_prompt
     ; start_context
     ; composed_context
+    ; turn_observation
     ; tools
     ; reasoning_effort
     }

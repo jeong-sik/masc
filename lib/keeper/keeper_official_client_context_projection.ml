@@ -127,35 +127,93 @@ let history_role_label = function
   | Agent_core.Types.Tool -> "TOOL:\n"
 ;;
 
-(* A vendor may keep its first System for the whole session. Keep Goal's
-   existing Start/held policy, but deliver a current Completion Authority event
-   in User only. Select the closed observation from the exact issuer; never
-   search the selected text or borrow a receipt from another composition. *)
-let project_start_system ~system_prompt ~composed_context =
-  match Option.bind composed_context (fun assembly ->
-      Option.map (fun issued -> assembly, issued)
+(* RFC-0491 §3.1. The issuer carries a Completion Authority event as a block
+   of its context carrier, which the Agent Core lane sends at the request's
+   tail. An official client puts the System-role carrier where the vendor
+   keeps it for the session (Claude Code's recorded [--system-prompt], Codex
+   [developerInstructions]), and an event kept there outlives its turn. The
+   official turn therefore takes the block out of the carrier once and
+   delivers it as current-turn input: in front of the Start prompt and on
+   every Resume. Its source proof is the issuer's own carrier span. *)
+type turn_observation =
+  { block : Prompt_block_id.t
+  ; text : string
+  ; issuer : Keeper_context_assembly.t
+  }
+
+let turn_observation_message observation = extra_system_context_message observation.text
+
+let turn_observation_piece observation =
+  Keeper_context_submission_link.encoded_carrier ~assembly:(Some observation.issuer)
+    ~selected_blocks:(Some [ observation.block ]) (turn_observation_message observation)
+;;
+
+let carrier_text (message : Agent_core.Types.message) =
+  match message.origin, message.content with
+  | Agent_core.Types.System_context, [ Agent_core.Types.Text text ] -> Some text
+  | Agent_core.Types.System_context,
+    ( []
+    | [ Agent_core.Types.(
+          Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+          | ToolResult _ | Document _ | Image _ | Audio _) ]
+    | _ :: _ :: _ )
+  | Agent_core.Types.(
+      Conversation | Historical_system_context | Recovery_instruction
+      | Tool_result_followup | Agent_instruction), _ -> None
+;;
+
+(* Split only the carrier the issuer composed, found exactly once. A stale or
+   missing issuer keeps the messages and the composition as they are. *)
+let split_turn_observation ~composed_context messages =
+  let unsplit = messages, composed_context, None in
+  match composed_context with
+  | None -> unsplit
+  | Some (issuer : Keeper_context_assembly.t) ->
+    (match issuer.extra_system_context,
+           Keeper_context_assembly.split_block Prompt_block_id.Completion_authority issuer with
+     | Some carrier, Some (rest, text) ->
+       let is_issued message = Option.equal String.equal (carrier_text message) (Some carrier) in
+       (match List.filter is_issued messages with
+        | [ _ ] ->
+          let replace (message : Agent_core.Types.message) =
+            if not (is_issued message) then [ message ]
+            else
+              Option.to_list
+                (Option.map (fun text -> { message with content = [ Agent_core.Types.Text text ] })
+                   rest.extra_system_context)
+          in
+          ( List.concat_map replace messages
+          , Some rest
+          , Some { block = Prompt_block_id.Completion_authority; text; issuer } )
+        | [] | _ :: _ :: _ -> unsplit)
+     | None, _ | Some _, None -> unsplit)
+;;
+
+(* A vendor may keep its first System for the whole session, so Start sends
+   the issued System as it is: its only observation is the Goal, which keeps
+   its Start/held policy. The composition names the issuer only when its
+   issued System is exactly the System sent; never borrow a receipt from
+   another composition. *)
+let project_start_system ~system_prompt ~composed_context messages =
+  let composed_context =
+    match Option.bind composed_context (fun assembly ->
         assembly.Keeper_context_assembly.system_prompt) with
-  | Some (assembly, issued) when String.equal issued.text system_prompt ->
-    let standing = List.filter (function
-      | Keeper_context_assembly.Active_goals _ -> true
-      | Completion_authority _ -> false) issued.observations in
-    let system_prompt = Keeper_context_assembly.with_system_observations
-        ~base_text:issued.base_text ~observations:standing assembly
-      |> Keeper_context_assembly.effective_system_prompt ~base_text:issued.base_text in
-    let observations = List.filter_map (function
-      | Keeper_context_assembly.Active_goals _ -> None
-      | Completion_authority text as observation ->
-        let block, _ = Keeper_context_assembly.observation_block observation in
-        let message = user_message text in
-        Some (Keeper_context_submission_link.concat ~separator:""
-          [Keeper_context_submission_link.literal (history_role_label message.role);
-           Keeper_context_submission_link.encoded_system_observation
-             ~target:Official_start_user ~block
-             ~assembly:(Some assembly) message])) issued.observations in
-    system_prompt, Keeper_context_submission_link.concat ~separator:"\n\n" observations,
-    Some assembly
-  | Some _ -> system_prompt, Keeper_context_submission_link.literal "", None
-  | None -> system_prompt, Keeper_context_submission_link.literal "", composed_context
+    | Some issued when String.equal issued.text system_prompt -> composed_context
+    | Some _ -> None
+    | None -> composed_context
+  in
+  let messages, composed_context, turn_observation =
+    split_turn_observation ~composed_context messages in
+  let start_context =
+    match turn_observation with
+    | None -> Keeper_context_submission_link.literal ""
+    | Some observation ->
+      Keeper_context_submission_link.concat ~separator:""
+        [ Keeper_context_submission_link.literal
+            (history_role_label (turn_observation_message observation).role)
+        ; turn_observation_piece observation ]
+  in
+  messages, start_context, composed_context, turn_observation
 ;;
 
 (* A blank line between rendered messages and before the goal. *)
@@ -209,7 +267,10 @@ type carried_body =
   | Whole_text
   | World_state_sections of world_state_section list
 
-type carried_source = Message_context | Issued_system_observation of Prompt_block_id.t
+type carried_source =
+  | Message_context
+  | Issued_system_observation of Prompt_block_id.t
+  | Turn_observation of turn_observation
 type rendered_source = Carried_source of carried_source | Host_notice
 
 (* One carried context a turn composes: its name and digest, whether a resume
@@ -336,7 +397,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   else []
 ;;
 
-let carried_context ~composed_context messages =
+let carried_context ?turn_observation ~composed_context messages =
   let observations = match Option.bind composed_context (fun assembly ->
       assembly.Keeper_context_assembly.system_prompt) with
     | None -> []
@@ -348,7 +409,16 @@ let carried_context ~composed_context messages =
         ; message = user_message text
         ; body = Whole_text
         ; source = Issued_system_observation block }) issued.observations in
-  observations @ List.concat_map (carried_of_message ~composed_context) messages
+  let turn = match turn_observation with
+    | None -> []
+    | Some observation ->
+      [ { held = { Session_store.context = Session_store.Context_block observation.block
+                 ; sha256 = sha256_hex observation.text }
+        ; resent_when_held = Prompt_block_id.resent_when_held observation.block
+        ; message = turn_observation_message observation
+        ; body = Whole_text
+        ; source = Turn_observation observation } ] in
+  observations @ turn @ List.concat_map (carried_of_message ~composed_context) messages
 ;;
 
 (* What the session holds once it has this carried context: the context under
@@ -392,8 +462,8 @@ let carried_label = function
 
 let carried_sha256_prefix_length = 12
 
-let carried_summaries ?composed_context messages =
-  carried_context ~composed_context messages
+let carried_summaries ?turn_observation ?composed_context messages =
+  carried_context ?turn_observation ~composed_context messages
   |> List.map (fun item ->
     { label = carried_label item.held.Session_store.context
     ; bytes = String.length (encode_history_message item.message)
@@ -403,14 +473,14 @@ let carried_summaries ?composed_context messages =
     })
 ;;
 
-let start_held_context ?composed_context messages =
-  held_of_carried (carried_context ~composed_context messages)
+let start_held_context ?turn_observation ?composed_context messages =
+  held_of_carried (carried_context ?turn_observation ~composed_context messages)
 ;;
 
 (* Blocks sent together read as one carrier, as they do on a start. *)
 let is_block item =
   match item.source with
-  | Issued_system_observation _ -> false
+  | Issued_system_observation _ | Turn_observation _ -> false
   | Message_context ->
     (match item.held.Session_store.context with
      | Session_store.Context_block _ -> true
@@ -706,8 +776,8 @@ let rec rendered_messages = function
   | sent :: rest -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest
 ;;
 
-let resume_prompt ~goal ~held ?composed_context messages =
-  let carried = carried_context ~composed_context messages in
+let resume_prompt ~goal ~held ?turn_observation ?composed_context messages =
+  let carried = carried_context ?turn_observation ~composed_context messages in
   let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
   let sent = List.filter_map (fun (_, delivery) -> match delivery with
     | Sent sent -> Some sent
@@ -723,7 +793,8 @@ let resume_prompt ~goal ~held ?composed_context messages =
          (match source with
           | Host_notice -> Keeper_context_submission_link.literal (encode_history_message message)
           | Carried_source (Issued_system_observation block) -> Keeper_context_submission_link.encoded_system_observation
-              ~target:Official_resume_user ~block ~assembly:composed_context message
+              ~block ~assembly:composed_context message
+          | Carried_source (Turn_observation observation) -> turn_observation_piece observation
           | Carried_source Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
               ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
               ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
@@ -801,6 +872,8 @@ let resume_prompt ~goal ~held ?composed_context messages =
     match item.source with
     | Issued_system_observation block -> Keeper_context_submission_link.omit_held_system_observation
         ~block ~assembly:composed_context item.message projection
+    | Turn_observation observation -> Keeper_context_submission_link.omit_held
+        ~assembly:(Some observation.issuer) ~blocks:(Some [ observation.block ]) item.message projection
     | Message_context -> Keeper_context_submission_link.omit_held ~assembly:composed_context
         ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
     context_projection omitted in

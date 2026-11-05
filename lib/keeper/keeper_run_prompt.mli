@@ -49,12 +49,13 @@ val assemble_request_context :
   dynamic_context_partition:Keeper_context_layers.rendered option ->
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
-(** Split uniquely renderer-attributed Active Goals and Completion Authority
-    into a stable system suffix. Missing, stale or duplicate renderer sections
-    do not acquire an observation identity.
+(** Split uniquely renderer-attributed Active Goals into a stable system
+    suffix and Completion Authority into its own context block. Missing, stale
+    or duplicate renderer sections acquire neither identity.
     [base_system_prompt] is the pre-existing override when present, otherwise
     the original turn system prompt. Later tool rounds retain only that exact
-    issued observations and permitted extra blocks. Other world state stays
+    issued observation, the Completion Authority block the previous round of
+    this turn carried, and permitted extra blocks. Other world state stays
     first-round only. No store read or conversation-history write. *)
 
 val ends_with_tool_results : Agent_core.Types.message list -> bool

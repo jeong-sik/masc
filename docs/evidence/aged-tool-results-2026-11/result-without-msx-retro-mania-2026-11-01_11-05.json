@@ -1,0 +1,185 @@
+{
+  "params": {
+    "marker_bytes": 596,
+    "thresholds": [
+      1024,
+      2048,
+      4096,
+      16384
+    ],
+    "headline_threshold": 2048
+  },
+  "requests": {
+    "counted": 4061,
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "no_boundary": 17
+  },
+  "prompt_bytes": 6097421433,
+  "shares_of_prompt": {
+    "system_prompt": 0.0667,
+    "tool_schemas": 0.0654,
+    "assistant_messages": 0.3192,
+    "system_messages": 0.0,
+    "tool_messages": 0.4562,
+    "user_messages": 0.0924
+  },
+  "tool_messages": {
+    "count": 1918313,
+    "with_media": 128
+  },
+  "rules": {
+    "before_current_turn": {
+      "aged_tool_bytes": 2649189555,
+      "aged_tool_share": 0.4345,
+      "exposed_bytes": 258069402,
+      "exposed_share": 0.0423,
+      "saved_bytes_by_threshold": {
+        "1024": 1514562008,
+        "2048": 1349897212,
+        "4096": 1100173020,
+        "16384": 528668412
+      },
+      "saved_share_by_threshold": {
+        "1024": 0.2484,
+        "2048": 0.2214,
+        "4096": 0.1804,
+        "16384": 0.0867
+      },
+      "per_request_saved_share_at_headline": {
+        "p25": 0.0,
+        "p50": 0.0093,
+        "p75": 0.3946,
+        "p90": 0.5484
+      }
+    },
+    "before_previous_turn": {
+      "aged_tool_bytes": 2574692610,
+      "aged_tool_share": 0.4223,
+      "exposed_bytes": 382268163,
+      "exposed_share": 0.0627,
+      "saved_bytes_by_threshold": {
+        "1024": 1464054146,
+        "2048": 1304375678,
+        "4096": 1064059388,
+        "16384": 511749378
+      },
+      "saved_share_by_threshold": {
+        "1024": 0.2401,
+        "2048": 0.2139,
+        "4096": 0.1745,
+        "16384": 0.0839
+      },
+      "per_request_saved_share_at_headline": {
+        "p25": 0.0,
+        "p50": 0.0076,
+        "p75": 0.3783,
+        "p90": 0.5304
+      }
+    }
+  },
+  "by_prompt_size": [
+    {
+      "prompt_bytes_below": 100000,
+      "requests": 0,
+      "prompt_share": 0.0,
+      "saved_share_of_band": 0.0,
+      "saved_share_of_total": 0.0
+    },
+    {
+      "prompt_bytes_below": 1000000,
+      "requests": 1418,
+      "prompt_share": 0.133,
+      "saved_share_of_band": 0.1096,
+      "saved_share_of_total": 0.0146
+    },
+    {
+      "prompt_bytes_below": 5000000,
+      "requests": 2643,
+      "prompt_share": 0.867,
+      "saved_share_of_band": 0.2385,
+      "saved_share_of_total": 0.2068
+    },
+    {
+      "prompt_bytes_below": null,
+      "requests": 0,
+      "prompt_share": 0.0,
+      "saved_share_of_band": 0.0,
+      "saved_share_of_total": 0.0
+    }
+  ],
+  "by_keeper": [
+    {
+      "keeper": "masc-productor-owner",
+      "requests": 635,
+      "prompt_bytes": 973058433,
+      "saved_share_before_current_turn_at_headline": 0.1351
+    },
+    {
+      "keeper": "wkbl-front",
+      "requests": 468,
+      "prompt_bytes": 692740642,
+      "saved_share_before_current_turn_at_headline": 0.0891
+    },
+    {
+      "keeper": "wkbl-data",
+      "requests": 359,
+      "prompt_bytes": 543533915,
+      "saved_share_before_current_turn_at_headline": 0.0989
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "requests": 233,
+      "prompt_bytes": 482916301,
+      "saved_share_before_current_turn_at_headline": 0.2967
+    },
+    {
+      "keeper": "context-reviewer",
+      "requests": 209,
+      "prompt_bytes": 481534151,
+      "saved_share_before_current_turn_at_headline": 0.4724
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "requests": 287,
+      "prompt_bytes": 379069612,
+      "saved_share_before_current_turn_at_headline": 0.1309
+    },
+    {
+      "keeper": "code-reviewer",
+      "requests": 169,
+      "prompt_bytes": 316175359,
+      "saved_share_before_current_turn_at_headline": 0.3728
+    },
+    {
+      "keeper": "ocaml-agent-ic",
+      "requests": 166,
+      "prompt_bytes": 314254100,
+      "saved_share_before_current_turn_at_headline": 0.0105
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "requests": 195,
+      "prompt_bytes": 285101473,
+      "saved_share_before_current_turn_at_headline": 0.211
+    },
+    {
+      "keeper": "kidsnote-incoming-dd-manager",
+      "requests": 194,
+      "prompt_bytes": 274293342,
+      "saved_share_before_current_turn_at_headline": 0.5399
+    },
+    {
+      "keeper": "sangsu",
+      "requests": 170,
+      "prompt_bytes": 246485212,
+      "saved_share_before_current_turn_at_headline": 0.2738
+    },
+    {
+      "keeper": "wkbl-growth",
+      "requests": 139,
+      "prompt_bytes": 223901114,
+      "saved_share_before_current_turn_at_headline": 0.261
+    }
+  ]
+}

@@ -384,27 +384,25 @@ let main env =
        green route test's [refresh] helper does. *)
     let wake_dos_watchers () =
       let config = Masc.Workspace.default_config base_path in
-      match
-        Masc.Lane_addon_runtime.tool_export_reading ~config
+      let reading =
+        Masc.Lane_addon_runtime.tool_export_snapshot ~config
           ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[]
-      with
-      | Error _ -> log "dos wake: no export reading"
-      | Ok reading ->
-        (match reading.exports with
-         | export :: _ ->
-           let instance_id =
-             export.Masc.Lane_addon_tool_export.instance_id in
-           (match
-              Masc.Lane_addon_runtime.dispatch ~config
-                ~access:Masc.Lane_addon_sources.Operator_configuration
-                ~operation:Masc.Lane_addon_runtime.Observe
-                (`Assoc [ ("instance_id", `String instance_id) ])
-            with
-            | Ok _ -> log "dos wake: observe dispatched"
-            | Error e ->
-              log "dos wake: observe failed: %s"
-                (Masc.Lane_addon_runtime.error_to_string e))
-         | [] -> log "dos wake: no exports")
+      in
+      (match reading.exports with
+       | export :: _ ->
+         let instance_id =
+           export.Masc.Lane_addon_tool_export.instance_id in
+         (match
+            Masc.Lane_addon_runtime.dispatch ~config
+              ~access:Masc.Lane_addon_sources.Operator_configuration
+              ~operation:Masc.Lane_addon_runtime.Observe
+              (`Assoc [ ("instance_id", `String instance_id) ])
+          with
+          | Ok _ -> log "dos wake: observe dispatched"
+          | Error e ->
+            log "dos wake: observe failed: %s"
+              (Masc.Lane_addon_runtime.error_to_string e))
+       | [] -> log "dos wake: no exports")
     in
     let serve_connection _addr gluten_reqd =
       let reqd = gluten_reqd.Gluten.Reqd.reqd in

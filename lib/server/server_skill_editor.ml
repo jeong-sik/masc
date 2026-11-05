@@ -470,9 +470,8 @@ let authoring_descriptors ~config ~access =
     @ List.concat_map Keeper_tool_descriptor.registered_names static
     |> List.sort_uniq String.compare
   in
-  Lane_addon_runtime.tool_export_reading ~config ~access ~reserved
-  |> Result.map (fun (reading : Lane_addon_runtime.export_reading) ->
-    static @ List.map Keeper_lane_addon_descriptor.create reading.exports)
+  let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
+  static @ List.map Keeper_lane_addon_descriptor.create reading.exports
 ;;
 
 let authoring_tools_to_yojson descriptors =
@@ -498,7 +497,6 @@ let authoring_tools_to_yojson descriptors =
 ;;
 
 let validate_source ~descriptors ~directory source_text =
-  let* descriptors = Result.map_error (fun detail -> Validation_failed detail) descriptors in
   Keeper_skill_catalog.validate_authored_source ~descriptors ~directory source_text
   |> Result.map_error (function
     | Keeper_skill_catalog.Source_too_large { bytes; max_bytes } ->

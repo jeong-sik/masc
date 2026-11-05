@@ -494,7 +494,7 @@ max_reply_bytes = 65536
       let rec await predicate=if predicate () then () else (Eio.Time.sleep clock 0.001;await predicate) in
       await (fun () -> (inspect () |> Yojson.Safe.Util.member "observation_seq" |> Yojson.Safe.Util.to_int)>0);
       let access=Lane_addon_sources.Keeper keeper in
-      let reading=Runtime.tool_export_reading ~config ~access ~reserved:[] |> string_ok in
+      let reading=Runtime.tool_export_snapshot ~config ~access ~reserved:[] in
       let export=match reading.exports with [one] -> one | [] | _::_ -> fail "fixture export unavailable" in
       let turn=original.O.source.turn_ref in
       let trace=Ids.Turn_ref.trace_id turn in

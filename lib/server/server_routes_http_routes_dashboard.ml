@@ -2366,11 +2366,10 @@ let add_routes ~sw ~clock router =
                  "status",`String "rejected";"reason",`String "single_submitted_by_and_request_id_required"] in
            Http.Response.json_value ~compress:true ~request:req payload reqd)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/tools" (fun state _agent_name req reqd ->
-           match Server_skill_editor.authoring_descriptors
-             ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration with
-           | Error detail -> respond_dashboard_error ~status:`Service_unavailable ~request:req reqd detail
-           | Ok descriptors -> Http.Response.json_value ~compress:true ~request:req
-               (Server_skill_editor.authoring_tools_to_yojson descriptors) reqd)
+           let descriptors = Server_skill_editor.authoring_descriptors
+             ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration in
+           Http.Response.json_value ~compress:true ~request:req
+             (Server_skill_editor.authoring_tools_to_yojson descriptors) reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/preview-new" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_create_body body_str with

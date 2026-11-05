@@ -183,14 +183,14 @@ type error =
       ; cause : recovery_cause
       }
 
-(** Capture the caller-visible attached tools once for authoring. Failure is
-    passed through to the editor; it never falls back to the static catalog. *)
+(** Capture the caller-visible attached tools once for authoring: the static
+    catalog and every Add-on export whose name nothing else claims. *)
 val authoring_descriptors :
   config:Workspace.config -> access:Lane_addon_sources.access ->
-  (Keeper_tool_descriptor.t list, string) result
+  Keeper_tool_descriptor.t list
 
 val load : base_path:string -> Skill_reference.t -> (loaded, error) result
-val preview : descriptors:(Keeper_tool_descriptor.t list, string) result -> base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
+val preview : descriptors:Keeper_tool_descriptor.t list -> base_path:string -> Skill_reference.t -> source_text:string -> (preview, error) result
 
 type expected_kind = Instruction_kind | Composition_kind
 
@@ -201,7 +201,7 @@ type expected_kind = Instruction_kind | Composition_kind
     publication, where the document itself expresses the author's intent. *)
 val preview_new :
   expected_kind:expected_kind option ->
-  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  descriptors:Keeper_tool_descriptor.t list ->
   source_id:Skill_source_config.source_id -> package_id:string -> string ->
   (preview, error) result
 
@@ -210,7 +210,7 @@ val preview_new :
 val authoring_tools_to_yojson : Keeper_tool_descriptor.t list -> Yojson.Safe.t
 
 val save :
-  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  descriptors:Keeper_tool_descriptor.t list ->
   base_path:string ->
   reference:Skill_reference.t ->
   source_text:string ->
@@ -225,7 +225,7 @@ val writable_sources : base_path:string -> (writable_source list, error) result
 (** Create one new package directory and SKILL.md without overwriting. *)
 val create :
   expected_kind:expected_kind option ->
-  descriptors:(Keeper_tool_descriptor.t list, string) result ->
+  descriptors:Keeper_tool_descriptor.t list ->
   base_path:string ->
   source_id:Skill_source_config.source_id ->
   package_id:string ->

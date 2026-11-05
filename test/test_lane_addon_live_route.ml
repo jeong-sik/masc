@@ -538,8 +538,7 @@ let test_live_route () =
               ~access:Sources.Unauthenticated ~name in
             let refresh () =
               let previous = match snapshot () with Ok (Some snapshot) -> snapshot.observation_seq | _ -> 0 in
-              let exports = match Masc.Lane_addon_runtime.tool_export_reading ~config ~access:Sources.Unauthenticated ~reserved:[] with
-                | Ok reading -> reading.exports | Error detail -> fail detail in
+              let exports = (Masc.Lane_addon_runtime.tool_export_snapshot ~config ~access:Sources.Unauthenticated ~reserved:[]).exports in
               let export = List.find (fun (export : Masc.Lane_addon_tool_export.t) -> export.tool.name=name) exports in
               (match Masc.Lane_addon_runtime.dispatch ~config ~access:Sources.Operator_configuration
                 ~operation:Masc.Lane_addon_runtime.Observe (`Assoc ["instance_id",`String export.instance_id]) with
@@ -829,9 +828,8 @@ let test_seat_reads_the_last_dos_observation () =
                 | _ -> Eio.Time.sleep clock 0.001; await_observed previous in
               let refresh () =
                 let previous = match snapshot () with Ok (Some observation) -> observation.observation_seq | _ -> 0 in
-                let exports = match Masc.Lane_addon_runtime.tool_export_reading ~config
-                    ~access:Sources.Unauthenticated ~reserved:[] with
-                  | Ok reading -> reading.exports | Error detail -> fail detail in
+                let exports = (Masc.Lane_addon_runtime.tool_export_snapshot ~config
+                    ~access:Sources.Unauthenticated ~reserved:[]).exports in
                 let export = List.find (fun (export : Masc.Lane_addon_tool_export.t) ->
                   export.tool.name = "masc_dos_screen") exports in
                 (match Masc.Lane_addon_runtime.dispatch ~config ~access:Sources.Operator_configuration

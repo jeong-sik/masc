@@ -2006,15 +2006,6 @@ let ended_export ~ended (reading : live_reading) (export : tool_export) =
   | Some unready -> Unavailable (Lane_addon_unready.message unready)
   | None -> Unavailable ended
 
-let unique_exports ~reserved exports =
-  let names = List.map (fun export -> export.tool.Mcp_protocol.Mcp_types.name) exports in
-  if List.exists (fun name -> List.mem name reserved) names then
-    Error "Add-on export collides with a host tool"
-  else if List.length names <> List.length (List.sort_uniq String.compare names) then
-    Error "Add-on tool name is provided by multiple visible installations"
-  else Ok exports
-
-type export_reading = { exports : tool_export list; unready : Lane_addon_unready.t list }
 type export_snapshot = {
   exports : tool_export list;
   conflicts : Lane_addon_tool_export.conflict list;
@@ -2066,11 +2057,6 @@ let tool_execution_snapshot ~config ~access ~reserved = Eio_context.run_on_owner
 
 let tool_execution_skill_owner (serving : tool_execution) =
   skill_export_owner ~installation_id:serving.installation_id ~instance_id:serving.export.instance_id
-
-let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
-  let reading = public_reading (current_reading ~config ~access) in
-  unique_exports ~reserved (reading_exports reading)
-  |> Result.map (fun exports -> ({ exports; unready = reading.unready } : export_reading)))
 
 type export_observation = {
   instance_id : string;

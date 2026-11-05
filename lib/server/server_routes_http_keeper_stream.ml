@@ -2290,6 +2290,23 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     in
     Result.bind persisted (fun () -> publish_tool_transcript_bindings tool_calls)
   in
+  (* A turn that the Owner stops, or that an operator interrupt or an
+     exception ends, leaves [run_turn] without [persist_failure_reply]: the
+     Owner writes its own failure row. The tools it already ran keep their
+     rows by the rule a failed turn uses: sealed calls stay, the unsealed
+     provider scope is quarantined. *)
+  let persist_ran_tool_calls () =
+    let tool_calls =
+      Keeper_stream_tool_accum.to_tool_calls_for_failure worker_tool_accum
+    in
+    Result.map (fun () -> tool_calls) (append_queued_tool_calls_once tool_calls)
+  in
+  let ended_turn_outcome kind detail =
+    match Result.bind (persist_ran_tool_calls ()) publish_tool_transcript_bindings with
+    | Ok () -> Failed { kind; detail }
+    | Error persist_error ->
+      Failed { kind = Transcript_persist_failed; detail = persist_error }
+  in
   let run_turn request_sw =
     let start_time = Tool_timing.start () in
         let finish_projection_failure kind (failure : Keeper_request_failure.t) =
@@ -2697,7 +2714,25 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
          Eio.Fiber.fork ~sw:execution_sw (fun () ->
            (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
             | _ -> publish_inline_completion ()
-            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+              let bt = Printexc.get_raw_backtrace () in
+              (* Cancellation is in flight, so the write runs protected and
+                 its commit events are not published: [push_worker_event] can
+                 wait for buffer space, and a stop must not wait on a reader.
+                 A deadline would not shorten the stop: the store write runs
+                 in a systhread that cancellation cannot end once submitted.
+                 A failure of the write is logged here and never replaces the
+                 cancellation this arm re-raises. *)
+              let not_kept detail =
+                Log.Keeper.error ~keeper_name:payload.name
+                  "keeper_stream: tool rows of the cancelled turn were not kept: %s"
+                  detail
+              in
+              (match Eio.Cancel.protect persist_ran_tool_calls with
+               | Ok (_ : Keeper_chat_store.tool_call list) -> ()
+               | Error detail -> not_kept detail
+               | exception write_exn -> not_kept (Printexc.to_string write_exn));
+              Printexc.raise_with_backtrace exn bt
             | exception exn when Keeper_registry_types.is_operator_interrupt exn ->
               (* Typed operator cancellation (#28810): the interrupt fails
                  the turn switch and the [Switch.run] boundary re-raises it
@@ -2708,7 +2743,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 (Stream_terminal
                    { status = Stream_error
                    ; body = detail
-                   ; queued_outcome = Some (Failed { kind = Turn_cancelled; detail })
+                   ; queued_outcome = Some (ended_turn_outcome Turn_cancelled detail)
                    });
               publish_inline_completion ()
             | exception exn ->
@@ -2725,7 +2760,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 (Stream_terminal
                    { status = Stream_error
                    ; body = detail
-                   ; queued_outcome = Some (Failed { kind = Turn_failed; detail })
+                   ; queued_outcome = Some (ended_turn_outcome Turn_failed detail)
                    });
               publish_inline_completion ()));
          Some (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)

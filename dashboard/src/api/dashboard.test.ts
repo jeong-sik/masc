@@ -1558,7 +1558,12 @@ describe('fetchDashboardTools', () => {
           never_called_count: 0,
           registered_count: 0,
         },
-        effective_keeper_surface: { status: 'warming', keeper_name: 'keeper/one' },
+        effective_keeper_surface: {
+          status: 'unavailable',
+          keeper_name: 'keeper/one',
+          reason: 'keeper_not_found',
+          detail: 'Keeper metadata does not exist',
+        },
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1570,8 +1575,10 @@ describe('fetchDashboardTools', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tools?keeper=keeper%2Fone')
     expect(result.effective_keeper_surface).toEqual({
-      status: 'warming',
+      status: 'unavailable',
       keeper_name: 'keeper/one',
+      reason: 'keeper_not_found',
+      detail: 'Keeper metadata does not exist',
     })
   })
 

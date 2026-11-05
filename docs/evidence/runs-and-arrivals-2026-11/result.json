@@ -1,0 +1,925 @@
+{
+  "window": {
+    "first_run_utc": "2026-10-17",
+    "last_run_utc": "2026-11-05"
+  },
+  "read_at_utc": "2026-11-05T19:39Z",
+  "unreadable_lines": 0,
+  "unreadable_files": 1,
+  "runs": {
+    "runs": 5392,
+    "runs_without_rounds": 2757,
+    "rounds": 32759,
+    "rounds_per_run_of_runs_with_rounds": {
+      "p50": 5.0,
+      "p90": 29.0,
+      "p99": 111.0,
+      "max": 903.0
+    },
+    "ge_100": {
+      "runs": 36,
+      "rounds": 7449,
+      "share_of_all_rounds": 0.2274,
+      "wall_hours": 40.45
+    },
+    "ge_400": {
+      "runs": 5,
+      "rounds": 3012,
+      "share_of_all_rounds": 0.0919,
+      "wall_hours": 11.95
+    }
+  },
+  "by_profile": [
+    {
+      "profile": "opencode-go-deepseek-flash",
+      "runs": 554,
+      "rounds": 11759,
+      "runs_ge_100": 14,
+      "runs_ge_400": 0,
+      "spin_runs": 1,
+      "spin_rounds": 215
+    },
+    {
+      "profile": "glm-5.3-flash",
+      "runs": 1074,
+      "rounds": 10894,
+      "runs_ge_100": 10,
+      "runs_ge_400": 5,
+      "spin_runs": 6,
+      "spin_rounds": 3163
+    },
+    {
+      "profile": "ollama-cloud-deepseek-v4-1-flash",
+      "runs": 287,
+      "rounds": 5675,
+      "runs_ge_100": 7,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "glm-5-3",
+      "runs": 419,
+      "rounds": 3174,
+      "runs_ge_100": 3,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "opencode-go-qwen-flash",
+      "runs": 6,
+      "rounds": 524,
+      "runs_ge_100": 2,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "opencode-go-minimax-flash",
+      "runs": 16,
+      "rounds": 153,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "opencode-go-glm-flash",
+      "runs": 11,
+      "rounds": 146,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "opencode-go-mimo-flash",
+      "runs": 24,
+      "rounds": 144,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "claude-vincent-sonnet-5-5-500k",
+      "runs": 70,
+      "rounds": 72,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "openrouter-free-nemotron-3-5-super-vl",
+      "runs": 3,
+      "rounds": 39,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "rondo",
+      "runs": 61,
+      "rounds": 32,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "music-sensei",
+      "runs": 47,
+      "rounds": 31,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "goo-yang-bong",
+      "runs": 54,
+      "rounds": 27,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "glossary-maniac",
+      "runs": 50,
+      "rounds": 26,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "github-pr-checker",
+      "runs": 105,
+      "rounds": 22,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "openrouter-deepseek-v4-1-flash",
+      "runs": 21,
+      "rounds": 21,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "masc-productor-owner",
+      "runs": 42,
+      "rounds": 16,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "kidsnote-qa-hub-manager",
+      "runs": 46,
+      "rounds": 2,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer-uncle",
+      "runs": 96,
+      "rounds": 1,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "wkbl-web-leader",
+      "runs": 67,
+      "rounds": 1,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "build-maniac",
+      "runs": 40,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer",
+      "runs": 141,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer-brother",
+      "runs": 109,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer-father",
+      "runs": 42,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer-mother",
+      "runs": 67,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "code-reviewer-sister",
+      "runs": 155,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "context-reviewer",
+      "runs": 13,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "e-masc-the-leader",
+      "runs": 133,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "ego-acceptance-20261101-0213",
+      "runs": 2,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "gayo-yoga-leader",
+      "runs": 115,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "geek-scout",
+      "runs": 88,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "kidsnote-incoming-dd-manager",
+      "runs": 3,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "kidsnote-job-manager",
+      "runs": 57,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "kidsnote-slack-reader",
+      "runs": 104,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "mad-scientist",
+      "runs": 200,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "msx-retro-mania",
+      "runs": 11,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "native-image-claude-20261101-114844",
+      "runs": 1,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "native-image-claude-alt-20261101-115215",
+      "runs": 1,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "native-image-claude-third-20261101-115442",
+      "runs": 1,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "native-image-codex-20261101-114844",
+      "runs": 1,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "native-image-guidance-codex-20261101-141032",
+      "runs": 5,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "ocaml-agent-ic",
+      "runs": 200,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "polisher",
+      "runs": 200,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "pr-updater",
+      "runs": 156,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "sangsu",
+      "runs": 96,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "wkbl-front",
+      "runs": 165,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "wkbl-growth",
+      "runs": 33,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    },
+    {
+      "profile": "you-never-change",
+      "runs": 200,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "runs_ge_400": 0,
+      "spin_runs": 0,
+      "spin_rounds": 0
+    }
+  ],
+  "by_day": [
+    {
+      "day": "2026-10-17",
+      "runs": 1,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-18",
+      "runs": 6,
+      "rounds": 0,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-19",
+      "runs": 17,
+      "rounds": 214,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-20",
+      "runs": 75,
+      "rounds": 1524,
+      "runs_ge_100": 3,
+      "rounds_in_ge_100": 408
+    },
+    {
+      "day": "2026-10-21",
+      "runs": 128,
+      "rounds": 1749,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-22",
+      "runs": 132,
+      "rounds": 144,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-23",
+      "runs": 159,
+      "rounds": 539,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-24",
+      "runs": 78,
+      "rounds": 418,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-25",
+      "runs": 58,
+      "rounds": 793,
+      "runs_ge_100": 1,
+      "rounds_in_ge_100": 222
+    },
+    {
+      "day": "2026-10-26",
+      "runs": 100,
+      "rounds": 321,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-27",
+      "runs": 122,
+      "rounds": 2007,
+      "runs_ge_100": 4,
+      "rounds_in_ge_100": 421
+    },
+    {
+      "day": "2026-10-28",
+      "runs": 232,
+      "rounds": 444,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-29",
+      "runs": 174,
+      "rounds": 237,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-10-30",
+      "runs": 143,
+      "rounds": 113,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-11-01",
+      "runs": 16,
+      "rounds": 13,
+      "runs_ge_100": 0,
+      "rounds_in_ge_100": 0
+    },
+    {
+      "day": "2026-11-03",
+      "runs": 432,
+      "rounds": 1703,
+      "runs_ge_100": 2,
+      "rounds_in_ge_100": 260
+    },
+    {
+      "day": "2026-11-04",
+      "runs": 1506,
+      "rounds": 10852,
+      "runs_ge_100": 15,
+      "rounds_in_ge_100": 2728
+    },
+    {
+      "day": "2026-11-05",
+      "runs": 2013,
+      "rounds": 11688,
+      "runs_ge_100": 11,
+      "rounds_in_ge_100": 3410
+    }
+  ],
+  "spin_runs": [
+    {
+      "keeper": "music-sensei",
+      "day": "2026-11-05",
+      "profile": "glm-5.3-flash",
+      "rounds": 903,
+      "hours": 3.63,
+      "top_tool": "masc_board_list",
+      "top_tool_calls": 901,
+      "tool_calls": 904,
+      "ended_by": "Rate limited: Usage limit reached for 5 "
+    },
+    {
+      "keeper": "wkbl-data",
+      "day": "2026-11-05",
+      "profile": "glm-5.3-flash",
+      "rounds": 665,
+      "hours": 2.77,
+      "top_tool": "Execute",
+      "top_tool_calls": 661,
+      "tool_calls": 665,
+      "ended_by": "Rate limited: Usage limit reached for 5 "
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "day": "2026-11-04",
+      "profile": "glm-5.3-flash",
+      "rounds": 508,
+      "hours": 1.03,
+      "top_tool": "masc_board_list",
+      "top_tool_calls": 487,
+      "tool_calls": 507,
+      "ended_by": "the model answered"
+    },
+    {
+      "keeper": "wkbl-growth",
+      "day": "2026-11-05",
+      "profile": "glm-5.3-flash",
+      "rounds": 475,
+      "hours": 2.19,
+      "top_tool": "Execute",
+      "top_tool_calls": 473,
+      "tool_calls": 473,
+      "ended_by": "Rate limited: Usage limit reached for 5 "
+    },
+    {
+      "keeper": "goo-yang-bong",
+      "day": "2026-11-05",
+      "profile": "glm-5.3-flash",
+      "rounds": 461,
+      "hours": 2.33,
+      "top_tool": "keeper_memory_write",
+      "top_tool_calls": 456,
+      "tool_calls": 460,
+      "ended_by": "the model answered"
+    },
+    {
+      "keeper": "context-reviewer",
+      "day": "2026-11-04",
+      "profile": "opencode-go-deepseek-flash",
+      "rounds": 215,
+      "hours": 1.55,
+      "top_tool": "Execute",
+      "top_tool_calls": 283,
+      "tool_calls": 291,
+      "ended_by": "Network error (connection_reset): Eio.Io"
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "day": "2026-11-04",
+      "profile": "glm-5.3-flash",
+      "rounds": 151,
+      "hours": 0.96,
+      "top_tool": "masc_board_list",
+      "top_tool_calls": 131,
+      "tool_calls": 150,
+      "ended_by": "Provider 'glm-coding' timeout phase=firs"
+    }
+  ],
+  "arrivals_during_runs": {
+    "acked_rows_in_coverage": 3544,
+    "arrived_during_a_run": 1791,
+    "acked_before_run_end": 0,
+    "visible_at_next_round": {
+      "rows": 1390,
+      "rows_in_runs_without_rounds": 222,
+      "rows_after_the_last_round": 179,
+      "seconds_to_next_round_p50": 23.4,
+      "seconds_to_next_round_p90": 258.3,
+      "seconds_to_next_round_max": 1795.3,
+      "hours_earlier_than_the_run_end": 337.1
+    },
+    "by_run_size": {
+      "0-9 rounds": {
+        "rows": 634,
+        "immediate": 170,
+        "blocked_hours": 36.9,
+        "blocked_minutes_p50": 1.6,
+        "blocked_minutes_p90": 9.6,
+        "blocked_hours_max": 1.0
+      },
+      "10-49 rounds": {
+        "rows": 813,
+        "immediate": 190,
+        "blocked_hours": 194.2,
+        "blocked_minutes_p50": 7.2,
+        "blocked_minutes_p90": 37.5,
+        "blocked_hours_max": 2.84
+      },
+      "50-99 rounds": {
+        "rows": 192,
+        "immediate": 16,
+        "blocked_hours": 73.6,
+        "blocked_minutes_p50": 16.6,
+        "blocked_minutes_p90": 45.8,
+        "blocked_hours_max": 3.41
+      },
+      "100+ rounds": {
+        "rows": 152,
+        "immediate": 12,
+        "blocked_hours": 78.2,
+        "blocked_minutes_p50": 25.3,
+        "blocked_minutes_p90": 64.6,
+        "blocked_hours_max": 2.22
+      }
+    },
+    "by_kind": {
+      "board_attention": {
+        "rows": 746,
+        "immediate": 0,
+        "blocked_hours": 172.2,
+        "blocked_minutes_p50": 7.2,
+        "blocked_minutes_p90": 36.6,
+        "blocked_hours_max": 3.37
+      },
+      "board_signal": {
+        "rows": 741,
+        "immediate": 295,
+        "blocked_hours": 160.5,
+        "blocked_minutes_p50": 5.4,
+        "blocked_minutes_p90": 34.5,
+        "blocked_hours_max": 3.41
+      },
+      "schedule_due": {
+        "rows": 174,
+        "immediate": 0,
+        "blocked_hours": 31.8,
+        "blocked_minutes_p50": 2.6,
+        "blocked_minutes_p90": 26.4,
+        "blocked_hours_max": 2.84
+      },
+      "keeper_delegate_completed": {
+        "rows": 64,
+        "immediate": 44,
+        "blocked_hours": 11.8,
+        "blocked_minutes_p50": 3.0,
+        "blocked_minutes_p90": 31.9,
+        "blocked_hours_max": 1.18
+      },
+      "task_outcome": {
+        "rows": 17,
+        "immediate": 17,
+        "blocked_hours": 2.5,
+        "blocked_minutes_p50": 4.2,
+        "blocked_minutes_p90": 35.7,
+        "blocked_hours_max": 0.77
+      },
+      "ask_answered": {
+        "rows": 15,
+        "immediate": 0,
+        "blocked_hours": 1.0,
+        "blocked_minutes_p50": 2.0,
+        "blocked_minutes_p90": 10.6,
+        "blocked_hours_max": 0.22
+      },
+      "completion_authority_rejected": {
+        "rows": 15,
+        "immediate": 15,
+        "blocked_hours": 2.0,
+        "blocked_minutes_p50": 1.2,
+        "blocked_minutes_p90": 27.7,
+        "blocked_hours_max": 0.8
+      },
+      "workspace_message": {
+        "rows": 14,
+        "immediate": 14,
+        "blocked_hours": 0.8,
+        "blocked_minutes_p50": 2.1,
+        "blocked_minutes_p90": 8.8,
+        "blocked_hours_max": 0.3
+      },
+      "tool_result_ready": {
+        "rows": 3,
+        "immediate": 3,
+        "blocked_hours": 0.0,
+        "blocked_minutes_p50": 0.5,
+        "blocked_minutes_p90": 0.5,
+        "blocked_hours_max": 0.01
+      },
+      "task_cancelled": {
+        "rows": 2,
+        "immediate": 0,
+        "blocked_hours": 0.2,
+        "blocked_minutes_p50": 10.6,
+        "blocked_minutes_p90": 10.6,
+        "blocked_hours_max": 0.18
+      }
+    },
+    "by_day": [
+      {
+        "day": "2026-10-17",
+        "acked_rows": 791,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-10-18",
+        "acked_rows": 858,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-10-19",
+        "acked_rows": 884,
+        "arrived_during_a_run": 5,
+        "blocked_hours": 5.6
+      },
+      {
+        "day": "2026-10-20",
+        "acked_rows": 875,
+        "arrived_during_a_run": 22,
+        "blocked_hours": 12.6
+      },
+      {
+        "day": "2026-10-21",
+        "acked_rows": 608,
+        "arrived_during_a_run": 16,
+        "blocked_hours": 3.9
+      },
+      {
+        "day": "2026-10-22",
+        "acked_rows": 696,
+        "arrived_during_a_run": 2,
+        "blocked_hours": 1.6
+      },
+      {
+        "day": "2026-10-23",
+        "acked_rows": 567,
+        "arrived_during_a_run": 6,
+        "blocked_hours": 1.1
+      },
+      {
+        "day": "2026-10-24",
+        "acked_rows": 451,
+        "arrived_during_a_run": 11,
+        "blocked_hours": 2.7
+      },
+      {
+        "day": "2026-10-25",
+        "acked_rows": 740,
+        "arrived_during_a_run": 2,
+        "blocked_hours": 0.4
+      },
+      {
+        "day": "2026-10-26",
+        "acked_rows": 1626,
+        "arrived_during_a_run": 2,
+        "blocked_hours": 0.8
+      },
+      {
+        "day": "2026-10-27",
+        "acked_rows": 1462,
+        "arrived_during_a_run": 8,
+        "blocked_hours": 0.8
+      },
+      {
+        "day": "2026-10-28",
+        "acked_rows": 6068,
+        "arrived_during_a_run": 15,
+        "blocked_hours": 0.3
+      },
+      {
+        "day": "2026-10-29",
+        "acked_rows": 1556,
+        "arrived_during_a_run": 2,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-10-30",
+        "acked_rows": 1421,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-10-31",
+        "acked_rows": 605,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-11-01",
+        "acked_rows": 1312,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-11-02",
+        "acked_rows": 1673,
+        "arrived_during_a_run": 0,
+        "blocked_hours": 0.0
+      },
+      {
+        "day": "2026-11-03",
+        "acked_rows": 2987,
+        "arrived_during_a_run": 70,
+        "blocked_hours": 19.0
+      },
+      {
+        "day": "2026-11-04",
+        "acked_rows": 3444,
+        "arrived_during_a_run": 737,
+        "blocked_hours": 144.7
+      },
+      {
+        "day": "2026-11-05",
+        "acked_rows": 2039,
+        "arrived_during_a_run": 893,
+        "blocked_hours": 189.2
+      }
+    ]
+  }
+}

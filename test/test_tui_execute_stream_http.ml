@@ -1347,7 +1347,8 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
   Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
     let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
     Alcotest.(check int) "the Play observer opens" 200 (Play_fixture.await clock first.response);
-    let locked, release = Eio.Promise.create () in
+    let acquired, mark_acquired = Eio.Promise.create () in
+    let release, release_lock = Eio.Promise.create () in
     let cancelled = ref false in
     let finished, mark_finished = Eio.Promise.create () in
     Server_mcp_transport_http.For_testing.with_disconnect_hook
@@ -1357,9 +1358,9 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
         | Some info ->
           Eio.Fiber.fork ~sw (fun () ->
             Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-              Eio.Promise.resolve release ();
-              Eio.Promise.await locked));
-          Eio.Promise.await locked)
+              Eio.Promise.resolve mark_acquired ();
+              Eio.Promise.await release));
+          Eio.Promise.await acquired)
       (fun () ->
         Eio.Fiber.fork ~sw (fun () ->
           (try
@@ -1370,8 +1371,8 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
           | Eio.Cancel.Cancelled Disconnect_fixture -> cancelled := true
           | Eio.Cancel.Cancelled _ -> ());
           Eio.Promise.resolve mark_finished ());
-        Play_fixture.await clock locked;
-        Eio.Promise.resolve release ();
+        Play_fixture.await clock acquired;
+        Eio.Promise.resolve release_lock ();
         Play_fixture.await clock finished);
     Alcotest.(check bool) "the transport preserves the original cancellation" true !cancelled;
     Alcotest.(check (list string)) "the transport still completes Play Leave"

@@ -63,9 +63,9 @@ The fixture has no pending approval and no open question (`(no pending approvals
   names both at 5 of 5.
 - The notice keeps its reason text at 100x30, 120x35, 200x40 before and at
   120x35, 200x40 after. At 100x30 it is drawn as its count. The fitter
-  does this by its own rule: a notice too wide to sit beside the keys that cannot be dropped
-  is drawn in a shorter text (`drawable_conflicts` in `bin/masc_tui_footer.ml`), and Esc and q
-  are now among those keys.
+  does this by its own rule: a notice that cannot be drawn beside the keys that cannot be
+  dropped and the cut marker is drawn in a shorter text (`without_a_blocking_conflict` in
+  `bin/masc_tui_footer.ml`), and Esc and q are now among those keys. At 100x30 the long notice (65 cells), `y / n:decide  Esc:back  q:quit` (30 cells) and the cut marker `…?` need 103 cells with their separators, and the row has 100.
 - Hints that left the row because Esc and q took their cells: 60x24 `j/k:move`; 80x24 `w:Workspace mode`, `e:Outside mode`; 120x35 `w:Workspace mode`; 200x40 `e:Outside mode`, `[ / ]:ask`. Hints that entered
   the row: 100x30 `w:Workspace mode`, `e:Outside mode`. The row ends with `…?` where it cut hints, and `?` opens the key sheet.
 

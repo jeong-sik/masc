@@ -15,6 +15,10 @@ let palette_starts_with ~needle haystack =
 let palette_contains ~needle haystack =
   Masc_tui_pick_list.lowercase_contains ~needle haystack
 
+(* Whole match: the text is the query, whatever the case. *)
+let palette_equals ~needle haystack =
+  String.equal (String.lowercase_ascii needle) (String.lowercase_ascii haystack)
+
 (* Command-palette jump targets. Surfaces come from the same ring the strip
    draws; keepers come from the loaded roster, so the palette can only offer
    a chat the roster can open. *)
@@ -428,6 +432,21 @@ let worktree_label (worktree : Masc.Tui_decode.git_worktree) =
     worktree.gw_name checkout
     (match flags with [] -> "" | flags -> "  " ^ String.concat " " flags)
 
+(* How an entry answers the query. [answer_order] is the ranking; it is
+   written out so that adding an answer is a compile error here and not a
+   position that depends on where the constructor was typed. *)
+type answer =
+  | Whole_query
+  | Starts_with_query
+  | Contains_query
+  | Characters_in_order
+
+let answer_order = function
+  | Whole_query -> 0
+  | Starts_with_query -> 1
+  | Contains_query -> 2
+  | Characters_in_order -> 3
+
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
@@ -482,21 +501,26 @@ let palette_matches (state : state) =
             (if location.ll_inside then "" else " (outside workspace)"),
           Palette_code_location (offer, location)) offer.clo_locations
   in
-  (* Three ranks, entry order kept inside each: a label that starts with the
-     query, then one that contains it, then one that only has its characters
-     in order. Typed Code questions retain only executable symbol candidates;
-     ordinary jump filters continue ranking destinations and content. *)
+  (* Four ranks, entry order kept inside each: a label or word that is the
+     whole query, then a label that starts with it, then one that contains it,
+     then one that only has its characters in order. The whole-query rank is
+     why "go Board" lands on Board and not on "go Board Attention history",
+     which starts with the same text and was listed first. Typed Code
+     questions retain only executable symbol candidates; ordinary jump filters
+     continue ranking destinations and content. *)
   let rank (label, action) =
     let texts = label :: palette_action_words action in
-    if List.exists (palette_starts_with ~needle) texts then Some 0
-    else if List.exists (palette_contains ~needle) texts then Some 1
-    else if List.exists (palette_subsequence ~needle) texts then Some 2
+    if List.exists (palette_equals ~needle) texts then Some Whole_query
+    else if List.exists (palette_starts_with ~needle) texts then Some Starts_with_query
+    else if List.exists (palette_contains ~needle) texts then Some Contains_query
+    else if List.exists (palette_subsequence ~needle) texts then Some Characters_in_order
     else None
   in
   entries
   |> List.filter_map (fun entry ->
          Option.map (fun r -> (r, entry)) (rank entry))
-  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
+  |> List.stable_sort (fun (a, _) (b, _) ->
+         Int.compare (answer_order a) (answer_order b))
   |> List.map snd
 
 let selected_file state =

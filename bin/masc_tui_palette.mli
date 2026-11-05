@@ -51,9 +51,11 @@ val lsp_question_prefixes : (string * string) list
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list
 val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 (** Search the existing typed destinations and content. Canonical top-level
-    surface names come from [surface_ring], alongside explicit aliases, so a
-    destination name is a prefix candidate before unrelated substring matches.
-    Matching does not introduce another destination or execute an action. *)
+    surface names come from [surface_ring], alongside explicit aliases. An
+    entry whose label or alias is the whole query comes first, then a prefix
+    candidate, before unrelated substring matches; entry order decides only
+    between entries of one rank. Matching does not introduce another
+    destination or execute an action. *)
 
 val selected_file : Masc_tui_types.state -> string option
 val selected_location : Masc_tui_types.state ->

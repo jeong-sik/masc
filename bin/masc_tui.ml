@@ -15786,6 +15786,7 @@ let launch_system_log_stream state ~mailbox ~level =
                   deliver (System_log_frame frame)
                 | Error detail -> deliver (System_log_frame_unread detail))
               (Masc_tui_system_log_stream.feed reader chunk))
+          ~on_connected:(fun () -> deliver System_log_stream_connected)
           ()
       in
       deliver (System_log_stream_down ended);
@@ -15845,14 +15846,19 @@ let take_system_log_stream state (stream : system_log_follow) event =
   | Some (current, _)
     when current.slf_owner == stream.slf_owner
          && stream.slf_reading == state.workspace_read_authority ->
-    let result =
-      match event with
-      | System_log_frame frame ->
-        Ok (Masc_tui_system_log_stream.apply ~limit:system_log_page frame
-              (System_logs_view.page System_logs_view.Server state.system_logs).lp_snapshot)
-      | System_log_frame_unread detail | System_log_stream_down detail -> Error detail
+    let apply_result result =
+      state.system_logs <- System_logs_view.apply System_logs_view.Server result state.system_logs
     in
-    state.system_logs <- System_logs_view.apply System_logs_view.Server result state.system_logs
+    (match event with
+     | System_log_frame frame ->
+       apply_result
+         (Ok (Masc_tui_system_log_stream.apply ~limit:system_log_page frame
+                (System_logs_view.page System_logs_view.Server state.system_logs).lp_snapshot))
+     | System_log_frame_unread detail | System_log_stream_down detail -> apply_result (Error detail)
+     | System_log_stream_connected ->
+       (* A reconnect that brings no new entry sends only keepalives, so no
+          frame would ever clear the error the dropped connection left. *)
+       state.system_logs <- System_logs_view.stream_connected state.system_logs)
   | Some _ | None -> ()
 
 (* A new floor or source: the server page reopens its stream with it on the

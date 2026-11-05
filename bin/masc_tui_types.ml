@@ -4930,6 +4930,8 @@ type system_log_follow_event =
   | System_log_frame of Masc_tui_system_log_stream.frame
   | System_log_frame_unread of string
   | System_log_stream_down of string
+  | System_log_stream_connected
+      (** The server accepted the stream and answered with an event stream. *)
 
 type keeper_execute_failure =
   | Execute_read_failed of string

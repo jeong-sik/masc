@@ -22,6 +22,9 @@ val update_current : (page -> page) -> t -> t
 val apply : source -> (Masc.Tui_decode.system_log_snapshot, string) result -> t -> t
 (** Update only the named source, including late results. Failure retains that
     source's previous snapshot. Cursor clamping uses that page's category. *)
+val stream_connected : t -> t
+(** The server log stream was accepted again: drop only the server page's
+    connection error. The snapshot, cursor, filters and detail stay. *)
 val clear_server : t -> t
 (** Retire server data/detail/navigation on workspace withdrawal, retaining its
     existing level/category preferences and all process-local observations. *)

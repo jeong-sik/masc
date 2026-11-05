@@ -1,9 +1,10 @@
 (* The runtime's provider transport takes its connections from the installed
    cache (RFC-0492 §3.1): two runs against one provider origin share one
-   connection, and the runtime health response reports it (RFC-0492 §6). A
-   run on a domain other than the one that installed the cache opens its own
-   connection, because Eio refuses a switch from another domain. A Keeper
-   turn streams, so the streaming path shares the connection the same way. *)
+   connection, and the [/health?full=1] response reports it without naming
+   the origin (RFC-0492 §6, RFC-0132). A run on a domain other than the one
+   that installed the cache opens its own connection, because Eio refuses a
+   switch from another domain. A Keeper turn streams, so the streaming path
+   shares the connection the same way. The cache leaves with its switch. *)
 
 module Fixture = Exact_output_fixture
 module Health = Server_routes_http_runtime_health_fleet
@@ -40,6 +41,23 @@ let streamed_answer =
 let model_id = "fixture"
 
 let count name json = Yojson.Safe.Util.(member name json |> to_int)
+
+let health_port = 8935
+
+(* The [provider_connection_cache] section of the [/health?full=1] response,
+   after the snapshot it is served from is computed again. *)
+let full_health_cache () =
+  let request_authority =
+    match Server_request_authority.of_host_port ~host:"localhost" ~port:health_port with
+    | Ok authority -> authority
+    | Error `Malformed -> Alcotest.fail "the health authority is malformed"
+  in
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now ~request_authority
+    request;
+  Yojson.Safe.Util.member "provider_connection_cache"
+    (Server_routes_http_runtime.make_health_response_json ~request_authority request)
+;;
 
 let provider_cfg (provider : Fixture.test_server) =
   Llm_provider.Provider_config.make
@@ -81,7 +99,9 @@ let with_provider_and_cache ?(behavior = Fixture.Reply_with (fun _ _ -> `OK, ans
     f ~sw ~net provider;
     Eio.Switch.fail sw Exit
   with
-  | Exit -> ()
+  | Exit ->
+    Alcotest.(check bool) "the cache is uninstalled with its switch" true
+      (Option.is_none (Provider_connection_cache_ref.for_this_domain ()))
 ;;
 
 let test_two_runs_share_one_connection () =
@@ -90,12 +110,19 @@ let test_two_runs_share_one_connection () =
   Alcotest.(check bool) "no cache is reported before one is installed" true
     (Health.provider_connection_cache_json () = `Null);
   with_provider_and_cache env (fun ~sw ~net provider ->
+    Masc_test_deps.init_eio_clock ~sw env;
     run_once ~sw ~net (provider_cfg provider);
     run_once ~sw ~net (provider_cfg provider);
-    let cache = Health.provider_connection_cache_json () in
+    let cache = full_health_cache () in
     Alcotest.(check int) "one connection opened" 1 (count "created_total" cache);
     Alcotest.(check int) "the second run reused it" 1 (count "reused_total" cache);
-    Alcotest.(check int) "it is parked again" 1 (count "idle_total" cache))
+    Alcotest.(check int) "it is parked again" 1 (count "idle_total" cache);
+    Alcotest.(check int) "on its one origin" 1 (count "idle_max_per_origin" cache);
+    Alcotest.(check (list string)) "no field names an origin"
+      [ "idle_total"; "idle_max_per_origin"; "reused_total"; "created_total"; "closed_total" ]
+      (Yojson.Safe.Util.keys cache));
+  Alcotest.(check bool) "no cache is reported once its switch is released" true
+    (Health.provider_connection_cache_json () = `Null)
 ;;
 
 let test_a_run_on_another_domain_opens_its_own_connection () =

@@ -99,6 +99,44 @@ let test_complete_reuses_connection () =
   | Exit -> ()
 ;;
 
+(* Short enough that the test waits twice that, long enough that one
+   request finishes well inside it on loopback. *)
+let short_idle_ttl_s = 0.05
+
+(* The cache has no clock, so no eviction fiber runs: only checkout can keep
+   a request from taking the expired connection. The eviction fiber runs
+   every half TTL and would leave such a connection parked for that long. *)
+let test_checkout_skips_a_connection_idle_past_the_ttl () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net (anthropic_response "cached") in
+    let config = make_anthropic_config url in
+    let cache = Http_client.create_cache ~sw ~idle_ttl_seconds:short_idle_ttl_s () in
+    let complete () =
+      match
+        (Complete.complete ~sw ~net:env#net ~config ~messages:[] ~connection_cache:cache ())
+          .Llm_provider.Completion_outcome.result
+      with
+      | Ok _ -> ()
+      | Error _ -> Alcotest.fail "expected Ok"
+    in
+    complete ();
+    Alcotest.(check int) "the first connection is parked" 1
+      (Http_client.cache_stats cache).total_idle;
+    Eio.Time.sleep env#clock (2.0 *. short_idle_ttl_s);
+    complete ();
+    let stats = Http_client.cache_stats cache in
+    Alcotest.(check int) "the expired connection was not reused" 0 stats.reuse_count_total;
+    Alcotest.(check int) "a second connection was opened" 2 stats.create_count_total;
+    Alcotest.(check int) "only the new connection is parked" 1 stats.total_idle;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_eviction_fiber_closes_idle () =
   Eio_main.run
   @@ fun env ->
@@ -1553,6 +1591,10 @@ let () =
             "eviction fiber closes idle"
             `Quick
             test_eviction_fiber_closes_idle
+        ; Alcotest.test_case
+            "checkout skips a connection idle past the TTL"
+            `Quick
+            test_checkout_skips_a_connection_idle_past_the_ttl
         ; Alcotest.test_case
             "cache switch releases idle connection"
             `Quick

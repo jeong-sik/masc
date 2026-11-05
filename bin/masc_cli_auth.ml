@@ -34,11 +34,11 @@ let public_base_url () =
     if Masc.Play_invite.is_http_public_base_url base
     then Ok base
     else
+      (* The value is not echoed: a refused URL can carry a password. *)
       Error
-        (Printf.sprintf
-           "%s=%s is not an http(s) origin with no path, so it cannot carry the link"
-           key
-           base)
+        (key
+         ^ " is not an http(s) origin with no user, path, query or fragment, so it cannot \
+            carry the link")
 ;;
 
 (* What a server started from this shell would read. A server started from
@@ -85,5 +85,14 @@ let bootstrap ~base_path ~external_store =
       (Authz_types.Workspace_id.to_string workspace_id)
       (Time_codec.rfc3339_of_unix (float_of_int (A.expires_at_ms invitation) /. 1000.))
       (A.link ~base_url invitation);
-    0
+    (* The invitation is committed by now. A link that did not reach the output
+       is reported, so the exit code does not claim it was printed. *)
+    (match flush stdout with
+     | () -> 0
+     | exception Sys_error detail ->
+       Printf.eprintf
+         "masc auth bootstrap: the installation is activated, and its link did not reach \
+          the standard output: %s\n"
+         detail;
+       1)
 ;;

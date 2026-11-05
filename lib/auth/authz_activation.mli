@@ -24,6 +24,10 @@
     A failure of the last step leaves the installation bootstrapped with no
     invitation ({!Invitation_not_written}).
 
+    A refusal writes no record. The first step opens the log and the store as a
+    boot does, which cuts a last line that never ended and leaves lock files
+    next to them.
+
     The caller holds the BasePath lease, so no server runs on the base path and
     no other activation runs at once. It calls {!activate} inside an Eio event
     loop, because the zones are [Eio.Mutex]es. The workspace id, the invite id
@@ -64,18 +68,20 @@ type invitation_error =
 type error =
   | Not_asked
       (** [config.json] does not ask for [Multi_account], so a boot starts a
-          single user. Nothing was written. *)
+          single user. No record was written. *)
   | Config_unreadable of string
-      (** [config.json] is there and its decoder refused it, with the reason.
-          A boot starts a single user that answers 503 to a request reading
-          the config. Nothing was written. *)
+      (** A boot reads [config.json] as unreadable, with the reason: it could
+          not be checked or read, it is not a regular file or not JSON, or its
+          fields do not decode (also beside an explicit [Single_user]). A boot
+          starts a single user that answers 503 to a request reading the
+          config. No record was written. *)
   | Already_active
       (** The log made [Multi_account] and the external store matches it: a
-          boot reads this installation as activated. Nothing was written. *)
+          boot reads this installation as activated. No record was written. *)
   | Boot_stops of string * string list
       (** A boot stops on this installation for another reason than an
-          activation, with the lines it prints. Nothing was written. *)
-  | Workspace_id_not_built of Authz_id.error  (** Nothing was written. *)
+          activation, with the lines it prints. No record was written. *)
+  | Workspace_id_not_built of Authz_id.error  (** No record was written. *)
   | Bootstrap_failed of Authz_bootstrap.error  (** As {!Authz_bootstrap} says. *)
   | Invitation_not_written of invitation_error
       (** The log holds the bootstrap and no invitation. *)

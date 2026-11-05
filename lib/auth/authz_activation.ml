@@ -62,8 +62,8 @@ let error_to_string = function
     "config.json does not ask for Multi_account, so a boot starts a single user and there is \
      nothing to activate"
   | Config_unreadable detail ->
-    "config.json did not decode, so a boot starts a single user and there is nothing to \
-     activate: "
+    "config.json cannot be read in full, so a boot starts a single user and there is nothing \
+     to activate: "
     ^ detail
   | Already_active ->
     "the authorization log made Multi_account and the external store matches it: this \

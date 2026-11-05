@@ -7,6 +7,10 @@ val state_dir : base_path:string -> keeper_name:string -> (string, string) resul
 
 val outbox_dir : base_path:string -> keeper_name:string -> (string, string) result
 
+val muse_storage_dir : base_path:string -> keeper_name:string -> (string, string) result
+(** The one root a Keeper's Muse Code host keeps its native files in
+    (RFC-0495). A new session empties it; a resumed one keeps it. *)
+
 type outbox_source
 (** One exact direct file path in a Keeper's official-client outbox directory.
     Filesystem ownership and symlink admission remain the scanner's authority;

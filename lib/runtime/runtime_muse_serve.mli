@@ -106,6 +106,24 @@ type session_mode =
           admits, before selecting the model or approval mode, persisting
           admission or dispatching a turn. *)
 
+(** Where [muse serve] keeps its native XDG data, cache, state and runtime
+    directories and its temporary files. HOME and the managed authentication
+    config stay the selected account's. The caller makes the root with
+    {!ensure_storage_dirs}; the root must be absolute. *)
+type storage =
+  | Stateless of string
+      (** A directory made for this one call. The caller removes it after
+          [run_turn] has reaped its process, so no session survives to be
+          resumed, and [Resume] is refused before spawn. *)
+  | Keeper_owned of string
+      (** The one directory a Keeper's Muse turns share (RFC-0495). It holds
+          the session the Keeper remembers, so it takes [Start] and [Resume]. *)
+
+val ensure_storage_dirs : string -> unit
+(** Makes a storage root and its [data], [cache], [state], [run] and [tmp]
+    children with mode [0o700], keeping any that already exist. Other
+    failures raise [Unix.Unix_error]. *)
+
 type mcp_server =
   { name : string
   ; server : Runtime_muse_msp.mcp_server
@@ -337,7 +355,7 @@ val context_submission_to_json : context_submission -> Yojson.Safe.t
     stdin. Not the host's acceptance. *)
 
 val run_turn
-  :  ?storage_root:string
+  :  storage:storage
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
@@ -353,13 +371,8 @@ val run_turn
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [storage_root] selects an absolute caller-owned per-call directory for native
-    XDG data/cache/state/runtime and temporary files, preserving the selected HOME
-    and managed authentication config. The caller creates its [data], [cache],
-    [state], [run], and [tmp] children and removes the tree after this call has
-    reaped its process. This stateless mode refuses resume before spawn; default
-    calls keep the selected account's durable storage. Native durability and
-    completion notifications remain enabled in both cases.
+(** [storage] says where the host keeps its native files (see {!storage}).
+    Native durability and completion notifications remain enabled for both.
 
     [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests

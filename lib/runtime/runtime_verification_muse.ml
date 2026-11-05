@@ -25,9 +25,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
               let workspace = Filename.concat root "workspace" in
               let storage_root = Filename.concat root "native" in
               Unix.mkdir workspace 0o700;
-              Unix.mkdir storage_root 0o700;
-              List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
-                ["data"; "cache"; "state"; "run"; "tmp"];
+              Runtime_muse_serve.ensure_storage_dirs storage_root;
               Ok (workspace, storage_root)
             with Unix.Unix_error _ -> Error Private_workspace_unavailable))) in
       let* workspace, storage_root = prepared in
@@ -65,7 +63,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
           | Runtime_muse_serve.Model_call_reported _
           | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
-        ~storage_root ?reasoning_effort ~mcp_servers ~mgr ~clock
+        ~storage:(Runtime_muse_serve.Stateless storage_root) ?reasoning_effort ~mcp_servers ~mgr ~clock
         ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") config
         ~workspace_root:workspace ~prompt ~images:[]
       |> Result.map_error (fun error -> Client_error error))

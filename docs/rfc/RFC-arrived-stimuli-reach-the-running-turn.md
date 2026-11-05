@@ -20,7 +20,7 @@ Keeper 의 실행 하나는 모델 요청을 여러 번 보낸다. 큐는 턴 �
 - 다루지 않는 것: 도는 실행을 끊는 일(`RFC-backlog-never-preempts-a-running-turn` 이 정했다), 행을 큐에서 지우거나 ack 하는 일, 비동기 도구(`RFC-0290`), 모델이 닫는 말을 쓰고 도구를 다시 부르는 버릇.
 - 근거 기준: 이 브랜치의 base `f2d98655513`(2026-11-06).
 - 측정: [`docs/evidence/runs-and-arrivals-2026-11/`](../evidence/runs-and-arrivals-2026-11/README.md). 2026-11-05T20:24Z 에 읽었어요. raw trace 는 오래된 순으로 지워져서 다시 재면 값이 달라져요.
-- 되풀이하는 호출 측정: [`docs/evidence/repeated-calls-2026-11/`](../evidence/repeated-calls-2026-11/README.md). 2026-11-05T20:15Z 에 읽었어요.
+- 되풀이하는 호출 측정: [`docs/evidence/repeated-calls-2026-11/`](../evidence/repeated-calls-2026-11/README.md). 2026-11-05T20:36Z 에 읽었어요.
 
 ## 0. 요약
 
@@ -72,7 +72,8 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 **[사실]** 1,614개(91.0%)는 11-04·11-05 에 도착했다. 그 두 날에 trace 가 가장 많이 남아 있다. 10-30~11-02 는 trace 가 거의 없어서 값이 없다.
 **[사실]** 돌고 도는 실행(round 150개 이상, 한 도구가 호출의 85% 이상) 7개가 round 3,378개(전체의 10.5%)를 썼다. 3개는 사용량 한도 오류로, 2개는 모델이 답해서, 1개는 네트워크 오류로, 1개는 provider 시간 초과로 끝났다.
 **[사실]** 그 7개 안에 도착한 행은 합쳐서 39개(전체 1,773개의 2.2%)다. `music-sensei`·`wkbl-data`·`wkbl-growth` 의 세 실행에는 ack 된 행이 한 개도 도착하지 않았다. 39개 중 33개는 `masc-productor-owner` 의 두 실행에서 왔다.
-**[사실]** 같은 실행에서 직전 호출과 도구 이름·입력·결과가 모두 같은 호출은 호출 43,700개 중 1,663개(3.8%)다. 그중 86.6%가 `masc_board_list` 이고, `music-sensei` 한 실행이 897개, `masc-productor-owner` 의 두 실행이 427개와 104개로 합쳐서 85.9%를 가진다. 이 세 실행은 위 7개에 든다. 나머지 4개(`wkbl-data`, `wkbl-growth`, `goo-yang-bong`, `context-reviewer`)는 한 도구를 거의 매 round 불렀지만 되풀이가 9개 이하다.
+**[사실]** 같은 실행에서 직전 호출과 도구 이름·입력·결과가 모두 같은 호출은 호출 43,639개 중 1,663개(3.8%)다. 그중 86.6%가 `masc_board_list` 이고, `music-sensei` 한 실행이 897개, `masc-productor-owner` 의 두 실행이 427개와 104개로 합쳐서 85.9%를 가진다. 이 세 실행은 위 7개에 든다. 나머지 4개(`wkbl-data`, `wkbl-growth`, `goo-yang-bong`, `context-reviewer`)는 한 도구를 거의 매 round 불렀지만 되풀이가 9개 이하다.
+**[사실]** 되풀이한 호출의 결과는 합쳐서 1,636,270바이트로 전체 도구 결과 124,501,392바이트의 1.3%다. 되풀이는 호출 수로 3.8%, 결과 바이트로 1.3%다.
 
 ## 3. 결정
 
@@ -116,7 +117,7 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 | 대시보드 | `tsc` 통과. `vitest run` 전체 13,045개 중 8개가 실패한다. 7개는 변경 없는 main(`f2d98655513`)에서도 실패한다(`keeper.test.ts` 3개 등). 1개(`artifact-pdf-export`)는 전체를 돌릴 때만 20초 시간 초과가 나고 그 파일만 돌리면 9개 모두 통과한다 |
 | `bin/masc_tui.exe` | 새 합타입 분기가 모두 있어서 컴파일 통과 |
 | 측정 스크립트(실행·도착) | 시험 22개, 새 필드 변형 9개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
-| 측정 스크립트(되풀이 호출) | 시험 27개, 변형 22개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
+| 측정 스크립트(되풀이 호출) | 시험 33개, 변형 34개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
 
 **[확인 필요]** `assemble_hooks` 를 거치는 시험은 없다. Agent Core 턴 하나를 통째로 돌리는 fixture 가 없고, hook 에는 블록 호출 한 곳과 `after_turn` 의 확인 한 줄이 있다.
 이 로컬 결과는 CI 와 현재 head 의 독립 리뷰를 대신하지 않는다.

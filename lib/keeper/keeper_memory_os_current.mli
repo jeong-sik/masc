@@ -402,9 +402,10 @@ val keeper_id_of_filename : string -> string option
 val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val list_preflight_keeper_ids : keepers_dir:string -> (string list, string) result
-(** List snapshot or publication receipt owners without changing either.
-    A first publication may have a receipt before a snapshot exists. An
-    inaccessible inventory is an error, not an empty store. *)
+(** List snapshot, publication receipt or retraction plan receipt owners
+    without changing any of them. A first publication may have a receipt
+    before a snapshot exists. An inaccessible inventory is an error, not an
+    empty store. *)
 
 type preflight_observation =
   | Preflight_absent
@@ -414,7 +415,9 @@ type preflight_observation =
 val inspect_for_preflight :
   keepers_dir:string -> keeper_id:string -> (preflight_observation, string) result
 (** Decode without recovering or notifying. A readable pending receipt is
-    reported as pending, not as proof that its companions can be recovered. *)
+    reported as pending, not as proof that its companions can be recovered.
+    A retraction plan receipt that does not decode is an error naming its
+    path; a readable one does not change the observation. *)
 
 type boot_observation =
   | Boot_absent

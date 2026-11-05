@@ -110,19 +110,7 @@ let invalidation_reason_to_string = function
 let invalidation_reason_of_string s = List.find_opt (fun v -> String.equal (invalidation_reason_to_string v) s) all_of_invalidation_reason
 ;;
 
-let exact_object_fields required fields =
-  List.length required = List.length fields
-  && List.for_all
-       (fun required_name ->
-          match
-            List.filter
-              (fun (observed_name, _) -> String.equal required_name observed_name)
-              fields
-          with
-          | [ _ ] -> true
-          | [] | _ :: _ :: _ -> false)
-       required
-;;
+let exact_fields = Keeper_memory_os_types.exact_field_names_detail
 
 let non_empty value = not (String.equal (String.trim value) "")
 
@@ -185,7 +173,8 @@ let source_to_json source =
 ;;
 
 let source_of_json = function
-  | `Assoc fields when exact_object_fields [ "kind"; "path"; "sha256" ] fields ->
+  | `Assoc fields ->
+    let* () = exact_fields ~subject:"source" [ "kind"; "path"; "sha256" ] fields in
     (match
        List.assoc_opt "kind" fields
        , List.assoc_opt "path" fields
@@ -193,9 +182,9 @@ let source_of_json = function
      with
      | Some (`String "file"), Some (`String path), Some (`String digest)
        when valid_source_path path && valid_sha256 digest ->
-       Some { path; sha256 = digest }
-     | _ -> None)
-  | _ -> None
+       Ok { path; sha256 = digest }
+     | _ -> Error "source is not a file with a one-line path and a sha256 digest")
+  | _ -> Error "source is not a JSON object"
 ;;
 
 let fact_to_json fact =
@@ -207,7 +196,8 @@ let fact_to_json fact =
 ;;
 
 let fact_of_json = function
-  | `Assoc fields when exact_object_fields [ "claim"; "first_seen"; "source" ] fields ->
+  | `Assoc fields ->
+    let* () = exact_fields ~subject:"fact" [ "claim"; "first_seen"; "source" ] fields in
     (match
        List.assoc_opt "claim" fields
        , List.assoc_opt "first_seen" fields
@@ -215,16 +205,14 @@ let fact_of_json = function
      with
      | Some (`String claim), Some (`Float first_seen), Some source
        when non_empty claim && finite_nonnegative first_seen ->
-       Option.map
-         (fun source -> { claim; first_seen; source })
-         (source_of_json source)
+       let+ source = source_of_json source in
+       { claim; first_seen; source }
      | Some (`String claim), Some (`Int first_seen), Some source
        when non_empty claim && first_seen >= 0 ->
-       Option.map
-         (fun source -> { claim; first_seen = float_of_int first_seen; source })
-         (source_of_json source)
-     | _ -> None)
-  | _ -> None
+       let+ source = source_of_json source in
+       { claim; first_seen = float_of_int first_seen; source }
+     | _ -> Error "fact needs a non-blank claim and a non-negative first_seen")
+  | _ -> Error "fact is not a JSON object"
 ;;
 
 let invalidation_to_json invalidation =
@@ -236,8 +224,15 @@ let invalidation_to_json invalidation =
 ;;
 
 let invalidation_of_json = function
-  | `Assoc fields
-    when exact_object_fields [ "source_path"; "invalidated_at"; "reason" ] fields ->
+  | `Assoc fields ->
+    let* () =
+      exact_fields ~subject:"invalidation" [ "source_path"; "invalidated_at"; "reason" ] fields
+    in
+    let reason_of_string reason =
+      Option.to_result
+        ~none:(Printf.sprintf "invalidation reason %S is unknown" reason)
+        (invalidation_reason_of_string reason)
+    in
     (match
        List.assoc_opt "source_path" fields
        , List.assoc_opt "invalidated_at" fields
@@ -245,30 +240,30 @@ let invalidation_of_json = function
      with
      | Some (`String source_path), Some (`Float invalidated_at), Some (`String reason)
        when valid_source_path source_path && finite_nonnegative invalidated_at ->
-       Option.map
-         (fun reason -> { source_path; invalidated_at; reason })
-         (invalidation_reason_of_string reason)
+       let+ reason = reason_of_string reason in
+       { source_path; invalidated_at; reason }
      | Some (`String source_path), Some (`Int invalidated_at), Some (`String reason)
        when valid_source_path source_path && invalidated_at >= 0 ->
-       Option.map
-         (fun reason ->
-            { source_path; invalidated_at = float_of_int invalidated_at; reason })
-         (invalidation_reason_of_string reason)
-     | _ -> None)
-  | _ -> None
+       let+ reason = reason_of_string reason in
+       { source_path; invalidated_at = float_of_int invalidated_at; reason }
+     | _ ->
+       Error
+         "invalidation needs a one-line source_path, a non-negative invalidated_at \
+          and a string reason")
+  | _ -> Error "invalidation is not a JSON object"
 ;;
 
-let list_of_json decode = function
+let list_of_json ~subject decode = function
   | `List values ->
-    List.fold_left
-      (fun decoded value ->
-         match decoded, decode value with
-         | Some decoded, Some value -> Some (value :: decoded)
-         | _ -> None)
-      (Some [])
-      values
-    |> Option.map List.rev
-  | _ -> None
+    let rec loop index decoded = function
+      | [] -> Ok (List.rev decoded)
+      | value :: rest ->
+        (match decode value with
+         | Ok value -> loop (index + 1) (value :: decoded) rest
+         | Error detail -> Error (Printf.sprintf "%s[%d]: %s" subject index detail))
+    in
+    loop 0 [] values
+  | _ -> Error (subject ^ " is not a JSON array")
 ;;
 
 module Path_set = Set.Make (String)
@@ -302,10 +297,12 @@ let to_json snapshot =
 ;;
 
 let of_json = function
-  | `Assoc fields
-    when exact_object_fields
-           [ "revision"; "updated_at"; "trace_id"; "facts"; "invalidations" ]
-           fields ->
+  | `Assoc fields ->
+    let* () =
+      exact_fields ~subject:"snapshot"
+        [ "revision"; "updated_at"; "trace_id"; "facts"; "invalidations" ]
+        fields
+    in
     (match
        List.assoc_opt "revision" fields
        , List.assoc_opt "updated_at" fields
@@ -318,33 +315,35 @@ let of_json = function
        , Some (`String trace_id)
        , Some facts_json
        , Some invalidations_json ) ->
-       let updated_at =
+       let* updated_at =
          match updated_at_json with
-         | `Float value -> Some value
-         | `Int value -> Some (float_of_int value)
-         | _ -> None
+         | `Float value -> Ok value
+         | `Int value -> Ok (float_of_int value)
+         | _ -> Error "updated_at is not a number"
        in
-       (match
-          updated_at
-          , list_of_json fact_of_json facts_json
-          , list_of_json invalidation_of_json invalidations_json
-        with
-        | Some updated_at, Some facts, Some invalidations
-          when revision >= 1
-               && finite_nonnegative updated_at
-               && non_empty trace_id
-               && paths_are_unique_and_disjoint facts invalidations ->
-          Some { revision; updated_at; trace_id; facts; invalidations }
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
+       let* facts = list_of_json ~subject:"facts" fact_of_json facts_json in
+       let* invalidations =
+         list_of_json ~subject:"invalidations" invalidation_of_json invalidations_json
+       in
+       if revision < 1
+       then Error "revision is below 1"
+       else if not (finite_nonnegative updated_at)
+       then Error "updated_at is negative or not finite"
+       else if not (non_empty trace_id)
+       then Error "trace_id is blank"
+       else if not (paths_are_unique_and_disjoint facts invalidations)
+       then Error "a source path appears in more than one fact or invalidation"
+       else Ok { revision; updated_at; trace_id; facts; invalidations }
+     | _ -> Error "revision is not an integer or trace_id is not a string")
+  | _ -> Error "snapshot is not a JSON object"
 ;;
 
 let parse path content =
   try
     match of_json (Yojson.Safe.from_string content) with
-    | Some snapshot -> Ok snapshot
-    | None -> Error (Printf.sprintf "%s: invalid source-bound memory snapshot" path)
+    | Ok snapshot -> Ok snapshot
+    | Error detail ->
+      Error (Printf.sprintf "%s: invalid source-bound memory snapshot: %s" path detail)
   with
   | Yojson.Json_error message ->
     Error (Printf.sprintf "%s: invalid JSON: %s" path message)

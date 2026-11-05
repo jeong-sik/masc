@@ -118,6 +118,15 @@ val exact_field_names_result
   -> (string * Yojson.Safe.t) list
   -> (unit, wire_error) result
 
+(** {!exact_field_names_result} for decoders that answer with a string. The
+    rejection reads ["<subject>: field set mismatch (missing: ...) (unexpected:
+    ...)"], or names the repeated field. *)
+val exact_field_names_detail
+  :  subject:string
+  -> string list
+  -> (string * Yojson.Safe.t) list
+  -> (unit, string) result
+
 (** Typed readers for a field the caller has already proven present. An absent
     field is reported as missing rather than raised: the two checks disagreeing
     is a rejection like any other. *)

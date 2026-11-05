@@ -183,6 +183,12 @@ let exact_field_names_result names fields =
   exact_fields_result (wire_field_set names) fields
 ;;
 
+let exact_field_names_detail ~subject names fields =
+  match field_set_rejection (wire_field_set names) fields with
+  | None -> Ok ()
+  | Some reason -> Error (Printf.sprintf "%s: %s" subject (wire_reason_to_string reason))
+;;
+
 (* Field readers used after [exact_fields_result] has proven the field set.
    Absence is still reported rather than asserted away: the two checks
    disagreeing is a rejection like any other, not a reason to raise. *)

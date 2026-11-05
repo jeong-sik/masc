@@ -34,8 +34,8 @@ related: ["durable-tool-result-markers", "0476"]
 
 - D1. 정리는 서버 안에서 돈다. 서버의 maintenance 루프가 앞 스캔이 시작된 뒤 24시간이 지나면 다음 스캔을 연다. 앞 스캔 시작 시각은 후보 기록 파일에 있어서, 서버를 다시 켜도 주기가 처음부터 다시 시작하지 않는다.
 - D2. 두 번 스캔 규칙은 그대로다. 지울 수 있는 것은 "앞 스캔의 후보 ∩ 이번 스캔의 후보"다.
-- D3. 그 집합에서 "건드린 주소"를 뺀다. 건드린 주소는 이 프로세스가 앞 스캔 시작 뒤(프로세스가 그 뒤에 떴으면 프로세스 시작 뒤) `Tool_blob_store` 의 쓰기·읽기 함수로 다룬 주소다(§4.2).
-- D4. 지우기는 `written_addresses` 에서 주소를 빼고, 파일을 다른 이름으로 옮긴 뒤, 건드린 주소인지 다시 본다. 건드렸으면 되돌리고, 아니면 지운다. 잠금은 쓰지 않는다(§4.3).
+- D3. 그 집합에서 "건드린 주소"를 뺀다. 건드린 주소는 둘이다. 이 프로세스가 앞 스캔 시작 뒤(프로세스가 그 뒤에 떴으면 프로세스 시작 뒤) `Tool_blob_store` 의 쓰기·읽기 함수로 다룬 주소, 그리고 파일 mtime 이 앞 스캔 시작 뒤인 주소다(§4.2).
+- D4. 지우기는 `written_addresses` 에서 주소를 빼고, 파일을 다른 이름으로 옮긴 뒤, 건드린 주소인지와 옮긴 파일이 확인한 그 파일인지(inode·mtime) 다시 본다. 하나라도 어긋나면 되돌리고, 아니면 지운다. 잠금은 쓰지 않는다(§4.3).
 - D5. 스캔과 지우기는 Eio 메인 domain 밖에서 돈다. 스캔이 실패하면 지금처럼 후보를 기록하지 않고, 아무것도 지우지 않는다.
 - D6. 1층은 지우지 않는다. 후보 수, 지울 수 있는 수와 크기, 지웠다면 깨졌을 참조 수, 스캔 시간, 실패 종류를 로그와 후보 기록에 남긴다(§5).
 - D7. 2층은 지우기를 켜고, 오프라인 명령 `tool-blob-maintenance` 를 지운다. 정리하는 곳은 서버 하나만 남는다.
@@ -106,7 +106,9 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 오프라인에서는 쓰는 쪽이 없다. 서버 안에서 돌면 두 가지가 생긴다.
 
 - `put` 은 이 프로세스가 이미 쓴 주소면 파일을 다시 쓰지 않는다(`written_addresses`). 정리가 그 파일을 지운 뒤 같은 본문을 `put` 하면, 파일 없이 참조만 남는다.
-- 참조는 blob 을 쓰지 않고도 생긴다. Board 첨부(`board_tool_attachment.ml`)와 composition 초안(`keeper_composition_draft.ml`)은 `fetch` 로 blob 을 읽은 뒤 `Tool_output.make_artifact_ref` 로 참조를 만든다. 기록에서 푼 참조를 다시 쓰는 길도 있다(`normalized_artifact_ref_of_json`, `decode_from_agent_core`).
+- 참조는 blob 을 쓰지 않고도 생긴다. Board 첨부(`board_tool_attachment.ml`)와 composition 초안(`keeper_composition_draft.ml`)은 `fetch` 로 blob 을 읽은 뒤 `Tool_output.make_artifact_ref` 로 참조를 만든다. 기록에서 푼 참조를 다시 쓰는 길도 있다. `normalized_artifact_ref_of_json` 과 `decode_from_agent_core` 는 여러 소비자가 부른다.
+
+- 서버 밖 프로세스도 같은 저장소에 쓴다. `bin/masc_librarian_continuity.ml` 은 `--publish-base-path` 를 받으면 서버가 떠 있어도 `put_durable` 로 보고서 사본을 쓴다(294줄, 426줄). 이 쓰기는 서버의 건드림 기록에 남지 않는다. `bin/` 에서 `Tool_blob_store` 에 쓰는 프로세스는 이것과 lease 를 잡는 helper 뿐이다.
 
 두 번째 경우는 오프라인 정리에도 있다. 두 오프라인 실행 사이에 서버가 옛 참조를 다시 쓰면 같은 결과가 난다. 이 RFC 는 그 위험을 새로 만들지 않는다. 대신 1층에서 얼마나 생기는지 잰다(§5.2).
 
@@ -124,21 +126,29 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 
 ### 4.2 건드린 주소
 
-`Tool_blob_store` 가 프로세스 전역 집합 두 개를 둔다.
+`Tool_blob_store` 가 프로세스 전역 값 하나를 둔다.
 
-- `touched_current`: 이번 스캔 시작 뒤 건드린 주소
-- `touched_previous`: 앞 스캔 시작부터 이번 스캔 시작까지 건드린 주소
+```
+type touched = { current : Touch_map.t; previous : Touch_map.t }   (* sha256 -> Put | Read *)
+val touched : touched Atomic.t
+```
 
-스캔을 열 때 `touched_current` 를 `touched_previous` 로 옮기고 비운다. 프로세스가 앞 스캔 뒤에 떴으면 `touched_previous` 는 프로세스 시작부터 채운 집합이다.
+- `current`: 이번 스캔 시작 뒤 건드린 주소
+- `previous`: 앞 스캔 시작부터 이번 스캔 시작까지 건드린 주소
 
-건드림을 기록하는 함수는 `put`, `put_addressed`, `put_durable`, `put_durable_reuse`, `put_file_durable*`, `fetch`, `fetch_bounded`, `fetch_range` 다. 쓰기는 `Put`, 읽기는 `Read` 로 기록한다(§5.2 가 둘을 나눠 센다). 기록은 파일을 보기 **전에** 한다. 이 모듈 밖에서 blob 파일 경로를 직접 쓰거나 읽는 코드는 없다(`git grep` 으로 `root_dir` 와 경로 조립을 확인했다).
+스캔을 열 때 `{ current = empty; previous = old.current }` 로 한 번에 바꾼다(CAS). 두 집합을 따로 두고 옮긴 뒤 비우면, 그 사이에 기록된 건드림을 잃는다. 건드림 기록도 같은 값에 CAS 로 더한다. 프로세스가 앞 스캔 뒤에 떴으면 `previous` 는 비어 있고 `current` 가 프로세스 시작부터 채운 집합이다.
 
-지울 수 있는 집합은 "앞 후보 ∩ 이번 후보 − touched_previous − touched_current" 다.
+건드림을 기록하는 함수는 `put`, `put_addressed`, `put_durable`, `put_durable_reuse`, `put_file_durable*`, `fetch`, `fetch_bounded`, `fetch_range` 다. 쓰기는 `Put`, 읽기는 `Read` 로 기록한다(§5.2 가 둘을 나눠 센다). 기록은 파일을 보기 **전에** 한다. 이 모듈 밖에서 blob 파일 경로를 직접 쓰거나 읽는 코드는 lib·bin 에 없다(`root_dir` 은 시험에서만 쓴다).
+
+다른 프로세스의 쓰기는 파일로 본다. 한 프로세스에서 처음 `put` 하면 파일을 다시 쓰고, `put_durable` 은 매번 다시 쓴다. 그래서 다른 프로세스가 앞 스캔 시작 뒤에 쓴 blob 은 mtime 이 앞 스캔 시작 뒤다.
+
+지울 수 있는 집합은 "앞 후보 ∩ 이번 후보 − `previous` − `current` − mtime 이 앞 스캔 시작 뒤인 것" 이다. 이것은 나이 기준이 아니다. 앞 스캔 뒤에 누가 그 파일을 썼다는 흔적이다.
 
 이 범위로 충분한 이유:
 
 - 이 프로세스가 지금 쥐고 있는 주소는 앞 스캔 시작 뒤에 쓰거나 읽은 것이다. 그보다 먼저 읽고 24시간 넘게 기록하지 않은 채 쥐는 경로가 있으면, 그것이 §5.2 가 재는 경우다.
-- 앞 프로세스가 쥐고 있던 주소는 그 프로세스와 함께 사라졌다. 앞 프로세스가 그 참조를 기록했으면 이번 스캔이 읽는다.
+- 앞 프로세스가 쥐고 있던 주소는 그 프로세스와 함께 사라졌다. 앞 프로세스가 그 참조를 기록했으면 이번 스캔이 읽는다. 단, 이 논증은 스캔 범위(`durable_consumer_basenames`)가 참조를 기록하는 곳을 모두 덮을 때만 맞다. 1층 PR 에서 producer 마다 쓰는 곳을 대조한다(§7).
+- 서버 밖 프로세스가 쓴 주소는 mtime 으로 빠진다. 서버 밖 프로세스가 읽기만 하고 참조를 쓰는 경로는 `bin/` 에 없다.
 
 메모리: 2026-09-15 에 하루 52,077개를 썼다고 `tool_blob_store.ml` 주석에 적혀 있다. 주소 하나가 약 160바이트라 두 집합을 합쳐도 하루 수십 MB 안쪽이다. 1층에서 실제 크기를 잰다.
 
@@ -156,10 +166,15 @@ put h:                               fetch h:
 delete h:
   written_addresses -= h
   if h in touched: skip
+  st1 = lstat h;  if st1.mtime >= previous_scan_started_at: skip
   rename h -> h.deleting
-  if h in touched: rename h.deleting -> h; skip
+  st2 = lstat h.deleting
+  if h in touched or st2.ino <> st1.ino or st2.mtime <> st1.mtime:
+    rename h.deleting -> h; skip
   unlink h.deleting
 ```
+
+`lstat`·`rename`·`unlink` 은 지금 `Tool_blob_store.delete` 와 같이 소유 경로, 일반 파일, 같은 parent 를 확인하고 잡아 둔 parent 기준으로 한다.
 
 경우를 나누면:
 
@@ -168,18 +183,20 @@ delete h:
 - `fetch` 가 옮긴 뒤에 읽었으면 파일이 없다. 지금처럼 `Ok None` 을 돌려주고 주소를 잊는다. 조용히 지나가지 않는다.
 - `put` 이 "이미 썼다"를 봤으면, 그 확인은 `delete` 가 `written_addresses` 에서 빼기 전이다. 그 앞에 건드림을 기록했으므로 `delete` 가 첫 확인이나 두 번째 확인에서 본다.
 - `put` 이 `written_addresses` 에서 빠진 뒤에 왔으면 파일을 새로 쓴다. 두 번째 확인이 건드림을 보면 `h.deleting` 을 `h` 로 되돌린다. 같은 sha256 이라 내용이 같다. 두 번째 확인 뒤에 왔으면 `unlink` 는 `h.deleting` 만 지우고 새 `h` 는 남는다.
+- 서버 밖 프로세스가 `lstat` 과 `rename` 사이에 파일을 바꿔 썼으면, 옮긴 파일의 inode 나 mtime 이 첫 `lstat` 과 다르다. 되돌린다. `rename` 뒤에 썼으면 새 `h` 가 생기고 `unlink` 는 `h.deleting` 만 지운다.
+- `rename` 과 되돌리기 사이에 온 `fetch` 는 파일이 없어 `Ok None` 을 받는다. 되돌린 뒤에도 그 `fetch` 의 답은 바뀌지 않는다. 눈에 보이는 실패지만 지우지 않은 blob 에서 생긴다. 2층은 되돌린 횟수를 로그에 남겨 이 창이 얼마나 생기는지 잰다.
 
-`touched` 는 §4.2 의 두 집합이다. `Atomic` 으로 바꾸고 읽어서, 한 thread 의 기록이 다른 thread 의 확인에 순서대로 보인다.
+`touched` 는 §4.2 의 `Atomic` 값이다. OCaml 5 `Atomic` 은 순차 일관이라, 한 thread 의 기록이 다른 thread 의 확인에 순서대로 보인다.
 
-서버가 `rename` 과 `unlink` 사이에 죽으면 `h.deleting` 이 남는다. 정리 pass 는 시작할 때 남은 `h.deleting` 을 모두 `h` 로 되돌린다. 그러면 그 주소는 다음 규칙으로 다시 판정된다. blob 목록(`list_all_result`)은 `.deleting` 이름을 blob 으로 세지 않는다.
+서버가 `rename` 과 `unlink` 사이에 죽으면 `h.deleting` 이 남는다. 서버는 시작할 때, Keeper 와 요청을 받기 전에 남은 `h.deleting` 을 모두 `h` 로 되돌린다. 정리 pass 가 아니라 시작 단계에서 하는 이유는, 그 전에 오는 `fetch` 가 `Ok None` 을 받지 않게 하려는 것이다. 되돌린 주소는 다음 스캔에서 같은 규칙으로 다시 판정된다. blob 목록(`list_all_result`)은 `.deleting` 이름을 blob 으로 세지 않는다.
 
 ### 4.4 메인 domain 밖에서
 
-스캔은 16GB 넘게 읽고 푼다. 메인 domain 에서 돌면 그동안 서버가 멈춘다. 정리 pass 전체를 system thread 에서 돌린다. 구현 층에서 `Fs_compat.load_owned_regular_file` 과 `Retention_directory` 를 그 thread 에서 부를 수 있는지 확인한다.
+스캔은 16GB 넘게 읽고 푼다. 메인 domain 에서 돌면 그동안 서버가 멈춘다. 정리 pass 전체를 system thread 에서 돌린다. 지금 `tool_blob_maintenance.ml` 은 Eio·Domain_pool·Mutex 를 부르지 않고 `Fs_compat` 의 blocking 함수와 Unix 호출만 쓴다. 그래서 그대로 system thread 에서 부를 수 있다. 구현 층에서 다시 확인한다.
 
 ### 4.5 후보 기록
 
-후보 기록 파일은 새 모양으로 바꾼다. 운영 workspace 에는 이 파일이 없으므로 hard cut 이다. 옛 모양을 읽는 코드는 두지 않는다.
+후보 기록 파일은 새 이름 `<base>/.masc/tool_blob_maintenance/candidates-v2` 에 새 모양으로 쓴다. 옛 파일은 읽지 않는다. 옛 모양을 읽거나 옮기는 코드는 두지 않는다. 운영 workspace 에는 이 폴더가 없다. 다른 workspace 에 옛 파일이 있으면 지우고 설치한다(1층 changelog 의 Upgrade notes).
 
 후보가 수백만 개일 수 있다. 그래서 JSON 배열 하나로 쓰지 않는다. 첫 줄은 머리, 그다음은 한 줄에 sha256 하나다.
 
@@ -207,7 +224,12 @@ d <sha256>
 - 읽으려 했다: `Read` 만 있다. 2층이었다면 `fetch` 가 `Ok None` 을 돌려줘서 그 기능이 눈에 보이게 실패했다(Board 첨부면 `Missing_artifact`).
 - 아무 흔적이 없다: 2층이었다면 파일 없이 참조만 남았다. §3.3 의 "blob 을 쓰지 않고 참조를 다시 쓰는 길"이 실제로 있다는 뜻이다.
 
-서버를 다시 켜면 건드림 집합이 비므로, 다른 프로세스가 읽은 경우는 "아무 흔적이 없다"로 셈한다. 위험 쪽으로 더 센다.
+서버를 다시 켜면 건드림 집합이 비므로, 앞 프로세스가 읽은 경우는 "아무 흔적이 없다"로 셈한다. 위험 쪽으로 더 센다.
+
+이 셈의 한계:
+
+- 참조를 기록하지 않고 메모리에서만 쓰고 버린 경우는 이번 스캔에 나타나지 않는다. 그래서 `d` 중 `Read` 가 기록된 주소는 참조가 있든 없든 따로 센다. 2층이었다면 그 `fetch` 가 모두 `Ok None` 을 받았다.
+- 1층은 앞 스캔 끝의 `d` 로 센다. 2층은 지우는 순간에 건드림과 mtime 을 다시 본다. 그래서 2층이 실제로 지우는 수는 `d` 보다 적거나 같다.
 
 셋째 묶음은 sha256 과, 그 주소를 가리키는 기록 경로를 로그에 남긴다. 그 경로로 어느 producer 인지 찾는다. 내용은 남기지 않는다.
 
@@ -225,7 +247,7 @@ d <sha256>
 - 후보가 어떤 수보다 적으면 두 번째 스캔을 건너뛰기. 기준값이 근거 없이 정해진다. 스캔 비용은 1층에서 재고, 비용이 문제면 스캔 자체를 줄이는 방법을 따로 정한다.
 - 지우기와 쓰기를 stdlib `Mutex` 로 줄 세우기. §4.3 에 이유를 적었다.
 - 후보 표본을 `fetch` 해서 확인하기. 후보는 디스크에 있는 blob 이라 `fetch` 는 늘 성공한다. 재려는 위험(지운 뒤 다시 생기는 참조)을 재지 못한다. §5.2 가 그것을 바로 센다.
-- 오래된 blob 만 지우기(나이 기준). 나이는 참조 여부를 말하지 않는다. 지금 규칙은 나이와 개수를 보지 않는다.
+- 오래된 blob 만 지우기(나이 기준). 나이는 참조 여부를 말하지 않는다. §4.2 의 mtime 조건은 나이가 아니라 "앞 스캔 뒤에 누가 썼다"는 흔적이라, 오래됐다고 지우지 않고 새로 썼으면 남긴다.
 
 ## 7. 확인할 것
 
@@ -233,6 +255,8 @@ d <sha256>
 - 스캔 시간과 그동안의 메인 domain 지연. 1층 로그와 기존 지연 측정을 같은 시간대로 맞춰 본다.
 - §5.2 의 수.
 - 두 건드림 집합의 크기와, pass 동안의 서버 RSS(후보 집합을 메모리에 든다).
+- 스캔 범위 대조: 참조(`Tool_output` marker, `Stored` media source)를 기록하는 producer 마다 쓰는 위치가 `durable_consumer_basenames` 나 Board 글 파일 안에 있는지. 1층 PR 본문에 표로 남긴다.
+- `list_all_result` 가 sha256 이 아닌 이름(`.deleting`, 임시 파일)을 어떻게 다루는지.
 
 ## 8. 열린 질문
 

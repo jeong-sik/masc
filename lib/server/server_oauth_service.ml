@@ -232,9 +232,7 @@ let authorize_get ~base_path ~authority ~target =
 
 (* RFC 9207 section 2: every authorization response redirected to the client,
    errors included, names the issuer so the client can reject a response that
-   a different authorization server produced (mix-up attack). Errors raised
-   after validation by [Auth_oauth.issue_authorization_code] are still
-   answered as JSON, not redirected. *)
+   a different authorization server produced (mix-up attack). *)
 let authorization_response_uri ~issuer authorization_request params =
   let state =
     match authorization_request.Auth_oauth.state with
@@ -315,13 +313,27 @@ let authorize_post ~base_path ~authority ~fetch_client_metadata ~body =
                 })
          | Ok bootstrap_credential ->
            let* request = verified () in
-           let* code =
-             Auth_oauth.issue_authorization_code
-               ~base_path
-               ~request
-               ~bootstrap_credential
-           in
-           Ok (Authorization_redirect (redirect_with_code ~issuer request code)))
+           (* [verified] has checked [client_id] and [redirect_uri], so a
+              refusal of this approval goes back to the client's callback
+              (RFC 6749 section 4.1.2.1); a JSON body would leave a loopback
+              callback waiting until it times out. A missing client or a
+              client document that was never checked means the callback is
+              not established, so those stay on this page. *)
+           (match
+              Auth_oauth.issue_authorization_code
+                ~base_path
+                ~request
+                ~bootstrap_credential
+            with
+            | Ok code -> Ok (Authorization_redirect (redirect_with_code ~issuer request code))
+            | Error
+                ((Auth_oauth.Invalid_scope
+                 | Access_denied
+                 | Temporarily_unavailable
+                 | Store_error _) as error) ->
+              Ok (Authorization_redirect (redirect_with_error ~issuer request error))
+            | Error ((Invalid_client | Invalid_grant | Invalid_request _) as error) ->
+              Error error))
 ;;
 
 let string_field fields name =

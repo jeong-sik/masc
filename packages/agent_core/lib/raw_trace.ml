@@ -255,12 +255,9 @@ let validate_record_fields json =
     ; "error"
     ]
   in
-  let removed = [ "tool_concurrency_class"; "evidence_role" ] in
   let field_error detail = Error (Error.Serialization (JsonParseError { detail })) in
   let rec loop seen = function
     | [] -> Ok ()
-    | (name, _) :: _ when List.mem name removed ->
-      field_error (Printf.sprintf "raw trace field %S has been removed" name)
     | (name, _) :: _ when not (List.mem name allowed) ->
       field_error (Printf.sprintf "raw trace field %S is not supported" name)
     | (name, _) :: _ when List.mem name seen ->

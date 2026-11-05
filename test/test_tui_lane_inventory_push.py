@@ -267,6 +267,10 @@ class LaneInventoryPushTest(unittest.TestCase):
             step("keys", ":go Features\r")
             step("keys", "o")
             step("wait", lambda: lane.response_count("reopen", ADDONS) >= 1,
+                 "Add-ons did not reopen")
+            step("drain", 0.3)
+            step("keys", "\r")
+            step("wait", lambda: lane.response_count("reopen", ADDONS) >= 2,
                  "the Add-on detail did not reopen")
             step("drain", 0.3)
             lane.set_phase("manual")

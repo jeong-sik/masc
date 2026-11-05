@@ -566,20 +566,9 @@ let keeper_view_summary ~cells rows layout sort =
         ; mode
         ]
   in
-  let lead = "  " and gap = "   " in
-  let width = Message_layout.display_width in
-  (* The first item always stays. Without it the row would be blank, and the
-     frame can still cut it. *)
-  let rec fit used = function
-    | [] -> []
-    | item :: rest ->
-        let used = used + width gap + width item in
-        if used > cells then [] else item :: fit used rest
-  in
-  match items with
-  | [] -> lead
-  | first :: rest ->
-      lead ^ String.concat gap (first :: fit (width lead + width first) rest)
+  let lead = "  " in
+  lead ^ Message_layout.join_fitting ~sep:"   "
+           ~cells:(cells - Message_layout.display_width lead) items
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in

@@ -571,6 +571,18 @@ let fit_width text width =
           prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
         else text ^ String.make (width - cells) ' '
 
+let join_fitting ~sep ~cells items =
+  match items with
+  | [] -> ""
+  | first :: rest ->
+      let rec fit used = function
+        | [] -> []
+        | item :: rest ->
+            let used = used + display_width sep + display_width item in
+            if used > cells then [] else item :: fit used rest
+      in
+      String.concat sep (first :: fit (display_width first) rest)
+
 (* [fit_width]'s other end: the padding goes in front, so a column of figures
    -- or of ages beside them -- lines up on its right edge.
 

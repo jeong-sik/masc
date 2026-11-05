@@ -79,6 +79,12 @@ val stimulus_kind_of_string : string -> stimulus_kind option
     through this and matches the variant exhaustively, so adding a stimulus
     variant forces the classifier to be updated (RFC-0266 regression guard). *)
 
+val stimulus_payload_preview : Keeper_event_queue.stimulus_payload -> string
+(** One line that names what a queued stimulus is: its kind and the ids, or the
+    first 256 bytes of a Board title, that identify it. The ledger stores it as
+    [payload_preview]; a running turn is shown the same line for a row that
+    arrived while it ran ({!Keeper_arrived_stimuli}). *)
+
 val reaction_kind_of_string : string -> (reaction_kind, reaction_decode_error) result
 (** Closed inverse of {!reaction_kind_to_string}. Strings outside the current
     reaction algebra return a typed decoder error and can never become a

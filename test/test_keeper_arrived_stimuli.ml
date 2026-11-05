@@ -1,0 +1,277 @@
+(* Rows that reach a Keeper's queue while one of its turns runs.
+
+   The queue is read when a turn starts, so a row that arrives later waits for
+   the turn to end. [Keeper_arrived_stimuli] picks the rows a later provider
+   round shows. What matters is that a row is shown to the model once, that a
+   request that never reached the model shows it again, and that the
+   per-round limit postpones rows without losing any. *)
+
+module Arrived = Masc.Keeper_arrived_stimuli
+module Queue = Keeper_event_queue
+module State = Keeper_event_queue_state
+
+let selection ~arrival ~arrived_at ?(urgency = Queue.Normal) receipt : State.pending_selection =
+  { State.source =
+      { Queue.post_id = Printf.sprintf "post-%Ld" arrival
+      ; urgency
+      ; arrived_at
+      ; payload = Queue.Tool_result_ready receipt
+      }
+  ; admitted_revision = 1L
+  ; arrival
+  ; checkpoint_retentions = 0
+  ; first_admitted_at = None
+  }
+;;
+
+let arrivals (round : Arrived.round) =
+  List.map (fun (row : Arrived.row) -> row.arrival) round.listed
+;;
+
+let int64_list = Alcotest.(list int64)
+let run_started_at = 1000.
+
+let test_rows_from_before_the_run_are_not_listed () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let round =
+    Arrived.next
+      tracker
+      [ selection ~arrival:1L ~arrived_at:999. "before"
+      ; selection ~arrival:2L ~arrived_at:1000. "at the start"
+      ; selection ~arrival:3L ~arrived_at:1000.5 "after"
+      ]
+  in
+  Alcotest.check int64_list "only the row after the start" [ 3L ] (arrivals round);
+  Alcotest.(check int) "nothing postponed" 0 round.later
+;;
+
+let test_a_row_is_listed_in_one_round_once_the_model_answered () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let first = selection ~arrival:1L ~arrived_at:1001. "first" in
+  let second = selection ~arrival:2L ~arrived_at:1002. "second" in
+  Alcotest.check int64_list "round 1" [ 1L ] (arrivals (Arrived.next tracker [ first ]));
+  Arrived.confirm tracker;
+  Alcotest.check
+    int64_list
+    "round 2 lists the new row only"
+    [ 2L ]
+    (arrivals (Arrived.next tracker [ first; second ]));
+  Arrived.confirm tracker;
+  Alcotest.check
+    int64_list
+    "round 3 has nothing new"
+    []
+    (arrivals (Arrived.next tracker [ first; second ]))
+;;
+
+let test_a_request_that_failed_lists_its_rows_again () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let row = selection ~arrival:1L ~arrived_at:1001. "row" in
+  Alcotest.check int64_list "round 1" [ 1L ] (arrivals (Arrived.next tracker [ row ]));
+  (* No [confirm]: the request failed before the model answered it. *)
+  Alcotest.check
+    int64_list
+    "the next request lists it again"
+    [ 1L ]
+    (arrivals (Arrived.next tracker [ row ]));
+  Arrived.confirm tracker;
+  Alcotest.check
+    int64_list
+    "and stops once an answer confirmed it"
+    []
+    (arrivals (Arrived.next tracker [ row ]))
+;;
+
+let test_the_limit_postpones_rows_and_loses_none () =
+  let total = Arrived.max_rows_per_round + 3 in
+  let rows =
+    List.init total (fun index ->
+      selection
+        ~arrival:(Int64.of_int (index + 1))
+        ~arrived_at:(1001. +. float_of_int index)
+        (string_of_int index))
+  in
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let first = Arrived.next tracker rows in
+  Alcotest.(check int) "first round lists the limit" Arrived.max_rows_per_round (List.length first.listed);
+  Alcotest.(check int) "and postpones the rest" 3 first.later;
+  Arrived.confirm tracker;
+  let second = Arrived.next tracker rows in
+  Alcotest.(check int) "second round lists the rest" 3 (List.length second.listed);
+  Alcotest.(check int) "nothing left" 0 second.later;
+  Arrived.confirm tracker;
+  let listed = List.sort Int64.compare (arrivals first @ arrivals second) in
+  Alcotest.check
+    int64_list
+    "every row was listed exactly once"
+    (List.init total (fun index -> Int64.of_int (index + 1)))
+    listed
+;;
+
+let test_the_oldest_arrival_comes_first_whatever_the_queue_order () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let round =
+    Arrived.next
+      tracker
+      [ selection ~arrival:5L ~arrived_at:1003. "newest"
+      ; selection ~arrival:2L ~arrived_at:1001. "oldest"
+      ; selection ~arrival:9L ~arrived_at:1002. "middle"
+      ]
+  in
+  Alcotest.check int64_list "oldest first" [ 2L; 9L; 5L ] (arrivals round)
+;;
+
+let test_rows_that_arrived_together_are_listed_by_entry_number () =
+  let round =
+    Arrived.next
+      (Arrived.create_tracker ~run_started_at)
+      [ selection ~arrival:7L ~arrived_at:1001. "later entry"
+      ; selection ~arrival:3L ~arrived_at:1001. "earlier entry"
+      ]
+  in
+  Alcotest.check int64_list "the lower entry number comes first" [ 3L; 7L ] (arrivals round)
+;;
+
+let test_a_row_that_left_the_queue_is_not_listed () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let stays = selection ~arrival:1L ~arrived_at:1001. "stays" in
+  let leaves = selection ~arrival:2L ~arrived_at:1002. "leaves" in
+  ignore (Arrived.next tracker [ stays; leaves ]);
+  (* The queue acknowledged [leaves] before the model answered. *)
+  Alcotest.check
+    int64_list
+    "the next request lists only what is still queued"
+    [ 1L ]
+    (arrivals (Arrived.next tracker [ stays ]))
+;;
+
+let test_the_block_names_each_listed_row () =
+  let round =
+    Arrived.next
+      (Arrived.create_tracker ~run_started_at)
+      [ selection ~arrival:1L ~arrived_at:1001. ~urgency:Queue.Immediate "receipt-one"
+      ; selection ~arrival:2L ~arrived_at:1002. "receipt-two"
+      ]
+  in
+  match Arrived.render ~now:1060. round with
+  | None -> Alcotest.fail "two listed rows render a block"
+  | Some text ->
+    List.iter
+      (fun needle ->
+         Alcotest.(check bool)
+           (Printf.sprintf "block names %s" needle)
+           true
+           (Astring.String.is_infix ~affix:needle text))
+      [ "receipt-one"; "receipt-two"; "immediate"; "normal" ]
+;;
+
+let test_nothing_listed_renders_nothing () =
+  let round = Arrived.next (Arrived.create_tracker ~run_started_at) [] in
+  Alcotest.(check (option string)) "no block" None (Arrived.render ~now:1060. round)
+;;
+
+let contains text needle = Astring.String.is_infix ~affix:needle text
+
+let test_the_block_gives_each_row_its_age () =
+  let round =
+    Arrived.next
+      (Arrived.create_tracker ~run_started_at)
+      [ selection ~arrival:1L ~arrived_at:1001. "row" ]
+  in
+  List.iter
+    (fun (seconds_later, age) ->
+       match Arrived.render ~now:(1001. +. seconds_later) round with
+       | None -> Alcotest.fail "a listed row renders a block"
+       | Some text ->
+         Alcotest.(check bool)
+           (Printf.sprintf "%.0f s later reads %s ago" seconds_later age)
+           true
+           (contains text (age ^ " ago:")))
+    [ 0., "0s"; 59., "59s"; 60., "1m"; 3599., "59m"; 3600., "1h00m"; 3725., "1h02m" ]
+;;
+
+let test_the_block_counts_the_rows_it_postpones () =
+  let total = Arrived.max_rows_per_round + 3 in
+  let rows =
+    List.init total (fun index ->
+      selection
+        ~arrival:(Int64.of_int (index + 1))
+        ~arrived_at:(1001. +. float_of_int index)
+        (Printf.sprintf "row-%d" index))
+  in
+  match Arrived.render ~now:1100. (Arrived.next (Arrived.create_tracker ~run_started_at) rows) with
+  | None -> Alcotest.fail "listed rows render a block"
+  | Some text ->
+    Alcotest.(check bool)
+      "the count covers the postponed rows"
+      true
+      (contains text (Printf.sprintf "%d row(s) reached your queue" total));
+    Alcotest.(check bool) "the postponed rows are named as a count" true (contains text "- 3 more arrived");
+    Alcotest.(check bool) "the oldest row is listed" true (contains text "row-0");
+    Alcotest.(check bool)
+      "the newest row waits for the next round"
+      false
+      (contains text (Printf.sprintf "row-%d" (total - 1)))
+;;
+
+let test_an_unreadable_queue_gives_no_block_and_loses_no_row () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let reasons = ref [] in
+  let row = selection ~arrival:1L ~arrived_at:1001. "row" in
+  let block read =
+    Arrived.block tracker ~now:1060. ~read ~on_unavailable:(fun reason -> reasons := reason :: !reasons)
+  in
+  Alcotest.(check (option string)) "no block" None (block (fun () -> Error "queue file locked"));
+  Alcotest.(check (list string)) "the reason is reported once" [ "queue file locked" ] !reasons;
+  match block (fun () -> Ok [ row ]) with
+  | None -> Alcotest.fail "the next readable round lists the row"
+  | Some text ->
+    Alcotest.(check bool) "the row the failed read could not list" true (contains text "row");
+    Alcotest.(check (list string)) "a readable round reports nothing" [ "queue file locked" ] !reasons
+;;
+
+let test_a_block_lists_a_row_in_one_round_after_the_answer () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let first = selection ~arrival:1L ~arrived_at:1001. "first-row" in
+  let second = selection ~arrival:2L ~arrived_at:1002. "second-row" in
+  let block rows =
+    Arrived.block tracker ~now:1060. ~read:(fun () -> Ok rows) ~on_unavailable:(fun reason -> Alcotest.fail reason)
+  in
+  let names text =
+    List.filter (contains text) [ "first-row"; "second-row" ]
+  in
+  (match block [ first ] with
+   | None -> Alcotest.fail "round 1 lists the first row"
+   | Some text -> Alcotest.(check (list string)) "round 1" [ "first-row" ] (names text));
+  Arrived.confirm tracker;
+  (match block [ first; second ] with
+   | None -> Alcotest.fail "round 2 lists the second row"
+   | Some text -> Alcotest.(check (list string)) "round 2 lists the new row only" [ "second-row" ] (names text));
+  Arrived.confirm tracker;
+  Alcotest.(check (option string)) "round 3 has nothing new" None (block [ first; second ])
+;;
+
+let () =
+  Alcotest.run
+    "keeper_arrived_stimuli"
+    [ ( "selection"
+      , [ Alcotest.test_case "rows from before the run" `Quick test_rows_from_before_the_run_are_not_listed
+        ; Alcotest.test_case "listed once after an answer" `Quick test_a_row_is_listed_in_one_round_once_the_model_answered
+        ; Alcotest.test_case "failed request lists again" `Quick test_a_request_that_failed_lists_its_rows_again
+        ; Alcotest.test_case "limit loses no row" `Quick test_the_limit_postpones_rows_and_loses_none
+        ; Alcotest.test_case "oldest first" `Quick test_the_oldest_arrival_comes_first_whatever_the_queue_order
+        ; Alcotest.test_case "same arrival time" `Quick test_rows_that_arrived_together_are_listed_by_entry_number
+        ; Alcotest.test_case "row that left the queue" `Quick test_a_row_that_left_the_queue_is_not_listed
+        ] )
+    ; ( "render"
+      , [ Alcotest.test_case "names each row" `Quick test_the_block_names_each_listed_row
+        ; Alcotest.test_case "empty round" `Quick test_nothing_listed_renders_nothing
+        ; Alcotest.test_case "age of each row" `Quick test_the_block_gives_each_row_its_age
+        ; Alcotest.test_case "postponed rows" `Quick test_the_block_counts_the_rows_it_postpones
+        ] )
+    ; ( "block"
+      , [ Alcotest.test_case "unreadable queue" `Quick test_an_unreadable_queue_gives_no_block_and_loses_no_row
+        ; Alcotest.test_case "one round per row" `Quick test_a_block_lists_a_row_in_one_round_after_the_answer
+        ] )
+    ]
+;;

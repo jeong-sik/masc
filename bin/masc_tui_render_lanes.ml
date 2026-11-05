@@ -25,14 +25,13 @@ let runtime_lane_notice_style = function
     if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
     else Theme.info ()
 
-let ordered_slot_list values =
+(* Candidates in the order they are tried, joined by arrows. The arrows carry
+   the order, so a candidate has no number in front of it: a pane that wraps the
+   chain breaks at an arrow, and never between a number and the id it numbers. *)
+let slot_chain values =
   match values with
   | [] -> "(없음)"
-  | values ->
-    values
-    |> List.mapi (fun index value ->
-      Printf.sprintf "%d %s" (index + 1) (Terminal_text.single_line value))
-    |> String.concat "  →  "
+  | values -> String.concat "  →  " (List.map Terminal_text.single_line values)
 
 let standalone_lane_purpose (lane : Tui_decode.standalone_lane) =
   Option.value ~default:"No consumer purpose reported by this server."
@@ -183,8 +182,8 @@ let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
 let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
     ~dropped_slots () =
   let slot_style = function [] -> Theme.recede () | _ :: _ -> Ansi.reset in
-  [ slot_style admitted_slots, "1차 HTTP: " ^ ordered_slot_list admitted_slots
-  ; slot_style cli_slots, "2차 CLI:  " ^ ordered_slot_list cli_slots
+  [ slot_style admitted_slots, "1차 HTTP: " ^ slot_chain admitted_slots
+  ; slot_style cli_slots, "2차 CLI:  " ^ slot_chain cli_slots
   ]
   @ (if no_slot_count > 0 then
        [ ( Theme.warn ()
@@ -193,7 +192,7 @@ let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
   @ (match dropped_slots with
      | [] -> []
      | dropped ->
-       [ Theme.warn (), "탈락 후보: " ^ ordered_slot_list dropped ])
+       [ Theme.warn (), "탈락 후보: " ^ slot_chain dropped ])
 
 let hint key label = { Hint_lines.key; label }
 
@@ -296,8 +295,8 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
               ~cli_slots:c.cli_slots ~dropped_slots:c.dropped_slots () )
         | Disabled c ->
           ( [ Theme.recede (), "동작: 새 작업 중지 (진행 중 작업은 완료까지 유지)" ]
-          , [ Theme.recede (), "1차 HTTP(보존): " ^ ordered_slot_list c.declared_slots
-            ; Theme.recede (), "2차 CLI(보존):  " ^ ordered_slot_list c.declared_cli_slots
+          , [ Theme.recede (), "1차 HTTP(보존): " ^ slot_chain c.declared_slots
+            ; Theme.recede (), "2차 CLI(보존):  " ^ slot_chain c.declared_cli_slots
             ] )
         | Unconfigured detail | Registry_unavailable detail ->
           ( [ Theme.warn (), "원인: " ^ detail ]

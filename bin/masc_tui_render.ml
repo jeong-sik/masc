@@ -236,10 +236,12 @@ let render_overview (state : state) home =
            (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));
       (* The key loop stores the window's first row from the same number. *)
       let budget = Masc_tui_home.home_requests_budget home ~chrome_budget in
+      let row_indent = "  " in
       let draw_row (action, label) =
-        let line = "  " ^ label in
+        let line = row_indent ^ label in
         if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
+      let operator_actions = Masc_tui_types.operator_actions state in
       let selection_changed =
         Masc_tui_home.home_selection_changed home
       in
@@ -278,15 +280,22 @@ let render_overview (state : state) home =
             ~decisions
             ~decisions_whole:(List.length decisions = List.length all_decisions)
             ~continuation ~status
-            ~actions:(Masc_tui_types.operator_actions state)
+            ~actions:operator_actions
         in
         match card_rows with
         | Some rows -> List.iter c.push rows
         | None ->
-        let spare = budget - essential_rows in
-        (* Action outcomes stay above the destinations they affect. Passive
-           health/history context follows the destinations, using only spare
+        (* Action outcomes stay above the destinations they affect. What the
+           server says needs the operator comes right after the destinations
+           and passive health/history context follows it. Both use only spare
            rows, so opening Home starts with a decision or a place to resume. *)
+        let reasons =
+          Masc_tui_overview_cards.plain_reasons
+            ~cells:(framed_inner_width cols - Message_layout.display_width row_indent)
+            ~rows:(budget - essential_rows) operator_actions
+        in
+        let reason_rows = Masc_tui_overview_cards.reasons_height reasons in
+        let spare = budget - essential_rows - reason_rows in
         let candle = Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation
           |> List.concat_map (fun line ->
             Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
@@ -304,6 +313,17 @@ let render_overview (state : state) home =
         let draw_context = List.iter (function
           | None, text -> c.push text
           | Some style, text -> c.push_styled ~style text) in
+        let draw_reasons { Masc_tui_overview_cards.shown; omitted } =
+          match shown with
+          | [] -> ()
+          | _ :: _ ->
+              c.push_styled ~style:Ansi.bold
+                (" " ^ Masc_tui_overview_cards.reasons_title (List.length operator_actions));
+              List.iter (List.iter (fun line -> c.push (row_indent ^ line))) shown;
+              if omitted > 0 then
+                c.push_styled ~style:(Theme.recede ())
+                  (row_indent ^ Masc_tui_card.more_text omitted)
+        in
         let gaps = spare - List.length shown_readings in
         (match decisions with
          | [] -> c.push_styled ~style:(Theme.recede ())
@@ -318,7 +338,15 @@ let render_overview (state : state) home =
         if gaps > 0 then c.push_empty ();
         c.push_styled ~style:Ansi.bold " Continue";
         List.iter draw_row continuation;
-        if gaps > 1 && shown_readings <> [] then c.push_empty ();
+        (* A blank row sets off each block that follows, as far as the spare
+           rows go. *)
+        let blank_before_reasons = reason_rows > 0 && gaps > 1 in
+        let blank_before_readings =
+          shown_readings <> [] && gaps > (if blank_before_reasons then 2 else 1)
+        in
+        if blank_before_reasons then c.push_empty ();
+        draw_reasons reasons;
+        if blank_before_readings then c.push_empty ();
         draw_context shown_readings
       end else begin
         (* Extremely short terminals show destinations around the selected

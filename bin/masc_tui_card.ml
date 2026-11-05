@@ -47,6 +47,8 @@ let body_row ~style ~width content =
     ; " "; style.edge; Box.v; style.reset
     ]
 
+let more_text hidden = Printf.sprintf "+%d more" hidden
+
 (* What a body shows in [rows] rows: all of it when it fits, otherwise all but
    the last row, which says how many rows are not shown. *)
 let window ~style ~rows body =
@@ -56,7 +58,7 @@ let window ~style ~rows body =
     let shown = rows - 1 in
     let hidden = count - shown in
     List.filteri (fun index _ -> index < shown) body
-    @ [ style.edge ^ Printf.sprintf "+%d more" hidden ^ style.reset ]
+    @ [ style.edge ^ more_text hidden ^ style.reset ]
 
 (* [body] is the rows already asked of the card at its content width, so a
    body that wraps is asked once per card however many times the layout reads

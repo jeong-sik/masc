@@ -4910,7 +4910,7 @@
 (test
  (name test_tui_overview_cards)
  (modules test_tui_overview_cards)
- (libraries alcotest astring masc_tui_overview_cards masc_tui_card masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest astring masc_tui_ansi masc_tui_overview_cards masc_tui_card masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_card)

@@ -122,6 +122,11 @@ let agent_failed_error_summary = function
        | Agent_core.Error.TripwireViolation _
        | Agent_core.Error.InputRequired _ ) as agent_error) ->
     Agent_core.Error.to_string (Agent_core.Error.Agent agent_error)
+  | Agent_core.Error.Internal_carried _ as error ->
+    (match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure error with
+     | Some (Agent_core.Error.TerminalToolEffectFailed _) ->
+       "terminal_tool_effect_failed"
+     | Some _ | None -> Agent_core.Error.to_string error)
   | ( Agent_core.Error.Api _
     | Agent_core.Error.Provider _
     | Agent_core.Error.Mcp _
@@ -129,8 +134,7 @@ let agent_failed_error_summary = function
     | Agent_core.Error.Serialization _
     | Agent_core.Error.Io _
     | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
-    | Agent_core.Error.Internal _
-    | Agent_core.Error.Internal_carried _ ) as error ->
+    | Agent_core.Error.Internal _ ) as error ->
     Agent_core.Error.to_string error
 ;;
 
@@ -514,12 +518,23 @@ let core_error_detail_fields (error : Agent_core.Error.t) =
   | Agent_core.Error.Io error -> core_io_error_fields error
   | Agent_core.Error.Orchestration error -> core_orchestration_error_fields error
   | Agent_core.Error.Media error -> core_media_error_fields error
-  | Agent_core.Error.Internal message | Agent_core.Error.Internal_carried { message = message; _ } ->
+  | Agent_core.Error.Internal_carried { message; _ } as error ->
+    (match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure error with
+     | Some agent_error -> core_agent_error_fields agent_error
+     | None -> [ "variant", `String "internal"; "message", `String message ])
+  | Agent_core.Error.Internal message ->
     [ "variant", `String "internal"; "message", `String message ]
 ;;
 
+let core_error_domain error =
+  match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure error with
+  | Some agent_error ->
+    Agent_core.Error.(category (Agent agent_error) |> category_label)
+  | None -> Agent_core.Error.(category error |> category_label)
+;;
+
 let core_error_json error =
-  let domain = Agent_core.Error.(category error |> category_label) in
+  let domain = core_error_domain error in
   let code =
     Keeper_agent_error.terminal_reason_code_of_core_error_typed error
     |> Keeper_turn_terminal_code.to_wire
@@ -542,7 +557,7 @@ type agent_failed_error_projection =
 
 let agent_failed_error_projection error =
   { error = agent_failed_error_summary error
-  ; error_domain = Agent_core.Error.(category error |> category_label)
+  ; error_domain = core_error_domain error
   ; error_code =
       (Keeper_agent_error.terminal_reason_code_of_core_error_typed error
        |> Keeper_turn_terminal_code.to_wire)

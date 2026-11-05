@@ -360,6 +360,7 @@ let check_terminal_projection
   let fields = Error_json.agent_failed_error_fields error in
   let full_projection = Yojson.Safe.to_string (`Assoc fields) in
   Alcotest.(check string) (label ^ " summary") expected_variant projection.error;
+  Alcotest.(check string) (label ^ " domain") "agent" projection.error_domain;
   Alcotest.(check bool)
     (label ^ " top-level summary hides raw detail")
     false
@@ -393,17 +394,50 @@ let check_terminal_projection
 
 let test_terminal_agent_failure_projection_redacts_detail () =
   let effect_secret = "terminal-effect-secret-7fe8c90d" in
+  let agent_error =
+    Agent_core.Error.TerminalToolEffectFailed
+      { tool_use_id = "tool-terminal-safe"
+      ; effect_disposition = Agent_core.Error.proven_post_terminal_effect
+      ; detail = effect_secret
+      }
+  in
   check_terminal_projection
     ~label:"terminal effect"
     ~secret:effect_secret
     ~expected_variant:"terminal_tool_effect_failed"
     ~expected_tool_use_id:"tool-terminal-safe"
-    (Agent_core.Error.Agent
-       (Agent_core.Error.TerminalToolEffectFailed
-          { tool_use_id = "tool-terminal-safe"
-          ; effect_disposition = Agent_core.Error.proven_post_terminal_effect
-          ; detail = effect_secret
-          }));
+    (Agent_core.Error.Agent agent_error);
+  let run_error =
+    Masc.Keeper_agent_run.terminal_effect_failure_error
+      (Agent_core.Error.Agent agent_error)
+      (Masc.Keeper_tools_agent_core.Terminal_effect_failed
+         { failure_class = Tool_result.Policy_rejection
+         ; effect_disposition = Tool_result.Proven_post_effect
+         ; detail =
+             Keeper_terminal_effect_detail.Tool_failed
+               { internal_tool_name = "keeper_surface_post"; message = effect_secret }
+         })
+  in
+  check_terminal_projection
+    ~label:"carried terminal effect"
+    ~secret:effect_secret
+    ~expected_variant:"terminal_tool_effect_failed"
+    ~expected_tool_use_id:"tool-terminal-safe"
+    run_error;
+  check string "carried terminal reason retains call and disposition"
+    "terminal_effect_failed:tool_use_id=tool-terminal-safe,effect_disposition=proven_post_effect"
+    (Masc.Keeper_agent_error.terminal_reason_code_of_core_error run_error);
+  (match Masc.Keeper_internal_error.classify_masc_internal_error run_error with
+   | Some
+       (Masc.Keeper_internal_error.Terminal_effect_failed
+          { failure_class = Tool_result.Policy_rejection
+          ; effect_disposition = Tool_result.Proven_post_effect
+          ; detail = Keeper_terminal_effect_detail.Tool_failed { message; _ }
+          }) -> check string "carried typed detail" effect_secret message
+   | Some other ->
+     failf "carried error became %s"
+       (Masc.Keeper_internal_error.kind_of_masc_internal_error other)
+   | None -> fail "carried error lost its typed terminal failure");
   let durability_secret = "terminal-durability-secret-2cc19a31" in
   check_terminal_projection
     ~label:"terminal durability"

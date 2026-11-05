@@ -300,22 +300,26 @@ let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
    provider turn and its failure ends the run, so the two describe the same
    call. The effect disposition stays Agent Core's, from the tool's declared
    contract: this changes what the failure says, not whether its effect may
-   run again. *)
+   run again. The original Agent error travels with that typed value so the
+   terminal reason and redacted event projection keep their existing contract. *)
 let terminal_effect_failure_error error terminal_effect_state =
   match error with
   | Agent_core.Error.Agent
-      (Agent_core.Error.TerminalToolEffectFailed { effect_disposition; _ }) ->
+      (Agent_core.Error.TerminalToolEffectFailed { effect_disposition; _ } as agent_error) ->
     (match terminal_effect_state with
      | Keeper_tools_agent_core.Terminal_effect_failed
          { failure_class; detail; effect_disposition = _ } ->
-       Keeper_internal_error.core_error_of_masc_internal_error
-         (Keeper_internal_error.Terminal_effect_failed
-            { failure_class
-            ; effect_disposition =
-                Keeper_internal_error.failure_effect_disposition_of_core
-                  effect_disposition
-            ; detail
-            })
+       let masc_error =
+         Keeper_internal_error.Terminal_effect_failed
+           { failure_class
+           ; effect_disposition =
+               Keeper_internal_error.failure_effect_disposition_of_core
+                 effect_disposition
+           ; detail
+           }
+       in
+       Keeper_internal_error.core_error_of_masc_internal_error_with_agent
+         ~agent_error masc_error
      | Keeper_tools_agent_core.Terminal_effect_open
      | Keeper_tools_agent_core.Deferred_tool_result
      | Keeper_tools_agent_core.External_effect_deferred

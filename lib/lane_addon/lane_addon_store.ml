@@ -295,9 +295,6 @@ let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojso
 type binding_write_error =
   | Binding_rejected of string
   | Binding_publication_failed of Fs_compat.atomic_replace_failure
-let binding_write_error_to_string = function
-  | Binding_rejected detail -> detail
-  | Binding_publication_failed failure -> Fs_compat.atomic_replace_failure_to_string failure
 let save_binding_staged_with ~replace_file t ~instance_id json =
   let* path = protect (fun () ->
     let path = Filename.concat t.root (binding_path instance_id) in

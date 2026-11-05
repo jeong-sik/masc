@@ -8,7 +8,6 @@ module Cache = Server_dashboard_json_cache
 let dashboard_model_metrics_cache = Cache.create ()
 let dashboard_runtime_metrics_cache = Cache.create ()
 let dashboard_cost_latency_cache = Cache.create ()
-let dashboard_keeper_costs_cache = Cache.create ()
 let dashboard_keeper_decisions_cache = Cache.create ()
 let dashboard_keeper_practice_cache = Cache.create ()
 
@@ -133,14 +132,12 @@ let add_routes ~sw router =
                reqd
          | Ok window ->
          let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int window ] in
+         (* The window keeps each Keeper's metrics day files between reads, so
+            a read after a keeper_costs push folds only the rows written since
+            and answers them; the first read of a file reads it whole, on a
+            worker. *)
          let json =
-           Cache.read ~sw ~sync_first:false
-             ~cache:dashboard_keeper_costs_cache ~key
-             ~placeholder:
-               (`Assoc [ "state", `String "loading"
-                       ; "window_minutes", `Int window ])
-             ~compute:(fun () ->
+           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
                let keeper_names =
                  (match Keeper_meta_store.keeper_names_result config with
                   | Ok names -> names

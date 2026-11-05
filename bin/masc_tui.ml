@@ -8163,6 +8163,12 @@ let owe_provider_usage_reads state =
 let owe_provider_standing_read state =
   owe_pushed_read state Surface_read_source.Runtime_quota
 
+(* The Usage view's Keeper usage reads again when the server announces that
+   its cost window took or dropped a row, on a revalidation and after a
+   failed read (RFC-0480 §3.4). *)
+let owe_keeper_costs_read state =
+  owe_pushed_read state Surface_read_source.Keeper_usage
+
 let owe_provider_history_day state ~now =
   match state.provider_history_reread_at with
   | Some at when at <= now ->
@@ -8207,6 +8213,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       owe_pushed_read state Surface_read_source.Account_emails
   | Masc.Workspace_dataset_event.Provider_usage -> owe_provider_usage_reads state
   | Masc.Workspace_dataset_event.Provider_standing -> owe_provider_standing_read state
+  | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
 

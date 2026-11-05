@@ -12,6 +12,7 @@ module Kind = struct
     | Account_emails
     | Provider_usage
     | Provider_standing
+    | Keeper_costs
     | Keeper_oauth_attempts
 
   let to_wire = function
@@ -22,6 +23,7 @@ module Kind = struct
     | Account_emails -> "account_emails"
     | Provider_usage -> "provider_usage"
     | Provider_standing -> "provider_standing"
+    | Keeper_costs -> "keeper_costs"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
   ;;
 
@@ -33,6 +35,7 @@ module Kind = struct
     | "account_emails" -> Some Account_emails
     | "provider_usage" -> Some Provider_usage
     | "provider_standing" -> Some Provider_standing
+    | "keeper_costs" -> Some Keeper_costs
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
     | _ -> None
   ;;
@@ -46,6 +49,7 @@ type dataset =
   | Account_emails
   | Provider_usage
   | Provider_standing
+  | Keeper_costs
   | Keeper_oauth_attempts of { keeper : string }
 
 let kind = function
@@ -56,6 +60,7 @@ let kind = function
   | Account_emails -> Kind.Account_emails
   | Provider_usage -> Kind.Provider_usage
   | Provider_standing -> Kind.Provider_standing
+  | Keeper_costs -> Kind.Keeper_costs
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
 ;;
 
@@ -66,7 +71,7 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
    name an instance instead, and joins here. *)
 let subject_fields = function
   | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
-  | Provider_usage | Provider_standing -> []
+  | Provider_usage | Provider_standing | Keeper_costs -> []
   | Keeper_oauth_attempts { keeper } -> [ ("keeper", `String keeper) ]
 ;;
 
@@ -89,6 +94,7 @@ let of_fields fields =
      | Some Kind.Account_emails -> Ok Account_emails
      | Some Kind.Provider_usage -> Ok Provider_usage
      | Some Kind.Provider_standing -> Ok Provider_standing
+     | Some Kind.Keeper_costs -> Ok Keeper_costs
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

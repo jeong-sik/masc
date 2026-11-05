@@ -151,7 +151,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Clients
          | Masc.Workspace_dataset_event.Account_emails
          | Masc.Workspace_dataset_event.Provider_usage
-         | Masc.Workspace_dataset_event.Provider_standing -> "")
+         | Masc.Workspace_dataset_event.Provider_standing
+         | Masc.Workspace_dataset_event.Keeper_costs -> "")
       ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
@@ -957,6 +958,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Account_emails
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -1024,6 +1026,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Account_emails
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -1042,6 +1045,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Account_emails
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
+              | Masc.Workspace_dataset_event.Keeper_costs
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
           | None -> true)
      | _ -> false);
@@ -1085,7 +1089,12 @@ let test_a_repository_push_reads_the_list () =
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
           ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
-          ]))
+          ]));
+  check (list string) "a Keeper costs push decodes by name"
+    [ "dataset(keeper_costs)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]))
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

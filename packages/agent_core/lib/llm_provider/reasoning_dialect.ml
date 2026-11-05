@@ -552,8 +552,12 @@ let request_control_fields
          | Chat_completions, No_toggle ->
            (* The [Thinking_object_clear_thinking] wire carries the toggle in
               the same [thinking] object as its [clear_thinking] member, so a
-              row without a toggle wire of its own encodes an explicit enable
-              there whether or not it declares [preserve_thinking]. *)
+              row without a toggle wire of its own writes an explicit enable
+              there whether or not it declares [preserve_thinking]. The row
+              declares no toggle wire, so the receipt claims no encoding:
+              admission reads [supports_reasoning] as it does for every
+              [No_thinking_control] row ([Complete_common]), admitting
+              inherent reasoning and refusing an enable on a row without it. *)
            (match dialect.preserve_wire, enable_thinking with
             | Thinking_object_clear_thinking, (Some true | None) ->
               let type_field =
@@ -569,7 +573,7 @@ let request_control_fields
               ( (match type_field @ clear_field with
                  | [] -> []
                  | fields -> [ "thinking", `Assoc fields ])
-              , explicit_field_encoding )
+              , None )
             | Thinking_object_clear_thinking, Some false
             | ( ( No_preserve_thinking_control
                 | Thinking_object_keep_all
@@ -678,10 +682,12 @@ let base_for_provider_config (config : Provider_config.t) =
 
 (* [preserve_thinking] decides reasoning across completed user turns on the
    [Thinking_object_clear_thinking] wire (RFC-0488 §3.2). Only a declared
-   [Some false] removes it: the request then also carries
-   [clear_thinking = true], so the provider and the request agree. An
-   undeclared row replays every assistant message as it was sent, and the
-   request carries no [clear_thinking] member ([clear_thinking_member]).
+   [Some false] removes it. On the two toggle wires whose request carries the
+   member (none of the row's own, and [Thinking_object_only]) the request then
+   also carries [clear_thinking = true], so the provider and the request
+   agree. An undeclared row replays every assistant message as it was sent,
+   and the request carries no [clear_thinking] member
+   ([clear_thinking_member]).
    Interleaved tool calls keep their assistant reasoning with the tool results
    whenever thinking is enabled; clearing completed turns does not clear that
    exchange.
@@ -1075,13 +1081,15 @@ let%test "request_control_fields preserves inherent reasoning without granting a
           [ ( "thinking"
             , `Assoc [ "type", `String "enabled"; "clear_thinking", `Bool false ] )
           ]
-      ; explicit_enable_receipt = Explicit_enable_encoded Request_control_field
+      ; explicit_enable_receipt = Explicit_enable_not_encoded
       }
 ;;
 
 (* RFC-0488 §3.2: the clear-thinking wire sends [clear_thinking] only for a
-   declared [preserve_thinking], as its inverse, and still encodes an explicit
-   enable without one. Every other preserve wire sends no member. *)
+   declared [preserve_thinking], as its inverse, and still writes an explicit
+   enable without one. The receipt claims no encoding, because a row without a
+   toggle wire is admitted by [supports_reasoning]. Every other preserve wire
+   sends no member. *)
 let%test "clear-thinking wire sends the member only for a declared preserve_thinking" =
   let clear_wire = { default with preserve_wire = Thinking_object_clear_thinking } in
   let control dialect ~enable_thinking ~preserve_thinking =
@@ -1101,7 +1109,7 @@ let%test "clear-thinking wire sends the member only for a declared preserve_thin
   control clear_wire ~enable_thinking:(Some true) ~preserve_thinking:None
   = Ok
       { fields = [ "thinking", `Assoc [ "type", `String "enabled" ] ]
-      ; explicit_enable_receipt = Explicit_enable_encoded Request_control_field
+      ; explicit_enable_receipt = Explicit_enable_not_encoded
       }
   && fields clear_wire ~enable_thinking:None ~preserve_thinking:None = Some []
   && fields clear_wire ~enable_thinking:None ~preserve_thinking:(Some true)

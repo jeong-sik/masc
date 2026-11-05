@@ -179,10 +179,11 @@ val ignores_sampling_param
     and no member for an undeclared one: its replay then keeps every assistant
     message as sent, so whichever default the endpoint applies agrees with the
     request (RFC-0488 §3.2). On that wire a row without a toggle wire of its own
-    encodes an explicit enable as [thinking.type = "enabled"] in the same
-    object. An omitted toggle leaves [thinking.type] absent and uses the
-    declared enabled default. Only the typed wire participates, never a
-    provider identity.
+    writes an explicit enable as [thinking.type = "enabled"] in the same
+    object, and its receipt is [Explicit_enable_not_encoded]: such a row is
+    admitted by [supports_reasoning], not by a toggle it does not declare. An
+    omitted toggle leaves [thinking.type] absent and uses the declared enabled
+    default. Only the typed wire participates, never a provider identity.
 
     On the categorical wire ([toggle_wire = Reasoning_effort]) an explicit
     [enable_thinking = Some false] is rendered as [reasoning_effort = "none"]

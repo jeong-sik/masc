@@ -59,8 +59,10 @@ let test_hybrid provider model () =
     let reset = config ~enable_thinking:true ~preserve_thinking:false provider model in
     Alcotest.(check bool) "explicit history clear still travels" true
       (body reset |> field "thinking" |> field "clear_thinking" |> Yojson.Safe.Util.to_bool);
-    Alcotest.(check string) "omitted toggle still declares the client's clear policy"
-      {|{"clear_thinking":true}|}
+    (* RFC-0488 §3.2: a row that declares no preserve_thinking sends no
+       clear_thinking member, so the endpoint's own default applies. *)
+    Alcotest.(check string) "undeclared row sends no thinking object"
+      "null"
       (body (config provider model) |> field "thinking" |> Yojson.Safe.to_string))
 ;;
 
@@ -117,6 +119,25 @@ let test_nonreasoning_default_omits_thinking model () =
       [Provider_config.Glm; Provider_config.OpenAI_compat])
 ;;
 
+(* The OpenAI-compatible preflight reads the same request-control artifact as
+   the serializer. A row without a toggle wire claims no encoding for an
+   explicit enable, so admission follows [supports_reasoning]: inherent
+   reasoning is admitted, and an enable on a row without reasoning is refused
+   before it reaches the wire (Complete_common [Enable_not_declared]). *)
+let test_openai_compat_explicit_enable model expected () =
+  with_catalog (fun () ->
+    let config =
+      Provider_config.make ~kind:OpenAI_compat ~provider_id:"glm" ~model_id:model
+        ~base_url:"https://api.z.ai/api/paas/v4" ~request_path:"/chat/completions"
+        ~max_tokens:128 ~enable_thinking:true ()
+    in
+    let caps = Backend_openai_request.capabilities_of_config config in
+    Alcotest.(check bool) "row declares no toggle wire" true
+      (caps.thinking_control_format = Capabilities.No_thinking_control);
+    Alcotest.(check bool) "explicit enable admission follows supports_reasoning" true
+      (Complete_common.thinking_control_request_rejection ~caps config = expected))
+;;
+
 let test_native_binding model can_disable () =
   with_catalog (fun () ->
     let disabled =
@@ -143,6 +164,14 @@ let () =
   Alcotest.run "GLM exact thinking contract"
     [ "documented hybrid", bindings [ "glm-5.2"; "glm-5.1"; "glm-5"; "glm-4.7"; "glm-4.6" ] test_hybrid
     ; "forced and undeclared", bindings [ "glm-5.3"; "glm-5.3-flash"; "unlisted-glm-model" ] test_no_toggle
+    ; "openai-compatible explicit enable", List.map (fun (model, expected) ->
+        Alcotest.test_case model `Quick (test_openai_compat_explicit_enable model expected))
+        [ "glm-5.3", None
+        ; "glm-5.3-flash", None
+        ; "glm-4", Some Complete_common.Enable_not_declared
+        ; "glm-4v", Some Complete_common.Enable_not_declared
+        ; "glm-4-flash", Some Complete_common.Enable_not_declared
+        ]
     ; "non-reasoning defaults", List.map (fun model ->
         Alcotest.test_case model `Quick (test_nonreasoning_default_omits_thinking model))
         ["glm-4"; "glm-4v"; "glm-4-flash"]

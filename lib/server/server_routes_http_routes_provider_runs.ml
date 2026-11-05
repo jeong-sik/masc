@@ -11,7 +11,6 @@ let dashboard_cost_latency_cache = Cache.create ()
 let dashboard_keeper_costs_cache = Cache.create ()
 let dashboard_provider_history_cache = Cache.create ()
 let dashboard_keeper_decisions_cache = Cache.create ()
-let dashboard_keeper_decisions_log_cache = Cache.create ()
 let dashboard_keeper_practice_cache = Cache.create ()
 
 let cache_key parts = String.concat "\x1f" parts
@@ -260,36 +259,6 @@ let add_routes ~sw router =
                in
                Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
                  ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions-log" (fun state req reqd ->
-         let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           Cache.read ~sw ~sync_first:false
-             ~cache:dashboard_keeper_decisions_log_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_log_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names =
-                 (match Keeper_meta_store.keeper_names_result config with
-                  | Ok names -> names
-                  | Error detail ->
-                    Log.Keeper.warn "dashboard keeper feed: keeper names unread: %s" detail;
-                    [])
-               in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | Ok (None) | Error _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_log_json ~config
-                 ~keepers ~limit ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        )

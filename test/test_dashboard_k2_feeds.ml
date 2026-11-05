@@ -1,12 +1,10 @@
-(** Tests for the K2 decisions telemetry feed.
+(** Tests for the keeper decisions dashboard feed ([keeper_decisions_json]).
 
     Covers:
-    - evidence_refs populated from real reference lists only (not prose)
-    - Limit clamping at both producer and route boundary
-    - Memory log IDs are collision-resistant for same-timestamp rows
-    - JSON shape matches spec:
-      {id, ts, ts_unix, keeper, decision_type, summary, evidence_refs[]}
-      {id, ts, ts_unix, keeper, kind, summary} *)
+    - the requested limit clamps to the range 1 to 200
+    - terminal reason and duration read from the decision-log row
+    - usage, stop reason and error category read from the turn telemetry
+      object *)
 
 open Alcotest
 module Workspace = Masc.Workspace
@@ -85,106 +83,21 @@ let append_jsonl path json =
   Masc.Keeper_types_support.append_jsonl_line path json
 ;;
 
-let strings json = json |> Json.to_list |> List.map Json.to_string
-
 
 (* --- Decision log tests --- *)
 
-let test_decisions_log_evidence_refs_are_real_refs () =
-  with_config
-  @@ fun config ->
-  let meta = keeper_meta "k2-decisions" in
-  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
-  append_jsonl
-    path
-    (`Assoc
-        [ "ts_unix", `Float 1_000.0
-        ; "keeper_name", `String meta.name
-        ; "summary", `String "prose summary is not an evidence ref"
-        ]);
-  append_jsonl
-    path
-    (`Assoc
-        [ "ts_unix", `Float 1_001.0
-        ; "keeper_name", `String meta.name
-        ; "summary", `String "new prose summary"
-        ; ( "evidence_refs"
-          , `List [ `String "trace:k2"; `String ""; `String " artifact:k2 " ] )
-        ]);
-  let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 () in
-  let events = Json.(json |> member "events" |> to_list) in
-  check int "events" 2 (List.length events);
-  match events with
-  | newest :: older :: _ ->
-    check
-      (list string)
-      "real evidence refs"
-      [ "trace:k2"; "artifact:k2" ]
-      Json.(newest |> member "evidence_refs" |> strings);
-    check
-      (list string)
-      "prose summary not used as evidence"
-      []
-      Json.(older |> member "evidence_refs" |> strings)
-  | _ -> fail "expected newest and older events"
-;;
-
-let test_decisions_log_clamps_low_limit () =
+let test_decisions_json_clamps_limit () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decision-limit" in
-  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
-  append_jsonl
-    path
-    (`Assoc
-        [ "ts_unix", `Float 1_000.0
-        ; "keeper_name", `String meta.name
-        ]);
-  let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:0 () in
-  check int "clamped limit" 1 Json.(json |> member "limit" |> to_int);
-  check int "one event" 1 Json.(json |> member "events" |> to_list |> List.length)
-;;
-
-let test_decisions_log_clamps_high_limit () =
-  with_config
-  @@ fun config ->
-  let meta = keeper_meta "k2-decision-hilimit" in
-  let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:999 () in
-  check int "clamped high limit" 200 Json.(json |> member "limit" |> to_int)
-;;
-
-let test_decisions_log_json_shape () =
-  with_config
-  @@ fun config ->
-  let meta = keeper_meta "k2-decisions-shape" in
-  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
-  append_jsonl
-    path
-    (`Assoc
-        [ "ts_unix", `Float 1_234.0
-        ; "keeper_name", `String meta.name
-        ; "outcome", `String "assert"
-        ; "blocker", `String "missing config"
-        ]);
-  let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 () in
-  let events = Json.(json |> member "events" |> to_list) in
-  check int "one event" 1 (List.length events);
-  let event = List.hd events in
-  check bool "has id" true (Json.(event |> member "id" |> to_string) <> "");
-  check string "has ts" "1970-01-01T00:20:34Z" Json.(event |> member "ts" |> to_string);
-  check (float 0.001) "ts_unix" 1234.0 Json.(event |> member "ts_unix" |> to_float);
-  check string "keeper" meta.name Json.(event |> member "keeper" |> to_string);
-  check
-    string
-    "decision_type"
-    "assert"
-    Json.(event |> member "decision_type" |> to_string);
-  check
-    bool
-    "summary contains blocker"
-    true
-    (let s = Json.(event |> member "summary" |> to_string) in
-     String_util.string_contains_substring ~needle:"blocked" s)
+  let limit_of requested =
+    Json.(
+      Dash.keeper_decisions_json ~config ~keepers:[ meta ] ~limit:requested ()
+      |> member "limit"
+      |> to_int)
+  in
+  check int "low limit clamps to 1" 1 (limit_of 0);
+  check int "high limit clamps to 200" 200 (limit_of 999)
 ;;
 
 let test_decisions_json_terminal_reason_duration_fallback () =
@@ -248,22 +161,7 @@ let test_decisions_json_terminal_reason_duration_fallback () =
   check string "compact context task" "task-decision"
     Json.(compact_event |> member "context" |> member "task_id" |> to_string);
   check string "compact context log" "decision-turn-19"
-    Json.(compact_event |> member "context" |> member "log_id" |> to_string);
-  let log =
-    Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 ()
-  in
-  let log_event =
-    match Json.(log |> member "events" |> to_list) with
-    | event :: _ -> event
-    | [] -> fail "expected decision log event"
-  in
-  check string "log terminal reason" "provider_error"
-    Json.(log_event |> member "terminal_reason_code" |> to_string);
-  check (float 0.001) "log duration fallback" 321.0
-    Json.(log_event |> member "duration_ms" |> to_float);
-  check bool "log summary includes reason" true
-    (let s = Json.(log_event |> member "summary" |> to_string) in
-     String_util.string_contains_substring ~needle:"reason: provider_error" s)
+    Json.(compact_event |> member "context" |> member "log_id" |> to_string)
 ;;
 
 (* The turn row as Keeper_unified_metrics_decision writes it: usage, stop
@@ -327,12 +225,9 @@ let () =
     "dashboard_k2_feeds"
     [ ( "decision log"
       , [ test_case
-            "keeps prose out of evidence refs"
+            "clamps the requested limit"
             `Quick
-            test_decisions_log_evidence_refs_are_real_refs
-        ; test_case "clamps low limit" `Quick test_decisions_log_clamps_low_limit
-        ; test_case "clamps high limit" `Quick test_decisions_log_clamps_high_limit
-        ; test_case "json shape matches spec" `Quick test_decisions_log_json_shape
+            test_decisions_json_clamps_limit
         ; test_case
             "terminal reason and duration fallback"
             `Quick

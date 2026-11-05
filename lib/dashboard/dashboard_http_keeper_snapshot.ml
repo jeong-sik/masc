@@ -533,7 +533,4 @@ let keeper_cost_aggregates_json =
     the dashboard can render a single chronology without knowing the
     original schema variants. *)
 let keeper_decisions_json = Dashboard_http_keeper_feeds.keeper_decisions_json
-
-let keeper_decisions_log_json =
-  Dashboard_http_keeper_feeds.keeper_decisions_log_json
 ;;

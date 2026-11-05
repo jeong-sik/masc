@@ -483,7 +483,7 @@ let for_surface = function
       ; b Navigate "j/k" "choose" ~help:"move between decision links and conversations"
       ; b Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b Navigate "p" "requests" ~help:"approvals and questions"
-      ; b Navigate "q" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
+      ; b Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
       ; b Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
       ; b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ; b Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"

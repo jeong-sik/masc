@@ -37527,9 +37527,11 @@ Use relative paths for resources already held in the package. -->
        | Some ("p" | "P") when state.view = Overview ->
            Masc_tui_home.open_approvals state
              ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
-       | Some ("q" | "Q") when state.view = Overview ->
+       | Some ("g" | "G") when state.view = Overview ->
            (* The quiz line's door: the operator quiz installation's Results,
-              where the scorecard windows and the wrong-answer notes live. *)
+              where the scorecard windows and the wrong-answer notes live.
+              [g] for the same reason Approvals answers [g]: the door to one
+              installation's Results. [q] stays the quit key. *)
            open_installation_results state ~mailbox:async_messages "operator-quiz"
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match Masc_tui_home.home_selected_action (Masc_tui_home.prepare state) with

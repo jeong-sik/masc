@@ -3939,7 +3939,7 @@ type overview_snapshot = {
 
 (* The operator quiz's rows for the Home scorecard line: one scorecard row
    per window and one review row per open wrong answer, both read through
-   the lane add-on slice endpoint. *)
+   the lane add-on inventory endpoint. *)
 type quiz_scorecard_snapshot = {
   quiz_scorecards: Masc.Lane_addon_types.row list;
   quiz_reviews: Masc.Lane_addon_types.row list;
@@ -4540,7 +4540,7 @@ type surface_needs = {
      only the Home Health line. *)
   needs_overview_briefing : bool;
   (* The operator quiz's scorecard and review rows, read through the lane
-     add-on slice endpoint. Feeds only the Home quiz line. *)
+     add-on inventory endpoint. Feeds only the Home quiz line. *)
   needs_quiz_scorecard : bool;
 }
 
@@ -11896,6 +11896,10 @@ let accept_overview_preview (state : state) preview =
    is not an error. *)
 let quiz_scorecard_reading (state : state) =
   match state.quiz_scorecard, state.quiz_scorecard_error with
+  | Some { quiz_scorecards = []; _ }, None ->
+      (* No scorecard rows at all means no live quiz installation was in the
+         inventory: no line, which is not the same as zero misses. *)
+      None
   | Some quiz, None ->
       let fraction subject =
         List.find_opt (fun (row : Masc.Lane_addon_types.row) ->
@@ -11910,10 +11914,10 @@ let quiz_scorecard_reading (state : state) =
         | Some shown -> " · " ^ label ^ " " ^ shown
         | None -> ""
       in
-      Some (Printf.sprintf " Quiz:%s%s%s · unrecovered misses %d · q opens the notes"
+      Some (Printf.sprintf " Quiz:%s%s%s · unrecovered misses %d · g opens the notes"
               (window "1일" "day") (window "7일" "7d") (window "30일" "30d")
               (List.length quiz.quiz_reviews))
-  | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · q opens the lane"
+  | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · g opens the lane"
   | None, None -> None
 
 let overview_refresh_reading (state : state) =

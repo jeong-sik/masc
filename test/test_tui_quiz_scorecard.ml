@@ -44,8 +44,16 @@ let test_the_line_names_each_window_and_the_open_misses () =
             ; quiz_reviews = [ review_row "i2"; review_row "i3" ] })
       None in
   check (option string) "the three windows and the miss count"
-    (Some " Quiz: · 1일 2/3 · 7일 5/8 · 30일 12/20 · unrecovered misses 2 · q opens the notes")
+    (Some " Quiz: · 1일 2/3 · 7일 5/8 · 30일 12/20 · unrecovered misses 2 · g opens the notes")
     (Types.quiz_scorecard_reading state)
+;;
+
+let test_an_inventory_without_the_quiz_shows_no_line () =
+  (* No scorecard rows at all is no live installation, not zero misses. *)
+  check (option string) "empty rows is no line"
+    None
+    (Types.quiz_scorecard_reading
+       (state_with (Some { Types.quiz_scorecards = []; quiz_reviews = [] }) None))
 ;;
 
 let test_nothing_read_is_no_line_not_an_error () =
@@ -55,7 +63,7 @@ let test_nothing_read_is_no_line_not_an_error () =
 
 let test_a_failed_read_says_so_without_dropping_the_hint () =
   check (option string) "the line names the failure"
-    (Some " Quiz: reading unavailable · q opens the lane")
+    (Some " Quiz: reading unavailable · g opens the lane")
     (Types.quiz_scorecard_reading (state_with None (Some "workspace unreachable")))
 ;;
 
@@ -64,7 +72,7 @@ let test_a_score_row_of_the_wrong_shape_shows_a_dash_not_a_crash () =
   let state =
     state_with (Some { Types.quiz_scorecards = [odd]; quiz_reviews = [] }) None in
   check (option string) "the window falls back to a dash"
-    (Some " Quiz: · 1일 - · unrecovered misses 0 · q opens the notes")
+    (Some " Quiz: · 1일 - · unrecovered misses 0 · g opens the notes")
     (Types.quiz_scorecard_reading state)
 ;;
 
@@ -73,6 +81,8 @@ let () =
     [ "line", [
         test_case "the line names each window and the open misses" `Quick
           test_the_line_names_each_window_and_the_open_misses
+      ; test_case "an inventory without the quiz shows no line" `Quick
+          test_an_inventory_without_the_quiz_shows_no_line
       ; test_case "nothing read is no line, not an error" `Quick
           test_nothing_read_is_no_line_not_an_error
       ; test_case "a failed read says so without dropping the hint" `Quick

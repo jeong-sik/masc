@@ -187,6 +187,163 @@
       }
     ]
   },
+  "by_model": {
+    "alone_calls": 2464,
+    "alone_calls_by_keeper_and_model": {
+      "code-reviewer": {
+        "deepseek/deepseek-v4.1-flash-1017": 12,
+        "unattributed: no stored request on one side": 360
+      },
+      "code-reviewer-brother": {
+        "unattributed: no stored request on one side": 27
+      },
+      "code-reviewer-mother": {
+        "deepseek/deepseek-v4.1-flash-1017": 5,
+        "unattributed: no stored request on one side": 59
+      },
+      "code-reviewer-sister": {
+        "unattributed: no stored request on one side": 217
+      },
+      "code-reviewer-uncle": {
+        "deepseek-v4.1-flash": 10
+      },
+      "context-reviewer": {
+        "unattributed: no stored request on one side": 270
+      },
+      "glossary-maniac": {
+        "unattributed: no stored request on one side": 13
+      },
+      "goo-yang-bong": {
+        "unattributed: no stored request on one side": 14
+      },
+      "jazz-developer": {
+        "unattributed: no stored request on one side": 12
+      },
+      "kidsnote-incoming-dd-manager": {
+        "deepseek-v4.1-flash": 37,
+        "unattributed: no stored request on one side": 1
+      },
+      "kidsnote-job-manager": {
+        "unattributed: no stored request on one side": 26
+      },
+      "kidsnote-qa-hub-manager": {
+        "unattributed: no stored request on one side": 1
+      },
+      "masc-productor-owner": {
+        "deepseek-v4.1-flash": 374,
+        "unattributed: no stored request on one side": 141,
+        "unattributed: the stored requests on both sides use different models": 5
+      },
+      "msx-retro-mania": {
+        "deepseek-v4.1-flash": 100,
+        "unattributed: no stored request on one side": 104
+      },
+      "ocaml-agent-ic": {
+        "unattributed: no stored request on one side": 2
+      },
+      "pr-updater": {
+        "unattributed: no stored request on one side": 16
+      },
+      "rondo": {
+        "unattributed: no stored request on one side": 20
+      },
+      "tui-developer": {
+        "unattributed: no stored request on one side": 89
+      },
+      "wkbl-data": {
+        "deepseek-v4.1-flash": 61
+      },
+      "wkbl-front": {
+        "deepseek-v4.1-flash": 364,
+        "nvidia/nemotron-3.5-super-vl:free": 3,
+        "unattributed: no stored request on one side": 90
+      },
+      "wkbl-growth": {
+        "deepseek/deepseek-v4.1-flash-1017": 6,
+        "unattributed: no stored request on one side": 1
+      },
+      "wkbl-web-leader": {
+        "unattributed: no stored request on one side": 23
+      },
+      "won-chik": {
+        "unattributed: no stored request on one side": 1
+      }
+    },
+    "alone_calls_by_model": {
+      "deepseek-v4.1-flash": 946,
+      "deepseek/deepseek-v4.1-flash-1017": 23,
+      "nvidia/nemotron-3.5-super-vl:free": 3,
+      "unattributed: no stored request on one side": 1487,
+      "unattributed: the stored requests on both sides use different models": 5
+    },
+    "last_alone_call_by_model": {
+      "deepseek-v4.1-flash": "2026-11-04T00:21:21.161213+00:00",
+      "deepseek/deepseek-v4.1-flash-1017": "2026-10-31T14:19:14.633128+00:00",
+      "nvidia/nemotron-3.5-super-vl:free": "2026-11-04T03:54:52.733817+00:00",
+      "unattributed: no stored request on one side": "2026-10-28T11:08:45.161281+00:00",
+      "unattributed: the stored requests on both sides use different models": "2026-11-03T15:38:57.921935+00:00"
+    },
+    "last_stored_demotion_by_model": {
+      "deepseek-v4.1-flash": "2026-11-04T01:50:50.830553+00:00",
+      "deepseek/deepseek-v4.1-flash-1017": "2026-11-01T00:53:04.421826+00:00",
+      "glm-5.3": "2026-11-04T08:09:19.854121+00:00",
+      "glm-5.3-flash": "2026-11-04T08:59:00.265944+00:00",
+      "kimi-k3.1-pro": "2026-10-29T09:55:00.462100+00:00",
+      "nvidia/nemotron-3.5-super-vl:free": "2026-11-04T08:39:02.289716+00:00"
+    },
+    "requests_by_model": {
+      "deepseek-v4.1-flash": {
+        "requests": 1484,
+        "with_demoted_arguments": 1093,
+        "with_stored_demotion": 1093
+      },
+      "deepseek/deepseek-v4.1-flash-1017": {
+        "requests": 690,
+        "with_demoted_arguments": 668,
+        "with_stored_demotion": 668
+      },
+      "glm-5.3": {
+        "requests": 1202,
+        "with_demoted_arguments": 1089,
+        "with_stored_demotion": 1089
+      },
+      "glm-5.3-flash": {
+        "requests": 1681,
+        "with_demoted_arguments": 1398,
+        "with_stored_demotion": 1369
+      },
+      "kimi-k3.1-pro": {
+        "requests": 143,
+        "with_demoted_arguments": 138,
+        "with_stored_demotion": 138
+      },
+      "mimo-v2.6-flash": {
+        "requests": 13,
+        "with_demoted_arguments": 0,
+        "with_stored_demotion": 0
+      },
+      "minimax-m3.1-flash": {
+        "requests": 1,
+        "with_demoted_arguments": 0,
+        "with_stored_demotion": 0
+      },
+      "nvidia/nemotron-3.5-super-vl:free": {
+        "requests": 28,
+        "with_demoted_arguments": 14,
+        "with_stored_demotion": 14
+      },
+      "qwen3.8-flash": {
+        "requests": 2,
+        "with_demoted_arguments": 0,
+        "with_stored_demotion": 0
+      }
+    },
+    "stored_requests": 5244,
+    "with_demoted_arguments": 4400,
+    "with_demoted_arguments_percent": 83.9,
+    "with_stored_demotion": 4371,
+    "with_stored_demotion_percent": 83.4
+  },
   "history_arguments": {
     "by_keeper_and_model": [
       {
@@ -604,6 +761,290 @@
     "unreadable_messages": 0,
     "with_demoted_arguments": 4400,
     "with_demoted_arguments_percent": 83.9
+  },
+  "split": {
+    "after": {
+      "alone_calls": 0,
+      "alone_calls_by_keeper_and_model": {},
+      "alone_calls_by_model": {},
+      "last_alone_call_by_model": {},
+      "last_stored_demotion_by_model": {},
+      "requests_by_model": {
+        "deepseek-v4.1-flash": {
+          "requests": 294,
+          "with_demoted_arguments": 0,
+          "with_stored_demotion": 0
+        },
+        "glm-5.3": {
+          "requests": 75,
+          "with_demoted_arguments": 0,
+          "with_stored_demotion": 0
+        },
+        "glm-5.3-flash": {
+          "requests": 146,
+          "with_demoted_arguments": 29,
+          "with_stored_demotion": 0
+        },
+        "mimo-v2.6-flash": {
+          "requests": 13,
+          "with_demoted_arguments": 0,
+          "with_stored_demotion": 0
+        },
+        "minimax-m3.1-flash": {
+          "requests": 1,
+          "with_demoted_arguments": 0,
+          "with_stored_demotion": 0
+        },
+        "qwen3.8-flash": {
+          "requests": 2,
+          "with_demoted_arguments": 0,
+          "with_stored_demotion": 0
+        }
+      },
+      "stored_requests": 531,
+      "with_demoted_arguments": 29,
+      "with_demoted_arguments_percent": 5.5,
+      "with_stored_demotion": 0,
+      "with_stored_demotion_percent": 0.0
+    },
+    "at": "2026-11-04T09:00:00+00:00",
+    "before": {
+      "alone_calls": 2464,
+      "alone_calls_by_keeper_and_model": {
+        "code-reviewer": {
+          "deepseek/deepseek-v4.1-flash-1017": 12,
+          "unattributed: no stored request on one side": 360
+        },
+        "code-reviewer-brother": {
+          "unattributed: no stored request on one side": 27
+        },
+        "code-reviewer-mother": {
+          "deepseek/deepseek-v4.1-flash-1017": 5,
+          "unattributed: no stored request on one side": 59
+        },
+        "code-reviewer-sister": {
+          "unattributed: no stored request on one side": 217
+        },
+        "code-reviewer-uncle": {
+          "deepseek-v4.1-flash": 10
+        },
+        "context-reviewer": {
+          "unattributed: no stored request on one side": 270
+        },
+        "glossary-maniac": {
+          "unattributed: no stored request on one side": 13
+        },
+        "goo-yang-bong": {
+          "unattributed: no stored request on one side": 14
+        },
+        "jazz-developer": {
+          "unattributed: no stored request on one side": 12
+        },
+        "kidsnote-incoming-dd-manager": {
+          "deepseek-v4.1-flash": 37,
+          "unattributed: no stored request on one side": 1
+        },
+        "kidsnote-job-manager": {
+          "unattributed: no stored request on one side": 26
+        },
+        "kidsnote-qa-hub-manager": {
+          "unattributed: no stored request on one side": 1
+        },
+        "masc-productor-owner": {
+          "deepseek-v4.1-flash": 374,
+          "unattributed: no stored request on one side": 141,
+          "unattributed: the stored requests on both sides use different models": 5
+        },
+        "msx-retro-mania": {
+          "deepseek-v4.1-flash": 100,
+          "unattributed: no stored request on one side": 104
+        },
+        "ocaml-agent-ic": {
+          "unattributed: no stored request on one side": 2
+        },
+        "pr-updater": {
+          "unattributed: no stored request on one side": 16
+        },
+        "rondo": {
+          "unattributed: no stored request on one side": 20
+        },
+        "tui-developer": {
+          "unattributed: no stored request on one side": 89
+        },
+        "wkbl-data": {
+          "deepseek-v4.1-flash": 61
+        },
+        "wkbl-front": {
+          "deepseek-v4.1-flash": 364,
+          "nvidia/nemotron-3.5-super-vl:free": 3,
+          "unattributed: no stored request on one side": 90
+        },
+        "wkbl-growth": {
+          "deepseek/deepseek-v4.1-flash-1017": 6,
+          "unattributed: no stored request on one side": 1
+        },
+        "wkbl-web-leader": {
+          "unattributed: no stored request on one side": 23
+        },
+        "won-chik": {
+          "unattributed: no stored request on one side": 1
+        }
+      },
+      "alone_calls_by_model": {
+        "deepseek-v4.1-flash": 946,
+        "deepseek/deepseek-v4.1-flash-1017": 23,
+        "nvidia/nemotron-3.5-super-vl:free": 3,
+        "unattributed: no stored request on one side": 1487,
+        "unattributed: the stored requests on both sides use different models": 5
+      },
+      "last_alone_call_by_model": {
+        "deepseek-v4.1-flash": "2026-11-04T00:21:21.161213+00:00",
+        "deepseek/deepseek-v4.1-flash-1017": "2026-10-31T14:19:14.633128+00:00",
+        "nvidia/nemotron-3.5-super-vl:free": "2026-11-04T03:54:52.733817+00:00",
+        "unattributed: no stored request on one side": "2026-10-28T11:08:45.161281+00:00",
+        "unattributed: the stored requests on both sides use different models": "2026-11-03T15:38:57.921935+00:00"
+      },
+      "last_stored_demotion_by_model": {
+        "deepseek-v4.1-flash": "2026-11-04T01:50:50.830553+00:00",
+        "deepseek/deepseek-v4.1-flash-1017": "2026-11-01T00:53:04.421826+00:00",
+        "glm-5.3": "2026-11-04T08:09:19.854121+00:00",
+        "glm-5.3-flash": "2026-11-04T08:59:00.265944+00:00",
+        "kimi-k3.1-pro": "2026-10-29T09:55:00.462100+00:00",
+        "nvidia/nemotron-3.5-super-vl:free": "2026-11-04T08:39:02.289716+00:00"
+      },
+      "requests_by_model": {
+        "deepseek-v4.1-flash": {
+          "requests": 1190,
+          "with_demoted_arguments": 1093,
+          "with_stored_demotion": 1093
+        },
+        "deepseek/deepseek-v4.1-flash-1017": {
+          "requests": 690,
+          "with_demoted_arguments": 668,
+          "with_stored_demotion": 668
+        },
+        "glm-5.3": {
+          "requests": 1127,
+          "with_demoted_arguments": 1089,
+          "with_stored_demotion": 1089
+        },
+        "glm-5.3-flash": {
+          "requests": 1535,
+          "with_demoted_arguments": 1369,
+          "with_stored_demotion": 1369
+        },
+        "kimi-k3.1-pro": {
+          "requests": 143,
+          "with_demoted_arguments": 138,
+          "with_stored_demotion": 138
+        },
+        "nvidia/nemotron-3.5-super-vl:free": {
+          "requests": 28,
+          "with_demoted_arguments": 14,
+          "with_stored_demotion": 14
+        }
+      },
+      "stored_requests": 4713,
+      "with_demoted_arguments": 4371,
+      "with_demoted_arguments_percent": 92.7,
+      "with_stored_demotion": 4371,
+      "with_stored_demotion_percent": 92.7
+    }
+  },
+  "turns_by_model": {
+    "deepseek-v4.1-flash": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 388,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 951,
+        "turns": 1093,
+        "turns_with_call": 502
+      }
+    },
+    "deepseek/deepseek-v4.1-flash-1017": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 19,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 23,
+        "turns": 668,
+        "turns_with_call": 15
+      }
+    },
+    "glm-5.3": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 110,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 0,
+        "turns": 1089,
+        "turns_with_call": 0
+      }
+    },
+    "glm-5.3-flash": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 295,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 0,
+        "turns": 1369,
+        "turns_with_call": 0
+      }
+    },
+    "kimi-k3.1-pro": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 3,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 0,
+        "turns": 138,
+        "turns_with_call": 0
+      }
+    },
+    "mimo-v2.6-flash": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 13,
+        "turns_with_call": 0
+      }
+    },
+    "minimax-m3.1-flash": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 1,
+        "turns_with_call": 0
+      }
+    },
+    "nvidia/nemotron-3.5-super-vl:free": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 14,
+        "turns_with_call": 0
+      },
+      "stored_demotion": {
+        "calls": 3,
+        "turns": 14,
+        "turns_with_call": 2
+      }
+    },
+    "qwen3.8-flash": {
+      "no_stored_demotion": {
+        "calls": 0,
+        "turns": 2,
+        "turns_with_call": 0
+      }
+    }
   },
   "window": {
     "from": "2026-10-19",

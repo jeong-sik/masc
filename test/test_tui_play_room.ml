@@ -118,6 +118,16 @@ let test_retired_read () =
   let _, held = View.poll (View.retire_read t) ~now:5. ~machine:Masc.Machine_lane.Dos in
   check bool "retiring reads keeps a send's receipt" true (Option.is_none held)
 
+let test_revalidate_marks_pending_for_trailing_read () =
+  let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t = View.revalidate t in
+  check bool "a change during the pending read is retained" true t.changed_since;
+  check (float 0.) "revalidation is due immediately" 0. t.next_read;
+  let t = View.receive t read ~now:1. (Ok empty) in
+  let _, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
+  check bool "the changed read is followed by one trailing read" true
+    (View.is_read (request trailing))
+
 let test_retired_first_read_keeps_presence () =
   let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
   check bool "the first read is in flight" true (View.is_read (request read));
@@ -196,6 +206,7 @@ let () = run "TUI public room" ["room", [
   test_case "unknown send can be retried with an empty composer" `Quick test_unknown_send_with_empty_next_draft;
   test_case "workspace withdrawal invalidates receipts" `Quick test_withdrawal;
   test_case "a retired reading releases only the room read" `Quick test_retired_read;
+  test_case "revalidation retains a trailing read" `Quick test_revalidate_marks_pending_for_trailing_read;
   test_case "a retired first read keeps presence to release" `Quick test_retired_first_read_keeps_presence;
   test_case "safe paste and Korean editing" `Quick test_paste_and_keys;
 ]]

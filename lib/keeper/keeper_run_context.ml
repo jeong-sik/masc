@@ -23,7 +23,7 @@ type run_context =
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; saved_history : saved_history
-  ; base_system_prompt : string
+  ; system : Keeper_turn_system.t
   ; workspace_root : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
@@ -65,6 +65,60 @@ let build_base_system_prompt
     |> Result.map_error (fun error -> Constitution_unreadable error)
   in
   Ok (workspace_root, prompt)
+
+(* Who composes the turn's first request, and for Agent Core where its range
+   opens against the last request on that runtime (RFC-0491 §3.2). The
+   runtime is the head of the walk a fresh turn takes, as the turn driver
+   orders it; the range is the one the driver composes over [history] before
+   the turn's input is appended, read the way the forecast reads it. *)
+let first_request_lane ~config ~(meta : keeper_meta) ~runtime_id history =
+  (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
+  let now = Unix.gettimeofday () in
+  let walk =
+    Keeper_turn_driver.Fresh_walk_by
+      (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:meta.name)
+  in
+  match Keeper_turn_driver.assignment_walk_order ~now ~walk runtime_id with
+  | Error (Keeper_turn_driver.Assignment_missing | Keeper_turn_driver.Catalog_unavailable _)
+  | Ok { Keeper_turn_driver.order = []; _ } -> Keeper_turn_system.Without_basis
+  | Ok { Keeper_turn_driver.order = head :: _; _ } ->
+    (match Keeper_carried_front.composer_of_runtime (Runtime.get_runtime_by_id head) with
+     | Keeper_carried_front.Hands_over_its_own_list | Keeper_carried_front.Not_materialized ->
+       Keeper_turn_system.Without_basis
+     | Keeper_carried_front.Composes_from_the_history ->
+       let keeper_name = meta.name in
+       let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+       let reads = Keeper_next_request_forecast.read_range ~config ~keeper_name ~trace_id history in
+       let { Keeper_next_request_forecast.carried; ledger_front } =
+         Keeper_next_request_forecast.first_request ~keeper_name ~trace_id ~runtime_id:head reads
+       in
+       Keeper_turn_system.Agent_core
+         (Keeper_turn_system.front
+            ~digest_at:reads.Keeper_next_request_forecast.digest_at
+            ~first_atom:carried.Keeper_next_request_forecast.first_atom
+            ~previous:ledger_front))
+
+(* The System this turn sends: the same namespace and articles
+   {!build_base_system_prompt} reads, rendered as {!Keeper_turn_system.issue}
+   decides. *)
+let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id history =
+  let open Result.Syntax in
+  let* workspace_root =
+    Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults
+    |> Result.map_error (fun detail -> Workspace_unavailable detail)
+  in
+  let* current =
+    World_constitution_store.load_articles ~base_path:config.Workspace.base_path
+    |> Result.map_error (fun error -> Constitution_unreadable error)
+  in
+  Ok
+    ( workspace_root
+    , Keeper_turn_system.issue
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:meta.name
+        ~lane:(first_request_lane ~config ~meta ~runtime_id history)
+        ~render:(Keeper_unified_prompt.render_system_prompt ~workspace_root ~meta ~profile_defaults)
+        ~current )
 
 let prepare_run_context
       ~(config : Workspace.config)
@@ -148,11 +202,12 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let* workspace_root, base_system_prompt =
+  let* workspace_root, system =
     (* Prompt rendering raises [Invalid_argument] when a slot is missing or
        fails to render; that is a typed refusal here, not a crashed cycle. *)
     (try
-       build_base_system_prompt ~config ~profile_defaults ~meta
+       issue_system ~config ~profile_defaults ~meta ~runtime_id
+         (Option.fold ~none:[] ~some:Keeper_context_runtime.messages_of_context ctx_opt)
        |> Result.map_error (fun error -> Base_prompt_unavailable error)
      with Invalid_argument detail -> Error (Prompt_unrenderable detail))
   in
@@ -161,10 +216,10 @@ let prepare_run_context
     match ctx_opt with
     | Some c -> c
     | None ->
-      Keeper_context_runtime.create ~eio:true ~system_prompt:base_system_prompt
+      Keeper_context_runtime.create ~eio:true ~system_prompt:system.Keeper_turn_system.text
   in
   let ctx_work =
-    Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
+    Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:system.Keeper_turn_system.text
   in
   (* Preserve the restored context exactly. Nothing is re-persisted before
      dispatch; a failed read has already returned without creating a context
@@ -187,7 +242,7 @@ let prepare_run_context
   ; session_dir
   ; session
   ; saved_history
-  ; base_system_prompt
+  ; system
   ; workspace_root
   ; ctx_work
   ; resume_agent_core_checkpoint

@@ -662,7 +662,7 @@ let run_turn
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
-  let base_system_prompt = ctx.base_system_prompt in
+  let base_system_prompt = ctx.system.Keeper_turn_system.text in
   let resume_agent_core_checkpoint = ctx.resume_agent_core_checkpoint in
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
@@ -781,9 +781,12 @@ let run_turn
       ~user_turn_record:prompt_user_turn_record
       ~start_turn_count)
   in
-  let turn_system_prompt = match native_resume with
-    | Some resumed -> Keeper_direct_native_continuation.system_prompt resumed
-    | None -> prompt_ctx.Keeper_run_prompt.turn_system_prompt in
+  let turn_system = match native_resume with
+    | Some resumed ->
+      Keeper_turn_system.with_bytes ~issued:prompt_ctx.Keeper_run_prompt.turn_system
+        (Keeper_direct_native_continuation.system_prompt resumed)
+    | None -> prompt_ctx.Keeper_run_prompt.turn_system in
+  let turn_system_prompt = turn_system.Keeper_turn_system.text in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
@@ -857,8 +860,7 @@ let run_turn
       ~turn_ctx_cell
       ~ctx_work
       ~session
-      ~base_system_prompt
-      ~turn_system_prompt
+      ~turn_system
       ~user_message
       ~dynamic_context
       ~history_messages

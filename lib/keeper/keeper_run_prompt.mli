@@ -1,14 +1,14 @@
 (** Keeper_run_prompt — build turn prompt context (Steps 5-6).
 
-    Takes the run context from [Keeper_run_context], whose base system prompt
-    is the one the turn sends, calls the [build_turn_prompt] callback to get
+    Takes the run context from [Keeper_run_context], whose System is the one
+    the turn sends, calls the [build_turn_prompt] callback to get
     the dynamic context, then renders memory/temporal context, builds prompt
     metrics, and appends the user message.
 
     @since 0.120.0 *)
 
 type turn_prompt_context =
-  { turn_system_prompt : string
+  { turn_system : Keeper_turn_system.t
   ; dynamic_context : string
   ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> Keeper_context_layers.rendered) option
   ; temporal_context : string
@@ -43,7 +43,7 @@ val assemble_extra_system_context :
     is handled at the MASC lane boundary. *)
 
 val assemble_request_context :
-  base_system_prompt:string ->
+  system:Keeper_turn_system.t ->
   post_tool_round:bool ->
   previous_assembly:extra_system_context_assembly option ->
   dynamic_context_partition:Keeper_context_layers.rendered option ->
@@ -52,11 +52,14 @@ val assemble_request_context :
 (** Split uniquely renderer-attributed Active Goals into a stable system
     suffix and Completion Authority into its own context block. Missing, stale
     or duplicate renderer sections acquire neither identity.
-    [base_system_prompt] is the pre-existing override when present, otherwise
-    the original turn system prompt. Later tool rounds retain only that exact
-    issued observation, the Completion Authority block the previous round of
-    this turn carried, and permitted extra blocks. Other world state stays
-    first-round only. No store read or conversation-history write. *)
+    [system] is the System the request sends: the turn's own, or
+    {!Keeper_turn_system.with_bytes} of a pre-existing override. Its
+    amendments ride every round as the
+    {!Prompt_block_id.Constitution_amendments} block. Later tool rounds
+    retain only that exact issued observation, the Completion Authority block
+    the previous round of this turn carried, and permitted extra blocks.
+    Other world state stays first-round only. No store read or
+    conversation-history write. *)
 
 val ends_with_tool_results : Agent_core.Types.message list -> bool
 

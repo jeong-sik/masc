@@ -23,7 +23,9 @@ type run_context =
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; saved_history : saved_history
-  ; base_system_prompt : string
+  ; system : Keeper_turn_system.t
+        (** The System every request of the turn sends, with the amendments
+            its end context carries (RFC-0491 §3.2). *)
   ; workspace_root : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
@@ -55,9 +57,11 @@ val build_base_system_prompt :
   -> meta:keeper_meta
   -> (string * string, base_prompt_error) result
 (** Build the keeper base system prompt from the same persisted meta/profile
-    inputs used by {!prepare_run_context}. This is the only system prompt a
-    turn sends, direct or autonomous. Returns the resolved workspace root and
-    prompt together; no prompt is built with an unavailable namespace. *)
+    inputs used by {!prepare_run_context}, rendered with the articles the
+    world holds now. A turn sends {!run_context.system} instead, which an
+    Agent Core turn may render with the articles of its last System. Returns
+    the resolved workspace root and prompt together; no prompt is built with
+    an unavailable namespace. *)
 
 val prepare_run_context :
      config:Workspace.config
@@ -76,7 +80,13 @@ val prepare_run_context :
     continuation; when supplied it is the history source instead of a second
     disk read. A missing or superseded checkpoint starts fresh; every other
     load failure returns its typed error before prompt construction. An
-    unreadable constitution ledger returns [Base_prompt_unavailable]. *)
+    unreadable constitution ledger returns [Base_prompt_unavailable].
+
+    [runtime_id] is the turn's assignment. The head of its fresh walk says
+    whether the System may keep its last articles: for an Agent Core head
+    the range the first request carries is predicted over the loaded
+    history ({!Keeper_next_request_forecast.first_request}), and
+    {!Keeper_turn_system.issue} decides. *)
 
 (** Whether the turn starts from a checkpoint it loaded. *)
 val loaded_checkpoint_present : run_context -> bool

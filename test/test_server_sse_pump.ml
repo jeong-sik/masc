@@ -566,7 +566,8 @@ let test_a_batch_takes_no_more_frames_once_it_is_full () =
 ;;
 
 (* Event 1's step overflows a queue of two, as producers do while the pump
-   builds a batch. The batch stops there: event 2's frame is not written. *)
+   builds a batch. The batch stops there: event 2 is not taken, and the frame
+   of event 1, taken before the pile-up, is not written either. *)
 let test_a_batch_stops_at_a_pile_up () =
   let step queue n =
     if n = 1 then List.iter (Pump.Queue.push queue) [ 3; 4; 5 ];
@@ -574,8 +575,41 @@ let test_a_batch_stops_at_a_pile_up () =
   in
   let ending, sends = sends_of ~capacity:2 ~step [ 1; 2 ] in
   check ending_t "the client fell behind" Pump.Fell_behind ending;
-  check (list (list string)) "only the frame taken before the pile-up"
-    [ [ frame_for 1 ] ] sends
+  check (list (list string)) "nothing is written after the pile-up" [] sends
+;;
+
+(* A producer on another domain can mark the queue behind at any moment,
+   also between the pump taking an event (or asking [idle]) and the send.
+   Here [step] and [idle] mark it at that moment, in the pump's own fiber, so
+   the order is fixed. The look right before the send sees the pile-up. *)
+let test_a_pile_up_marked_before_a_send_writes_nothing () =
+  let overflow queue = List.iter (Pump.Queue.push queue) [ 2; 3; 4 ] in
+  let step queue n =
+    overflow queue;
+    Pump.Send_last (frame_for n)
+  in
+  let ending, sends = sends_of ~capacity:2 ~step [ 1 ] in
+  check ending_t "a last frame: the client fell behind" Pump.Fell_behind ending;
+  check (list (list string)) "the last frame is not written" [] sends;
+  let ending, sends =
+    Eio_mock.Backend.run_full (fun env ->
+      let queue = Pump.Queue.create ~max_queued_events:2 in
+      let sends = ref [] in
+      let ending =
+        Pump.run ~queue
+          ~step:(fun n -> Pump.Send (frame_for n))
+          ~idle:(fun () ->
+            overflow queue;
+            Pump.Keepalive)
+          ~clock:(Eio.Stdenv.clock env) ~ping_interval_s
+          ~send:(fun bytes ->
+            sends := bytes :: !sends;
+            Sse.Written)
+      in
+      ending, !sends)
+  in
+  check ending_t "a keepalive: the client fell behind" Pump.Fell_behind ending;
+  check (list string) "the keepalive is not written" [] sends
 ;;
 
 let producer_domains = 4
@@ -720,6 +754,8 @@ let () =
         ; test_case "a batch takes no more frames once it is full" `Quick
             test_a_batch_takes_no_more_frames_once_it_is_full
         ; test_case "a batch stops at a pile-up" `Quick test_a_batch_stops_at_a_pile_up
+        ; test_case "a pile-up marked before a send writes nothing" `Quick
+            test_a_pile_up_marked_before_a_send_writes_nothing
         ; test_case "a quiet interval writes nothing and asks again" `Quick
             test_a_quiet_interval_writes_nothing_and_asks_again
         ; test_case "an idle finish ends the stream without a frame" `Quick

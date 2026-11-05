@@ -9,11 +9,14 @@
     the queue fill up, or when the stream says it is done ([Send_last],
     [Stop], [Finish]).
 
-    The pile-up closes the connection and drops what was queued. Each stream
+    The pile-up ends the stream and drops what was queued. Each stream
     says how its client catches up after reconnecting: the fleet stream sends
     a [Snapshot] (RFC-0477), and the Keeper chat stream replays the journal
-    after [since_seq] (RFC-0412). A pile-up is acted on when the [send] in
-    progress returns, and nothing is written after it. *)
+    after [since_seq] (RFC-0412). The pump looks for a pile-up right before
+    each [send]. Once it sees one, nothing more is written. A producer on
+    another domain can mark one after that look, while the frames are handed
+    to [send] or wait for the socket; that pile-up is acted on when the
+    [send] returns. *)
 
 type ending =
   | Client_gone  (** [send] answered [Closed]. *)
@@ -80,4 +83,6 @@ val run :
     - The frames of the events already queued when one is taken go out in the
       same [send], within {!max_batch_bytes}, so a burst waits for the client
       once per batch. A [Send_last] or [Stop] ends the batch and then the
-      stream. No frame for an event queued after a pile-up is written. *)
+      stream. No frame for an event queued after a pile-up is written, and a
+      pile-up seen before a [send] ends the stream without it, even for the
+      frames of events taken earlier. *)

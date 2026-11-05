@@ -87,22 +87,22 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
         (match step event with
          | Skip -> serve ()
          | Send frame -> batch [ frame ] ~bytes:(String.length frame)
-         | Send_last frame -> after_send ~last:true (send frame)
+         | Send_last frame -> write ~last:true [ frame ]
          | Stop -> Finished)
       | Ping ->
         (match idle () with
-         | Keepalive -> after_send ~last:false (send keepalive_frame)
+         | Keepalive -> write ~last:false [ keepalive_frame ]
          | Quiet -> serve ()
          | Finish -> Finished))
   (* The events already queued go out in the same send, so a burst waits for
      the socket once per batch instead of once per frame. Each take first
-     looks for a pile-up: a frame for an event queued after a dropped one is
-     never written. *)
+     looks for a pile-up, so no event queued after a dropped one is taken. *)
   and batch frames ~bytes =
-    let write ~last frames = after_send ~last (send (String.concat "" (List.rev frames))) in
-    if bytes >= max_batch_bytes || Queue.fell_behind queue
+    if Queue.fell_behind queue
+    then Fell_behind
+    else if bytes >= max_batch_bytes
     then write ~last:false frames
-    else
+    else (
       match Queue.take_nonblocking queue with
       | None -> write ~last:false frames
       | Some event ->
@@ -110,11 +110,18 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
          | Skip -> batch frames ~bytes
          | Send frame -> batch (frame :: frames) ~bytes:(bytes + String.length frame)
          | Send_last frame -> write ~last:true (frame :: frames)
-         | Stop -> write ~last:true frames)
-  and after_send ~last : Server_sse_response.outcome -> ending = function
-    | Written -> if last then Finished else serve ()
-    | Closed -> Client_gone
-    | Stalled -> Stalled
+         | Stop -> write ~last:true frames))
+  (* The last look for a pile-up is here, right before the frames go to
+     [send]. A producer on another domain can still mark one after it; that
+     pile-up is acted on when this [send] returns. *)
+  and write ~last frames =
+    if Queue.fell_behind queue
+    then Fell_behind
+    else (
+      match (send (String.concat "" (List.rev frames)) : Server_sse_response.outcome) with
+      | Written -> if last then Finished else serve ()
+      | Closed -> Client_gone
+      | Stalled -> Stalled)
   in
   serve ()
 ;;

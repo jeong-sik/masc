@@ -242,11 +242,16 @@ let run_sse_pumps ~sw info ~(drain : unit -> unit) ~(ping : unit -> unit) =
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Switch.run (fun conn_sw ->
         Eio.Switch.on_release conn_sw (fun () -> release_sse_conn info);
+        (* A pump returns on its own only after the stop, or after it logged
+           an exception it caught (a prime or replay send that raised). The
+           connection then has no drain or no ping, so it ends there. *)
         Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
           drain ();
+          stop_sse_conn_if_current info;
           `Stop_daemon);
         Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
           ping ();
+          stop_sse_conn_if_current info;
           `Stop_daemon);
         Eio.Promise.await info.stop_promise))
 

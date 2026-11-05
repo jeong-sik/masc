@@ -135,18 +135,55 @@ let median values =
   List.nth sorted (List.length sorted / 2)
 ;;
 
+type way =
+  | Pump
+  | Send
+  | Flush
+  | Fire
+
+let ways = [ Pump; Send; Flush; Fire ]
+
+let on_response ~clock frame = function
+  | Pump -> waits ~clock frame
+  | Send -> send_only ~clock frame
+  | Flush -> flush_only frame
+  | Fire -> fire_and_forget frame
+;;
+
+(* Run [run] takes the ways starting at the [run]th, so the way that runs
+   first, right after the process starts or after the other frame size,
+   changes from run to run. *)
+let rotated run =
+  let count = List.length ways in
+  List.init count (fun index -> List.nth ways ((run + index) mod count))
+;;
+
+(* The seconds of every run, per way. [List.init] evaluates the runs left to
+   right and [List.fold_left] takes the ways in list order. *)
+let seconds_per_way env ~clock frame =
+  let runs =
+    List.init runs (fun run ->
+      List.fold_left
+        (fun measured way -> (way, measure env ~on_response:(on_response ~clock frame way)) :: measured)
+        [] (rotated run))
+  in
+  fun way -> List.concat_map (List.filter_map (fun (w, s) -> if w = way then Some s else None)) runs
+;;
+
 let () =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
-    Printf.printf "%d frames per run, median of %d runs\n" frames_per_run runs;
+    Printf.printf "%d frames per run, median of %d runs, each run in a rotated order\n" frames_per_run
+      runs;
     List.iter
       (fun size ->
-         let frame = frame_of_size size in
-         let rate on_response =
-           let seconds = median (List.init runs (fun _ -> measure env ~on_response)) in
-           float_of_int frames_per_run /. seconds
-         in
-         Printf.printf "%5d B  pump %9.0f  send %9.0f  flush %9.0f  fire %9.0f frames/s\n%!" size
-           (rate (waits ~clock frame)) (rate (send_only ~clock frame)) (rate (flush_only frame)) (rate (fire_and_forget frame)))
+         let seconds = seconds_per_way env ~clock (frame_of_size size) in
+         let rate way = float_of_int frames_per_run /. median (seconds way) in
+         let pump = rate Pump in
+         let send = rate Send in
+         let flush = rate Flush in
+         let fire = rate Fire in
+         Printf.printf "%5d B  pump %9.0f  send %9.0f  flush %9.0f  fire %9.0f frames/s\n%!" size pump
+           send flush fire)
       frame_sizes)
 ;;

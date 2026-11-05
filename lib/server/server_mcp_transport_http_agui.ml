@@ -121,6 +121,9 @@ let handle_ag_ui_events ~deps request reqd =
                   let send_first_frames () =
                     if not (send_raw info prime) then
                       Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
+                    (* [List.fold_left] applies its function in list order,
+                       so the replay goes out in order; it keeps the
+                       deliveries sent. *)
                     let replayed =
                       match last_event_id with
                       | Some last_id ->
@@ -129,14 +132,17 @@ let handle_ag_ui_events ~deps request reqd =
                         (Sse.replay_after_for_session
                        ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~session_id
                            ~kind:Sse.Observer last_id).Sse.deliveries
-                        |> List.filter (fun delivery ->
-                          if send_raw info (ag_ui_event_of_masc_event delivery)
-                          then true
-                          else (
-                            Log.Server.debug
-                              "ag-ui replay send failed for session %s"
-                              info.session_id;
-                            false))
+                        |> List.fold_left
+                             (fun sent delivery ->
+                                if send_raw info (ag_ui_event_of_masc_event delivery)
+                                then delivery :: sent
+                                else (
+                                  Log.Server.debug
+                                    "ag-ui replay send failed for session %s"
+                                    info.session_id;
+                                  sent))
+                             []
+                        |> List.rev
                       | None -> []
                     in
                     Sse.create_replay_handoff replayed

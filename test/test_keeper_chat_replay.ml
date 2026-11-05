@@ -478,6 +478,48 @@ let test_a_client_gone_during_the_replay_ends_before_the_live_part () =
   Alcotest.(check (list string)) "the acceptance and the first replay frame"
     [ acceptance; Ag_ui.event_to_sse ~id:0 delta ] written
 
+(* How long the test waits for the submit while the retry frame has no
+   answer. The submit takes no time, so reaching it means the submit waited
+   for the frame. *)
+let submit_patience_s = 2.0
+
+(* A client that left before the head went out leaves the retry frame
+   without an answer until the stall bound. The durable submit runs during
+   that wait, and the answer comes back with the submit's result. *)
+let test_the_submit_runs_while_the_retry_frame_waits () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let answer, give_answer = Eio.Promise.create () in
+    let submitted, mark_submitted = Eio.Promise.create () in
+    let frames = ref [] in
+    let send frame =
+      frames := frame :: !frames;
+      Eio.Promise.await answer
+    in
+    let (retry, accepted), submitted_during_the_wait =
+      Eio.Fiber.pair
+        (fun () ->
+          Stream.For_testing.send_retry_beside_submit ~send ~retry_frame:"retry: 1\n\n"
+            (fun () ->
+              Eio.Promise.resolve mark_submitted ();
+              "accepted"))
+        (fun () ->
+          let during =
+            match
+              Eio.Time.with_timeout clock submit_patience_s (fun () ->
+                Ok (Eio.Promise.await submitted))
+            with
+            | Ok () -> true
+            | Error `Timeout -> false
+          in
+          Eio.Promise.resolve give_answer Sse.Stalled;
+          during)
+    in
+    Alcotest.(check bool) "the submit ran while the frame waited" true submitted_during_the_wait;
+    Alcotest.(check (list string)) "only the retry frame was sent" [ "retry: 1\n\n" ] !frames;
+    Alcotest.(check bool) "the frame's answer comes back" true (retry = Sse.Stalled);
+    Alcotest.(check string) "the submit's result comes back" "accepted" accepted)
+
 let idle_name = function
   | Pump.Keepalive -> "Keepalive"
   | Pump.Quiet -> "Quiet"
@@ -675,6 +717,8 @@ let () =
             test_a_settled_turn_ends_after_the_live_events_of_the_replay
         ; Alcotest.test_case "a client gone during the replay ends before the live part" `Quick
             test_a_client_gone_during_the_replay_ends_before_the_live_part
+        ; Alcotest.test_case "the submit runs while the retry frame waits" `Quick
+            test_the_submit_runs_while_the_retry_frame_waits
         ; Alcotest.test_case "a quiet stream follows the client and the operation" `Quick
             test_a_quiet_stream_follows_the_client_and_the_operation
         ; Alcotest.test_case "the step drops only what the replay wrote" `Quick

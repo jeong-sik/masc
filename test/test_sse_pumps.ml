@@ -141,6 +141,65 @@ let test_stop_cancels_a_waiting_send () =
   | Error `Timeout -> failf "a waiting send outlived the stop by %.0f s" stop_bound_s
 ;;
 
+exception Prime_failed
+
+type pump =
+  | Drain
+  | Ping
+
+let pump_name = function
+  | Drain -> "drain"
+  | Ping -> "ping"
+;;
+
+(* Runs [run_sse_pumps] with [returning] as one pump and a pump that waits
+   for its cancellation as the other, then checks that the connection
+   ended. *)
+let check_one_returning_pump_ends_the_connection pump returning =
+  Eio_main.run
+  @@ fun env ->
+  let which = pump_name pump in
+  let clock = Eio.Stdenv.clock env in
+  let session_id = fresh_session ("pump-ended-" ^ which) in
+  let info = make_info ~clock ~stalled_after_s:long_stall_s session_id in
+  Conn.register_sse_conn ~session_id ~info;
+  let other_cancelled, set_other_cancelled = Eio.Promise.create () in
+  let waiting () =
+    Fun.protect
+      ~finally:(fun () -> Eio.Promise.resolve set_other_cancelled ())
+      Eio.Fiber.await_cancel
+  in
+  let drain, ping =
+    match pump with
+    | Drain -> returning, waiting
+    | Ping -> waiting, returning
+  in
+  match
+    Eio.Time.with_timeout clock stop_bound_s (fun () ->
+      Eio.Switch.run (fun sw -> Conn.run_sse_pumps ~sw info ~drain ~ping);
+      Ok ())
+  with
+  | Ok () ->
+    check bool (which ^ ": the other pump was cancelled") true (Eio.Promise.is_resolved other_cancelled);
+    check bool (which ^ ": the connection is stopped") true (Atomic.get info.closed);
+    check bool (which ^ ": the response is closed") true (Server_sse_response.is_closed info.response);
+    check bool (which ^ ": the connection left the registry") false
+      (Conn.is_active_sse_session session_id)
+  | Error `Timeout -> failf "the connection outlived its %s by %.0f s" which stop_bound_s
+;;
+
+(* Each route's drain sends the prime and the replay inside a handler that
+   logs an exception and returns. A drain that returned that way carries no
+   more events, and a ping that returned that way sends no more keepalives,
+   so the connection ends. *)
+let test_a_pump_that_returns_ends_the_connection () =
+  let raising_prime () = raise Prime_failed in
+  check_one_returning_pump_ends_the_connection Drain (fun () ->
+    try raising_prime () with
+    | Prime_failed -> ());
+  check_one_returning_pump_ends_the_connection Ping (fun () -> ())
+;;
+
 (* A frame that never reaches a socket ends the send at the stall bound.
    Before RFC-0493 [send_raw] returned [true] here and the frame stayed in
    httpun's buffer. *)
@@ -168,6 +227,8 @@ let () =
             test_switch_off_closes_the_response
         ; test_case "the stop cancels a send that waits for the socket" `Quick
             test_stop_cancels_a_waiting_send
+        ; test_case "a pump that returns ends the connection" `Quick
+            test_a_pump_that_returns_ends_the_connection
         ] )
     ; ( "send_raw"
       , [ test_case "an unread frame ends at the stall bound" `Quick

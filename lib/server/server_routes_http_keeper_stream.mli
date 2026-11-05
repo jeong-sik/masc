@@ -276,9 +276,10 @@ val handle_keeper_chat_stream :
   keeper_chat_stream_request ->
   unit
 (** Drives the [POST /api/keeper/chat-stream] SSE response
-    (RFC-0493 §3.2). One fiber forked on [sw] submits the operation and is
-    the stream's only sender: it writes the acceptance and the reconnect
-    replay, then serves the live events of the turn through
+    (RFC-0493 §3.2). One fiber forked on [sw] submits the operation while
+    the retry frame waits for the socket, then is the stream's only sender:
+    it writes the acceptance and the reconnect replay, then serves the live
+    events of the turn through
     {!Server_sse_pump}. The Keeper turn only puts its events in that
     stream's queue. The stream ends after the turn's terminal, when the
     operation settled without one, when the client is gone, when a frame
@@ -483,6 +484,15 @@ module For_testing : sig
       replay wrote a terminal) behind the live events that arrived meanwhile,
       then runs the pump. [None] when the client was gone before the live
       part. *)
+
+  val send_retry_beside_submit :
+    send:(string -> Server_sse_response.outcome) ->
+    retry_frame:string ->
+    (unit -> 'submitted) ->
+    Server_sse_response.outcome * 'submitted
+  (** The handler before the acceptance: hands [retry_frame] to [send] and
+      runs the submit while that frame waits for the socket. Returns once
+      both are done. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

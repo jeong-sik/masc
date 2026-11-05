@@ -809,11 +809,99 @@ let test_observation_commit_announces_lane_inventory () = with_fixture (fun cloc
       (List.filter (fun (name, _) -> String.equal name "lane_addons") !heard |> List.length);
     detach clock fixture instance)))
 
+let test_private_addon_events_are_scoped_to_their_readers () =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let owner_auth = Masc_test_deps.make_sse_auth workspace "owner" in
+  let other_auth = Masc_test_deps.make_sse_auth workspace "other" in
+  Masc_test_deps.ensure_rng_initialized ();
+  let admin_auth =
+    match Auth.create_token workspace ~agent_name:"operator" ~role:Masc_domain.Admin with
+    | Ok (raw_token, _) -> { Masc.Sse.config = workspace; token = Some raw_token }
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let owner_session = "private-owner-" ^ string_of_int (Random.bits ()) in
+  let other_session = "private-other-" ^ string_of_int (Random.bits ()) in
+  let admin_session = "private-admin-" ^ string_of_int (Random.bits ()) in
+  let subscription = "private-addon-external-" ^ string_of_int (Random.bits ()) in
+  let register session_id auth =
+    ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
+    match Sse.register ~kind:Sse.Observer ~auth session_id ~last_event_id:0 with
+    | Ok (_, stream, _) -> stream
+    | Error error -> fail (Sse.registration_error_to_string error)
+  in
+  let owner_stream = register owner_session owner_auth in
+  let other_stream = register other_session other_auth in
+  let admin_stream = register admin_session admin_auth in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unsubscribe_external subscription;
+      Sse.unregister owner_session;
+      Sse.unregister other_session;
+      Sse.unregister admin_session;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      let visibility kind = `Assoc [ "kind", `String kind ] in
+      let payload visibility =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "private-instance"
+          ; "visibility", visibility ]
+      in
+      let shared_external = ref [] in
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+        ~id:subscription
+        ~callback:(fun (event : Sse.external_event) ->
+          match event.ext_payload with
+          | `Assoc fields ->
+              (match List.assoc_opt "visibility" fields with
+               | Some (`Assoc [ "kind", `String "shared" ]) ->
+                   shared_external := !shared_external + 1
+               | Some _ | None -> ())
+          | _ -> ())
+        ();
+      let owner_only = payload (`Assoc [ "kind", `String "keeper"; "keeper", `String "owner" ]) in
+      let operator_only = payload (visibility "operator") in
+      let shared = payload (visibility "shared") in
+      List.iter (Sse.broadcast_to Sse.Observers) [ owner_only; operator_only; shared ];
+      let received stream =
+        let rec drain acc =
+          match Sse.take_delivery_nonblocking stream with
+          | Some delivery -> drain (delivery :: acc)
+          | None -> List.rev acc
+        in
+        drain []
+      in
+      let ids deliveries = List.map (fun (delivery : Sse.delivery) -> delivery.payload) deliveries in
+      check (list bool) "owner reads only owner and shared" [ true; true ]
+        (List.map (fun payload -> List.mem payload (ids (received owner_stream))) [ owner_only; shared ]);
+      check (list bool) "another Keeper reads neither private event" [ false; false ]
+        (List.map (fun payload -> List.mem payload (ids (received other_stream))) [ owner_only; operator_only ]);
+      check (list bool) "operator reads all events" [ true; true; true ]
+        (List.map (fun payload -> List.mem payload (ids (received admin_stream)))
+          [ owner_only; operator_only; shared ]);
+      check int "an external subscriber without identity sees only shared" 1 !shared_external;
+      let replay session_id =
+        (Sse.replay_after_for_session
+          ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+          ~session_id ~kind:Sse.Observer 0).deliveries
+        |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
+      in
+      check (list bool) "replay keeps owner-only identity" [ true; false ]
+        (List.map (fun payload -> List.mem payload (replay owner_session)) [ owner_only; operator_only ]);
+      check (list bool) "replay hides private events from another Keeper" [ false; false ]
+        (List.map (fun payload -> List.mem payload (replay other_session)) [ owner_only; operator_only ]);
+      check (list bool) "replay retains operator access" [ true; true; true ]
+        (List.map (fun payload -> List.mem payload (replay admin_session))
+          [ owner_only; operator_only; shared ]))
+
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
   "optional world actions",[
   test_case "machine live announces only changed evidence" `Quick test_machine_live_announces_only_changed_evidence;
   test_case "observation commit announces Lane inventory and its instance" `Quick test_observation_commit_announces_lane_inventory;
+  test_case "private Add-on events stay with their readers" `Quick test_private_addon_events_are_scoped_to_their_readers;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;

@@ -18,9 +18,13 @@ sum over profiles of every count equals the whole-ledger count.
 - profile: the `runtime_profile` of the row, `unrecorded` when it has none.
 - keeper counts: tool calls per Keeper under that profile, rows with the
   `tool_call` record kind only.
-- `tools` keeps the `--top` tools with the most calls of the profile; `daily`
-  keeps the UTC days of the window; the hourly series, the bursts and the
-  empty-input table of the official summary are left out.
+- `identical_rereads` and `spilled_results` keep the counts of the official
+  summary of the same name. `tools` keeps the `--top` tools with the most calls
+  of the profile, `keepers` the `--top` Keepers, `calls_by_day` the calls of each
+  UTC day. The hourly series, the bursts and the empty-input table of the
+  official summary are left out.
+- `--json-out` writes one profile per line, so a diff of two result files shows
+  which profile changed.
 
 Reads `<base-path>/.masc/tool_calls/YYYY-MM/DD[.NNN].jsonl` and never writes to
 it. A day that is still being written changes under the script, so measure a
@@ -29,7 +33,7 @@ not a JSON object, holds NaN or Infinity, or is not valid UTF-8 is counted under
 `unreadable_lines` and belongs to no profile.
 
 Usage:
-    docs/evidence/tool-efficiency-by-profile-2026-11/measure_by_profile.py \
+    python3 docs/evidence/tool-efficiency-by-profile-2026-11/measure_by_profile.py \
         --base-path ~/me --from-date 2026-11-01 --to-date 2026-11-04 --json-out result.json
 """
 
@@ -54,7 +58,9 @@ OFFICIAL_SCRIPT = REPO_ROOT / "scripts" / "measure-tool-efficiency.py"
 OFFICIAL_MODULE = "measure_tool_efficiency"
 UNRECORDED_PROFILE = "unrecorded"  # the label observe_row gives a row without runtime_profile
 DEFAULT_TOP = 8
-SUMMARY_KEEP = ("tool_time_s", "result_bytes", "identical_rereads", "spilled_results", "daily")
+REREAD_KEYS = ("calls", "bytes", "same_turn", "later_turn")
+SPILLED_KEYS = ("calls", "bytes", "read_back_calls", "read_back_bytes")
+TOOL_KEYS = ("tool", "calls", "reread_calls", "reread_bytes", "spilled_calls", "spilled_bytes", "time_s")
 
 
 class Totals(Protocol):
@@ -159,17 +165,23 @@ def calls_of(summary: JsonObject) -> int:
 
 
 def profile_report(profile: str, summary: JsonObject, keepers: Counter[str], whole_calls: int, top: int) -> JsonObject:
-    tools = sorted(cast(list[JsonObject], summary["tools"]), key=lambda row: -cast(int, row["calls"]))
     calls = calls_of(summary)
-    report: JsonObject = {
+    reread = cast(JsonObject, summary["identical_rereads"])
+    spilled = cast(JsonObject, summary["spilled_results"])
+    tools = sorted(cast(list[JsonObject], summary["tools"]), key=lambda row: -cast(int, row["calls"]))[:top]
+    daily = cast(dict[str, JsonObject], summary["daily"])
+    return {
         "profile": profile,
         "calls": calls,
         "calls_pct_of_ledger": round(100.0 * calls / whole_calls, 2) if whole_calls else 0.0,
+        "tool_time_s": summary["tool_time_s"],
+        "result_bytes": summary["result_bytes"],
+        "identical_rereads": {key: reread[key] for key in REREAD_KEYS},
+        "spilled_results": {key: spilled[key] for key in SPILLED_KEYS},
+        "keepers": dict(keepers.most_common(top)),
+        "tools": [{key: row[key] for key in TOOL_KEYS} for row in tools],
+        "calls_by_day": {day: bucket["calls"] for day, bucket in daily.items()},
     }
-    report.update({key: summary[key] for key in SUMMARY_KEEP})
-    report["keepers"] = dict(keepers.most_common(top))
-    report["tools"] = tools[:top]
-    return report
 
 
 def measure(official: Official, base: pathlib.Path, first: date, last: date, window_sec: float, top: int) -> JsonObject:
@@ -192,6 +204,13 @@ def measure(official: Official, base: pathlib.Path, first: date, last: date, win
         "unreadable_lines": sum(day.unreadable_lines for day in days),
         "profiles": [profile_report(name, summary, keepers[name], whole_calls, top) for name, summary in ordered],
     }
+
+
+def dump(result: JsonObject) -> str:
+    """The result as JSON with each profile on one line."""
+    head = [f" {json.dumps(key)}: {json.dumps(value)}" for key, value in result.items() if key != "profiles"]
+    profiles = [f"  {json.dumps(report, ensure_ascii=False)}" for report in cast(list[JsonObject], result["profiles"])]
+    return "{\n" + ",\n".join(head) + ',\n "profiles": [\n' + ",\n".join(profiles) + "\n ]\n}\n"
 
 
 def render(result: JsonObject) -> str:
@@ -231,7 +250,7 @@ def main(argv: list[str]) -> int:
     if args.json_out is not None:
         destination = pathlib.Path(cast(str, args.json_out))
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        destination.write_text(dump(result), encoding="utf-8")
     sys.stdout.write(render(result))
     return 0
 

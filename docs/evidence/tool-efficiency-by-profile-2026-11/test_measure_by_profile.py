@@ -119,6 +119,7 @@ class MeasureByProfileTest(unittest.TestCase):
         self.assertEqual(1, profiles["p2"]["calls"])
         self.assertEqual(1, cast(JsonObject, profiles["p2"]["identical_rereads"])["calls"])
         self.assertEqual(100, cast(JsonObject, profiles["p2"]["identical_rereads"])["bytes"])
+        self.assertEqual({"2026-11-01": 2}, profiles["p1"]["calls_by_day"])
 
     def test_a_row_without_a_profile_is_unrecorded_and_its_spill_is_counted(self) -> None:
         self.write_two_profile_ledger()
@@ -210,8 +211,13 @@ class MeasureByProfileTest(unittest.TestCase):
             str(out),
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
-        written = cast(JsonObject, json.loads(out.read_text(encoding="utf-8")))
-        self.assertEqual(self.measure(), written)
+        text = out.read_text(encoding="utf-8")
+        self.assertEqual(self.measure(), json.loads(text))
+        lines = text.splitlines()
+        for name, report in by_name(self.measure()).items():
+            holders = [line for line in lines if f'"profile": {json.dumps(name)}' in line]
+            self.assertEqual(1, len(holders), name)  # one line per profile
+            self.assertEqual(report, json.loads(holders[0].rstrip(",")))
         self.assertIn("unrecorded", completed.stdout)
 
     def test_a_window_that_ends_before_it_starts_is_refused(self) -> None:

@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: ["#48685", "#48721"]
+implementation_prs: ["#48685", "#48721", "#48750"]
 ---
 
 # RFC: TUI 비동기 답은 그 답의 묶음 모듈이 받아서 반영한다
@@ -301,7 +301,7 @@ Github 의 `deliver` 를 받는다.
 | 층 | 하는 일 | 끝난 기준 |
 |---|---|---|
 | L1(#48685) | Code 시범. `code_msg`·`apply`·`answer_kind` 를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, Code 생성자를 나열하던 분류 자리 5곳(프로토콜 함수 넷, 받지 않는 답의 갈래) → 0, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
-| L2(#48721)~ | 나머지 얇은 묶음 16개. L2 는 Context | L1 과 같은 기준 |
+| L2(#48721)~ | 나머지 얇은 묶음 16개. L2 는 Context, L3(#48750)은 Fleet | L1 과 같은 기준 |
 | Ls | 1.3 의 공용 함수 13개를 `masc_tui.ml` 아래 라이브러리로 내리거나 할 일 값으로 바꾼다 | 두꺼운 묶음이 그 함수를 모듈 이름 없이 부르지 않는다 |
 | Lt | 두꺼운 묶음(Runtime, Lane, Voice, Board, Observer 등) | L1 과 같은 기준 |
 | 마지막 | Keeper(51갈래, 1,579줄, `masc_tui.ml` 함수 62개) | L1 과 같은 기준 |

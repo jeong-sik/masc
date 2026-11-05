@@ -146,7 +146,7 @@ let apply_catalog (state : state) request result =
                 (Masc_tui_fetched.request_key request) ->
       state.code_catalog <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_catalog request result
-  | Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump | Palette_choice _ -> ()
+  | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _ -> ()
 
 let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
@@ -332,7 +332,7 @@ let take_ready_found_file (state : state) ~input_pending =
                 state.code_file <- file;
                 apply_file state file_request (Ok content);
                 true)
-  | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _),
     (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))) -> false
 
@@ -346,8 +346,21 @@ let apply_branches (state : state) request result =
                 (Masc_tui_fetched.request_key request) ->
       state.code_branches <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_branches request result
-  | Palette_branches _ | Palette_files _ | Palette_locations _ | Palette_jump
+  | Palette_branches _ | Palette_worktrees _ | Palette_files _ | Palette_locations _ | Palette_jump
   | Palette_choice _ -> ()
+
+(* A worktree list lands only while the worktree palette that asked is still
+   the open one over the same directory. *)
+let apply_worktrees (state : state) request result =
+  match state.palette_mode with
+  | Palette_worktrees origin
+      when state.palette_open && code_finder_current state origin
+           && code_scope_path_equal (origin.cfo_scope, origin.cfo_dir)
+                (Masc_tui_fetched.request_key request) ->
+      state.code_worktrees <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
+          state.code_worktrees request result
+  | Palette_worktrees _ | Palette_branches _ | Palette_files _ | Palette_locations _
+  | Palette_jump | Palette_choice _ -> ()
 
 let apply_found_file ?(input_pending = false) (state : state) request result =
   let scope, _ = Masc_tui_fetched.request_key request in
@@ -360,7 +373,7 @@ let apply_found_file ?(input_pending = false) (state : state) request result =
       state.code_finder_file <- Masc_tui_fetched.complete ~equal:code_scope_path_equal
           state.code_finder_file request result;
       take_ready_found_file state ~input_pending
-  | Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump | Palette_choice _ -> false
+  | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _ -> false
 
 let apply_blame (state : state) request result =
   (* An answer that arrives after the operator moved on describes bytes
@@ -377,7 +390,7 @@ let apply_blame (state : state) request result =
 let start_lsp_question ?line (state : state) ~question ~symbol =
   (match state.palette_mode with
    | Palette_locations _ -> close_code_finder state
-   | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ -> state.code_location_offer <- None);
+   | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_worktrees _ -> state.code_location_offer <- None);
   state.code_navigation <- None;
   (if state.code_file_resume_intent = Open_code_file then
    match Masc_tui_fetched.current state.code_file with
@@ -519,7 +532,7 @@ let retire_lsp_input state =
   match state.palette_mode with
   | Palette_locations offer when state.palette_open
       && code_location_offer_current state offer -> ()
-  | Palette_locations _ | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ ->
+  | Palette_locations _ | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_worktrees _ ->
       (* Workspace recovery reissues the current key, including settled ones. *)
       state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
       state.code_location_offer <- None
@@ -528,7 +541,7 @@ let retire_lsp_input state =
 let choose_lsp_location state offer location =
   let owns_picker = match state.palette_mode with
     | Palette_locations current -> state.palette_open && current == offer
-    | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ -> false in
+    | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_worktrees _ -> false in
   if not owns_picker || not (code_location_offer_current state offer)
      || not (List.exists (fun candidate -> candidate == location) offer.clo_locations)
   then No_followup
@@ -549,10 +562,10 @@ let take_ready_lsp_locations state ~input_pending =
   | Some offer ->
       match state.palette_open, state.palette_mode with
       | true, Palette_locations current when current == offer -> No_followup
-      | true, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_locations _) ->
+      | true, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _) ->
           state.code_location_offer <- None;
           No_followup
-      | false, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_locations _) ->
+      | false, (Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _) ->
           match offer.clo_locations with
           | [] -> state.code_location_offer <- None; No_followup
           | [location] ->

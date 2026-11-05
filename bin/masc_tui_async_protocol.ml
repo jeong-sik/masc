@@ -755,6 +755,9 @@ type async_msg =
   | Code_branches_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.git_branches, string) result
+  | Code_worktrees_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_worktrees, string) result
   | Code_finder_file_loaded of
       (code_workspace_scope * string) Masc_tui_fetched.request
       * (Masc.Tui_decode.workspace_file_source, string) result
@@ -1072,7 +1075,7 @@ let rec workspace_message_is_read = function
   | Librarian_input_loaded _
   | (Resources_listed _ | Artifact_checks_loaded _)
   | Code_entries_loaded _
-  | Code_catalog_loaded _ | Code_branches_loaded _ | Code_finder_file_loaded _
+  | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
   | Code_file_loaded _
   | Code_history_loaded _
   | Code_diff_loaded _
@@ -1251,7 +1254,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Preset_detail_loaded _ | Preset_contents_shown _ | Preset_saved _ | Preset_restored _
   | Preset_deleted _ | Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
   | Play_invite_revoked _ | Librarian_input_loaded _ | Artifact_checks_loaded _
-  | Artifact_check_changed _ | Resources_listed _ | Code_catalog_loaded _ | Code_branches_loaded _
+  | Artifact_check_changed _ | Resources_listed _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
   | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_draft_saved _ | Code_file_loaded _
   | Code_history_loaded _ | Code_diff_loaded _ | Acting_pane_changes_loaded _
   | Code_blame_loaded _ | Code_lsp_answered _ | Resource_exported _ | Resource_share_changed _
@@ -1408,7 +1411,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_room_received (_, _) | Play_invites_listed (_, _)
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
     | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-    | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_finder_file_loaded _
+    | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
@@ -1546,7 +1549,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_room_received (_, _) | Play_invites_listed (_, _)
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
   | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-  | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_finder_file_loaded _
+  | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)

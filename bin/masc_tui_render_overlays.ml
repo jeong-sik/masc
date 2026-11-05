@@ -374,7 +374,8 @@ let render_palette (state : state) =
     | Masc_tui_types.Palette_jump ->
         Masc_tui_palette.palette_typed_question state.palette_query
     | Masc_tui_types.Palette_choice _ | Masc_tui_types.Palette_files _
-    | Masc_tui_types.Palette_locations _ | Masc_tui_types.Palette_branches _ -> None
+    | Masc_tui_types.Palette_locations _ | Masc_tui_types.Palette_branches _
+    | Masc_tui_types.Palette_worktrees _ -> None
   in
   let explicit_question =
     match typed_question with
@@ -403,6 +404,8 @@ let render_palette (state : state) =
         (" MASC Find file", "filter:", "open")
     | Masc_tui_types.Palette_branches _ ->
         (" MASC Branches", "filter:", "close")
+    | Masc_tui_types.Palette_worktrees _ ->
+        (" MASC Worktrees", "filter:", "close")
     | Masc_tui_types.Palette_locations offer ->
         let query = Masc_tui_fetched.request_key offer.clo_query in
         (Printf.sprintf " %s · %s" query.clq_question
@@ -442,6 +445,18 @@ let render_palette (state : state) =
   let finder_notes =
     match state.palette_mode with
     | Palette_jump | Palette_choice _ -> []
+    | Palette_worktrees _ ->
+        List.map Terminal_text.single_line
+          (match code_worktrees_view state with
+           | Masc_tui_fetched.Absent -> [ "Worktrees are no longer active; Esc returns to Code" ]
+           | Masc_tui_fetched.Loading -> [ "Reading worktrees…" ]
+           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
+           | Masc_tui_fetched.Ready listing ->
+               [ Printf.sprintf "%d worktrees · %s%s"
+                   (List.length listing.Tui_decode.gws_worktrees)
+                   (if String.equal listing.gws_root "" then "workspace repository"
+                    else listing.gws_root)
+                   (if listing.gws_truncated then " · first only" else "") ])
     | Palette_branches _ ->
         List.map Terminal_text.single_line
           (match code_branches_view state with
@@ -503,6 +518,7 @@ let render_palette (state : state) =
           let kind = match state.palette_mode with
             | Palette_files _ -> "files" | Palette_locations _ -> "locations"
             | Palette_branches _ -> "branches"
+            | Palette_worktrees _ -> "worktrees"
             | Palette_jump | Palette_choice _ -> "commands" in
           c.push_styled ~style:(Theme.recede ())
             (Printf.sprintf "   %d %s · %d/%d · type to filter"
@@ -527,8 +543,15 @@ let render_palette (state : state) =
                      | Masc_tui_fetched.Ready _ -> false
                      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                      | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _ -> true) -> ()
-             | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump
-               | Palette_choice _),
+             | Palette_worktrees _, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                 | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Failed _
+                 | Masc_tui_fetched.Stale _)
+               when (match code_worktrees_view state with
+                     | Masc_tui_fetched.Ready _ -> false
+                     | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                     | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _ -> true) -> ()
+             | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
+               | Palette_jump | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
                  c.push ("   No matching " ^ kind ^ " · Ctrl-U clears the filter")))

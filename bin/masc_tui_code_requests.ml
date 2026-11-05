@@ -67,8 +67,34 @@ let launch_branches state ~host ~deliver =
                    ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
     | Palette_branches _, None ->
         Masc_tui_loader.report_action state "error" "Branches have no workspace identity"
-    | (Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
+    | (Palette_files _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
         ()
+  end
+
+(* Opens the worktree palette and reads the worktrees of the repository that
+   owns the directory Code is showing. *)
+let launch_worktrees state ~host ~deliver =
+  if not (server_authority_ready state) then
+    Masc_tui_loader.report_action state "error" "Worktrees need a confirmed workspace"
+  else begin
+    open_code_worktrees state;
+    match state.palette_mode, state.server_identity with
+    | Palette_worktrees origin, Some expected_workspace ->
+        (match Masc_tui_fetched.start ~equal:code_scope_path_equal state.code_worktrees
+                 ~key:(origin.cfo_scope, origin.cfo_dir) with
+         | Masc_tui_fetched.Already_loading -> ()
+         | Masc_tui_fetched.Started (reading, request) ->
+             state.code_worktrees <- reading;
+             let port = state.port in
+             let keeper, repo = code_scope_axes_of origin.cfo_scope in
+             Masc_tui_async_read.launch
+               ~deliver:(fun result -> deliver (Code_worktrees_loaded (request, result)))
+               (fun () -> Masc_tui_http.fetch_git_worktrees ?keeper ?repo
+                   ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
+    | Palette_worktrees _, None ->
+        Masc_tui_loader.report_action state "error" "Worktrees have no workspace identity"
+    | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump
+      | Palette_choice _), (Some _ | None) -> ()
   end
 
 let open_found_file state ~host ~deliver ~path =
@@ -87,7 +113,8 @@ let open_found_file state ~host ~deliver ~path =
              ~deliver:(fun result -> deliver (Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
-  | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump | Palette_choice _),
+  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
+    | Palette_choice _),
     (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()
 

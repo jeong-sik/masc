@@ -176,7 +176,7 @@ delete h:
 
 `lstat`·`rename`·`unlink` 은 지금 `Tool_blob_store.delete` 와 같이 소유 경로, 일반 파일, 같은 parent 를 확인하고 잡아 둔 parent 기준으로 한다.
 
-`previous_scan_started_at` 은 `Unix.gettimeofday` 가 아니라, 스캔을 열 때 blob 폴더에 쓴 표지 파일의 mtime 으로 정한다. 그러면 blob mtime 과 같은 파일시스템 시계끼리 비교한다. `rename` 은 mtime 을 바꾸지 않으므로, 되돌린 blob 은 옛 mtime 그대로 다음 스캔에서 다시 판정된다.
+`previous_scan_started_at` 은 `Unix.gettimeofday` 가 아니라, 스캔을 열 때 후보 기록 폴더(`tool_blob_maintenance/`)에 쓴 표지 파일의 mtime 으로 정한다. 이 폴더와 `tool_blobs` 는 같은 `<base>/.masc` 아래에 있어 같은 파일시스템 시계끼리 비교한다. 표지 파일을 blob 폴더에 두지 않는 것은 blob 목록에 섞이지 않게 하려는 것이다. `rename` 은 mtime 을 바꾸지 않으므로, 되돌린 blob 은 옛 mtime 그대로 다음 스캔에서 다시 판정된다.
 
 경우를 나누면:
 

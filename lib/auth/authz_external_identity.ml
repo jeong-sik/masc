@@ -108,12 +108,18 @@ let of_body (body : Authz_body.t) =
     if String.equal provider google_label
     then (
       match members with
-      | [ ("sub", Authz_body.String sub) ] -> valid (google ~sub)
+      | [ ("sub", sub) ] ->
+        (match Authz_body.string_value sub with
+         | Some sub -> valid (google ~sub)
+         | None -> Error Wrong_members)
       | _ -> Error Wrong_members)
     else if String.equal provider github_label
     then (
       match members with
-      | [ ("user_id", Authz_body.Int user_id) ] -> valid (github ~user_id)
+      | [ ("user_id", user_id) ] ->
+        (match Authz_body.int_value user_id with
+         | Some user_id -> valid (github ~user_id)
+         | None -> Error Wrong_members)
       | _ -> Error Wrong_members)
     else Error (Unknown_provider provider)
   | Authz_body.Object _ -> Error Wrong_members

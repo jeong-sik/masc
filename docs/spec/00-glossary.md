@@ -1560,7 +1560,7 @@ status: reference
   회전 사실 자체는 이후보 증거가 아니라 영수증 `degraded_retry_reason`과
   Failure Route로 관측된다.
   → [runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli)
-  · [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
+  · [Runtime_candidate_standing.order](../../lib/runtime/runtime_candidate_standing.mli)
 
 **Demotion (강등)**
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
@@ -1573,12 +1573,12 @@ status: reference
     보낸다. 강등한 뒤에도 맨 앞 후보가 쉬는 중이면 그 walk는 기다린다 — 맨 앞 후보가
     풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
     중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
-    (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
+    (`Runtime_candidate_standing.order`, RFC-0458 §3.4).
     실패 증거를 적은 Keeper(recorder)는 다음 사이클에 자기가 표시한 후보를
     강등하지 않고 선언 자리에서 다시 부른다(RFC-0458 §3.4 rule 5, #38327).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
-  → [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
+  → [Runtime_candidate_standing.order](../../lib/runtime/runtime_candidate_standing.mli)
 
 **Official-client Session Recovery**
 : 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
@@ -2130,7 +2130,7 @@ status: reference
   `Seats_unknown`으로 거절한다. 이름을 스스로 적을 수 있는 환경에는 목록이 없어
   넘김이 그대로 통과한다.
   - **단일 자격증명 트랜잭션 직렬화 (Credential Admission Serialization)**: 인계 대상
-    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_dos_controller.holder_left`),
+    적격성 확인(`Play_seat.hand_to`), 이탈한 조종자 해제(`Keeper_machine_controller_authority.holder_left`),
     실제 제어권 변경(`Dos_lane.pass`)은 단일 Auth 자격증명 트랜잭션(`with_credential_transaction`)
     안에서 원자적으로 직렬화된다(#40577). 대상 회수가 먼저 완료되면 목록에서 제외되어 거절되고,
     인계가 먼저 권한을 얻으면 회수는 인계가 끝날 때까지 대기한 뒤 새 조종자의 권한을 해제한다.
@@ -2147,8 +2147,8 @@ status: reference
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli) ·
   [Play_seat.participants](../../lib/play/play_seat.mli) ·
   [Play_seat.hand_to](../../lib/play/play_seat.mli) ·
-  [Keeper_dos_controller.execute](../../lib/keeper/keeper_dos_controller.mli) ·
-  [Keeper_dos_controller.holder_left](../../lib/keeper/keeper_dos_controller.mli)
+  [Machine_addon_host.call](../../lib/machine_addon_host.mli) ·
+  [Keeper_machine_controller_authority.holder_left](../../lib/keeper/keeper_machine_controller_authority.mli)
 
 **Shared DOS Play Invite (공유 DOS 플레이 초대)**
 : 운영자가 이름과 만료 시각을 붙여 발급하는 `Player` 자격증명. 링크를 받은 사람은
@@ -3372,7 +3372,7 @@ status: reference
   `Self_owned`/`Held_by_other` 를 가르고, lifecycle 의 다른 전이는 같은 함수를
   `~same_agent` 라는 인자 이름으로 받는다. 이름표는 셋이지만 비교는 하나이므로,
   한쪽만 바꾸면 도구가 받아들일 전이를 lifecycle 이 거절한다.
-  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_dos_controller.holder_left`,
+  **다른 뜻과 구별한다**: 기계를 쥔 조종자(`Keeper_machine_controller_authority.holder_left`,
   → 조종권 (Controller))도 홀더라고 부르지만, 그쪽은 기계 조종권을 쥔 이름이고
   Task 와 무관하다. Task 문맥의 홀더는 언제나 Assignee 다.
   → [Types_core](../../lib/types/types_core.mli),

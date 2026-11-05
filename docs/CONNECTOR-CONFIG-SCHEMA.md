@@ -41,9 +41,9 @@ and `runtime.toml` resolved to at startup, not to the hardcoded baseline.
 Changes persist in `.masc/runtime_params.json` and are recorded in
 `.masc/param_audit.jsonl`.
 
-`Channel_gate_discord_state.set_trigger_policy` holds a display mirror for the
-connector status JSON, not the value anything is judged by; a param change
-carries it along so the screen does not contradict the change.
+`Channel_gate_discord_state.status_json` reads the runtime param on each call,
+including while the gateway is disconnected, so the status JSON follows a
+param change.
 
 Slack's `[slack].trigger_policy` and its `slack.trigger_policy` param work the
 same way, through the same shared resolution (`Connector_trigger_policy`).

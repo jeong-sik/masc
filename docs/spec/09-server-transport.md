@@ -190,7 +190,7 @@ MCP는 JSON-RPC 2.0 위에 구축된다. 모든 요청은 동일한 구조를 �
 
 ### 4.3 MCP Protocol Version
 
-지원 버전은 `Mcp_server.supported_protocol_versions`에 정의된다. 세션 생성 시 `initialize` 요청의 `params.protocolVersion` 필드로 버전을 협상한다.
+지원 버전은 `Mcp_transport_protocol.supported_protocol_versions`에 정의된다. 세션 생성 시 `initialize` 요청의 `params.protocolVersion` 필드로 버전을 협상한다.
 
 - `mcp_protocol_versions`: 지원 버전 목록
 - `mcp_protocol_version_default`: 기본 버전

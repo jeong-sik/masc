@@ -98,7 +98,7 @@ shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shi
 (`<base>/.masc/microvm/shim/masc-exec-shim` 과 옆의 `.sha256`). 바꾸는 방법은 아래
 "shim 받기"다. SSH 엔드포인트용 `masc-exec-ssh-bootstrap` 은 게스트에 쓰지 않는다.
 게스트는 이 디렉터리를 마운트로 읽고 서버는 요청마다 shim 을 새로 실행하므로
-(`Keeper_sandbox_remote.transport_argv`), 켜져 있는 게스트도 다음 요청부터 새 shim 을
+(`Keeper_sandbox_remote.Exec_per_request`), 켜져 있는 게스트도 다음 요청부터 새 shim 을
 쓴다. 2026-10-13 에 0.49.0 을 0.52.0 으로 바꿨을 때 재시작 없이 게스트 18개가 새
 릴리즈로 답했다(#42726). 다만 서버는 probe 답을 프로세스가 사는 동안 들고 있고
 게스트는 다시 probe 하지 않는다. 그래서 `keeper_lane_status` 의 `shim_release` 와 이

@@ -2,7 +2,7 @@
 
 Keeper approval rules are persisted allow rules. The authoritative path is
 `Keeper_approval_queue_rules.rules_path`, which resolves beneath
-`Workspace_utils.masc_dir_from_base_path`. They are only loaded when every rule
+`Common.masc_dir_from_base_path`. They are only loaded when every rule
 entry parses as a complete rule. A malformed entry fails the whole load, is
 reported as a persistence read drop, and cannot match a future request or
 auto-approve a tool call.

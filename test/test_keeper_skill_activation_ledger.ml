@@ -1619,12 +1619,35 @@ let test_usage_reads_only_the_committed_session () =
       check int "idempotent beta stays cached" 1 (load_count "trace-two"))
 ;;
 
+let test_a_failed_session_load_is_retried () =
+  with_session @@ fun config trace _session_dir ->
+  let valid = ok "valid session" (Ledger.load ~config ~trace_id:trace) in
+  let attempts = ref 0 in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config:_ ~trace_id:_ ->
+      incr attempts;
+      if !attempts = 1 then
+        Error (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" }))
+      else Ok valid)
+    (fun () ->
+      let read () = Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ] in
+      let first_loaded, first_unavailable = read () in
+      check (list string) "the failed session is not loaded" [] (List.map fst first_loaded);
+      check int "the failure remains explicit" 1 (List.length first_unavailable);
+      let second_loaded, second_unavailable = read () in
+      check (list string) "the recovered session loads" [ "alpha" ] (List.map fst second_loaded);
+      check (list string) "the recovered read has no old failure" [] second_unavailable;
+      check int "the failed session was retried" 2 !attempts)
+;;
+
 let () =
   run
     "keeper skill activation ledger"
     [ ( "session ledger"
       , [ test_case "usage reloads only the committed session" `Quick
             test_usage_reads_only_the_committed_session
+        ; test_case "a failed session load is retried" `Quick
+            test_a_failed_session_load_is_retried
         ; test_case "a committed row announces its Keeper" `Quick
             test_a_committed_row_announces_its_keeper
         ; test_case "legacy composition identifies its row and refuses later append" `Quick

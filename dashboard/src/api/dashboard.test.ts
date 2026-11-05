@@ -5203,9 +5203,7 @@ describe('fetchRuntimeProviders', () => {
               has_system_prompt: false,
               enable_thinking: true,
               preserve_thinking: null,
-              clear_thinking: false,
               resolved_reasoning_effort: 'high',
-              glm_clear_thinking: false,
               glm_replay_reasoning: true,
               tool_stream: true,
               tool_choice: {

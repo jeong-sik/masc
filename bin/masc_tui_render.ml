@@ -197,17 +197,24 @@ let render_overview (state : state) home =
     | Some line -> line
     | None -> ""
   in
-  let work =
+  (* The reading, then where its details live. The pointer is a separate
+     item so the Status card leaves it out whole when it does not fit, rather
+     than wrapping its last word onto a line of its own. *)
+  let work_separator = " · " in
+  let work_details_pointer = "details in Work" in
+  let work_items =
     match state.task_flow, state.tasks_error with
-    | _, Some _ -> " Work: reading unavailable · open Work for the source"
-    | None, None -> " Work: not observed"
+    | _, Some _ -> [ "Work: reading unavailable · open Work for the source" ]
+    | None, None -> [ "Work: not observed" ]
     | Some flow, None ->
         if flow.Masc_tui_task_flow.unparseable_timestamps > 0 then
-          " Work: partial timestamp coverage · details in Work"
+          [ "Work: partial timestamp coverage"; work_details_pointer ]
         else
-          Printf.sprintf " Work: %d currently done in the last 24h · details in Work"
-            flow.Masc_tui_task_flow.recent.completed
+          [ Printf.sprintf "Work: %d currently done in the last 24h"
+              flow.Masc_tui_task_flow.recent.completed
+          ; work_details_pointer ]
   in
+  let work = " " ^ String.concat work_separator work_items in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
     ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
@@ -260,7 +267,8 @@ let render_overview (state : state) home =
             in
             List.concat_map wrapped [ String.trim health ]
             @ List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset)
-                (wrapped (String.trim work))
+                (wrapped
+                   (Message_layout.join_fitting ~sep:work_separator ~cells work_items))
             @ List.concat_map wrapped
                 (Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation)
           in

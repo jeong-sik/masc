@@ -398,8 +398,6 @@ let test_finalize_multi_block_ordered () =
   | _ -> Alcotest.fail "expected 3 text blocks in order"
 ;;
 
-(* ── finalize: tool_use with invalid JSON fails closed ─────────── *)
-
 (* ── finalize: tool_use metadata boundary ───────────────────────── *)
 
 let test_finalize_tool_use_missing_name () =

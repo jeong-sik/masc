@@ -1717,8 +1717,7 @@ let%test
   =
   (* minimax-m3 (Ollama Cloud) stamps every parallel tool call index:0 but gives
      each a distinct id. Blocks are keyed by id so the three calls do not collapse
-     into one buffer, which previously concatenated their arguments into invalid
-     JSON and failed the turn with malformed_tool_use_arguments. *)
+     into one buffer whose concatenated arguments are not one JSON object. *)
   let mk id name args : openai_tool_call_delta =
     { tc_index = 0
     ; tc_id = Some id

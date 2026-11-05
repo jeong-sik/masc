@@ -2011,14 +2011,21 @@ let with_post_stream
            { message = "stream body timed out (awaiting first token / inter-chunk idle)"
            ; phase = Unknown_timeout
            })
+    | Eio.Cancel.Cancelled _ as exn ->
+      (* Checked before the end-of-file branch below: a cancellation after the
+         transport reported end of file is still a cancellation. The
+         connection is closed first, so a cached socket does not stay open
+         on the cache's switch. *)
+      Eio.Cancel.protect (fun () -> end_connection conn (Close Request_failed));
+      raise exn
     | exn ->
       (match classify_network_exn exn with
        | Some e -> Error e
        | None when !transport_eof_seen -> Error (eof_error exn)
        | None ->
-         (* Unclassified exceptions (including cancellation) escape, so close
-              the connection before re-raising to avoid leaking a cached socket
-              bound to the long-lived cache switch. *)
+         (* Other unclassified exceptions escape, so close the connection
+            before re-raising to avoid leaking a cached socket bound to the
+            long-lived cache switch. *)
          Eio.Cancel.protect (fun () ->
            end_connection conn (Close Request_failed));
          raise exn)

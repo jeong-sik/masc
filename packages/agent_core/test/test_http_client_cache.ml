@@ -745,6 +745,54 @@ let test_eviction_fiber_closes_idle () =
   | Exit -> ()
 ;;
 
+(* The body is delimited by the peer's close, so reading it to its end makes
+   the transport report end of file. The stream's fiber is cancelled after
+   that; [with_post_stream] must raise the cancellation, not return the end
+   of file as a network error. *)
+let test_stream_cancelled_after_transport_eof_raises_the_cancellation () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url, _ =
+      start_raw_server ~close_after_first:true ~sw ~net:env#net
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+         data: one\n\n"
+    in
+    let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
+    let drained, notify_drained = Eio.Promise.create () in
+    let outcome = ref `Not_finished in
+    Eio.Fiber.first
+      (fun () ->
+         match
+           Http_client.with_post_stream ~cache ~net:env#net ~url ~headers:[] ~body:""
+             ~f:(fun ~pre_header_elapsed_s:_ reader ->
+               let body = Eio.Buf_read.take_all reader in
+               Eio.Promise.resolve notify_drained ();
+               Eio.Fiber.await_cancel () |> ignore;
+               body)
+             ()
+         with
+         | result -> outcome := `Returned result
+         | exception (Eio.Cancel.Cancelled _ as exn) ->
+           outcome := `Cancelled;
+           raise exn)
+      (fun () ->
+         await_promise ~clock:env#clock ~label:"the stream body is read to its end" drained);
+    (match !outcome with
+     | `Cancelled -> ()
+     | `Returned (Error _) ->
+       Alcotest.fail "the cancellation was returned as an error after the transport's end"
+     | `Returned (Ok _) -> Alcotest.fail "the cancelled stream returned its body"
+     | `Not_finished -> Alcotest.fail "the stream fiber did not finish");
+    Alcotest.(check int) "the connection is not parked" 0
+      (Http_client.cache_stats cache).total_idle;
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let with_cache_switch f =
   Eio_main.run
   @@ fun env ->
@@ -1717,6 +1765,10 @@ let () =
             "connection-close stream is not parked"
             `Quick
             test_stream_connection_close_does_not_park
+        ; Alcotest.test_case
+            "cancelled after transport EOF raises the cancellation"
+            `Quick
+            test_stream_cancelled_after_transport_eof_raises_the_cancellation
         ; Alcotest.test_case
             "response cache eligibility"
             `Quick

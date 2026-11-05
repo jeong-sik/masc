@@ -1,0 +1,499 @@
+open Alcotest
+open Masc
+module Watch = Schedule_run_watch
+
+(* [until_github_run] at the tool boundary: what masc_schedule_create and
+   masc_schedule_update store from it, what they refuse, and that the row they
+   store is one [Schedule_run_watch.tick] can wake. *)
+
+let runner_tick_sec = 1.0
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let wake_keeper = "schedule-keeper"
+
+(* The wake-target check reads the keeper through its effective meta, which
+   needs both the declared profile and a snapshot. *)
+let register_wake_target config keeper_name =
+  let profile_path =
+    Keeper_sandbox_config.keeper_toml_path
+      ~base_path:config.Workspace.base_path
+      ~agent_name:keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname profile_path);
+  Out_channel.with_open_text profile_path (fun channel ->
+    Printf.fprintf
+      channel
+      "[keeper]\ninstructions = \"run watch test target\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String keeper_name; "trace_id", `String ("trace-" ^ keeper_name) ])
+  with
+  | Error msg -> fail ("keeper meta parse failed: " ^ msg)
+  | Ok meta ->
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error detail -> fail ("keeper meta write failed: " ^ detail))
+;;
+
+let with_config f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let path = Filename.temp_dir "schedule_tool_run_watch_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf path);
+  let config = Workspace.default_config path in
+  ignore (Workspace.init config ~agent_name:(Some "run-watch-tool-test"));
+  Workspace_metric_hooks.install ();
+  Atomic.set Workspace_hooks.schedule_wake_target_registered_fn (fun config keeper_name ->
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Ok (Some _) -> Ok true
+    | Ok None -> Ok false
+    | Error detail -> Error detail);
+  register_wake_target config wake_keeper;
+  f config
+;;
+
+let schedule_ctx config : Tool_schedule.context =
+  { config
+  ; caller = Tool_schedule.Named_caller "scheduler-agent"
+  ; stamp_keeper_wake_result_delivery =
+      (fun ~payload ->
+        Schedule_payload_projection.set_keeper_wake_result_delivery ~payload ~channel:None)
+  ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+  ; withdraw_queued_keeper_wakes = Keeper_schedule_cancel_withdrawal.run
+  ; result_boundary = Tool_output.Sent_to_client
+  }
+;;
+
+let dispatch config ~name fields =
+  match Tool_schedule.dispatch (schedule_ctx config) ~name ~args:(`Assoc fields) with
+  | Some result -> result
+  | None -> fail ("schedule dispatch returned None: " ^ name)
+;;
+
+let create_name = "masc_schedule_create"
+let update_name = "masc_schedule_update"
+
+(* A tool call is dated by the dispatch clock and refuses a due time behind
+   it, so these schedules are due in 2100. *)
+let future_due_at = 4_102_444_800.0
+
+let run_url = "https://github.com/jeong-sik/masc/actions/runs/41895911884"
+
+let create_fields ?(schedule_id = "watched") ?(extra = []) ~message () =
+  [ "schedule_id", `String schedule_id
+  ; "due_at_unix", `Float future_due_at
+  ; "keeper_name", `String wake_keeper
+  ; "message", `String message
+  ]
+  @ extra
+;;
+
+let stored_exn config schedule_id =
+  match Schedule_store.get_schedule config ~schedule_id with
+  | Some request -> request
+  | None -> fail ("no stored schedule " ^ schedule_id)
+;;
+
+let body_of (request : Schedule_domain.schedule_request) =
+  match Schedule_domain.payload_to_yojson request.Schedule_domain.payload with
+  | `Assoc fields ->
+    (match List.assoc_opt "body" fields with
+     | Some (`Assoc body) -> body
+     | Some _ | None -> fail "stored payload has no body object")
+  | _ -> fail "stored payload is not an object"
+;;
+
+let watch_of_row request =
+  match Watch.watch_of_body (body_of request) with
+  | Ok watch -> watch
+  | Error detail -> fail detail
+;;
+
+let describe_watch = function
+  | None -> "no watch"
+  | Some target -> Watch.target_url target
+;;
+
+let message_of request =
+  match List.assoc_opt "message" (body_of request) with
+  | Some (`String message) -> message
+  | Some _ | None -> fail "stored body has no message"
+;;
+
+let check_success label result =
+  if not (Tool_result.is_success result)
+  then failf "%s: refused: %s" label (Tool_result.message result)
+;;
+
+let check_refused label ~mentioning result =
+  check bool (label ^ ": refused") false (Tool_result.is_success result);
+  List.iter
+    (fun word ->
+      check
+        bool
+        (Printf.sprintf "%s: the message names %s" label word)
+        true
+        (String_util.contains_substring (Tool_result.message result) word))
+    mentioning
+;;
+
+(* --- Create --- *)
+
+let test_create_stores_the_run_as_a_typed_field () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"merge if green"
+          ~extra:[ "until_github_run", `String (run_url ^ "?pr=1#summary") ]
+          ()));
+  let stored = stored_exn config "watched" in
+  check
+    string
+    "the stored field is the parsed run, not the URL"
+    {|{"repo":"jeong-sik/masc","run_id":41895911884}|}
+    (Yojson.Safe.to_string (List.assoc Watch.watch_field (body_of stored)));
+  check string "the message is the Keeper's own" "merge if green" (message_of stored);
+  check (float 0.0) "the due time is the fallback" future_due_at stored.Schedule_domain.due_at
+;;
+
+let test_create_keeps_a_named_attempt () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"check"
+          ~extra:[ "until_github_run", `String (run_url ^ "/attempts/2") ]
+          ()));
+  check
+    string
+    "attempt"
+    (run_url ^ "/attempts/2")
+    (describe_watch (watch_of_row (stored_exn config "watched")))
+;;
+
+let test_create_refuses_a_url_that_names_no_run () =
+  with_config
+  @@ fun config ->
+  List.iter
+    (fun url ->
+      check_refused
+        url
+        ~mentioning:[ Watch.watch_field; "actions/runs" ]
+        (dispatch
+           config
+           ~name:create_name
+           (create_fields ~message:"check" ~extra:[ "until_github_run", `String url ] ()));
+      check bool (url ^ ": nothing stored") true
+        (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched")))
+    [ "https://github.com/jeong-sik/masc/pull/12"
+    ; "https://gitlab.com/jeong-sik/masc/actions/runs/1"
+    ; "https://github.com/jeong-sik/masc/actions/runs/abc"
+    ; "41895911884"
+    ]
+;;
+
+let test_create_refuses_a_recurring_schedule () =
+  with_config
+  @@ fun config ->
+  check_refused
+    "interval"
+    ~mentioning:[ Watch.watch_field; "one_shot" ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"check"
+          ~extra:
+            [ "until_github_run", `String run_url
+            ; "recurrence_kind", `String "interval"
+            ; "recurrence_interval_sec", `Int 3600
+            ]
+          ()));
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
+;;
+
+let test_create_refuses_a_lane_action_with_a_run () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch
+      config
+      ~name:create_name
+      [ "schedule_id", `String "lane-watched"
+      ; "due_at_unix", `Float future_due_at
+      ; "installation_id", `String "inst-1"
+      ; "action", `Assoc [ "kind", `String "compose" ]
+      ; "until_github_run", `String run_url
+      ]
+  in
+  check bool "refused" false (Tool_result.is_success result);
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"lane-watched"))
+;;
+
+(* --- Update --- *)
+
+let test_update_replaces_the_watch_with_what_it_is_given () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields ~message:"first" ~extra:[ "until_github_run", `String run_url ] ()));
+  let update ~message extra =
+    dispatch
+      config
+      ~name:update_name
+      ([ "schedule_id", `String "watched"; "keeper_name", `String wake_keeper; "message", `String message ]
+       @ extra)
+  in
+  check_success "update without the run" (update ~message:"second" []);
+  let without = stored_exn config "watched" in
+  check string "the watch is gone" "no watch" (describe_watch (watch_of_row without));
+  check string "the message changed" "second" (message_of without);
+  check_success
+    "update with another run"
+    (update
+       ~message:"third"
+       [ "until_github_run", `String "https://github.com/jeong-sik/wkbl/actions/runs/7" ]);
+  check
+    string
+    "the new watch"
+    "https://github.com/jeong-sik/wkbl/actions/runs/7"
+    (describe_watch (watch_of_row (stored_exn config "watched")))
+;;
+
+let test_update_refuses_a_run_on_a_recurring_schedule () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"every hour"
+          ~extra:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 3600 ]
+          ()));
+  check_refused
+    "update"
+    ~mentioning:[ Watch.watch_field; "one_shot" ]
+    (dispatch
+       config
+       ~name:update_name
+       [ "schedule_id", `String "watched"
+       ; "keeper_name", `String wake_keeper
+       ; "message", `String "every hour"
+       ; "until_github_run", `String run_url
+       ]);
+  check string "the stored row has no watch" "no watch"
+    (describe_watch (watch_of_row (stored_exn config "watched")))
+;;
+
+(* --- The tool schemas --- *)
+
+let schema_of action =
+  match
+    List.find_opt
+      (fun (definition : Tool_schemas_schedule.definition) -> definition.action = action)
+      Tool_schemas_schedule.definitions
+  with
+  | Some definition ->
+    let schema : Masc_domain.tool_schema = definition.schema in
+    schema
+  | None -> fail "schedule definition missing"
+;;
+
+let validate action args =
+  let schema = schema_of action in
+  Tool_input_validation.validate_args
+    ~schema:schema.input_schema
+    ~name:schema.name
+    ~args:(`Assoc args)
+    ()
+;;
+
+let test_schemas_declare_the_param () =
+  List.iter
+    (fun (label, action, extra) ->
+      match
+        validate
+          action
+          ([ "due_at_unix", `Float future_due_at
+           ; "keeper_name", `String wake_keeper
+           ; "message", `String "check"
+           ; "until_github_run", `String run_url
+           ]
+           @ extra)
+      with
+      | Ok _ -> ()
+      | Error rejection -> failf "%s: %s" label (Tool_result.message rejection))
+    [ "create", Tool_schemas_schedule.Create_request, []
+    ; "update", Tool_schemas_schedule.Update_request, [ "schedule_id", `String "watched" ]
+    ]
+;;
+
+let test_schemas_keep_the_param_out_of_a_lane_action () =
+  List.iter
+    (fun (label, action, extra) ->
+      let lane_action =
+        [ "due_at_unix", `Float future_due_at
+        ; "installation_id", `String "inst-1"
+        ; "action", `Assoc [ "kind", `String "compose" ]
+        ]
+        @ extra
+      in
+      (match validate action lane_action with
+       | Ok _ -> ()
+       | Error rejection ->
+         failf "%s: a Lane action alone was refused: %s" label (Tool_result.message rejection));
+      match validate action (lane_action @ [ "until_github_run", `String run_url ]) with
+      | Ok _ -> failf "%s: a Lane action with until_github_run was accepted" label
+      | Error _ -> ())
+    [ "create", Tool_schemas_schedule.Create_request, []
+    ; "update", Tool_schemas_schedule.Update_request, [ "schedule_id", `String "watched" ]
+    ]
+;;
+
+(* --- The payload contract --- *)
+
+let keeper_wake_payload watch =
+  `Assoc
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; ( "body"
+      , `Assoc
+          ([ "keeper_name", `String wake_keeper; "message", `String "m" ]
+           @
+           match watch with
+           | None -> []
+           | Some value -> [ Watch.watch_field, value ]) )
+    ]
+;;
+
+let test_the_payload_contract_checks_the_watch () =
+  let creation payload =
+    Schedule_payload_projection.validate_request_payload_for_creation_detailed ~payload
+  in
+  check bool "no watch" true (Result.is_ok (creation (keeper_wake_payload None)));
+  check bool "a well-formed watch" true
+    (Result.is_ok
+       (creation
+          (keeper_wake_payload
+             (Some (`Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 5 ])))));
+  List.iter
+    (fun (label, watch) ->
+      check bool label true (Result.is_error (creation (keeper_wake_payload (Some watch)))))
+    [ "the URL as a string", `String run_url
+    ; "no run id", `Assoc [ "repo", `String "jeong-sik/masc" ]
+    ; "a repository that is not owner/name", `Assoc [ "repo", `String "masc"; "run_id", `Int 5 ]
+    ; ( "an unknown field"
+      , `Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 5; "url", `String run_url ] )
+    ; "a run id of zero", `Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 0 ]
+    ]
+;;
+
+(* --- From the tool to the wake --- *)
+
+let test_a_row_the_tool_created_is_woken_and_still_dispatchable () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"merge if green"
+          ~extra:[ "until_github_run", `String run_url; "urgency", `String "low" ]
+          ()));
+  let now = future_due_at -. 3600.5 in
+  let outcomes =
+    match
+      Watch.tick config ~now ~runner_tick_sec ~read:(fun _ ->
+        Ok (Watch.Completed (Some Watch.Failure)))
+    with
+    | Ok outcomes -> outcomes
+    | Error detail -> fail detail
+  in
+  check int "one watched row" 1 (List.length outcomes);
+  (match outcomes with
+   | [ { Watch.verdict = Watch.Woken (Watch.Run_completed (Some Watch.Failure)); _ } ] -> ()
+   | _ -> fail "the row was not woken for a failed run");
+  let woken = stored_exn config "watched" in
+  check (float 0.0) "due at the current second" (Float.floor now) woken.Schedule_domain.due_at;
+  check string "no watch left" "no watch" (describe_watch (watch_of_row woken));
+  (match String.split_on_char '\n' (message_of woken) with
+   | [ headline; url; ""; original ] ->
+     check bool "the outcome leads" true (String_util.contains_substring headline "failure");
+     check string "then the run URL" run_url url;
+     check string "then the Keeper's own message" "merge if green" original
+   | _ -> fail "the message is the outcome, the run URL, an empty line, then the Keeper's own");
+  check string "urgency is kept" "low"
+    (match List.assoc_opt "urgency" (body_of woken) with
+     | Some (`String urgency) -> urgency
+     | Some _ | None -> fail "urgency lost");
+  check bool "the consumer still accepts the payload" true
+    (Result.is_ok (Schedule_payload_projection.dispatch_view_detailed woken))
+;;
+
+let () =
+  run
+    "schedule_tool_run_watch"
+    [ ( "create"
+      , [ test_case "stores the run as a typed field" `Quick test_create_stores_the_run_as_a_typed_field
+        ; test_case "keeps a named attempt" `Quick test_create_keeps_a_named_attempt
+        ; test_case "refuses a URL that names no run" `Quick test_create_refuses_a_url_that_names_no_run
+        ; test_case "refuses a recurring schedule" `Quick test_create_refuses_a_recurring_schedule
+        ; test_case "refuses a Lane action with a run" `Quick test_create_refuses_a_lane_action_with_a_run
+        ] )
+    ; ( "update"
+      , [ test_case
+            "replaces the watch with what it is given"
+            `Quick
+            test_update_replaces_the_watch_with_what_it_is_given
+        ; test_case
+            "refuses a run on a recurring schedule"
+            `Quick
+            test_update_refuses_a_run_on_a_recurring_schedule
+        ] )
+    ; ( "schemas"
+      , [ test_case "declare the param" `Quick test_schemas_declare_the_param
+        ; test_case
+            "keep the param out of a Lane action"
+            `Quick
+            test_schemas_keep_the_param_out_of_a_lane_action
+        ] )
+    ; ( "payload"
+      , [ test_case "the contract checks the watch" `Quick test_the_payload_contract_checks_the_watch ] )
+    ; ( "wake"
+      , [ test_case
+            "a row the tool created is woken and still dispatchable"
+            `Quick
+            test_a_row_the_tool_created_is_woken_and_still_dispatchable
+        ] )
+    ]
+;;

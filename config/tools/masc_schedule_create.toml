@@ -76,6 +76,17 @@ Where the wake sits in the Keeper's queue when it lands. Defaults to \
 normal."""
 
 [[params]]
+name = "until_github_run"
+type = "string"
+description = """
+A GitHub Actions run URL: https://github.com/<owner>/<repo>/actions/runs/<id>, \
+optionally followed by /attempts/<n>. The wake comes when that run completes, \
+whatever its conclusion, or at the due time, whichever is first. The wake \
+message then starts with the run's outcome and URL. The server reads the run \
+with its GitHub reader account; when that account cannot see the run, the \
+wake comes early and says so. Works with recurrence_kind one_shot only."""
+
+[[params]]
 name = "schedule_id"
 type = "string"
 description = "Optional stable schedule id."
@@ -156,8 +167,8 @@ type = "string"
 description = """
 For a Lane action instead of a Keeper wake: the declared Lane Add-on \
 installation (its declaration id) whose live worker runs action at each due \
-time. Give it with action, and without keeper_name, message, title, urgency \
-or allow_unregistered_keeper."""
+time. Give it with action, and without keeper_name, message, title, urgency, \
+allow_unregistered_keeper or until_github_run."""
 
 [[params]]
 name = "action"
@@ -174,5 +185,5 @@ description = "Wake a Keeper with this message."
 
 [[one_of]]
 required = ["installation_id", "action"]
-forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper"]
+forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper", "until_github_run"]
 description = "Hand this action to a declared Lane installation's live worker."

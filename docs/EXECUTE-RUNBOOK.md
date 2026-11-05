@@ -22,10 +22,17 @@ syntax; there is no object form for them.
 
 ## Output Limits
 
-Host subprocess capture (`Process_eio`) keeps the first 8 MiB and the last 256 KiB
-of each stream (`Common.max_process_capture_head_bytes` and
-`Common.max_process_capture_tail_bytes`) and marks the elided bytes with a
-truncation marker. Both limits are constants; no environment variable changes them.
+Each captured stream (stdout or stderr of one process) keeps its first 8 MiB
+and its last 256 KiB. A stream of at most 8 MiB + 256 KiB is kept whole. In a
+longer stream the bytes in between are dropped, and the output shows
+`...(truncated N bytes)...` where they were. `N` is the dropped byte count plus
+the bytes trimmed so that no UTF-8 character is cut in half (up to six for text).
+
+The budgets are `max_process_capture_head_bytes` and
+`max_process_capture_tail_bytes` in `lib/core/common.ml`. They bound what the
+runtime buffers from a process. The size of one tool result on the wire has its
+own ceiling, `max_tool_result_wire_bytes` in the same file, so a stream that was
+captured whole can still reach the caller as a stored blob.
 
 ## Typed Input
 

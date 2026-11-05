@@ -138,6 +138,7 @@ sidecars/**/.venv/
 
 # Scratch files from local workflows
 issue*.md
+PR-BODY.md
 .nvimlog
 config/personas/uranium666
 # Personal flavor personas (system-role personas stay tracked as the roster).

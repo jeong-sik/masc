@@ -104,7 +104,9 @@ let test_execute_output_route_eof env =
           | Error _ -> Alcotest.fail "execute stream did not end cleanly")))
 
 (* A presence stream is closed by the real session stop path after its prime
-   frame. The HTTP server itself stays up while the client waits for EOF. *)
+   frame. The HTTP server itself stays up while the client waits for EOF. The
+   route is served with a runtime, so its supervisor owns the response
+   (RFC-0493 §3.2). *)
 let test_presence_route_eof env =
   let workspace = Masc_test_deps.setup_test_workspace () in
   let raw_session_id = "presence-eof-" ^ string_of_int (Random.bits ()) in
@@ -125,12 +127,24 @@ let test_presence_route_eof env =
         | Error `Malformed -> Alcotest.fail "fixture authority"
       in
       let admit ~base_path:_ _request = Ok () in
+      Eio.Switch.run (fun sw ->
+      let runtime : Server_mcp_transport_http_types.runtime =
+        { base_path = workspace
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; tool_allowed_in_profile = (fun _ _ -> true)
+        ; handle_request =
+            (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
+                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+        ; clear_resource_subscriptions_for_session = (fun _ -> ())
+        }
+      in
       let deps : Server_mcp_transport_http_types.deps =
         { get_origin = (fun _ -> "")
         ; cors_headers = (fun _ -> [])
         ; auth_token_from_request = (fun _ -> None)
         ; is_ready = (fun () -> true)
-        ; get_runtime_result = (fun () -> Error "unused")
+        ; get_runtime_result = (fun () -> Ok runtime)
         ; get_base_path = (fun () -> workspace)
         ; get_server_state = (fun () -> None)
         ; verify_mcp_auth = admit
@@ -168,7 +182,7 @@ let test_presence_route_eof env =
         match result with
         | Ok (Masc_http_client.Pool.Streamed _) -> ()
         | Ok (Masc_http_client.Pool.Buffered _) -> Alcotest.fail "presence was buffered"
-        | Error detail -> Alcotest.failf "presence stream failed: %s" detail))
+        | Error detail -> Alcotest.failf "presence stream failed: %s" detail)))
 
 let () =
   let case name test = Alcotest.test_case name `Quick (fun () -> Eio_main.run test) in

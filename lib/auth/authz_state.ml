@@ -95,7 +95,8 @@ let apply state (record : R.t) =
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
       | K.Local_recovery
-      | K.Invite ) as kind )
+      | K.Invite
+      | K.Admission ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -106,7 +107,8 @@ let apply state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery ) as kind )
+      | K.Local_recovery
+      | K.Admission ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 

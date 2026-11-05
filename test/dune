@@ -7245,6 +7245,7 @@
 
 (include stanzas/test_authz_invite_event.inc)
 (include stanzas/test_authz_invite_state.inc)
+(include stanzas/test_authz_admission_event.inc)
 
 (include stanzas/test_authz_log.inc)
 

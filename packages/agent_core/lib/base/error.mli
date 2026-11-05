@@ -149,10 +149,6 @@ type io_error =
 type orchestration_error =
   | UnknownAgent of { name : string }
   | TaskTimeout of { task_id : string }
-  | DiscoveryFailed of
-      { url : string
-      ; detail : string
-      }
 
 (** {1 Top-level error} *)
 

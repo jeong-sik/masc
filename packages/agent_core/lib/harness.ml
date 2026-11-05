@@ -166,16 +166,6 @@ end
 (* ── Adversarial harness ─────────────────────────────────────── *)
 
 module Adversarial = struct
-  (** Types of adversarial input. *)
-  type adversarial_input =
-    | MalformedJson of string
-    | PromptInjection of string
-    | ToolError of
-        { tool_name : string
-        ; error : string
-        }
-    | OversizedInput of { size : int }
-
   (** What we expect under adversarial conditions. *)
   type expectation =
     | GracefulError
@@ -439,15 +429,6 @@ end
 (* ── Composability harness ───────────────────────────────────── *)
 
 module Composability = struct
-  type scenario =
-    | SingleAgent
-    | Handoff of
-        { parent : string
-        ; targets : string list
-        }
-    | Orchestrated of { agents : string list }
-    | Pipeline of { stages : string list }
-
   type expectation =
     | HandoffOccurred of string
     | AllAgentsCompleted

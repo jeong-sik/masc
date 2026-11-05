@@ -325,11 +325,6 @@ let core_orchestration_error_fields = function
     [ "variant", `String "unknown_agent"; "name", `String name ]
   | Agent_core.Error.TaskTimeout { task_id } ->
     [ "variant", `String "task_timeout"; "task_id", `String task_id ]
-  | Agent_core.Error.DiscoveryFailed { url; detail } ->
-    [ "variant", `String "discovery_failed"
-    ; "url", `String url
-    ; "detail", `String detail
-    ]
 ;;
 
 let stored_fields (stored : Agent_core.History.stored) =

@@ -94,7 +94,7 @@ L4 가 2초 갈래를 지운다. 그 전까지는 2초 갈래가 남아 있어 �
 
 ## 4. 검증
 
-- L1: 한 Keeper 응답이 fleet 응답의 그 행과 같다. 없는 Keeper 는 404. fleet 합계가 공용 모듈 결과와 같다.
+- L1: 한 Keeper 응답이 fleet 응답의 그 행과 같다. fleet 답에 행이 없는 Keeper 는 200 과 `"keeper": null` 로 답한다. TUI 의 workspace 읽기는 2xx·304 에서만 receipt 를 확인하므로, 404 로 답하면 그 답이 이 workspace 의 것인지 확인할 수 없다. fleet 합계가 공용 모듈 결과와 같다.
 - L2: PTY 시험. Memory 화면에서 한 Keeper 알림이 그 Keeper 행 읽기 하나만 일으킨다. 다른 dataset 알림은 아무것도 읽지 않는다. 합친 합계가 fleet 응답 합계와 같다. Browser lane 을 닫으면 그사이 온 알림을 읽는다.
 - L3·L4: 저장소마다 쓰기 한 번이 그 Keeper 알림 하나를 낸다. 묶이지 않은 디렉터리의 쓰기는 알리지 않는다. L4 PTY 시험은 `--refresh 1` 로 Memory 화면에 3초 머물며 알림 없이는 읽지 않는 것을 본다.
 - 층마다 `scripts/harness/perf/tui_request_probe.py` 로 Memory 화면의 요청 수를 앞뒤로 잰다(준비되는 대로).

@@ -1,9 +1,10 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11 and 13 to 17 of the stack (#48231, #48232, #48233,
-#48250, #48254, #48266, #48289, #48292, #48299, #48306, #48327, #48329, #48341,
-#48344, #48350). Layer 7 is the first version of this document. Layer 12 added
-layers 6 and 8 to 11. The layer that carries this text added layers 13 to 17.
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19 and 20 of the stack (#48231, #48232,
+#48233, #48250, #48254, #48266, #48289, #48292, #48299, #48306, #48327, #48329,
+#48341, #48344, #48350, #48365, #48370). Layer 7 is the first version of this
+document. Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13 to 17.
+The layer that carries this text added layers 19 and 20.
 
 ## Source
 
@@ -23,6 +24,8 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 14) | `b4024cd1b69969af074544e33dbcbe7ed2e91bb9` | 41902957736 | `e274ba9288ff5ee1a40d6988c8291ad62a97b88899e4cf85c49638869952baa2` | `108103f1eb58106a2088d3298a304dc1b5e2e3bbd351e8b8ec5f06ce0e3b2280` |
 | After (layers 1 to 16) | `3a2c8c907ada34d56ab902c35d5c445ef81a3351` | 41907039543 | `0a7e5caff4a8edc16a19df2c4cc68cc1572585a9a352ecf6934e1ff5aa498ff8` | `a3d493e9b978ca472df16d9e6caf6f16e893124d4bb64fe0e81af9673b8a3a24` |
 | After (layers 1 to 17) | `9257388f916e738faf8c7acd2115a8101368c7d0` | 41909034875 | `ad08fcc424bbcc32076b440fd142b2c6d7c71d7aa75d849d059ef0f1aa0ea1c0` | `bc0396352e13b30b2ac262552ee0e7cabe04d8266b612a3b59dc1eaf5b916d1c` |
+| After (layers 1 to 19) | `66a120b1993303d4c41b6c76a4ac5af50783d650` | 41913436954 | `8ef3094b19cef732d6c2057218cb189c2c1412b45375a4fadd1e77bbd838039a` | `fd8d22b0cff9f377e02a2696cefdf8fd2156b1ad9311b05fd970f9f5f4971716` |
+| After (layers 1 to 20) | `8394991844dee9b123c3b577334bf368a3a7906d` | 41915100410 | `809e534c1b99241c45c51639e78fa46c7701beb8657ac8f470e2be6c3f87fa09` | `cac9d03ef037ce87bc341b97438438332b3c848c5037970b57c051b5e0a1752b` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -41,7 +44,8 @@ artifacts were uploaded after that failure.
   and Enter) are the ones with no key path from the Dashboard that the capture
   needed. Layers 13 to 17 used 200x55 and 120x35 (Dashboard), 100x30 and 80x24
   (Features), 120x35 (the footers of layers 15 and 16) and 120x35 and 80x24 (System
-  menu).
+  menu). Layer 19 used 120x35 and 200x55 (Dashboard). Layer 20 used 80x24 and 120x35
+  (Usage).
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -400,6 +404,55 @@ It now ends at the last view. At 120 cells the row is the same on both sides.
 ![System menu row before, 80x24](system-menu-80-before.png)
 ![System menu row after, 80x24](system-menu-80-after.png)
 
+### Layer 19: the Status card keeps its Work pointer whole (#48365)
+
+Dashboard, Status card. The `Work` row is a reading followed by where its
+details live. Before is the layers 1 to 17 build, after is the layers 1 to 19
+build.
+
+```
+120x35  before  Work: 0 currently done in the last 24h · details in
+                Work
+120x35  after   Work: 0 currently done in the last 24h
+200x55  before  Work: 0 currently done in the last 24h · details in Work
+200x55  after   Work: 0 currently done in the last 24h · details in Work
+```
+
+The text area of the card is 54 cells at 120 columns. The pointer
+`details in Work` does not fit after the reading, and the card used to wrap it
+and leave `Work` alone on the second line. It now leaves the pointer out when it
+does not fit whole. At 200 columns it fits, and the row is the same on both
+sides.
+
+![Status card before, 120x35](status-card-120-before.png)
+![Status card after, 120x35](status-card-120-after.png)
+
+### Layer 20: Usage lists accounts with no report under one line (#48370)
+
+Usage tab (`Tab` three times from the Dashboard), Plan view. The server has not
+heard from any of the fixture's ten accounts since it started, so all ten are in
+the `No windows to show` section. Before is the layers 1 to 19 build, after is
+the layers 1 to 20 build. The account ids differ between the sides, which start
+separate workspaces.
+
+```
+80x24   before  [rows 1-14/29 · j/k to scroll]   3 accounts on the first screen
+80x24   after   [rows 1-14/17 · j/k to scroll]   7 accounts on the first screen
+120x35  before  20 rows from the heading: five rows of two cards, three rows each
+120x35  after   12 rows from the heading: one sentence, then ten names
+```
+
+Before, each account was a card (120 cells) or a block of two or three rows
+(80 cells) that repeated `No usage report since server start`. The section now
+says it once and lists the accounts by name and id, one per row. An account with
+an email, an account that reported with no window, and an account with a
+catalogue exhausted tag are not in this fixture and were not drawn.
+
+![Usage at 80x24 before](usage-80-before.png)
+![Usage at 80x24 after](usage-80-after.png)
+![Usage at 120x35 before](usage-120-before.png)
+![Usage at 120x35 after](usage-120-after.png)
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -424,5 +477,12 @@ It now ends at the last view. At 120 cells the row is the same on both sides.
   verdicts and no repository, so neither screen was reached.
 - Only the 120x35 Keepers list was measured for column positions. The 200x55
   and 80x24 Keepers screens differ in the same header text and were not measured.
+- Layer 19 at widths between 120 and 200 cells, and with a reading that says
+  `Work: reading unavailable`: the fixture reads Work and the Dashboard was
+  captured at 120x35 and 200x55 only.
+- Layer 20 with an account that has an email, with an account that reported but
+  has no window, and at widths below 80 cells: the fixture has ten accounts,
+  none with an email, none that reported, and the Usage tab was captured at
+  80x24 and 120x35 only.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

@@ -8,7 +8,7 @@ RFC-0490 의 근거다. 가짜 MCP 서버와 일회용 HOME 으로 Antigravity C
 | --- | --- |
 | agy | 1.5.1 (`~/.local/bin/agy`, 2026-11-05 08:17Z 에 자동 업데이트로 바뀜). 측정 내내 같은 버전이었다(`Language server version: 1.5.1`) |
 | 모델 | `claude-sonnet-5-5-low` (msx-retro-mania 가 쓴 것과 같다) |
-| 시각 | 측정 1–5: 2026-11-05 10:38Z – 11:01Z. 측정 6–9: 11:19Z – 11:27Z |
+| 시각 | 측정 1–5: 2026-11-05 10:38Z – 11:01Z. 측정 6–9: 11:19Z – 11:27Z. 측정 10: 12:32Z |
 | 서버 | 아래 `server.py`. streamable HTTP, `tools/list`·`tools/call` 을 한 줄씩 기록한다 |
 | HOME | 아래 `setup` 으로 만든 일회용 디렉터리. 기본 settings 는 masc 의 `Native_none` 과 같다. 측정마다 바꾼 settings 는 표에 적었다 |
 | 실제 도구 스펙 | msx-retro-mania 의 `keeper_tools_list` 결과(10:26Z, `descriptor_surface` 206개)에서 이름·설명을 받고, 인자는 `config/tools/<internal_name>.toml` 의 `[[params]]` 로 다시 만들었다. TOML 이 없는 5개는 `schema_shape` 의 속성 이름을 문자열로 두었다. masc 가 실제로 보내는 바이트가 아니라 재구성한 스펙이다 |
@@ -44,6 +44,7 @@ RFC-0490 의 근거다. 가짜 MCP 서버와 일회용 HOME 으로 Antigravity C
 | 8a | 7 + 20 KB 결과(`masc_dos_screen`) | 결과가 `brain/.../output.txt`(701 줄, 20,317 B)로 빠짐. allow·hook 없이 읽힘. 모델이 끝 글자 `END-OF-BIG-RESULT` 를 보고함 |
 | 8b | RFC-0490 2.2 의 `Native_none` 줄: allow `mcp(masc/*)`·`read_file(<appDataDir>/mcp/masc)`, deny `read_file(<HOME>/.gemini/config)`·`read_file(<appDataDir>/antigravity-oauth-token)`·`write_file(*)`·`command(*)`·`read_url(*)`·`execute_url(*)`. hook 없음 | 로그인 정상. schema 읽힘(인자 4개 정확). 20,317 B 결과 파일 읽힘. `mcp_config.json` 은 "user-configured deny rule" 로 거절되고 턴은 이어짐. appDataDir 안 파일은 boundary 로 거절. 모델이 JSON 답을 끝까지 냄 |
 | 9 | 8b 의 HOME 에서 "경로 인자를 받는 함수 이름을 대라" 고만 물음 | `read_file`·`write_file`·`edit_file`, 그리고 경로 인자 없는 `run_command`. 모델 자기 보고다. 측정 내내 읽기 단계의 `tool_name` 은 `read_file` 만 나왔다 |
+| 10 | `Native_read` 와 같은 읽기 규칙(allow `read_file(<workspace>)`, deny `write_file(*)`·`command(*)`·`read_url(*)`·`execute_url(*)`), MCP 서버·hook 없음. 모델에게 문장 하나를 먼저 쓰고 작업 폴더 밖 파일을 읽게 함 | 읽기는 Ask → 자동 거절, 실행이 끝남. 결과 `status: SUCCESS`, `response: "Starting the check now.\n"`, `denied_actions: [{"action": "read_file", "display_name": "ReadFile"}]`. stderr 는 비어 있음. 모델이 쓰기로 한 마지막 문장은 없음 |
 
 ### 2 의 잘린 지점
 
@@ -102,7 +103,7 @@ agy 의 `usage` 에서 입력 토큰과 캐시 읽기 토큰을 더했다. 첫 `
 
 ## 스크립트
 
-측정에 쓴 스크립트를 줄인 판이다. 서버의 `Mcp-Session-Id` 헤더와 `DELETE` 처리, hook 의 `AbsolutePath`·`path` 인자 처리를 뺐다. 측정 중 agy 의 `read_file` 인자는 `Path` 만 나왔다. 세 파일을 한 디렉터리에 두고 `python3 -I` 로 돌린다. 토큰은 운영자 자신의 agy 로그인을 쓴다. 측정 2 의 HOME 은 `setup` 으로 만들고, `mcp_config.json` 의 `tools` 에 206개 이름을 `{"eager": true}` 로 넣는다. 측정 6–9 는 `setup` 으로 만든 HOME 의 settings 만 표대로 바꿨다.
+측정에 쓴 스크립트를 줄인 판이다. 서버의 `Mcp-Session-Id` 헤더와 `DELETE` 처리, hook 의 `AbsolutePath`·`path` 인자 처리를 뺐다. 측정 중 agy 의 `read_file` 인자는 `Path` 만 나왔다. 세 파일을 한 디렉터리에 두고 `python3 -I` 로 돌린다. 토큰은 운영자 자신의 agy 로그인을 쓴다. 측정 2 의 HOME 은 `setup` 으로 만들고, `mcp_config.json` 의 `tools` 에 206개 이름을 `{"eager": true}` 로 넣는다. 측정 6–10 은 `setup` 으로 만든 HOME 의 settings 만 표대로 바꿨다.
 
 `server.py` (`<port> <specs.json> <log> [always_load|big=<tool>]`):
 

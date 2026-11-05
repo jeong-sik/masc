@@ -1534,11 +1534,9 @@ export interface KeeperOutcomes {
   observed_turns: number
   successes: {
     substantive_turns: number
-    handoffs_ok: number
   }
   failures: {
     turn_failed: number
-    handoff_failed: number
     crashes: number
     restarts: number
     consecutive_fail_current: number

@@ -10,7 +10,30 @@
   "skipped": {
     "bad_lines": 0,
     "bad_schema_entries": 0,
+    "bad_message_entries": 0,
     "unplaced_files": 0
+  },
+  "composition": {
+    "requests": 5479,
+    "body_bytes": 11533469199,
+    "pooled_pct": {
+      "tool_schemas": 4.56,
+      "system_prompt": 5.19,
+      "messages.user": 7.97,
+      "messages.assistant": 24.26,
+      "messages.tool": 34.65,
+      "unaccounted": 31.23,
+      "messages.system": 0.04
+    },
+    "median_pct": {
+      "tool_schemas": 9.25,
+      "system_prompt": 10.51,
+      "messages.user": 11.55,
+      "messages.assistant": 35.45,
+      "messages.tool": 34.75,
+      "unaccounted": 0.0,
+      "messages.system": 0.0
+    }
   },
   "tools": [
     {

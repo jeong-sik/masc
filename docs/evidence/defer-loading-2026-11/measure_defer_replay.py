@@ -38,6 +38,13 @@ Definitions:
   `len(name) + 2` bytes either way, because the `keeper_tool_search` listing names
   each deferred tool, placed or not, joined with ", ".
 
+- composition: how much of a request body each part takes, for the stored requests
+  that record `wire.body_bytes`. The parts are the tool schemas, the system prompt
+  (`system_prompt.bytes`), the messages by role (the sum of `messages[].artifact.bytes`
+  per `role`) and `unaccounted`, the rest of the body (image data of requests with
+  media, and the JSON around the parts; never below zero). Shares are pooled over
+  all bytes and taken as the median of the per-request shares.
+
 A tool's name here is the name the Keeper sees (`BrowserSession`), which is the
 name in both stores. Its file under `config/tools/` can have another name
 (`masc_browser_session`).
@@ -70,6 +77,9 @@ LISTING_SEPARATOR = ", "
 CARRY_SAME_DAY = "same-day"
 CARRY_FROM_FIRST_CALL = "from-first-call"
 CARRY_RULES = (CARRY_SAME_DAY, CARRY_FROM_FIRST_CALL)
+TOOL_SCHEMAS = "tool_schemas"
+SYSTEM_PROMPT = "system_prompt"
+UNACCOUNTED = "unaccounted"
 DEFAULT_MIN_PRESENCE_PCT = 90.0
 DEFAULT_TOP = 20
 
@@ -79,6 +89,9 @@ class StoredRequest:
     keeper: str
     day: str
     tools: Mapping[str, int]
+    body_bytes: int
+    system_bytes: int
+    message_bytes: Mapping[str, int]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -95,6 +108,7 @@ class Skipped:
 
     bad_lines: int = 0
     bad_schema_entries: int = 0
+    bad_message_entries: int = 0
     unplaced_files: int = 0
 
 
@@ -127,6 +141,14 @@ class Replay:
     surface_median_after: float
     summed_before: int
     summed_after: int
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Composition:
+    requests: int
+    body_bytes: int
+    pooled_pct: Mapping[str, float]
+    median_pct: Mapping[str, float]
 
 
 def _day_of(path: pathlib.Path) -> str | None:
@@ -176,6 +198,31 @@ def _schema_sizes(schemas: list[object], skipped: Skipped) -> dict[str, int]:
     return sizes
 
 
+def _int_field(container: object, key: str) -> int | None:
+    if not isinstance(container, dict):
+        return None
+    value = cast(dict[str, object], container).get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _message_sizes(messages: object, skipped: Skipped) -> dict[str, int]:
+    sizes: dict[str, int] = {}
+    if messages is None:
+        return sizes
+    if not isinstance(messages, list):
+        skipped.bad_message_entries += 1
+        return sizes
+    for entry in cast(list[object], messages):
+        fields = cast(dict[str, object], entry) if isinstance(entry, dict) else {}
+        role = fields.get("role")
+        size = _int_field(fields.get("artifact"), "bytes")
+        if isinstance(role, str) and size is not None:
+            sizes[role] = sizes.get(role, 0) + size
+        else:
+            skipped.bad_message_entries += 1
+    return sizes
+
+
 def read_stored_requests(
     masc_dir: pathlib.Path, from_day: str, to_day: str, skipped: Skipped
 ) -> list[StoredRequest]:
@@ -190,7 +237,17 @@ def read_stored_requests(
             if not isinstance(schemas, list):
                 continue
             sizes = _schema_sizes(cast(list[object], schemas), skipped)
-            found.append(StoredRequest(keeper, day, MappingProxyType(sizes)))
+            messages = _message_sizes(row.get("messages"), skipped)
+            found.append(
+                StoredRequest(
+                    keeper=keeper,
+                    day=day,
+                    tools=MappingProxyType(sizes),
+                    body_bytes=_int_field(row.get("wire"), "body_bytes") or 0,
+                    system_bytes=_int_field(row.get("system_prompt"), "bytes") or 0,
+                    message_bytes=MappingProxyType(messages),
+                )
+            )
     return found
 
 
@@ -329,12 +386,40 @@ def replay(
     )
 
 
+def composition(requests: Sequence[StoredRequest]) -> Composition | None:
+    """Shares of the request body by part, over the requests that record a body size."""
+    measured = [request for request in requests if request.body_bytes > 0]
+    if not measured:
+        return None
+    pooled: dict[str, int] = {}
+    shares: dict[str, list[float]] = {}
+    for request in measured:
+        parts = {TOOL_SCHEMAS: sum(request.tools.values()), SYSTEM_PROMPT: request.system_bytes}
+        for role, size in request.message_bytes.items():
+            parts[f"messages.{role}"] = size
+        parts[UNACCOUNTED] = max(request.body_bytes - sum(parts.values()), 0)
+        for name, size in parts.items():
+            pooled[name] = pooled.get(name, 0) + size
+            shares.setdefault(name, []).append(size / request.body_bytes)
+    total = sum(request.body_bytes for request in measured)
+    padding = [0.0] * len(measured)
+    return Composition(
+        requests=len(measured),
+        body_bytes=total,
+        pooled_pct={name: 100 * size / total for name, size in pooled.items()},
+        median_pct={
+            name: 100 * statistics.median(values + padding[len(values) :]) for name, values in shares.items()
+        },
+    )
+
+
 def to_json(
     from_day: str,
     to_day: str,
     requests: Sequence[StoredRequest],
     surface_median: float,
     rows: Sequence[ToolRow],
+    breakdown: Composition | None,
     outcomes: Sequence[Replay],
     skipped: Skipped,
 ) -> dict[str, object]:
@@ -345,6 +430,14 @@ def to_json(
         "keeper_days": len({(request.keeper, request.day) for request in requests}),
         "surface_median_bytes": surface_median,
         "skipped": dataclasses.asdict(skipped),
+        "composition": None
+        if breakdown is None
+        else {
+            "requests": breakdown.requests,
+            "body_bytes": breakdown.body_bytes,
+            "pooled_pct": {name: round(value, 2) for name, value in breakdown.pooled_pct.items()},
+            "median_pct": {name: round(value, 2) for name, value in breakdown.median_pct.items()},
+        },
         "tools": [
             {**dataclasses.asdict(row), "ratio": None if row.ratio is None else round(row.ratio, 2)}
             for row in rows
@@ -375,6 +468,7 @@ def _print_report(
     requests: Sequence[StoredRequest],
     surface_median: float,
     rows: Sequence[ToolRow],
+    breakdown: Composition | None,
     outcomes: Sequence[Replay],
     skipped: Skipped,
     top: int,
@@ -386,8 +480,16 @@ def _print_report(
     )
     print(
         f"skipped: {skipped.bad_lines} unreadable lines, {skipped.bad_schema_entries} schema entries "
-        f"without a size, {skipped.unplaced_files} files whose name is not a day"
+        f"without a size, {skipped.bad_message_entries} message entries without a role or size, "
+        f"{skipped.unplaced_files} files whose name is not a day"
     )
+    if breakdown is not None:
+        print(
+            f"composition of {breakdown.requests} requests with a body size "
+            f"({breakdown.body_bytes / 1e9:.2f} GB pooled): share of body, pooled / median per request"
+        )
+        for name in sorted(breakdown.pooled_pct, key=lambda part: -breakdown.pooled_pct[part]):
+            print(f"  {name:24} {breakdown.pooled_pct[name]:6.1f}% {breakdown.median_pct[name]:6.1f}%")
     print(f"{'tool':36} {'pres%':>6} {'med_B':>6} {'load_MB':>8} {'calls':>6} {'turns':>6} {'ratio':>7}")
     for row in rows[:top]:
         ratio = "-" if row.ratio is None else f"{row.ratio:.1f}"
@@ -435,10 +537,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
-    _print_report(from_day, to_day, requests, surface_median, rows, outcomes, skipped, cast(int, args.top))
+    breakdown = composition(requests)
+    _print_report(from_day, to_day, requests, surface_median, rows, breakdown, outcomes, skipped, cast(int, args.top))
     json_out = cast(pathlib.Path | None, args.json_out)
     if json_out is not None:
-        payload = to_json(from_day, to_day, requests, surface_median, rows, outcomes, skipped)
+        payload = to_json(from_day, to_day, requests, surface_median, rows, breakdown, outcomes, skipped)
         json_out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return 0
 

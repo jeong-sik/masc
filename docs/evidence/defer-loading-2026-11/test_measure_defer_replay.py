@@ -30,6 +30,21 @@ def stored(trace: str, sizes: dict[str, int]) -> dict[str, object]:
     return {"trace_id": trace, "tool_schemas": schemas(sizes)}
 
 
+def with_body(
+    trace: str,
+    sizes: dict[str, int],
+    *,
+    body: int,
+    system: int = 0,
+    messages: tuple[tuple[str, int], ...] = (),
+) -> dict[str, object]:
+    row = stored(trace, sizes)
+    row["wire"] = {"body_bytes": body}
+    row["system_prompt"] = {"bytes": system}
+    row["messages"] = [{"role": role, "artifact": {"bytes": size}, "media": []} for role, size in messages]
+    return row
+
+
 def call(keeper: str, tool: str, trace: str, turn: str, key: str = "keeper_turn_id") -> dict[str, object]:
     return {"record_kind": "tool_call", "keeper": keeper, "tool": tool, "trace_id": trace, key: turn}
 
@@ -310,6 +325,78 @@ class ReplayTest(TempStoreCase):
             replay_tool.replay(requests, calls, ["tool", "tooll"])
 
 
+class CompositionTest(TempStoreCase):
+    def test_pooled_and_median_shares_of_the_body(self) -> None:
+        self.store.requests(
+            "alpha",
+            DAY_1,
+            [
+                with_body("t1", {"a": 100}, body=1000, system=200, messages=(("user", 100), ("assistant", 300), ("tool", 200))),
+                with_body("t2", {"a": 100}, body=2000, system=200, messages=(("tool", 1000),)),
+            ],
+        )
+        requests, _, _ = self.read()
+        result = replay_tool.composition(requests)
+        assert result is not None
+        self.assertEqual((result.requests, result.body_bytes), (2, 3000))
+        pooled, median = result.pooled_pct, result.median_pct
+        self.assertAlmostEqual(pooled[replay_tool.TOOL_SCHEMAS], 100 * 200 / 3000)
+        self.assertAlmostEqual(pooled[replay_tool.SYSTEM_PROMPT], 100 * 400 / 3000)
+        self.assertAlmostEqual(pooled["messages.tool"], 100 * 1200 / 3000)
+        self.assertAlmostEqual(pooled[replay_tool.UNACCOUNTED], 100 * 800 / 3000)
+        self.assertAlmostEqual(median[replay_tool.TOOL_SCHEMAS], 7.5)
+        # messages.user is in one request of two: the other counts as zero.
+        self.assertAlmostEqual(median["messages.user"], 5.0)
+
+    def test_messages_of_one_role_add_up(self) -> None:
+        self.store.requests("alpha", DAY_1, [with_body("t1", {"a": 1}, body=100, messages=(("tool", 10), ("assistant", 5), ("tool", 20)))])
+        requests, _, _ = self.read()
+        result = replay_tool.composition(requests)
+        assert result is not None
+        self.assertAlmostEqual(result.pooled_pct["messages.tool"], 30.0)
+        self.assertAlmostEqual(result.pooled_pct["messages.assistant"], 5.0)
+
+    def test_the_rest_of_the_body_is_never_negative(self) -> None:
+        self.store.requests("alpha", DAY_1, [with_body("t1", {"a": 80}, body=100, system=50)])
+        requests, _, _ = self.read()
+        result = replay_tool.composition(requests)
+        assert result is not None
+        self.assertEqual(result.pooled_pct[replay_tool.UNACCOUNTED], 0.0)
+
+    def test_the_rest_of_the_body_is_what_the_parts_leave(self) -> None:
+        self.store.requests("alpha", DAY_1, [with_body("t1", {"a": 10}, body=100, system=20, messages=(("user", 30),))])
+        requests, _, _ = self.read()
+        result = replay_tool.composition(requests)
+        assert result is not None
+        self.assertAlmostEqual(result.pooled_pct[replay_tool.UNACCOUNTED], 40.0)
+
+    def test_requests_without_a_body_size_are_left_out(self) -> None:
+        self.store.requests("alpha", DAY_1, [stored("t1", {"a": 10}), with_body("t2", {"a": 10}, body=100)])
+        requests, _, _ = self.read()
+        result = replay_tool.composition(requests)
+        assert result is not None
+        self.assertEqual((len(requests), result.requests, result.body_bytes), (2, 1, 100))
+        self.assertIsNone(replay_tool.composition(requests[:1]))
+        self.assertIsNone(replay_tool.composition([]))
+
+    def test_unreadable_messages_are_counted(self) -> None:
+        row = with_body("t1", {"a": 1}, body=100)
+        row["messages"] = [
+            {"role": "user", "artifact": {"bytes": 5}},
+            {"artifact": {"bytes": 5}},
+            {"role": "tool"},
+            {"role": "tool", "artifact": {"bytes": True}},
+            "text",
+        ]
+        other = with_body("t2", {"a": 1}, body=100)
+        other["messages"] = "not a list"
+        absent = stored("t3", {"a": 1})
+        self.store.requests("alpha", DAY_1, [row, other, absent])
+        requests, _, skipped = self.read()
+        self.assertEqual(skipped.bad_message_entries, 5)
+        self.assertEqual(requests[0].message_bytes, {"user": 5})
+
+
 class CommandLineTest(TempStoreCase):
     def run_main(self, *extra: str) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -325,6 +412,7 @@ class CommandLineTest(TempStoreCase):
         code, out, _ = self.run_main("--tools", "tool", "--json-out", str(target))
         self.assertEqual(code, 0)
         self.assertIn("2 stored requests, 1 agent-core Keepers, surface median 1000 B", out)
+        self.assertNotIn("composition of", out)
         payload = json.loads(target.read_text(encoding="utf-8"))
         self.assertEqual(payload["stored_requests"], 2)
         self.assertEqual(payload["window"], {"from": DAY_1, "to": DAY_2})
@@ -334,6 +422,17 @@ class CommandLineTest(TempStoreCase):
         by_name = {row["name"]: row for row in payload["tools"]}
         self.assertIsNone(by_name["tool"]["ratio"])
         self.assertEqual(by_name["core"]["needed_turns"], 1)
+
+    def test_composition_is_in_the_report_and_json(self) -> None:
+        self.store.requests("alpha", DAY_1, [with_body("t1", {"a": 10}, body=100, system=20, messages=(("tool", 30),))])
+        target = self.store.base / "result.json"
+        code, out, _ = self.run_main("--json-out", str(target))
+        self.assertEqual(code, 0)
+        self.assertIn("composition of 1 requests with a body size", out)
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(payload["composition"]["requests"], 1)
+        self.assertEqual(payload["composition"]["pooled_pct"]["messages.tool"], 30.0)
+        self.assertEqual(payload["composition"]["median_pct"]["unaccounted"], 40.0)
 
     def test_without_tools_there_is_no_replay(self) -> None:
         self.store.requests("alpha", DAY_1, [stored("t1", {"tool": 10})])

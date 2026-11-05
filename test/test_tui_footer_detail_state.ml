@@ -74,7 +74,15 @@ let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
    answers and the one drawn where the dispatcher refuses it.
    [t], [p], [/] and [n / N] act on the Work list; in a Goal detail [p] is
    Pause and the other three have no list to act on. [c] replies to the post
-   that is open, so the Board list has nothing to reply to. *)
+   that is open, so the Board list has nothing to reply to. [/] and [n / N]
+   search the list's rows, and an open Verification, Harness or System_logs
+   detail has none. *)
+let search_keys name surface =
+  ( name,
+    Keys.footer_hints ~detail_open:false surface,
+    Keys.footer_hints ~detail_open:true surface,
+    [ "/"; "n / N" ] )
+
 let scoped_keys =
   [ ( "Planning",
       Keys.footer_hints_planning_goal_list,
@@ -84,6 +92,9 @@ let scoped_keys =
       Keys.footer_hints ~detail_open:true Masc_tui_types.Board,
       Keys.footer_hints ~detail_open:false Masc_tui_types.Board,
       [ "c" ] )
+  ; search_keys "Verification" Masc_tui_types.Verification
+  ; search_keys "Harness" Masc_tui_types.Harness
+  ; search_keys "System_logs" Masc_tui_types.System_logs
   ]
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
@@ -97,6 +108,25 @@ let test_a_scoped_key_is_named_only_where_it_answers () =
             false (names_item refusing key))
         keys)
     scoped_keys
+
+(* The draft keys act on an open file only: the dispatcher needs the file pane
+   focused with no diff, history or notes drawn over it. The tree and diff
+   footers used to name them anyway. *)
+let draft_keys = [ "e"; "S"; "V"; "X"; "A (draft)" ]
+
+let test_code_draft_keys_are_named_only_on_the_file_pane () =
+  let file = Keys.footer_hints_code ~pane:Keys.Code_file in
+  List.iter
+    (fun key ->
+      check bool ("the file pane names " ^ key) true (names_item file key);
+      List.iter
+        (fun (pane_name, pane) ->
+          check bool
+            (pane_name ^ " pane does not name " ^ key)
+            false
+            (names_item (Keys.footer_hints_code ~pane) key))
+        [ ("tree", Keys.Code_tree); ("diff", Keys.Code_diff) ])
+    draft_keys
 
 let test_every_scoped_surface_is_named () =
   let named =
@@ -119,6 +149,8 @@ let () =
             test_each_list_footer_names_no_key_it_refuses
         ; test_case "a scoped key is named only where it answers" `Quick
             test_a_scoped_key_is_named_only_where_it_answers
+        ; test_case "code draft keys are named only on the file pane" `Quick
+            test_code_draft_keys_are_named_only_on_the_file_pane
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

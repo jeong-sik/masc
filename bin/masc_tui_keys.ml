@@ -904,10 +904,12 @@ let for_surface = function
       ; b Act "a / x" "approve / reject"
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"
-      ; b Search "/" "find"
+      (* The row search reads the list's rows. An open detail has none, so the
+         footer drawn for it leaves the pair out. *)
+      ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
@@ -932,8 +934,9 @@ let for_surface = function
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "/" "find" ~detail:List_only
+          ~help:"jump the cursor to a matching task id or title"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_edges @ listing_meta
   | Fusion ->
@@ -1214,10 +1217,10 @@ let for_surface = function
       ; b Act "Right / Enter" "detail"
           ~help:"show the full message, source, category, turn, and JSON details"
       ; b Act "Left / Esc" "back"
-      ; b Search "/" "find"
+      ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_edges @ listing_meta
 
@@ -1641,8 +1644,12 @@ let code_history_bindings =
   ]
 
 let footer_hints_code ~pane =
+  (* The draft keys ([e], [S], [V], [X], [A (draft)]) belong here too: the
+     dispatcher answers them only with the file pane focused and no diff,
+     history or notes drawn over it. *)
   let file_keys =
-    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m" ]
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m"
+    ; "e"; "S"; "V"; "X"; "A (draft)" ]
   in
   (* One key belongs to one pane and was showing on all three: [Enter
      (history)] opens a commit's pull request and only the history view has

@@ -103,8 +103,9 @@ let get_current_task (config : Workspace.config) : string option =
         path msg;
       None
 
-(** Set current task_id for session *)
-let set_current_task (config : Workspace.config) ~task_id : (unit, string) result =
+(* The raw write. Callers outside this file use [set_current_task], which turns
+   the exceptions raised here into [Error]. *)
+let persist_current_task (config : Workspace.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
   Fs_compat.mkdir_p (Filename.dirname path);
   let write_current_task () =
@@ -138,6 +139,19 @@ let set_current_task (config : Workspace.config) ~task_id : (unit, string) resul
              path msg)
       end
   else write_current_task ()
+
+(* Callers such as the claim chain write the pointer after the claim has
+   committed, so a store failure comes back as [Error]. An exception would
+   reach them as a failed call for work that happened. Cancellation is not a
+   store failure and passes through. *)
+let set_current_task (config : Workspace.config) ~task_id : (unit, string) result =
+  try persist_current_task config ~task_id with
+  | Sys_error msg -> Error (Printf.sprintf "failed to write current_task: %s" msg)
+  | Unix.Unix_error (err, fn, arg) ->
+    Error
+      (Printf.sprintf
+         "failed to write current_task: %s (%s %s)"
+         (Unix.error_message err) fn arg)
 
 (** Clear current task *)
 let clear_current_task (config : Workspace.config) : unit =

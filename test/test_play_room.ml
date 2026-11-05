@@ -17,7 +17,7 @@ let action ?(client = "tab1") ?(machine = "dos") ?text ?id ?before name =
     @ (match before with None -> [] | Some n -> ["before", `Int n]))
 let perform base_path ?(speaker = Room.Participant) ?(now = 100.) who args =
   Room.perform ~base_path ~who ~speaker ~now (ok (Room.parse_action args)) |> ok
-let perform_change base_path ?(speaker = Room.Participant) ?(now = 100.) who args =
+let perform_change ~base_path:base_path ?(speaker = Room.Participant) ?(now = 100.) who args =
   Room.perform_with_change ~base_path ~who ~speaker ~now (ok (Room.parse_action args)) |> ok
 let read base_path ?(now = 100.) ?before () = Room.read ~base_path ~now ~before |> ok
 let texts snapshot = List.map (fun (m : Room.message) -> m.text) snapshot.Room.messages
@@ -51,9 +51,9 @@ let test_idempotency () = workspace (fun base ->
 let test_change_metadata () = workspace (fun base ->
   let flags (change : Room.change) =
     change.message_committed, change.membership_changed in
-  let _, join = perform_change base "alice" (action "join") in
+  let _, join = perform_change ~base_path:base "alice" (action "join") in
   check (pair bool bool) "the first public member is a membership change" (false, true) (flags join);
-  let _, first = perform_change base "alice" (action ~id:"first" ~text:"hello" "say") in
+  let _, first = perform_change ~base_path:base "alice" (action ~id:"first" ~text:"hello" "say") in
   check (pair bool bool) "a new message does not alter membership" (true, false) (flags first);
   let _, retry = perform_change ~now:105. "alice" (action ~id:"first" ~text:"hello" "say") in
   check (pair bool bool) "an identical retry has no new effect" (false, false) (flags retry);
@@ -72,7 +72,7 @@ let test_change_metadata () = workspace (fun base ->
   let _, reread = perform_change ~now:150. "alice" (action "read") in
   check (pair bool bool) "Read neither revives nor moves presence" (false, false) (flags reread);
   check (list string) "Read leaves no membership behind" [] (names reread);
-  ignore (perform_change base "expiring" (action ~client:"expiry" "join"));
+  ignore (perform_change ~base_path:base "expiring" (action ~client:"expiry" "join"));
   let _, expired = perform_change ~now:160.5 "expiring" (action ~client:"expiry" "read") in
   check (pair bool bool) "a public member expiring is a change" (false, true) (flags expired);
   check (list string) "the expired public member is gone" [] (names expired))

@@ -10,6 +10,9 @@ val create : unit -> t
 val focused : t -> bool
 val focus : t -> bool -> t
 val active : t -> bool -> t
+val revalidate : t -> t
+(** Schedule one authoritative Read and retain a change during its pending Read
+    for one trailing Read. The transcript is shared across machines. *)
 val suspend : t -> t
 (** Retire responses after workspace authority withdrawal, preserving this
     workspace's draft, unknown-send receipt and possible presence. Once the

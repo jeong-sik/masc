@@ -75,10 +75,10 @@ need for one.
 
 ### 1.3 Stores bind to whatever the environment says
 
-- `Eval_calibration.get_store`, the wake payload store in `Dashboard_harness_health`,
-  `Keeper_transition_audit.get_default_store` and the `Keeper_voice_local` singleton are
-  opened on first use from the environment and kept in one `Atomic`; the first successful
-  reader decides the directory for the rest of the process.
+- `Eval_calibration.get_store`, `Keeper_transition_audit.get_default_store` and the
+  `Keeper_voice_local` singleton are opened on first use from the environment and kept
+  in one `Atomic`; the first successful reader decides the directory for the rest of
+  the process.
 - `Tool_assignment_telemetry.get_or_create_runtime` reads the environment on every call
   and reopens its store when the answer changes, so a change of the environment moves it
   mid-process.
@@ -119,7 +119,7 @@ callers that only gain an argument; a batch that grows past that is split before
 | Batch | Site | Reads | In reach |
 |---|---|---|---|
 | 1 | `Keeper_transition_audit.get_default_store` and its callers (`keeper_registry`, `keeper_turn_fsm`, `server_dashboard_http_keeper_api`, `keeper_runtime_trust_snapshot`, `dashboard_http_keeper_outcomes`) | `Env_config_core.base_path` | caller |
-| 2 | `Eval_calibration.get_store` (`completion_authority_agent`); `Dashboard_harness_health` wake payload store, readers (`dashboard_http_keeper_outcomes`, `server_routes_http_routes_dashboard`) and writers (`keeper_wake_telemetry`, `keeper_keepalive_signal`, `keeper_agent_run_phase0_telemetry`) | `Env_config_core.base_path` | caller |
+| 2 | `Eval_calibration.get_store` (`completion_authority_agent`) and its readers (`dashboard_harness_health`, `dashboard_http_keeper_outcomes`, `server_routes_http_routes_dashboard`) | `Env_config_core.base_path` | caller |
 | 3 | `Board_paths.board_base_path` (`board_votes`, `board_core`, `board_core_persist`) | `Env_config_core.base_path` | partial (`store.workspace_masc_dir`) |
 | 4 | channel gate state paths (`channel_gate_{slack,discord,imessage,sidecar}_state`, stored as `unit -> string` in `channel_gate_binding_store`), `server_imessage_in_process_gateway` cursor path | `Env_config_core.resolve_against_base_path` | no |
 | 5 | browser lane token path; `Tool_misc_web_fetch.offload_full_text` and the `handle` callers (`tool_misc`, `tool_misc_web_enrichment`, `verification_authority_tools`, `fusion_agent_core`, `keeper_tool_in_process_runtime`); delete `resolve_against_base_path` | `Env_config_core.resolve_against_base_path`, `Env_config_core.base_path` | no |

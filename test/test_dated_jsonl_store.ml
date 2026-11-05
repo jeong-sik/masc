@@ -24,7 +24,6 @@ let expected_dir = function
   | Store.Root Transition_audit -> "/ws/.masc/transition-audit"
   | Store.Root Audit_approvals -> "/ws/.masc/audit-approvals"
   | Store.Root Tool_events -> "/ws/.masc/tool-events"
-  | Store.Root Keeper_wake_payload -> "/ws/.masc/keeper-wake-payload"
   | Store.Root Verdicts -> "/ws/.masc/verdicts"
   | Store.Root Audit -> "/ws/.masc/audit"
   | Store.Root Telemetry -> "/ws/.masc/telemetry"
@@ -146,7 +145,6 @@ let expected_rule = function
   | Store.Root Transition_audit -> Window
   | Store.Root Audit_approvals -> Window
   | Store.Root Tool_events -> Window
-  | Store.Root Keeper_wake_payload -> Window
   | Store.Root Verdicts -> Never
   | Store.Root Audit -> Window
   | Store.Root Telemetry -> Window

@@ -22,7 +22,6 @@ type site =
   | Prefix_digest_encode
   | Prompt_metrics_encode
   | Provider_snapshot_encode
-  | Phase0_bytes
   | Final_attribution_bytes
   | Built_surface
   | Agent_core_surface

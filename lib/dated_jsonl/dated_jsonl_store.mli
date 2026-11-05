@@ -11,7 +11,6 @@ module Root : sig
     | Transition_audit
     | Audit_approvals
     | Tool_events
-    | Keeper_wake_payload
     | Verdicts
     | Audit
     | Telemetry

@@ -3,7 +3,6 @@ module Root = struct
     | Transition_audit
     | Audit_approvals
     | Tool_events
-    | Keeper_wake_payload
     | Verdicts
     | Audit
     | Telemetry
@@ -25,7 +24,6 @@ module Root = struct
     | Transition_audit -> [ "transition-audit" ]
     | Audit_approvals -> [ "audit-approvals" ]
     | Tool_events -> [ "tool-events" ]
-    | Keeper_wake_payload -> [ "keeper-wake-payload" ]
     | Verdicts -> [ "verdicts" ]
     | Audit -> [ "audit" ]
     | Telemetry -> [ "telemetry" ]
@@ -127,7 +125,6 @@ let root_retention = function
   | Root.Transition_audit
   | Root.Audit_approvals
   | Root.Tool_events
-  | Root.Keeper_wake_payload
   | Root.Audit
   | Root.Telemetry
   | Root.Events

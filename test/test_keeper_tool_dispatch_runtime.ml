@@ -5681,7 +5681,7 @@ let test_frozen_surface_rejection_names_the_inventory_reason () =
     call
       ~capability_surface:
         (frozen_capability_surface ~sandbox_profile:Masc.Keeper_types_profile.Micro_vm ())
-      "keeper_spawn"
+      "keeper_job_start"
   in
   check_frozen_surface_rejection "sandbox-refused Tool" refused;
   let refused_data = execution_data_exn "sandbox-refused Tool" refused in
@@ -6889,96 +6889,6 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             match bundle.terminal_effect_state () with
             | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
             | _ -> fail "correction-capable failures poisoned terminal state"))
-;;
-
-let test_stale_spawn_handles_remain_correction_capable () =
-  with_exec_fixture
-    ~process:true
-    ~always_allow:true
-    ~bind_eio_context:true
-    "stale-spawn-handle-correction"
-    (fun ~config ~meta ~publication_recovery ~ctx_work ->
-       let registry =
-         Spawn_registry.create ~run:"current-turn" ~output_limit_bytes:(1 lsl 16)
-         |> function
-         | Some registry -> registry
-         | None -> fail "valid spawn registry was rejected"
-       in
-       Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
-       let bundle =
-         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
-           ~config
-           ~meta
-           ~publication_recovery
-           ~ctx_snapshot:ctx_work
-           ()
-       in
-       Fun.protect
-         ~finally:bundle.cleanup
-         (fun () ->
-            let terminal_error = ref None in
-            let projected =
-              match
-                Masc.Keeper_official_client_host.dynamic_tools ~result_scope:None
-                  ~accepts_image_input:true
-                  ~content_transport:Runtime_official_client_tool.Codex
-                  ~tool_approval:None
-                  ~pre_tool_rejects:(ref [])
-                  ~runtime_label:"test-official-client"
-                  ~keeper_name:meta.name
-                  ~turn_count:1
-                  ~tools:bundle.tools
-                  ~loading_plan:Masc.Keeper_official_client_host.All_on_demand ~hooks:Agent_core.Hooks.empty
-                  ~event_bus:None
-                  ~context_injector:None
-                  ~context:(Some (Agent_core.Context.create_sync ()))
-                  ~terminal_effect_state:bundle.terminal_effect_state
-                  ~terminal_error
-                  ~raw_trace_run:None
-                  ()
-              with
-              | Ok (tools, _) -> tools
-              | Error error -> fail (Agent_core.Error.to_string error)
-            in
-            let call name input =
-              let tool =
-                projected
-                |> List.find_opt
-                     (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
-                        String.equal tool.name name)
-                |> function
-                | Some tool -> tool
-                | None -> failf "%s was not projected" name
-              in
-              tool.call ~call_id:("stale-" ^ name) input
-            in
-            let stale_handle = "previous-turn-1" in
-            let cases =
-              [ ( "keeper_spawn_read"
-                , `Assoc [ "handle", `String stale_handle ] )
-              ; ( "keeper_spawn_wait"
-                , `Assoc
-                    [ "handle", `String stale_handle
-                    ; "until", `String "exit"
-                    ; "timeout_sec", `Float 1.
-                    ] )
-              ; ( "keeper_spawn_stop"
-                , `Assoc [ "handle", `String stale_handle ] )
-              ]
-            in
-            List.iter
-              (fun (name, input) ->
-                 let result = call name input in
-                 check bool (name ^ " reports the stale handle") false result.success;
-                 check
-                   (option string)
-                   (name ^ " keeps the provider loop correction-capable")
-                   None
-                   (Option.map (fun _ -> "abort") result.abort_turn))
-              cases;
-            match bundle.terminal_effect_state () with
-            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
-            | _ -> fail "stale handle lookup poisoned terminal state"))
 ;;
 
 let test_composition_action_commit_advances_revision_before_refresh_event () =
@@ -9157,10 +9067,7 @@ let composable_model_names () =
 type output_probe =
   { tool_name : string
   ; (* Whether running this producer reaches the sandbox runtime. A probe
-       that does cannot report anything on a host without the image, and
-       naming the tools that do by hand -- the skip below matched the string
-       "Execute" -- left keeper_spawn out and reported its container failure
-       as a schema problem. *)
+       that does cannot report anything on a host without the image. *)
     needs_sandbox : bool
   ; prepare :
       config:Masc.Workspace.config
@@ -9180,15 +9087,6 @@ let composable_output_probes =
   ; probe
       ~needs_sandbox:true
       "Execute"
-      (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
-    (* #34263 gave the start answer a named handle so a composition can hand
-       it on. The declaration landed without a probe, and this list is the
-       only thing that runs the producer against the schema it now claims.
-       Start builds a container argv, so it needs the sandbox the same way
-       Execute does. *)
-  ; probe
-      ~needs_sandbox:true
-      "keeper_spawn"
       (`Assoc [ "argv", `List [ `String "/bin/echo"; `String "probe" ] ])
   ; probe "keeper_lane_status" (`Assoc [])
   ; probe "keeper_portrait_read" (`Assoc [ "size", `Int 96 ])
@@ -10851,8 +10749,6 @@ let () =
         test_direct_execute_post_effect_artifact_failure_closes_official_client_loop;
       test_case "direct pre-effect and read-only failures remain correction-capable" `Quick
         test_direct_pre_effect_and_readonly_failures_remain_correction_capable;
-      test_case "stale spawn handles remain correction-capable" `Quick
-        test_stale_spawn_handles_remain_correction_capable;
       test_case "composition action commit refreshes dashboard evidence" `Quick
         test_composition_action_commit_advances_revision_before_refresh_event;
       test_case "composition telemetry outage preserves execution" `Quick

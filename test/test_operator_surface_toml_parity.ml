@@ -1,4 +1,4 @@
-(** What the published surface says: which tools the operator surface declares, and three invariants.
+(** What the published surface says: which tools the operator surface declares, and two invariants.
 
     The descriptions and input schemas this suite also pinned were literals
     read off the same published values before the declarations moved into
@@ -93,14 +93,6 @@ let test_config_category_enum_matches_its_owner () =
     published
 ;;
 
-let test_keeper_spawn_is_not_published () =
-  check
-    bool
-    "keeper_spawn absent from the misc schema set"
-    false
-    (has_schema "keeper_spawn" Tool_schemas_misc.schemas)
-;;
-
 (* pause / resume / pause_status are Operator_only: reached through
    control_schema, never through the list a Keeper model reads. *)
 let test_control_operations_stay_off_the_published_list () =
@@ -135,7 +127,6 @@ let () =
             "the config category enum matches its owner"
             `Quick
             test_config_category_enum_matches_its_owner
-        ; test_case "keeper_spawn is not published" `Quick test_keeper_spawn_is_not_published
         ; test_case
             "control operations stay off the published list"
             `Quick

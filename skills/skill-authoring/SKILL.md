@@ -67,7 +67,7 @@ YAML description that contains `:`, `#`, or a leading backtick.
   params is checked before any node runs; an input that reads another node's output
   is checked when its node runs, after the nodes before it.
 - `kind = "output"` reads a field of an earlier node only when that tool declares a JSON
-  output schema (`keeper_spawn` declares `/handle`, `Read` declares `/path`). An opaque
+  output schema (`keeper_lane_status` declares `/profile`, `Read` declares `/path`). An opaque
   result cannot feed another node. The same rule applies to `[[compositions.exports]]`:
   give each export a unique `name`, a producer `node` and an RFC 6901 `pointer` into
   its declared output. For example, `name = "profile"`, `node = "lane"`,

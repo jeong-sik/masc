@@ -42,7 +42,7 @@ type keeper_profile_defaults = {
      read which one held it back. *)
   attached_tool_allow : string list option;
   (* Built-in tools this keeper never offers the model, named by their
-     model-visible name (e.g. ["keeper_spawn"; "masc_keeper_delegate"]).
+     model-visible name (e.g. ["keeper_job_start"; "masc_keeper_delegate"]).
      Absent and explicit [] both deny nothing, so unlike [skill_names] this is
      a plain list. The capability surface drops the descriptor entirely: the
      tool is neither listed to the model nor present in the turn's dispatch

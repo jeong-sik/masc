@@ -336,49 +336,6 @@ val handle_keeper_webmcp_with_outcome
     [Effect_outcome_unknown] because the bridge cannot prove the page's tool
     did not run. *)
 
-val spawn_sandbox_argv
-  :  sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
-  -> turn_sandbox_factory:Keeper_sandbox_factory.t option
-  -> cwd:string
-  -> command_argv:string list
-  -> (string list, string) result
-(** The argv a spawn backgrounds on the host for the turn's Docker container,
-    or the refusal: a profile {!Keeper_spawn_boundary.of_sandbox_profile}
-    refuses (remote_ssh, microvm), or no factory. Resolving the factory boots
-    nothing.
-    Exported for the same reason as {!spawn_outside_boundary}: the decision
-    is otherwise reachable only through the handler. *)
-
-val spawn_outside_boundary
-  :  name:string
-  -> profile:Keeper_types_profile_sandbox.sandbox_profile
-  -> detail:string
-  -> Keeper_tool_execution.t
-(** The refusal {!handle_keeper_spawn_with_outcome} answers a start it cannot
-    place inside the keeper's boundary with.
-
-    Exported so a test can pin it: reaching it through the handler needs a
-    turn registry and a live switch, and a decision only reachable that way is
-    a decision no test pins. *)
-
-val handle_keeper_spawn_with_outcome
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> turn_sandbox_factory:Keeper_sandbox_factory.t option
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-(** The four spawn tools, reached through the turn's registry.
-
-    Answers with a refusal outside a turn: there is nowhere for a process to
-    live that a later call could reach, and saying so beats creating a registry
-    nothing else can find.
-
-    A start runs inside the keeper's turn container, through the same argv
-    [Keeper_turn_sandbox_runtime.exec_argv] builds for a blocking Execute, so
-    a command that must not hold the turn still runs behind the boundary.
-    [Remote_ssh] has no argv to background and is refused. *)
-
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)
 val handle_masc_schedule_with_outcome

@@ -444,7 +444,7 @@ let sandbox_image_preparation =
 
 let run_tool_case_or_fail tool_name () =
   if List.mem tool_name
-       [ "Execute"; "Grep"; "Read"; "Write"; "keeper_ide_annotate"; "keeper_spawn" ]
+       [ "Execute"; "Grep"; "Read"; "Write"; "keeper_ide_annotate" ]
   then Lazy.force sandbox_image_preparation;
   match run_tool_case_process tool_name with
   | Ok () -> ()

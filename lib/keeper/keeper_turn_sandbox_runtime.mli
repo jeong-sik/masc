@@ -397,9 +397,7 @@ val exec_argv :
 (** The argv that runs [command_argv] inside the turn-scoped container.
 
     Exactly what {!run_exec_with_status_split} blocks on, handed over instead
-    of run: a command that must not hold the turn is spawned, and it has to
-    land in the same container as the same uid under the same rewritten paths.
-    Building that argv twice would be building the boundary twice. *)
+    of run: the same container, the same uid, the same rewritten paths. *)
 
 val run_exec_with_status_split :
   ?stdin_content:string ->

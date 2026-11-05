@@ -193,7 +193,6 @@ let create_with_descriptors
                                          | Keeper_tool_descriptor.Tool_masc_control_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
-                                         | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
                                          | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
                                          | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
                                          | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
@@ -210,21 +209,13 @@ let create_with_descriptors
            List.exists (Keeper_tool_deny.matches ~lane_addon ~name) tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in
-  (* The spawn tools are refused together when the sandbox profile cannot start
-     a process: the handler refuses every start with the rule applied here.
-     Read, wait and stop address handles in the turn's spawn registry, which is
-     created per turn and filled only by a start, so on such a profile they
-     could only answer that the handle is unknown. Every one of the four
-     carries the start refusal, the reason none of them can do anything. Like a
-     deny, it applies only to a descriptor the model could otherwise call. *)
+  (* The owned-job tools are refused when the sandbox profile has no isolated
+     private workspace backend. Like a deny, it applies only to a descriptor
+     the model could otherwise call. *)
   let sandbox_refusal descriptor =
     if Keeper_tool_descriptor.keeper_model_names descriptor = [] then None
     else
       match descriptor.Keeper_tool_descriptor.runtime_handler with
-      | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch ->
-        (match Keeper_spawn_boundary.of_sandbox_profile sandbox_profile with
-         | Keeper_spawn_boundary.Refuses_start { detail } -> Some detail
-         | Keeper_spawn_boundary.Starts_in_container -> None)
       | Keeper_tool_descriptor.Tool_keeper_job_dispatch ->
         (match sandbox_profile with
          | Keeper_types_profile_sandbox.Docker -> None

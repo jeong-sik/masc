@@ -42,7 +42,7 @@ type keeper_profile_defaults = {
           keeper through [tool_deny]. *)
   tool_deny : string list;
       (** Built-in tools this keeper never offers the model, named by their
-          model-visible name (e.g. ["keeper_spawn";
+          model-visible name (e.g. ["keeper_job_start";
           "masc_keeper_delegate"]). Absent and explicit [] both deny nothing,
           so unlike [skill_names] this is a plain list. The capability
           surface drops the descriptor entirely: the tool is neither listed

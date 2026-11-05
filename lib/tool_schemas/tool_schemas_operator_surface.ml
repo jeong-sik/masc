@@ -7,11 +7,10 @@
     dune rule captured its stdout into [tool_descriptors_gen.ml]. This RFC
     solves the same problem with data files, which is why its header carries
     [supersedes: ["0057"]]. The definitions live here; the generator, its dune rule
-    and its regression suite are gone. The three invariants that suite carried
+    and its regression suite are gone. The two invariants that suite carried
     which had nothing to do with code generation — the masc_config category
-    enum matching its owner, keeper_spawn staying unpublished, and the
-    Operator_only control trio staying off the Keeper-visible list — moved to
-    [test_operator_surface_toml_parity].
+    enum matching its owner, and the Operator_only control trio staying off
+    the Keeper-visible list — moved to [test_operator_surface_toml_parity].
 
     One file declares one tool; [schema_of_name] decodes it through
     [Tool_definition_toml] once at module initialization. A missing file or a

@@ -762,7 +762,6 @@
   test_exec_shell_command_gate
   test_shell_costume
   test_spawn_registry
-  test_tool_spawn
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
@@ -1113,7 +1112,6 @@
   test_exec_shell_command_gate
   test_shell_costume
   test_spawn_registry
-  test_tool_spawn
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
@@ -1154,7 +1152,7 @@
   masc.masc_core eio eio_main
   masc.cost_ledger
   masc.dated_jsonl
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   ;; The fake ssh shim renders its result trailer with the same function
   ;; the real shim uses, so the wire version cannot be typed in by hand.
@@ -1193,7 +1191,7 @@
  (modules test_keeper_sandbox_docker_route)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Extracted from the big (tests ...) group above: this suite measures mention
@@ -1204,7 +1202,7 @@
  (modules test_broadcast_wakeup_policy)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 (test
@@ -1212,7 +1210,7 @@
  (modules test_keeper_supervisor)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 (test
@@ -1220,7 +1218,7 @@
  (modules test_channel_gate_connector_routes)
  (libraries
   masc_test_deps masc_tui_types masc_tui_workspace_job masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
@@ -1349,7 +1347,7 @@
  (modules test_operator_control_support)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.embedded_config masc.keeper_identity masc.mcp_client
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
   exec_ssh_protocol))
 
@@ -1378,7 +1376,6 @@
   masc.embedded_config
   masc.keeper_identity
   masc.mcp_client
-  masc.tool_spawn
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot))
@@ -5225,7 +5222,7 @@
 (test
  (name test_goal_tool_toml_parity)
  (modules test_goal_tool_toml_parity)
- (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types masc.masc_tool_dispatch masc.embedded_config))
+ (libraries alcotest yojson masc.tool_schemas masc_types masc.masc_tool_dispatch masc.embedded_config))
 
 (test
  (name test_keeper_task_skill_block)
@@ -5500,7 +5497,7 @@
  (name test_keeper_composition_async_broker)
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf
-   masc.keeper_checkpoint_ref masc.embedded_config masc.tool_spawn))
+   masc.keeper_checkpoint_ref masc.embedded_config))
 
 (test
  (name test_keeper_remote_ssh_profile)

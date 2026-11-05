@@ -1,0 +1,46 @@
+# task-3237 필수 증거 (3-c) — #47781 의 케이스 유입 의도 대조
+
+계약이 (b) 분류에 요구한 항목: "시험 의도·#47781 작성자 근거 대조"
+
+## (3-c-1) #47781 PR 본문에 play_invite 언급이 있는가
+
+```
+$ gh pr view 47781 --json body -q .body | grep -ciE "play_invite|play-invite"
+0
+```
+
+0회. PR 제목은 "fix(keeper): ride turn-entry admission on the tail carrier" 로 프롬프트 캐시 작업이다.
+
+## (3-c-2) 그 커밋이 바꾼 파일 목록에 play_invite 가 있는가
+
+```
+$ git show --stat --format="" 1e5740024c | grep -E "play_invite"
+ .../tests/a4b/test_play_invite_routes.txt          |    10 +
+ .../tests/main/test_play_invite_routes.txt         |    10 +
+ lib/play/play_invite.ml                            |   347 +
+ lib/play/play_invite.mli                           |   154 +
+ test/stanzas/test_play_invite.inc                  |     8 +
+ test/stanzas/test_play_invite_routes.inc           |     8 +
+ test/test_play_invite.ml                           |   262 +
+ test/test_play_invite_routes.ml                    |   332 +
+```
+
+즉 그 파일은 #47781 커밋에 **포함돼 있지만** PR 본문은 그 파일을 언급하지 않는다. 두 사실을 함께 둔다.
+
+## (3-c-3) 결정적 사실 — 제품과 시험이 같은 커밋에서 함께 생겼다
+
+```
+$ git log --format="%H %s" --diff-filter=A -- lib/play/play_invite.ml
+1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc fix(keeper): ride turn-entry admission on the tail carrier (#47781)
+
+$ git show --numstat --format="" 1e5740024c -- lib/play/play_invite.ml
+347	0	lib/play/play_invite.ml
+```
+
+`lib/play/play_invite.ml`(제품 347줄)과 `test/test_play_invite.ml`(시험 262줄)이 **같은 커밋 `1e5740024c` 에서 처음 생겼다.**
+
+## 이게 (b) 판정에 주는 것
+
+- 제가 앞서 쓴 "제품이 나중에 바뀌어 유효 케이스를 거부하게 됐다"는 **성립하지 않는다** — 둘이 같은 커밋에서 태어났으므로 "나중에 바뀐" 시점이 없다.
+- 남는 가능성은 **"처음부터 그 케이스가 제품과 맞지 않았다"**(b) 하나다. 그러나 이것도 **그 커밋에서 시험이 한 번도 통과한 적이 있는지**를 봐야 확정된다.
+- 그 검증은 아래 (1-b) run 목록에 있다.

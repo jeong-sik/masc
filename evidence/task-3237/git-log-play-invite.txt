@@ -1,0 +1,29 @@
+# task-3237 필수 증거 (2) — 1e5740024c 이후 play_invite.ml 커밋 목록 + 파일 생성 사실
+
+수집: 2026-11-05, 명령과 원문 출력
+
+## (2-a) 1e5740024c 이후 lib/play/play_invite.ml 커밋
+
+```
+$ git log --format="%H|%ad|%s" --date=iso 1e5740024c..origin/main -- lib/play/play_invite.ml
+(위 줄이 없으면 0건)
+
+$ git log --oneline 1e5740024c..origin/main -- lib/play/play_invite.ml | wc -l
+0
+```
+
+## (2-b) 1e5740024c 가 test/test_play_invite.ml 을 **생성**했다 (검증자 요구)
+
+```
+$ git show --stat --format="" 1e5740024c -- test/test_play_invite.ml
+ test/test_play_invite.ml | 262 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 262 insertions(+)
+
+$ git show --numstat --format="" 1e5740024c -- test/test_play_invite.ml
+262	0	test/test_play_invite.ml
+
+$ git log --format="%H %s" --diff-filter=A -- test/test_play_invite.ml
+1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc fix(keeper): ride turn-entry admission on the tail carrier (#47781)
+```
+
+`--diff-filter=A` 는 파일이 **추가된** 커밋만 고른다. 그 결과가 `1e5740024c` 하나이므로, 이 파일은 그 커밋에서 처음 생겼다.

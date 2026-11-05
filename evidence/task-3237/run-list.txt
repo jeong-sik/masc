@@ -1,0 +1,40 @@
+# task-3237 필수 증거 (1) — test_play_invite 스위트 run 목록 (TARGET_SUITES 포함)
+
+수집: 2026-11-05. 명령과 원문 출력.
+
+## (1-a) test_play_invite 단독 실행 run
+
+```
+$ gh run view 41966075993 --json headSha,conclusion
+head=7d2b43bf30e4839962dfb38a25a52db3fa8c69ac conclusion=failure
+
+$ gh run view 41966075993 --log | grep TARGET_SUITES
+   TARGET_SUITES: test_play_invite
+   TARGET_SUITES: test_play_invite
+
+$ gh run view 41966075993 --log | grep -E "FAIL|targeted"
+ [targeted] @@test/runtest-test_play_invite: start 2026-11-05T04:14:54Z (dune alias)
+   [31m[FAIL][0m        [36minvite[0m          2   valid browser hosts issue credentials.
+ [2m│ [0m[31m[FAIL][0m        [36minvite[0m          2   valid browser hosts issue credentials.[2m     │[0m
+ [targeted] @@test/runtest-test_play_invite: FAIL exit 1 in 11s
+```
+
+## (1-b) 1e5740024c 시점의 test_play_invite run 존재 여부 — **조회 한계 있음**
+
+```
+$ gh run list --workflow=test.yml --limit 100 --json databaseId,headSha,conclusion,createdAt
+# headSha 가 1e5740024c 로 시작하는 run: 0건
+
+$ gh run list --workflow=test.yml --limit 100 --json ... | select(.event=="schedule")
+41879986062 failure 2026-11-04T17:44:07Z c18670f7
+```
+
+## 이 항목의 지위
+
+- `1e5740024c` 를 head 로 한 test.yml run 을 **찾지 못했다.** 다만 **최근 100개만 조회**했고 그 이전은 안 봤다.
+- 따라서 "이 스위트가 1e5740024c 에서 처음부터 실패했다"를 **실행으로 확정하지 못했다.**
+- 확인된 것은: `1e5740024c` 이후 `lib/play/play_invite.ml` 변경 0건, 그리고 현재 main(`7d2b43bf30`)에서 이 스위트가 실패한다는 것(run 41966075993).
+
+## 정직한 결론
+
+**(b) 는 "제품과 시험이 같은 커밋에서 태어났고 그 뒤 제품이 안 바뀌었다"까지가 확인된 범위다.** "그 케이스가 한 번도 통과한 적 없다"는 **미확인**이다 — 100개 조회 한계 때문이다.

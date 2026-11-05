@@ -376,6 +376,16 @@ type keeper_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Keeper_tool_approval_answered of
+      string
+      * string
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
+      * Masc_tui_operator_projection.Flow.generation
+      (** keeper, tool call id, allow, and whether a wait was released — the
+          Approvals-surface twin of [Keeper_chat_approval_answered], which
+          needs the chat request this path does not have. *)
   | Keeper_roster_reloaded of keeper_roster_observation
       (** The whole roster read on its own, after a change or a failure. *)
   | Keeper_row_reloaded of keeper_row_observation
@@ -414,9 +424,7 @@ type keeper_msg =
       * Masc.Keeper_tool_approval_mode.mode
       * (unit, string) result
       * Masc_tui_operator_projection.Flow.generation
-      (** keeper, tool call id, allow, and whether a wait was released — the
-          Approvals-surface twin of [Keeper_chat_approval_answered], which
-          needs the chat request this path does not have. *)
+  | Keeper_composer_released
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
@@ -582,16 +590,6 @@ type approvals_msg =
       * (Masc_tui_operator_projection.confirm_outcome, string) result
       * Masc_tui_operator_projection.Flow.generation
       * (approval_snapshot, string) result
-
-type surface_msg =
-  | Surface_composer_released
-  | Surface_tool_approval_answered of
-      string
-      * string
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-      * Masc_tui_operator_projection.Flow.generation
 
 type board_msg =
   | Board_post_refresh_done of
@@ -897,7 +895,6 @@ type async_msg =
   | Ask_msg of ask_msg
   | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Approvals_msg of approvals_msg
-  | Surface_msg of surface_msg
   | Board_msg of board_msg
   | Context_msg of context_msg
   | Live_context_loaded of Masc_tui_context_state.request * int64

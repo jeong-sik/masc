@@ -2841,7 +2841,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
      the Gate and operator-confirm decisions beside it. Take the same
      single-action slot so the header shows [submitting] at once and a repeat
      press during the trip is refused rather than answering the call twice.
-     Completion ([Surface_tool_approval_answered]) releases the slot. *)
+     Completion ([Keeper_tool_approval_answered]) releases the slot. *)
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
       report_action state "system" "Approval action already in progress"
@@ -2863,7 +2863,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
-          (Surface_msg (Surface_tool_approval_answered
+          (Keeper_msg (Keeper_tool_approval_answered
              (keeper_name, tool_call_id, approval_id, allow, result, generation)))
       in
       match Eio_context.get_switch_opt () with
@@ -2871,7 +2871,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
           fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
-            (Surface_msg (Surface_tool_approval_answered
+            (Keeper_msg (Keeper_tool_approval_answered
                ( keeper_name,
                  tool_call_id,
                  approval_id,
@@ -8378,7 +8378,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
     save_message_draft state;
     let was_focused = state.composer_focused in
     state.composer_focused <- false;
-    if was_focused then enqueue_async mailbox (Surface_msg Surface_composer_released)
+    if was_focused then enqueue_async mailbox (Keeper_msg Keeper_composer_released)
   end;
   if not from_reference then state.followed_from <- None;
   leave_browser_lane_for_surface state destination;
@@ -22536,7 +22536,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
         | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
-        | (Approvals_msg Approvals_listing_superseded) | (Surface_msg Surface_composer_released)
+        | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
         | Chat_msg (Chat_search_finished (_, _, _, _)) | Workspace_scoped (_, _, _) | Workspace_operation _
         | Chat_command_read_completed (_, _) | Workspace_msg (Workspace_identity_unconfirmed _)
         | Schedule_msg (Schedule_form_authority_refused _) | Lane_msg (Lane_package_catalog_loaded (_, _, _)
@@ -22584,7 +22584,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
         | Keeper_chat_control_received (_, _, _)) | Gate_msg (Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
-        | Surface_msg (Surface_tool_approval_answered (_, _, _, _, _, _)) | Keeper_msg (Keeper_gate_settings_loaded _
+        | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
         | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
         | Keeper_action_done (_, _, _, _))
@@ -24109,7 +24109,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | None -> notice ~kind:Notice_reply
                    "/find source changed while searching; repeat /find to search the current conversation")
       end
-  | (Surface_msg Surface_composer_released) ->
+  | (Keeper_msg Keeper_composer_released) ->
       drain_queued_message state ~base_path ~mailbox
   | Http_msg (Http_scoped_refresh_done (authority, currency_authority, results)) ->
       if authority = state.workspace_authority
@@ -26880,7 +26880,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error detail ->
            report_action state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
-  | Surface_msg (Surface_tool_approval_answered
+  | Keeper_msg (Keeper_tool_approval_answered
       (keeper_name, tool_call_id, approval_id, allow, result, generation)) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
          the header clears [submitting] and the next decision is admitted. *)

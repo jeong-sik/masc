@@ -389,6 +389,16 @@ type keeper_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Keeper_tool_approval_answered of
+      string
+      * string
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
+      * Masc_tui_operator_projection.Flow.generation
+      (** keeper, tool call id, allow, and whether a wait was released — the
+          Approvals-surface twin of [Keeper_chat_approval_answered], which
+          needs the chat request this path does not have. *)
   | Keeper_roster_reloaded of keeper_roster_observation
   | Keeper_row_reloaded of keeper_row_observation
   | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
@@ -425,9 +435,7 @@ type keeper_msg =
       * Masc.Keeper_tool_approval_mode.mode
       * (unit, string) result
       * Masc_tui_operator_projection.Flow.generation
-      (** keeper, tool call id, allow, and whether a wait was released — the
-          Approvals-surface twin of [Keeper_chat_approval_answered], which
-          needs the chat request this path does not have. *)
+  | Keeper_composer_released
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
@@ -589,16 +597,6 @@ type approvals_msg =
       * (Masc_tui_operator_projection.confirm_outcome, string) result
       * Masc_tui_operator_projection.Flow.generation
       * (approval_snapshot, string) result
-
-type surface_msg =
-  | Surface_composer_released
-  | Surface_tool_approval_answered of
-      string
-      * string
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-      * Masc_tui_operator_projection.Flow.generation
 
 type board_msg =
   | Board_post_refresh_done of
@@ -904,7 +902,6 @@ type async_msg =
   | Ask_msg of ask_msg
   | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Approvals_msg of approvals_msg
-  | Surface_msg of surface_msg
   | Board_msg of board_msg
   | Context_msg of context_msg
   | Live_context_loaded of Masc_tui_context_state.request * int64
@@ -1249,7 +1246,7 @@ let rec workspace_message_is_read = function
      read the confirm queue again. It belongs to that refresh, which is
      ordered by its own tickets. *)
   | (Approvals_msg Approvals_listing_superseded)
-  | (Surface_msg Surface_composer_released)
+  | (Keeper_msg Keeper_composer_released)
   | Http_msg (Http_scoped_refresh_done _
   | Http_scoped_refresh_failed _)
   | Approvals_msg (Approval_decision_done _)
@@ -1271,8 +1268,8 @@ let rec workspace_message_is_read = function
   | Gate_msg (Gate_approval_resolved _
   | Gate_auto_judge_retried _
   | Gate_mode_set _)
-  | Surface_msg (Surface_tool_approval_answered _)
-  | Keeper_msg (Keeper_tool_mode_set _
+  | Keeper_msg (Keeper_tool_approval_answered _
+  | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _)
   | Schedule_msg (Schedule_form_authority_refused _)
   | Keeper_msg (Keeper_deletion_retry_done _)
@@ -1342,7 +1339,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _)
   | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _
   | Http_msg (Http_initial_identity_read _ | Http_refresh_done _ | Http_refresh_failed _)
-  | Approvals_msg (Approvals_listing_superseded | Approvals_summary_loaded _) | (Surface_msg Surface_composer_released)
+  | Approvals_msg (Approvals_listing_superseded | Approvals_summary_loaded _) | (Keeper_msg Keeper_composer_released)
   | Http_msg (Http_scoped_refresh_done _ | Http_scoped_refresh_failed _) | Board_msg (Board_post_refresh_done _)
   | Approvals_msg (Approval_decision_done _) | Ask_msg (Ask_answer_done _) | Keeper_msg (Keeper_chat_dispatch_started _
   | Keeper_chat_done _ | Keeper_chat_stream_deltas _ | Keeper_chat_stream_unavailable _
@@ -1372,8 +1369,8 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_tool_approvals_loaded _) | Ask_msg (Asks_reloaded _) | Keeper_msg (Keeper_roster_reloaded _ | Keeper_row_reloaded _) | Listen_prepared _ | Resource_msg (Resource_diagram_ready _)
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _) | Gate_msg (Gate_snapshot_loaded _ | Gate_approval_resolved _
-  | Gate_auto_judge_retried _ | Gate_mode_set _) | Surface_msg (Surface_tool_approval_answered _)
-  | Keeper_msg (Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
+  | Gate_auto_judge_retried _ | Gate_mode_set _) | Keeper_msg (Keeper_tool_approval_answered _
+  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _)
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
@@ -1483,7 +1480,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _ | Voice_transcribed _
     | Voice_silent _ | Voice_discarded _ | Voice_failed _) | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _
     | Http_refresh_failed (_, _, _)) | Approvals_msg (Approvals_listing_superseded
-    | Approvals_summary_loaded (_, _, _, _)) | (Surface_msg Surface_composer_released)
+    | Approvals_summary_loaded (_, _, _, _)) | (Keeper_msg Keeper_composer_released)
     | Http_msg (Http_scoped_refresh_done (_, _, _)
     | Http_scoped_refresh_failed (_, _, _, _, _, _))
     | Board_msg (Board_post_refresh_done (_, _)) | Approvals_msg (Approval_decision_done (_, _, _, _, _))
@@ -1526,8 +1523,8 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_control_received (_, _, _)) | Gate_msg (Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
     | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
-    | Surface_msg (Surface_tool_approval_answered (_, _, _, _, _, _))
-    | Keeper_msg (Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+    | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
+    | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
     | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
@@ -1627,7 +1624,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
   | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _ | Http_refresh_failed (_, _, _))
   | Approvals_msg (Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _))
-  | (Surface_msg Surface_composer_released) | Http_msg (Http_scoped_refresh_done (_, _, _)
+  | (Keeper_msg Keeper_composer_released) | Http_msg (Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _, _)) | Board_msg (Board_post_refresh_done (_, _))
   | Keeper_msg (Keeper_chat_dispatch_started (_, _, _) | Keeper_chat_done (_, _, _, _)
   | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
@@ -1666,8 +1663,8 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_control_received (_, _, _)) | Gate_msg (Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)
   | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
-  | Surface_msg (Surface_tool_approval_answered (_, _, _, _, _, _))
-  | Keeper_msg (Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
+  | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
+  | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _

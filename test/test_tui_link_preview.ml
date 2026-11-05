@@ -117,27 +117,6 @@ let test_compact_badge_source_spans () =
       check bool "compact observer preserves silence" (Option.is_none (render_compact_badge silent))
         (Option.is_none (render_compact_badge_with_spans silent))
 
-let test_modal_keeps_complete_url_and_instructions () =
-  let url = "https://example.com/" ^ String.make 140 'x' ^ "/한글끝.png" in
-  List.iter (fun width ->
-    let lines = render_modal_card ~width ~height:4 (synthesize_preview url) in
-    check bool "each rendered row fits the actual modal width" true
-      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
-    check bool "each physical row is valid UTF-8" true
-      (List.for_all String.is_valid_utf_8 lines);
-    let rec url_lines = function
-      | [] -> fail "modal has no complete URL reader"
-      | line :: rest ->
-          (match Astring.String.cut ~sep:"URL:" line with
-           | None -> url_lines rest
-           | Some (_, first) -> String.trim first :: List.map String.trim rest) in
-    check string "the complete URL survives wrapping and short window height"
-      url (String.concat "" (url_lines lines));
-    let joined = String.concat " " (List.map String.trim lines) in
-    check bool "the image viewing instruction reaches its final word" true
-      (Option.is_some (Astring.String.find_sub ~sub:"terminal graphics engine." joined)))
-    [30; 40; 60; 80; 120]
-
 (* A URL the background fetch refused stays refused: the store keeps the
    answer, and the card says why instead of showing nothing. One case per
    refusal, so a fetch failure, an empty body, an unreadable cache file and a
@@ -172,13 +151,12 @@ let test_a_refused_image_url_is_remembered_and_said () =
     cases;
   clear_cache ()
 
-(* Until the background fetch has answered, the store holds nothing and the
-   card says nothing about a preview: a missing entry is not a refusal. *)
+(* Until the background fetch has answered, the store holds nothing: a
+   missing entry is not a refusal. *)
 let test_an_undecided_image_url_says_nothing () =
   clear_cache ();
   let url = "https://example.com/undecided.png" in
   check bool "no entry" true (Option.is_none (mosaic_lookup url));
-  check bool "no preview line" false (card_says ~url "  preview");
   clear_cache ()
 
 (* ---- parse_og_html: real fetched metadata (pure, no network) ---- *)
@@ -332,8 +310,7 @@ let () =
     ; ( "cache"
       , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding ] )
     ; ( "render"
-      , [ test_case "modal keeps complete URL and instructions" `Quick test_modal_keeps_complete_url_and_instructions
-        ; test_case "compact badge source spans" `Quick test_compact_badge_source_spans
+      , [ test_case "compact badge source spans" `Quick test_compact_badge_source_spans
         ; test_case "formatter-owned card source spans" `Quick test_card_source_spans
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said

@@ -989,7 +989,6 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      ; ( "runtime_blockers"
        , `Assoc
            (Keeper_status_bridge.runtime_blocker_fields_json_of_surface
-              meta
               observations.runtime_blocker) )
      ; ("recent_tool_calls_unavailable", recent_tool_calls_unavailable)
      ]

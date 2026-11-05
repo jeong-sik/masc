@@ -149,32 +149,22 @@ let last_runtime_attempt_json (meta : keeper_meta) =
   | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
-let runtime_blocker_facts_json (meta : keeper_meta) =
-  `Assoc
-    [ "source", `String "keeper_runtime.last_runtime_attempt"
-    ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_runtime_attempt", last_runtime_attempt_json meta
-    ]
-;;
-
-let runtime_blocker_fields_json_of_surface (meta : keeper_meta) = function
+let runtime_blocker_fields_json_of_surface = function
   | Some blocker ->
     [ "runtime_blocker_class", `String (runtime_blocker_class_to_string blocker.blocker_class)
     ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
     ; "runtime_blocker_signature",
       (match blocker.signature with Some s -> `String s | None -> `Null)
-    ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
   | None ->
     [ "runtime_blocker_class", `Null
     ; "runtime_blocker_summary", `Null
     ; "runtime_blocker_signature", `Null
-    ; "runtime_blocker_facts", `Null
     ]
 ;;
 
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  runtime_blocker_fields_json_of_surface meta (runtime_blocker_surface_opt config meta)
+  runtime_blocker_fields_json_of_surface (runtime_blocker_surface_opt config meta)
 ;;
 
 let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =

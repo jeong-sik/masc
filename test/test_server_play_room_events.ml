@@ -130,19 +130,21 @@ let test_renew_failure_keeps_lease_for_next_ping () = workspace (fun base_path -
       ~scope:room_scope ~sse_client_id:30 |> ok;
     disconnect base_path ~sse_client_id:30 room_scope))
 
-let test_disconnect_finishes_before_cancellation () = workspace (fun base_path ->
+let test_disconnect_finishes_before_cancellation () =
+  let exception Disconnect_fixture in
+  workspace (fun base_path ->
   with_events base_path (fun heard ->
     let room_scope = scope () in
     connect base_path ~sse_client_id:40 room_scope;
     let cancelled =
       try
         Eio.Cancel.sub (fun context ->
-          Eio.Cancel.cancel context (Failure "disconnect fixture");
+          Eio.Cancel.cancel context Disconnect_fixture;
           ignore (Events.disconnect ~base_path ~agent_name:"player" ~role:Masc_domain.Player
             ~scope:room_scope ~sse_client_id:40);
           false)
       with
-      | Eio.Cancel.Cancelled (Failure "disconnect fixture") -> true
+      | Eio.Cancel.Cancelled Disconnect_fixture -> true
       | Eio.Cancel.Cancelled _ -> false
     in
     check bool "the original cancellation is preserved" true cancelled;

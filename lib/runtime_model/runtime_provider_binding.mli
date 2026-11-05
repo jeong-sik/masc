@@ -10,10 +10,6 @@
 
 module Runtime_binding = Agent_core.Provider_runtime_binding
 
-val normalize_provider_id : string -> string
-(** Trim, lowercase, and replace [-] with [_] in a provider identifier so
-    label/binding lookups are case- and separator-insensitive. *)
-
 val local_runtime_label : string -> string
 
 val default_headers_for_kind :

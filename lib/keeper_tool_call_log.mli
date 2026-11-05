@@ -428,10 +428,7 @@ val read_recent :
     oldest first, optionally only one keeper's. Default [n=100].
 
     The answer is exact: [n] rows come back whenever the store holds [n] for
-    that keeper, so a short answer means the store is short. It used to be a
-    tail scan with a keeper filter, which returned 454 rows for a request of
-    500 and left the caller unable to tell that from a keeper that had made
-    no more calls.
+    that keeper, so a short answer means the store is short.
 
     Answered from the derived read index (RFC-0437), which advances itself to
     the store's current end before the query and names rows the store is then
@@ -439,30 +436,6 @@ val read_recent :
     or read is [Error (Index_unavailable detail)] rather than fallen back from
     or answered as empty, so there is one read path and its failure is the
     caller's to state. An unconfigured store is [Ok []]. *)
-
-val read_over_scan_factor : int
-(** Scan multiplier for callers that share one fleet read
-    ({!read_recent_rows} + {!filter_rows_for_keeper}) instead of asking per
-    keeper: to end up with [n] rows from one keeper such a read must cover
-    [n * read_over_scan_factor] fleet rows, and it is still a scan, so the
-    coverage it buys is approximate.
-
-    {!read_recent} no longer applies it. That read goes through the index and
-    is exact. *)
-
-val read_recent_rows : n:int -> unit -> (Yojson.Safe.t list, index_error) result
-(** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
-    with no keeper filter. One shared read serves every per-keeper
-    {!filter_rows_for_keeper} derivation, instead of each keeper
-    re-parsing the store. Read through the same index as {!read_recent},
-    with the same [Error] on an index that cannot be read. *)
-
-val filter_rows_for_keeper :
-  keeper_name:string -> n:int -> Yojson.Safe.t list -> Yojson.Safe.t list
-(** [filter_rows_for_keeper ~keeper_name ~n rows] is [read_recent]'s
-    keeper filter applied to an already-read row window: rows whose
-    ["keeper"] field equals [keeper_name], order preserved, truncated to
-    the last [n]. *)
 
 val file_change_tally :
   ?keeper_name:string ->

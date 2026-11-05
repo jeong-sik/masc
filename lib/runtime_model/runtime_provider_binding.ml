@@ -9,12 +9,6 @@
 
 module Runtime_binding = Agent_core.Provider_runtime_binding
 
-let normalize_provider_id provider_id =
-  String.trim provider_id
-  |> String.lowercase_ascii
-  |> String.map (fun c -> if c = '-' then '_' else c)
-;;
-
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true

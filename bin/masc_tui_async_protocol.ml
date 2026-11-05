@@ -832,14 +832,6 @@ type observer_msg =
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 
-type original_msg =
-  | Original_task_read_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_history_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.history_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_evidence_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.evidence_snapshot, Masc_tui_original_task_read.error) result
-
 type async_msg =
   | Chat_msg of chat_msg
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
@@ -936,7 +928,7 @@ type async_msg =
   | Account_msg of account_msg
   | Observer_msg of observer_msg
   | Fleet_msg of Masc_tui_fleet_results.msg
-  | Original_msg of original_msg
+  | Original_msg of Masc_tui_original_results.msg
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it awaited UI application, whether queued or request-owned.
@@ -1054,6 +1046,9 @@ let rec workspace_message_is_read = function
   | Fleet_msg answer ->
       (match Masc_tui_fleet_results.answer_kind answer with
        | Masc_tui_fleet_results.Read -> true)
+  | Original_msg answer ->
+      (match Masc_tui_original_results.answer_kind answer with
+       | Masc_tui_original_results.Read -> true)
   | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) -> true
   | Chat_msg (Chat_search_finished _) -> true
@@ -1154,7 +1149,7 @@ let rec workspace_message_is_read = function
   | Keeper_msg (Keeper_schedules_loaded _)
   | System_logs_loaded _
   | Ask_msg (Ask_followup_observed _ | Ask_followup_finished _)
-  | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) | Keeper_msg (Keeper_calls_loaded _)
+  | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded _)
   | Goal_msg (Goal_timeline_loaded _ | Goal_candle_loaded _)
   | Task_msg (Task_history_loaded _)
   | Verification_msg (Verification_evidence_loaded _)
@@ -1284,6 +1279,9 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Fleet_msg answer ->
       (match Masc_tui_fleet_results.answer_kind answer with
        | Masc_tui_fleet_results.Read -> false)
+  | Original_msg answer ->
+      (match Masc_tui_original_results.answer_kind answer with
+       | Masc_tui_original_results.Read -> false)
   | Sent_image_ready _ | Image_render_ready _ -> true
   | Board_msg (Board_attachment_saved (_, result)) ->
       (match result with
@@ -1361,8 +1359,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
   | Account_login_removal _) | Github_msg (Github_login_lines _ | Github_login_finished _
   | Github_token_saved _) | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
-  | Original_msg (Original_task_read_done _
-  | Original_task_history_done _ | Original_task_evidence_done _) | Task_msg (Task_dispatch_completed _
+  | Task_msg (Task_dispatch_completed _
   | Task_creation_read_done _) | Keeper_msg (Keeper_queue_action_received _
   | Keeper_execute_streamed _) -> false
 let workspace_message_admitted state ~authority ~reading message =
@@ -1418,6 +1415,9 @@ let retired_operation_observation state ~authority ~reading message =
     | Fleet_msg answer ->
         (match Masc_tui_fleet_results.answer_kind answer with
          | Masc_tui_fleet_results.Read -> None)
+    | Original_msg answer ->
+        (match Masc_tui_original_results.answer_kind answer with
+         | Masc_tui_original_results.Read -> None)
     | Browser_msg (Browser_lane_scene_loaded (generation, Ok _)) ->
         (match state.browser_lane with
          | Some ({load=Browser_lane_view.Loading (current, operation); _} as view)
@@ -1500,7 +1500,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
     | System_logs_loaded _ | Schedule_msg (Schedule_cancel_done (_, _))
     | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
-    | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
+    | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
     | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
     | Verification_msg (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | Keeper_msg (Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1546,6 +1546,9 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Fleet_msg answer ->
       (match Masc_tui_fleet_results.answer_kind answer with
        | Masc_tui_fleet_results.Read -> message)
+  | Original_msg answer ->
+      (match Masc_tui_original_results.answer_kind answer with
+       | Masc_tui_original_results.Read -> message)
   | Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation)) ->
       let receipt, observation = project receipt observation in
       Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation))
@@ -1642,7 +1645,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
   | System_logs_loaded _ | Schedule_msg (Schedule_cancel_done (_, _))
   | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
-  | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
+  | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
   | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
   | Verification_msg (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | Keeper_msg (Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)

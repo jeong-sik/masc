@@ -95,14 +95,18 @@ Keeper 의 provider 요청은 매번 새 TCP·TLS 연결을 열고, 응답을 �
 
 ### 3.1 캐시는 서버 프로세스에 하나다
 
-- 서버가 시작할 때 루트 switch 와 서버 clock 으로 `Http_client_cache.create` 를 한 번 부른다. 자리는 `lib/server/server_runtime_bootstrap.ml` 이 `Fd_accountant.install_observers` 를 부르는 곳 옆이다.
+- 서버가 시작할 때 루트 switch 와 단조 시계(`Eio.Stdenv.mono_clock`)로 `Http_client_cache.create` 를 한 번 부른다. 자리는 `lib/server/server_runtime_bootstrap.ml` 이 `Fd_accountant.install_observers` 를 부르는 곳 옆이다.
+  - 연결이 논 시간은 넣은 때부터 단조 시계로 잰다. Eio 는 `clock` 을 "the system clock (used to get the current time and date)", `mono_clock` 을 "a monotonic clock (used for measuring intervals)" 라고 적었다(`eio.mli:261`, `:264`, Eio 1.3). 시스템 시계로 재면 시계가 뒤로 갈 때 서버가 이미 닫은 연결을 내준다. 11-06 감사가 이것을 찾았고 5층이 고친다.
 - 캐시는 `Provider_connection_cache_ref` 에 두고, 설치한 domain 을 같이 적는다. `Runtime_agent.transport_for_provider` 는 그 domain 에서만 캐시를 받아 `make_http_transport ~connection_cache` 로 넘긴다. 설치되지 않았거나 다른 domain 이면 `None` 이고 지금처럼 요청마다 닫는다.
 - 키는 지금처럼 scheme·host·port 다. 여러 Keeper 가 같은 origin 의 연결을 나눠 쓴다. 꺼낸 연결은 돌려놓기 전까지 그 요청만 쓴다.
 - `idle_ttl_seconds` 는 20초다. §1.2 에서 가장 먼저 닫은 api.z.ai(25초)보다 짧다. §1.4 에서 60초로 늘려도 얻는 비율은 0.2~5.3%p 다.
   - 요청은 20초 넘게 논 연결을 받지 않는다. 꺼낼 때(`Http_client_cache.checkout`) 나이를 보고, 넘었으면 닫는다.
   - eviction fiber 는 TTL 의 절반마다 돈다. 그것만으로는 30초까지 논 연결이 요청에 나간다. 3층 리뷰가 이것을 찾았다.
 - `max_idle_per_host` 는 기본값 8 을 둔다. 배포 뒤 `Http_client_cache.stats` 의 origin 별 idle 수로 다시 본다.
-- 연결은 캐시의 switch 위에 열린다. 새 연결을 열 때 그 switch 에 fiber 를 붙인다. Eio 는 다른 domain 에서 switch 를 쓰면 `Invalid_argument "Switch accessed from wrong domain!"` 을 던진다(`eio/core/switch.ml` 의 `check_our_domain`, Eio 1.3).
+- 연결마다 owner switch 를 따로 둔다. 캐시의 switch 위 daemon 하나가 그 owner switch 를 연결이 닫힐 때까지 돌린다. 연결을 여는 함수(`create`)는 요청 fiber 에서 owner switch 를 받아 돈다.
+  - `Tcp_address_race` 는 소켓을 넘긴 뒤에도 그 switch 에 fiber 를 남긴다. Eio 는 fiber 가 예외를 내면 "[Switch.fail sw] is called" 라고 적었다(`eio__core.mli` `Fiber.fork`). 캐시의 switch 는 서버의 switch 라서, owner switch 가 없으면 연결 하나의 늦은 실패가 서버 switch 를 실패시킨다.
+  - owner switch 가 실패하면 daemon 이 그 예외를 `Diag.warn` 으로 남기고 끝난다. 캐시는 그 연결을 다시 내주지도 넣지도 않고 닫는다. 캐시의 switch 를 취소하면 owner switch 도 모두 취소된다.
+- owner switch 를 돌리는 daemon 은 캐시의 switch 에 붙는다. Eio 는 다른 domain 에서 switch 를 쓰면 `Invalid_argument "Switch accessed from wrong domain!"` 을 던진다(`eio/core/switch.ml` 의 `check_our_domain`, Eio 1.3).
   - 그래서 캐시는 설치한 domain 의 요청만 쓴다. 다른 domain 에 캐시를 넘기면 그 요청은 provider 오류로 끝난다. 3층 시험이 이것을 재현했다.
   - 지금 캐시를 쓰는 provider 요청(Keeper owner 턴, 자율 턴, 리뷰어, Fusion)은 모두 main domain 에서 돈다. serving domain 모드의 handler 는 Keeper owner mailbox 로 넘긴다.
   - 통계는 어느 domain 에서든 읽는다. 캐시 상태는 `Eio.Mutex` 와 `Atomic` 이 지키고, Eio 는 둘 다 여러 domain 에서 써도 된다고 적었다(Eio README "Mutexes and Semaphores").
@@ -169,3 +173,4 @@ val decide :
 2. #48633 병합 뒤: `Reuse_verdict` 와 `Http_client_cache.release`, 세 함수의 판정 교체와 시험(agent_core).
 3. `Provider_connection_cache_ref` 설치와 `Runtime_agent.transport_for_provider` 배선, runtime health 응답의 캐시 `stats`(masc).
 4. 꺼낸 연결의 출처(`lease`), `http_client` 의 연결 합타입, 다시 쓴 연결의 이유별 닫은 수와 health 응답의 `closed_after_reuse`(agent_core·masc, #48933).
+5. 단조 시계로 재는 TTL, 연결마다 owner switch, 전송층 EOF 뒤 취소를 취소로 올리기(agent_core·masc, #48990).

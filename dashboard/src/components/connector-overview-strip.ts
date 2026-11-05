@@ -1,8 +1,7 @@
 // ConnectorOverviewStrip — top-of-page compact strip showing all 4 known
-// sidecars at once. Each tile is a brand-colored mini card with the
-// readiness rail underneath and one primary action (Start when down,
-// Stop when up). Clicking the tile body smooth-scrolls to that
-// connector's full panel below in the page.
+// connectors at once. Each tile is a brand-colored mini card with the
+// readiness rail underneath and a config button. Clicking the tile body
+// smooth-scrolls to that connector's full panel below in the page.
 //
 // Rendered only on the all-connectors view (`section=connector-status`).
 // Per-bridge sub-sections already filter to one panel and don't need an
@@ -13,7 +12,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { SurfaceCard } from './common/card'
-import { ConnectorReadinessRail, deriveRail, getRailInflight } from './connector-readiness-rail'
+import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, type KnownConnectorId } from './connector-constants'
 import { connectorStateLabel } from './connector-state'
 import { openConnectorConfig } from './connector-config-form'
@@ -249,7 +248,6 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       expandHeader: () => selectConnector(true),
       scrollToBindings: () => selectConnector(true),
     },
-    getRailInflight(id),
   )
   const accent = connectorAccentStyle(id)
   const displayName = CONNECTOR_DISPLAY_NAMES[id] ?? id
@@ -615,7 +613,6 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     >
       <span aria-hidden="true">⚠</span>
       <span>최근 5분 내 연결 끊김 — ${names}</span>
-      <span class="ml-auto text-3xs font-normal text-[var(--bad-light)]/80">아래 Start 버튼으로 복구</span>
     </${SurfaceCard}>
   `
 }

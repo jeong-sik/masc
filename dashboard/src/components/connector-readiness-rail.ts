@@ -8,52 +8,13 @@
 //
 // Status mapping:
 //   ok    — the thing is set up and live (green)
-//   warn  — set up but not live (running sidecar with no bindings, etc.)
+//   warn  — set up but not live (keepers exist but no channel is bound)
 //   bad   — actively missing / broken (red)
 //   idle  — unknown / not measured yet (gray)
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 
 type RailState = 'ok' | 'warn' | 'bad' | 'idle'
-export type RailKey = 'token' | 'process' | 'gate' | 'bindings'
-
-/** Per-connector × per-pill in-flight tracker. Subscribed by deriveRail
-    callers so a click on the Process pill can flip the pill into a
-    pulsing "진행 중..." state until the underlying action settles. */
-const inflightState = signal<Record<string, Partial<Record<RailKey, boolean>>>>({})
-
-export function markRailInflight(connectorId: string, key: RailKey) {
-  const cur = inflightState.value[connectorId] ?? {}
-  inflightState.value = { ...inflightState.value, [connectorId]: { ...cur, [key]: true } }
-}
-
-export function clearRailInflight(connectorId: string, key: RailKey) {
-  const cur = inflightState.value[connectorId] ?? {}
-  if (!cur[key]) return
-  const next = { ...cur }
-  delete next[key]
-  inflightState.value = { ...inflightState.value, [connectorId]: next }
-}
-
-export function getRailInflight(connectorId: string): Partial<Record<RailKey, boolean>> {
-  return inflightState.value[connectorId] ?? {}
-}
-
-export function resetRailInflightState() {
-  inflightState.value = {}
-}
-
-/** Wrap an async action so the pill it backs pulses for its duration.
-    Helper for callers that don't want to remember mark/clear. */
-export async function withRailInflight<T>(connectorId: string, key: RailKey, fn: () => Promise<T>): Promise<T> {
-  markRailInflight(connectorId, key)
-  try {
-    return await fn()
-  } finally {
-    clearRailInflight(connectorId, key)
-  }
-}
 
 export interface RailPill {
   key: 'token' | 'process' | 'gate' | 'bindings'
@@ -62,9 +23,6 @@ export interface RailPill {
   detail: string
   hint: string | null
   onClick: () => void
-  /** Action triggered by clicking this pill is currently in flight.
-      Renders a muted pulse + spinner glyph instead of the state icon. */
-  inflight?: boolean
 }
 
 const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string; gradient: string }> = {
@@ -114,47 +72,41 @@ export function statToneGradient(state: RailState): string {
 }
 
 /** Pure: compose a screen-reader label for the pill so assistive
-    technology reads "Token — 설정됨 (sidecar 부팅 통과). 클릭하면 Config" instead
+    technology reads "Token — 게이트웨이 설정됨" instead
     of just "Token" (which is what a button with only visible <span>
     children would otherwise expose). Kept pure so tests can pin the
     concatenation rules without mounting a DOM. */
 export function railPillAriaLabel(pill: RailPill): string {
-  const detail = pill.inflight === true ? '진행 중' : pill.detail
-  const parts = [pill.label, detail]
+  const parts = [pill.label, pill.detail]
   if (pill.hint !== null) parts.push(pill.hint)
   return parts.join(' — ')
 }
 
 function Pill({ pill }: { pill: RailPill }) {
   const tone = TONE[pill.state]
-  const inflight = pill.inflight === true
   // Grafana Stat panel layout — vertical stack (icon dominates, label
   // secondary) with a threshold-color gradient background. Detail moves
   // entirely to `title` + aria-label so a narrow tile can never render
   // "BINDIN k.." or "TOKEN 설." — the label is always the full word and
   // the detail is always the full sentence, no matter the column width.
   // Keyboard focus ring uses the accent token (PatternFly AA target:
-  // visible 2px ring on :focus-visible only). aria-busy announces
-  // "진행 중…" to AT without a separate visually-hidden span.
+  // visible 2px ring on :focus-visible only).
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-[var(--r-1)] border px-2 py-2.5 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-fg)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-[var(--r-1)] border px-2 py-2.5 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-fg)] ${tone.gradient} ${tone.border} hover:brightness-125`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}
-      aria-busy=${inflight ? 'true' : 'false'}
       onClick=${pill.onClick}
       data-rail-pill=${pill.key}
       data-rail-state=${pill.state}
-      data-rail-inflight=${inflight ? 'true' : 'false'}
       data-rail-layout="stat-tile"
-      disabled=${inflight}
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-sm font-bold ${inflight ? 'bg-[var(--color-bg-hover)]' : tone.dot} text-[var(--color-bg-page)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-sm font-bold ${tone.dot} text-[var(--color-bg-page)]`}
       >
-        ${inflight ? '…' : tone.icon}
+        ${tone.icon}
       </span>
       <span
         aria-hidden="true"
@@ -202,11 +154,7 @@ export interface RailHandlers {
   scrollToBindings: () => void
 }
 
-export function deriveRail(
-  input: RailInputs,
-  on: RailHandlers,
-  inflight: Partial<Record<RailKey, boolean>> = {},
-): RailPill[] {
+export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
   const tokenState: RailState = input.gatewayAvailable ? 'ok' : 'bad'
   const tokenDetail = input.gatewayAvailable ? '게이트웨이 설정됨' : '필요 — ⚙ Config 에서 입력'
 
@@ -251,7 +199,6 @@ export function deriveRail(
       detail: tokenDetail,
       hint: tokenState === 'bad' ? '클릭하면 ⚙ Config 가 열립니다' : null,
       onClick: on.openConfig,
-      inflight: inflight.token === true,
     },
     {
       key: 'process',
@@ -260,7 +207,6 @@ export function deriveRail(
       detail: processDetail,
       hint: processHint,
       onClick: on.expandHeader,
-      inflight: inflight.process === true,
     },
     {
       key: 'gate',
@@ -269,7 +215,6 @@ export function deriveRail(
       detail: gateDetail,
       hint: '클릭하면 헤더 detail 펼침',
       onClick: on.expandHeader,
-      inflight: inflight.gate === true,
     },
     {
       key: 'bindings',
@@ -278,7 +223,6 @@ export function deriveRail(
       detail: bindingsDetail,
       hint: bindingsState !== 'ok' ? 'keeper 디렉토리로 스크롤' : null,
       onClick: on.scrollToBindings,
-      inflight: inflight.bindings === true,
     },
   ]
 }

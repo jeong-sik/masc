@@ -57,7 +57,7 @@ import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SurfaceCard, surfaceCardClassName } from './common/card'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
-import { ConnectorReadinessRail, deriveRail, getRailInflight } from './connector-readiness-rail'
+import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
 import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorFlowSection } from './connector-flow'
@@ -695,7 +695,6 @@ function ConnectorLivePanel({
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
             },
           },
-          getRailInflight(connectorId),
         )}
       />
       <${ConnectorSourceHealthStrip} connector=${connector} />

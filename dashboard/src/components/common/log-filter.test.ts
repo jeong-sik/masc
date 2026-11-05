@@ -46,9 +46,9 @@ describe('LogFilter', () => {
 
   it('applies custom class alongside base class', () => {
     const container = document.createElement('div')
-    render(html`<${LogFilter} class="v2-sidecar-log-level-pill">All<//>`, container)
+    render(html`<${LogFilter} class="custom-pill">All<//>`, container)
     const el = container.querySelector('button')
     expect(el?.classList.contains('log-f')).toBe(true)
-    expect(el?.classList.contains('v2-sidecar-log-level-pill')).toBe(true)
+    expect(el?.classList.contains('custom-pill')).toBe(true)
   })
 })

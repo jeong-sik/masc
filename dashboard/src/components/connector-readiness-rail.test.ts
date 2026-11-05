@@ -5,11 +5,6 @@ import { html } from 'htm/preact'
 import {
   ConnectorReadinessRail,
   deriveRail,
-  markRailInflight,
-  clearRailInflight,
-  getRailInflight,
-  withRailInflight,
-  resetRailInflightState,
   railPillAriaLabel,
   statToneGradient,
   type RailHandlers,
@@ -23,7 +18,7 @@ const noop: RailHandlers = {
 }
 
 describe('deriveRail', () => {
-  it('all bad/idle when sidecar is down with no gate signal and no keepers', () => {
+  it('all bad/idle when the gateway is unavailable with no gate signal and no keepers', () => {
     const pills = deriveRail(
       { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
@@ -101,47 +96,6 @@ describe('ConnectorReadinessRail rendering', () => {
     expect(bindingsPill?.getAttribute('data-rail-state')).toBe('warn')
   })
 
-  it('inflight=true pulses the pill, disables click, announces 진행 중 via aria-label', () => {
-    // Under the Grafana Stat-panel redesign the detail text no longer
-    // appears in the visible DOM — "진행 중" is reserved for the
-    // aria-label / title so AT users still hear the busy state.
-    const pills = deriveRail(
-      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
-      noop,
-      { process: true },
-    )
-    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
-    const processPill = container.querySelector('[data-rail-pill="process"]') as HTMLButtonElement
-    expect(processPill.getAttribute('data-rail-inflight')).toBe('true')
-    expect(processPill.disabled).toBe(true)
-    expect(processPill.className).toContain('animate-pulse')
-    expect(processPill.getAttribute('aria-label') ?? '').toContain('진행 중')
-  })
-
-  it('withRailInflight marks then clears the key around an async op', async () => {
-    resetRailInflightState()
-    const before = getRailInflight('discord').process
-    expect(before).toBeUndefined()
-
-    let observedDuringAwait: boolean | undefined
-    await withRailInflight('discord', 'process', async () => {
-      observedDuringAwait = getRailInflight('discord').process
-    })
-    expect(observedDuringAwait).toBe(true)
-    expect(getRailInflight('discord').process).toBeUndefined()
-  })
-
-  it('markRailInflight then clearRailInflight only mutates the targeted key', () => {
-    resetRailInflightState()
-    markRailInflight('discord', 'process')
-    markRailInflight('discord', 'token')
-    expect(getRailInflight('discord').process).toBe(true)
-    expect(getRailInflight('discord').token).toBe(true)
-    clearRailInflight('discord', 'process')
-    expect(getRailInflight('discord').process).toBeUndefined()
-    expect(getRailInflight('discord').token).toBe(true)
-  })
-
   it('clicking a pill invokes its onClick', () => {
     let opened = 0
     const handlers: RailHandlers = {
@@ -172,17 +126,6 @@ describe('ConnectorReadinessRail rendering', () => {
     expect(aria).toContain('Config')
     // Focus ring is applied via focus-visible so mouse clicks don't light up.
     expect(tokenPill.className).toContain('focus-visible:outline')
-  })
-
-  it('inflight pill sets aria-busy="true"', () => {
-    const pills = deriveRail(
-      { gatewayAvailable: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
-      noop,
-      { process: true },
-    )
-    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
-    const processPill = container.querySelector('[data-rail-pill="process"]') as HTMLButtonElement
-    expect(processPill.getAttribute('aria-busy')).toBe('true')
   })
 
   it('decorative glyph + label spans are aria-hidden so AT only reads the aria-label', () => {
@@ -253,11 +196,6 @@ describe('railPillAriaLabel', () => {
     const pill = { ...basePill, hint: '클릭하면 Config' }
     expect(railPillAriaLabel(pill)).toBe('Token — 설정됨 — 클릭하면 Config')
   })
-
-  it('replaces detail with "진행 중" when inflight so AT announces the busy state', () => {
-    const pill = { ...basePill, inflight: true }
-    expect(railPillAriaLabel(pill)).toBe('Token — 진행 중')
-  })
 })
 
 describe('statToneGradient (pure)', () => {
@@ -282,7 +220,6 @@ describe('ConnectorReadinessRail layout', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    resetRailInflightState()
   })
   afterEach(() => {
     document.body.removeChild(container)

@@ -1,7 +1,7 @@
-/* MASC Dashboard v2 — Logs surface + Sidecar log viewer.
+/* MASC Dashboard v2 — Logs surface.
  *
- * Scoped to .v2-logs-surface and .v2-sidecar-log-surface so unmigrated
- * surfaces keep their legacy styling.
+ * Scoped to .v2-logs-surface so unmigrated surfaces keep their legacy
+ * styling.
  *
  * Colors come from v2-theme.css; this file handles surface-specific
  * layout, hairlines, hover states, and brass accent touches.
@@ -731,38 +731,4 @@
     padding-right: 20px;
     padding-left: 20px;
   }
-}
-
-.v2-sidecar-log-surface {
-  background: var(--color-bg-surface);
-  border-color: var(--color-border-default);
-}
-
-.v2-sidecar-log-toggle {
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
-}
-
-.v2-sidecar-log-toggle:hover {
-  border-color: var(--color-accent-fg-dim);
-  color: var(--color-accent-fg);
-  background: var(--color-brass-soft);
-}
-
-.v2-sidecar-log-path {
-  color: var(--color-fg-muted);
-}
-
-.v2-sidecar-log-pre {
-  background: var(--color-bg-page);
-  color: var(--color-fg-primary);
-}
-
-.v2-sidecar-log-level-pill {
-  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
-}
-
-.v2-sidecar-log-level-pill[aria-checked="true"] {
-  border-color: var(--color-accent-fg);
-  background: var(--color-brass-soft);
-  color: var(--color-fg-primary);
 }

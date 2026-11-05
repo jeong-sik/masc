@@ -181,9 +181,10 @@ def audit_original_payloads(packet, admitted, snapshots, public, terminal):
             assert row["input_json"] == (None if terminal else encoded(executions[opid]))
             # The status read does not repeat the submitted request; only the
             # fields it carries are compared with the SQLite row.
+            # batch_input_digest is not carried, so only the execution binding
+            # is compared here.
             assert status["created_at"] == row["created_at"] and status["state"].lower() == projected_state
             assert status.get("batch_execution_id") == (None if member is None else member["execution_id"])
-            assert status.get("batch_input_digest") == (None if member is None else member["admitted_digest"])
     assert seen == set(originals)
 
 

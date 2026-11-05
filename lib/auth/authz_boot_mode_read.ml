@@ -168,10 +168,13 @@ let high_water_detail = function
 let messages (input : B.input) = function
   | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
   | Activation_requested ->
-    ( "config.json asks for Multi_account and nothing is set up yet; run masc auth bootstrap \
-       --external-store PATH on this workspace while no server runs, then start the server \
-       (Activation_requested)"
-    , [] )
+    ( "config.json asks for Multi_account and nothing is set up yet (Activation_requested)"
+    , [ "this build does not serve multi-account; without account_mode in config.json, a boot \
+         starts a single user"
+      ; "masc auth bootstrap --external-store PATH, run while no server runs, activates the \
+         workspace; a server of this build then stops at boot, and no command undoes the \
+         activation"
+      ] )
   | Multi_account_not_served mode ->
     ( Printf.sprintf
         "the authorization log made Multi_account (%s); this build does not have the account \

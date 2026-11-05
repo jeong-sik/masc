@@ -472,7 +472,6 @@ val exec_policy_cwd_existing_siblings_hint : string
     renders around the caller-supplied [because]. *)
 
 val subset_rewrite_move_to_field : string
-val subset_rewrite_call_this_instead : string
 
 (** tool_guidance.* — generic cross-domain tool-result guidance, one arm of
     [Tool_guidance.t] per key. *)

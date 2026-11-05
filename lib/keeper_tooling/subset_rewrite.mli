@@ -13,17 +13,15 @@
     runs no shell" about a working [$PWD] and rewrote it into an absolute
     path, which is the same trip this module exists to stop.
 
-    What survives is where another form is still the better call:
-
-    - [&] leaves a child the shell's exit orphans, and Spawn is the tool that
-      returns a handle for one;
-    - a nested pipeline is what {!Connector} names. The typed [pipeline]
-      field is gone from the Execute schema, so this arm is unreachable until
-      the Shell IR parser judges [command] (RFC-execute-boundary-is-the-sandbox).
+    What survives is where another form is still the better call: a nested
+    pipeline is what {!Connector} names. The typed [pipeline] field is gone
+    from the Execute schema, so this arm is unreachable until the Shell IR
+    parser judges [command] (RFC-execute-boundary-is-the-sandbox).
 
     Everything else answers {!Unrepresentable}: the shell runs the line, and
-    the only thing worth adding is that argv is the form that gets path
-    scope.
+    the only thing worth adding is why the construct behaves as it does --
+    [&] leaves a child the shell's exit orphans -- or that argv is the form
+    that gets path scope.
 
     {!of_reason} stays exhaustive. A construct cannot join the excluded list
     without someone choosing whether the caller should have done anything
@@ -38,19 +36,11 @@ type field = Connector
     [timeout_sec], and this arm is unreachable until the Shell IR parser
     judges [command] -- the same note {!of_reason} carries above. *)
 
-type call =
-  | Spawn
-      (** a process that outlives the call needs the handle, not this tool *)
-
 type t =
   | Move_to_field of {
       field : field;
       because : string;
     }  (** the schema already has somewhere to put this *)
-  | Call_this_instead of {
-      call : call;
-      because : string;
-    }  (** a call the caller can make now *)
   | Unrepresentable of {
       construct : Masc_exec.Parsed.reason_too_complex;
       because : string;

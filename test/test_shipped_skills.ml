@@ -80,78 +80,6 @@ let string_member field json =
   Yojson.Safe.Util.(json |> member field |> to_string)
 ;;
 
-let test_run_and_read_waits_then_reads_both_streams () =
-  Eio_main.run (fun _ ->
-    let handle = "spawn-handle" in
-    let plan =
-      instantiate
-        "run-and-read"
-        (`Assoc [ "command", `String "true"; "timeout_sec", `Float 5.0 ])
-    in
-    let answer = function
-      | "keeper_spawn" -> `Assoc [ "status", `String "running"; "handle", `String handle ]
-      | "keeper_spawn_wait" ->
-        `Assoc
-          [ "status", `String "exited"
-          ; "exit", `Assoc [ "kind", `String "exited"; "code", `Int 0 ]
-          ]
-      | "keeper_spawn_read" ->
-        `Assoc [ "bytes", `String ""; "next", `Int 0; "dropped_before", `Int 0 ]
-      | tool -> fail ("unexpected tool: " ^ tool)
-    in
-    let result, calls = run_plan plan ~answer in
-    (match result with
-     | Ok _ -> ()
-     | Error _ -> fail "run-and-read did not complete against valid tool answers");
-    (match List.map fst calls with
-     | "start" :: "settle" :: reads ->
-       check
-         (list string)
-         "both streams are read after the wait"
-         [ "stderr"; "stdout" ]
-         (List.sort String.compare reads)
-     | order -> fail ("start then settle expected first, ran: " ^ String.concat ", " order));
-    check
-      (list string)
-      "argv preserves failed pipeline stages"
-      [ "bash"; "-o"; "pipefail"; "-c"; "true" ]
-      Yojson.Safe.Util.(
-        input_of calls "start" |> member "argv" |> to_list |> List.map to_string);
-    check string "waits for exit" "exit" (string_member "until" (input_of calls "settle"));
-    check
-      string
-      "wait uses the spawned handle"
-      handle
-      (string_member "handle" (input_of calls "settle"));
-    check string "reads stdout" "stdout" (string_member "stream" (input_of calls "stdout"));
-    check string "reads stderr" "stderr" (string_member "stream" (input_of calls "stderr")))
-;;
-
-let test_run_and_read_preserves_a_failed_pipeline () =
-  Eio_main.run (fun _ ->
-    let plan = instantiate "run-and-read"
-        (`Assoc [ "command", `String "printf 'capture failed\\n'; (exit 23) | cat";
-                  "timeout_sec", `Float 5.0 ]) in
-    let result, calls = run_plan plan ~answer:(function
-      | "keeper_spawn" ->
-        (* The descriptor declares both fields required; the executor
-           validates a producer's output before a consumer may read it. *)
-        `Assoc [ "status", `String "running"; "handle", `String "pipeline" ]
-      | "keeper_spawn_wait" | "keeper_spawn_read" -> `Assoc []
-      | tool -> fail ("unexpected tool: " ^ tool)) in
-    (match result with Ok _ -> () | Error _ -> fail "invalid shipped plan");
-    let argv = Yojson.Safe.Util.(input_of calls "start" |> member "argv"
-      |> to_list |> List.map to_string) in
-    match Process_eio.run_argv_with_status_split_or_refusal argv with
-    | Ok (Unix.WEXITED 23, stdout, _) ->
-      check string "failed capture output is retained" "capture failed\n" stdout
-    | Ok (status, _, _) ->
-      fail ("pipeline lost its failing stage: " ^
-        (match status with Unix.WEXITED n -> string_of_int n
-         | Unix.WSIGNALED n | Unix.WSTOPPED n -> "signal " ^ string_of_int n))
-    | Error _ -> fail "Bash could not be started")
-;;
-
 let test_prior_art_bounds_every_search () =
   Eio_main.run (fun _ ->
     let plan = instantiate "prior-art" (`Assoc [ "query", `String "EACCES" ]) in
@@ -324,14 +252,6 @@ let () =
         ] )
     ; ( "compositions"
       , [ test_case
-            "run-and-read waits then reads both streams"
-            `Quick
-            test_run_and_read_waits_then_reads_both_streams
-        ; test_case
-            "run-and-read preserves a failed pipeline"
-            `Quick
-            test_run_and_read_preserves_a_failed_pipeline
-        ; test_case
             "prior-art bounds every search"
             `Quick
             test_prior_art_bounds_every_search

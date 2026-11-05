@@ -2,16 +2,9 @@ module Gate = Masc_exec_command_gate.Shell_command_gate
 
 type field = Connector
 
-type call =
-  | Spawn
-
 type t =
   | Move_to_field of {
       field : field;
-      because : string;
-    }
-  | Call_this_instead of {
-      call : call;
       because : string;
     }
   | Unrepresentable of {
@@ -28,9 +21,8 @@ type t =
    Advising against it is not merely stale, it is the failure this module was
    written to end -- 2026-08-31, lane-smith was told "this tool runs no shell"
    for a working [$PWD] and rewrote it into an absolute path. What is left is
-   [&], where another call is the better move, and a nested pipeline, where a
-   field still is; for the rest the honest answer is that there is nothing to
-   say. *)
+   a nested pipeline, where a field still is; for the rest the honest answer
+   is that there is nothing to suggest. *)
 let a_shell_is_the_answer construct because =
   Unrepresentable { construct; because }
 ;;
@@ -38,16 +30,13 @@ let a_shell_is_the_answer construct because =
 (* Exhaustive on purpose.  A construct cannot join the excluded list without
    someone choosing whether the caller should have done something else. *)
 let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
-  (* Still true, and not about the subset: the shell that runs the line exits
-     when the line ends, so [&] leaves a child with no handle to wait on or
-     stop. Spawn is the tool that returns one. *)
-  | `Background ->
-    Call_this_instead
-      { call = Spawn
-      ; because =
-          "the shell running this line exits when the line does, so [&] \
-           leaves a child with no handle to wait on, read from, or stop"
-      }
+  (* Not about the subset: the shell that runs the line exits when the line
+     ends, so [&] leaves a child with no handle to wait on or stop. *)
+  | `Background as construct ->
+    a_shell_is_the_answer
+      construct
+      "the shell running this line exits when the line does, so [&] leaves a \
+       child with no handle to wait on, read from, or stop"
   | `Shell_builtin name as construct ->
     a_shell_is_the_answer
       construct
@@ -99,24 +88,8 @@ let field_name = function
   | Connector -> "connector"
 ;;
 
-(* The category the census counts. RFC execute-subset-dispositions §3.7 keys
-   its corpus table on these, so they stay put when what the caller types is
-   renamed. *)
-let call_name = function
-  | Spawn -> "spawn"
-;;
-
-(* What the caller types. [Spawn] is one concrete tool, so it is named
-   exactly -- "call spawn instead" sent the reader looking for a tool nobody
-   has. This library cannot see the tool schemas, so a test at a layer that
-   sees both holds the two together. *)
-let call_instruction = function
-  | Spawn -> "keeper_spawn"
-;;
-
 let tag = function
   | Move_to_field { field; _ } -> "move_to_field:" ^ field_name field
-  | Call_this_instead { call; _ } -> "call_this_instead:" ^ call_name call
   | Unrepresentable _ -> "unrepresentable"
 ;;
 
@@ -143,11 +116,6 @@ let to_string = function
     render_advice
       Prompt_names.subset_rewrite_move_to_field
       [ "field", field_name field; "because", because ]
-      ~fallback:because
-  | Call_this_instead { call; because } ->
-    render_advice
-      Prompt_names.subset_rewrite_call_this_instead
-      [ "call", call_instruction call; "because", because ]
       ~fallback:because
   | Unrepresentable { construct = _; because } -> because
 ;;

@@ -717,7 +717,6 @@ let exec_policy_cwd_existing_siblings_hint = "exec_policy.cwd_existing_siblings_
 (* subset_rewrite.* — the advice templates [Subset_rewrite.to_string]
    renders around the caller-supplied [because]. *)
 let subset_rewrite_move_to_field = "subset_rewrite.move_to_field"
-let subset_rewrite_call_this_instead = "subset_rewrite.call_this_instead"
 
 (* tool_guidance.* — generic cross-domain tool-result guidance, one arm of
    [Tool_guidance.t] per key. *)

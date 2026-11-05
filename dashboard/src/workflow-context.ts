@@ -1,26 +1,12 @@
-import { signal } from '@preact/signals'
 import type { OperatorRecommendedAction, RouteState } from './types'
 import { isRecord, asNullableString, asRecord } from './components/common/normalize'
 import { isRootTarget } from './components/ops/helpers'
-
-const STORAGE_KEY = 'masc_dashboard_workflow_context'
-const CONTEXT_TTL_MS = 15 * 60 * 1000
 
 function asDisplayString(value: unknown): string | null {
   const text = asNullableString(value)
   if (text) return text
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
-}
-
-function safeStorage(): Storage | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.sessionStorage
-  }
-  catch {
-    return null
-  }
 }
 
 export interface DashboardWorkflowContext {
@@ -39,56 +25,6 @@ export interface DashboardWorkflowContext {
   evidence: unknown
   created_at: string
 }
-
-function parseStoredContext(raw: string | null): DashboardWorkflowContext | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!isRecord(parsed)) return null
-    const id = asNullableString(parsed.id)
-    const sourceSurface = asNullableString(parsed.source_surface)
-    const sourceLabel = asNullableString(parsed.source_label)
-    const summary = asNullableString(parsed.summary)
-    const createdAt = asNullableString(parsed.created_at)
-    if (!id || (sourceSurface !== 'mission' && sourceSurface !== 'execution') || !sourceLabel || !summary || !createdAt) return null
-    return {
-      id,
-      source_surface: sourceSurface,
-      source_label: sourceLabel,
-      action_type: asNullableString(parsed.action_type),
-      target_type: asNullableString(parsed.target_type),
-      target_id: asNullableString(parsed.target_id),
-      focus_kind: asNullableString(parsed.focus_kind),
-      operation_id: asNullableString(parsed.operation_id),
-      summary,
-      payload_preview: asNullableString(parsed.payload_preview),
-      suggested_payload: asRecord(parsed.suggested_payload),
-      preview: parsed.preview ?? null,
-      evidence: parsed.evidence ?? null,
-      created_at: createdAt,
-    }
-  }
-  catch {
-    return null
-  }
-}
-
-function contextIsFresh(context: DashboardWorkflowContext): boolean {
-  const ts = Date.parse(context.created_at)
-  if (Number.isNaN(ts)) return false
-  return Date.now() - ts <= CONTEXT_TTL_MS
-}
-
-function initialContext(): DashboardWorkflowContext | null {
-  const storage = safeStorage()
-  const parsed = parseStoredContext(storage?.getItem(STORAGE_KEY) ?? null)
-  if (!parsed) return null
-  if (contextIsFresh(parsed)) return parsed
-  storage?.removeItem(STORAGE_KEY)
-  return null
-}
-
-const dashboardWorkflowContext = signal<DashboardWorkflowContext | null>(initialContext())
 
 export function extractActionPayload(
   action?: OperatorRecommendedAction | null,
@@ -141,25 +77,9 @@ function workflowContextId(
   ].join(':')
 }
 
-function matchesRouteParams(
-  context: DashboardWorkflowContext,
-  params: Record<string, string>,
-): boolean {
-  return (
-    (params.source === 'mission' || params.source === 'execution')
-    && (params.action_type ?? null) === (context.action_type ?? null)
-    && (params.target_type ?? null) === (context.target_type ?? null)
-    && (params.target_id ?? null) === (context.target_id ?? null)
-    && (params.focus_kind ?? null) === (context.focus_kind ?? null)
-    && (params.operation_id ?? null) === (context.operation_id ?? null)
-  )
-}
-
 export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>): DashboardWorkflowContext | null {
   const { params } = routeState
   if (params.source !== 'mission' && params.source !== 'execution') return null
-  const stored = dashboardWorkflowContext.value
-  if (stored && contextIsFresh(stored) && matchesRouteParams(stored, params)) return stored
   const createdAt = new Date().toISOString()
   const sourceSurface = params.source === 'execution' ? 'execution' : 'mission'
   return {

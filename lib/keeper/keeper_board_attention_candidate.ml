@@ -539,7 +539,7 @@ let removable_consumed ~cursor candidate =
    this a no-op (0) instead of a data loss. The rewrite is at-cursor: a
    concurrent keeper process that moves the cursor makes the whole prune fail
    instead of dropping that process's row. *)
-let prune_consumed_behind_cursor ~base_path ~keeper_name cursor =
+let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candidates cursor =
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   try
@@ -550,7 +550,10 @@ let prune_consumed_behind_cursor ~base_path ~keeper_name cursor =
       else
         let kept =
           List.filter
-            (fun candidate -> not (removable_consumed ~cursor candidate))
+            (fun candidate ->
+               not
+                 (removable_consumed ~cursor candidate
+                  && not (List.mem candidate.candidate_id open_partition_candidates)))
             state.latest
         in
         let removed = List.length state.latest - List.length kept in

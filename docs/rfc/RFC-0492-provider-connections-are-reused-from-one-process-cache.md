@@ -99,6 +99,8 @@ Keeper 의 provider 요청은 매번 새 TCP·TLS 연결을 열고, 응답을 �
 - 캐시는 `Provider_connection_cache_ref` 에 두고, 설치한 domain 을 같이 적는다. `Runtime_agent.transport_for_provider` 는 그 domain 에서만 캐시를 받아 `make_http_transport ~connection_cache` 로 넘긴다. 설치되지 않았거나 다른 domain 이면 `None` 이고 지금처럼 요청마다 닫는다.
 - 키는 지금처럼 scheme·host·port 다. 여러 Keeper 가 같은 origin 의 연결을 나눠 쓴다. 꺼낸 연결은 돌려놓기 전까지 그 요청만 쓴다.
 - `idle_ttl_seconds` 는 20초다. §1.2 에서 가장 먼저 닫은 api.z.ai(25초)보다 짧다. §1.4 에서 60초로 늘려도 얻는 비율은 0.2~5.3%p 다.
+  - 요청은 20초 넘게 논 연결을 받지 않는다. 꺼낼 때(`Http_client_cache.checkout`) 나이를 보고, 넘었으면 닫는다.
+  - eviction fiber 는 TTL 의 절반마다 돈다. 그것만으로는 30초까지 논 연결이 요청에 나간다. 3층 리뷰가 이것을 찾았다.
 - `max_idle_per_host` 는 기본값 8 을 둔다. 배포 뒤 `Http_client_cache.stats` 의 origin 별 idle 수로 다시 본다.
 - 연결은 캐시의 switch 위에 열린다. 새 연결을 열 때 그 switch 에 fiber 를 붙인다. Eio 는 다른 domain 에서 switch 를 쓰면 `Invalid_argument "Switch accessed from wrong domain!"` 을 던진다(`eio/core/switch.ml` 의 `check_our_domain`, Eio 1.3).
   - 그래서 캐시는 설치한 domain 의 요청만 쓴다. 다른 domain 에 캐시를 넘기면 그 요청은 provider 오류로 끝난다. 3층 시험이 이것을 재현했다.
@@ -153,7 +155,9 @@ val decide :
 ## 6. 검증
 
 - 시험: `decide` 의 모든 입력 조합. `with_client`·`dispatch_sync_request`·`with_post_stream` 이 `connection: close` 응답, 본문을 덜 읽은 응답, 전송층 EOF 에서 연결을 돌려놓지 않는다. 같은 origin 의 연속 요청이 연결 하나를 다시 쓴다(`stats.reuse_count_total`).
-- 배포 뒤: 캐시 `stats` 의 재사용 수와 새로 연 수, 이유별 닫은 수를 본다. 3층이 이 값을 `Fd_accountant` 스냅샷을 내는 runtime health 응답(`lib/server/server_routes_http_runtime_health_fleet.ml`)에 더한다. 다시 쓴 연결의 응답 전 `NetworkError` 수를 센다.
+- 배포 뒤: 캐시 `stats` 의 재사용 수와 새로 연 수, 이유별 닫은 수를 본다. 3층이 이 값을 `/health?full=1` 의 snapshot 필드 `provider_connection_cache` 로 낸다.
+  - `/health` 는 인증 없이 열린 집계 화면이다. 그래서 origin 이름은 내지 않는다(RFC-0132). `max_idle_per_host` 를 다시 볼 값으로 origin 하나의 최대 idle 수만 낸다.
+  - 다시 쓴 연결의 응답 전 `NetworkError` 수는 지금 셀 곳이 없다. `checkout` 이 연결의 출처를 돌려주지 않아서다(#48933).
 - 비용 원장 `per_request` 행에는 `request_latency_ms` 만 있고 첫 바이트 시간이 없다. 그래서 첫 바이트가 얼마나 빨라졌는지는 원장으로 직접 재지 못한다. 요청 시간이 짧은 ollama_cloud(중앙값 2.9초)의 `request_latency_ms` 를 배포 전 같은 시간대와 견주는 것이 간접 확인이다.
 
 ## 7. 층

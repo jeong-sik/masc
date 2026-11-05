@@ -14,7 +14,10 @@ async function flushUi(): Promise<void> {
 
 async function loadMonitor(get: (path: string, opts?: { signal?: AbortSignal }) => Promise<unknown>) {
   vi.resetModules()
-  vi.doMock('../api/core', () => ({ get }))
+  vi.doMock('../api/core', async importOriginal => ({
+    ...await importOriginal<typeof import('../api/core')>(),
+    get,
+  }))
   return import('./gate-monitor')
 }
 

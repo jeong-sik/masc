@@ -893,15 +893,12 @@ let complete_stream_http
                  to the provider's own end or to a deadline, and the socket was
                  held and the output paid for through all of it.
 
-                 It is the close time that moves, not whether it closes. No
-                 caller wires a [connection_cache] today — [create_cache] has
-                 no user outside [Http_client] and its own test — so
-                 [with_post_stream] already took its no-cache arm and closed.
-                 With one wired it would close here too in the ordinary case,
-                 because a body left unread leaves [eof_seen] false; the
-                 exception is an NDJSON final line with no trailing newline,
-                 where [Buf_read.line] consumes to EOF and parking is then
-                 correct, the body being spent. *)
+                 It is the close time that moves, not whether it closes. A
+                 body left unread ends [Http_client.with_post_stream] as
+                 [`Not_drained], so a cached connection is closed here, not
+                 parked. The exception is an NDJSON final line with no
+                 trailing newline, where [Buf_read.line] consumes to EOF and
+                 parking is then correct, the body being spent. *)
               (* The reader arms the first-event budget until the first
                  [Output] and inter-token idle after it; a Responses
                  [response.created] or an Anthropic [message_start] is

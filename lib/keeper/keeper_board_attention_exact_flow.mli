@@ -9,6 +9,10 @@ type setup_error =
   | Network_unavailable
   | Candidate_not_pending
   | Prompt_contract_unavailable of string
+  | Registry_fenced
+      (** A runtime configuration write held the registry while this setup
+          read it. Closing that write wakes every
+          {!Runtime_exact_output_registry.subscribe_lane_changes} consumer. *)
   | Registry_unavailable
   | Lane_unavailable
   | Lane_preference_unavailable of string

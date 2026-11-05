@@ -28855,6 +28855,8 @@ let main
         (Terminal_profile.synchronized_output terminal_profile)
       ()
   in
+  (* Off unless MASC_TUI_NAV_TRACE names a file (RFC-0485). *)
+  let nav_trace = Masc_tui_nav_trace_log.from_environment ~clock:Unix.gettimeofday in
   (* All interaction evidence is committed together after terminal output. *)
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
@@ -29376,13 +29378,16 @@ let main
        presentation. Activity, chat row action and repository change authority
        changes force a full presentation only if a differential draw would
        otherwise do nothing; ordinary async updates stay differential. *)
-    match
+    let result =
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed
                         || task_detail_needs_present || tools_task_needs_present)
         ~write ~flush frame
-    with
+    in
+    Masc_tui_nav_trace_log.note_frame nav_trace
+      ~surface:frame.Frame_presenter.surface_key ~result;
+    match result with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
         Masc_tui_frame_timing.note_presented ~surface:frame.Frame_presenter.surface_key;
@@ -31502,6 +31507,12 @@ Use relative paths for resources already held in the package. -->
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      Masc_tui_nav_trace_log.note_input nav_trace
+        (match input with
+         | Some (Key name) -> Masc_tui_nav_trace_log.Key name
+         | Some (Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+                | Mouse_wheel _) -> Masc_tui_nav_trace_log.Other_input
+         | Some (Graphics_reply _) | None -> Masc_tui_nav_trace_log.No_input);
       (* Retire the old preview before a frame barrier or paste recovery can
          consume the event. Protocol replies do not represent operator input. *)
       let duplicate_image_save = match input with

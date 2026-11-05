@@ -153,6 +153,13 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
 (* Record writing                                                    *)
 (* ================================================================ *)
 
+(* The observer is called after every appended verdict or label record, with
+   the workspace the store belongs to, under no lock of this module. *)
+let written_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_written_observer observer = Atomic.set written_observer observer
+
 let identity_matching predicate identity =
   Option.bind identity (fun identity -> if predicate identity then Some identity else None)
 
@@ -185,7 +192,8 @@ let record_verdict
       ; timestamp = Unix.gettimeofday ()
       }
     in
-    Dated_jsonl.append (store ~base_path) (verdict_record_to_json record)
+    Dated_jsonl.append (store ~base_path) (verdict_record_to_json record);
+    (Atomic.get written_observer) ~base_path
 
 let record_human_label
     ~(base_path : string)
@@ -201,7 +209,8 @@ let record_human_label
     reason;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (store ~base_path) (label_record_to_json record)
+  Dated_jsonl.append (store ~base_path) (label_record_to_json record);
+  (Atomic.get written_observer) ~base_path
 
 (* ================================================================ *)
 (* JSON deserialization (for analysis)                                *)

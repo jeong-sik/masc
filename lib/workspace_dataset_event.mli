@@ -13,6 +13,9 @@ type dataset =
       (** The repository catalog, read by [GET /api/v1/repositories]. *)
   | Verification_requests
       (** The verification request store, read by the Verification queue. *)
+  | Harness_verdicts
+      (** The judge verdicts and operator labels [Eval_calibration] records,
+          read by [GET /api/v1/dashboard/harness-health]. *)
 
 val event_type : string
 

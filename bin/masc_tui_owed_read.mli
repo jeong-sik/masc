@@ -46,3 +46,15 @@ val abandoned : t -> t
 
 val due : now:float -> t -> bool
 (** Whether a read should start now, when the surface is able to read. *)
+
+val stale_at_to_schedule : now:float -> float option -> float option
+(** The [stale_at] a server answer carries, kept only when it still lies in
+    the future.
+
+    [stale_at] names the moment the evaluator turns Stale with no push to
+    read for, so a read loop that stores it re-reads once at that moment.
+    A snapshot whose evaluator is already Stale carries a [stale_at] in the
+    past, and the read that just returned that snapshot covered the turn
+    itself; keeping the past moment would make the loop owe a new read on
+    every answer, since the next answer carries the same past moment
+    again. So it is dropped, and no schedule is stored for it. *)

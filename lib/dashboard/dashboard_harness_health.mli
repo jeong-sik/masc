@@ -69,6 +69,11 @@ val read_recent_verdicts_for_agents
     to the [?since] / [?until] window when provided. *)
 val json : ?since:string -> ?until:string -> base_path:string -> unit -> Yojson.Safe.t
 
+val cache_key_prefix : string
+(** Every dashboard cache key the harness health read is kept under starts
+    with this, whatever its workspace and query window. *)
+
+
 (** {1 Operator labels} *)
 
 type label_request =

@@ -1855,6 +1855,8 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
+  hov_stale_at : float option;
+      (** When the evaluator status turns Stale if no verdict arrives first. *)
 }
 
 type harness_snapshot = {
@@ -2466,7 +2468,13 @@ let decode_harness_overview json =
         | `String value -> value
         | _ -> "unknown"
       in
-      Some { hov_evaluator_status = status }
+      let stale_at =
+        match member "stale_at" overview with
+        | `Float value -> Some value
+        | `Int value -> Some (float_of_int value)
+        | _ -> None
+      in
+      Some { hov_evaluator_status = status; hov_stale_at = stale_at }
   | _ -> None
 
 

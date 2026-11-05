@@ -11034,6 +11034,11 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_inflight: bool;
+  (* The read the harness health owes while Harness is on screen. *)
+  mutable harness_owed: Masc_tui_owed_read.t;
+  (* The wall-clock moment the last reading's evaluator turns Stale without a
+     new verdict. Nothing is pushed for it, so Harness reads once then. *)
+  mutable harness_stale_at: float option;
   mutable harness_scroll: int;
   mutable harness_cursor: int;
   (* The verdict opened from the list. Task id alone is not an identity: the
@@ -14946,6 +14951,8 @@ let suspend_workspace_readings state =
   state.tools_skill_generation <- state.tools_skill_generation + 1;
   state.tools_skill_pending <- [];
   state.harness_inflight <- false;
+  state.harness_owed <- Masc_tui_owed_read.settled;
+  state.harness_stale_at <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.verification_owed <- Masc_tui_owed_read.settled;
@@ -20382,6 +20389,8 @@ let create_state
   harness = None;
   harness_error = None;
   harness_inflight = false;
+  harness_owed = Masc_tui_owed_read.settled;
+  harness_stale_at = None;
   harness_scroll = 0;
   harness_cursor = 0;
   harness_detail = None;

@@ -216,6 +216,11 @@ let overview_json
     [ ( "evaluator_status"
       , `String (status_to_string (evaluator_status ~calibration verdict_last)) )
     ; "last_signal_at", Json_util.float_opt_to_json verdict_last
+      (* When the status turns Stale with no new verdict. A reader that
+         re-reads only on a push has no push for that moment. *)
+    ; ( "stale_at"
+      , Json_util.float_opt_to_json
+          (Option.map (fun ts -> ts +. evaluator_stale_after_s) verdict_last) )
     ; "evaluator_last_event_at", Json_util.float_opt_to_json verdict_last
     ; "fallback_ratio", `Float fallback_ratio
     ; "distinct_runtime_rate", measurement "distinct_runtime_rate"
@@ -224,6 +229,8 @@ let overview_json
     ; "model_identity_observation", measurement "model_identity_observation"
     ]
 ;;
+
+let cache_key_prefix = "harness_health:"
 
 let json ?since ?until ~base_path () =
   let calibration = Eval_calibration.calibration_stats ?since ?until ~base_path () in

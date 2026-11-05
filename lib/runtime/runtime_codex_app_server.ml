@@ -2816,6 +2816,19 @@ let sub_agent_overrides =
   [ "-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false" ]
 ;;
 
+(* Codex finds a project root by walking up from the cwd to the first
+   [project_root_markers] entry (default [.git]) and reads every AGENTS.md and
+   repo [.agents/skills] between that root and the cwd. An empty list keeps
+   the walk at the cwd. A Keeper's cwd lies under the base path, and the base
+   path can be a checkout whose root holds the operator's own AGENTS.md and
+   skills. Codex reads this setting from non-project layers only, so the
+   session flag holds.
+   Upstream: codex-rs/core/src/agents_md.rs (agents_md_paths),
+   codex-rs/config/src/project_root_markers.rs,
+   codex-rs/ext/skills/src/host_roots.rs (repo_agents_skill_roots). *)
+let project_root_overrides = [ "-c"; "project_root_markers=[]" ]
+;;
+
 (* A read posture keeps Codex's permissions read-only, but shell execution
    would still run in the host cwd rather than the Keeper's Docker sandbox.
    Supported app-server CLI overrides outrank inherited config. ShellTool=false
@@ -2836,6 +2849,7 @@ let client_argv (config : config) =
      | Runtime_native_tools.Native_read ->
        [ "-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false" ]
      | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
+  @ project_root_overrides
   @ sub_agent_overrides
 ;;
 

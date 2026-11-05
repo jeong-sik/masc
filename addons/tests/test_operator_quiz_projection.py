@@ -202,6 +202,25 @@ class TwoWeeks(unittest.TestCase):
         self.assertNotIn(p.SCORECARD, {row["lane_id"] for row in output["rows"]})
         self.assertNotIn(p.REVIEW, {row["lane_id"] for row in output["rows"]})
 
+    def test_a_void_latest_pose_is_not_the_notes_question(self):
+        # Missed by choice on day 1, re-asked as a written question on day 3
+        # and judged void: the void pose is not an attempt, so the note keeps
+        # the day-1 choice question, not the voided one.
+        events = HISTORY + answered(21, "i8", "asks", at(1, 9), "incorrect") \
+            + asked(22, "i8", "asks", at(3, 8, 30)) + [
+                q.AnswerReceived("s22-ask", (q.Answer("q1", q.Wrote("plans?")),),
+                                 {"surface": "dashboard"}, at(3, 8, 31)),
+                q.GradeRequested("s22-ask", "q1", "s22-ask-grade-q1-0", "3" * 64),
+                q.Judged("s22-ask", "q1", q.Void(), "the quote is gone", "s22-ask-grade-q1-0")]
+        output = p.observation(q.fold(events), {}, SEOUL, at(4, 12))
+        (note,) = [row for row in output["rows"] if row["lane_id"] == p.REVIEW
+                   and row["subject_id"] == "i8"]
+        fields = note["fields"]
+        self.assertEqual(fields["question"]["mode"], "single")
+        self.assertEqual(fields["response"], {"kind": "chose", "choice_ids": ["b"]})
+        self.assertEqual(fields["by"], "key")
+        self.assertEqual(fields["last_miss_at"], at(1, 9))
+
     def test_a_written_latest_answer_is_not_open_debt_and_gets_no_review_row(self):
         # i6's latest attempt waits for a judgment: no wrong-answer note yet.
         self.assertNotIn("i6", {row["subject_id"] for row in self.rows(p.REVIEW)})

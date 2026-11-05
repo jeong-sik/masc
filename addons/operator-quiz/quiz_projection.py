@@ -224,8 +224,11 @@ def review_rows(sessions: list[q.Session], items: list[g.Item]) -> list[dict]:
     no key (§5)."""
     last_pose: dict[str, tuple[q.Session, q.AnswerReceived, q.Posed]] = {}
     for session, answer in answered_sessions(sessions):
-        for posed in session.posed:
-            last_pose[posed.item_id] = (session, answer, posed)
+        # A void judgment is not an attempt, so its pose must not be the
+        # note's question: the note carries the last pose that counted.
+        for posed, verdict in attempt_states(session):
+            if verdict != g.VOID:
+                last_pose[posed.item_id] = (session, answer, posed)
     out: list[dict] = []
     for item in items:
         if not item.open_debt:

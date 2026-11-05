@@ -28,6 +28,33 @@ let temp_base_path prefix =
 
 let keeper_name = "fact-retention-keeper"
 
+(* The surface-read handler classifies "discord" through the runtime's
+   binding store: an empty discord list refuses the read as
+   Unbound_connector (keeper_surface_read.ml). The store is a plain file
+   read with Unix.openfile, resolved against the workspace base path,
+   which the handler syncs to this test's [base_dir] on every read
+   (workspace_utils_backend_setup.ml). Plant one binding for this test's
+   keeper so the paged reads exercise the retention mechanism instead of
+   the unbound-connector refusal. The whole [base_dir] is removed by the
+   test's own cleanup, so nothing persists. *)
+let discord_channel_id = "1234567890"
+
+let write_discord_binding ~base_dir =
+  let dir = Filename.concat base_dir ".gate/runtime/discord" in
+  let rec mkdir_p d =
+    if d = "" || d = "." || d = "/" || Sys.file_exists d then ()
+    else begin
+      mkdir_p (Filename.dirname d);
+      Unix.mkdir d 0o755
+    end
+  in
+  mkdir_p dir;
+  let oc = open_out (Filename.concat dir "bindings.json") in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc
+      (Yojson.Safe.to_string
+         (`Assoc [ (discord_channel_id, `String keeper_name) ])))
+
 let chat_path ~base_dir =
   Filename.concat
     (Filename.concat
@@ -131,6 +158,7 @@ let test_every_planted_fact_is_reachable_at_depth () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       write_fixture ~path:(chat_path ~base_dir) ();
+      write_discord_binding ~base_dir;
       List.iter
         (fun (key, _line, expected_page) ->
           match pages_to_find ~base_dir (fact_token key) with
@@ -148,6 +176,7 @@ let test_walk_terminates_at_history_start () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       write_fixture ~path:(chat_path ~base_dir) ();
+      write_discord_binding ~base_dir;
       (* A token that was never planted: the walk must exhaust all 11
          pages and stop on has_more=false, not loop. *)
       Alcotest.(check (option int))
@@ -158,6 +187,7 @@ let with_fixture prefix write check =
   let base_dir = temp_base_path prefix in
   Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
     write (chat_path ~base_dir);
+    write_discord_binding ~base_dir;
     check base_dir)
 
 let file_contents path =

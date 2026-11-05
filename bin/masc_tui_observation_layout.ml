@@ -73,10 +73,6 @@ let latency_label = function
   | Some latency -> Printf.sprintf "%dms" latency
   | None -> "--"
 
-let cost_label = function
-  | Some cost -> Printf.sprintf "$%.3f" cost
-  | None -> "--"
-
 (* The metrics tail's columns.
 
    The eight widths were written here and the eight column names were written

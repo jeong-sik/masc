@@ -1023,13 +1023,16 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
         | Some _ -> " · ] older"
         | None -> if Option.is_some state.lane_runs then " · end" else "" in
     count ^ continuation in
+  (* Laid out like the other title rows that name one thing before the badge.
+     The label was padded to twenty cells here, so at eighty columns the
+     padding pushed the badge past the edge and the frame cut it to
+     "HTTP [co…". *)
   let header =
-    Printf.sprintf "%s · %s (%s)  %s"
-      (screen_title " MASC Features")
-      (fit_width
-         (Terminal_text.single_line (observed_lane_label lane))
-         20)
-      coverage (connection_badge state)
+    detail_heading ~cols
+      ~lead:(Lead_text (screen_title " MASC Features" ^ " \xc2\xb7 "))
+      ~id:(observed_lane_label lane)
+      ~after:(Printf.sprintf " (%s)" coverage)
+      ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

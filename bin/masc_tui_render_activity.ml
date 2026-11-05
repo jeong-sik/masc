@@ -134,36 +134,50 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
-let activity_tab_strip ~cols ~on_logs ~after =
-  tab_strip
-    ~width:
-      (tab_strip_width ~cols
-         ~before:(screen_title " MASC Activity" ^ tab_strip_gap) ~after)
-    ~press:(fun surface text -> pressable (Press_surface surface) text)
-    [ ("Events", not on_logs, Acting); ("Logs", on_logs, System_logs) ]
+let activity_tabs ~on_logs : (string * bool * surface) list =
+  [ ("Events", not on_logs, Acting); ("Logs", on_logs, System_logs) ]
 
-(* The title: the strip, then what the reading on screen holds, after a dot.
-   The count used to follow the strip directly, so on Events it sat against
-   the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
-   as that tab's count. It stays after the strip rather than moving before it,
-   so the tabs do not shift sideways when the count grows a digit. *)
-(* [after] is what the caller draws past this title on the same row -- the
-   clock and the badge -- so the strip can leave room for it. *)
-let activity_title ~cols ~on_logs ~after reading =
-  let strip =
-    activity_tab_strip ~cols ~on_logs
-      ~after:(Printf.sprintf "  \xc2\xb7  %s%s" reading after)
+(* The title row of both readings: the title, the strip, then what the reading
+   on screen holds after a dot, and the clock and the badge last. The count used
+   to follow the strip directly, so on Events it sat against the tab that is
+   not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read as that
+   tab's count. It stays after the strip rather than moving before it, so the
+   tabs do not shift sideways when the count grows a digit.
+
+   [tail] is what the row draws last, and it is laid out by [detail_heading]
+   like the other title rows: the badge stays whole, the reading is cut at its
+   end, and the strip draws in what the reading leaves. It is whole or it is
+   not drawn: this row was joined by hand, so at eighty columns the reading and
+   the clock pushed the badge past the edge and the frame cut it to
+   "HTTP [c…", and a strip squeezed below the width that holds its current tab
+   drew that tab cut as well: "▸Even…". A strip that draws nothing takes its
+   separator with it. *)
+let activity_heading ~cols ~on_logs ~reading ~tail =
+  let tabs = activity_tabs ~on_logs in
+  let title = screen_title " MASC Activity" in
+  let before = title ^ "  " and dot = "  \xc2\xb7" in
+  let cells text =
+    Message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  (* The dot is the strip's, not the row's. It was a literal in this format
-     string, so when the row ran out of width and the strip drew nothing the
-     dot stayed: at 56 columns the title read "MASC Activity    \xc2\xb7  (0 rows
-     \xc2\xb7 0 events held)", a separator with its left side missing. A strip that
-     draws nothing takes its separator with it. *)
-  let strip_part =
-    if Masc_tui_message_layout.display_width strip = 0 then ""
-    else Printf.sprintf "  %s  \xc2\xb7" strip
-  in
-  Printf.sprintf "%s%s  %s" (screen_title " MASC Activity") strip_part reading
+  let around = cells before + cells dot in
+  detail_heading ~cols
+    ~lead:
+      (Lead_strip
+         { floor = cells title
+         ; draw =
+             (fun width ->
+               let room = width - around in
+               if room < tab_strip_min_width tabs
+               then title
+               else
+                 before
+                 ^ tab_strip ~width:room
+                     ~press:(fun surface text ->
+                       pressable (Press_surface surface) text)
+                     tabs
+                 ^ dot)
+         })
+    ~id:"" ~after:("  " ^ reading) ~tail
 
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -226,21 +240,18 @@ let render_system_logs (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s"
-          (activity_title ~cols ~on_logs:true
-             ~after:(Printf.sprintf "  %s  %s" timestamp (system_logs_status state))
-             (reading_note ^ set_filter_note))
-          timestamp (system_logs_status state)
+        activity_heading ~cols ~on_logs:true
+          ~reading:(reading_note ^ set_filter_note)
+          ~tail:(timestamp ^ "  " ^ system_logs_status state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        Printf.sprintf "%s  %s  %s"
-          (activity_title ~cols ~on_logs:true
-             ~after:(Printf.sprintf "  %s  %s" timestamp (system_logs_status state))
-             (Printf.sprintf "(%d of %d)%s%s" total_entries snapshot.sys_total
-                (match snapshot.sys_latest_seq with None -> "" | Some seq -> Printf.sprintf "  seq %d" seq)
-                filter_note))
-          timestamp (system_logs_status state)
+        activity_heading ~cols ~on_logs:true
+          ~reading:
+            (Printf.sprintf "(%d of %d)%s%s" total_entries snapshot.sys_total
+               (match snapshot.sys_latest_seq with None -> "" | Some seq -> Printf.sprintf "  seq %d" seq)
+               filter_note)
+          ~tail:(timestamp ^ "  " ^ system_logs_status state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -794,13 +805,11 @@ let render_acting (state : state) =
      other. The scope name left with it: the row under the feed says it,
      "scope turns · …", one line down. *)
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (activity_title ~cols ~on_logs:false
-         ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-         (Masc_tui_types.activity_title_reading ~observer:state.observer
-            ~shown ~held))
-      timestamp
-      (connection_badge state)
+    activity_heading ~cols ~on_logs:false
+      ~reading:
+        (Masc_tui_types.activity_title_reading ~observer:state.observer
+           ~shown ~held)
+      ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

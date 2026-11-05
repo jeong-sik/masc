@@ -68,11 +68,10 @@ let refuses_before_dispatch name attached class_ call =
   check bool (name ^ ": no worker received a command") true (ledger attached=before)
 
 let every_source_reaches_its_own_worker () =
-  run_with [one Automation [stray];one Stagehand [];one Owned_firefox [bidi];one Ego [ego];
+  run_with [one Automation [stray];one Owned_firefox [bidi];one Ego [ego];
             one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
       reaches "automation reaches the automation worker" ~issue B.Automation_route B.Backend.Automation;
-      reaches "Stagehand reaches the Stagehand worker" ~issue B.Stagehand_route B.Backend.Stagehand;
       reaches "a BiDi client reaches the owned Firefox worker" ~issue (live bidi) B.Backend.Owned_firefox;
       reaches "an ego client reaches the ego worker" ~issue (live ego) B.Backend.Ego;
       reaches "an extension client reaches the external host worker" ~issue (live extension)
@@ -84,7 +83,6 @@ let every_source_reaches_its_own_worker () =
       (* Each worker reports only its own source registered, so a report read
          from the wrong worker would say unregistered. *)
       check bool "automation is read from its own worker" true published.automation.registered;
-      check bool "Stagehand is read from its own worker" true published.stagehand.registered;
       List.iter (fun backend -> check bool (B.Backend.to_wire backend ^ " is observed on its own worker") true
         (Result.is_ok (Browser_addon_host.snapshot host ~backend))) B.Backend.all)
 
@@ -101,21 +99,19 @@ let a_user_owned_refusal_routes_its_reclaim () =
         attached worker (B.Live_route None) verb call)
 
 let a_missing_source_fails_alone () =
-  run_with [one Automation [];one Owned_firefox [bidi]]
+  run_with [one Owned_firefox [bidi]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a source no worker serves is refused" ~issue B.Stagehand_route;
+      refused "a source no worker serves is refused" ~issue B.Automation_route;
       refused "a live client no worker lists is refused" ~issue (live ego);
-      reaches "automation is still served" ~issue B.Automation_route B.Backend.Automation;
       reaches "the BiDi client is still served" ~issue (live bidi) B.Backend.Owned_firefox;
       check bool "the missing source has no snapshot" true
-        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Stagehand));
-      check bool "and is unobserved in the choice" false (snapshot host).stagehand.registered)
+        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
+      check bool "and is unobserved in the choice" false (snapshot host).automation.registered)
 
 let a_doubled_source_fails_alone () =
-  run_with [one Automation [];one Automation [];one Stagehand [];one Ego [ego]]
+  run_with [one Automation [];one Automation [];one Ego [ego]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
       refused "a source two workers serve is refused" ~issue B.Automation_route;
-      reaches "Stagehand is still served" ~issue B.Stagehand_route B.Backend.Stagehand;
       reaches "the ego client is still served" ~issue (live ego) B.Backend.Ego;
       check bool "the doubled source has no snapshot" true
         (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
@@ -208,16 +204,16 @@ let unreadable_live_controller_never_authorizes_ego_input () =
    it is counted, so the source is not given to another, and a command to it
    is refused before any worker. *)
 let a_service_without_its_command_still_counts () =
-  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Automation [];one Stagehand []]
+  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Automation [];one Ego [ego]]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a source one exporting and one silent service serve is doubled"
         ~because:"more than one attached browser Add-on serves" ~issue B.Automation_route;
-      reaches "the other source is served" ~issue B.Stagehand_route B.Backend.Stagehand);
-  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Stagehand []]
+      reaches "the other source is served" ~issue (live ego) B.Backend.Ego);
+  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Ego [ego]]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a command to the silent service is refused" ~because:"advertises no browser command"
         ~issue B.Automation_route;
-      reaches "and the other source is served" ~issue B.Stagehand_route B.Backend.Stagehand)
+      reaches "and the other source is served" ~issue (live ego) B.Backend.Ego)
 
 let a_client_two_workers_list_is_refused () =
   run_with [one Owned_firefox [bidi];one Ego [bidi;ego]]

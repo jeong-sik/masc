@@ -741,7 +741,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
          ; contents = replacement_catalog
          })
   in
-  let optional_lane = "browser_stagehand_exact" in
+  let optional_lane = "candle_appraiser" in
   let unknown_target = "not-in-frozen-catalog" in
   let optional_registry =
     match

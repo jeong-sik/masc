@@ -432,14 +432,12 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let read ?(unready=[]) services route = T.document_route_services ~services ~unready ~backend:(fun (_,backend,_) -> backend)
       ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
   let automation=service "automation" B.Backend.Automation []
-  and stagehand=service "stagehand" B.Backend.Stagehand []
   and ego_worker=service "ego" B.Backend.Ego [ego]
   and second_worker=service "second ego" B.Backend.Ego [second]
   and native=service "native" B.Backend.External_host [extension] in
-  let all=[automation;stagehand;ego_worker;second_worker;native] in
+  let all=[automation;ego_worker;second_worker;native] in
   let route client=B.Live_route (Some client.B.client_id) in
   check bool "automation reads on its own service" true (read all B.Automation_route=Ok ["automation"]);
-  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route=Ok ["stagehand"]);
   check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
   check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
   check bool "another live source remains exact" true (read all (route extension)=Ok ["native"]);
@@ -460,7 +458,7 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   check bool "an unreadable owned backend cannot block an exact Ego read" true
     (read [ego_worker;hidden B.Backend.Automation] (route ego)=Ok ["ego"]);
   check bool "an unready owned backend cannot block an exact Ego read" true
-    (read ~unready:[B.Backend.Stagehand] [ego_worker] (route ego)=Ok ["ego"]);
+    (read ~unready:[B.Backend.Automation] [ego_worker] (route ego)=Ok ["ego"]);
   check bool "an exact extension read remains usable with an unknown live controller" true
     (read [native;hidden B.Backend.Ego] (route extension)=Ok ["native"]);
   check bool "owned reads remain independent of unknown live controllers" true

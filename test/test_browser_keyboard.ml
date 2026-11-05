@@ -1,6 +1,5 @@
 open Alcotest
 module Keyboard = Browser_lane.Keyboard
-module Wire = Masc.Browser_stagehand_wire
 let chord key modifiers = match Keyboard.of_wire ~key ~modifiers with
   | Ok value -> value | Error detail -> fail detail
 let test_unicode_boundary () =
@@ -18,30 +17,6 @@ let test_unicode_boundary () =
     (Result.is_error (Keyboard.of_wire ~key:"a" ~modifiers:["Meta";"Meta"]));
   check bool "unknown modifier refused" true
     (Result.is_error (Keyboard.of_wire ~key:"a" ~modifiers:["Command"]))
-let test_native_protocol () =
-  let cases = [
-    Wire.Page_double_click {page_id="P";x=12.;y=34.}, "page.click",
-      {|{"page_id":"P","x":12.0,"y":34.0,"options":{"click_count":2}}|};
-    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Primary}, "page.click",
-      {|{"page_id":"P","x":12.0,"y":34.0}|};
-    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Middle}, "page.click",
-      {|{"page_id":"P","x":12.0,"y":34.0,"options":{"button":"middle"}}|};
-    Wire.Page_click {page_id="P";x=12.;y=34.;button=Browser_lane.Pointer.Secondary}, "page.click",
-      {|{"page_id":"P","x":12.0,"y":34.0,"options":{"button":"right"}}|};
-    Wire.Page_set_viewport_size {page_id="P";width=800;height=600}, "page.set_viewport_size",
-      {|{"page_id":"P","width":800,"height":600}|};
-    Wire.Page_type {page_id="P";text="한글🙂"}, "page.type", {|{"page_id":"P","text":"한글🙂"}|};
-    Wire.Page_key_press {page_id="P";key=chord "a" ["Meta";"Shift"]}, "page.key_press",
-      {|{"page_id":"P","key":"Meta+Shift+a"}|};
-    Wire.Page_key_press {page_id="P";key=chord "+" ["Control"]}, "page.key_press",
-      {|{"page_id":"P","key":"Control++"}|};
-    Wire.Page_key_press {page_id="P";key=chord "Tab" ["Shift"]}, "page.key_press",
-      {|{"page_id":"P","key":"Shift+Tab"}|}] in
-  List.iter (fun (request,method_,params) ->
-    check string "native method" method_ (Wire.method_name request);
-    check string "exact native params" params (Yojson.Safe.to_string (Wire.call_params request));
-    check bool "native input never asks a model" false (Wire.uses_model request);
-    check bool "native input has no sentence timeout" true (Wire.sentence_timeout_of_call request=None)) cases
 let test_w3c_input_sources () =
   let field key json = Yojson.Safe.Util.member key json in
   let actions source = match source with
@@ -62,5 +37,4 @@ let test_w3c_input_sources () =
     (Result.is_error (Keyboard.text_source ~id:"owner" "\xee\x80\x89"))
 let () = run "browser keyboard" ["native",[
   test_case "Unicode and closed chord boundary" `Quick test_unicode_boundary;
-  test_case "native W3C chord ownership and Unicode scalar input" `Quick test_w3c_input_sources;
-  test_case "actual Stagehand protocol fields" `Quick test_native_protocol]]
+  test_case "native W3C chord ownership and Unicode scalar input" `Quick test_w3c_input_sources]]

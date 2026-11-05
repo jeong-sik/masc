@@ -45,7 +45,7 @@ let test_the_verb_and_the_table () =
   let verb = Browser_lane.Page_cookies { tab_id = 3 } in
   check string "wire name" "page.cookies" (Browser_lane.verb_to_string verb);
   check bool "automation only" true
-    (Browser_lane.verb_allowed_on_automation verb && not (Browser_lane.verb_allowed_on_stagehand verb)
+    (Browser_lane.verb_allowed_on_automation verb
      && not (Browser_lane.verb_allowed_on_live verb));
   (match Masc.Browser_addon_wire.verb_of_json ~route:Browser_lane.Automation_route (Browser_lane.verb_json verb) with
    | Ok parsed -> check bool "the Add-on wire parses it back" true (parsed = verb)
@@ -56,7 +56,7 @@ let test_the_verb_and_the_table () =
   check bool "the owned Firefox reads cookies" true (reaches Cap.Owned_gecko);
   List.iter (fun (label, backend) -> check bool (label ^ " does not") false (reaches backend))
     [ "live BiDi", Cap.Connected Browser_lane.Webdriver_bidi; "the extension", Cap.Connected Browser_lane.Web_extension
-    ; "Stagehand", Cap.Owned_chromium; "Safari", Cap.Safari_unavailable ];
+    ; "Safari", Cap.Safari_unavailable ];
   check bool "writing storage is still not offered" false
     (match Cap.support Cap.Owned_gecko Cap.Write_storage with Cap.Unsupported _ -> false | Cap.Available _ | Cap.Conditional _ -> true)
 

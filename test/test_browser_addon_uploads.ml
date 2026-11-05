@@ -97,7 +97,7 @@ let discard_and_replacement () = Eio_main.run (fun _env ->
         check string "cleanup never deletes a replacement file" "replacement-owned" (contents foreign)))))
 (* A grant staged for a live connection this worker runs (the ego
    connection) is claimed on that connection's route only; a route that
-   names no connection, and Stagehand, are not staged for. *)
+   names no connection is not staged for. *)
 let live_route_grants_are_its_own () = Eio_main.run (fun _env ->
   let root=private_root () in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
@@ -108,7 +108,7 @@ let live_route_grants_are_its_own () = Eio_main.run (fun _env ->
         let live=client (id "11") and other=client (id "12") and verb=command paths and actor="keeper/uploader" in
         List.iter (fun (name, route) ->
           check bool (name ^ " is not staged for") true (Result.is_error (Broker.stage broker ~id:(id "13") ~actor ~route ~verb)))
-          ["a live route without a connection",B.Live_route None;"Stagehand",B.Stagehand_route];
+          ["a live route without a connection",B.Live_route None];
         let grant=id "14" in
         ok (Broker.stage broker ~id:grant ~actor ~route:live ~verb);
         check bool "another live connection cannot claim it" true

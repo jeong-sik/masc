@@ -29,8 +29,7 @@ let roundtrips () =
     Page_act (B.Action.Control (B.Action.Adopt_tab {tab_id=7;label=Some "login"}));
     Page_act (B.Action.Control (B.Action.Release_tab 7));
     Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000};
-    Page_instruct {tab_id=7;instruction="Open the menu"};Page_locate {tab_id=7;instruction=None};
-    Page_extract {tab_id=7;instruction="Read totals";schema=Some (`Assoc ["type",`String "object"])}] in
+    Page_locate {tab_id=7;instruction=None}] in
   let hooks = ok (Masc.Lane_addon_tool_hooks.prepare
     ~hooks:[Validate_input] Masc.Browser_addon_tool.definition) in
   let public command = `Assoc ["lane",`String "live";

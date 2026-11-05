@@ -58,7 +58,7 @@ def control(conn):
         ego_refused=[]
         if os.path.exists(os.path.join(a.root,"unavailable.json")):
             with open(os.path.join(a.root,"unavailable.json")) as src: ego_refused=json.load(src)
-        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"unavailable":ego_refused,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False},"stagehand":{"activity":"enabled","registered":owned["stagehand"],"session":"unknown","locate":False}}}}
+        result={"reply":"snapshot","snapshot":{"state":"serving","clients":clients,"unavailable":ego_refused,"owned_backends":{"automation":{"activity":"enabled","registered":owned["automation"],"session":"closed","locate":False}}}}
         conn.sendall((json.dumps(result)+"\n").encode())
 def serve():
     while True:
@@ -163,16 +163,13 @@ max-context = 400000
 default = "codex.codex"
 [browser.automation]
 geckodriver = "/bin/false"
-[browser.stagehand]
-chrome = "/bin/false"
-extension = %S
 [browser.live.bidi]
 firefox = "/bin/false"
 profile = %S
 [browser.live.ego]
 command = "/bin/false"
 space = 0
-|} root profile);
+|} profile);
           require (Runtime.init_default ~config_path:path);
           run ~sw ~root ~settle:(fun () -> settled:=true)))))
 let dispatch ~config operation fields=R.dispatch ~caller:"browser-fixture"
@@ -190,7 +187,7 @@ let wait ~env predicate = let rec loop ()=if predicate () then () else
 (* One scripted worker under [root]/[name], attached with its own package.
    [backend] is the one source its package names, or none for the package
    that serves every source. Answers [stop] once its worker detached. *)
-let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stagehand) ~clients ~downloads ~received ~respond =
+let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:automation ~clients ~downloads ~received ~respond =
   let root=Filename.concat root name in Unix.mkdir root 0o700;
   let requests=Filename.concat root "requests" and answers=Filename.concat root "answers" in
   Unix.mkdir requests 0o700;Unix.mkdir answers 0o700;
@@ -219,7 +216,7 @@ let start ~sw ~env ~config ~root ~name ~backend ~exports ~owned:(automation,stag
           "observedAt",`Float 1.;"recheck",`String "take_over"]]));
         if Sys.file_exists unavailable then Sys.remove unavailable in
   write (Filename.concat root "owned.json")
-    (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation;"stagehand",`Bool stagehand]));
+    (Yojson.Safe.to_string (`Assoc ["automation",`Bool automation]));
   write (Filename.concat root "downloads.json")
     (Yojson.Safe.to_string (`Assoc downloads));
   write (Filename.concat root "tool.json") (Yojson.Safe.to_string (`Assoc [
@@ -248,7 +245,6 @@ max_reply_bytes = 2097152
     let route=match Yojson.Safe.Util.member "lane" arguments,Yojson.Safe.Util.member "clientId" arguments with
       | `String "live",`String raw -> B.Live_route (Some (require (B.client_id_of_string raw)))
       | `String "live",`Null -> B.Live_route None
-      | `String "stagehand",`Null -> B.Stagehand_route
       | `String "automation",`Null -> B.Automation_route
       | _ -> failwith "invalid fixture browser connection" in
     let verb=require (W.verb_of_json ~route (Yojson.Safe.Util.member "command" arguments)) in
@@ -256,7 +252,7 @@ max_reply_bytes = 2097152
     received ~route;
     let known=match route with B.Live_route (Some id) ->
         List.exists (fun (client:B.client_info) -> client.client_id=id) !current_clients
-      | Automation_route|Stagehand_route|Live_route None -> true in
+      | Automation_route|Live_route None -> true in
     let result=if known then response ~route verb (respond ~route verb)
       else
         let typed=Tool_result.make_err ~tool_name:"browser_command" ~start_time:(Tool_timing.start ())
@@ -306,20 +302,19 @@ let run_workers ~env ~config ~downloads ~received ~respond workers run =
       List.iteri (fun index (worker:worker) ->
         let name=Printf.sprintf "worker-%d" index in
         let attached,stop=start ~sw ~env ~config ~root ~name ~backend:worker.serves ~exports:worker.exports
-          ~owned:(worker.serves=B.Backend.Automation,worker.serves=B.Backend.Stagehand)
+          ~owned:(worker.serves=B.Backend.Automation)
           ~clients:worker.clients ~downloads
           ~received:(received ~serves:worker.serves) ~respond:(respond ~serves:worker.serves) in
         started:=(attached,stop) :: !started) workers;
       let attached=List.rev_map fst !started in
       List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
       run ~stop attached))
-(* The owned automation and Stagehand sources, and the external hosts that
-   list [clients], each in its own worker answered by [respond]. *)
+(* The owned automation source and the external hosts that list [clients],
+   each in its own worker answered by [respond]. *)
 let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   run_workers ~env ~config ~downloads ~received:(fun ~serves:_ ~route:_ -> ())
     ~respond:(fun ~serves:_ -> respond)
     [{serves=B.Backend.Automation;clients=[];exports=true};
-     {serves=B.Backend.Stagehand;clients=[];exports=true};
      {serves=B.Backend.External_host;clients;exports=true}]
     (fun ~stop _ -> run {stop})
 let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =

@@ -453,9 +453,6 @@ let test_client_connection_ownership () =
   expect "late discovery cannot replace chosen client"
     (accept_clients ~generation:20 (Ok (found [firefox])) pending = (pending, false));
   expect "automation sends no native client ID" (request_body (switch_source Automation right) = `Assoc ["lane", `String "automation"])
-  ;
-  expect "stagehand sends its lane and no native client ID"
-    (request_body (switch_source Stagehand right) = `Assoc ["lane", `String "stagehand"])
 
 (* The picker's empty row reads the list, not the failure: a discovery that
    failed has no list, and an empty one is an answer. *)
@@ -661,10 +658,6 @@ let test_unified_browser_picker () =
   let same = choose_browser (Connected_browser firefox) current in
   expect "choosing current browser retains tab and scroll"
     (same = { current with client_picker = None });
-  let stagehand = choose_browser Stagehand_browser current in
-  expect "switching to Stagehand withdraws native tab and document"
-    (stagehand.source = Stagehand && stagehand.selected_client = None
-     && stagehand.selected_tab = None && stagehand.scene = None && stagehand.reading = None);
   let independent = choose_browser Automation_browser current in
   let waiting = { independent with scroll = 7; selected_tab = Some 3;
     load = Loading (90, Discover Choose_client) } in
@@ -885,7 +878,7 @@ let recommended lane client reason = `Assoc ["ok",`Bool true;"data",`Assoc [
   "reason",`String reason]]
 let unavailable = `Assoc ["ok",`Bool false;"error",`Assoc [
   "code",`String "no_available_browser";"message",`String "No connected browser"]]
-let recommended_work = recommended "stagehand" None "preferred_work_browser"
+let recommended_work = recommended "automation" None "compatible_work_browser"
 let automatic_discover ?(generation=101) view answer =
   accept_clients ~generation (decode_discovery answer)
     {view with load=Loading (generation,Discover Read_after_discovery)}
@@ -946,7 +939,7 @@ let test_automatic_work_requests () =
   let empty = automatic_answer ~listed:[] unavailable recommended_work in
   let prompt, read = automatic_discover (create ()) empty in
   expect "entering the reader with no browser binds a work recommendation without opening it"
-    (not read && prompt.source=Stagehand && prompt.load=No_browser
+    (not read && prompt.source=Automation && prompt.load=No_browser
      && prompt.reading=None && cadence_operation prompt=None);
   let selected, operation = prepare_open (pinned ()) in
   expect "explicit open discovers the work recommendation instead of opening the login browser"
@@ -957,11 +950,11 @@ let test_automatic_work_requests () =
     (not read && ignored=pending && ignored.pending_open);
   let opened, continue = accept_clients ~generation:202 (decode_discovery empty) pending in
   expect "current work discovery dispatches one open against its concrete owned source"
-    (continue && opened.source=Stagehand && discovery_continuation opened=Open_session);
+    (continue && opened.source=Automation && discovery_continuation opened=Open_session);
   let endpoint, body, _ = success (action_request ~source:opened.source Open_session) in
   expect "the actual shared HTTP request builder opens a visible work browser"
     (endpoint="session" && body=`Assoc ["action",`String "open";"headless",`Bool false;
-      "lane",`String "stagehand"]);
+      "lane",`String "automation"]);
   let owned = {(switch_source Automation (create ())) with selected_tab=Some 7} in
   let retained, operation = prepare_open owned in
   expect "choosing the same advanced owned browser preserves its tab and owner"
@@ -977,8 +970,8 @@ let test_automatic_work_requests () =
   let existing, read = automatic_discover (create ()) session in
   expect "an existing owned session can be read without opening another window"
     (read && existing.source=Automation && discovery_continuation existing=Read);
-  let wrong_id = recommended "stagehand" (Some zen.client_id) "existing_work_session" in
-  let unknown_reason = recommended "stagehand" None "unknown_reason" in
+  let wrong_id = recommended "automation" (Some zen.client_id) "existing_work_session" in
+  let unknown_reason = recommended "automation" None "unknown_reason" in
   List.iter (fun invalid ->
     let decoded = success (decode_discovery (automatic_answer invalid recommended_work)) in
     let refused, read = automatic_discover (create ()) (automatic_answer invalid recommended_work) in

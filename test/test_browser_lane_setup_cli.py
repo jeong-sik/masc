@@ -62,11 +62,11 @@ def declared(base):
     return sorted(path.name for path in directory.glob("*.toml")) if directory.is_dir() else []
 
 
-# A configured [browser.stagehand]. Parsing reads no file, so fixture paths do.
-STAGEHAND_TABLE = """
-[browser.stagehand]
-chrome = "/fixture/chrome"
-extension = "/fixture/stagehand-extension"
+# A configured [browser.live.bidi]. Parsing reads no file, so fixture paths do.
+FIREFOX_TABLE = """
+[browser.live.bidi]
+firefox = "/fixture/firefox"
+profile = "/fixture/firefox-profile"
 """
 
 
@@ -190,18 +190,18 @@ class BrowserLaneSetupCommand(unittest.TestCase):
     def test_addon_declares_each_configured_source_once(self):
         root = self.scratch()
         base = workspace(root)
-        runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE)
+        runtime_toml(base).write_text(RUNTIME_TOML + FIREFOX_TABLE)
         first = masc(root, "--mode", "addon", "--base-path", str(base))
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-        self.assertEqual(declared(base), ["browser-stagehand.toml"], "the configured source only")
-        self.assertTrue((package(base, "stagehand") / "lane.toml").is_file(), "its package is written")
+        self.assertEqual(declared(base), ["browser-firefox.toml"], "the configured source only")
+        self.assertTrue((package(base, "firefox") / "lane.toml").is_file(), "its package is written")
         self.assertFalse(lane(base).exists(), "no host, no token, no extension")
-        declaration = base / ".masc/config/lane-addons/browser-stagehand.toml"
+        declaration = base / ".masc/config/lane-addons/browser-firefox.toml"
         written = declaration.read_text()
         again = masc(root, "--mode", "addon", "--base-path", str(base))
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertEqual(declaration.read_text(), written, "the declaration is not rewritten")
-        self.assertEqual(declared(base), ["browser-stagehand.toml"], "one declaration")
+        self.assertEqual(declared(base), ["browser-firefox.toml"], "one declaration")
 
     def test_addon_without_a_configured_source_declares_nothing(self):
         root = self.scratch()
@@ -214,12 +214,12 @@ class BrowserLaneSetupCommand(unittest.TestCase):
     # Which sources a runtime.toml that does not parse runs is not known. A
     # repeated table is refused like a syntax error, not raised.
     def test_a_runtime_toml_that_does_not_parse_is_refused(self):
-        for label, extra in (("syntax", "[browser.stagehand\n"), ("repeated table", STAGEHAND_TABLE),
+        for label, extra in (("syntax", "[browser.live.bidi\n"), ("repeated table", FIREFOX_TABLE),
                              ("a lane switch", "\n[browser.automation]\nenabled = false\n")):
             with self.subTest(label):
                 root = self.scratch()
                 base = workspace(root)
-                runtime_toml(base).write_text(RUNTIME_TOML + STAGEHAND_TABLE + extra)
+                runtime_toml(base).write_text(RUNTIME_TOML + FIREFOX_TABLE + extra)
                 result = masc(root, "--mode", "addon", "--base-path", str(base))
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("does not parse", result.stderr)
@@ -231,7 +231,7 @@ class BrowserLaneSetupCommand(unittest.TestCase):
     def test_a_runtime_toml_that_does_not_parse_leaves_the_host_step(self):
         root = self.scratch()
         base = workspace(root)
-        runtime_toml(base).write_text(RUNTIME_TOML + "[browser.stagehand\n")
+        runtime_toml(base).write_text(RUNTIME_TOML + "[browser.live.bidi\n")
         result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((lane(base) / "host/launch.json").is_file(), "the host is installed")

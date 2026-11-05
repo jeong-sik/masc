@@ -3041,7 +3041,7 @@ let add_routes ~sw ~clock router =
          match Option.map String.trim (Server_utils.query_param req "keeper") with
          | None ->
            respond_cached_read ~request:req ~reqd
-             ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
+             ~cache_key:(Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path)
              ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
                  ~base_path))

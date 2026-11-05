@@ -3295,6 +3295,7 @@
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
+(include stanzas/test_memory_health_input_announce.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
 (include stanzas/test_keeper_metrics_appended_announce.inc)

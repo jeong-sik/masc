@@ -1007,7 +1007,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
   let warm_keeper_memory_health () =
     try
       let t_start = Time_compat.now () in
-      let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
+      let cache_key = Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path in
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
         (Dashboard_cache.get_or_compute_payload cache_key

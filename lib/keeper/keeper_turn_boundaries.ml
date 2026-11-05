@@ -329,27 +329,33 @@ let append ~keepers_dir ~keeper_id record =
     let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     let line = Yojson.Safe.to_string (record_to_json record) ^ "\n" in
     let failed message = Error (Write_failed { path; message }) in
-    (match Fs_compat.append_private_jsonl_durable_locked_result path line with
-     | Fs_compat.Private_file_succeeded () -> Ok ()
-     | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
-       Log.Keeper.warn
-         ~keeper_name:keeper_id
-         "turn boundary append committed; descriptor settlement failed path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-       Ok ()
-     | Fs_compat.Private_file_failed error ->
-       failed (Fs_compat.private_jsonl_append_error_to_string error)
-     | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-       failed
-         (Printf.sprintf
-            "%s; descriptor settlement also failed: %s"
-            (Fs_compat.private_jsonl_append_error_to_string error)
-            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception Sys_error message -> failed message
-     | exception Unix.Unix_error (code, fn, arg) ->
-       failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+    let appended =
+      match Fs_compat.append_private_jsonl_durable_locked_result path line with
+       | Fs_compat.Private_file_succeeded () -> Ok ()
+       | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+         Log.Keeper.warn
+           ~keeper_name:keeper_id
+           "turn boundary append committed; descriptor settlement failed path=%s: %s"
+           path
+           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+         Ok ()
+       | Fs_compat.Private_file_failed error ->
+         failed (Fs_compat.private_jsonl_append_error_to_string error)
+       | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+         failed
+           (Printf.sprintf
+              "%s; descriptor settlement also failed: %s"
+              (Fs_compat.private_jsonl_append_error_to_string error)
+              (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception Sys_error message -> failed message
+       | exception Unix.Unix_error (code, fn, arg) ->
+         failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    (match appended with
+     | Ok () -> Keeper_memory_health_input.written ~keepers_dir ~keeper_id
+     | Error _ -> ());
+    appended
 ;;
 
 type read_error =

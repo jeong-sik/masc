@@ -95,5 +95,6 @@ val write_error_to_string : write_error -> string
 (** Replace the file with [t] ({!Fs_compat.save_file_atomic_strict}: the
     payload and the parent directory are fsynced before success is reported).
     After an [Error] the file holds the old value or the new one; the next
-    {!read} says which. *)
+    {!read} says which. A write that succeeded is told to
+    {!Keeper_memory_health_input}. *)
 val write : keepers_dir:string -> keeper_id:string -> t -> (unit, write_error) result

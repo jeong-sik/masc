@@ -28,7 +28,7 @@ let test_shared_room () = workspace (fun base ->
   ignore (perform base ~speaker:Room.Keeper "keeper-b" (action ~machine:"msx" "join"));
   ignore (perform base "player" (action ~id:"one" ~text:"같이 해요" "say"));
   let snapshot = perform base ~speaker:Room.Keeper "keeper-a" (action ~id:"reply" ~text:"좋아요" "say") in
-  check (list string) "all joined identities" ["keeper-a"; "keeper-b"; "player"] (names snapshot);
+  check (list string) "only explicit joins are members" ["keeper-a"; "keeper-b"] (names snapshot);
   check (list string) "one conversation across machines" ["같이 해요"; "좋아요"] (texts snapshot);
   check bool "verified Keeper attribution" true ((List.nth snapshot.messages 1).speaker = Room.Keeper);
   check (list string) "fresh database connection reads durable messages" (texts snapshot) (texts (read base ())))
@@ -51,10 +51,10 @@ let test_idempotency () = workspace (fun base ->
 let test_change_metadata () = workspace (fun base ->
   let flags (change : Room.change) =
     change.message_committed, change.membership_changed in
-  ignore (perform_change base "alice" (action "join"));
+  let _, join = perform_change base "alice" (action "join") in
+  check (pair bool bool) "the first public member is a membership change" (false, true) (flags join);
   let _, first = perform_change base "alice" (action ~id:"first" ~text:"hello" "say") in
-  check (pair bool bool) "a new message and its first public member are changes"
-    (true, true) (flags first);
+  check (pair bool bool) "a new message does not alter membership" (true, false) (flags first);
   let _, retry = perform_change ~now:105. "alice" (action ~id:"first" ~text:"hello" "say") in
   check (pair bool bool) "an identical retry has no new effect" (false, false) (flags retry);
   let conflict = ok (Room.parse_action (action ~id:"first" ~text:"changed" "say")) in

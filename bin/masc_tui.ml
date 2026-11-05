@@ -8117,6 +8117,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health _ ->
       state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
+  | Masc.Workspace_dataset_event.Play_room _ ->
+      state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
       let module Decision = Masc_tui_lane_read_decision in
       let addon = Option.bind state.lane_addons (fun (view : Masc_tui_lane_addons.t) ->

@@ -6,6 +6,11 @@ type message = {
 }
 type member = { name : string; speaker : speaker; machine : Machine_lane.t; seen_at : float }
 type snapshot = { messages : message list; members : member list; has_more : bool }
+type change = {
+  machine : Machine_lane.t;
+  message_committed : bool;
+  membership_changed : bool;
+}
 type error = Invalid_request of string | Conflict of string | Unavailable of string
 type operation = Join | Read of int option | Say of { message_id : string; text : string } | Leave
 type action = { client_id : string; machine : Machine_lane.t; operation : operation }
@@ -165,29 +170,48 @@ let transaction db fn =
   | Error error -> ignore (exec db "ROLLBACK"); Error error
   | exception ex -> ignore (exec db "ROLLBACK"); raise ex
 
-let perform ~base_path ~who ~speaker ~now action = with_db ~base_path (fun db ->
+let public_membership snapshot =
+  snapshot.members
+  |> List.map (fun (member : member) -> member.name, member.speaker, member.machine)
+  |> List.sort_uniq compare
+
+let perform_with_change ~base_path ~who ~speaker ~now action = with_db ~base_path (fun db ->
   transaction db (fun () ->
-    let* () = match action.operation with
+    let* before = snapshot db ~now ~before:None in
+    let* message_committed = match action.operation with
       | Say {message_id; text = body} ->
         let* existing = rows db
             "SELECT machine,text FROM messages WHERE who=? AND client_id=? AND message_id=?"
             [text who; text action.client_id; text message_id]
             (fun stmt -> Ok (Sqlite3.column_text stmt 0, Sqlite3.column_text stmt 1)) in
         (match existing with
-         | [] -> update db
-             "INSERT INTO messages(at,who,speaker,machine,text,client_id,message_id) VALUES (?,?,?,?,?,?,?)"
-             [FLOAT now; text who; text (speaker_name speaker); text (machine_name action.machine);
-              text body; text action.client_id; text message_id]
-         | [(machine, previous)] when machine = machine_name action.machine && previous = body -> Ok ()
+         | [] ->
+             let* () = update db
+                 "INSERT INTO messages(at,who,speaker,machine,text,client_id,message_id) VALUES (?,?,?,?,?,?,?)"
+                 [FLOAT now; text who; text (speaker_name speaker); text (machine_name action.machine);
+                  text body; text action.client_id; text message_id] in
+             Ok true
+         | [(machine, previous)] when machine = machine_name action.machine && previous = body -> Ok false
          | _ -> Error (Conflict "message_id already names a different message; keep the original id only for an identical retry"))
-      | Join | Read _ | Leave -> Ok () in
+      | Join | Read _ | Leave -> Ok false in
     let* () = match action.operation with
       | Leave -> update db "DELETE FROM members WHERE who=? AND client_id=?" [text who; text action.client_id]
-      | Join | Read _ | Say _ -> update db
+      | Join -> update db
           "INSERT INTO members(who,client_id,speaker,machine,seen_at) VALUES (?,?,?,?,?) ON CONFLICT(who,client_id) DO UPDATE SET speaker=excluded.speaker,machine=excluded.machine,seen_at=excluded.seen_at"
-          [text who; text action.client_id; text (speaker_name speaker); text (machine_name action.machine); FLOAT now] in
+          [text who; text action.client_id; text (speaker_name speaker); text (machine_name action.machine); FLOAT now]
+      | Read _ | Say _ -> Ok () in
     let* () = update db "DELETE FROM members WHERE seen_at <= ?" [FLOAT (now -. presence_seconds)] in
-    snapshot db ~now ~before:(match action.operation with Read before -> before | Join | Say _ | Leave -> None)))
+    let* after = snapshot db ~now ~before:(match action.operation with Read before -> before | Join | Say _ | Leave -> None) in
+    let change =
+      { machine = action.machine
+      ; message_committed
+      ; membership_changed = public_membership before <> public_membership after
+      }
+    in
+    Ok (after, change)))
+
+let perform ~base_path ~who ~speaker ~now action =
+  perform_with_change ~base_path ~who ~speaker ~now action |> Result.map fst
 
 let read ~base_path ~now ~before =
   match before with

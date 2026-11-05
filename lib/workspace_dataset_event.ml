@@ -35,6 +35,7 @@ type dataset =
   | Lanes
   | Machine_live of { machine : Machine_lane.t }
   | Memory_health of { keeper : string }
+  | Play_room of { machine : Machine_lane.t }
   | Lane_addons of { instance_id : string }
   | Browser_observation of browser_observation
 
@@ -58,6 +59,7 @@ let runtime_metrics_name = "runtime_metrics"
 let lanes_name = "lanes"
 let machine_live_name = "machine_live"
 let memory_health_name = "memory_health"
+let play_room_name = "play_room"
 let lane_addons_name = "lane_addons"
 let browser_observation_name = "browser_observation"
 
@@ -190,6 +192,7 @@ let dataset_name = function
   | Lanes -> lanes_name
   | Machine_live _ -> machine_live_name
   | Memory_health _ -> memory_health_name
+  | Play_room _ -> play_room_name
   | Lane_addons _ -> lane_addons_name
   | Browser_observation _ -> browser_observation_name
 ;;
@@ -198,7 +201,8 @@ let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Provider_usage | Provider_standing | Keeper_costs
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
-  | Machine_live { machine } -> [ "machine", `String (Machine_lane.to_wire machine) ]
+  | Machine_live { machine } | Play_room { machine } ->
+      [ "machine", `String (Machine_lane.to_wire machine) ]
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
   | Browser_observation { scope; revision } ->
       browser_scope_fields scope @ [ "revision", `String revision ]
@@ -246,6 +250,8 @@ let of_fields fields =
   | Some (`String name) when String.equal name lanes_name -> Ok Lanes
   | Some (`String name) when String.equal name machine_live_name ->
     Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
+  | Some (`String name) when String.equal name play_room_name ->
+    Result.map (fun machine -> Play_room { machine }) (machine_of_fields fields)
   | Some (`String name) when String.equal name lane_addons_name ->
     Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
   | Some (`String name) when String.equal name browser_observation_name ->

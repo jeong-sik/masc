@@ -28,8 +28,14 @@ let perform ~base_path ~who body =
     with Yojson.Json_error _ -> Error (Play_room.Invalid_request "body must be JSON")
   in
   Result.bind action (fun action ->
-    Play_room.perform ~base_path ~who ~speaker:Play_room.Participant
-      ~now:(Time_compat.now ()) action)
+    match Play_room.perform_with_change ~base_path ~who ~speaker:Play_room.Participant
+      ~now:(Time_compat.now ()) action with
+    | Ok (snapshot, change) ->
+        if change.message_committed || change.membership_changed then
+          Workspace_dataset_event.announce ~base_path
+            (Workspace_dataset_event.Play_room { machine = change.machine });
+        Ok snapshot
+    | Error _ as error -> error)
 let perform_bound ~config ~who body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error _ ->

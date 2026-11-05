@@ -57,8 +57,8 @@ let fake_output : Types.output = {
 }
 
 (* What the fake worker declares on its private effect port, as the DOS worker
-   declares masc_dos_screen and masc_dos_step. [hinted_read] is shaped like
-   onepassword_status: MCP readOnlyHint true and no declaration. *)
+   declares masc_dos_screen and masc_dos_step. [hinted_read] has an MCP
+   readOnlyHint true and no declaration. *)
 let declared_read = "fixture_read"
 let declared_write = "fixture_write"
 let hinted_read = "fixture_hinted"
@@ -2429,7 +2429,7 @@ let with_holdable_observation f =
 (* Only the worker's declaration on its private effect port covers its
    observation. A declared read never marks the last observation refreshing,
    and a successful one takes no new observation. An error from that read, a
-   tool hinted read-only over MCP but undeclared (as onepassword_status is),
+   tool hinted read-only over MCP but undeclared,
    and an explicit may_change each still take one. The wakes are counted while
    the observer is held inside an earlier observation, so each one stays
    visible as the pending observation or a coalesced wake. *)

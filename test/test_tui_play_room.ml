@@ -121,7 +121,7 @@ let test_retired_read () =
 let test_revalidate_marks_pending_for_trailing_read () =
   let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
   let t = View.revalidate t in
-  let t = View.receive t read ~now:1. (Ok empty) in
+  let t = View.receive t (request read) ~now:1. (Ok empty) in
   let _, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
   check bool "the changed read is followed by one trailing read" true
     (View.is_read (request trailing))

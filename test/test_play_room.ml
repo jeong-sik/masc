@@ -67,7 +67,7 @@ let test_change_metadata () = workspace (fun base ->
   check (pair bool bool) "the same public member is not duplicated" (false, false) (flags second_tab);
   let _, moved = perform_change ~base_path:base ~now:110. "alice" (action ~machine:"msx" "join") in
   check (pair bool bool) "changing the public machine is a membership change" (false, true) (flags moved);
-  let _, left = perform_change "alice" (action "leave") in
+  let _, left = perform_change ~base_path:base "alice" (action "leave") in
   check (pair bool bool) "the last Leave removes the public member" (false, true) (flags left);
   let _, reread = perform_change ~base_path:base ~now:150. "alice" (action "read") in
   check (pair bool bool) "Read neither revives nor moves presence" (false, false) (flags reread);

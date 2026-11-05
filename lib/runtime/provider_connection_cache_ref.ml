@@ -5,8 +5,8 @@ type installed =
 
 let installed : installed option Atomic.t = Atomic.make None
 
-let install ~sw ~clock ~idle_ttl_seconds =
-  let cache = Llm_provider.Http_client.create_cache ~sw ~clock ~idle_ttl_seconds () in
+let install ~sw ~mono_clock ~idle_ttl_seconds =
+  let cache = Llm_provider.Http_client.create_cache ~sw ~mono_clock ~idle_ttl_seconds () in
   let this_install = Some { cache; domain = Domain.self () } in
   Atomic.set installed this_install;
   (* Compared physically, so a later install is not removed with this one. *)

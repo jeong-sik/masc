@@ -511,7 +511,7 @@
 (test
  (name test_http_client_cache)
  (modules test_http_client_cache)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock mtime))
 
 (test
  (name test_http_client_addresses)

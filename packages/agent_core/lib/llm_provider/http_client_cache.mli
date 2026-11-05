@@ -1,8 +1,9 @@
 (** Idle connection cache behind {!Http_client.cache}.
 
     Parks reusable transport connections per origin, closes the ones idle for
-    longer than [idle_ttl_seconds], and closes every parked connection when the
-    switch the cache was created with is released. *)
+    longer than [idle_ttl_seconds] on its monotonic clock, and closes every
+    parked connection when the switch the cache was created with is
+    released. *)
 
 type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
 
@@ -20,9 +21,9 @@ end
 type t
 
 (** Connections that {!release} closed on a [Close] verdict, by
-    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full or the
-    cache stopped closes the connection without a reason and is not counted
-    here. *)
+    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full, the
+    cache stopped, or the connection's owner switch off (see {!checkout})
+    closes the connection without a reason and is not counted here. *)
 type close_counts =
   { request_failed : int
   ; not_persistent : int
@@ -44,17 +45,17 @@ type stats =
 
 (** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
     connections kept per origin and [idle_ttl_seconds] is how long one may sit
-    idle. {!checkout} never hands out a connection idle for longer; it closes
-    it instead. [clock], if supplied, drives a background fiber that closes
-    expired connections every [idle_ttl_seconds /. 2.]; without it they are
-    closed at the next {!checkout} for their origin or when [sw] is
-    released.
+    idle, measured on [mono_clock] from when it was parked. {!checkout} never
+    hands out a connection idle for longer; it closes it instead. A daemon on
+    [sw] also closes expired connections every [idle_ttl_seconds /. 2.] on
+    [mono_clock].
 
-    @raise Invalid_argument if [max_idle_per_host < 1] or
-    [idle_ttl_seconds <= 0]. *)
+    @raise Invalid_argument if [max_idle_per_host < 1], or if
+    [idle_ttl_seconds] is under 1 ns, not finite, or 2{^53} ns (about 104
+    days) or longer. *)
 val create
   :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
+  -> mono_clock:_ Eio.Time.Mono.t
   -> ?max_idle_per_host:int
   -> ?idle_ttl_seconds:float
   -> unit
@@ -70,11 +71,22 @@ type lease
 val lease_connection : lease -> connection
 
 (** A lease on a parked connection for the origin idle for at most the TTL;
-    otherwise on the connection [create] opens, on the given switch. The
-    caller holds the lease until {!release}. Expired connections for the
-    origin are closed on the way. Counts a reuse for the first case and a
-    created connection for a [create] that returns [Ok], whose [Error] is
-    returned as it is. Always runs [create] once the cache is stopped. *)
+    otherwise on the connection [create] opens. The caller holds the lease
+    until {!release}. Expired connections for the origin are closed on the
+    way. Counts a reuse for the first case and a created connection for a
+    [create] that returns [Ok], whose [Error] is returned as it is.
+
+    [create] runs in the calling fiber with an owner switch of the new
+    connection's own. A daemon on the cache's switch runs that switch until
+    the connection is closed. A fiber [create] forks there outlives the
+    request. If such a fiber raises, it fails the owner switch only: the
+    failure is logged, the cache's switch keeps running, and the connection
+    is closed instead of being handed out or parked again. Cancelling the
+    cache's switch cancels every owner switch.
+
+    Once the cache is stopped no parked connection is handed out. When the
+    cache's switch is cancelled or finished, a checkout that would open a
+    connection raises as [Eio.Switch.check] does. *)
 val checkout
   :  t
   -> Key.t
@@ -82,8 +94,8 @@ val checkout
   -> (lease, 'e) result
 
 (** Ends a lease. [Park] parks its connection for later reuse, or closes it
-    when the origin already holds [max_idle_per_host] idle connections or the
-    cache is stopped. [Close reason] closes it and counts [reason] in
+    when the origin already holds [max_idle_per_host] idle connections, the
+    cache is stopped, or its owner switch is off. [Close reason] closes it and counts [reason] in
     [closed_total], and also in [closed_after_reuse] when the connection was
     parked before. Cancellation does not interrupt it.
 

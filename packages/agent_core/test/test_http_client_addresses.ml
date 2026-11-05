@@ -84,7 +84,7 @@ let test_blackhole_and_cache = with_runtime (fun env sw ->
         else (
           Eio.Promise.await started;
           Eio.Net.connect ~sw env#net address)) in
-  let cache = Http_client.create_cache ~sw () in
+  let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
   check_success (post ~cache net);
   Alcotest.(check bool) "pending descriptors closed while cache lives" true (all_closed fds);
   check_success (post ~cache net);
@@ -97,7 +97,7 @@ let test_failed_attempts_do_not_accumulate = with_runtime (fun env sw ->
   let first = `Tcp (Eio.Net.Ipaddr.V6.loopback, 1) in
   let last = `Tcp (Eio.Net.Ipaddr.V4.loopback, 2) in
   let fds = ref [] in
-  let cache = Http_client.create_cache ~sw () in
+  let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
   for _ = 1 to 16 do
     let last_failed, fail_last = Eio.Promise.create () in
     let net = routed_net ~net:env#net ~addresses:[first; last]
@@ -129,7 +129,7 @@ let test_caller_cancellation = with_runtime (fun env sw ->
         incr attempts;
         if !attempts = 2 then Eio.Promise.resolve start ();
         Eio.Fiber.await_cancel ()) in
-  let cache = Http_client.create_cache ~sw () in
+  let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
   (try
      Eio.Cancel.sub (fun cancel ->
        Eio.Fiber.both
@@ -151,7 +151,7 @@ let test_simultaneous_connections = with_runtime (fun env sw ->
         if List.length !sockets = 2 then Eio.Promise.resolve connected ();
         Eio.Promise.await both_connected;
         socket) in
-  let cache = Http_client.create_cache ~sw () in
+  let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
   (match post ~cache net with
    | Ok response -> Alcotest.(check int) "original HTTP failure response" 503 response.status
    | Error _ -> Alcotest.fail "expected HTTP response");
@@ -178,7 +178,7 @@ let test_tls_failure_is_not_replayed = with_runtime (fun env sw ->
         let socket = Eio.Net.connect ~sw env#net address in
         sockets := Eio_unix.Net.fd socket :: !sockets;
         socket) in
-  let cache = Http_client.create_cache ~sw () in
+  let cache = Http_client.create_cache ~sw ~mono_clock:env#mono_clock () in
   (match Http_client.post_sync_once ~cache ~net ~url:"https://provider.test/request"
       ~headers:[] ~body:"one request" () with
    | Error (Http_client.Before_dispatch_error _) -> ()
@@ -213,7 +213,7 @@ let test_cache_owner_cancellation phase =
                     Eio.Fiber.yield ()
                   | Pending | Parked -> ());
                  socket) in
-         let cache = Http_client.create_cache ~sw:owner_sw () in
+         let cache = Http_client.create_cache ~sw:owner_sw ~mono_clock:env#mono_clock () in
          Eio.Fiber.fork ~sw:owner_sw (fun () ->
            Eio.Promise.await reached;
            Eio.Switch.fail owner_sw Owner_stopped);

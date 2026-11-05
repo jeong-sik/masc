@@ -5,16 +5,17 @@
     idle connections from it, so Keepers that call the same origin share
     connections.
 
-    A new cached connection is owned by a fiber on the cache's switch, and
-    Eio refuses a switch from another domain. A transport built on any other domain gets no
+    A new cached connection is opened on a switch that a daemon on the
+    cache's switch runs, and Eio refuses a switch from another domain. A transport built on any other domain gets no
     cache: each of its requests opens its own connection and closes it, as
     every request does when no cache is installed. *)
 
 val install :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> idle_ttl_seconds:float -> unit
+  sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t -> idle_ttl_seconds:float -> unit
 (** Creates a cache on [sw] and installs it for the calling domain, replacing
     any cache installed before. A request takes only a connection idle for at
-    most [idle_ttl_seconds]. The eviction fiber starts on [sw], so a call from
+    most [idle_ttl_seconds] on [mono_clock], counted from when the cache
+    parked it. The eviction fiber starts on [sw], so a call from
     a domain that does not own [sw] raises [Invalid_argument]. The cache is
     uninstalled when [sw] is released. *)
 

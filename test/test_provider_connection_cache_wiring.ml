@@ -95,7 +95,8 @@ let with_provider_and_cache ?(behavior = Fixture.Reply_with (fun _ _ -> `OK, ans
     Eio.Switch.run
     @@ fun sw ->
     let provider = Fixture.start_server ~sw ~net ~clock behavior in
-    Provider_connection_cache_ref.install ~sw ~clock ~idle_ttl_seconds:idle_ttl_s;
+    Provider_connection_cache_ref.install ~sw ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~idle_ttl_seconds:idle_ttl_s;
     f ~sw ~net provider;
     Eio.Switch.fail sw Exit
   with

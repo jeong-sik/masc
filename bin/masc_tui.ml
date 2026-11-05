@@ -16916,6 +16916,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.observer_stream_owner <- None;
   state.observer_machine <- None;
   state.observer_browser <- None;
+  state.observer_play <- None;
   state.contact_retry_owner <- None;
   state.observer_recovery_owner <- None;
   state.observer_scope_binding <- Observer_scope_unbound;
@@ -18653,9 +18654,11 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
   let owner = ref () in
   let machine = Masc_tui_types.observer_machine_of_state state in
   let browser = observer_browser_scope state in
+  let play = Masc_tui_types.observer_play_of_state state in
   state.observer_stream_owner <- Some owner;
   state.observer_machine <- machine;
   state.observer_browser <- browser;
+  state.observer_play <- play;
   state.observer_retry_owner <- None;
   state.observer <- Observer_opening;
   let session = state.mcp_session in
@@ -18691,7 +18694,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   | [] -> ()
                   | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events_with_scopes ~machine ~browser ~clock
+                Masc_tui_http.observe_runtime_events_with_scopes ~play ~machine ~browser ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
                   ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
                   ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)
@@ -18730,12 +18733,15 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
 let reconcile_observer_machine state ~host ~port ~mailbox =
   let machine = Masc_tui_types.observer_machine_of_state state in
   let browser = observer_browser_scope state in
-  if machine <> state.observer_machine || browser <> state.observer_browser then begin
+  let play = Masc_tui_types.observer_play_of_state state in
+  if machine <> state.observer_machine || browser <> state.observer_browser
+     || play <> state.observer_play then begin
     Option.iter (fun owner -> Masc_tui_workspace_job.cancel_observation state ~key:owner)
       state.observer_stream_owner;
     state.observer_stream_owner <- None;
     state.observer_machine <- None;
     state.observer_browser <- None;
+    state.observer_play <- None;
     state.observer_retry_owner <- None;
     state.observer <- Observer_off;
     open_observer_if_due state ~retry_closed:false ~host ~port ~mailbox
@@ -23132,6 +23138,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            connection replays every event since the last applied one, the
            visible surfaces read once more (RFC-0480 §3.3). *)
         if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+          state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
           if state.view = Memory then owe_memory_health_read state;
           if state.view = Lanes then
             owe_dataset_read state Masc.Workspace_dataset_event.Lanes;
@@ -23630,6 +23637,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_stream_owner <- None;
       state.observer_machine <- None;
       state.observer_browser <- None;
+      state.observer_play <- None;
       state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
       let was_opening = state.observer = Observer_opening in
       let reason =

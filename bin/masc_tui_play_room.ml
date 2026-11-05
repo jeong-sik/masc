@@ -19,6 +19,7 @@ type origin = Viewer | Keeper | Peer
 let create () = { client = Random_id.hex ~bytes:16; active = false; joined = false;
   focused = false; draft = ""; retry = None; pending = None; next_read = 0.; changed_since = false;
   snapshot = None; notice = None; viewer = None; before = None; position = Latest; viewport = None }
+let client_id t = t.client
 let focused t = t.focused
 let focus t focused = { t with focused }
 let active t active = if t.active = active then t else {t with active; focused = false; next_read = 0.}
@@ -113,9 +114,15 @@ let receive ?viewer t request ~now result = match t.pending with
       | (Ok _ | Error _), None | Error _, Some _ -> t.viewer in
     let next_read =
       if t.changed_since then now
-      else match request.operation with
-        | (Read _ | Say _) when not t.active -> now
-        | Read _ | Say _ | Leave -> now +. 2.
+      else if not t.active then
+        match request.operation with
+        | Read _ | Say _ -> now
+        | Leave -> now +. 2.
+      else
+        match request.operation, result with
+        | (Read _ | Say _), Ok _ -> infinity
+        | (Read _ | Say _ | Leave), Error _ -> now +. 2.
+        | Leave, Ok _ -> now +. 2.
     in
     let t = {t with pending = None; viewer; next_read; changed_since = false} in
     match request.operation, result with

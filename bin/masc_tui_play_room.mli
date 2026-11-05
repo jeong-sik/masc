@@ -7,6 +7,9 @@ type origin = Viewer | Keeper | Peer
 (** Who a message belongs to as this view reads it: the authenticated viewer,
     a keeper, or another participant. *)
 val create : unit -> t
+val client_id : t -> string
+(** The generated room identity shared by HTTP actions and this room's Observer
+    Play scope. It is not a machine or authenticated-principal identity. *)
 val focused : t -> bool
 val focus : t -> bool -> t
 val active : t -> bool -> t
@@ -28,8 +31,11 @@ val key : t -> string -> t * intent
 val paste : t -> string -> t
 (** [now] is monotonic elapsed seconds, from the same clock as [receive]. *)
 val poll : t -> now:float -> machine:Masc.Machine_lane.t -> t * request option
-(** An inactive view retries an unconfirmed leave at the normal polling cadence
-    until a successful response confirms that presence has been removed. *)
+(** A successful active Read or Say has no periodic successor. A failed Read
+    retries after two seconds, and a change during a pending request earns one
+    trailing Read. An inactive view retries an unconfirmed leave at the normal
+    polling cadence until a successful response confirms that presence has been
+    removed. *)
 val send : t -> machine:Masc.Machine_lane.t -> t * request option
 (** A new send transfers the composer to a separate pending receipt and clears
     the composer for the next message. An unconfirmed send keeps its client,

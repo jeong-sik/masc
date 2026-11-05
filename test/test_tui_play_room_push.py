@@ -119,6 +119,8 @@ class PlayRoomPushTest(unittest.TestCase):
             step("wait", room.read_held.is_set, "the first Play change read did not start")
             room.events.put(room_event("dos"))
             room.events.put(room_event("msx"))
+            step("wait", lambda: room.count("trailing", "observer-event-written") == 3,
+                 "the held read did not receive the complete Play burst")
             step("drain", 0.3)
             room.release_read.set()
             step("wait", lambda: room.response_count("trailing", "play:read") == 2,
@@ -134,14 +136,19 @@ class PlayRoomPushTest(unittest.TestCase):
             step("wait", lambda: room.count("reconnect", "observer-play:msx:" + next(iter(room.play_clients))) >= 1,
                  "the reconnected Observer lost its Play scope")
 
+            subscriptions = room.observer_subscriptions
             room.set_phase("leaving")
             step("keys", "\x1b")
             step("wait", lambda: room.response_count("leaving", "play:leave") == 1,
                  "hiding the room did not release its previous HTTP presence")
             step("wait", lambda: room.count("leaving", "observer-play:none:none") >= 1,
                  "hiding the room did not remove its Observer Play scope")
+            step("wait", lambda: room.observer_subscriptions > subscriptions,
+                 "the hidden Observer replacement was not subscribed")
             room.set_phase("hidden")
             room.events.put(room_event("dos"))
+            step("wait", lambda: room.count("hidden", "observer-event-written") == 1,
+                 "the hidden Observer did not receive the notification")
             step("drain", 0.5)
             self.assertEqual(room.count("hidden", "play:read"), 0,
                              "a hidden Play room still read after a notification")

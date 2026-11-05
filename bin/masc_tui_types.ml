@@ -10987,6 +10987,7 @@ type state = {
   mutable observer_stream_owner: unit ref option;
   mutable observer_machine: Masc.Machine_lane.t option;
   mutable observer_browser: Masc.Workspace_dataset_event.browser_scope option;
+  mutable observer_play: (Masc.Machine_lane.t * string) option;
   (* While the server cannot be reached, booting or unconfirmed, a timer
      tries a revalidation again, waiting longer after each failure. *)
   mutable contact_retry_owner: unit ref option;
@@ -14476,6 +14477,7 @@ let suspend_workspace_readings state =
   state.observer_stream_owner <- None;
   state.observer_machine <- None;
   state.observer_browser <- None;
+  state.observer_play <- None;
   (* The withdrawal cancelled the contact timer with every other job. *)
   state.contact_retry_owner <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
@@ -20125,6 +20127,7 @@ let create_state
   observer_stream_owner = None;
   observer_machine = None;
   observer_browser = None;
+  observer_play = None;
   contact_retry_owner = None;
   contact_failures = 0;
   observer_recovery_owner = None;
@@ -20237,6 +20240,11 @@ let observer_browser_scope_of_state state =
   Option.bind (browser_lane_on_screen state) (fun view ->
     Browser_lane_view.observation_scope ~image_open:state.image_open
       ?viewport:(Option.map fst state.browser_viewport) view)
+
+let observer_play_of_state state =
+  if state.msx_open && not state.msx_menu_open then
+    Option.map (fun room -> state.machine_source, Masc_tui_play_room.client_id room) state.play_room
+  else None
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =

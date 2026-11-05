@@ -1743,7 +1743,7 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events_with_machine ~machine ~browser ~on_identity ~clock ~expected_base_path ~expected_masc_root
+let observe_runtime_events_with_machine ~machine ?(browser = None) ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =

@@ -146,7 +146,7 @@ let test_sampling_stops_with_the_observer () =
     Eio.Switch.run (fun sw ->
       let calls = ref 0 in
       Spectator.For_testing.with_reader
-        (fun ~config:_ ~scope ->
+        (fun ~config:_ scope ->
           incr calls;
           match scope.Dataset.view with
           | Dataset.Viewport -> Ok (screenshot ())

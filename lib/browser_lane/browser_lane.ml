@@ -30,6 +30,22 @@ module Lane_token = Browser_lane_token
 let default_timeout_sec = 20.
 
 type node_ref = { document_id : string; node_id : string }
+
+let node_ref_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->
+      let nonempty name =
+        match List.assoc_opt name fields with
+        | Some (`String "") -> Error "empty scene identity"
+        | Some (`String value) -> Ok value
+        | Some _ -> Error "scene string required"
+        | None -> Error ("scene missing " ^ name)
+      in
+      let open Result.Syntax in
+      let* document_id = nonempty "documentId" in
+      let* node_id = nonempty "nodeId" in
+      Ok ({document_id;node_id} : node_ref)
+  | _ -> Error "scope requires exactly documentId and nodeId from an observed region"
+
 type scene_view = Content | Regions
 (* What an accessibility snapshot covers: the viewport, the whole page, or the
    subtree under one ref an earlier snapshot of the same page printed. *)

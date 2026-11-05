@@ -145,7 +145,7 @@ let browser_scope_of_fields fields =
         let* scope =
           match List.assoc_opt "scope" fields with
           | Some `Null -> Ok None
-          | Some json -> Browser_scene.scope_of_json json |> Result.map Option.some
+          | Some json -> Browser_lane.node_ref_of_json json |> Result.map Option.some
           | None -> Error (event_type ^ " browser_observation names no scene scope")
         in
         Ok (Scene { scene_view; scope })

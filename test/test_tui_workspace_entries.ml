@@ -1622,6 +1622,44 @@ let test_a_refresh_keeps_the_comparison_on_screen () =
   Alcotest.(check bool) "another file asks for its working tree" true
     (code_diff_target_equal (target "b.ml") (worktree_diff "b.ml"))
 
+let test_d_in_history_opens_only_a_commits_diff () =
+  let commit : Decode.git_log_row =
+    { gl_hash = "abc1234"; gl_at_ms = 0.; gl_author = "alpha"; gl_subject = "fix" }
+  in
+  let target ?(file_path = Some "a.ml") entry =
+    history_commit_diff_target ~file_path entry
+  in
+  Alcotest.(check bool) "a commit row names that commit in the open file" true
+    (match target (Some (Hist_commit commit)) with
+     | Some t -> code_diff_target_equal t (commit_diff "a.ml")
+     | None -> false);
+  Alcotest.(check bool) "no open file has no path to ask about" true
+    (Option.is_none (target ~file_path:None (Some (Hist_commit commit))));
+  Alcotest.(check bool) "no selection opens nothing" true
+    (Option.is_none (target None))
+
+let test_leaving_a_commit_diff_returns_to_the_history () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let shown, _ =
+    start_read ~equal:code_diff_target_equal state.code_diff (commit_diff "a.ml")
+  in
+  state.code_diff <- shown;
+  state.code_diff_open <- true;
+  state.code_history_scroll <- 30;
+  close_code_diff state;
+  Alcotest.(check bool) "the diff closes" false state.code_diff_open;
+  Alcotest.(check bool) "the history it came from reopens" true state.code_history_open;
+  Alcotest.(check int) "at the position it was left" 30 state.code_history_scroll;
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let shown, _ =
+    start_read ~equal:code_diff_target_equal state.code_diff (worktree_diff "a.ml")
+  in
+  state.code_diff <- shown;
+  state.code_diff_open <- true;
+  close_code_diff state;
+  Alcotest.(check bool) "a working-tree diff only closes" false
+    (state.code_diff_open || state.code_history_open)
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
@@ -1731,6 +1769,10 @@ let () =
             test_a_diff_reply_must_match_its_comparison
         ; Alcotest.test_case "a refresh keeps the comparison on screen" `Quick
             test_a_refresh_keeps_the_comparison_on_screen
+        ; Alcotest.test_case "d in history opens only a commit's diff" `Quick
+            test_d_in_history_opens_only_a_commits_diff
+        ; Alcotest.test_case "leaving a commit diff returns to the history" `Quick
+            test_leaving_a_commit_diff_returns_to_the_history
         ] )
     ; ( "scope"
       , [ Alcotest.test_case "a shared path is not a shared request" `Quick

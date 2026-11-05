@@ -1,0 +1,24 @@
+# TUI request observation
+
+Counts the HTTP requests one TUI binary sends, window by window, against an already running local server:
+
+```sh
+python3 scripts/harness/perf/tui_request_probe.py \
+  --binary "$MASC_TUI_BINARY" --base-path "$MASC_BASE_PATH" \
+  --output-dir "$TUI_REQUEST_DIR" \
+  --step 'home::30' --step 'next:\t:30'
+```
+
+Python 3.12+ on POSIX is required. The output directory must be new. No build is run. Each `--step LABEL:KEYS:SECONDS` sends KEYS and then counts for SECONDS. KEYS is ASCII with Python escapes such as `\t`, `\r` and `\x1b`, must decode to text that UTF-8 can encode, is sent as UTF-8, and may be empty. Steps run in order, starting `--settle` seconds after the first complete frame. A window closes when the next one opens, so the windows cover the run without gaps. Without `--step` the probe rests 30 seconds on the first screen. `--port`, `--rows`, `--columns`, `--ready-timeout` and `--termination-grace` are kept in the report.
+
+`tui_request_proxy.py` listens on a free 127.0.0.1 port and relays HTTP/1.1 to `--port`. Message framing is in `tui_request_http.py`, event naming in `tui_request_events.py` and the log entries in `tui_request_log.py`. The TUI child gets the relay's port as its `--port`, so every request it sends to the server passes through the relay. Bytes pass unchanged except the request's `Host`: the server answers 400 `request_authority_untrusted` when `Host` does not name its own bind port, so the relay forwards `127.0.0.1:<server port>`, the `Host` a direct client sends. The relay reads both sides of each connection at once, and a byte counts once the kernel has taken it for the side it is going to.
+
+The probe reads `/health?full=1` from the server directly, checks its runtime instance and effective base path, and reads it again through the relay. It reads with `http.client`, which reads no proxy settings: on macOS `urllib`'s proxy lookup starts threads, and the probe forks the TUI's child while it has one thread, before the relay thread starts. The child execs the TUI only after both answers name the same runtime, with SIGPIPE and SIGXFSZ back at their defaults as `subprocess` would start it; exit code 2 means a check failed and no TUI ran. At the end the probe sends SIGTERM and reads `/health` once more.
+
+`result.json` has one entry in `windows` per window: `startup`, from the TUI's start to the first step, and then each step. A window counts the requests that started in it, grouped by method, path and sorted query names (`by_request`, with statuses, how each request ended and bytes each way), and the server-sent events that arrived in it, grouped by stream path and event name (`by_event`). An event is named by its `event` field, otherwise by the `type` (and `dataset`) or the JSON-RPC `method` of its JSON data; `:comment` is a keep-alive and `:no-data` is a block that dispatches no event. A stream counts as one request in the window it opened in. Its traffic is counted by its events, and its bytes stay out of `response_bytes`. `streams` lists every stream with when it opened and how it ended. `relayed_requests` counts the requests that passed through the relay. Header values, query values and bodies are not stored. The raw terminal stream is kept only with `--capture-screen`.
+
+`observation_complete` is true only when the first frame arrived, every step ran to its end, the TUI exited 0 within the termination grace, the server's runtime and the binary's hash were the same before and after, at least one request passed through the relay, and the relay framed every message and raised nothing (`faults` is empty). When the TUI closes a connection, the relay ends it at once: an exchange still open there ends as `client_closed`, even a silent stream or a request with no answer yet, and nothing that arrives later is counted. A stream the server cuts short ends as `server_closed`, and a body that ends when the server closes the connection ends as `complete`. None of these is a fault.
+
+To compare two binaries, run the probe once per binary against the same server with the same steps and geometry, then compare the step windows' `by_request` and `by_event`. A screen that reads only when the server announces a change shows no request rows in a rest window other than the streams it opened there.
+
+Not measured: input or display latency ([TUI latency observation](README-tui-latency.md)), other clients of the same server, and reads the TUI makes from base-path files on local disk. The relay speaks HTTP/1.1 only. It forwards interim answers such as `100 Continue` from the server and answers nothing itself. It takes the end of a client's input as the client leaving, so a client that half-closes its connection and still reads would lose its answer; the TUI's HTTP client closes whole sockets. A compressed event stream would be counted in bytes, not events.

@@ -48,8 +48,9 @@ related: ["0494"]
 | `Keeper_muse_runtime` | 없음. 계정 home 의 XDG 폴더 | 지우지 않는다 |
 
 - `storage_root` 를 주면 `client_environment` 가 `XDG_DATA_HOME`·`XDG_CACHE_HOME`·`XDG_STATE_HOME`·`XDG_RUNTIME_DIR`·`TMPDIR` 를 그 아래로 바꾼다. `HOME`·`XDG_CONFIG_HOME` 과 credential backend 는 계정 home 그대로다.
-- `run_turn` 은 `storage_root` 가 있으면 `Resume` 을 거절한다("isolated stateless storage cannot resume"). 임시 root 만 생각한 규칙이다.
+- `run_turn` 은 `storage_root` 가 있으면 `Resume` 을 거절한다("isolated stateless storage cannot resume"). 지금 root 를 주는 곳은 Fusion·verification 뿐이고, 둘 다 호출이 끝나면 root 를 지운다. 그래서 그 root 에는 이어 갈 세션이 남지 않는다. 이 거절은 그 사실을 적은 것이다.
 - 같은 계정을 쓰는 Keeper 는 모두 같은 `session-index.db` 를 쓴다.
+- 계정 home 의 data 폴더(`.local/share/muse`)에는 `sessions`·`session-index.db`·`local-tracing`·`model-catalog`·`plugins`·`skills`·`rewind-progress-v2`·`serve-exit.jsonl`·`session-admission-locks` 가 있다. 로그인 파일 `auth.json` 은 `.config/muse` 아래에 있다(11-06, 이름만 확인).
 
 ### 1.3 새 세션이 열리는 때
 
@@ -98,6 +99,7 @@ type storage =
 - `Keeper_muse_runtime` 이 `session_mode = Start` 로 정한 뒤, 프로세스를 띄우기 전에 root 를 통째로 지우고 다시 만든다.
 - 1.3 에서 보듯 이 시점에 root 안의 세션은 모두 버린 세션이다. 같은 Keeper 의 다른 턴이 그 root 를 쓰는 중일 수 없다.
 - `Resume` 이면 비우지 않는다.
+- 세션을 바꾸는 일은 claim 경계에서만 일어난다. 1.3 의 `plan_claim` 거절 덕분에 같은 Keeper 의 턴이 살아 있는 동안에는 새 claim 이 없고, 비우기도 없다.
 - 비우기에 실패하면 그 턴은 dispatch 전 실패로 끝난다. 비우지 못한 root 로 새 세션을 열지 않는다.
 
 Muse 는 `model-catalog`·`plugins`·`skills` 도 data 폴더에 둔다(11-06 각각 8 KiB, 4.0 MiB, 6.1 MiB). 새 세션마다 다시 만든다. Fusion 은 지금도 호출마다 이렇게 돈다.
@@ -117,6 +119,8 @@ Fresh state: Muse 를 쓰는 Keeper 의 `official-client-runtime/session.json` �
 
 ## 4. 하지 않는 것
 
+- 세션마다 root 를 따로 두지 않는다. 그러려면 `session.json` 이 세션 id 와 root 를 같이 기억해야 하고(스키마 변경), 새 세션 기록과 옛 root 삭제 사이에 프로세스가 죽으면 남는 root 를 치우는 sweep 이 따로 필요하다. Keeper 마다 root 하나를 두고 Start 직전에 비우면, 죽어서 남은 세션도 다음 Start 가 지운다.
+
 - 세션 파일이나 index 를 MASC 가 골라 지우지 않는다. Muse 내부 형식이다.
 - 개수·용량·나이로 자르지 않는다. 기억하는 세션까지 지울 수 있다.
 - Codex(16.0 GiB)·Antigravity(7.7 GiB)·Claude Code(7.0 GiB) 계정 home 은 다루지 않는다(11-05 합계). 같은 모양인지는 따로 재고 이슈로 남긴다.
@@ -135,5 +139,6 @@ L2 는 혼자 들어가도 동작이 바뀌지 않는다. L3 와 L4 는 같이 �
 
 ## 6. 열린 질문
 
-1. 로그인 상태가 data 폴더에 있는지. `HOME`·`XDG_CONFIG_HOME` 이 그대로라 Fusion 처럼 로그인은 유지될 것이다. L2 의 일회용 사본에서 `.local/share/muse` 를 지운 뒤에도 로그인이 되는지 확인한다.
+1. 로그인 유지. `auth.json` 은 config 쪽에 있고(1.2) Fusion 은 빈 data 폴더로 돈다. 다만 Fusion 은 Resume 을 하지 않는다. L2 의 일회용 사본에서 빈 `Keeper_owned` root 로 Start 한 뒤 Resume 이 로그인 없이 되는지 확인한다.
 2. root 를 비우는 시점. 2.3 은 Start 직전이다. 새 세션이 settle 된 뒤 비우면 Start 가 실패했을 때 앞 세션 파일이 남지만, 그 세션은 이미 버려졌으니 쓸모가 없다.
+3. Muse host 에 세션 삭제 요청이 생기면. root 는 그대로 Keeper 마다 두고, 비우기 대신 host 에 지우라고 요청할지 그때 정한다. host 쪽에 기능 요청을 올릴지는 운영자가 정한다.

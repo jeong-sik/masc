@@ -10,8 +10,8 @@ module Types = Masc_tui_types
 
 let fresh () = Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. ()
 
-(* Every constructor named: a new answer has to be placed here before this
-   test compiles. *)
+(* [name] matches every constructor, so a new answer does not compile until it
+   is named here. [answers] is written by hand: a new answer goes there too. *)
 let name : Fleet.msg -> string = function
   | Fleet.Fleet_stream_view _ -> "view"
   | Fleet.Fleet_stream_reader_ended _ -> "ended"
@@ -70,13 +70,16 @@ let test_an_ended_reader_is_logged_and_left_idle () =
   let before = latest_ring_seq () in
   Fleet.apply state (Fleet.Fleet_stream_reader_ended "socket closed");
   Alcotest.(check bool) "the stream is idle" true (Option.is_none (followed_view state));
-  let messages =
-    List.map
-      (fun (entry : Log.Ring.entry) -> entry.message)
+  let warnings =
+    List.filter_map
+      (fun (entry : Log.Ring.entry) ->
+        match entry.level with
+        | Log.Warn -> Some entry.message
+        | Log.Debug | Log.Info | Log.Error -> None)
       (Log.Ring.recent ~limit:10 ~module_filter:"Transport" ?since_seq:before ())
   in
-  Alcotest.(check (list string)) "the end is logged with its detail"
-    [ "tui_fleet_stream_reader_ended detail=socket closed" ] messages
+  Alcotest.(check (list string)) "the end is a warning with its detail"
+    [ "tui_fleet_stream_reader_ended detail=socket closed" ] warnings
 
 let () =
   Alcotest.run "tui fleet msg"

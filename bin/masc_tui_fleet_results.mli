@@ -7,8 +7,9 @@ type msg =
   | Fleet_stream_view of Masc_tui_fleet_stream.view
       (** The reader's view, posted whenever it changes. *)
   | Fleet_stream_reader_ended of string
-      (** The stream job ended, and why. The job reconnects by itself and
-          ends only when withdrawn, so an end it reports is a failure. *)
+      (** The stream job ended or could not start, and why. A running job
+          reconnects by itself and ends only when withdrawn, so an end it
+          reports is a failure. *)
 
 (** The protocol and the loop decide by kind, not by answer: whether an answer
     is a read, whether it waits for input, whether it carries an operation
@@ -23,6 +24,7 @@ type answer_kind =
 val answer_kind : msg -> answer_kind
 
 val apply : Masc_tui_types.state -> msg -> unit
-(** Apply one answer to the reader. A view from a job that is no longer
-    followed changes nothing. A reader that ended is logged and left idle, so
-    the next refresh starts another. *)
+(** Apply one answer to the reader. A view that arrives while no job is
+    followed changes nothing; [apply] cannot tell which job posted a view. A
+    reader that ended is logged and left idle, so the next refresh starts
+    another. *)

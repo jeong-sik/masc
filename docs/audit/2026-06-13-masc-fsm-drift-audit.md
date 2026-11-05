@@ -162,5 +162,4 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 - `docs/spec/04-turn-lifecycle.md` — SSOT for turn lifecycle; Open Questions table references #1/#2 (`OQ-TURN-001`, `OQ-TURN-002`) and #3 (`OQ-TURN-003`).
 - `docs/keeper-turn-lifecycle.md` — historical state table and open-work table.
-- `docs/observability/keeper-turn-fsm-metrics.md` — historical wiring-sites table.
 - `specs/keeper-turn-fsm/KeeperTurnFSM.tla` — formal model including bug actions.

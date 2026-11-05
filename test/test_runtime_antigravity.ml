@@ -1324,7 +1324,7 @@ let test_documented_noncompletion_results_never_complete () =
                 ~on_stream_event:(fun event -> events := event :: !events)
              with
              | Error (Runtime_antigravity.Result_not_completed
-                 { status; conversation_id; response; error; num_turns; usage }) ->
+                 { status; conversation_id; response; error; num_turns; usage; denied = None }) ->
                check bool "exact typed status" true (status = expected_status);
                check (option string) "init identity survives blank restatement"
                  (Some "conversation-1") conversation_id;
@@ -1361,7 +1361,7 @@ let test_pre_init_noncompletion_keeps_unbound_identity () =
             ~on_conversation_ready:(fun ~conversation_id:_ -> admitted := true; Ok ())
             ~on_stream_event:(fun event -> events := event :: !events) with
          | Error (Runtime_antigravity.Result_not_completed
-             { status; conversation_id; response; error; num_turns; usage }) ->
+             { status; conversation_id; response; error; num_turns; usage; denied = None }) ->
            check bool "typed pre-init state" true (status = expected_status);
            check (option string) "unbound identity retained"
              (Some "unbound-conversation") conversation_id;
@@ -1499,6 +1499,16 @@ let test_empty_success_after_a_tool_step_carries_diagnostics () =
        | Ok _ -> fail "blank SUCCESS after a tool step was admitted")
 ;;
 
+let index_of_substring hay needle =
+  let n = String.length hay and m = String.length needle in
+  let rec go i =
+    if i + m > n then None
+    else if String.sub hay i m = needle then Some i
+    else go (i + 1)
+  in
+  go 0
+;;
+
 (* The wire shape agy 1.5.1 printed on 2026-11-05 when print mode refused a
    read it could not ask about. *)
 let refused_read_json = {|[{"action":"read_file","display_name":"ReadFile"}]|}
@@ -1517,8 +1527,10 @@ let test_text_before_a_refused_action_is_not_the_answer () =
            | Runtime_antigravity.Turn_finished _ -> finished := true
            | _ -> ()) with
         | Error (Runtime_antigravity.Actions_denied
-            { conversation_id; denied; response; num_turns; usage }) ->
+            { conversation_id; model; denied; response; num_turns; usage; tool_steps; _ }) ->
           check string "admitted identity" "conversation-1" conversation_id;
+          check string "admitted model" "gemini-fixture" model;
+          check int "no tool step ran" 0 tool_steps;
           check (list string) "refused actions" [ "read_file" ]
             (Runtime_antigravity.denied_action_names denied);
           check string "partial text kept as evidence" "Starting the check now.\n" response;
@@ -1541,6 +1553,94 @@ let test_refusal_without_text_names_the_refusal () =
        | Ok _ -> fail "an empty refused run completed")
 ;;
 
+(* agy writes the run's text only into the result when nothing streamed; a
+   refusal keeps it out of the reply stream as well as out of completion. *)
+let test_unstreamed_text_before_a_refusal_is_not_replayed () =
+  let pieces = ref [] in
+  with_fixture
+    ~stderr_line:"antigravity: refused read_file"
+    [ init (); result ~response:"Starting the check now.\n" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       (match run_fixture path ~on_stream_event:(function
+           | Runtime_antigravity.Text_delta { text; _ } -> pieces := text :: !pieces
+           | _ -> ()) with
+        | Error (Runtime_antigravity.Actions_denied { stderr_tail; _ } as error) ->
+          check string "stderr tail kept" "antigravity: refused read_file" stderr_tail;
+          let detail = Runtime_antigravity.error_to_string error in
+          check bool "detail names the model" true
+            (index_of_substring detail "model=gemini-fixture" <> None);
+          check bool "detail carries the stderr tail" true
+            (index_of_substring detail "antigravity: refused read_file" <> None)
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ -> fail "a refused run completed");
+       check (list string) "refused text is not streamed" [] !pieces)
+;;
+
+(* A refusal ends the run whatever status the CLI reports, so an ERROR with a
+   deliverable-looking sentence is not the answer either. *)
+let test_error_result_with_refusals_is_actions_denied () =
+  with_fixture
+    [ init ()
+    ; result ~status:"ERROR" ~response:"Here is the full report you asked for."
+        ~error:"permission denied" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Actions_denied { denied; response; _ }) ->
+         check (list string) "refused actions" [ "read_file" ]
+           (Runtime_antigravity.denied_action_names denied);
+         check string "text kept as evidence" "Here is the full report you asked for." response
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an ERROR with refusals completed")
+;;
+
+let test_refusals_keep_the_cli_order () =
+  with_fixture
+    [ init ()
+    ; result ~response:""
+        ~denied_actions_json:{|[{"action":"read_file"},{"action":"run_command","display_name":"RunCommand"}]|} () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Actions_denied { denied; _ }) ->
+         check (list string) "both refusals in order" [ "read_file"; "run_command" ]
+           (Runtime_antigravity.denied_action_names denied)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a refused run completed")
+;;
+
+let test_absent_refusals_complete_the_turn () =
+  List.iter
+    (fun denied_actions_json ->
+       with_fixture
+         [ init (); result ~denied_actions_json () ]
+         (fun path ->
+            match run_fixture path with
+            | Ok _ -> ()
+            | Error error ->
+              failf "denied_actions %s failed the turn: %s" denied_actions_json
+                (Runtime_antigravity.error_to_string error)))
+    [ "[]"; "null" ]
+;;
+
+(* The CLI's own noncompletion keeps its class; the refusals ride along as
+   evidence instead of being dropped. *)
+let test_noncompletion_keeps_its_refusals () =
+  with_fixture
+    [ init ()
+    ; result ~status:"INTERRUPTED" ~response:"partial" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Result_not_completed ({ status = Interrupted; denied = Some denied; _ } as evidence)) ->
+         check (list string) "refusals retained" [ "read_file" ]
+           (Runtime_antigravity.denied_action_names denied);
+         (match Runtime_antigravity.noncompletion_result_to_json evidence with
+          | `Assoc fields ->
+            check bool "evidence names the refusals" true
+              (List.assoc_opt "denied_actions" fields = Some (`List [ `String "read_file" ]))
+          | _ -> fail "noncompletion evidence is not an object")
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an interrupted run completed")
+;;
+
 let test_malformed_refusal_entry_is_a_protocol_error () =
   List.iter
     (fun denied_actions_json ->
@@ -1557,16 +1657,6 @@ let test_malformed_refusal_entry_is_a_protocol_error () =
 (* A Korean stderr line longer than the byte budget must come back cut at a
    character boundary, never with a torn Hangul character at its head
    (#39090 made String_util the SSOT for that rule). *)
-let index_of_substring hay needle =
-  let n = String.length hay and m = String.length needle in
-  let rec go i =
-    if i + m > n then None
-    else if String.sub hay i m = needle then Some i
-    else go (i + 1)
-  in
-  go 0
-;;
-
 let test_empty_success_stderr_tail_cuts_at_a_character_boundary () =
   let korean =
     "안녕하세요 검증 메시지입니다 " ^ String.concat "" (List.init 40 (fun _ -> "토큰"))
@@ -2327,6 +2417,15 @@ let () =
             test_refusal_without_text_names_the_refusal
         ; test_case "malformed refusal entry is a protocol error" `Quick
             test_malformed_refusal_entry_is_a_protocol_error
+        ; test_case "unstreamed text before a refusal is not replayed" `Quick
+            test_unstreamed_text_before_a_refusal_is_not_replayed
+        ; test_case "ERROR result with refusals is Actions_denied" `Quick
+            test_error_result_with_refusals_is_actions_denied
+        ; test_case "refusals keep the CLI order" `Quick test_refusals_keep_the_cli_order
+        ; test_case "absent refusals complete the turn" `Quick
+            test_absent_refusals_complete_the_turn
+        ; test_case "noncompletion keeps its refusals" `Quick
+            test_noncompletion_keeps_its_refusals
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"

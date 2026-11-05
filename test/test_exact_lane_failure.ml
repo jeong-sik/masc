@@ -80,13 +80,27 @@ let test_antigravity_noncompletion_is_not_transient () =
       let cause = Runtime_antigravity.Result_not_completed
           { status; conversation_id = Some "interrupted-conversation"
           ; response = "partial reply"; error = None; num_turns = 1
-          ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2} } in
+          ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2}
+          ; denied = None } in
       let classified = F.cli_failure
           (Masc.Keeper_lane_cli_oneshot.Execution_failed
              { runtime_id = "agy.fixture"; cause = Masc.Fusion_official_client.Antigravity_failure cause }) in
       check failure "non-completed answer is unusable" F.Output_unusable classified;
       check bool "no safe transient replay" false (F.is_transient classified))
     [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ]
+
+let test_antigravity_refusal_is_not_transient () =
+  let cause = Runtime_antigravity.Actions_denied
+      { conversation_id = "conversation-1"; model = "gemini-fixture"
+      ; denied = { first = "read_file"; rest = [] }; response = "partial reply"
+      ; num_turns = 1
+      ; usage = {input_tokens=1;output_tokens=1;thinking_tokens=0;cache_read_tokens=0;total_tokens=2}
+      ; tool_steps = 0; stderr_tail = "" } in
+  let classified = F.cli_failure
+      (Masc.Keeper_lane_cli_oneshot.Execution_failed
+         { runtime_id = "agy.fixture"; cause = Masc.Fusion_official_client.Antigravity_failure cause }) in
+  check failure "refused run is unusable" F.Output_unusable classified;
+  check bool "the same rules refuse a replay" false (F.is_transient classified)
 
 let () =
   run "exact lane failure"
@@ -96,4 +110,6 @@ let () =
         ; test_case "completion failures" `Quick test_completion_failures
         ; test_case "cli failures" `Quick test_cli_failures
         ; test_case "Antigravity noncompletion is not transient" `Quick
-            test_antigravity_noncompletion_is_not_transient ] ) ]
+            test_antigravity_noncompletion_is_not_transient
+        ; test_case "Antigravity refusal is not transient" `Quick
+            test_antigravity_refusal_is_not_transient ] ) ]

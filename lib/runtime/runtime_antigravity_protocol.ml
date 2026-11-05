@@ -53,6 +53,16 @@ type stream_event =
       }
   | Turn_finished of { text : string }
 
+(* Print mode cannot ask for approval, so agy refuses such an action and ends
+   the run, naming the refusals in the result's [denied_actions] (CLI
+   changelog; measured 2026-11-05 on agy 1.5.1: status SUCCESS, and text
+   written before the refused call survives as [response]). A result with no
+   refusals carries [None]; this record is never empty. *)
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
 type noncompletion_result =
   { status : noncompletion_status
   ; conversation_id : string option
@@ -60,24 +70,18 @@ type noncompletion_result =
   ; error : string option
   ; num_turns : int
   ; usage : usage
-  }
-
-(* Print mode cannot ask for approval, so agy refuses such an action and ends
-   the run with status SUCCESS. The result names the refusals in
-   [denied_actions] (CLI changelog; measured 2026-11-05 on agy 1.5.1, where
-   text written before the refused call survives as [response]). A result with
-   no refusals carries [None]; this record is never empty. *)
-type denied_actions =
-  { first : string
-  ; rest : string list
+  ; denied : denied_actions option
   }
 
 type denied_result =
   { conversation_id : string
+  ; model : string
   ; denied : denied_actions
   ; response : string
   ; num_turns : int
   ; usage : usage
+  ; tool_steps : int
+  ; stderr_tail : string
   }
 
 type error =
@@ -416,7 +420,8 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
               | None -> "status=ERROR before init"))
       | Awaiting_init, Success -> protocol_error stage "received result before init"
       | Awaiting_init, Not_completed status ->
-        Error (Result_not_completed { status; conversation_id; response; error; num_turns; usage })
+        Error (Result_not_completed
+          { status; conversation_id; response; error; num_turns; usage; denied })
       | Completed { running; result = _ }, (Success | Result_error | Not_completed _) ->
         let* () =
           verify_restatement ~stage ~expected:running.conversation_id conversation_id
@@ -428,18 +433,21 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
         in
         Ok running
     in
+    (* Text written before a refused call is not the answer, so the result
+       does not replay it as one. *)
     let text_obligations =
       if running.text_streamed then []
       else
-        match status with
-        | Success -> [ Stream (Text_delta { step_index = None; text = response }) ]
-        | Result_error ->
+        match status, denied with
+        | (Success | Result_error | Not_completed _), Some _ -> []
+        | Success, None -> [ Stream (Text_delta { step_index = None; text = response }) ]
+        | Result_error, None ->
           if Agent_core.Response_shape.has_deliverable_content
                (Agent_core.Response_shape.summarize_blocks
                   [ Llm_provider.Types.Text response ])
           then [ Stream (Text_delta { step_index = None; text = response }) ]
           else []
-        | Not_completed _ -> []
+        | Not_completed _, None -> []
     in
     let result : received_result = { status; response; error; num_turns; usage; denied } in
     Ok

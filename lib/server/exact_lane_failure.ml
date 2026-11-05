@@ -141,6 +141,9 @@ let claude_error = function
 let antigravity_error = function
   | Runtime_antigravity.Invalid_config _ -> Configuration_refused
   | Runtime_antigravity.Result_not_completed _ -> Output_unusable
+  (* The same request meets the same permission rules, so a retry ends on
+     the same refusal. *)
+  | Runtime_antigravity.Actions_denied _ -> Output_unusable
   (* A counted breach is deterministic — the same turn re-kills — so the
      workspace needs operator action, not a retry. A pressure refusal may
      pass with the pressure, so it stays transient. *)
@@ -150,7 +153,6 @@ let antigravity_error = function
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
-  | Runtime_antigravity.Actions_denied _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Unhandled_exception _
   | Runtime_antigravity.Timeout _ -> Transient

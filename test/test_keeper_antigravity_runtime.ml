@@ -2399,6 +2399,32 @@ let test_child_fd_ceiling_reports_and_recovers () =
     true
 ;;
 
+(* A run that ended on a refusal is the provider's reported failure with its
+   own name, and it recovers like the empty SUCCESS it sits beside. *)
+let test_actions_denied_reports_and_recovers () =
+  let open Keeper_antigravity_runtime.For_testing in
+  let usage : Runtime_antigravity.usage =
+    { input_tokens = 1; output_tokens = 1; thinking_tokens = 0; cache_read_tokens = 0; total_tokens = 2 }
+  in
+  let error =
+    Runtime_antigravity.Actions_denied
+      { conversation_id = "conversation-1"; model = "gemini-fixture"
+      ; denied = { first = "read_file"; rest = [] }; response = "Starting the check now."
+      ; num_turns = 1; usage; tool_steps = 0; stderr_tail = "" }
+  in
+  (match runtime_error_to_core_error error with
+   | Agent_core.Error.Provider
+       (Llm_provider.Error.ProviderReportedError { provider; error_type; detail }) ->
+     check string "provider" "antigravity_cli" provider;
+     check (option string) "error type" (Some "actions_denied") error_type;
+     check string "detail" (Runtime_antigravity.error_to_string error) detail
+   | core -> fail ("expected ProviderReportedError, got " ^ Agent_core.Error.to_string core));
+  check bool "recovery"
+    (recovery_failure_of_runtime_error error
+    = Keeper_official_client_session_store.Provider_rejected)
+    true
+;;
+
 (* Exercise the actual adapter writer, then recover its serialized argument
    through the same canonical reader tool that the prepared surface advertises. *)
 module Argument_start_fixture = struct
@@ -2822,6 +2848,10 @@ let () =
             "child fd ceiling reports and recovers without blind retry"
             `Quick
             test_child_fd_ceiling_reports_and_recovers
+          ; test_case
+            "a refusal-ended run reports and recovers as provider rejected"
+            `Quick
+            test_actions_denied_reports_and_recovers
           ; test_case
             "every declared loading is eager on Antigravity"
             `Quick

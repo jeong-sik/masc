@@ -62,14 +62,15 @@ let empty_success_stderr_bytes = 200
    diagnostics while masking credentials, including standalone token values. *)
 let redact_stderr_tail = Secret_patterns.redact_text
 
+(* Cut at a UTF-8 character boundary — String_util is the SSOT for that
+   rule (#39090), so a Korean stderr line never breaks mid-character. *)
+let diagnostic_stderr_tail stderr =
+  String_util.utf8_suffix ~max_bytes:empty_success_stderr_bytes
+    (redact_stderr_tail (String.trim stderr))
+;;
+
 let empty_success_detail ~model ~tool_steps stderr =
-  let trimmed = String.trim stderr in
-  (* Cut at a UTF-8 character boundary — String_util is the SSOT for that
-     rule (#39090), so a Korean stderr line never breaks mid-character. *)
-  let stderr_tail =
-    String_util.utf8_suffix ~max_bytes:empty_success_stderr_bytes
-      (redact_stderr_tail trimmed)
-  in
+  let stderr_tail = diagnostic_stderr_tail stderr in
   if stderr_tail = "" then
     Printf.sprintf "%s (model=%s, tool_steps=%d, stderr=<empty>)"
       empty_success_detail_prefix model tool_steps
@@ -212,6 +213,13 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
+type denied_actions = Protocol.denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
+let denied_action_names (denied : denied_actions) = denied.first :: denied.rest
+
 type noncompletion_result = Protocol.noncompletion_result =
   { status : noncompletion_status
   ; conversation_id : string option
@@ -219,6 +227,7 @@ type noncompletion_result = Protocol.noncompletion_result =
   ; error : string option
   ; num_turns : int
   ; usage : usage
+  ; denied : denied_actions option
   }
 
 let noncompletion_result_to_json (result : noncompletion_result) =
@@ -231,6 +240,11 @@ let noncompletion_result_to_json (result : noncompletion_result) =
     ; "partial_response", `String result.response
     ; "error", optional_string result.error
     ; "reported_num_turns", `Int result.num_turns
+    ; "denied_actions",
+      (match result.denied with
+       | None -> `Null
+       | Some denied ->
+         `List (List.map (fun action -> `String action) (denied_action_names denied)))
     ; "reported_usage", `Assoc
         [ "input_tokens", `Int result.usage.input_tokens
         ; "output_tokens", `Int result.usage.output_tokens
@@ -241,20 +255,16 @@ let noncompletion_result_to_json (result : noncompletion_result) =
     ]
 ;;
 
-type denied_actions = Protocol.denied_actions =
-  { first : string
-  ; rest : string list
-  }
-
 type denied_result = Protocol.denied_result =
   { conversation_id : string
+  ; model : string
   ; denied : denied_actions
   ; response : string
   ; num_turns : int
   ; usage : usage
+  ; tool_steps : int
+  ; stderr_tail : string
   }
-
-let denied_action_names (denied : denied_actions) = denied.first :: denied.rest
 
 type error = Protocol.error =
   | Invalid_config of string
@@ -288,11 +298,14 @@ let error_to_string = function
     Printf.sprintf "Antigravity result did not complete (status=%s)%s"
       (noncompletion_status_to_string status)
       (match error with None -> "" | Some detail -> ": " ^ detail)
-  | Actions_denied { denied; response; _ } ->
+  | Actions_denied { denied; response; model; tool_steps; stderr_tail; _ } ->
     Printf.sprintf
-      "Antigravity print mode refused %s and ended the turn before it finished (partial response: %d bytes)"
+      "Antigravity print mode refused %s and ended the turn before it finished (model=%s, tool_steps=%d, partial response: %d bytes, %s)"
       (String.concat ", " (denied_action_names denied))
+      model
+      tool_steps
       (String.length response)
+      (if stderr_tail = "" then "stderr=<empty>" else "stderr tail: " ^ stderr_tail)
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Child_fd_ceiling_exceeded { count = Some count; ceiling } ->
@@ -1154,18 +1167,20 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
         (Agent_core.Response_shape.summarize_blocks
            [ Llm_provider.Types.Text terminal.response ]) in
     (match terminal.status, terminal.denied with
-     (* A refusal ended the run: the text so far, if any, is not the answer. *)
-     | Success, Some denied ->
+     (* A refusal ended the run: the text so far, if any, is not the answer,
+        whether the CLI called the run a success or an error. *)
+     | (Success | Result_error), Some denied ->
          Error (Actions_denied
-           { conversation_id = terminal.conversation_id; denied
-           ; response = terminal.response; num_turns = terminal.num_turns
-           ; usage = terminal.usage })
+           { conversation_id = terminal.conversation_id; model = terminal.model
+           ; denied; response = terminal.response; num_turns = terminal.num_turns
+           ; usage = terminal.usage; tool_steps = terminal.tool_steps
+           ; stderr_tail = diagnostic_stderr_tail stderr })
      | Success, None ->
          if deliverable then complete terminal ~trajectory_error:None
          else Error (Turn_failed
            (empty_success_detail ~model:terminal.model
               ~tool_steps:terminal.tool_steps stderr))
-     | Result_error, (None | Some _) ->
+     | Result_error, None ->
          let detail = match terminal.error with
            | Some detail -> detail
            | None -> "status=ERROR" in
@@ -1173,12 +1188,15 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
             Prior streamed text cannot rescue an empty terminal response. *)
          if deliverable then complete terminal ~trajectory_error:(Some detail)
          else Error (Turn_failed detail)
+     (* The CLI's own noncompletion keeps its stricter recovery fence; the
+        refusals ride along as evidence. *)
      | Not_completed status, (None | Some _) ->
          Error
            (Result_not_completed
               { status; conversation_id = Some terminal.conversation_id
               ; response = terminal.response; error = terminal.error
-              ; num_turns = terminal.num_turns; usage = terminal.usage }))
+              ; num_turns = terminal.num_turns; usage = terminal.usage
+              ; denied = terminal.denied }))
   | `Exited 0, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
   | (`Exited _ | `Signaled _), None ->

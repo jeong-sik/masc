@@ -746,21 +746,21 @@ let keeper_memory_health_http_json ~base_path =
 ;;
 
 (* One Keeper's row, the way the fleet answer carries it under [keepers]. A
-   Keeper the fleet answer has no row for has none here: the name is matched
-   against the Keepers the fleet would list, so it never names a file on its
-   own. *)
+   Keeper the fleet answer has no row for, one that left included, answers
+   [null]: the answer says so itself, under the same workspace receipt as a
+   row, instead of leaving it to a status a proxy could also send. The name is
+   matched against the Keepers the fleet would list, so it never names a file
+   on its own. *)
 let keeper_memory_health_row_http_json ~base_path ~keeper =
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
-  then
-    Some
-      (`Assoc
-        [ "schema", `String schema
-        ; "generated_at", `Float (Time_compat.now ())
-        ; "keeper", keeper_health_entry_to_json (keeper_health ~config ~keepers_dir keeper)
-        ])
-  else None
+  let generated_at = Time_compat.now () in
+  let row =
+    if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
+    then keeper_health_entry_to_json (keeper_health ~config ~keepers_dir keeper)
+    else `Null
+  in
+  `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]
 ;;
 
 (* Preserve each store's own revision and evidence rather than synthesizing a

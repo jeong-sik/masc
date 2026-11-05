@@ -178,11 +178,9 @@ let test_handoff_emits_request_and_completion () =
 
 (* ── B. Agent.run emits AgentStarted and one terminal outcome ── *)
 
-(* Run-level lifecycle pair restored in [Agent.run]: the legacy
-   orchestrator producer was removed in #1755, leaving the variants
-   without any producer. [publish_started]/[publish_finished]
-   in [lib/agent/agent_lifecycle_events.ml] now emit a start and one terminal
-   outcome around every run. *)
+(* [publish_started]/[publish_finished] in
+   [lib/agent/agent_lifecycle_events.ml] emit a start and one terminal
+   outcome around every run of [Agent.run]. *)
 
 let with_mock_server ~handler f =
   let port = fresh_port () in

@@ -1,6 +1,6 @@
-(** Tests for the live re-exports formerly reached through the api.ml facade:
-    content block JSON round-trips, Anthropic/OpenAI response parsing,
-    message_to_json, SSE event parsing, and the api_common string helpers. *)
+(** Tests for content block JSON round-trips, Anthropic/OpenAI response
+    parsing, message_to_json, SSE event parsing, and the api_common string
+    helpers. *)
 
 open Alcotest
 open Agent_core

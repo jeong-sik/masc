@@ -373,12 +373,6 @@ let test_validate_illegal_block_at_on_stop () =
   check bool "Block at on_stop is Error" true (Result.is_error err)
 ;;
 
-(* [test_validate_illegal_elicit_at_pre_tool_use] was deleted by Agent Core contract.
-   It pinned exactly the closure that RFC removes. Its coverage is not lost:
-   [test_elicit_input_illegal_where_it_cannot_settle_input] asserts the same
-   rejection for all seven stages where [ElicitInput] is still illegal, which
-   is strictly broader than the single stage this one checked. *)
-
 (** Test stage_of_event for all event variants. *)
 let test_stage_of_event () =
   let cases =

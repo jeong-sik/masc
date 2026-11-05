@@ -156,15 +156,18 @@ let of_json = function
     let* () = validate value in Ok value
   | _ -> Error "unread message must be an object"
 
-let source_key {source;_} = match source with
-  | Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
-    `Atom (trace_id, history_start_boundary_line, atom, message_in_atom)
-  | Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
-    `Official (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref,
-      boundary_line, message_in_turn)
+let source_digest = function
+  | Atom {message_sha256;_} | Official_turn {message_sha256;_} -> message_sha256
 
 module Source_key = struct
   type t = [ `Atom of string * int * int * int | `Official of string * int * int * int ]
+
+  let of_source = function
+    | Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
+      `Atom (trace_id, history_start_boundary_line, atom, message_in_atom)
+    | Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
+      `Official (Ids.Turn_ref.trace_id turn_ref, Ids.Turn_ref.absolute_turn turn_ref,
+        boundary_line, message_in_turn)
 
   let compare a b =
     match a, b with
@@ -180,6 +183,8 @@ module Source_key = struct
           if c <> 0 then c else Int.compare m1 m2
     | `Atom _, `Official _ -> -1
     | `Official _, `Atom _ -> 1
+
+  let equal a b = compare a b = 0
 end
 module Source_keys = Set.Make (Source_key)
 
@@ -188,7 +193,7 @@ let validate_set values =
     | [] -> Ok ()
     | value :: rest ->
       let* () = validate value in
-      let key = source_key value in
+      let key = Source_key.of_source value.source in
       if Source_keys.mem key previous then Error "duplicate unread message source coordinates"
       else loop (Source_keys.add key previous) rest in
   loop Source_keys.empty values
@@ -236,7 +241,7 @@ let merge previous added =
   let* () = validate_set added in
   let* indexed = List.fold_left (fun parsed value ->
     let* indexed = parsed in
-    let key = source_key value in
+    let key = Source_key.of_source value.source in
     match Source_map.find_opt key indexed with
     | None -> Ok (Source_map.add key value indexed)
     | Some prior ->

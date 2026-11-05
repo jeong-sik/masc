@@ -26,6 +26,22 @@ val source_of_json : Yojson.Safe.t -> (source, string) result
 (** The shared exact source identity for processed messages and unread holes.
     Decoding validates coordinates and digest without inventing a refusal. *)
 
+val source_digest : source -> string
+(** The hash of the exact message the source names. *)
+
+(** Where one source message sits. The hash is not part of it: two sources at
+    one place name one message, and a different hash there makes them
+    conflict. *)
+module Source_key : sig
+  type t
+
+  val of_source : source -> t
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
+module Source_keys : Set.S with type elt = Source_key.t
+
 val sources_for_atom_range :
   trace_id:string -> history_start_boundary_line:int -> start_atom:int -> end_atom:int ->
   messages:Agent_core.Types.message list -> (source list, string) result

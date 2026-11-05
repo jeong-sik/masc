@@ -17,41 +17,6 @@ type error = { detail : string; reports : Runtime.not_committed list }
 let lift result = Result.map_error (fun detail -> {detail;reports=[]}) result
 let refused detail reports = Error {detail;reports}
 
-type coordinate =
-  | Atom_coordinate of string * int * int * int
-  | Official_coordinate of string * int * int
-
-let compare_coordinate a b =
-  match a, b with
-  | Atom_coordinate (t1, b1, a1, m1), Atom_coordinate (t2, b2, a2, m2) ->
-    let c = String.compare t1 t2 in
-    if c <> 0 then c
-    else
-      let c = Int.compare b1 b2 in
-      if c <> 0 then c
-      else
-        let c = Int.compare a1 a2 in
-        if c <> 0 then c else Int.compare m1 m2
-  | Official_coordinate (t1, b1, m1), Official_coordinate (t2, b2, m2) ->
-    let c = String.compare t1 t2 in
-    if c <> 0 then c
-    else
-      let c = Int.compare b1 b2 in
-      if c <> 0 then c else Int.compare m1 m2
-  | Atom_coordinate _, Official_coordinate _ -> -1
-  | Official_coordinate _, Atom_coordinate _ -> 1
-
-module Coordinates = Set.Make (struct type t = coordinate let compare = compare_coordinate end)
-
-let coordinate = function
-  | Unread.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
-    Atom_coordinate (trace_id,history_start_boundary_line,atom,message_in_atom)
-  | Unread.Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
-    Official_coordinate (Ids.Turn_ref.to_string turn_ref,boundary_line,message_in_turn)
-
-let source_digest = function
-  | Unread.Atom {message_sha256;_} | Unread.Official_turn {message_sha256;_} -> message_sha256
-
 let validate_manifest sources (input : Keeper_librarian.input) =
   let* () = if sources=[] then Error "message floor requires a nonempty original source manifest"
     else Ok () in
@@ -59,13 +24,13 @@ let validate_manifest sources (input : Keeper_librarian.input) =
     | [], [] -> Ok ()
     | source::sources, message::messages ->
       let* _ = Unread.source_of_json (Unread.source_to_json source) in
-      let key = coordinate source in
-      if Coordinates.mem key seen then Error "duplicate message floor source coordinate"
-      else if source_digest source <> Unread.message_digest message then
+      let key = Unread.Source_key.of_source source in
+      if Unread.Source_keys.mem key seen then Error "duplicate message floor source coordinate"
+      else if Unread.source_digest source <> Unread.message_digest message then
         Error "message floor source hash differs from its original message"
-      else bind (Coordinates.add key seen) sources messages
+      else bind (Unread.Source_keys.add key seen) sources messages
     | [], _::_ | _::_, [] -> Error "message floor differs from its original source manifest" in
-  let* () = bind Coordinates.empty sources input.messages in
+  let* () = bind Unread.Source_keys.empty sources input.messages in
   let message_count = List.length input.messages in
   let tool_count = List.length input.tool_observations in
   if List.for_all (fun (context : H.t) ->

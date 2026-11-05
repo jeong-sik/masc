@@ -1,46 +1,13 @@
 open Keeper_memory_os_types
 open Result.Syntax
 module Source = Keeper_librarian_unread
+module Source_key = Source.Source_key
+module Source_keys = Source.Source_keys
 module Core = Keeper_memory_os_disposition_core
 module Payloads = Set_util.StringMap
 module Identity_set = Set_util.StringSet
 
 include Keeper_memory_os_program_types
-
-type coordinate =
-  | Atom_coordinate of string * int * int * int
-  | Official_coordinate of string * int * int
-
-let compare_coordinate a b =
-  match a, b with
-  | Atom_coordinate (t1, b1, a1, m1), Atom_coordinate (t2, b2, a2, m2) ->
-    let c = String.compare t1 t2 in
-    if c <> 0 then c
-    else
-      let c = Int.compare b1 b2 in
-      if c <> 0 then c
-      else
-        let c = Int.compare a1 a2 in
-        if c <> 0 then c else Int.compare m1 m2
-  | Official_coordinate (t1, b1, m1), Official_coordinate (t2, b2, m2) ->
-    let c = String.compare t1 t2 in
-    if c <> 0 then c
-    else
-      let c = Int.compare b1 b2 in
-      if c <> 0 then c else Int.compare m1 m2
-  | Atom_coordinate _, Official_coordinate _ -> -1
-  | Official_coordinate _, Atom_coordinate _ -> 1
-
-module Coordinates = Set.Make (struct type t = coordinate let compare = compare_coordinate end)
-
-let coordinate = function
-  | Source.Atom {trace_id;history_start_boundary_line;atom;message_in_atom;_} ->
-    Atom_coordinate (trace_id,history_start_boundary_line,atom,message_in_atom)
-  | Source.Official_turn {turn_ref;boundary_line;message_in_turn;_} ->
-    Official_coordinate (Ids.Turn_ref.to_string turn_ref,boundary_line,message_in_turn)
-
-let source_digest = function
-  | Source.Atom {message_sha256;_} | Source.Official_turn {message_sha256;_} -> message_sha256
 
 let facts = function None -> [] | Some facts -> facts
 let payload fact = Yojson.Safe.to_string (fact_to_json fact)
@@ -68,21 +35,22 @@ let validate_sources sources unread decisions =
   let* manifest = List.fold_left (fun result source ->
     let* seen = result in
     let* _ = Source.source_of_json (Source.source_to_json source) in
-    let key = coordinate source in
-    if Coordinates.mem key seen then Error "duplicate program source coordinate"
-    else Ok (Coordinates.add key seen)) (Ok Coordinates.empty) sources in
+    let key = Source_key.of_source source in
+    if Source_keys.mem key seen then Error "duplicate program source coordinate"
+    else Ok (Source_keys.add key seen)) (Ok Source_keys.empty) sources in
   let* _ = Source.list_of_json (Source.list_to_json unread) in
   let* holes = List.fold_left (fun result (hole : Source.t) ->
     let* seen = result in
-    let key = coordinate hole.source in
-    if not (Coordinates.mem key manifest) then Error "unread source is outside the program manifest"
+    let key = Source_key.of_source hole.source in
+    if not (Source_keys.mem key manifest) then Error "unread source is outside the program manifest"
     else
-      match List.find_opt (fun source -> coordinate source = key) sources with
-      | Some source when source_digest source = source_digest hole.source ->
-        Ok (Coordinates.add key seen)
+      match List.find_opt (fun source -> Source_key.equal (Source_key.of_source source) key) sources with
+      | Some source when Source.source_digest source = Source.source_digest hole.source ->
+        Ok (Source_keys.add key seen)
       | None | Some _ -> Error "unread source hash differs from the program manifest")
-    (Ok Coordinates.empty) unread in
-  let expected_read = List.filter (fun source -> not (Coordinates.mem (coordinate source) holes)) sources in
+    (Ok Source_keys.empty) unread in
+  let expected_read =
+    List.filter (fun source -> not (Source_keys.mem (Source_key.of_source source) holes)) sources in
   let actual_read = List.concat_map (fun (decision : decision) -> decision.sources) decisions in
   if actual_read = expected_read then Ok ()
   else Error "program steps do not account for the ordered manifest exactly once"

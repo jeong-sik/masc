@@ -93,12 +93,16 @@ class SpectatorPushTest(unittest.TestCase):
             self.assertEqual(spectator.count("push", "legacy-tick"), 0)
 
             spectator.set_phase("control")
+            connections = spectator.observer_connections
             step("keys", "\x1b[15~")
-            step("wait", lambda: spectator.count("control", "observer:msx") >= 1,
+            step("wait", lambda: spectator.observer_connections > connections
+                 and spectator.count("control", "observer:msx") >= 1,
                  "Control did not reconnect with the machine query")
             spectator.set_phase("watch")
+            connections = spectator.observer_connections
             step("keys", "\x1b[15~")
-            step("wait", lambda: spectator.count("watch", "observer:watch") >= 1,
+            step("wait", lambda: spectator.observer_connections > connections
+                 and spectator.count("watch", "observer:watch") >= 1,
                  "Watch did not remove the machine query")
             self.assertEqual(spectator.count("watch", "legacy-tick"), 0)
 

@@ -63,6 +63,8 @@ let test_the_front_is_the_same_only_at_the_same_atom_and_message () =
   check_front "same atom, same opening message" System.Same_front
     (System.front ~digest_at ~first_atom:2 ~previous);
   check_front "another atom" System.Moved_front (System.front ~digest_at ~first_atom:3 ~previous);
+  check_front "another atom opened by an identical message" System.Moved_front
+    (System.front ~digest_at:(fun _ -> Some "d2") ~first_atom:3 ~previous);
   check_front "the message at the atom changed" System.Moved_front
     (System.front ~digest_at:(fun _ -> Some "rewritten") ~first_atom:2 ~previous);
   check_front "an omitted history is not an opened atom" System.Moved_front

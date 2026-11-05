@@ -44,6 +44,7 @@ let echo_tool =
 let text_response ?(content = [ Llm_provider.Types.Text "ok" ]) () : Types.api_response =
   { id = "resp-1"
   ; model = "openai_chat"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content
   ; usage = None

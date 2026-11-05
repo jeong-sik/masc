@@ -252,6 +252,7 @@ let test_synthetic_events_media_blocks () =
   let response : api_response =
     { id = "r1"
     ; model = "m1"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; usage = Some (usage ())
     ; telemetry = None

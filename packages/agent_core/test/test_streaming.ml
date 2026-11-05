@@ -656,6 +656,7 @@ let test_synthetic_text_only () =
   let response : api_response =
     { id = "msg-s1"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "hello" ]
     ; usage =
@@ -693,6 +694,7 @@ let test_synthetic_thinking () =
   let response : api_response =
     { id = "msg-t"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Thinking { signature = Some "sig"; content = "I think..." } ]
     ; usage = None
@@ -710,6 +712,7 @@ let test_synthetic_tool_use () =
   let response : api_response =
     { id = "msg-tu"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = StopToolUse
     ; content = [ ToolUse { id = "tu1"; name = "calc"; input = `Assoc [ "x", `Int 1 ] } ]
     ; usage = None
@@ -733,6 +736,7 @@ let test_synthetic_image_media_delta () =
   let response : api_response =
     { id = "msg-img"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Image { media_type = "image/png"; source = Base64 "abc" } ]
     ; usage = None
@@ -758,6 +762,7 @@ let test_synthetic_multi_block () =
   let response : api_response =
     { id = "msg-m"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content =
         [ Thinking { signature = Some "s"; content = "hmm" }
@@ -798,6 +803,7 @@ let test_synthetic_usage_propagation () =
   let response : api_response =
     { id = "msg-u"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "x" ]
     ; usage = Some usage

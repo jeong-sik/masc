@@ -334,6 +334,7 @@ let%test "emit_synthetic_events round-trips a media block through the accumulato
   let response : api_response =
     { id = "msg_rt"
     ; model = "test-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ image ]
     ; usage = None

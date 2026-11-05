@@ -73,6 +73,7 @@ let unbounded_window : float Eio.Time.clock_ty Eio.Resource.t Deadline_window.t 
 let response =
   { Types.id = "window-response"
   ; model = "window-fixture"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Types.Text "accepted" ]
   ; usage = None

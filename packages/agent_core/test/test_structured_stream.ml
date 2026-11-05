@@ -11,6 +11,7 @@ open Types
 let make_tool_response ~tool_id ~tool_name ~input_json =
   { id = "msg_test"
   ; model = "claude-sonnet-4"
+  ; unreadable_tool_uses = []
   ; stop_reason = StopToolUse
   ; content = [ ToolUse { id = tool_id; name = tool_name; input = input_json } ]
   ; usage =
@@ -87,6 +88,7 @@ let test_on_event_callback_fires () =
   let response =
     { id = "msg_2"
     ; model = "claude-sonnet-4"
+    ; unreadable_tool_uses = []
     ; stop_reason = StopToolUse
     ; content =
         [ Text "thinking..."

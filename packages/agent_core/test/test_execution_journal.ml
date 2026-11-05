@@ -28,6 +28,7 @@ let serial_schedule : Tool_contract.schedule =
 let provider_response ?(id = "response-stream-1") ?(cost_usd = Some 0.25) () =
   { Llm_provider.Types.id
   ; model = "streaming-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Llm_provider.Types.EndTurn
   ; content = [ Llm_provider.Types.Text "answer" ]
   ; usage =

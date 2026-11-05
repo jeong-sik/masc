@@ -1249,12 +1249,46 @@ let with_reported_cache_usage
   }
 ;;
 
+type tool_argument_piece =
+  | Argument_delta of int
+  | Argument_snapshot of int
+[@@deriving show, yojson]
+
+type tool_argument_assembly =
+  { last_pieces : tool_argument_piece list
+  ; piece_count : int
+  }
+[@@deriving show, yojson]
+
+let tool_argument_assembly_to_string { last_pieces; piece_count } =
+  let pieces =
+    last_pieces
+    |> List.map (function
+      | Argument_delta bytes -> Printf.sprintf "delta:%d" bytes
+      | Argument_snapshot bytes -> Printf.sprintf "snapshot:%d" bytes)
+    |> String.concat ","
+  in
+  match piece_count - List.length last_pieces with
+  | 0 -> pieces
+  | omitted -> Printf.sprintf "omitted:%d,%s" omitted pieces
+;;
+
+type unreadable_tool_use =
+  { tool_use_id : string
+  ; tool_name : string
+  ; arguments : string
+  ; arguments_problem : Tool_call_input.parse_error
+  ; arguments_assembly : tool_argument_assembly option
+  }
+[@@deriving show, yojson]
+
 (** API response *)
 type api_response =
   { id : string
   ; model : string
   ; stop_reason : stop_reason
   ; content : content_block list
+  ; unreadable_tool_uses : unreadable_tool_use list
   ; usage : api_usage option
   ; telemetry : inference_telemetry option
   }

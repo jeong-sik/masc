@@ -2655,6 +2655,7 @@ let test_patch_telemetry_reports_the_request_window () =
   let response : Types.api_response =
     { id = "ctx-1"
     ; model = "uncatalogued-wide"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = [ Types.Text "ok" ]
     ; usage = None

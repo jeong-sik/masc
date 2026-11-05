@@ -431,6 +431,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     Ok
       { id = json |> member "model" |> to_string_option |> Option.value ~default:"ollama"
       ; model
+      ; unreadable_tool_uses = []
       ; stop_reason
       ; content =
           thinking_blocks

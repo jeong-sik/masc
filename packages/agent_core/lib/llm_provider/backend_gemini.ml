@@ -949,7 +949,7 @@ let parse_response json =
           }
     in
     let model_str = Cli_common_json.member_str "modelVersion" json in
-    { id = ""; model = model_str; stop_reason; content; usage
+    { id = ""; model = model_str; unreadable_tool_uses = []; stop_reason; content; usage
     ; telemetry =
         Some
           (Types.with_reported_cache_usage

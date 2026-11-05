@@ -159,6 +159,7 @@ let host_stop_result
     let response : Agent_core.Types.api_response =
       { id = turn_id
       ; model
+      ; unreadable_tool_uses = []
       ; stop_reason = Agent_core.Types.EndTurn
       ; content = []
       ; usage = None

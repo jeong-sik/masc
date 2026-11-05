@@ -247,6 +247,7 @@ let test_agent_turn_preparation () =
 let pipeline_response ?telemetry stop_reason : Types.api_response =
   { id = "pipeline-reset-test"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content = [ Text "done" ]
   ; usage = None
@@ -454,6 +455,7 @@ let test_effective_provider_config_drives_lifecycle_without_inferred_cost () =
   let response : Types.api_response =
     { id = "effective-provider-config"
     ; model = ""
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "done" ]
     ; usage =
@@ -1035,6 +1037,7 @@ let test_pipeline_text_tool_intent_remains_text () =
 let repeated_invalid_tool_response id : Types.api_response =
   { id
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = StopToolUse
   ; content = [ ToolUse { id; name = "my_tool"; input = `Assoc [] } ]
   ; usage = None
@@ -1057,6 +1060,7 @@ let test_repeated_validation_error_without_judge_continues_to_provider () =
     | 3 ->
       { Types.id = "validation-replanned"
       ; model = "mock-model"
+      ; unreadable_tool_uses = []
       ; stop_reason = EndTurn
       ; content = [ Text "provider replanned" ]
       ; usage = None
@@ -2673,6 +2677,7 @@ let durable_tool_response
   =
   { Types.id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.StopToolUse
   ; content =
       List.map (fun (id, name, input) -> Llm_provider.Types.ToolUse { id; name; input }) tool_uses

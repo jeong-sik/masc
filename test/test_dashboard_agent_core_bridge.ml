@@ -83,6 +83,7 @@ let make_response ?usage ?telemetry ?(model = "claude-opus") ()
   =
   { id = "resp-1"
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = Agent_core.Types.EndTurn
   ; content = []
   ; usage

@@ -19,7 +19,7 @@ let params : S.create_message_params = {
 let test_image_only_completion_is_sampling_content () =
   let module L = Llm_provider.Types in
   let response content : L.api_response =
-    {id="image-response";model="image-model";stop_reason=L.EndTurn;
+    {id="image-response";model="image-model";unreadable_tool_uses = []; stop_reason=L.EndTurn;
      content;usage=None;telemetry=None} in
   let block = L.Image {media_type="image/png";source=L.Base64 image} in
   let project = Server_lane_addon_sampling.For_testing.response_content in

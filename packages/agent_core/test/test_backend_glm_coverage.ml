@@ -224,6 +224,7 @@ let test_extract_reasoning_handles_empty_and_malformed_bodies () =
   let resp =
     { T.id = "resp"
     ; model = "glm-5.1"
+    ; unreadable_tool_uses = []
     ; stop_reason = T.EndTurn
     ; content = [ T.Text "answer" ]
     ; usage = None

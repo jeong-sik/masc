@@ -458,6 +458,7 @@ let parse_openai_response_result_json_raw
     Ok
       { id = Cli_common_json.member_str "id" json
       ; model
+      ; unreadable_tool_uses = []
       ; stop_reason
       ; content
       ; usage = usage_of_openai_json json
@@ -484,7 +485,7 @@ let parse_openai_response_result_json
   =
   match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
   | Error _ as error -> error
-  | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
+  | Ok ({ content = []; id; model; unreadable_tool_uses = []; stop_reason; usage; telemetry } : Types.api_response)
     as response ->
     (match stop_reason with
      | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded

@@ -85,6 +85,7 @@ let test_visible_text_excludes_non_answer_blocks () =
   let response : Agent_core.Types.api_response =
     { id = "resp"
     ; model = "model"
+    ; unreadable_tool_uses = []
     ; stop_reason = Agent_core.Types.EndTurn
     ; content =
         [ Llm_provider.Types.Text "visible"

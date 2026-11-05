@@ -45,6 +45,7 @@ let text_response
   fun (_ : message list) ->
   { id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text text ]
   ; usage = usage ~input_tokens ~output_tokens
@@ -64,6 +65,7 @@ let tool_use_response
   fun (_ : message list) ->
   { id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = StopToolUse
   ; content = [ ToolUse { id = id ^ ":tool"; name = tool_name; input = tool_input } ]
   ; usage = usage ~input_tokens ~output_tokens
@@ -87,6 +89,7 @@ let thinking_response
   fun (_ : message list) ->
   { id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Thinking { signature = None; content = thinking }; Text text ]
   ; usage = usage ~input_tokens ~output_tokens

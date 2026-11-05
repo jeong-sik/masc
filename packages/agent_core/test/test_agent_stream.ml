@@ -34,7 +34,7 @@ let make_response
       content
   : Types.api_response
   =
-  { id; model; stop_reason; content; usage; telemetry = None }
+  { id; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry = None }
 ;;
 
 (** Count events of a specific kind. *)

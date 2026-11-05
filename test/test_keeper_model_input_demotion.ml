@@ -741,6 +741,7 @@ let stamp_signed_call ~config ~prefix ~id input =
     | Error detail -> Alcotest.fail detail in
   let response : Types.api_response =
     { id = "signed-argument-response"; model = "claude-sonnet-5-5"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn; content; usage = None
     ; telemetry = Some { Types.default_inference_telemetry with
         reasoning_source = Some capability.target; reasoning_prefix } } in

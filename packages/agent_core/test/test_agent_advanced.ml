@@ -17,6 +17,7 @@ let mock_provider =
 let text_response text : Types.api_response =
   { id = "advanced-text"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
@@ -27,6 +28,7 @@ let text_response text : Types.api_response =
 let tool_use_response : Types.api_response =
   { id = "advanced-tool"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.StopToolUse
   ; content =
       [ Llm_provider.Types.ToolUse

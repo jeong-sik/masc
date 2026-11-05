@@ -21,6 +21,7 @@ let response ?provider_kind content : Types.api_response =
   in
   { id = "resp_1"
   ; model = "model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.StopToolUse
   ; content
   ; usage = None

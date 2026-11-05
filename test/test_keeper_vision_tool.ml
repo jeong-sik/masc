@@ -93,6 +93,7 @@ let ok_response text : Agent_core.Types.api_response =
   in
   { id = "vision-test"
   ; model = "vision-test-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Agent_core.Types.EndTurn
   ; content = [ Llm_provider.Types.Text text_json ]
   ; usage = None
@@ -102,6 +103,7 @@ let ok_response text : Agent_core.Types.api_response =
 let text_response text : Agent_core.Types.api_response =
   { id = "vision-test"
   ; model = "vision-test-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Agent_core.Types.EndTurn
   ; content = [ Llm_provider.Types.Text text ]
   ; usage = None

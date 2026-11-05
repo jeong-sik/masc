@@ -79,7 +79,7 @@ let mk_response
       ()
   : Types.api_response
   =
-  { id; model; stop_reason; content; usage; telemetry = None }
+  { id; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry = None }
 ;;
 
 (* ═══════════════════════════════════════════════════

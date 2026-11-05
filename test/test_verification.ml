@@ -2382,6 +2382,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
       (fun ~hooks ~wrap_tool ->
         let response : Agent_core.Types.api_response =
           { id = "response-" ^ tool_use_id; model = "reported-fixture-model"
+          ; unreadable_tool_uses = []
           ; stop_reason = StopToolUse
           ; content = [ToolUse {id=tool_use_id; name="submit-fixture"; input=`Assoc []}]
           ; usage = None
@@ -2908,7 +2909,7 @@ let test_submitting_response_identity_survives_later_responses_and_reload () =
   Runtime_response_identity_scope.with_scope ~actor:(Some "omega") ~runtime_id:"producer-slot"
     ~provider_id:(Some "actual-provider") (fun ~hooks ~wrap_tool ->
       let observed model id : Agent_core.Types.api_response =
-        { id; model; stop_reason = StopToolUse
+        { id; model; unreadable_tool_uses = []; stop_reason = StopToolUse
         ; content = [ToolUse {id="submit-call"; name="submit-fixture"; input=`Assoc []}]; usage = None
         ; telemetry = Some { Llm_provider.Types.default_inference_telemetry with
             canonical_model_id = Some model; reported_model = Some (Provider_reported_model model) } } in

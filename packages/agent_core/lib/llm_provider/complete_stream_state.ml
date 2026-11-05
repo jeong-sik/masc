@@ -1294,6 +1294,7 @@ let finalize_completed state stop_reason =
   Ok
     { Types.id = state.id
     ; model = state.model
+    ; unreadable_tool_uses = []
     ; stop_reason
     ; content
     ; usage = Option.map terminal_usage state.usage

@@ -194,7 +194,7 @@ let http_request_fingerprint ~config ~messages ?(tools = []) ~http_codec ~body (
 
 (* ── Serialization ──────────────────────────────────── *)
 
-let schema_version = "3"
+let schema_version = "4"
 
 (* A cached response retains its original inference telemetry, including the
    source needed to persist signed reasoning. Incompatible payloads are misses;
@@ -205,6 +205,8 @@ let schema_version = "3"
    diverged from the canonical parser (it never learned pause_turn/refusal/
    compaction/model_context_window_exceeded), so a cached PauseTurn replayed as
    [Unknown "pause_turn"]. *)
+(* A cached response replays its unreadable tool calls too: a hit must give the
+   caller the same response the provider gave, not one whose calls vanished. *)
 let response_to_json (resp : Types.api_response) : Yojson.Safe.t =
   let usage_json =
     match resp.usage with
@@ -227,6 +229,8 @@ let response_to_json (resp : Types.api_response) : Yojson.Safe.t =
     ; "model", `String resp.model
     ; "stop_reason", `String (Types.stop_reason_to_string resp.stop_reason)
     ; "content", `List (List.map Api_common.content_block_to_json resp.content)
+    ; ( "unreadable_tool_uses"
+      , `List (List.map Types.unreadable_tool_use_to_yojson resp.unreadable_tool_uses) )
     ; "usage", usage_json
     ; "telemetry", opt_json Types.inference_telemetry_to_yojson resp.telemetry
     ]
@@ -263,6 +267,19 @@ let response_of_json (json : Yojson.Safe.t) : Types.api_response option =
         |> Result.map List.rev
         |> Result.to_option
       in
+      let unreadable_tool_uses =
+        json
+        |> member "unreadable_tool_uses"
+        |> to_list
+        |> List.fold_left
+             (fun result call ->
+                Option.bind result (fun calls ->
+                  Types.unreadable_tool_use_of_yojson call
+                  |> Result.to_option
+                  |> Option.map (fun decoded -> decoded :: calls)))
+             (Some [])
+        |> Option.map List.rev
+      in
       let telemetry =
         match List.assoc "telemetry" (to_assoc json) with
         | `Null -> Some None
@@ -271,11 +288,12 @@ let response_of_json (json : Yojson.Safe.t) : Types.api_response option =
           |> Result.to_option
           |> Option.map Option.some
       in
-      match content, telemetry with
-      | Some content, Some telemetry ->
+      match content, unreadable_tool_uses, telemetry with
+      | Some content, Some unreadable_tool_uses, Some telemetry ->
         let response =
           { Types.id = json |> member "id" |> to_string
           ; model = json |> member "model" |> to_string
+          ; unreadable_tool_uses
           ; stop_reason =
               json |> member "stop_reason" |> to_string |> Types.stop_reason_of_string
           ; content
@@ -285,7 +303,7 @@ let response_of_json (json : Yojson.Safe.t) : Types.api_response option =
         (match Types.assistant_message_of_response response with
          | Ok _ -> Some response
          | Error _ -> None)
-      | None, _ | _, None -> None)
+      | None, _, _ | _, None, _ | _, _, None -> None)
   with
   | Yojson.Safe.Util.Type_error _ | Not_found | Yojson.Json_error _ -> None
 ;;

@@ -14,6 +14,7 @@ let partial_response_of_stop
   {
     id = session_id;
     model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
+    unreadable_tool_uses = [];
     stop_reason = Agent_core.Types.EndTurn;
     content = [ Llm_provider.Types.Text text ];
     usage = None;

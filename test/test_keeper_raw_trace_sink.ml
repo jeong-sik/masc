@@ -621,6 +621,7 @@ let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
   {
     Agent_core.Types.id = "resp-test";
     model = "model-test";
+    unreadable_tool_uses = [];
     stop_reason;
     content;
     usage = None;

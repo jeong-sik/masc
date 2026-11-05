@@ -16,6 +16,7 @@ let string_contains ~needle haystack =
 let mock_response text =
   { Types.id = "r-1"
   ; model = "mock"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text text ]
   ; usage = None

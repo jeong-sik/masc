@@ -23,6 +23,7 @@ let make_mock_transport () : Llm_provider.Llm_transport.t =
   let response : Types.api_response =
     { id = "telemetry-pipeline-mock"
     ; model = "mock-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = [ Llm_provider.Types.Text "ok" ]
     ; usage = None
@@ -57,6 +58,7 @@ let make_mock_transport () : Llm_provider.Llm_transport.t =
 let text_response ?(id = "checkpoint-text") text : Types.api_response =
   { id
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text text ]
   ; usage = None
@@ -67,6 +69,7 @@ let text_response ?(id = "checkpoint-text") text : Types.api_response =
 let tool_use_response () : Types.api_response =
   { id = "checkpoint-tool-use"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.StopToolUse
   ; content =
       [ Llm_provider.Types.ToolUse

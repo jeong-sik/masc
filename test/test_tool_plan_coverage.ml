@@ -67,14 +67,6 @@ let make_ctx_unique label : Tool_plan.context =
   let config = Masc.Workspace.default_config base_path in
   ({ config } : Tool_plan.context)
 
-let planning_context_path (ctx : Tool_plan.context) task_id =
-  Filename.concat
-    (Filename.concat ctx.config.Masc.Workspace.base_path (Printf.sprintf "planning/%s" task_id))
-    "context.json"
-
-let planning_task_plan_path ctx task_id =
-  Filename.concat (Filename.dirname (planning_context_path ctx task_id)) "task_plan.md"
-
 let test_dispatch_plan_set_task () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in

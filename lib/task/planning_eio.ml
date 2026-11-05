@@ -152,5 +152,3 @@ let clear_current_task (config : Workspace.config) : unit =
       Log.Task.warn
         "planning_eio.clear_current_task: %s became a directory during remove: %s"
         path msg
-
-(** Resolve task_id - use provided or fall back to current *)

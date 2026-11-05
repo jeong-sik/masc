@@ -676,17 +676,19 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
   let preferred_action =
     match quit_action with
     | Some confirmation ->
-        Some (fst (Masc_tui_action_notice.quit_ordinary confirmation),
-              pressable (Press_quit_confirmation confirmation))
+        Some (Masc_tui_footer.Pending_question
+                (fst (Masc_tui_action_notice.quit_ordinary confirmation),
+                 pressable (Press_quit_confirmation confirmation)))
     | None when Option.is_some recovery_in_slot -> None
     | None -> (match Masc_tui_action_notice.preferred state.last_action
             ~existing_action:(Option.is_some action_text)
             ~now:(Unix.gettimeofday ()) ~window:Masc_tui_types.last_action_window_s with
     | No_preferred -> None
-    | Csi_recovery -> Some (Masc_tui_action_notice.csi_recovery_text, Fun.id)
+    | Csi_recovery ->
+        Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.csi_recovery_text, Fun.id))
     | Rejection notice ->
-        Some (Masc_tui_action_notice.rejection_text notice,
-              pressable (Press_input_rejection notice))) in
+        Some (Masc_tui_footer.Outcome (Masc_tui_action_notice.rejection_text notice,
+              pressable (Press_input_rejection notice)))) in
   let identity =
     match state.server_identity with
     | None -> []

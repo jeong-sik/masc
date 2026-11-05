@@ -118,6 +118,83 @@ let test_a_notice_without_a_shorter_text_outranks_the_operator_notice () =
          && not (contains ~needle:whole_notice row))
        rows)
 
+(* A question that one more key answers, as the quit confirmation is, leads the
+   row and outranks the notice and the keys that can be dropped. It is drawn
+   beside the keys that cannot be dropped where they fit, alone where only it
+   fits, and not at all below that, where the fallback text stands. These
+   cases check what must hold at every width. *)
+let question = "Quit loses unsaved work; q again"
+let fallback = "Resize to confirm quit"
+
+(* The row as drawn, and the same row without its colour marks. *)
+let marked_and_plain_row_with ~preferred_action ~status width =
+  let line =
+    Masc_tui_footer.line ~preferred_action ~action_text:fallback ~status ~dim:""
+      ~reset:"" ~max_cells:width ~port:8935 ~hints ()
+  in
+  match String.split_on_char '\n' line with
+  | [ row; "" ] -> (row, Masc_tui_theme.strip_sgr row)
+  | _ -> Alcotest.failf "%d cells: the footer is not one line: %S" width line
+
+let row_with ~preferred_action ~status width =
+  snd (marked_and_plain_row_with ~preferred_action ~status width)
+
+(* A mark that takes no cells, as the press mark of the quit confirmation does,
+   so it can only show in the row as drawn. *)
+let underline text = "\027[4m" ^ text ^ "\027[24m"
+
+let test_a_pending_question_leads_the_row_and_is_whole_or_absent () =
+  let alone = "  " ^ question in
+  let beside_the_keys = cells (alone ^ "  Enter:open  q:quit  \xe2\x80\xa6?") in
+  List.iter
+    (fun width ->
+      let marked_row, row =
+        marked_and_plain_row_with
+          ~preferred_action:(Masc_tui_footer.Pending_question (question, underline))
+          ~status:[ operator_notice ] width
+      in
+      let label what = Printf.sprintf "%d cells: %s" width what in
+      let drawn = contains ~needle:question row in
+      check_bool (label "the row fits") true (cells row <= width);
+      check_bool (label "a drawn question carries its mark and no other text does")
+        drawn
+        (contains ~needle:(underline question) marked_row);
+      check_bool (label "the question is drawn from the narrowest row that can carry it")
+        (width >= cells alone) drawn;
+      check_bool (label "the question and its fallback are never both drawn") false
+        (drawn && contains ~needle:fallback row);
+      if drawn then begin
+        check_bool (label "the question leads the row") true
+          (String.starts_with ~prefix:alone row);
+        if width >= beside_the_keys then
+          check_bool (label "the keys that cannot be dropped stay beside it") true
+            (contains ~needle:"Enter:open" row && contains ~needle:"q:quit" row)
+        else check_bool (label "the row is the question alone") true (String.equal row alone)
+      end)
+    widths
+
+(* An outcome keeps the old rule: it replaces the fallback only where it fits
+   whole beside the keys that cannot be dropped, and never stands with it. *)
+let test_an_outcome_replaces_the_fallback_only_when_it_fits_whole () =
+  let outcome = "That key does nothing here" in
+  List.iter
+    (fun width ->
+      let row =
+        row_with
+          ~preferred_action:(Masc_tui_footer.Outcome (outcome, Fun.id))
+          ~status:[ operator_notice ] width
+      in
+      let label what = Printf.sprintf "%d cells: %s" width what in
+      check_bool (label "the row fits") true (cells row <= width);
+      check_bool (label "the outcome is whole or left out") true
+        (contains ~needle:outcome row || not (contains ~needle:"That key" row));
+      check_bool (label "the outcome and the fallback are never both drawn") false
+        (contains ~needle:outcome row && contains ~needle:fallback row);
+      if contains ~needle:outcome row then
+        check_bool (label "the keys that cannot be dropped stay beside it") true
+          (contains ~needle:"Enter:open" row && contains ~needle:"q:quit" row))
+    widths
+
 let () =
   Alcotest.run "tui_footer_notice_forms"
     [ ( "leading notice"
@@ -126,5 +203,13 @@ let () =
         ; Alcotest.test_case
             "a notice without a shorter text outranks the operator notice" `Quick
             test_a_notice_without_a_shorter_text_outranks_the_operator_notice
+        ] )
+    ; ( "preferred action"
+      , [ Alcotest.test_case
+            "a pending question leads the row and is whole or absent" `Quick
+            test_a_pending_question_leads_the_row_and_is_whole_or_absent
+        ; Alcotest.test_case
+            "an outcome replaces the fallback only when it fits whole" `Quick
+            test_an_outcome_replaces_the_fallback_only_when_it_fits_whole
         ] )
     ]

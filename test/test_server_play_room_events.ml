@@ -119,7 +119,7 @@ let test_permission_denial_leaves_no_lease () = workspace (fun base_path ->
       match Events.connect ~base_path ~agent_name:"player" ~role:Masc_domain.Player
         ~scope:room_scope ~sse_client_id:20 with
       | Error _ -> ()
-      | Ok () -> fail "permission denial admitted presence");
+      | Ok _ -> fail "permission denial admitted presence");
     check (list string) "denial creates no member" [] (names base_path);
     check int "denial announces nothing" 0 (event_count heard);
     connect base_path ~sse_client_id:20 room_scope;

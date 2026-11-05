@@ -991,7 +991,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             if Atomic.get disconnected then begin
               Sse.unregister_if_current session_id client.id;
               stop_sse_session_before ~client_id:client.id session_id;
-              cleanup_previous ()
+              cleanup_previous ();
+              respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                ~request_authority request reqd ~session_id ~protocol_version
+                "Observer disconnected before publication"
             end else
             match play with
             | Some scope ->
@@ -1003,7 +1006,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                    disconnect_play ();
                    Sse.unregister_if_current session_id client.id;
                    stop_sse_session_before ~client_id:client.id session_id;
-                   cleanup_previous ()
+                   cleanup_previous ();
+                   respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                     ~request_authority request reqd ~session_id ~protocol_version
+                     "Observer disconnected before publication"
                  end else begin
                    cleanup_previous ();
                    stop_sse_session_before ~client_id:client.id session_id;
@@ -1032,7 +1038,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect)
            with
-           | Error (Sse.Registration_stale _) as reg_err ->
+           | Error (Sse.Registration_stale _ as reg_err) ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
@@ -1134,8 +1140,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           (match published with
            | false ->
              Eio.Cancel.protect (fun () ->
-               stop_sse_conn_if_current info;
-               disconnect_play ());
+               Fun.protect ~finally:disconnect_play (fun () ->
+                 stop_sse_conn_if_current info));
              Eio.Fiber.check ()
            | true ->
           if Atomic.get disconnected then stop_sse_conn_if_current info;

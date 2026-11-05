@@ -68,7 +68,7 @@ let connect ~base_path ~agent_name ~role ~scope ~sse_client_id =
   let key = key ~base_path ~agent_name ~play_client:scope.play_client in
   with_lease_lock (fun () ->
     match Hashtbl.find_opt leases key with
-    | Some current when current.sse_client_id > sse_client_id -> Ok Stale
+    | Some current when current.sse_client_id > sse_client_id -> Ok (None, Stale)
     | Some _ | None ->
       match perform_action ~base_path ~agent_name ~speaker action with
       | Error _ as error -> error

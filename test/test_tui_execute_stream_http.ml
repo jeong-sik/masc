@@ -1307,18 +1307,21 @@ let test_aborted_replacement_cleans_predecessor_presence env =
     assert_http_join_available workspace)
 
 let test_readiness_loss_cleans_predecessor_presence env =
-  let readiness_checks = ref 0 in
-  Play_fixture.with_fixture env
-    ~ready:(fun () -> incr readiness_checks; !readiness_checks < 4)
+  let ready = ref true in
+  Play_fixture.with_fixture env ~ready:(fun () -> !ready)
     (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
       let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
       Alcotest.(check int) "the established Observer opens" 200 (Play_fixture.await clock first.response);
       Alcotest.(check (list string)) "the established Observer owns presence"
         ["play-observer"] (Play_fixture.member_names workspace);
-      readiness_checks := 0;
-      let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
-      Alcotest.(check int) "readiness is lost after replacement" 503 (Play_fixture.await clock second.response);
-      Play_fixture.await clock first.ended;
+      let previous_hook = Atomic.get Masc.Sse.register_commit_test_hook in
+      Atomic.set Masc.Sse.register_commit_test_hook (Some (fun () -> ready := false));
+      Fun.protect ~finally:(fun () -> Atomic.set Masc.Sse.register_commit_test_hook previous_hook)
+        (fun () ->
+          let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+          Alcotest.(check int) "readiness is lost after replacement" 503
+            (Play_fixture.await clock second.response);
+          Play_fixture.await clock first.ended);
       Alcotest.(check (list string)) "readiness loss removes the predecessor"
         [] (Play_fixture.member_names workspace);
       assert_http_join_available workspace)
@@ -1354,8 +1357,8 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
         | Some info ->
           Eio.Fiber.fork ~sw (fun () ->
             Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-              Eio.Promise.resolve locked ();
-              Eio.Promise.await release));
+              Eio.Promise.resolve release ();
+              Eio.Promise.await locked));
           Eio.Promise.await locked)
       (fun () ->
         Eio.Fiber.fork ~sw (fun () ->

@@ -39,6 +39,7 @@ type registration_error =
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
+  | Registration_stale of { session_id : string }
 
 let registration_error_to_string = function
   | Registration_stale { session_id } ->

@@ -201,7 +201,7 @@ delete h:
 
 ### 4.5 후보 기록
 
-후보 기록 파일은 새 이름 `<base>/.masc/tool_blob_maintenance/candidates-v2` 에 새 모양으로 쓴다. 옛 파일은 읽지 않는다. 옛 모양을 읽거나 옮기는 코드는 두지 않는다. 운영 workspace 에는 이 폴더가 없다. 다른 workspace 에 옛 파일이 있으면 지우고 설치한다(1층 changelog 의 Upgrade notes).
+후보 기록 파일은 새 이름 `<base>/.masc/tool_blob_maintenance/candidates-v2` 에 새 모양으로 쓴다. 옛 파일 `candidates.json` 은 읽지 않는다. 옛 모양을 읽거나 옮기는 코드는 두지 않는다. 1층까지는 오프라인 명령이 옛 파일을 계속 쓴다. 2층이 그 명령을 지우면 옛 파일은 아무도 읽지 않으므로 지우고 설치한다(2층 changelog 의 Upgrade notes). 운영 workspace 에는 이 폴더가 없다.
 
 후보가 수백만 개일 수 있다. 그래서 JSON 배열 하나로 쓰지 않는다. 첫 줄은 머리, 그다음은 한 줄에 sha256 하나다.
 

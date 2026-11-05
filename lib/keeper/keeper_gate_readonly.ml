@@ -356,7 +356,7 @@ let classify_argv argv =
        | "find" -> not (rejected find_flag_writes_or_execs)
        | "diff" -> not (rejected writes_to_file)
        | "date" -> not (rejected sets_system_time)
-       | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && String.sub flag 0 1 = "-") rest
+       | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && flag.[0] = '-') rest
        | "gh" -> gh_argv_is_read rest
        | command -> List.mem command observation_commands)
 ;;

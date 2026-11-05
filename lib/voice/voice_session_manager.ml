@@ -78,12 +78,9 @@ let realtime_bridge_env =
   Env_setting.String_opt_knob.env_name Voice_realtime_ws_url
 ;;
 
-let has_prefix ~prefix s =
-  let prefix_len = String.length prefix in
-  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
-
 let valid_realtime_bridge_endpoint endpoint =
-  has_prefix ~prefix:"ws://" endpoint || has_prefix ~prefix:"wss://" endpoint
+  String.starts_with ~prefix:"ws://" endpoint
+  || String.starts_with ~prefix:"wss://" endpoint
 
 let realtime_bridge_endpoint ?(getenv = Sys.getenv_opt) () =
   match getenv realtime_bridge_env with

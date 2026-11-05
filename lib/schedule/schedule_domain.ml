@@ -359,7 +359,7 @@ let timezone_offset_seconds timezone =
   | "UTC" | "Etc/UTC" | "Z" -> Some 0
   | "Asia/Seoul" | "KST" -> Some (9 * 3600)
   | raw ->
-    if String.length raw > 3 && String.sub raw 0 3 = "UTC" then
+    if String.length raw > 3 && String.starts_with ~prefix:"UTC" raw then
       parse_fixed_offset (String.sub raw 3 (String.length raw - 3))
     else
       parse_fixed_offset raw

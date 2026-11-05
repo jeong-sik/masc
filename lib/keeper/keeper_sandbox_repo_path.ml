@@ -147,7 +147,7 @@ let execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd =
           else host_root ^ Filename.dir_sep
         in
         if String.length path > String.length prefix
-           && String.sub path 0 (String.length prefix) = prefix
+           && String.starts_with ~prefix path
         then
           `String
             (Filename.concat

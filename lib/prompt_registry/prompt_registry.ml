@@ -225,7 +225,7 @@ let strip_primary_suffix rest =
 ;;
 
 let parse_slot_header line =
-  if String.length line > 4 && String.sub line 0 4 = "### " then (
+  if String.length line > 4 && String.starts_with ~prefix:"### " line then (
     let rest, primary_declaration =
       strip_primary_suffix (String.trim (String.sub line 4 (String.length line - 4)))
     in

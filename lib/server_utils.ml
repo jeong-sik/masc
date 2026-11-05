@@ -243,7 +243,7 @@ let board_post_dashboard_json ?current_vote
 let extract_path_param ~prefix path =
   let plen = String.length prefix in
   let plen_total = String.length path in
-  if plen_total > plen && String.sub path 0 plen = prefix then
+  if plen_total > plen && String.starts_with ~prefix path then
     let param = String.trim (String.sub path plen (plen_total - plen)) in
     if String.length param > 0 then Some param else None
   else None

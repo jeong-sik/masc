@@ -263,7 +263,7 @@ let image_arguments runtime image = match runtime with
   | Apple_container -> ["image"; "inspect"; image]
 let image_of_inspect runtime raw =
   let sha256 value = String.length value = 71
-    && String.sub value 0 7 = "sha256:" && valid_id (String.sub value 7 64) in
+    && String.starts_with ~prefix:"sha256:" value && valid_id (String.sub value 7 64) in
   match runtime with
   | Docker -> let value = String.trim raw in
       if sha256 value then Ok (Docker_image_id value)

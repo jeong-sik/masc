@@ -912,6 +912,7 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
     let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
     let auth = Masc_test_deps.make_sse_auth workspace "machine-observer" in
     let token = Option.get auth.Masc.Sse.token in
+    ignore (Masc.Session.McpSessionStore.get_or_create ~id:"observer-machine-test" ());
     let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
       | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
     let admit ~base_path:_ _request = Ok () in

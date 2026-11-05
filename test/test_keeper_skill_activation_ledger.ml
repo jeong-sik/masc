@@ -1658,7 +1658,7 @@ let test_cold_read_and_commit_do_not_deadlock () =
     ~ledger_loader:(fun ~config ~trace_id ->
       Atomic.set read_started true;
       while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
-      Ledger.load ~config ~trace_id)
+      Ledger.load ~config ~trace_id:trace)
     (fun () ->
       let reader = Domain.spawn (fun () ->
         Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ])
@@ -1667,7 +1667,7 @@ let test_cold_read_and_commit_do_not_deadlock () =
       let writer = Domain.spawn (fun () ->
         Fun.protect
           ~finally:(fun () -> Atomic.set writer_finished true)
-          (fun () -> Ledger.record ~keeper_name:"alpha" ~config ~trace_id (activation ())))
+          (fun () -> Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace (activation ())))
       in
       let finished_before_return = wait_for_commit () in
       Atomic.set allow_return true;

@@ -933,38 +933,49 @@ let render_approvals (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
-  (* Both Gate lanes, always on screen here — one row, counted with the rule
-     row below it in [gate_lane_rows] so the body arithmetic can subtract
-     both as a constant. The durable rows obey
-     the external lane, and an operator deciding them needs to see which
-     switch they are under. The [e] that cycles the external lane is a
-     footer key like any other -- it reaches the footer and the [?] help
-     through the Approvals row of Masc_tui_keys, which is where it was
-     missing until 2026-08-29. *)
+  (* Both Gate lanes are always on screen here. The durable rows obey the
+     external lane, and an operator deciding them needs to see which switch
+     they are under. The [e] that cycles the external lane is a footer key
+     like any other: it reaches the footer and the [?] help through the
+     Approvals row of Masc_tui_keys. *)
   (* A lane word this build does not know is drawn as the server wrote it,
      the same spelling the chat header and the Keeper detail draw. *)
   let lane_mode_label = function
     | Tui_decode.Gate_mode mode -> Masc_tui_palette.gate_mode_label mode
     | Tui_decode.Unrecognised_gate_mode raw -> Terminal_text.single_line raw
   in
-  box_line buf cols
+  (* The two lanes share a row while both fit. A narrower terminal gives each
+     lane its own row, so a mode is not cut off in the middle of its words. *)
+  let lane_rows modes =
+    let lane ~key gate mode =
+      Printf.sprintf "[%s] %s: %s" key (Masc_tui_palette.gate_lane_label gate)
+        (lane_mode_label mode)
+    in
+    let workspace =
+      lane ~key:"w" Masc_tui_palette.Workspace_gate modes.Tui_decode.glm_workspace
+    in
+    let external_lane =
+      lane ~key:"e" Masc_tui_palette.External_gate modes.Tui_decode.glm_external
+    in
+    let together = Printf.sprintf "  %s  |  %s" workspace external_lane in
+    List.map
+      (fun row -> Theme.info () ^ row ^ Ansi.reset)
+      (if Message_layout.display_width together <= framed_inner_width cols
+       then [ together ]
+       else [ "  " ^ workspace; "  " ^ external_lane ])
+  in
+  List.iter (box_line buf cols)
     (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
-     | Some modes, _ ->
-         Printf.sprintf
-           "  %s[w] Workspace: %s  |  [e] Outside services: %s%s"
-           (Theme.info ())
-           (lane_mode_label modes.Tui_decode.glm_workspace)
-           (lane_mode_label modes.Tui_decode.glm_external)
-           Ansi.reset
+     | Some modes, _ -> lane_rows modes
      (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
         and the loader's message already opens "gate load failed:", so a third
         "gate:" in front read as a stutter -- "(data unreliable: gate: gate
         load failed: ...)". Same rule the schedule warning is written to. The
         two rows below keep their prefixes because the detail there is the
         server's own sentence about the store, which does not name itself. *)
-     | None, Some err -> data_unreliable_row ~cols err
+     | None, Some err -> [ data_unreliable_row ~cols err ]
      | None, None ->
-         Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset);
+         [ Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset ]);
   (* Standing always-allow rules, on the row under the lanes. A rule answers
      its call before the call can reach the queue, so an operator reading an
      empty queue is reading the rules' work without seeing them. One row: the
@@ -989,13 +1000,9 @@ let render_approvals (state : state) =
   box_divider buf cols;
 
   (* Every row the surface spends around the queue, read back off the buffers
-     they were drawn into. Declared beside the drawing instead, the rows above
-     the queue were subtracted twice -- once inside [boxed_surface_chrome_rows]
-     and again as the two Gate lane rows -- so the surface came out two rows
-     short of its budget. [finish_surface] pads a short surface under its last
-     row, and the last row here is the footer: it floated two rows above the
-     composer at every terminal height, and the queue drew two blank rows in
-     place of two approvals. *)
+     they were drawn into. The Gate lanes take one row or two by the width, and
+     they are counted because they are in the buffer. [finish_surface] pads a
+     short surface under its last row, and the last row here is the footer. *)
   let head_rows = count_frame_lines buf in
   (* The rows under the queue: the frame's closing row, the selected row's
      detail, the metadata rows, and the payload row beneath them. Drawn now so

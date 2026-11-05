@@ -3175,7 +3175,7 @@ after the answer's own reload removed it. New question listings resume when
 answer submission finishes. A failed question read retains the previous snapshot
 and draft; submission waits for a successful read.
 
-`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
+`w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading. It shows both lanes on one row while they fit and gives each lane its own row on a narrower terminal.
 
 ### Board navigation and Planning changes
 

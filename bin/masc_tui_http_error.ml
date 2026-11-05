@@ -21,11 +21,20 @@ let encoding_of_name name =
        | "windows-1251" | "cp1251" -> Known (Markup.Encoding.windows_1251, Single_byte)
        | _ -> Unsupported name)
 
+(* [html_response] runs on several CPU-pool domains at once. *)
+
+(* WORKAROUND: Markup builds its named character reference table in a [lazy]
+   the first time a page uses one (&amp;), and [Lazy.force] raises
+   [Lazy.Undefined] when two domains force it at once. Reading one reference
+   here, while the program initializes on the main domain, builds the table
+   before any pool domain parses an error page. Root fix: Markup builds the
+   table without [lazy]. *)
+let () = Markup.string "&amp;" |> Markup.parse_html |> Markup.signals |> Markup.drain
+
 (* One Content-Type value, read with the RFC 9110 §8.3.1 media-type grammar.
-   [html_response] runs on several CPU-pool domains at once, so this parser
-   keeps no state between calls. An ocamlyacc parser such as [Cohttp.Accept]
-   cannot be used here: the stdlib [Parsing] engine keeps one process-wide
-   stack, and two domains parsing at once read each other's values. *)
+   The parser keeps no state between calls. An ocamlyacc parser cannot be
+   used here: the stdlib [Parsing] engine keeps one process-wide stack, and
+   two domains parsing at once read each other's values. *)
 type media_type = { kind: string; subtype: string; parameters: (string * string) list }
 
 let is_tchar = function

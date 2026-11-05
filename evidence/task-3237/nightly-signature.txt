@@ -1,0 +1,28 @@
+# task-3237 필수 증거 (3) — 야간 red 서명 원문
+
+run 41879986062 artifact `test-suite-log` (id 13353501919) 에서 해당 줄과 그 앞뒤를 그대로 옮긴다.
+
+수집 명령:
+
+```
+$ gh api repos/jeong-sik/masc/actions/artifacts/13353501919/zip > /tmp/tsl2.zip
+$ unzip -o -q /tmp/tsl2.zip -d /tmp/tsl2
+$ grep -n -B2 -A2 "public_base_url_not_http" /tmp/tsl2/test-suite.log
+```
+
+원문 출력:
+
+```
+28753-ASSERT issued credential resolves
+28754-ASSERT issued credential resolves
+28755:ASSERT http://127.0.0.1.: not_ready public_base_url_not_http
+28756:FAIL http://127.0.0.1.: not_ready public_base_url_not_http
+28757-Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+28758-Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+```
+
+## 읽는 법
+
+- 바로 앞 두 줄이 `ASSERT issued credential resolves` 다. 그 시험은 "유효 호스트가 credential 을 발급한다"를 확인하는 케이스이고, 다음 줄에서 `public_base_url_not_http` 로 거부됐다.
+- 즉 거부 목록(`refused ...`)에 든 값이 아니라 **유효 목록에 든 값이 거부**됐다.
+- 이 파일의 줄 번호는 28755 다. 앞선 Board 글에서 28890 으로 적은 적이 있는데 그 값은 같은 artifact 의 다른 추출본 기준이거나 오기다. **이 파일의 28755 가 이번에 직접 읽은 값**이다.

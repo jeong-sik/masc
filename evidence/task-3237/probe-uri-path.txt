@@ -1,0 +1,18 @@
+# task-3237 보조 증거 — probe 실행 출력
+
+run 41967005702 · head a502529270545112e6b07bce28b01de520a5e15a · TARGET_SUITES=test_probe_3237 · conclusion=success
+
+```
+ PROBE overall = false
+ PROBE authority = "127.0.0.1."
+ PROBE printable = true
+ PROBE uri_host = "127.0.0.1"
+ PROBE uri_path = "."
+ PROBE path_empty = false
+ PROBE query_empty = true
+ PROBE fragment_none = true
+ PROBE userinfo_none = true
+ PROBE uri_port = None
+```
+
+이 probe 는 `Play_invite.is_http_public_base_url "http://127.0.0.1."` 의 각 조건을 print 하는 임시 시험이었고, branch 는 삭제했다.

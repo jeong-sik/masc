@@ -1,0 +1,24 @@
+# task-3237 필수 증거 (1) — test_play_invite 스위트 run 목록
+
+수집: 2026-11-05, 조회 명령과 원문 출력
+
+## 최근 test.yml run (workflow_dispatch + schedule)
+
+```
+$ gh run list --workflow=test.yml --limit 15 --json databaseId,headSha,conclusion,createdAt,event
+41969375564 workflow_dispatch  2026-11-05T04:41:39Z d8b4b7e39775f03cb61841ff9aacde458eeb0652
+41969128400 workflow_dispatch  2026-11-05T04:39:11Z 21362f10e67f3b819dc718faa0fb1388bd65e91a
+41968741732 workflow_dispatch  2026-11-05T04:35:24Z ae7f274f81f1c72a8ef30d715442e22cadecd663
+41968650747 workflow_dispatch failure 2026-11-05T04:34:32Z eb68c3dc692307c545aab7391aec24d4438f2d9f
+41968618745 workflow_dispatch  2026-11-05T04:34:14Z 558750b0533fb805fe76c2633fdc8baf5560120c
+41967913541 workflow_dispatch failure 2026-11-05T04:27:22Z 77de77b17e31bed4e8eb674784415f725bbbcd79
+41967736196 workflow_dispatch failure 2026-11-05T04:25:39Z a7f5b48d4588c4fddb38178e1f888c028e198014
+41967321737 workflow_dispatch success 2026-11-05T04:21:41Z 79f476eaa6121b36e7a888181ca2bdc0d5ea320d
+41967005702 workflow_dispatch success 2026-11-05T04:18:39Z a502529270545112e6b07bce28b01de520a5e15a
+41966803734 workflow_dispatch success 2026-11-05T04:16:41Z 881854d58d27d9a8096fd79b31cfc4765fed18fd
+41966485936 workflow_dispatch success 2026-11-05T04:13:44Z bea45f2c591ed1aa7250bfab9ce8081d5a5b03ec
+41966147270 workflow_dispatch failure 2026-11-05T04:10:29Z 9cdcef7dea2950710ad4187fb1c90c5a77ef098d
+41966075993 workflow_dispatch failure 2026-11-05T04:09:53Z 7d2b43bf30e4839962dfb38a25a52db3fa8c69ac
+41965753071 workflow_dispatch failure 2026-11-05T04:06:53Z b06f98dd5737ae4cb82e2a26f0dfc5b26c1231dd
+41964790064 workflow_dispatch failure 2026-11-05T03:57:36Z dce407cea274f5258cd7d1264f807a120e20ba5c
+```

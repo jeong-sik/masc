@@ -1,0 +1,31 @@
+# task-3237 필수 증거 (2) — `1e5740024c` 이후 `lib/play/play_invite.ml` 커밋 목록
+
+수집 시각: 2026-11-05 (KST)
+수집 명령과 원문 출력을 그대로 옮긴다.
+
+## 명령
+
+```
+$ cd <repo> && git fetch origin
+$ git log --format='%H|%ad|%s' --date=iso 1e5740024c..origin/main -- lib/play/play_invite.ml
+$ git log --format='%H|%ad|%s' --date=iso -1 1e5740024c
+```
+
+## 원문 출력
+
+```
+$ git log --format='%H|%ad|%s' --date=iso 1e5740024c..origin/main -- lib/play/play_invite.ml
+(출력 없음 — 0줄)
+
+$ git log --oneline 1e5740024c..origin/main -- lib/play/play_invite.ml | wc -l
+0
+
+$ git log --format='%H|%ad|%s' --date=iso -1 1e5740024c
+1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc|2026-11-03 11:08:18 +0900|fix(keeper): ride turn-entry admission on the tail carrier (#47781)
+```
+
+## 읽는 법
+
+- `1e5740024c` 는 `test/test_play_invite.ml` 을 신규 262줄로 추가한 커밋이다. 그 커밋 메시지는 "ride turn-entry admission on the tail carrier" — 프롬프트 캐시 작업이고 `play_invite` 와 무관하다.
+- 그 커밋 **이후** `lib/play/play_invite.ml` 을 바꾼 커밋이 **0건**이다.
+- 따라서 `test_play_invite` 의 실패는 "제품 판정이 나중에 바뀌어 유효 케이스가 거부되게 됐다"로 설명되지 않는다.

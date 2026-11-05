@@ -1460,10 +1460,9 @@ let runtime_http_transport_is_loopback url =
   Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
 ;;
 
-(* Closed over the transports a runtime can have. The dashboard label used to
-   be derived from the serialized name with a wildcard, so "http" reached
-   "cloud" implicitly and a fourth transport kind would have joined it in
-   silence. Both mappings are exhaustive now; the wire strings are unchanged. *)
+(* Closed over the transports a runtime can have. The dashboard label is
+   matched on the constructor, so a fourth transport kind needs its own arm
+   instead of joining "cloud" in silence. Both mappings are exhaustive. *)
 type runtime_transport_kind =
   | Kind_cli
   | Kind_local

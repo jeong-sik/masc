@@ -221,12 +221,13 @@ let base_path_lease_directory ~run_dir ~owner_uid =
     (Printf.sprintf "%s-%d" private_lease_directory_prefix owner_uid)
 ;;
 
-(* The lease used to be named by the digest of the canonical BasePath
-   string. macOS answers [Unix.realpath] with two different strings for one
-   directory (/private/tmp/X and /System/Volumes/Data/private/tmp/X), so two
-   servers could hold two leases for the same directory. The lease is now
-   named by the digest of the directory's own (st_dev, st_ino) identity, so
-   one directory has exactly one lease name on every supported platform. *)
+(* The lease is named by the digest of the directory's own (st_dev, st_ino)
+   identity, not of the canonical BasePath string. macOS answers
+   [Unix.realpath] with two different strings for one directory
+   (/private/tmp/X and /System/Volumes/Data/private/tmp/X), so a name taken
+   from the string would let two servers hold two leases for the same
+   directory. One directory has exactly one lease name on every supported
+   platform. *)
 let base_path_lock_digest_of_stats (stat : Unix.stats) =
   Printf.sprintf "masc-base-path-lease:%d:%d" stat.st_dev stat.st_ino
   |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex

@@ -99,13 +99,13 @@ let base64_media_payload ~backend ~block = function
 
 (* ── Document admission (agent-core boundary) ───────────────────────────────────────
 
-   A [Document] block used to be re-labelled as an [image_url] part on the
+   A [Document] block is never re-labelled as an [image_url] part on the
    OpenAI-compatible Chat Completions wire. Serializing the same typed block
    differently per wire is the legitimate serialization boundary; changing
-   *which modality it is* is not — the model received a picture where the
-   caller sent a file, and nothing reported it.
+   *which modality it is* is not — the model would receive a picture where the
+   caller sent a file, and nothing would report it.
 
-   The two facts that decide whether a document may go out are now separate and
+   The two facts that decide whether a document may go out are separate and
    both typed: [document_wire_form] says which native part the wire has (there
    is no wildcard: a wire with no document part says so), and
    [Capabilities.supports_document_input] says whether the resolved model row

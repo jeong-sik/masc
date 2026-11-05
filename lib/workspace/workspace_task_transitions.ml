@@ -1071,14 +1071,14 @@ let commit_verdict_r
               reconcile_terminal ();
               run_post_commit "done_hooks" (fun () ->
                 Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
-              (* Completion metrics must fire on this path too. They used to be
-                 emitted from the agent transition surface, which a verdict no
-                 longer passes through — without this a verdict-completed task
-                 would record no completion at all. [collaborators] is empty by
-                 construction: the authority is not an agent and does not
-                 collaborate on the task. A start that does not parse records no
-                 metric: this hook measures duration, and one measured from an
-                 invented start lands in the same average as a real one. *)
+              (* Completion metrics fire on this path too: a verdict does not pass
+                 through the agent transition surface, so without this a
+                 verdict-completed task would record no completion at all.
+                 [collaborators] is empty by construction: the authority is not
+                 an agent and does not collaborate on the task. A start that does
+                 not parse records no metric: this hook measures duration, and one
+                 measured from an invented start lands in the same average as a
+                 real one. *)
               run_post_commit "completion_metric" (fun () ->
                 match task_started_at_unix task.task_status with
                 | Some started_at ->

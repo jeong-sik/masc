@@ -146,10 +146,9 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         let shell_ref = ref (`Assoc []) in
         let execution_ref = ref (`Assoc []) in
         (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
-           allow shell/namespace reads to warm up.  Constants used to be
-           tunable via [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] but Step 4 retires
-           those knobs — see module-level [namespace_truth_*_timeout_s]
-           bindings for the rationale. *)
+           allow shell/namespace reads to warm up.  The values are the
+           module-level [namespace_truth_*_timeout_s] bindings; see them for the
+           rationale. *)
         let warm_timeout_s = namespace_truth_warm_timeout_s in
         let cold_timeout_s = namespace_truth_cold_timeout_s in
         let is_cold =

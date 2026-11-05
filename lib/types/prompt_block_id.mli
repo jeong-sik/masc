@@ -10,6 +10,9 @@
     per-turn world context, including current criterion and measurement.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
+    [Constitution_amendments] names the world articles written or taken back
+    since the turn's System rendered its [<norms>] (RFC-0491 §3.2). It exists
+    only beside a System rendered with articles the world has since changed.
     [Dynamic_context] is the remaining composite soft-context string built by
     keeper_turn.ml/keeper_run_prompt.ml (continuity snapshot, skill
     route, worktree, telemetry feedback, turn instructions, recent
@@ -40,6 +43,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Constitution_amendments
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -73,6 +77,10 @@ val cache_rank : t -> int
     turn. That turn reported 314,080 cache-creation tokens against 50,788
     cache reads.
 
+    [constitution_amendments] sits after [skill_compositions]: it changes only
+    when the world's article ledger is written, and leaves when the System is
+    rendered again.
+
     [recalled_memory] and [recalled_memory_status] have not been measured yet:
     the body is placed in front of [dynamic_context] because it changes only
     when the carried set does, and the status line behind it because it names
@@ -96,7 +104,9 @@ val injected_on_post_tool_round : t -> bool
     separately produced immutable Goal snapshot. [Completion_authority] carries
     this turn's approval/rejection correlation keys. Both remain in the System
     carrier after tools without rebroadcasting Task, Gate, Lane or other inbox
-    state. Operator
+    state. [Constitution_amendments] rides every round of the turn, as the
+    System it amends does: without it a later round reads only the older
+    norms that System holds. Operator
     speech remains [Operator_note] (RFC-0366). A new constructor must declare
     its class here before it can ride a post-tool round.
 
@@ -124,7 +134,8 @@ val resent_when_held : t -> bool
 
     [Completion_authority] also answers [true], preserving its producer
     layer's [Sent_every_resume] semantics even when the session saw identical
-    bytes.
+    bytes. [Constitution_amendments] answers [false]: the same bytes name the
+    same articles the session already holds.
 
     [Recalled_memory_status] answers [true]: each turn's line names its own
     turn, so an unchanged copy is still a new line, and the session reads the

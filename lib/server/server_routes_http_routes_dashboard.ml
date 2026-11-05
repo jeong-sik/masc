@@ -2920,15 +2920,6 @@ let add_routes ~sw ~clock router =
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/provider-logs" (fun _state req reqd ->
-         respond_cached_read ~request:req ~reqd ~cache_key:"provider_logs"
-           ~ttl:live_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ Provider_logs.dashboard_provider_logs_json)
-       )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/provider-logs/tail" (fun _state req reqd ->
-         let status, json = Provider_logs.dashboard_provider_log_tail_json req in
-         Http.Response.json_value ~status ~compress:true ~request:req json reqd
-       )
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_broadcast" }) "/api/v1/dashboard/logs/tool-host-failures" (fun state reported_by req reqd ->
          let request = req in Http.Request.read_body_async reqd (fun body_str ->
            let fallback_agent =

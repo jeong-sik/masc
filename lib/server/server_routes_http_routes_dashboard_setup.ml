@@ -10,9 +10,6 @@ module Keeper_api = Server_dashboard_http_keeper_api
    [Server_dashboard_logs_json] (godfile decomp). *)
 let dashboard_logs_json = Server_dashboard_logs_json.build
 
-module Provider_logs = Server_routes_http_dashboard_provider_logs
-
-
 (* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
    along with [Dashboard_cache.get_or_compute] from the cold-start
    fallback path.  After Step 1/2/3 wired snapshot reads in front of

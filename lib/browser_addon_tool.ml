@@ -121,7 +121,7 @@ let failure_of_reply = function
   | Service_refusal {disposition=W.Outcome_unknown;_} | Issue_result (Ok B.Timed_out) ->
       Some (Tool_result.Dependency_unavailable,Tool_result.Effect_outcome_unknown)
   | Issue_result (Ok (B.Answered _))
-  | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt ->
+  | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt ->
       Some (Tool_result.Runtime_failure,Tool_result.Effect_outcome_unknown)
 let invoke ~owner ~principal arguments =
   let start_time=Tool_timing.start () in
@@ -148,7 +148,7 @@ let invoke ~owner ~principal arguments =
             (Browser_page_script.check_scoped_elements ~filter:(B.elements_filter verb)
                (Option.value (List.assoc_opt "data" fields) ~default:`Null))
       | Issue_result (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-      | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+      | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _
       | Poll_result _|Receipt -> None in
     match unscoped with
     | Some detail -> refused ~start_time ~class_:Tool_result.Dependency_unavailable detail

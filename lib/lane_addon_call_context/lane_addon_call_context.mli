@@ -5,18 +5,11 @@ type principal = Keeper of string | Authenticated_agent of string | Host_actor o
 (** [Host_actor] is identity admitted by a host HTTP authorization boundary,
     including explicitly allowed token-less local attribution. It conveys no
     Keeper-private installation access. *)
-type companion = private { socket_path:string; invocation_id:string; max_message_bytes:int;
-  publication_id:string option }
-val companion_to_json : companion -> Yojson.Safe.t
-val companion_of_json : Yojson.Safe.t -> (companion, string) result
-(** Private invocation capabilities. [publication_id=None] explicitly has no
-    automatic continuation destination. Never retain or expose these through
-    model tools; publication and Browser admission have independent lifetimes. *)
 type t = private { tool : string; arguments : Yojson.Safe.t; principal : principal;
-  controller : Machine_controller_contract.admission option; companion:companion option }
+  controller : Machine_controller_contract.admission option }
 val tool_name : string
 val to_json_with_controller : controller:Machine_controller_contract.admission option ->
-  companion:companion option -> tool:string -> arguments:Yojson.Safe.t -> principal:principal -> Yojson.Safe.t
+  tool:string -> arguments:Yojson.Safe.t -> principal:principal -> Yojson.Safe.t
 val to_json : tool:string -> arguments:Yojson.Safe.t -> principal:principal -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val input_schema : Yojson.Safe.t

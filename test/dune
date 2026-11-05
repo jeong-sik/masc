@@ -5733,8 +5733,6 @@
 (include stanzas/test_browser_console.inc)
 (include stanzas/test_browser_network.inc)
 (include stanzas/test_browser_cookies.inc)
-(include stanzas/test_lane_addon_companion_broker.inc)
-(include stanzas/test_lane_addon_companion_allocation.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -7196,7 +7194,6 @@
 
 (include stanzas/test_lane_addon_companion_origin.inc)
 
-(include stanzas/test_lane_addon_companion_publication.inc)
 
 (include stanzas/test_keeper_direct_goal_provider_wire.inc)
 

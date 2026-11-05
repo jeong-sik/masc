@@ -55,7 +55,6 @@ val await_completion : t -> (release, error) result
 val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
 val operator_schema : t -> Yojson.Safe.t option
-val companion_tools : t -> string list
 val observation_effect : t -> string -> Lane_addon_call_context.observation_effect
 val call_operator : t -> admit:(unit -> (unit, Lane_addon_worker_protocol.operator_error) result) -> arguments:Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_worker_protocol.operator_error) result
@@ -66,7 +65,6 @@ val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
 val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
 val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) ->
   ?on_dispatch:(unit -> unit) ->
-  ?companion:Lane_addon_worker_protocol.companion_admission ->
   ?finalize_result:Lane_addon_worker_protocol.result_finalizer ->
   ?authorize:Lane_addon_call_context.mediation ->
   ?principal:Lane_addon_call_context.principal -> t -> name:string ->

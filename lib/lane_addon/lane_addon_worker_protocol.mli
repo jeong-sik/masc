@@ -41,10 +41,6 @@ val exported_tools : t -> Mcp_protocol.Mcp_types.tool list
 val action_schema : t -> Yojson.Safe.t option
 type operator_error = Operator_unavailable | Operator_rejected | Operator_outcome_unknown
 val operator_schema : t -> Yojson.Safe.t option
-val companion_tools : t -> string list
-(** Ready-only negotiated export names. The optional version-2 handshake requires
-    host context and supports binding after a validated public reply. No grant
-    is given to other tools; unsupported hosts cannot silently negotiate it. *)
 val observation_effect : t -> string -> Lane_addon_call_context.observation_effect
 (** What the Ready worker declared on its {!Lane_addon_call_context.effects_tool}
     port for this export. An export it left out, a missing or unsupported port
@@ -71,14 +67,9 @@ val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, err
 type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result
-(** Mandatory host receipt processing when supplied. Companion replies are
-    validated and projected to public content before this callback. *)
-type companion_admission = { context:Lane_addon_call_context.companion; admit:unit -> bool }
-(** Host callback is rechecked under the original worker RPC mutex immediately
-    before dispatch. It must not acquire global configuration/action locks. *)
+(** Mandatory host receipt processing when supplied. *)
 val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) ->
   ?on_dispatch:(unit -> unit) ->
-  ?companion:companion_admission ->
   ?finalize_result:result_finalizer ->
   ?authorize:Lane_addon_call_context.mediation ->
   ?principal:Lane_addon_call_context.principal -> t -> name:string ->
@@ -90,10 +81,8 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
     revokes the protocol. A mediated call counts as written from its first
     RPC, the controller snapshot included, so one cancelled while its next
     RPC waits for the mutex also revokes: more than needed, never less.
-    Ordinary [on_result] sees each original RPC reply under the RPC mutex.
-    Companion callbacks see only the validated public projection, with worker
-    text and metadata removed. Companion exports require closed output schemas.
-    After invocation succeeds, [finalize_result] runs once outside that mutex;
-    ordinary calls preserve their existing finalization-before-validation order.
+    [on_result] sees each original RPC reply under the RPC mutex.
+    After invocation succeeds, [finalize_result] runs once outside that mutex,
+    before the output hooks validate its result.
     Finalization errors are post-dispatch protocol failures, never replayed.
     Cancellation always propagates to the execution owner. *)

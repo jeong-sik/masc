@@ -28,14 +28,14 @@ let framing_preflight () =
     Service.For_testing.read_request ~dispatch ~reader ~max_message_bytes:bound in
   check bool "unwatched EOF frame remains accepted at the limit" true
     (match call snapshot (String.length snapshot) with Some W.Receipt -> true
-     | Some (W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+     | Some (W.Snapshot_result _ | W.Model_reply _
        | W.Download_reply _ | W.Poll_result _ | W.Issue_result _ | W.Service_refusal _)
      | None -> false);
   check bool "one byte over the limit is refused" true
     (match call (snapshot ^ "\n") (String.length snapshot - 1) with
      | Some (W.Service_refusal {disposition=W.Not_started;_}) -> true
      | Some (W.Service_refusal {disposition=W.Outcome_unknown;_} | W.Snapshot_result _
-       | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ | W.Poll_result _
+       | W.Model_reply _ | W.Download_reply _ | W.Poll_result _
        | W.Issue_result _ | W.Receipt) | None -> false)
 
 let cancellation_scope () =
@@ -68,25 +68,25 @@ let bounded_flow_framing () =
           Service.For_testing.read_request ~dispatch ~reader ~max_message_bytes:bound in
         check bool "LF frame at the flow bound is accepted" true
           (match read (snapshot ^ "\n") with Some W.Receipt -> true
-           | Some (W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+           | Some (W.Snapshot_result _ | W.Model_reply _
              | W.Download_reply _ | W.Poll_result _ | W.Issue_result _ | W.Service_refusal _)
            | None -> false);
         check bool "CRLF frame at the flow bound is accepted" true
           (match read (snapshot ^ "\r\n") with Some W.Receipt -> true
-           | Some (W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+           | Some (W.Snapshot_result _ | W.Model_reply _
              | W.Download_reply _ | W.Poll_result _ | W.Issue_result _ | W.Service_refusal _)
            | None -> false);
         check bool "flow exceeding the bound is refused" true
           (match read (snapshot ^ " \n") with
            | Some (W.Service_refusal {disposition=W.Not_started;_}) -> true
            | Some (W.Service_refusal {disposition=W.Outcome_unknown;_} | W.Snapshot_result _
-             | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ | W.Poll_result _
+             | W.Model_reply _ | W.Download_reply _ | W.Poll_result _
              | W.Issue_result _ | W.Receipt) | None -> false);
         check bool "CRLF flow exceeding the bound is refused" true
           (match read (snapshot ^ " \r\n") with
            | Some (W.Service_refusal {disposition=W.Not_started;_}) -> true
            | Some (W.Service_refusal {disposition=W.Outcome_unknown;_} | W.Snapshot_result _
-             | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ | W.Poll_result _
+             | W.Model_reply _ | W.Download_reply _ | W.Poll_result _
              | W.Issue_result _ | W.Receipt) | None -> false);
         check int "only the bounded frames are dispatched" 2 !calls)))
 
@@ -124,7 +124,7 @@ let watched_completion_order () =
         Eio.Flow.copy_string "late" sink2;
         check bool "completion committed before a later byte" true
           (match result with Some W.Receipt -> true
-           | Some (W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+           | Some (W.Snapshot_result _ | W.Model_reply _
                | W.Download_reply _ | W.Poll_result _ | W.Issue_result _ | W.Service_refusal _)
            | None -> false))))
 
@@ -165,7 +165,7 @@ let dispatch_failure_boundary () =
     (match reply with
      | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
      | W.Service_refusal {disposition=W.Not_started;_} | W.Snapshot_result _
-     | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ | W.Poll_result _
+     | W.Model_reply _ | W.Download_reply _ | W.Poll_result _
      | W.Receipt | W.Issue_result _ -> false);
   check bool "Eio cancellation propagates" true
     (match Service.For_testing.handle_dispatch
@@ -227,7 +227,7 @@ let exercise_departure ~connect owner =
      | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized payload
      | W.Issue_result (Ok (B.Lane_absent|B.Timed_out|B.Refused _|B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
-     | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false);
+     | W.Service_refusal _ | W.Model_reply _ | W.Download_reply _ -> false);
   let third=start "\n" in
   let command_c=poll () in
   let interrupt_c = match Owner.live_request_window owner ~client_id ~id:command_c.id with
@@ -265,7 +265,7 @@ let exercise_departure ~connect owner =
      | W.Issue_result (Ok (B.Answered _ | B.Lane_absent | B.Timed_out
          | B.Refused _ | B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
-     | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false);
+     | W.Service_refusal _ | W.Model_reply _ | W.Download_reply _ -> false);
   (match Owner.poll_live owner ~client ~window_sec:0.01 with
    | Ok None -> () | Ok (Some _) -> fail "cancelled queued request was delivered"
    | Error detail -> fail detail);
@@ -278,7 +278,7 @@ let exercise_departure ~connect owner =
      | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized payload
      | W.Issue_result (Ok (B.Lane_absent | B.Timed_out | B.Refused _ | B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
-     | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false)
+     | W.Service_refusal _ | W.Model_reply _ | W.Download_reply _ -> false)
 
 (* An independent extension-client fixture keeps A executing after its caller
    leaves. Queueing B cannot be mistaken for an idle or completed executor. *)
@@ -337,7 +337,7 @@ let exercise_extension_departure ~sw ~connect owner =
      | W.Issue_result (Ok (B.Answered actual)) -> normalized actual=normalized (payload "B")
      | W.Issue_result (Ok (B.Lane_absent | B.Timed_out | B.Refused _ | B.Rejected_before_effect _))
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
-     | W.Service_refusal _ | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _ -> false)
+     | W.Service_refusal _ | W.Model_reply _ | W.Download_reply _ -> false)
 let scenario () =
   let directory = Filename.temp_file "ba" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
@@ -368,14 +368,14 @@ let scenario () =
               (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
                | W.Snapshot_result _ -> true
                | W.Poll_result _|Receipt|Issue_result _|Service_refusal _
-               | Model_reply _|Extension_reply _|Download_reply _ -> false);
+               | Model_reply _|Download_reply _ -> false);
             let malformed = connect path in
             Eio.Flow.copy_string "{\"private\":PRIVATE_FRAME_MARKER}\n" malformed;
             let reply = Eio.Buf_read.line (Eio.Buf_read.of_flow malformed ~max_size:4096) in
             check bool "JSON parser fragments never enter the private transport reply" true
               (match ok (W.reply_of_json (Yojson.Safe.from_string reply)) with
                | W.Service_refusal {disposition=W.Not_started;message="invalid browser worker JSON"} -> true
-               | Snapshot_result _|Poll_result _|Receipt|Issue_result _|Service_refusal _|Model_reply _|Extension_reply _|Download_reply _ -> false);
+               | Snapshot_result _|Poll_result _|Receipt|Issue_result _|Service_refusal _|Model_reply _|Download_reply _ -> false);
             exercise_departure ~connect:(fun () -> connect path) owner;
             exercise_extension_departure ~sw ~connect:(fun () -> connect path) owner;
             let effects=ref 0 in
@@ -400,7 +400,7 @@ let scenario () =
                   (match ok (W.reply_of_json (Yojson.Safe.from_string response)) with
                    | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
                    | W.Service_refusal {disposition=W.Not_started;_} | W.Snapshot_result _
-                   | W.Model_reply _ | W.Extension_reply _ | W.Download_reply _
+                   | W.Model_reply _ | W.Download_reply _
                    | W.Poll_result _ | W.Receipt | W.Issue_result _ -> false);
                 let second=connect failing in
                 Eio.Flow.copy_string (Yojson.Safe.to_string
@@ -419,7 +419,7 @@ let scenario () =
                 check bool "same listener accepts the next request" true
                   (match ok (W.reply_of_json (Yojson.Safe.from_string response)) with
                    | W.Receipt -> true
-                   | W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+                   | W.Snapshot_result _ | W.Model_reply _
                    | W.Download_reply _ | W.Poll_result _ | W.Issue_result _
                    | W.Service_refusal _ -> false);
                 check int "all connections reached dispatch" 3 !effects);
@@ -437,7 +437,7 @@ let scenario () =
                 check bool "watched service request accepts CRLF at its exact payload limit" true
                   (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
                    | W.Receipt -> true
-                   | W.Snapshot_result _ | W.Model_reply _ | W.Extension_reply _
+                   | W.Snapshot_result _ | W.Model_reply _
                    | W.Download_reply _ | W.Poll_result _ | W.Issue_result _
                    | W.Service_refusal _ -> false);
                 check int "exact CRLF dispatches once" 1 !exact_calls);

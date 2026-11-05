@@ -9,7 +9,7 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
 (** Uses a fresh socket per request, never the serialized MCP connection. Before
     writing, failure proves no request was sent; after writing begins, transport
     loss is unknown. Transport uses the existing host control timeout, plus the
-    command's own wait window for Issue/Poll. Private Retire, Extension and Model_wait wait
+    command's own wait window for Issue/Poll. Private Retire and Model_wait wait
     for lifecycle completion/state change rather than the quick-control timeout; caller
     cancellation still propagates. Model-backed Issue calls also wait for their
     owner rather than the quick transport clock.
@@ -23,10 +23,6 @@ val call : t -> on_cancel_after_dispatch:(unit -> unit) -> Browser_addon_wire.co
     Cancellation after writing invokes
     the owner's callback under cancellation protection, then propagates. *)
 val revoke : t -> unit
-val call_companion : t -> admit:(unit -> bool) -> on_cancel_after_dispatch:(unit -> unit) ->
-  Browser_extension_protocol.command -> (Browser_addon_wire.reply, error) result
-(** Host-only private extension path. Rechecks original authority after connect
-    and immediately before writing; errors never include request/exception text. *)
 (** Admission only. Caller still owns worker termination and resource cleanup. *)
 val transfer_download : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb ->

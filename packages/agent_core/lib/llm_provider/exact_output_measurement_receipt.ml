@@ -106,13 +106,6 @@ let create_measurement_receipt_snapshot
 ;;
 
 let measurement_receipt_operation_id snapshot = snapshot.operation_id
-let measurement_receipt_flow_id snapshot = snapshot.flow_id
-let measurement_receipt_visit_ordinal snapshot = snapshot.visit_ordinal
-let measurement_receipt_candidate_id snapshot = snapshot.candidate_id
-
-let measurement_receipt_candidate_binding_sha256 snapshot =
-  snapshot.candidate_binding_sha256
-;;
 
 let measurement_receipt_catalog_generation_fingerprint snapshot =
   snapshot.catalog_generation_fingerprint
@@ -122,10 +115,6 @@ let measurement_receipt_catalog_evidence_sha256 snapshot =
   snapshot.catalog_evidence_sha256
 ;;
 
-let measurement_receipt_request_body_sha256 snapshot = snapshot.request_body_sha256
-let measurement_receipt_phase snapshot = snapshot.phase
-let measurement_receipt_dispatch_fact snapshot = snapshot.dispatch
-let measurement_receipt_outcome snapshot = snapshot.outcome
 let snapshot_format = "agent_core.exact-output.measurement-receipt"
 let snapshot_version = 1
 let sha256 value = Agent_core_sha256.(to_hex (digest_string value))

@@ -97,26 +97,11 @@ val measurement_receipt_operation_id
   :  measurement_receipt_snapshot
   -> measurement_operation_id
 
-val measurement_receipt_flow_id : measurement_receipt_snapshot -> flow_id
-val measurement_receipt_visit_ordinal : measurement_receipt_snapshot -> flow_visit_ordinal
-val measurement_receipt_candidate_id : measurement_receipt_snapshot -> string
-val measurement_receipt_candidate_binding_sha256 : measurement_receipt_snapshot -> string
-
 val measurement_receipt_catalog_generation_fingerprint
   :  measurement_receipt_snapshot
   -> string
 
 val measurement_receipt_catalog_evidence_sha256 : measurement_receipt_snapshot -> string
-val measurement_receipt_request_body_sha256 : measurement_receipt_snapshot -> string
-val measurement_receipt_phase : measurement_receipt_snapshot -> measurement_receipt_phase
-
-val measurement_receipt_dispatch_fact
-  :  measurement_receipt_snapshot
-  -> measurement_dispatch_fact
-
-val measurement_receipt_outcome
-  :  measurement_receipt_snapshot
-  -> measurement_outcome option
 
 val measurement_receipt_snapshot_to_string : measurement_receipt_snapshot -> string
 

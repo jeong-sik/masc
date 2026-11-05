@@ -4712,7 +4712,6 @@ type wake_producer =
   | Wake_keeper_delegate
   | Wake_keeper_composition
   | Wake_keeper_job
-  | Wake_keeper_addon
   | Wake_read_model_reader
 
 type waiting_item = {
@@ -4797,7 +4796,6 @@ let wake_producer_of_string raw =
     ; "keeper_delegate", Wake_keeper_delegate
     ; "keeper_composition", Wake_keeper_composition
     ; "keeper_job", Wake_keeper_job
-    ; "keeper_addon", Wake_keeper_addon
     ; "read_model_reader", Wake_read_model_reader
     ]
     raw

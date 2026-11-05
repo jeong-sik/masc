@@ -293,7 +293,7 @@ let test_replayed_comment_discovery_respects_parent_visibility () =
              | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
              | Task_cancelled _ | Workspace_message _ | Delegate_completed _
              | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
-             | Addon_operation_changed _ | Task_outcome _ -> false)
+             | Task_outcome _ -> false)
            |> List.length in
        ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
        check int (label ^ ": replayed comment candidates") expected_candidates (count_comment ());

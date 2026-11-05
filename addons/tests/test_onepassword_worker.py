@@ -49,26 +49,8 @@ class WorkerTests(unittest.TestCase):
         tools = {tool["name"]: tool for tool in responses[1]["result"]["tools"]}
         self.assertTrue(set(manifest["world"]["tools"]["export"]) <= set(tools))
         status = responses[2]["result"]["structuredContent"]
-        self.assertEqual(status, {"phase": "not_configured", "connected": False,
-                                  "browser_login_available": False})
+        self.assertEqual(status, {"phase": "not_configured", "connected": False})
         self.assertEqual(set(status), set(tools["onepassword_status"]["outputSchema"]["required"]))
-        self.assertTrue((PACKAGE / "skills" / "onepassword" / "SKILL.md").is_file())
-
-    def test_private_companion_negotiation_grants_only_login_start(self):
-        responses = self.call([self.rpc("lane_companion", {"version": 3}),
-                               self.rpc("lane_companion", {"token": "MUST_NOT_LEAK"}, 2),
-                               self.rpc("lane_call", {"tool": "lane_companion", "arguments": {},
-                                                       "caller": {"kind": "operator"}}, 3)])
-        self.assertEqual(responses[0]["result"], {"content": [], "structuredContent": {"version": 3, "tools": ["onepassword_login"]},
-                                                "isError": False})
-        self.assertTrue(responses[1]["result"]["isError"])
-        self.assertTrue(responses[2]["result"]["isError"])
-        self.assertNotIn("MUST_NOT_LEAK", json.dumps(responses))
-
-    def test_deferred_bind_requires_exact_host_protocol_version(self):
-        responses = self.call([self.rpc("lane_companion", arguments, index) for index, arguments in
-                               enumerate([{}, {"version": 1}, {"version": 2}, {"version": 3.0}], 1)])
-        self.assertTrue(all(response["result"]["isError"] for response in responses))
 
     def test_status_requires_host_context_and_cannot_select_oauth_controls(self):
         requests = [self.rpc("onepassword_status", {}, 1)]
@@ -90,8 +72,7 @@ class WorkerTests(unittest.TestCase):
         result = self.call([self.rpc("lane_observe", {"binding": {"sources": []}, "sources": []})])[0]["result"]
         self.assertFalse(result["isError"])
         fields = result["structuredContent"]["rows"][0]["fields"]
-        self.assertEqual(fields, {"phase": "not_configured", "connected": False,
-                                  "browser_login_available": False})
+        self.assertEqual(fields, {"phase": "not_configured", "connected": False})
         self.assertEqual(result["structuredContent"]["coverage"], [])
 
     def test_configuration_errors_never_echo_secrets_or_paths(self):

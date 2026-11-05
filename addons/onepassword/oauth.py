@@ -1,9 +1,9 @@
 """Backend-only 1Password Agentic Autofill connection authority.
 
 No function in this module returns tokens, integration keys or URLs to an
-agent. Operator controls use begin/complete; the browser owner's private
-execution path alone may use credentials. The provider's protocol limits
-are not Keeper task lifetimes. See the package README for docking work.
+agent. Operator controls use begin/complete; credentials are reachable only
+through backend callbacks. The provider's protocol limits are not Keeper task
+lifetimes.
 """
 from __future__ import annotations
 
@@ -166,8 +166,8 @@ def _macos_record_operation(api, operation):
     from ctypes import POINTER, byref, c_ubyte
 
     # SecItem authentication options do not cover the file-based Keychain.
-    # Its interaction policy belongs to the process, so connection and login
-    # records share this lock through native work and restoration.
+    # Its interaction policy belongs to the process, so every record call
+    # shares this lock through native work and restoration.
     with _macos_interaction_lock:
         get_allowed = api._sec.SecKeychainGetUserInteractionAllowed
         get_allowed.argtypes = [POINTER(c_ubyte)]

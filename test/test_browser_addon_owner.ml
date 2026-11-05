@@ -9,14 +9,14 @@ let id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
 let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None}
 let receipt = function
   | W.Receipt -> true
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
 let pre_effect = function
   | W.Service_refusal {disposition=W.Not_started;_} -> true
   | W.Service_refusal {disposition=W.Outcome_unknown;_}
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 let command = function
   | W.Poll_result {command=Some command;_} -> command
-  | W.Poll_result {command=None;_}|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
+  | W.Poll_result {command=None;_}|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _|Service_refusal _ -> fail "expected dispatched command"
 let scenario () = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
@@ -46,7 +46,7 @@ let scenario () = Eio_main.run (fun env ->
       (match Eio.Promise.await_exn pending with
        | W.Issue_result (Ok (B.Answered actual)) -> actual=payload
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Service_refusal _ -> false);
     check bool "identical result retry is idempotent" true
       (receipt (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "changed retry is refused" true
@@ -78,7 +78,7 @@ let scenario () = Eio_main.run (fun env ->
          check bool "the tool reads a reclaim as a success" true
            (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "the claim answers with a reclaimed receipt" true false);
     check bool "a second refusal is not published over the first" true
       (Result.is_error (Owner.mark_ego_user_owned_name owner ~space:"second" ~ids:[9] ~observed_at:2.));
@@ -102,7 +102,7 @@ let scenario () = Eio_main.run (fun env ->
          check bool "the tool reads a reopening as a success" true
            (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "a missing Space is reopened by name" true false);
     reopen:=Error "configured by number";
     check bool "a recovery that cannot reopen is refused" true
@@ -133,7 +133,7 @@ let scenario () = Eio_main.run (fun env ->
            (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 11;
              "spaceName",`String "busy";"reclaimed",`Bool true])
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "the running reclaim answers with a receipt" true false);
     Owner.clear_ego_unavailable owner;
     check bool "wrong incarnation cannot register" true
@@ -202,7 +202,7 @@ let scenario () = Eio_main.run (fun env ->
       (match Eio.Promise.await_exn input_pending with
        | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
        | W.Service_refusal {disposition=W.Not_started;_}
-       | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check int "input was not replayed" 2 !automation_calls;
     let result = Eio.Promise.await_exn pending in
     check bool "retirement does not prove no effect" true
@@ -212,7 +212,7 @@ let scenario () = Eio_main.run (fun env ->
            payload=`Assoc ["ok",`Bool false;"error",`String "client_disconnected"]
        | W.Service_refusal {disposition=W.Not_started;_}
        | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt -> false);
+       | W.Issue_result (Error _)|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt -> false);
     check bool "late result cannot attach to retired owner" true
       (pre_effect (send (W.Deliver {client_id=id;id=issued.id;payload})));
     check bool "retired owner cannot register again" true

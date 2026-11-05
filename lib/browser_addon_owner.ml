@@ -384,7 +384,6 @@ let dispatch t (request : W.request) =
           Browser_addon_downloads.release downloads ~id ~actor ~route ~verb) with
           | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
   | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
-  | W.Extension _ -> refusal "private extension executor is unavailable"
   | W.Model_result arguments -> model_port t request.incarnation (fun models ->
       Browser_addon_models.deliver models ~arguments
       |> Result.map (fun accepted -> `Assoc ["accepted",`Bool accepted]))
@@ -423,7 +422,7 @@ let live t command = dispatch t {W.incarnation=t.incarnation;command}
 let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
   | W.Poll_result {command;_} -> Ok command
   | W.Service_refusal {message;_} -> if is_retired t then Ok None else Error message
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
 let live_request_window t ~client_id ~id =
   Eio.Mutex.use_ro t.gate (fun () ->
     match t.phase with
@@ -434,5 +433,5 @@ let live_request_window t ~client_id ~id =
 let deliver_live t ~client_id ~id ~payload = match live t (W.Deliver {client_id;id;payload}) with
   | W.Receipt -> Ok ()
   | W.Service_refusal {message;_} -> Error message
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
 let disconnect_live t client_id = ignore (live t (W.Disconnect client_id))

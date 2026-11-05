@@ -80,7 +80,7 @@ class KeychainPolicyTests(unittest.TestCase):
             stream = types.SimpleNamespace(buffer=io.BytesIO(
                 ("\n".join(json.dumps(value) for value in requests) + "\n").encode()))
             output = io.StringIO()
-            with patch.object(server, "load_settings", return_value=server.Settings(connector, "fixture", None)), \
+            with patch.object(server, "load_settings", return_value=server.Settings(connector, "fixture")), \
                     patch.object(sys, "stdin", stream), contextlib.redirect_stdout(output):
                 server.serve(worker)
             responses = [json.loads(line) for line in output.getvalue().splitlines()]

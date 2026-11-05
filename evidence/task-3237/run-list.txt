@@ -1,24 +1,61 @@
-# task-3237 필수 증거 (1) — test_play_invite run 목록 (TARGET_SUITES 포함)
+# task-3237 필수 증거 (1) — test_play_invite run 목록 (run id·TARGET_SUITES·head 40자 병기)
 
-## (1-a) 스위트 단독 실행
+## (1-a) 스위트 단독 실행 — 유일하게 이 스위트를 돌린 run
 
 ```
-run 41966075993
-head=7d2b43bf30e4839962dfb38a25a52db3fa8c69ac  conclusion=failure
-   TARGET_SUITES: test_play_invite
-   TARGET_SUITES: test_play_invite
+run id        : 41966075993
+head 40자     : 7d2b43bf30e4839962dfb38a25a52db3fa8c69ac
+TARGET_SUITES : test_play_invite
+conclusion    : failure
+event         : workflow_dispatch  2026-11-05T04:09:53Z
+
  [targeted] @@test/runtest-test_play_invite: FAIL exit 1 in 11s
  [FAIL]  invite  2  valid browser hosts issue credentials.
  FAIL http://127.0.0.1.: not_ready public_base_url_not_http
 ```
 
-## (1-b) 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc 를 head 로 한 run — head_sha 조회
+## (1-b) 시험 도입 커밋 head 의 run 전수 — head_sha 조회
 
 ```
 $ gh api "repos/jeong-sik/masc/actions/runs?head_sha=1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc&per_page=100"
 total_count 2
-41567478107 Main minimal build schedule failure 2026-11-03T02:39:35Z
-41565389744 Main minimal build schedule failure 2026-11-03T02:19:29Z
+
+run id        : 41567478107
+head 40자     : 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc
+TARGET_SUITES : (없음 — workflow 이름이 Main minimal build, 이 스위트를 실행하지 않는다)
+conclusion    : failure  2026-11-03T02:39:35Z
+
+run id        : 41565389744
+head 40자     : 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc
+TARGET_SUITES : (없음 — 같은 workflow)
+conclusion    : failure  2026-11-03T02:19:29Z
 ```
 
-두 run 다 failure 다. 다만 **Main minimal build 는 test_play_invite 를 실행하지 않는다**(로그에 그 이름 0건). 그래서 이 head 에서 그 시험의 녹색/적색을 직접 확인한 것은 아니다.
+두 로그에서 `grep -aE 'TARGET_SUITES|play_invite'` → **양쪽 다 0건**.
+
+## (1-c) 최근 test.yml 300건 head 필터
+
+```
+$ gh run list --workflow=test.yml --limit 300 --json databaseId,headSha | select(headSha startswith 1e5740024c)
+0건
+```
+
+## (1-d) 확인한 전체 회귀(schedule) run 3건 — 모두 이 스위트 실패 이후의 head
+
+```
+41493891921 failure 2026-11-02T17:43:49Z 6a8091db
+41686990273 failure 2026-11-03T17:43:30Z 5f7109bc
+41879986062 failure 2026-11-04T17:44:07Z c18670f7
+```
+
+## (1-e) 녹색 run 부재 — 확인한 범위와 못 한 범위
+
+**확인한 범위**
+- 도입 커밋 head 의 run 은 2건뿐이고 둘 다 이 스위트를 실행하지 않는다 → 그 head 에서 녹색이었는지는 **알 수 없다**.
+- 최근 test.yml 300건에 도입 커밋 head run 이 없다.
+- 확인한 전체 회귀 3건은 모두 failure 이고 이 스위트가 그 안에서 실패했다.
+
+**못 한 범위**
+- `workflow_dispatch` run 이 **2,500건**이다. 이 스위트는 `TARGET_SUITES` 로 지정할 때만 도는 타깃 실행이므로, 그 2,500건 로그를 전수 스캔해야 "녹색 없음"을 확정할 수 있다. **전수 스캔하지 않았다.**
+
+**그래서 "녹색 없음"은 확정이 아니다.** 이 미확정 때문에 본 task 의 분류를 (b)가 아니라 **(c) 원인 미특정**으로 등기한다. classification.txt 참조.

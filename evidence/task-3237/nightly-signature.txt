@@ -1,13 +1,14 @@
-# task-3237 필수 증거 (3) — 야간 red 서명 원문 (run↔artifact 연결 포함)
+# task-3237 필수 증거 (3) — 야간 red 서명 원문 (run 3요소 병기)
 
-## (3-a) run → artifact 연결
+## (3-a) run → artifact 연결, run id·TARGET_SUITES·head 40자 병기
 
 ```
-$ gh run view 41879986062 --json headSha,conclusion
-head=c18670f7af23ddacdf20a9c1b1ca5c65214e9e96 conclusion=failure
-
-$ gh api repos/jeong-sik/masc/actions/runs/41879986062/artifacts
-name=test-suite-log id=13353501919 size=838908 expired=false
+run id          : 41879986062
+head 40자       : c18670f7af23ddacdf20a9c1b1ca5c65214e9e96
+TARGET_SUITES   : (빈 값 = 전체 회귀. 이 run 은 schedule 이벤트다)
+conclusion      : failure
+artifact        : test-suite-log id=13353501919 size=838908 expired=false
+event           : schedule  2026-11-04T17:44:07Z
 ```
 
 ## (3-b) 그 artifact 안의 서명 원문
@@ -20,3 +21,17 @@ name=test-suite-log id=13353501919 size=838908 expired=false
 28757-Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
 28758-Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
 ```
+
+## (3-b) 그 artifact 안의 서명 원문
+
+```
+$ grep -n -B2 -A2 public_base_url_not_http test-suite.log
+28753-ASSERT issued credential resolves
+28754-ASSERT issued credential resolves
+28755:ASSERT http://127.0.0.1.: not_ready public_base_url_not_http
+28756:FAIL http://127.0.0.1.: not_ready public_base_url_not_http
+28757-Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+28758-Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+```
+
+앞 두 줄(`ASSERT issued credential resolves`)이 유효 케이스가 거부됐음을 보인다.

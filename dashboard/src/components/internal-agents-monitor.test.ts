@@ -354,7 +354,7 @@ describe('InternalAgentsMonitor', () => {
     }
 
     // HITL can have older retained runs even when the global exact window
-    // contains none. Stagehand does not retain its model calls at all.
+    // contains none.
     api.fetchStandaloneLanes.mockResolvedValue({
       ...laneSnapshot,
       exactRunProjectionCount: 4,
@@ -362,27 +362,24 @@ describe('InternalAgentsMonitor', () => {
       exactRunProjectionTruncated: true,
       lanes: [
         lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
-        lane({ laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
       ],
     })
     sse.refresh?.()
     expect(await within(matrix).findByText('No run in recent window')).toBeTruthy()
-    expect(within(matrix).getByText('Run history not retained')).toBeTruthy()
     expect(within(matrix).getByText('최근 완료 관측 없음')).toBeTruthy()
-    expect(within(matrix).getByText('실행 기록 미보존')).toBeTruthy()
   })
 
   it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {
     api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
     api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
     api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
-    const purpose = 'Answers structured model requests; run records are not retained yet.'
+    const purpose = 'Appraises a confirmed Goal payout.'
     const snapshot = {
       schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
       observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
       exactRunProjectionTruncated: false,
       lanes: [{
-        laneId: 'browser_stagehand_exact', label: 'Browser Stagehand', purpose,
+        laneId: 'candle_appraiser', label: 'Candle Appraiser', purpose,
         required: false, observationOnly: true, configured: false,
         configurationState: 'unconfigured', jev: null, admittedSlots: [],
         cliSlots: [], droppedSlots: [], admissionError: 'model lane not configured',

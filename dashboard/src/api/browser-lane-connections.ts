@@ -53,7 +53,7 @@ const connections = Schema.Struct({
   state: Schema.Literal('serving', 'retired'),
   clients: Schema.Array(client).pipe(Schema.filter(clients => new Set(clients.map(item => item.clientId)).size === clients.length)),
   // Server-owned sessions are distinct from connected personal browsers.
-  owned_backends: Schema.Struct({ automation: ownedBrowser, stagehand: ownedBrowser }),
+  owned_backends: Schema.Struct({ automation: ownedBrowser }),
   unavailable: Schema.optional(Schema.Array(unavailable)),
 })
 export type BrowserConnection = Schema.Schema.Type<typeof client>

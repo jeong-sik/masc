@@ -45,7 +45,6 @@ function snapshot() {
       row('hitl_auto_judge'),
       row('librarian_exact', 'no_retained_observation'),
       row('verifier_exact'),
-      row('browser_stagehand_exact', 'no_retained_observation'),
       row('candle_appraiser', 'no_retained_observation'),
     ],
   }
@@ -54,15 +53,15 @@ function snapshot() {
 describe('standalone lane snapshot decoder', () => {
   it('keeps all current lane states and observed slot counts', () => {
     const parsed = parseStandaloneLanesSnapshot(snapshot())
-    expect(parsed.lanes).toHaveLength(6)
+    expect(parsed.lanes).toHaveLength(5)
     expect(parsed.lanes[0]?.status).toBe('running')
     expect(parsed.lanes[0]?.selectedSlots).toEqual([{ slotId: 'primary', count: 1 }])
     expect(parsed.lanes[0]?.declaredSlots).toEqual(['primary', 'rejected'])
     expect(parsed.lanes[0]?.declaredCliSlots).toEqual(['cli-fallback'])
     expect(parsed.lanes[2]?.status).toBe('no_retained_observation')
-    expect(parsed.lanes[4]?.laneId).toBe('browser_stagehand_exact')
+    expect(parsed.lanes[4]?.laneId).toBe('candle_appraiser')
     expect(parsed.lanes[4]?.retainedRunCount).toBe(0)
-    expect(parsed.lanes[4]?.purpose).toBe('Purpose of browser_stagehand_exact')
+    expect(parsed.lanes[4]?.purpose).toBe('Purpose of candle_appraiser')
   })
 
   it('refuses a projection without the declared order used by the editor', () => {

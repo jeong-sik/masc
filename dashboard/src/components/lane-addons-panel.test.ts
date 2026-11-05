@@ -61,8 +61,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks() })
 describe('optional Lane Add-on surface', () => {
   it('exposes nested browser callers in the normal observation list and selected event', async () => {
     const browserRow = { ...row, lane_id: 'instance-1/browser/connections', fields: {
-      state: 'serving', owned_backends: { automation: { activity: 'disabled', registered: false, session: 'closed', locate: false },
-        stagehand: { activity: 'unobserved', registered: false, session: 'unknown', locate: false } }, clients: [{ clientId: 'client-original', browser: 'ego_lite',
+      state: 'serving', owned_backends: { automation: { activity: 'disabled', registered: false, session: 'closed', locate: false } }, clients: [{ clientId: 'client-original', browser: 'ego_lite',
         version: '0.6.1.11', engineVersion: 'chromium', transport: 'ego_task_space', space: { id: 32, name: 'Goal Space' },
         spaceObservation: { spaceId: 32, spaceName: 'Goal Space', ownership: 'agentDelegatedToUser', observedAt: 42 },
         spacePresence: { spaceId: 32, state: 'present', observedAt: 42 },
@@ -81,7 +80,7 @@ describe('optional Lane Add-on surface', () => {
     fireEvent.click(view.getByRole('button', { name: `Inspect event: ${row.title} · ${row.id}` }))
     const focused = await view.findByLabelText('Selected Lane event')
     expect(within(focused).getByLabelText(`Browser connections for ${row.id}`).textContent).toContain('request-original')
-    expect(within(focused).getByLabelText('Stagehand browser session').textContent).toContain('Browser session at observation: unknown')
+    expect(within(focused).getByLabelText('Automation browser session').textContent).toContain('Browser session at observation: closed')
     expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
     expect(api.observeLaneAddon).not.toHaveBeenCalled()
   })

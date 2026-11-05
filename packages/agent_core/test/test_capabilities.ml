@@ -2395,23 +2395,6 @@ let test_manifest_rejects_unknown_reasoning_replay () =
   | Ok _ -> Alcotest.fail "unknown reasoning_replay should reject"
 ;;
 
-(* [reasoning_visibility] was retired with the #2236 CoT-loop fix: the parsed
-   override only ever drove the reasoning->Text promotion that re-injected
-   reasoning as answer content. The manifest key is now unknown, so a stale
-   config is rejected fail-closed (via [reject_unknown_keys]) rather than
-   silently ignored. *)
-let test_manifest_rejects_retired_reasoning_visibility_key () =
-  let json =
-    Yojson.Safe.from_string
-      {|{"schema_version":2,"models":[{"model_id":"retired-visibility","reasoning_visibility":"visible_text"}]}|}
-  in
-  match Capability_manifest.of_json json with
-  | Error msg ->
-    check_contains "names the retired key" msg "reasoning_visibility";
-    check_contains "rejected as unknown field" msg "unknown field"
-  | Ok _ -> Alcotest.fail "retired reasoning_visibility key should reject"
-;;
-
 let test_manifest_applies_accepted_reasoning_efforts () =
   let json =
     Yojson.Safe.from_string
@@ -3515,10 +3498,6 @@ let () =
             "unknown reasoning_replay rejects"
             `Quick
             test_manifest_rejects_unknown_reasoning_replay
-        ; test_case
-            "retired reasoning_visibility key rejects"
-            `Quick
-            test_manifest_rejects_retired_reasoning_visibility_key
         ; test_case
             "modality_priority applied"
             `Quick

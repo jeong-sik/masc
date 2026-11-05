@@ -444,9 +444,6 @@ let test_mimo_v25_uses_thinking_object_and_json_mode () =
     "requires tool-call reasoning replay"
     true
     (RD.requires_reasoning_replay_on_tool_call dialect);
-  (* reasoning_visibility vocab was retired (#2304, #2236 CoT loop fix);
-     "side_channel:reasoning_content" is now governed by reasoning_replay
-     policy, exercised in test_provider_agnostic_reasoning_replay. *)
   let thinking = json |> member "thinking" in
   check string "thinking type" "disabled" (thinking |> member "type" |> to_string);
   check_member_absent "chat_template_kwargs" json;

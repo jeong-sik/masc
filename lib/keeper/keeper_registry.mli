@@ -512,9 +512,8 @@ val wakeup_cadence_sleeper_exact :
 val fiber_health_of : base_path:string -> string -> fiber_health
 
 
-(** Reset tracking state (agent count + board wakeups) for a keeper. *)
-val cleanup_tracking : base_path:string -> string -> unit
-
+(** Reset tracking state (tool usage + board cursor) of this lane's entry,
+    leaving a same-name replacement untouched. *)
 val cleanup_tracking_exact_for_lifecycle :
   Keeper_lifecycle_reservation.token -> registry_entry -> exact_update_result
 

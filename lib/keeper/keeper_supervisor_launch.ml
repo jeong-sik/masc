@@ -398,7 +398,23 @@ let launch_supervised_fiber_body
            where a raise becomes [Fun.Finally_raised] and masks the body
            exception (masc crash 2026-04-17). Swallow everything and log. *)
           match run_cleanup_best_effort (fun () ->
-            Keeper_registry.cleanup_tracking ~base_path meta.name;
+            (* Only this lane's entry is reset, read at the moment it is
+               written: a failure reason stored meanwhile or a same-name lane
+               registered since is kept (#47385). *)
+            (match
+               Keeper_registry.cleanup_tracking_exact_for_lifecycle lifecycle_token reg
+             with
+             | Keeper_registry.Exact_updated | Keeper_registry.Exact_update_missing -> ()
+             | Keeper_registry.Exact_update_replaced ->
+               Log.Keeper.info
+                 "%s: lane cleanup retained newer same-name registry entry"
+                 meta.name
+             | Keeper_registry.Exact_update_invalid validation_error ->
+               Log.Keeper.warn
+                 "%s: failed to cleanup registry tracking: %s"
+                 meta.name
+                 (Keeper_registry.registry_entry_validation_error_to_string
+                    validation_error));
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
             then (

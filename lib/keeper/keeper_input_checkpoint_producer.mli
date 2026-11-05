@@ -31,6 +31,7 @@ val publish_direct : t -> operation_id:Keeper_chat_operation.Operation_id.t ->
   execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->
   Agent_core.Checkpoint.t -> (t * Keeper_checkpoint_ref.t, error) result
 (** Retain exact bytes durably, then publish with the captured Owner witness.
-    Installed plus auxiliary facts remain an error carrying the installation;
-    neither uncertain retention nor uncertain Owner commit permits replay.
+    An installation whose durability is unknown remains an error carrying the
+    installation; neither uncertain retention nor uncertain Owner commit permits
+    replay.
     Session locks are released before entering the Owner mailbox. *)

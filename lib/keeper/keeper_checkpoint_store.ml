@@ -1559,6 +1559,26 @@ type checkpoint_installation =
   | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
 
+let checkpoint_installation_auxiliary_to_string = function
+  | Commit_durability_unknown error ->
+    "commit durability unknown: " ^ Keeper_fs.durable_write_error_to_string error
+  | Commit_observer_failed (exn, _backtrace) ->
+    "commit observer failed: " ^ Printexc.to_string exn
+  | Release_process_lock_failed error ->
+    "checkpoint lock release failed: " ^ File_lock_eio.durable_lock_error_to_string error
+  | Post_commit_unwind_interrupted (exn, _backtrace) ->
+    "post-commit unwind interrupted: " ^ Printexc.to_string exn
+;;
+
+(* Whether the head's bytes are known to be on disk. Only a writer error after
+   the rename leaves that open; the observer, the lock release and the unwind
+   all run after Keeper_fs reports the commit durable. *)
+let leaves_commit_durability_open = function
+  | Commit_durability_unknown _ -> true
+  | Commit_observer_failed _ | Release_process_lock_failed _
+  | Post_commit_unwind_interrupted _ -> false
+;;
+
 let require_confirmed_installation installation =
   let auxiliary = match installation with
     | Installed installed -> installed.auxiliary
@@ -1570,8 +1590,20 @@ let require_confirmed_installation installation =
     | Commit_observer_failed _ | Post_commit_unwind_interrupted _
     | Commit_durability_unknown _ | Release_process_lock_failed _ -> ()) auxiliary;
   match installation with
-  | Installed {installed_ref; auxiliary=[]} -> Ok installed_ref
-  | (Installed {auxiliary=_::_; _} | Not_installed _) as unconfirmed -> Error unconfirmed
+  | Not_installed _ -> Error installation
+  | Installed installed ->
+    if List.exists leaves_commit_durability_open installed.auxiliary
+    then Error installation
+    else (
+      (* The turn goes on with a durable head, so this is where a failure that
+         happened after the commit is still written down. *)
+      List.iter
+        (fun fact ->
+          Log.Keeper.warn "checkpoint %s installed durably; %s"
+            installed.installed_ref.Keeper_checkpoint_ref.sha256
+            (checkpoint_installation_auxiliary_to_string fact))
+        installed.auxiliary;
+      Ok installed.installed_ref)
 
 let not_installed cause = Not_installed { cause; auxiliary = [] }
 

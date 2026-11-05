@@ -328,20 +328,6 @@ let checkpoint_cas_error_to_string = function
   | Commit_not_installed error -> Keeper_fs.durable_write_error_to_string error
 ;;
 
-let exception_detail (exn, _backtrace) = Printexc.to_string exn
-
-let checkpoint_installation_auxiliary_to_string = function
-  | Keeper_checkpoint_store.Commit_durability_unknown error ->
-    "commit durability unknown: " ^ Keeper_fs.durable_write_error_to_string error
-  | Commit_observer_failed failure ->
-    "commit observer failed: " ^ exception_detail failure
-  | Release_process_lock_failed error ->
-    "checkpoint lock release failed: "
-    ^ File_lock_eio.durable_lock_error_to_string error
-  | Post_commit_unwind_interrupted failure ->
-    "post-commit unwind interrupted: " ^ exception_detail failure
-;;
-
 let purge_report_json report =
   `Assoc
     [ "messages_before", `Int report.messages_before
@@ -616,7 +602,8 @@ let purge_current_unlocked config ~keeper_name ~apply =
                              ; report
                              ; warnings =
                                  List.map
-                                   checkpoint_installation_auxiliary_to_string
+                                   Keeper_checkpoint_store
+                                   .checkpoint_installation_auxiliary_to_string
                                    installed.auxiliary
                                  @ history_warnings
                              }))))))

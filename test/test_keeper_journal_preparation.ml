@@ -535,16 +535,26 @@ let test_retention_post_commit_cancel_propagates_with_evidence () =
       (match Agent_core.Checkpoint_objects.head_of_string (contents (input_retained_path session_dir snapshot)) with
        | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
        | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error));
-    let failure = Checkpoint.Installed {installed_ref=Checkpoint.exact_snapshot_reference snapshot;
+    let installed_ref = Checkpoint.exact_snapshot_reference snapshot in
+    (* An observer failure comes after the durable commit, so the retention
+       holds. *)
+    let observer_failed = Checkpoint.Installed {installed_ref;
       auxiliary=[Checkpoint.Commit_observer_failed (Failure "observer failed",original_backtrace)]} in
-    (match Journal.For_testing.confirm_input_retention failure with
+    (match Journal.For_testing.confirm_input_retention observer_failed with
+     | Ok () -> ()
+     | Error _ -> fail "a retention committed before its observer failed was refused");
+    let durability_unknown = Checkpoint.Installed {installed_ref;
+      auxiliary=[Checkpoint.Commit_durability_unknown
+        { Keeper_fs.renamed = true; stage = Keeper_fs.Parent_directory_fsync_after_rename
+        ; failure = Keeper_fs.Operation_failed "injected post-rename durability failure" }]} in
+    (match Journal.For_testing.confirm_input_retention durability_unknown with
      | Error cause -> (match cause.Journal.failure with
        | Input_retention_unconfirmed preserved ->
-         check bool "full installation evidence retained" true (preserved==failure)
+         check bool "full installation evidence retained" true (preserved==durability_unknown)
        | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
          | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Installation_intent_unconfirmed _ -> fail "installation evidence was discarded")
-     | Ok _ -> fail "failed retention was accepted"))
+     | Ok _ -> fail "a retention of unknown durability was accepted"))
 
 let install_digests plan =
   let json = Journal.installation_plan_to_json plan in

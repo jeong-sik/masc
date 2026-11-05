@@ -251,24 +251,41 @@ let test_confirmation_propagates_committed_cancellation ~in_observer () =
     assert_snapshot "cancelled confirmation keeps installed bytes" snapshot
       (load session_dir (Store.exact_snapshot_reference snapshot)))
 
-let test_confirmation_preserves_observer_failure () = with_session (fun session_dir ->
-  let _, snapshot = accepted "observer failed after actual commit" in
+(* The observer and the unwind both run after Keeper_fs reports the commit
+   durable, so what they fail on does not make the head less installed: the
+   reference is confirmed, and the caller still holds the failure in the
+   installation it passed. *)
+let test_confirmation_accepts_failures_after_the_durable_commit () = with_session (fun session_dir ->
   let observer_error = Sys_error "observer failure" in
-  let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+  let unwind_error = Sys_error "unwind failure" in
+  let observer_writer ~on_durable_commit ~ownership_root ~path ~bytes =
     Keeper_fs.save_bytes_durable_atomic_observed
       ~on_durable_commit:(fun () -> on_durable_commit (); raise observer_error)
       ~ownership_root path bytes in
-  let outcome = Store.For_testing.retain_exact_snapshot_with_writer
-      ~write_checkpoint_bytes:writer ~session_dir snapshot in
-  (match outcome with
-   | Store.Installed {auxiliary=[Store.Commit_observer_failed (cause, _)]; _}
-       when cause == observer_error -> ()
-   | Store.Installed _ | Store.Not_installed _ -> fail "actual observer failure lost its installed evidence");
-  (match Store.require_confirmed_installation outcome with
-   | Error evidence -> check bool "observer failure remains the same unconfirmed result" true (evidence == outcome)
-   | Ok _ -> fail "observer failure became confirmation");
-  assert_snapshot "observer failure keeps installed bytes" snapshot
-    (load session_dir (Store.exact_snapshot_reference snapshot)))
+  let unwind_writer ~on_durable_commit ~ownership_root ~path ~bytes =
+    match Keeper_fs.save_bytes_durable_atomic_observed ~on_durable_commit ~ownership_root path bytes with
+    | Ok Keeper_fs.Committed -> raise unwind_error
+    | (Ok (Keeper_fs.Committed_but_observer_failed _) | Error _) as result -> result in
+  List.iter (fun (label, writer, carries_the_failure) ->
+    let _, snapshot = accepted label in
+    let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+        ~write_checkpoint_bytes:writer ~session_dir snapshot in
+    (match outcome with
+     | Store.Installed {auxiliary=[fact]; _} when carries_the_failure fact -> ()
+     | Store.Installed _ | Store.Not_installed _ -> fail (label ^ " lost its installed evidence"));
+    (match Store.require_confirmed_installation outcome with
+     | Ok reference -> check bool (label ^ ": the installed reference is confirmed") true
+         (Keeper_checkpoint_ref.equal reference (Store.exact_snapshot_reference snapshot))
+     | Error _ -> fail (label ^ " after a durable commit was refused"));
+    assert_snapshot label snapshot (load session_dir (Store.exact_snapshot_reference snapshot)))
+    [ "observer failed after the commit", observer_writer,
+      (function Store.Commit_observer_failed (cause, _) -> cause == observer_error
+              | Store.Commit_durability_unknown _ | Store.Release_process_lock_failed _
+              | Store.Post_commit_unwind_interrupted _ -> false)
+    ; "unwind failed after the commit", unwind_writer,
+      (function Store.Post_commit_unwind_interrupted (cause, _) -> cause == unwind_error
+              | Store.Commit_durability_unknown _ | Store.Release_process_lock_failed _
+              | Store.Commit_observer_failed _ -> false) ])
 
 let test_confirmation_preserves_unconfirmed_evidence () = with_session (fun session_dir ->
   List.iter (fun (stage, label) ->
@@ -394,8 +411,8 @@ let () = run "keeper owned exact checkpoints" ["retention", [
     (test_confirmation_propagates_committed_cancellation ~in_observer:false);
   test_case "confirmation reraises actual commit-observer cancellation" `Quick
     (test_confirmation_propagates_committed_cancellation ~in_observer:true);
-  test_case "confirmation preserves actual non-cancellation observer failure" `Quick
-    test_confirmation_preserves_observer_failure;
+  test_case "confirmation accepts failures after the durable commit" `Quick
+    test_confirmation_accepts_failures_after_the_durable_commit;
   test_case "confirmation preserves installed and unconfirmed evidence" `Quick
     test_confirmation_preserves_unconfirmed_evidence;
   test_case "large canonical read keeps exact source bytes" `Quick test_large_canonical_read_keeps_exact_source;

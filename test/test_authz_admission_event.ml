@@ -153,6 +153,7 @@ let refusals =
   ; "a namespace that is a number", body ~namespace:(`Int 1) (), "wrong members"
   ; "an empty workspace id", body ~workspace_id:(`String "") (), "invalid workspace id"
   ; "a namespace that is a path segment", body ~namespace:(`String "..") (), "invalid account home namespace"
+  ; "a namespace with a capital letter", body ~namespace:(`String "ns-A") (), "invalid account home namespace"
   ; "a bad invite id comes before a bad workspace", body ~invite_id:(`String "") ~workspace_id:(`String "") (), "invalid invite id"
   ]
 ;;
@@ -164,6 +165,22 @@ let a_body_that_is_not_an_admission_is_refused () =
       | Ok _ -> Alcotest.failf "%s was read as an admission" name
       | Error error -> Alcotest.(check string) name expected (error_name error))
     refusals
+;;
+
+(* Two names that differ only in case would name one directory on a file system
+   that does not tell case apart, so a namespace has no capital letter. *)
+let a_namespace_has_no_capital_letter () =
+  let index_of text =
+    match Account_home_namespace.of_string text with
+    | Ok (_ : Account_home_namespace.t) -> None
+    | Error (Authz_id.Invalid_byte { index }) -> Some index
+    | Error (Authz_id.Empty | Authz_id.Too_long | Authz_id.Path_segment) ->
+      Alcotest.failf "%s refused for another reason" text
+  in
+  Alcotest.(check (option int)) "lower case" None (index_of "ns-alice");
+  Alcotest.(check (option int)) "a capital first" (Some 0) (index_of "Ns-alice");
+  Alcotest.(check (option int)) "a capital later" (Some 3) (index_of "ns-Alice");
+  Alcotest.(check (option int)) "a byte outside every id comes first" (Some 2) (index_of "ns Alice")
 ;;
 
 (* ---- the admission in a record ---- *)
@@ -201,6 +218,7 @@ let () =
       , [ Alcotest.test_case "bytes" `Quick bytes_of_an_admission
         ; Alcotest.test_case "reads back" `Quick an_admission_reads_back
         ; Alcotest.test_case "refusals" `Quick a_body_that_is_not_an_admission_is_refused
+        ; Alcotest.test_case "no capital in a namespace" `Quick a_namespace_has_no_capital_letter
         ] )
     ; "record", [ Alcotest.test_case "who writes it" `Quick only_an_authenticated_principal_writes_one ]
     ]

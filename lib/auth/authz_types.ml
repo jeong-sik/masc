@@ -8,7 +8,28 @@ module Grant_id = Authz_id.Make ()
 module Policy_id = Authz_id.Make ()
 module Workspace_id = Authz_id.Make ()
 module Invite_id = Authz_id.Make ()
-module Account_home_namespace = Authz_id.Make ()
+module Account_home_namespace = struct
+  module Id = Authz_id.Make ()
+  include Id
+
+  let first_capital s =
+    Seq.find_map
+      (fun (index, byte) ->
+        match byte with
+        | 'A' .. 'Z' -> Some index
+        | _ -> None)
+      (String.to_seqi s)
+  ;;
+
+  let of_string s =
+    match Id.of_string s with
+    | Error error -> Error error
+    | Ok id ->
+      (match first_capital s with
+       | Some index -> Error (Authz_id.Invalid_byte { index })
+       | None -> Ok id)
+  ;;
+end
 
 module Principal = struct
   type t =

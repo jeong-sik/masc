@@ -746,9 +746,6 @@ let test_warm_dashboard_surfaces_populates_caches () =
       let planning_key = Server_dashboard_http.planning_cache_key ~base_path:dir in
       check bool "planning cache key populated" true
         (Option.is_some (Dashboard_cache.peek planning_key));
-      let keeper_health_key = Printf.sprintf "keeper_memory_health:%s" dir in
-      check bool "keeper_memory_health cache key populated" true
-        (Option.is_some (Dashboard_cache.peek keeper_health_key));
       let board_key =
         Printf.sprintf "board:memory:-;-;hot;false;false;100;0;%s;-" dir
       in

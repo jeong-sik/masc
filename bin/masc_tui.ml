@@ -6381,6 +6381,7 @@ let launch_memory_health_load state ~mailbox =
      || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
     state.memory_health_inflight <- true;
+    state.memory_health_owed <- Masc_tui_owed_read.started state.memory_health_owed;
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -8042,6 +8043,9 @@ let owe_overview_read state =
 let owe_lanes_read state =
   state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed
 
+let owe_memory_health_read state =
+  state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
+
 let owe_lane_addons_read state =
   state.lane_addons_owed <- Masc_tui_owed_read.changed state.lane_addons_owed
 
@@ -8169,6 +8173,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Lanes -> owe_lanes_read state
   | Masc.Workspace_dataset_event.Lane_addon_instance { instance_id } ->
       if lane_addons_show_instance state instance_id then owe_lane_addons_read state
+  | Masc.Workspace_dataset_event.Memory_health _ ->
+      owe_memory_health_read state
   | Masc.Workspace_dataset_event.Lane_addon_configuration ->
       if Option.is_some state.lane_addons then begin
         owe_lane_addons_read state;
@@ -8218,7 +8224,12 @@ let launch_surface_reads state ~mailbox (surface : surface) =
            launch_fusion_detail_load ~demand state ~mailbox ~run_id
        | Fusion_historical_detail reference ->
            launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
-  | Memory -> launch_memory_health_load state ~mailbox
+  (* Arriving owes the health a read as well as starting one: a read already
+     in flight may have begun before a change announced while the surface was
+     off screen. Metrics shows the same health and owes it the same way. *)
+  | Memory ->
+      owe_memory_health_read state;
+      launch_memory_health_load state ~mailbox
   | Repositories ->
       owe_repositories_read state;
       launch_repositories_load state ~mailbox
@@ -8251,6 +8262,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Resources -> launch_resources_load state ~mailbox
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
   | Metrics ->
+      owe_memory_health_read state;
       launch_memory_health_load state ~mailbox;
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
@@ -9079,6 +9091,21 @@ let launch_owed_lanes state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.standalone_lanes_inflight
     then launch_lanes_load state ~mailbox
   end
+
+(* Runs on every loop iteration. Only Memory and Metrics read the memory
+   health; off screen nothing is owed, since arriving reads it. A read already
+   in flight is let finish first. *)
+let launch_owed_memory_health state ~mailbox =
+  if state.view = Memory || state.view = Metrics then begin
+    let read =
+      if state.memory_health_inflight then state.memory_health_owed
+      else Masc_tui_owed_read.abandoned state.memory_health_owed
+    in
+    state.memory_health_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.memory_health_inflight
+    then launch_memory_health_load state ~mailbox
+  end
+  else state.memory_health_owed <- Masc_tui_owed_read.settled
 
 (* Runs on every loop iteration. A closed pane owes nothing: opening it
    reads. An open pane reads what it owes once no read is out and no draft,
@@ -19083,6 +19110,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight
        owe_chat_journal_reads state;
        owe_overview_read state;
        owe_lanes_read state;
+       owe_memory_health_read state;
        if Option.is_some state.lane_addons then owe_lane_addons_read state;
        if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state);
   scoped_refresh_followup :=
@@ -19410,6 +19438,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_overview_read state;
     owe_harness_read state;
     owe_lanes_read state;
+    owe_memory_health_read state;
     owe_async_requests_read state;
     owe_whole_keeper_roster_read state;
     owe_keeper_turns_read state;
@@ -27447,6 +27476,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.repositories_error <- Some detail)
   | Memory_loaded result ->
       state.memory_health_inflight <- false;
+      state.memory_health_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.memory_health_owed
+         | Error _ -> failed_read state.memory_health_owed);
       (match result with
       | Ok snapshot ->
           apply_memory_health_snapshot state snapshot
@@ -32914,6 +32947,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_lanes state ~mailbox:async_messages;
+      launch_owed_memory_health state ~mailbox:async_messages;
       launch_owed_lane_addons state ~mailbox:async_messages;
       reconcile_contact_retry state ~mailbox:async_messages
         ~refresh_inflight:!http_refresh_inflight;
@@ -41530,10 +41564,10 @@ Use relative paths for resources already held in the package. -->
          (* Fusion re-reads on [fusion_run_status] and retries a failed read
             ([launch_owed_fusion]). *)
          | Fusion -> ()
-         | Memory ->
-             (* Fleet memory health is a reading, so the tick refreshes it
-                like the listings above. *)
-             launch_memory_health_load state ~mailbox:async_messages
+         (* The memory health re-reads when the server says a Keeper's row
+            or the execution availability moved, and retries a failed read
+            ([launch_owed_memory_health]). *)
+         | Memory -> ()
          (* The repository list re-reads on its dataset push and
             retries a failed read ([launch_owed_repositories]). *)
          | Repositories -> ()

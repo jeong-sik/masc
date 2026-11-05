@@ -10701,6 +10701,10 @@ type state = {
   mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
   mutable memory_health_error: string option;
   mutable memory_health_inflight: bool;
+  (* The memory health reads when the server announces a Keeper's row moved,
+     on a revalidation and an authority change, and again after a failed read,
+     while Memory or Metrics shows it (RFC-0480 §3.4). *)
+  mutable memory_health_owed: Masc_tui_owed_read.t;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   mutable memory_unit: Masc_tui_memory_usage.display_unit;
@@ -14595,6 +14599,7 @@ let suspend_workspace_readings state =
   state.connectors_read <- Connector_read.suspend state.connectors_read;
   state.connectors_owed <- Masc_tui_owed_read.settled;
   state.memory_health_inflight <- false;
+  state.memory_health_owed <- Masc_tui_owed_read.settled;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
   state.runtime_config_owed <- Masc_tui_owed_read.settled;
@@ -19999,6 +20004,7 @@ let create_state
   memory_health = None;
   memory_health_error = None;
   memory_health_inflight = false;
+  memory_health_owed = Masc_tui_owed_read.settled;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_unit = Masc_tui_memory_usage.Tokens;

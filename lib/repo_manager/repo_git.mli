@@ -202,7 +202,9 @@ type branch_entry = {
 }
 
 type branch_list = {
-  bl_entries : branch_entry list;  (** Newest tip first. *)
+  bl_entries : branch_entry list;
+      (** Newest tip first. A cut list keeps its first [max_entries] branches
+          and then the checked-out branch when the cut dropped it. *)
   bl_truncated : bool;  (** More branches existed than [max_entries]. *)
 }
 

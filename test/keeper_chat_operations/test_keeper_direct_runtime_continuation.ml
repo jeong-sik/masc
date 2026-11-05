@@ -67,7 +67,7 @@ let test_same_operation_survives_and_completes () = with_path (fun path ->
     assert_bound store retry;
     original.admission_digest) in
   with_open path (fun store ->
-    check int "queued continuation is not interrupted" 0 (List.length (Store.settle_running_after_restart store ~now:20. |> ok));
+    check int "queued continuation is not interrupted" 0 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:20. |> ok));
     let claimed = claim store in
     check string "same admission identity" admission_digest claimed.admission_digest;
     check bool "attachments and instructions intact" true (claimed.input = Some input);
@@ -85,7 +85,7 @@ let test_restart_after_claim_requires_exact_checkpoint () = with_path (fun path 
     ignore (defer store original retry |> ok);
     ignore (claim store));
   with_open path (fun store ->
-    check int "typed pending retry is restored, not terminalized" 0 (List.length (Store.settle_running_after_restart store ~now:20. |> ok));
+    check int "typed pending retry is restored, not terminalized" 0 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:20. |> ok));
     check bool "same operation requeued" true ((current store).state = Operation.Queued);
     ignore (claim store);
     rejected (Store.resume_direct_runtime_retry store ~now:21. ~operation_id
@@ -101,7 +101,7 @@ let test_interrupted_resumed_effects_are_not_replayed () = with_path (fun path -
     ignore (claim store);
     Store.resume_direct_runtime_retry store ~now:13. ~operation_id ~observed:retry |> ok);
   with_open path (fun store ->
-    check int "execution without a new checkpoint needs reconciliation" 1 (List.length (Store.settle_running_after_restart store ~now:20. |> ok));
+    check int "execution without a new checkpoint needs reconciliation" 1 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:20. |> ok));
     check bool "no blind queue replay" true ((Store.claim_next store ~now:21. |> ok) = None);
     check bool "original semantic input remains for reconciliation" true ((execution store).input = Some input);
     check bool "typed interrupted origin" true (match (execution store).phase with
@@ -270,7 +270,7 @@ let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = w
     ignore (Store.succeed_running store ~now:14. ~operation_id:steering ~outcome_ref:"steering" |> ok);
     ignore (Store.claim_next store ~now:15. |> ok));
   with_open path (fun store ->
-    check int "claim crash retains unconsumed checkpoint" 0 (List.length (Store.settle_running_after_restart store ~now:16. |> ok));
+    check int "claim crash retains unconsumed checkpoint" 0 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:16. |> ok));
     ignore (Store.claim_next store ~now:17. |> ok);
     rejected (Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:(Semantic.Agent_core (checkpoint "wrong")));
     Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:saved |> ok;
@@ -441,7 +441,7 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
     check_original store);
   with_open path (fun store ->
     check int "claim crash retains official continuation instead of failing it" 0
-      (List.length (Store.settle_running_after_restart store ~now:16. |> ok));
+      (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:16. |> ok));
     check bool "claim crash restores unfinished operation" true ((current store).state = Operation.Queued);
     check_original store;
     ignore (Store.claim_next store ~now:17. |> ok);

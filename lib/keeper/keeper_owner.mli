@@ -295,9 +295,11 @@ val wake_operation_drain : t -> (unit, error) result
 
     An idle Owner whose operation store became unavailable first closes and
     reopens the existing database and continues from its durable queued and
-    terminal rows. Metadata and integrity faults stay fenced. A Running row
-    with no live child fences the Owner until the next restart settles it;
-    this call never replays a failed mutation. *)
+    terminal rows. Metadata and integrity faults stay fenced. The same wake
+    settles each Running row that no chat child holds, as boot does: a row with
+    a durable continuation is queued again, and the rest fail as
+    [Store_unavailable] and reach the runner's [on_execution_settled]. This
+    call never replays a failed mutation. *)
 
 val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)

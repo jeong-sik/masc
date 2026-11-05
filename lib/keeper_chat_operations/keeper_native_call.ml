@@ -163,3 +163,8 @@ let state_of_json = function
        Ok (Terminal_unacknowledged (call, {Agent.outcome; recovery}))
      | Some _ | None -> Error "unknown native call state")
   | _ -> Error "native call state must be an object or null"
+
+let unknown_effect_disposition =
+  { Agent.outcome = Agent.Terminal_cancelled
+  ; recovery = Agent.Operator_repair_required Agent.Effect_outcome_unknown
+  }

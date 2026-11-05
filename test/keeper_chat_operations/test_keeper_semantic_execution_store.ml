@@ -134,7 +134,7 @@ let test_restart_interrupted_execution_releases_the_running_slot () =
     check string "resumed continuation holds the running slot" "running" (Execution.phase_name running.phase);
     Store.close store |> store_ok;
     with_open path (fun reopened ->
-      let _failed = Store.settle_running_after_restart reopened ~now:30. |> store_ok in
+      let _failed = Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:30. |> store_ok in
       let recovered = get reopened running.id in
       (match recovered.phase with
        | Execution.Recovering {origin = Execution.Interrupted_execution; _} -> ()
@@ -727,7 +727,7 @@ let test_preparation_wait_preserves_official_checkpoint ?(agent_core=false) ?ret
          check bool "rollback retains exact not-entered preparation" true
            (match (get store scope).phase with Execution.Preparing_checkpoint saved ->
              Execution.equal_gate_checkpoint checkpoint (Execution.Official_client saved) | _ -> false);
-         Store.settle_running_after_restart store ~now:6. |> store_ok |> ignore
+         Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:6. |> store_ok |> ignore
        | _,result -> result |> store_ok |> ignore);
       let waiting = Store.direct_preparation_wait store ~operation_id |> store_ok |> Option.get in
       check bool "ordinary drain cannot claim preparation wait" true
@@ -735,7 +735,7 @@ let test_preparation_wait_preserves_official_checkpoint ?(agent_core=false) ?ret
       operation,waiting) in
     with_open path (fun store ->
       check int "restart settles no blocked operation" 0
-        (List.length (Store.settle_running_after_restart store ~now:8. |> store_ok));
+        (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:8. |> store_ok));
       let reread = Store.direct_preparation_wait store ~operation_id |> store_ok |> Option.get in
       check bool "exact wait survives reopening" true (reread = waiting);
       let retained = get store scope in
@@ -851,7 +851,7 @@ let test_uncertain_preparation_retry_reopens_by_original_identity () =
       check bool "stale retry changes no admitted authority" true
         (Execution.to_json (get store scope)=Execution.to_json retained);
       check int "restart preserves the explicitly authorized retry" 0
-        (List.length (Store.settle_running_after_restart store ~now:9. |> store_ok));
+        (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:9. |> store_ok));
       let resumed = claim store ~now:10. in
       check bool "normal admission selects the same operation and input" true
         (Chat.Operation_id.equal resumed.operation_id original.operation_id

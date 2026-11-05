@@ -3520,7 +3520,7 @@ let test_guidance_admission_fault_never_enters_sdk fault () =
            check bool "rollback retains exact original checkpoint" true
              (Semantic.equal_gate_checkpoint checkpoint (Semantic.Official_client original));
            check bool "rollback retains original input" true (execution.input=Some input);
-           Operations.settle_running_after_restart operations ~now:7. |> Result.get_ok |> ignore;
+           Operations.settle_running_without_executor ~cause:Operations.After_process_restart operations ~now:7. |> Result.get_ok |> ignore;
            check bool "restart blocks the not-entered preparation" true
              (Option.is_some (Operations.direct_preparation_wait operations ~operation_id |> Result.get_ok));
            check bool "restart dispatches nothing automatically" true

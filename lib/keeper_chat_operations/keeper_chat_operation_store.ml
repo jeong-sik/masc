@@ -3227,7 +3227,27 @@ let reconcile_semantic_running store ~now =
       | Semantic.Recovering _ | Semantic.Settled _) -> Ok count) (Ok 0) executions
 ;;
 
-let settle_running_after_restart store ~now =
+type running_settlement =
+  | After_process_restart
+  | After_store_recovery
+
+(* What a settled row says happened. Both causes end the same way -- no live
+   executor will commit this row -- and differ only in what took it away. *)
+let running_settlement_failure = function
+  | After_process_restart ->
+    Operation.Interrupted_by_restart, "process restarted before terminal operation commit"
+  | After_store_recovery ->
+    ( Operation.Store_unavailable
+    , "the operation store became unavailable before terminal operation commit" )
+;;
+
+let running_settlement_unacknowledged_detail = function
+  | After_process_restart -> "process restarted before Owner receipt acknowledgement"
+  | After_store_recovery ->
+    "the operation store became unavailable before Owner receipt acknowledgement"
+;;
+
+let settle_running_without_executor store ~cause ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
@@ -3245,14 +3265,36 @@ let settle_running_after_restart store ~now =
           else Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
         read []) in
     (* A running operation with a durable continuation goes back to Queued and
-       resumes; one without is the request the restart cut off, and only
-       those are failed below. *)
-    let* interrupted = List.fold_left (fun result operation ->
+       resumes; one without is a request whose executor ended without
+       committing it, and only those are failed below. An active native call
+       resumes only after a restart. After store recovery this process is the
+       one that ran the call, and the commit the outage refused may be the
+       Owner closing it, so it is closed as an unknown effect, not run again. *)
+    let* interrupted = List.fold_left (fun result (operation : Operation.t) ->
       let* interrupted = result in
       let* execution = direct_execution_with_db store.db operation in
       match Option.map (fun (execution : Semantic.t) -> execution.native_call) execution with
-      | Some (Keeper_native_call.Active _) ->
-        requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+      | Some (Keeper_native_call.Active call) ->
+        (match cause with
+         | After_process_restart ->
+           requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+         | After_store_recovery ->
+           let* closed =
+             apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
+               ~execution_digest:operation.execution_digest
+               (Keeper_native_call.Terminal
+                  { call_id = call.Keeper_native_call.call_id
+                  ; disposition = Keeper_native_call.unknown_effect_disposition
+                  })
+           in
+           let* settled = semantic_transition ~now
+             (Semantic.Settle
+                (Semantic.Failed
+                   "the operation store became unavailable while its native call was active; \
+                    its effect is unknown"))
+             closed in
+           let* () = update_semantic store ~expected:closed settled in
+           Ok (operation :: interrupted))
       | Some (Keeper_native_call.Terminal_unacknowledged _) ->
         (* A committed Core terminal is not an Owner response receipt. Keep
            its identity, report interruption, and never resume its journal. *)
@@ -3260,7 +3302,9 @@ let settle_running_after_restart store ~now =
           | None -> Error (Integrity_error "native terminal lost its execution")
           | Some expected ->
             let* next = semantic_transition ~now
-              (Semantic.Settle (Semantic.Failed "process restarted before Owner receipt acknowledgement")) expected in
+              (Semantic.Settle
+                 (Semantic.Failed (running_settlement_unacknowledged_detail cause)))
+              expected in
             update_semantic store ~expected next in
         Ok (operation :: interrupted)
       | None | Some Keeper_native_call.No_native_call ->
@@ -3277,16 +3321,20 @@ let settle_running_after_restart store ~now =
     let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"
-      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = 'process restarted before terminal operation commit' WHERE state = 'running'"
+      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running'"
       (fun stmt ->
-         let* () = bind_float store.db stmt ~operation:"bind restart settlement time" 1 now in
+         let failure_kind, failure_detail = running_settlement_failure cause in
+         let* () = bind_float store.db stmt ~operation:"bind settlement time" 1 now in
          let* () =
            bind_text
              store.db
              stmt
-             ~operation:"bind restart failure kind"
+             ~operation:"bind settlement failure kind"
              2
-             (Operation.failure_kind_to_string Operation.Interrupted_by_restart)
+             (Operation.failure_kind_to_string failure_kind)
+         in
+         let* () =
+           bind_text store.db stmt ~operation:"bind settlement failure detail" 3 failure_detail
          in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
          Ok (Sqlite3.changes store.db)) in

@@ -418,15 +418,11 @@ type metadata_fault = Metadata_persistence_failure of string
 
 (* Why the Owner refuses operation-store work. Only
    [Operation_availability_failure] is retried: a stale SQLite handle heals by
-   close+reopen at an idle wake. The other two need a process restart or an
-   operator, so a wake must not churn the handle for them. *)
+   close+reopen at an idle wake. An integrity failure needs a process restart
+   or an operator, so a wake must not churn the handle for it. *)
 type operation_fault =
   | Operation_availability_failure of string
   | Operation_integrity_failure of string
-  | Operation_reconciliation_required of Chat_operation.Operation_id.t
-      (* A durable Running row with no live child: its terminal commit was
-         lost to the outage. [settle_running_after_restart] settles it on
-         the next boot; this process never fabricates an outcome. *)
 
 let metadata_fault_detail (Metadata_persistence_failure detail) = detail
 
@@ -436,15 +432,10 @@ let operation_fault_detail = function
   | Operation_availability_failure detail -> detail
   | Operation_integrity_failure detail ->
     "Keeper chat operation integrity failure: " ^ detail
-  | Operation_reconciliation_required operation_id ->
-    Printf.sprintf
-      "operation %s is Running with no live child; restart the keeper to settle it before storage recovery"
-      (Chat_operation.Operation_id.to_string operation_id)
 
 let retain_operation_fault fault previous =
   match previous with
-  | Some (Operation_integrity_failure _
-         | Operation_reconciliation_required _) -> previous
+  | Some (Operation_integrity_failure _) -> previous
   | None | Some (Operation_availability_failure _) -> Some fault
 
 type t =
@@ -471,6 +462,10 @@ type t =
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
+  ; operation_runner : operation_runner option
+        (* Kept on [t] for the rows that store recovery fails outside any
+           child: their failure reaches the transcript, the journal and a
+           waiting stream through the same hook as a child's. *)
   ; autonomous_lost_slot : bool ref
         (* Set when the autonomous lane asked for the slot and was refused,
            cleared when the release notification is delivered. Without it the
@@ -916,13 +911,6 @@ type active_native_call_policy =
   | Close_active_call
   | Leave_active_call_for_restart
 
-let native_call_unknown_effect_disposition =
-  { Agent_core.Agent.outcome = Agent_core.Agent.Terminal_cancelled
-  ; recovery =
-      Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown
-  }
-;;
-
 let native_call_unknown_effect_success_detail =
   "turn reported success, but its native call has an unknown effect; recorded as failed"
 ;;
@@ -1085,11 +1073,51 @@ let chat_child_in_flight t =
   | Some { lane = Autonomous | Maintenance; _ } | None -> false
 ;;
 
+(* [settled] are the rows as read before settlement, still Running. Each batch
+   is read back as committed, so the hook sees the Failed rows it projects.
+   A projection that does not land is logged and stays retryable: the Failed
+   row is immutable and every start projects all Failed rows again. *)
+let project_settled_after_recovery t settled =
+  match t.operation_runner with
+  | None -> ()
+  | Some runner ->
+    List.iter (fun (interrupted : Chat_operation.t) ->
+      let operation_id = interrupted.operation_id in
+      let log_pending detail =
+        Log.Keeper.error ~keeper_name:t.keeper_name
+          "chat operation projection pending operation=%s: %s"
+          (Chat_operation.Operation_id.to_string operation_id) detail in
+      match
+        run_operation_store ~label:"read store recovery settlement" (fun () ->
+          Chat_operation_store.batch_operations t.operation_store ~operation_id)
+        |> Result.map_error (record_operation_error t)
+      with
+      | Error error -> log_pending (error_to_string error)
+      | Ok operations ->
+        (match operations with
+         | { Chat_operation.state = Failed { failure; _ }; _ } :: _ ->
+           (try
+              runner.on_execution_settled ~keeper_name:t.keeper_name
+                ~claimed_operation_id:(Some operation_id) ~operations
+                ~execution:
+                  (Operation_failed
+                     { kind = failure.kind
+                     ; detail = failure.detail
+                     ; outcome_ref = failure.outcome_ref
+                     })
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> log_pending ("projection raised: " ^ Printexc.to_string exn))
+         | [] -> log_pending "its batch has no rows after settlement"
+         | { Chat_operation.state = Queued | Running _ | Succeeded _ | Cancelled _; _ } :: _ ->
+           log_pending "it is not Failed after settlement"))
+      settled
+;;
+
 let recover_operation_availability t =
   match !(t.operation_error) with
   | None -> Ok ()
-  | Some (Operation_integrity_failure _
-         | Operation_reconciliation_required _ as fault) ->
+  | Some (Operation_integrity_failure _ as fault) ->
     Error (Store_unavailable (operation_fault_detail fault))
   | Some (Operation_availability_failure detail) when chat_child_in_flight t ->
     Error (Store_unavailable detail)
@@ -1112,28 +1140,42 @@ let recover_operation_availability t =
        (match Chat_operation_store.block_preparing_operations operation_store ~now:(t.now ()) with
         | Error error -> Error (record_operation_error t error)
         | Ok () ->
+       (* No Chat_operation child is in flight, so nothing in this process
+          will commit a Running row: either the outage refused its child's
+          terminal commit, or the child left its native call Active. A row
+          with a durable continuation goes back to the queue and resumes. An
+          Active call does not: this process ran it, and the refused commit
+          may be this Owner closing it, so the store closes it as an unknown
+          effect. Those rows and the rest fail as [Store_unavailable], which
+          names what took the result away without claiming completion or that
+          no external effect happened. *)
+       (match
+          run_operation_store ~label:"settle Keeper chat operations after store recovery"
+            (fun () ->
+              Chat_operation_store.settle_running_without_executor operation_store
+                ~cause:Chat_operation_store.After_store_recovery ~now:(t.now ()))
+        with
+        | Error error -> Error (record_operation_error t error)
+        | Ok settled ->
        (match read_operation_projection operation_store ~now:(t.now ()) with
         | Error error -> Error (record_operation_error t error)
         | Ok projection ->
           (match projection.running_operation_id with
            | Some operation_id ->
-             (* Only a Chat_operation child creates a Running row, and this
-                branch runs when none is in flight, so a Running row seen here
-                lost its settlement commit to the outage. It may be an uncertain
-                claim or a completed external effect. Neither starting it again
-                nor manufacturing completion is justified, and re-fencing it as
-                an availability fault would reopen the handle on every wake for
-                nothing. *)
-             let fault = Operation_reconciliation_required operation_id in
-             set_operation_fault t fault;
-             publish_operation_projection t { projection with store_unavailable = true };
-             Error (Store_unavailable (operation_fault_detail fault))
+             Error
+               (record_operation_error t
+                  (Chat_operation_store.Integrity_error
+                     (Printf.sprintf
+                        "operation %s is still Running after store recovery settled it"
+                        (Chat_operation.Operation_id.to_string operation_id))))
            | None ->
              t.operation_error := None;
              publish_operation_projection t projection;
+             project_settled_after_recovery t settled;
              Log.Keeper.info ~keeper_name:t.keeper_name
-               "keeper Owner operation store recovered queued=%d" projection.queued_count;
-             Ok ()))))
+               "keeper Owner operation store recovered queued=%d settled=%d"
+               projection.queued_count (List.length settled);
+             Ok ())))))
 ;;
 
 (* Remove the retained files that the store's confirmed commits released.
@@ -1317,7 +1359,7 @@ let start
     let startup_now = now () in
     match
       run_operation_store ~label:"settle Keeper chat operations after restart" (fun () ->
-        Chat_operation_store.settle_running_after_restart operation_store ~now:startup_now)
+        Chat_operation_store.settle_running_without_executor ~cause:Chat_operation_store.After_process_restart operation_store ~now:startup_now)
       |> Result.map_error owner_error_of_operation_error
     with
     | Error _ as error -> error
@@ -1370,6 +1412,7 @@ let start
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
+    ; operation_runner
     ; failed_at_start
     }
   in
@@ -1602,7 +1645,7 @@ let start
                  ~execution_digest:operation.Chat_operation.execution_digest
                  (Keeper_native_call.Terminal
                     { call_id = call.Keeper_native_call.call_id
-                    ; disposition = native_call_unknown_effect_disposition
+                    ; disposition = Keeper_native_call.unknown_effect_disposition
                     })
              in
              Ok Native_call_closed_without_disposition))
@@ -1696,7 +1739,7 @@ let start
          | Ok (Some _) ->
            (match !(t.operation_error) with
             | Some (Operation_availability_failure _) -> t.operation_error := None
-            | Some (Operation_integrity_failure _ | Operation_reconciliation_required _) | None -> ());
+            | Some (Operation_integrity_failure _) | None -> ());
            (match read_operation_projection t.operation_store ~now:(t.now ()) with
             | Error error -> Error (record_operation_error t error)
             | Ok projection -> publish_operation_projection t projection; Ok ())
@@ -2833,8 +2876,8 @@ let start
             match completion with
             | Operation_child_finished { claimed_operation_id; execution; ended } ->
               (* The child ignores this result and the row stays Running, so
-                 a refused settlement is otherwise invisible until the next
-                 boot settles it. *)
+                 a refused settlement is otherwise invisible until store
+                 recovery or the next boot settles it. *)
               let settled = finish_operation_child claimed_operation_id execution ~ended in
               (match settled with
                | Error error as failed ->

@@ -287,12 +287,6 @@ let latest_keeper_msg_recovery_observation () =
   Atomic.get latest_keeper_msg_recovery
 ;;
 
-let latest_keeper_config_journal_recovery = Atomic.make None
-
-let latest_keeper_config_journal_recovery_report () =
-  Atomic.get latest_keeper_config_journal_recovery
-;;
-
 let recover_keeper_config_journal_on_startup ~base_path =
   let recover () =
     Keeper_config_journal.recover_interrupted ~base_path
@@ -347,7 +341,6 @@ let recover_keeper_config_journal_on_startup ~base_path =
     | Unix.Unix_error (error, action, path) ->
       failed (Printf.sprintf "%s %s: %s" action path (Unix.error_message error))
   in
-  Atomic.set latest_keeper_config_journal_recovery (Some report);
   (match report.outcome with
    | Keeper_config_journal.No_journal -> ()
    | Keeper_config_journal.Recovered_rolled_back _ ->

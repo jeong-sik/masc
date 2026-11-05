@@ -412,32 +412,19 @@ let rec publish workspace ~config_path candidate =
     else publish workspace ~config_path candidate
 ;;
 
-type source_update = Retain_sources | Replace_sources of additional_source list
-
-let refresh_internal ~workspace ~user_home ~source_update ~read_config =
+let refresh ~workspace ~user_home ~read_config =
   Cross_context_mutex.with_lock workspace.slot.refresh_lock (fun () ->
     match Atomic.get workspace.slot.state with
     | Retired -> Workspace_retired
     | Active _ ->
       let observation = read_config () in
-      let additions = match source_update with
-        | Retain_sources -> workspace.slot.additional_sources
-        | Replace_sources sources -> sources in
       let candidate, diagnostics = build_snapshot ~base_path:workspace.base_path
-          ~user_home ~additional_sources:additions observation in
+          ~user_home ~additional_sources:workspace.slot.additional_sources observation in
       (* Both scans have completed. Cancellation before this point publishes
-         neither a partial source selection nor a partial catalog. *)
-      workspace.slot.additional_sources <- additions;
+         no partial catalog. *)
       workspace.slot.config_input <- Some (user_home, observation);
       Atomic.set workspace.slot.additional_diagnostics diagnostics;
       publish workspace ~config_path:observation.path candidate)
-;;
-
-let refresh ~workspace ~user_home ~read_config =
-  refresh_internal ~workspace ~user_home ~source_update:Retain_sources ~read_config
-;;
-let refresh_with_sources ~workspace ~user_home ~sources ~read_config =
-  refresh_internal ~workspace ~user_home ~source_update:(Replace_sources sources) ~read_config
 ;;
 let additional_source_diagnostics ~workspace = Atomic.get workspace.slot.additional_diagnostics
 

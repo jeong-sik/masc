@@ -310,6 +310,14 @@ val field :
 val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
+val recover_for_process_start :
+  base_path:string -> keeper_name:string -> (unit, string) result
+(** Process-start recovery of the candidate ledger. A torn final row left by a
+    mid-append crash is cut to the last complete row and fsynced under the
+    store's stable lock; every other failure is returned unchanged. Only the
+    worker that owns process recovery for [keeper_name] calls it, before the
+    partition ledger's recovery reads this ledger. *)
+
 val load_candidates_with_rejections
   :  base_path:string
   -> keeper_name:string

@@ -351,6 +351,35 @@ let load_candidates_with_rejections ~base_path ~keeper_name =
   Ok (latest_candidates rows, rejected)
 ;;
 
+(* Process-start recovery only, as in the partition ledger: a torn tail left
+   by a mid-append crash is cut to the last complete row under the store's
+   stable lock. General reads keep refusing an incomplete tail. *)
+let recover_for_process_start ~base_path ~keeper_name =
+  let path = candidate_path ~base_path ~keeper_name in
+  let entry = ledger_entry path in
+  try
+    Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
+      entry.ledger_cache <- None;
+      Fs_compat.recover_private_jsonl_durable_locked_result path
+      |> snapshot_result ~path
+      |> Result.map (fun (snapshot : Fs_compat.private_jsonl_snapshot) ->
+        entry.ledger_cache <-
+          Some
+            (apply_snapshot
+               ~path
+               (empty_ledger_state snapshot.Fs_compat.cursor)
+               snapshot)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "Board attention ledger recovery failed keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
+;;
+
 let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in

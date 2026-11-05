@@ -29,8 +29,11 @@
       Its settlement is still written before the append, because the append
       moves the head and an intent left behind it could no longer be aborted.
       A reduction that the settlement gives up blocks its subject in the state
-      that reads the record ({!Authz_state.hold_revocations}, design 8.3), and
-      a replay blocks the subjects of every reduction the store gave up.
+      that reads the record ({!Authz_state.hold_revocations}, design 8.3). The
+      block is published once the settlement is written, so a commit that fails
+      after it leaves the block in place. A replay starts each block after the
+      record its intent began at, as the writer did, and a block whose record
+      the log no longer holds starts once the log is read.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for
@@ -94,6 +97,9 @@ module Replay : sig
     { state : Authz_state.t
     ; probe : Authz_high_water.Probe.t
     ; head : Authz_record.head
+    ; unreached : (Authz_record.Hash.t * Authz_records.Subject.t) list
+          (** The blocks of given-up reductions whose record the replay has not
+              read yet. *)
     }
 
   (** Over an empty log, for a store in the given state. *)
@@ -101,6 +107,10 @@ module Replay : sig
 
   (** The fold function for {!Authz_log.open_at_start}. *)
   val step : t -> Authz_record.t -> (t, Authz_state.refusal) result
+
+  (** The replay once the log is read: the blocks it has not reached start
+      too. A start reads the state of this. *)
+  val finish : t -> t
 end
 
 type snapshot =

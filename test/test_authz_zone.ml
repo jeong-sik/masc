@@ -184,7 +184,7 @@ let open_files dirs =
   match
     L.open_at_start ~path:(log_file dirs) ~init:(Z.Replay.init store_state) ~step:Z.Replay.step
   with
-  | Ok (log, replay, _recovered) -> { store; store_state; log; replay }
+  | Ok (log, replay, _recovered) -> { store; store_state; log; replay = Z.Replay.finish replay }
   | Error error ->
     Alcotest.failf "log not opened: %s" (L.open_error_to_string Authz_state.refusal_to_string error)
 ;;
@@ -821,6 +821,21 @@ let admission_draft ~at_ms : Z.draft =
   | Error _ -> Alcotest.fail "fixture admission refused"
 ;;
 
+(* The intent that a commit of the revocation [draft] at [head] writes. *)
+let revocation_intent ~head draft : S.intent =
+  { S.previous_record_hash = R.head_hash head
+  ; intended_next_record_digest = (record_at ~head draft).R.hash
+  ; change = S.Change.Authz { event = S.Change.Revoke; subject = Subject.Invite invite_id }
+  }
+;;
+
+let check_blocked label expected (state : Authz_state.t) =
+  Alcotest.(check (list string))
+    label
+    expected
+    (List.map Subject.to_string state.Authz_state.revocation_pending)
+;;
+
 (* A revocation whose append failed leaves its intent. The next entry gives it
    up, and from then on its invitation is blocked (design 8.3): the holder of
    the token does not get in, and a replay keeps the block. *)
@@ -830,13 +845,7 @@ let an_aborted_revocation_blocks_its_invitation () =
     let zone = open_zone dirs in
     let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
     let revoke = revoke_draft ~at_ms:(at_ms + 2) in
-    let head = (Z.snapshot zone).Z.head in
-    let left : S.intent =
-      { S.previous_record_hash = R.head_hash head
-      ; intended_next_record_digest = (record_at ~head revoke).R.hash
-      ; change = S.Change.Authz { event = S.Change.Revoke; subject = Subject.Invite invite_id }
-      }
-    in
+    let left = revocation_intent ~head:(Z.snapshot zone).Z.head revoke in
     with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
       check_error
         "a revocation while another process holds the log"
@@ -852,10 +861,51 @@ let an_aborted_revocation_blocks_its_invitation () =
     let switched = commit_ok zone (mode_draft ~at_ms:(at_ms + 4) M.Off) in
     check_settled "the next record gives the revocation up" ("Abort " ^ intent_name left) switched;
     let opened = check_restart "a restart" dirs ~mode:off ~head:switched.Z.record_hash in
+    check_blocked "the replay blocks the invitation" [ "invite:invite-1" ] opened.replay.Z.Replay.state)
+;;
+
+(* The settlement puts the abort in the store before the record is appended.
+   The block is published then, so an append that fails after it leaves the
+   invitation blocked for the gate that reads the published state, and the
+   next start blocks it too. *)
+let a_block_outlives_a_commit_that_fails_after_the_abort () =
+  (* The superuser writes to a file of mode 0400. *)
+  skip_for_superuser ();
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let revoke = revoke_draft ~at_ms:(at_ms + 2) in
+    let left = revocation_intent ~head:(Z.snapshot zone).Z.head revoke in
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_error
+        "a revocation while another process holds the log"
+        "Record_not_appended Write_locked"
+        zone
+        revoke;
+      release ());
+    check_blocked "nothing is given up yet" [] (Z.snapshot zone).Z.state;
+    Unix.chmod (log_file dirs) 0o400;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod (log_file dirs) 0o600)
+      (fun () ->
+        check_error
+          "a commit that gives the revocation up and cannot append"
+          "Record_not_appended Write_failed"
+          zone
+          (mode_draft ~at_ms:(at_ms + 3) M.Off));
+    check_blocked "the published state blocks the invitation" [ "invite:invite-1" ] (Z.snapshot zone).Z.state;
+    let opened = open_files dirs in
     Alcotest.(check (list string))
-      "the replay blocks the invitation"
-      [ "invite:invite-1" ]
-      (List.map Subject.to_string opened.replay.Z.Replay.state.Authz_state.revocation_pending))
+      "the store holds the abort"
+      [ intent_name left ]
+      (List.map intent_name (S.State.aborted opened.store_state));
+    check_blocked "the replay blocks the invitation" [ "invite:invite-1" ] opened.replay.Z.Replay.state;
+    check_error
+      "the token after a restart"
+      "Refused Revocation_pending"
+      (open_zone dirs)
+      (admission_draft ~at_ms:(at_ms + 4)))
 ;;
 
 let a_refused_invite_writes_nothing () =
@@ -1311,6 +1361,10 @@ let () =
             "an aborted revocation blocks its invitation"
             `Quick
             an_aborted_revocation_blocks_its_invitation
+        ; Alcotest.test_case
+            "a block outlives a commit that fails after the abort"
+            `Quick
+            a_block_outlives_a_commit_that_fails_after_the_abort
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

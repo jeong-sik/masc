@@ -2,26 +2,7 @@ module Ledger = Workspace_memory_ledger
 module Context = Workspace_memory_context
 module String_map = Map.Make (String)
 
-module Fact_map = Map.Make (struct
-  type t = Ledger.fact_ref
-
-  let compare a b =
-    let key = function
-      | Ledger.Ordinary { keeper_id; claim_sha256 } -> keeper_id, 0, "", claim_sha256
-      | Ledger.Source_bound { keeper_id; path; claim_sha256 } -> keeper_id, 1, path, claim_sha256
-    in
-    let keeper_a, store_a, path_a, hash_a = key a
-    and keeper_b, store_b, path_b, hash_b = key b in
-    match String.compare keeper_a keeper_b with
-    | 0 ->
-      (match Int.compare store_a store_b with
-       | 0 ->
-         (match String.compare path_a path_b with
-          | 0 -> String.compare hash_a hash_b
-          | order -> order)
-       | order -> order)
-    | order -> order
-end)
+module Fact_map = Ledger.Fact_map
 
 open Result.Syntax
 

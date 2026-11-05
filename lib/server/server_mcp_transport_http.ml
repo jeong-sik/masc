@@ -105,6 +105,12 @@ let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
 
 let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
+let ping_interval_override = Atomic.make None
+let disconnect_test_hook = ref (fun _ -> ())
+let ping_interval () =
+  match Atomic.get ping_interval_override with
+  | Some seconds -> seconds
+  | None -> sse_ping_interval_s
 
 let post_sse_keepalive_interval_s = Float.max 0.1 sse_ping_interval_s
 
@@ -934,6 +940,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let owned_info = Atomic.make None in
           let disconnected = Atomic.make false in
           let play_registration = Atomic.make None in
+          let previous_cleanup = Atomic.make None in
+          let previous_cleanup_done = Atomic.make false in
+          let cleanup_previous () =
+            if not (Atomic.get previous_cleanup_done) then
+              match Atomic.get previous_cleanup with
+              | Some previous when Atomic.compare_and_set previous_cleanup_done false true ->
+                (match previous.Sse.on_disconnect with
+                 | Some hook -> hook ()
+                 | None -> ())
+              | Some _ | None -> ()
+          in
           let disconnect_play () =
             Option.iter (fun (client, scope) ->
               match Server_play_room_events.disconnect ~base_path
@@ -946,9 +963,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               (Atomic.get play_registration)
           in
           let on_disconnect () =
-            Atomic.set disconnected true;
-            Option.iter stop_sse_conn_if_current (Atomic.get owned_info);
-            disconnect_play ()
+            Eio.Cancel.protect (fun () ->
+              Atomic.set disconnected true;
+              !disconnect_test_hook (Atomic.get owned_info);
+              Fun.protect
+                ~finally:(fun () ->
+                  disconnect_play ();
+                  cleanup_previous ())
+                (fun () -> Option.iter stop_sse_conn_if_current (Atomic.get owned_info)));
+            Eio.Fiber.check ()
           in
           let renew_play () =
             Option.iter (fun (client, scope) ->
@@ -961,25 +984,46 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                   session_id (Play_room.error_message error))
               (Atomic.get play_registration)
           in
-          let with_play_presence (client : Sse.client) body =
+          let with_play_presence (previous : Sse.client option) (client : Sse.client) body =
+            Atomic.set previous_cleanup previous;
             Atomic.set play_registration
               (Option.map (fun scope -> client, scope) play);
+            if Atomic.get disconnected then begin
+              Sse.unregister_if_current session_id client.id;
+              stop_sse_session_before ~client_id:client.id session_id;
+              cleanup_previous ()
+            end else
             match play with
             | Some scope ->
               (match Server_play_room_events.connect ~base_path
                 ~agent_name:client.Sse.agent_name ~role:client.Sse.role ~scope
                 ~sse_client_id:client.Sse.id with
-               | Ok () ->
-                 stop_sse_session session_id;
-                 body ()
+               | Ok Server_play_room_events.Connected ->
+                 if Atomic.get disconnected then begin
+                   disconnect_play ();
+                   Sse.unregister_if_current session_id client.id;
+                   stop_sse_session_before ~client_id:client.id session_id;
+                   cleanup_previous ()
+                 end else begin
+                   cleanup_previous ();
+                   stop_sse_session_before ~client_id:client.id session_id;
+                   body ()
+                 end
+               | Ok Server_play_room_events.Stale ->
+                 Sse.unregister_if_current session_id client.id;
+                 respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                   ~request_authority request reqd ~session_id ~protocol_version
+                   "Play observer was replaced by a newer client"
                | Error error ->
                  Sse.unregister_if_current session_id client.id;
-                 stop_sse_session session_id;
+                 stop_sse_session_before ~client_id:client.id session_id;
+                 cleanup_previous ();
                  respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
                    ~request_authority request reqd ~session_id ~protocol_version
                    (Play_room.error_message error))
             | None ->
-              stop_sse_session session_id;
+              cleanup_previous ();
+              stop_sse_session_before ~client_id:client.id session_id;
               body ()
           in
           (match
@@ -988,21 +1032,29 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect)
            with
+           | Error (Sse.Registration_stale _) as reg_err ->
+               let msg = Sse.registration_error_to_string reg_err in
+               Log.Server.warn "%s" msg;
+               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
                stop_sse_session session_id;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
-           | Ok (client, _) when not (scope_is_current ()) ->
+           | Ok (client, previous, _) when not (scope_is_current ()) ->
+              Atomic.set previous_cleanup previous;
               Sse.unregister_if_current session_id client.id;
-              stop_sse_session session_id;
+              stop_sse_session_before ~client_id:client.id session_id;
+              cleanup_previous ();
               refuse_workspace Workspace.Workspace_precondition_failed
-           | Ok (client, _) when sse_kind = Sse.Observer && not (deps.is_ready ()) ->
+           | Ok (client, previous, _) when sse_kind = Sse.Observer && not (deps.is_ready ()) ->
+              Atomic.set previous_cleanup previous;
               Sse.unregister_if_current session_id client.id;
-              stop_sse_session session_id;
+              stop_sse_session_before ~client_id:client.id session_id;
+              cleanup_previous ();
               respond_not_ready ~deps request reqd
-           | Ok (client, evicted) ->
-              with_play_presence client (fun () ->
+           | Ok (client, previous, evicted) ->
+              with_play_presence previous client (fun () ->
               let client_id = client.id in
               let event_stream = client.event_stream in
               let attested_runtime =
@@ -1077,8 +1129,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
           let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-          register_sse_conn ~session_id ~info;
+          let published = register_sse_conn_if_newer ~session_id ~info in
           Atomic.set owned_info (Some info);
+          (match published with
+           | false ->
+             Eio.Cancel.protect (fun () ->
+               stop_sse_conn_if_current info;
+               disconnect_play ());
+             Eio.Fiber.check ()
+           | true ->
           if Atomic.get disconnected then stop_sse_conn_if_current info;
           let send_if_current data =
             if scope_is_current () then send_raw info data
@@ -1153,7 +1212,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                   in
                   let rec loop () =
                     if not (Atomic.get info.stop) then (
-                      (try Eio.Time.sleep clock sse_ping_interval_s
+                      (try Eio.Time.sleep clock (ping_interval ())
                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping sleep error: %s"
@@ -1188,7 +1247,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
               Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients)))))))
+              session_id client_count Sse.max_clients))))))))
 
 
 let handle_get_operator_mcp ~deps request reqd =
@@ -1302,3 +1361,15 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
           in
           let response = Httpun.Response.create ~headers `Bad_request in
           safe_respond_with_string reqd response body)
+
+module For_testing = struct
+  let with_ping_interval seconds fn =
+    let previous = Atomic.get ping_interval_override in
+    Atomic.set ping_interval_override (Some seconds);
+    Fun.protect ~finally:(fun () -> Atomic.set ping_interval_override previous) fn
+
+  let with_disconnect_hook replacement fn =
+    let previous = !disconnect_test_hook in
+    disconnect_test_hook := replacement;
+    Fun.protect ~finally:(fun () -> disconnect_test_hook := previous) fn
+end

@@ -5,6 +5,8 @@ type room_scope = {
   machine : Machine_lane.t;
 }
 
+type connection_outcome = Connected | Stale
+
 type lease = {
   sse_client_id : int;
   machine : Machine_lane.t;
@@ -66,16 +68,16 @@ let connect ~base_path ~agent_name ~role ~scope ~sse_client_id =
   let key = key ~base_path ~agent_name ~play_client:scope.play_client in
   with_lease_lock (fun () ->
     match Hashtbl.find_opt leases key with
-    | Some current when current.sse_client_id > sse_client_id -> Ok None
+    | Some current when current.sse_client_id > sse_client_id -> Ok Stale
     | Some _ | None ->
       match perform_action ~base_path ~agent_name ~speaker action with
       | Error _ as error -> error
       | Ok (_, change) ->
         Hashtbl.replace leases key { sse_client_id; machine = scope.machine };
-        Ok change)
-  |> Result.map (fun change ->
+        Ok (change, Connected))
+  |> Result.map (fun (change, outcome) ->
     announce_change ~base_path change;
-    ())
+    outcome)
 
 let renew ~base_path ~agent_name ~role ~scope ~sse_client_id =
   let* () = permitted role in
@@ -99,7 +101,7 @@ let disconnect ~base_path ~agent_name ~role ~scope ~sse_client_id =
   let* () = permitted role in
   let speaker = speaker_of_role role in
   let key = key ~base_path ~agent_name ~play_client:scope.play_client in
-  Eio.Cancel.protect (fun () ->
+  let result = Eio.Cancel.protect (fun () ->
     with_lease_lock (fun () ->
       match Hashtbl.find_opt leases key with
       | Some current when current.sse_client_id = sse_client_id ->
@@ -113,7 +115,9 @@ let disconnect ~base_path ~agent_name ~role ~scope ~sse_client_id =
       | Some _ | None -> Ok None)
     |> Result.map (fun change ->
       announce_change ~base_path change;
-      ()))
+      ())) in
+  Eio.Fiber.check ();
+  result
 
 let guarded_http ~base_path ~agent_name ~play_client operation action =
   let key = key ~base_path ~agent_name ~play_client in

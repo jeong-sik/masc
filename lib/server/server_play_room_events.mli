@@ -7,10 +7,13 @@ val room_scope_of_request_target : string -> (room_scope option, string) result
 (** Decode a paired [play_client_id]/[play_machine] query. Absence of both is an
     ordinary Observer. A partial, duplicate, or invalid pair is rejected. *)
 
+type connection_outcome = Connected | Stale
+
 val connect :
   base_path:string -> agent_name:string -> role:Masc_domain.agent_role ->
-  scope:room_scope -> sse_client_id:int -> (unit, Play_room.error) result
-(** Join, then install the lease for this exact Observer [sse_client_id]. *)
+  scope:room_scope -> sse_client_id:int -> (connection_outcome, Play_room.error) result
+(** Join, then install the lease for this exact Observer [sse_client_id].
+    An older connect returns [Stale] and cannot replace its successor. *)
 
 val renew :
   base_path:string -> agent_name:string -> role:Masc_domain.agent_role ->

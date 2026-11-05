@@ -70,7 +70,7 @@ TUI 의 Memory 화면은 2초마다 fleet 전체 Memory health(`GET /api/v1/dash
 
 ## 2. 결정
 
-1. **알림은 저장소 쓰기 함수에서 낸다.** 호출 위치마다 달지 않는다. 저장소마다 쓰기가 모이는 함수 하나에 observer 를 둔다(`Repo_store.install_written_observer` 와 같은 모양). 호출 위치에 다는 방식은 새 호출 위치가 생기면 빠진다.
+1. **알림은 저장소 쓰기 함수에서 낸다.** 호출 위치마다 달지 않는다. 저장소마다 쓰기가 모이는 함수 하나가 쓰기를 마친 뒤 공용 통로 `Keeper_memory_health_input.written` 을 부른다. 메모리·source 스냅샷은 이미 있는 `Keeper_memory_commit_notifications` 로 알리므로 서버가 그 통로도 구독한다. 호출 위치에 다는 방식은 새 호출 위치가 생기면 빠진다.
 2. **observer 는 keepers 디렉터리와 Keeper 이름을 받는다.** 쓰기 자리 일부는 `base_path` 를 모른다. 서버는 시작할 때 자기 workspace 의 `C` 와 `R` 을 `base_path` 에 묶어 두고, observer 가 받은 디렉터리로 workspace 를 찾는다. 묶이지 않은 디렉터리의 쓰기는 알리지 않는다(그 workspace 를 보는 TUI 가 이 서버에 없다).
 3. **알림은 바뀔 때마다 낸다.** 간격 제한·합치기를 서버에 두지 않는다. 읽는 쪽 비용은 행 하나로 줄인다(결정 4). TUI 는 지금처럼 진행 중인 읽기 하나로 몰아 읽는다(`Masc_tui_owed_read`).
 4. **TUI 는 그 Keeper 행 하나만 읽는다.** 응답은 fleet 응답의 `keepers` 원소와 같은 모양이다. TUI 는 들고 있는 fleet 답에서 그 행만 바꾸고, 합계와 경보 요약을 다시 계산한다. 그 Keeper 가 없으면(삭제) 행을 지운다.
@@ -87,8 +87,9 @@ TUI 의 Memory 화면은 2초마다 fleet 전체 Memory health(`GET /api/v1/dash
 |---|---|---|
 | L1 | 서버: `GET /api/v1/dashboard/keeper-memory-health?keeper=<k>`. 합계·경보 요약 계산을 공용 모듈로 옮기고, fleet 응답도 그 모듈을 쓴다 | main |
 | L2 | wire 와 TUI: dataset `Memory_health { keeper }`. 알림이 오면 그 Keeper 행만 읽고 합친다. Memory 입력 창도 선택한 Keeper 알림에 읽는다. Browser lane 에서 돌아오면 그 화면에 도착한 것으로 읽는다. 2초 갈래는 아직 둔다 | L1, RFC-0480 2층(#48489, subject 디코더) |
-| L3 | 서버: 입력 1~6·10·11·13 의 저장소 observer, `C`·`R` → `base_path` 묶음, 알림과 fleet 캐시 비우기. 보관 기간 정리 알림 | L2 |
-| L4 | 서버: 메모리 안 입력 7·8·12 의 observer. TUI: Memory 2초 갈래를 지운다 | L3 |
+| L3a | 서버: 행이 읽는 파일(입력 1~6·10·11)의 쓰기 알림. 공용 통로, `C`·`R` → `base_path` 묶음, 알림 전 fleet 캐시 비우기 | L2 |
+| L3b | 서버: Keeper 가 fleet 에 들어오고 나가는 쓰기(입력 13 의 생성·삭제, Keeper 전체 purge)와 보관 기간 정리 알림 | L3a |
+| L4 | 서버: 메모리 안 입력 7·8·12 의 observer. TUI: Memory 2초 갈래를 지운다 | L3b |
 
 L4 가 2초 갈래를 지운다. 그 전까지는 2초 갈래가 남아 있어 중간 층이 main 에 들어가도 화면이 멈추지 않는다.
 
@@ -96,7 +97,7 @@ L4 가 2초 갈래를 지운다. 그 전까지는 2초 갈래가 남아 있어 �
 
 - L1: 한 Keeper 응답이 fleet 응답의 그 행과 같다. fleet 답에 행이 없는 Keeper 는 200 과 `"keeper": null` 로 답한다. TUI 의 workspace 읽기는 2xx·304 에서만 receipt 를 확인하므로, 404 로 답하면 그 답이 이 workspace 의 것인지 확인할 수 없다. fleet 합계가 공용 모듈 결과와 같다.
 - L2: PTY 시험. Memory 화면에서 한 Keeper 알림이 그 Keeper 행 읽기 하나만 일으킨다. 다른 dataset 알림은 아무것도 읽지 않는다. 합친 합계가 fleet 응답 합계와 같다. Browser lane 을 닫으면 그사이 온 알림을 읽는다.
-- L3·L4: 저장소마다 쓰기 한 번이 그 Keeper 알림 하나를 낸다. 묶이지 않은 디렉터리의 쓰기는 알리지 않는다. L4 PTY 시험은 `--refresh 1` 로 Memory 화면에 3초 머물며 알림 없이는 읽지 않는 것을 본다.
+- L3a·L3b·L4: 저장소마다 쓰기 한 번이 그 Keeper 알림 하나를 낸다. 묶이지 않은 디렉터리의 쓰기는 알리지 않는다. L4 PTY 시험은 `--refresh 1` 로 Memory 화면에 3초 머물며 알림 없이는 읽지 않는 것을 본다.
 - 층마다 `scripts/harness/perf/tui_request_probe.py` 로 Memory 화면의 요청 수를 앞뒤로 잰다(준비되는 대로).
 
 ## 5. 손대지 않을 것

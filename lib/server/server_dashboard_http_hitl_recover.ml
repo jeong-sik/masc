@@ -21,7 +21,7 @@
 module Http = Http_server_eio
 
 let permission = Masc_domain.CanAdmin
-let prefix = "/api/v1/keepers/"
+let prefix = Server_dashboard_http_keeper_api_types.keeper_api_prefix
 
 let route path =
   if not (String.starts_with ~prefix path)

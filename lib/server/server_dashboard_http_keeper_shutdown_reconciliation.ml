@@ -6,7 +6,7 @@ module Operation = Keeper_shutdown_types
 open Result.Syntax
 let permission = Masc_domain.CanAdmin
 let request_schema = "masc.keeper_shutdown.absence_acknowledgement.request.v1"
-let prefix = "/api/v1/keepers/"
+let prefix = Server_dashboard_http_keeper_api_types.keeper_api_prefix
 
 type target = { keeper_name : string; operation_id : string }
 

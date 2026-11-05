@@ -1,10 +1,12 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19 and 20 of the stack (#48231, #48232,
-#48233, #48250, #48254, #48266, #48289, #48292, #48299, #48306, #48327, #48329,
-#48341, #48344, #48350, #48365, #48370). Layer 7 is the first version of this
-document. Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13 to 17.
-The layer that carries this text added layers 19 and 20.
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25 and 27 of the stack
+(#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292, #48299, #48306,
+#48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386, #48389, #48392,
+#48401, #48411). Layer 7 is the first version of this document. Layer 12 added
+layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21 added layers 19
+and 20. Layer 26 is an RFC and has no screens. The layer that carries this text
+added layers 22 to 25 and 27.
 
 ## Source
 
@@ -26,6 +28,9 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 17) | `9257388f916e738faf8c7acd2115a8101368c7d0` | 41909034875 | `ad08fcc424bbcc32076b440fd142b2c6d7c71d7aa75d849d059ef0f1aa0ea1c0` | `bc0396352e13b30b2ac262552ee0e7cabe04d8266b612a3b59dc1eaf5b916d1c` |
 | After (layers 1 to 19) | `66a120b1993303d4c41b6c76a4ac5af50783d650` | 41913436954 | `8ef3094b19cef732d6c2057218cb189c2c1412b45375a4fadd1e77bbd838039a` | `fd8d22b0cff9f377e02a2696cefdf8fd2156b1ad9311b05fd970f9f5f4971716` |
 | After (layers 1 to 20) | `8394991844dee9b123c3b577334bf368a3a7906d` | 41915100410 | `809e534c1b99241c45c51639e78fa46c7701beb8657ac8f470e2be6c3f87fa09` | `cac9d03ef037ce87bc341b97438438332b3c848c5037970b57c051b5e0a1752b` |
+| After (layers 1 to 22) | `a6e907b07070ea13dc207c745be240f006bfbe8a` | 41919019723 | `eb92caef0a73d7935b05a0285c4873bb96ad59c437023a8bc45d8b75f990e76d` | `50a2c1484a131bba574f8d11955ebdc78e2f2dfc06f30dbfd5b61103555308ef` |
+| After (layers 1 to 25) | `c514194fc2b378b3569485d5e8a58189b24ca69a` | 41925502321 | `c290ad1f9eb83919fbe77958bd7f614186d64e62123a0a0f948f3de241aa8700` | `bce80de3f7c0a05d0069469e1e13b8241cdaadf1fbee0912409d078ec6925990` |
+| After (layers 1 to 27) | `d738d2334693f14ffa475ca8e5552dbe0425daf4` | 41929495694 | `8f0ca03fe34d837dafb2b17453ecef13dbb39ef3fe8aaa9c33ff7105e0cbe26f` | `76dd1f564067a2533487100dc6e772cc8debd74187b7cabf8b37c11b38e264ba` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -45,7 +50,11 @@ artifacts were uploaded after that failure.
   needed. Layers 13 to 17 used 200x55 and 120x35 (Dashboard), 100x30 and 80x24
   (Features), 120x35 (the footers of layers 15 and 16) and 120x35 and 80x24 (System
   menu). Layer 19 used 120x35 and 200x55 (Dashboard). Layer 20 used 80x24 and 120x35
-  (Usage).
+  (Usage). Layer 22 used 60x24, 80x24, 86x24, 87x24, 100x30 and 120x35 (Task
+  Review). Layer 23 used 60x24, 80x24, 120x35 and 200x55 (Features). Layer 24 used
+  80x24, 100x30, 120x35 and 140x40 (Runtime). Layer 25 used 60x24, 80x24, 120x35
+  and 200x55 with 42 open tasks (Work, Tasks). Layer 27 used 120x35 and 80x24 with
+  the 12-task fixture (Task detail).
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -57,6 +66,8 @@ artifacts were uploaded after that failure.
   Three Keeper definitions (`imp`, `relay`, `scout`) are present but none can
   run on this machine, so every footer starts with `ACTION NEEDED 3`. Each
   side seeds its own fresh workspace, so timestamps differ between the sides.
+  Layers 25 and 27 seeded extra Tasks with the same neutral text (42 open Tasks
+  for layer 25, 12 for layer 27).
 - The key sequences are in the sections below. Each capture starts a new TUI
   process, waits for `HTTP [connected]`, settles for a few seconds, and then
   sends the keys. The capture driver is not part of the repository.
@@ -453,6 +464,166 @@ catalogue exhausted tag are not in this fixture and were not drawn.
 ![Usage at 120x35 before](usage-120-before.png)
 ![Usage at 120x35 after](usage-120-after.png)
 
+### Layer 22: Task Review leaves out whole columns before it cuts the title (#48386)
+
+Task Review (`:`, `go Task Review`, Enter). The fixture has one Task in
+review. Before is the layers 1 to 20 build, after is the layers 1 to 22 build.
+
+```
+60x24   before  TASK, SUBMITTED BY, 제출 / 요구, start of 자동 검증   TITLE is not on the screen
+60x24   after   TASK, 자동 검증, TITLE                               title 24 cells
+80x24   before  all five columns                                     title 9 cells
+80x24   after   TASK, 제출 / 요구, 자동 검증, TITLE                  title 26 cells
+86x24   before  all five columns                                     title 15 cells
+86x24   after   TASK, 제출 / 요구, 자동 검증, TITLE                  title 32 cells
+87x24   before and after: all five columns, title 16 cells, the same screen
+```
+
+Before, the five columns were drawn at every width and TITLE received what
+was left: 9 of 76 cells at 80x24, none at 60x24. After, `Masc_tui_table.fit`
+keeps 16 cells for TITLE and drops SUBMITTED BY, then 제출 / 요구, then 자동
+검증 until the row fits. At 87x24 and wider all five columns fit and the screen
+did not change (87x24, 100x30 and 120x35 were captured on both sides). The
+screen that Enter opens was not captured for this layer.
+
+![Task Review at 80x24 before](task-review-80-before.png)
+![Task Review at 80x24 after](task-review-80-after.png)
+![Task Review at 60x24 before](task-review-60-before.png)
+![Task Review at 60x24 after](task-review-60-after.png)
+
+### Layer 23: Features sizes its two columns to their longest values (#48389)
+
+Features (`:`, `go Features`, Enter). Before is the layers 1 to 20 build, after
+is the layers 1 to 25 build, which holds layer 23 and nothing else that changes
+this list.
+
+```
+width   before: STATE starts this far from FEATURE   after
+60x24   27 cells, sentence ends `· 2…`               the same screen
+80x24   37 cells, sentence ends `2 admitted …`       27 cells, whole sentence `… 2 admitted slots`
+120x35  72 cells                                     27 cells
+200x55  96 cells                                     27 cells
+```
+
+Before, the FEATURE column took every cell the row had left and STATE sat at
+the right edge. After, each column takes the width of its longest value:
+FEATURE is 25 cells (`Browser Lane (automation)`) plus the 2-cell gap. At 80x24
+STATE had 39 cells and now has 43, which holds the longest sentence. At 60x24
+the two columns do not fit together, so the list keeps the earlier split.
+
+![Features at 120x35 before](features-120-before.png)
+![Features at 120x35 after](features-120-after.png)
+![Features at 80x24 before](features-80-before.png)
+![Features at 80x24 after](features-80-after.png)
+
+### Layer 24: Runtime leaves a fallback label out whole when the lane column is short (#48392)
+
+Runtime (`:`, `go Runtime`, Enter), the `coding` lane, which has two
+candidates. Before is the layers 1 to 20 build, after is the layers 1 to 25
+build. The lane cell of a fallback row is a 2-cell indent, a branch mark, the
+word `fallback` and a number (`└─ fallback #1`), 16 cells in all.
+
+```
+width   lane column   before            after
+80x24   10 cells      `└─ fall…`        `└─`
+100x30  10 cells      `└─ fall…`        `└─`
+120x35  14 cells      `└─ fallback…`    `└─ fallback`
+140x40  18 cells      `└─ fallback #1`  `└─ fallback #1`
+```
+
+Before, the cell was cut at the column edge and the cut word read like a name.
+After, only the parts that fit whole are kept (`Message_layout.join_fitting`).
+The candidate column still carries `2/2`, so the order is visible at every
+width. Lane names longer than the column still fold in the middle.
+
+![Runtime at 80x24 before](runtime-80-before.png)
+![Runtime at 80x24 after](runtime-80-after.png)
+![Runtime at 120x35 before](runtime-120-before.png)
+![Runtime at 120x35 after](runtime-120-after.png)
+
+### Layer 25: the Work Tasks list names its columns (#48401)
+
+Work, Tasks (`Tab`, then `t`), 42 open tasks. Before is the layers 1 to 22
+build (the list is untouched by layers 23 and 24), after is the layers 1 to 25
+build. Status columns are in cells from the left edge of the capture.
+
+```
+width   before: status word at     GOAL shown on      after: status word at   GOAL shown on
+60x24   cell 26 to 52              0 of 13 rows       cell 38 on every row    0 of 12 rows
+80x24   cell 37 to 72              5 of 13 rows       cell 43 on every row    12 of 12 rows
+120x35  cell 69 to 99              23 of 24 rows      cell 69 on every row    23 of 23 rows
+200x55  cell 93 to 123             41 of 42 rows      cell 93 on every row    42 of 42 rows
+```
+
+Before, each task was one joined line and the title took what its neighbours
+left, so the status started at a different cell on every row and the goal
+showed only where the line had room. After, the list is a table: `TASK`,
+`TITLE`, `STATUS`, `OWNER`, `GOAL` and a `!` for top priority. The header costs
+one row, so one task fewer fits on the first screen. At 60x24 `GOAL` is dropped
+first and the status word takes its short spelling (`active`, `verify`). The
+header stays in place when the list scrolls.
+
+![Tasks at 80x24 before](tasks-80-before.png)
+![Tasks at 80x24 after](tasks-80-after.png)
+![Tasks at 120x35 before](tasks-120-before.png)
+![Tasks at 120x35 after](tasks-120-after.png)
+![Tasks at 80x24 after, scrolled](tasks-80-scrolled-after.png)
+
+### Layer 27: the Task detail colours its headings, status and time rows (#48411)
+
+Work, Tasks, Enter on a Task. The fixture has 12 tasks. Before is the layers 1
+to 25 build (layers 1 to 26 do not touch the Task detail), after is the layers
+1 to 27 build. The `.txt` captures hold no colour, so the table lists the SGR
+codes that the `.ansi` captures carry on each row. "Bright cyan" is SGR 96 and
+"bright yellow" is SGR 93: the capture terminal does not answer the palette
+query, so the info and warn roles come out as these two.
+
+```
+Task in review, 120x35 (the detail pane)
+row                                                       before   after
+[ 1. 작업 식별 · 상태 및 목표 (Task Identity & Status) ]   plain    bold + bright cyan
+title, id, goal                                           plain    plain
+link: masc://planning/example-goal                        plain    dim
+status: awaiting verification                             plain    bright yellow
+actor                                                     plain    plain
+started, submitted, created                               plain    dim
+verification, creator, priority, cycles                   plain    plain
+[ 2. 작업 설명 · 대상 파일 (Description & Files) ]          plain    bold + bright cyan
+[ 3. 인수인계 · 완료 계약 (Handoff & Completion Contract) ]  plain    bold + bright cyan
+handoff updated                                           plain    dim
+handoff, handoff updater, evidence                        plain    plain
+[ 4. 상태 전환 이력 (HISTORY) ]                             plain    bold + bright cyan
+Lifecycle, Audit, history rows, JSON                      plain    plain
+
+status row by state     before   after
+claimed                 plain    bright cyan
+in progress             plain    bright cyan
+awaiting verification   plain    bright yellow
+```
+
+Before, every row of the detail was drawn in the default colour, so a
+heading, the status and a timestamp looked like the title and the description.
+After, headings are bold in the info colour, the `status` row uses the colour
+of the same Task's row in the list, and the rows that say when something
+happened, plus the Goal `link` row, are dim. Rows are coloured after they are
+wrapped, so a wrapped row carries its colour on every line and each line ends
+with a reset. The history heading is its own row (`history_heading_rows`)
+because the two callers send the status lines through a wrapper that writes
+ESC as text.
+
+The 80x24 capture (the detail uses the full width) and the scrolled capture
+(the `[ 2. ... ]` heading at the top, history below) carry the same colours.
+In the scrolled capture the history rows and the JSON are still plain.
+
+![Task detail at 120x35 before](task-detail-120-before.png)
+![Task detail at 120x35 after](task-detail-120-after.png)
+![Task detail at 80x24 before](task-detail-80-before.png)
+![Task detail at 80x24 after](task-detail-80-after.png)
+![Claimed Task detail at 120x35 before](task-detail-claimed-120-before.png)
+![Claimed Task detail at 120x35 after](task-detail-claimed-120-after.png)
+![Scrolled Task detail at 120x35 before](task-detail-scrolled-120-before.png)
+![Scrolled Task detail at 120x35 after](task-detail-scrolled-120-after.png)
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -484,5 +655,19 @@ catalogue exhausted tag are not in this fixture and were not drawn.
   has no window, and at widths below 80 cells: the fixture has ten accounts,
   none with an email, none that reported, and the Usage tab was captured at
   80x24 and 120x35 only.
+- Layer 22 with more than one Task in review, and at widths between 88 and 99
+  cells: the fixture has one Task in review and Task Review was captured at
+  60x24, 80x24, 86x24, 87x24, 100x30 and 120x35.
+- Layer 23 with a Feature name longer than 25 cells or a state sentence longer
+  than 44 cells, where the two columns do not fit together and the list keeps
+  the earlier split.
+- Layer 24 with a lane name longer than its column (the middle fold is
+  unchanged) and at widths above 140 cells.
+- Layer 25 with a Task that has several goals, with the English UI, and at
+  widths below 60 cells: the fixture gives each Task at most one goal.
+- Layer 27 with a done or cancelled Task, with a terminal that answers the
+  palette query, and in the Tools view of a Task from an async request: the Work
+  list shows open Tasks only, the capture terminal does not answer the palette
+  query, and the fixture has no async request source.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

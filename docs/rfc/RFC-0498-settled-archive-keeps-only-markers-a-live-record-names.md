@@ -1,0 +1,165 @@
+---
+rfc: "0498"
+title: "settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문은 보관하지 않는다"
+status: Draft
+created: 2026-11-06
+updated: 2026-11-06
+author: claude
+supersedes: []
+superseded_by: null
+related: ["librarian-history-settles-finished-originals", "workspace-curator-originals-name-ledger-revisions", "0497"]
+---
+
+# RFC-0498: settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문은 보관하지 않는다
+
+- 상태: 초안
+- 이슈: #48946
+- 근거: §2 의 수치는 2026-11-06 04시(KST) 운영 workspace 에서 쟀다. 보관 위치는 파일 이름과 크기만 셌다. 살아 있는 기록은 문자열 값 중 요청 ID 모양인 것만 뽑아 digest 를 비교했다. 요청 본문은 열지 않았다. §3 의 코드는 `origin/main` `f2d98655513` 이다.
+- 앞선 문서: RFC "librarian-history-settles-finished-originals" 는 보관 위치를 만들고 정리 규칙을 Q3 으로 미뤘다. RFC "workspace-curator-originals-name-ledger-revisions" 의 Q1 도 같은 결정을 기다린다.
+- 짝 문서: RFC-0497 은 Lane instance 의 binding 과 관측을 다룬다. 이 문서와 독자도, 잘못 지웠을 때의 비용도 다르다.
+
+## 0. 요약
+
+끝난 original 은 `settle` 로 `tool-request-owners-settled/<scope digest>/<날짜>/` 에 옮겨진다. 옮겨진 뒤 지우는 코드가 없다. 지금 19.7GB 이고 하루 0.5~0.9GB 씩 는다.
+
+이 보관 위치를 읽는 코드는 하나뿐이다. `Lane_addon_store.tool_request_settled` 가 기록 파일이 있는지 `lstat` 으로 본다. 묻는 쪽은 "살아 있는 부모가 가리키는 자식이 보관됐나"만 묻는다. 멈춘 settle 을 마저 끝내려고 묻는 것이다.
+
+- 보관된 본문 14.05GB 는 아무도 읽지 않는다.
+- 보관된 기록 5.64GB 도 내용은 아무도 읽지 않는다. 파일이 있는지만 쓴다.
+- 지금 살아 있는 기록 420개가 담은 요청 ID 457개 중, 보관된 기록 12,456개를 가리키는 것은 0개다.
+
+이 RFC 는 두 가지를 정한다. `settle` 은 본문을 보관하지 않고 지운다. 보관된 기록은 살아 있는 기록이 그 ID 를 가리키지 않으면 지운다.
+
+## 1. 결정
+
+- D1. `settle` 은 기록을 보관 위치로 옮긴 뒤, 본문을 보관 위치로 옮기지 않고 지운다. 순서는 지금처럼 기록이 먼저다. 다시 부른 `settle` 은 남은 본문을 지운다.
+- D2. 보관된 기록은 살아 있는 기록이 그 요청 ID 를 가리키지 않으면 지운다. "가리킨다"는 settle 을 부르는 세 곳이 마저 끝내기에서 묻는 ID 와 같다(§3.2). 각 곳이 타입으로 답한다(§4.2).
+- D3. 지우기는 settlement barrier 와 workspace process lease 안에서 한다. 그 안에서는 settle 이 돌지 않는다. 그래서 그 순간 살아 있는 기록이 가리키는 ID 집합이 정확하다.
+- D4. 이미 쌓인 12,456개도 같은 규칙으로 지운다. 먼저 대상만 세는 층을 내고, 운영자가 수치를 확인한 뒤 지우는 층을 낸다(§6).
+- D5. 표시를 두 단계("표시 → 다음 주기 재확인 → 삭제")로 지우지 않는다. 이유는 §4.3 에 있다.
+
+## 2. 무슨 일이 났나
+
+### 2.1 크기
+
+| 위치 | scope | 기록 | 본문 |
+|---|---|---|---|
+| `tool-request-owners-settled` | 123 | 12,456개, 5.64GB | 12,456개, 14.05GB |
+| `tool-request-owners` (살아 있음) | 115 | 420개, 19MB | `tool-request-bodies` 202MB |
+
+날짜별 보관 기록 수(체인 root 가 만들어진 UTC 날짜):
+
+| 10-26 | 10-27 | 10-28 | 10-29 | 10-30 | 10-31 | 11-01 | 11-02 | 11-03 | 11-04 | 11-05 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1,168 | 1,962 | 381 | 82 | 43 | 289 | 520 | 2,789 | 4,381 | 561 | 280 |
+
+기록 하나가 평균 453KB 다. 앞선 RFC 의 실측대로 같은 요청이 기록의 이벤트에도 들어 있어서다.
+
+### 2.2 살아 있는 기록이 가리키는 보관 기록
+
+살아 있는 기록 420개의 모든 문자열 값 중 UUIDv7 을 담은 것(요청 ID 모양) 457개를 뽑았다. 각 문자열의 SHA-256 을 보관 기록 파일 이름(`digest request_id`)과 맞대었다.
+
+- 맞는 보관 기록: 0개
+- 방법 확인: 살아 있는 기록 420개 모두 자기 `request_id` 의 SHA-256 이 파일 이름과 같다. 그래서 ID 문자열을 digest 해서 비교하는 방법이 맞다.
+
+즉 지금 보관된 기록 12,456개는 모두 D2 의 대상이다.
+
+## 3. 지금 코드
+
+### 3.1 보관 위치를 읽는 곳
+
+- `Lane_addon_store.tool_request_settled` 가 유일하다. 기록 경로를 `lstat` 해서, 이 프로세스가 가진 일반 파일이면 `true`, 없으면 `false` 다(`lane_addon_store.ml` 803). 내용은 읽지 않는다.
+- 보관된 본문 경로(`tool_request_archive_body_path`)는 `settle` 이 쓸 때만 쓴다. 읽는 곳이 없다.
+- 시작할 때 도는 본문 inventory(`Lane_addon_original_body_inventory`)는 보관 위치를 보지 않는다. 그 `.mli` 가 "Settled records are not read" 라고 적는다.
+- 설계 문서 `addon-original-request-discovery.md` 도 같은 말을 한다. "the Curator's discovery only asks whether a child's record is there, to finish a stopped settle, and `settled` answers only that."
+
+`lane_addon_store.mli` 의 `tool_request_archive_body_path` 주석은 "Startup cleanup inventories the records" 라고 적는다. 지금 코드와 맞지 않는다. 구현 층에서 이 주석을 고친다.
+
+### 3.2 `settled` 를 묻는 곳
+
+settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리키는 자식이 살아 있는 목록에 없을 때만 묻는다.
+
+| 묻는 곳 | 살아 있는 기록에서 꺼내는 ID |
+|---|---|
+| `Keeper_librarian_durable_execution` `finished_chains` | `Progress.replacement` 가 `Preparation_confirmed intended` 인 기록의 `intended.request_id` |
+| `Keeper_librarian_durable_execution` `settle_orphan_gates` | gate inventory 의 execution ID |
+| `Keeper_librarian_floor_cleanup` `settle_orphan_gates` | step gate inventory 의 execution ID |
+| `Server_workspace_memory_addon` `finish_settling` | `Progress.Subdivided (_, intent)` 인 기록의 `intent.request_id` |
+
+`true` 면 살아 있는 부모 체인을 마저 옮긴다. `false` 면 그 부모를 그대로 둔다.
+
+## 4. 설계
+
+### 4.1 본문
+
+`settle_tool_request` 는 지금 기록과 본문을 차례로 `move_into_archive` 한다. D1 은 두 번째 이동을 지우기로 바꾼다.
+
+- 기록이 먼저 옮겨진다. 그래서 중간에 멈추면 지금처럼 "본문만 scope 옆에 남는다". 기록이 본문 없이 남는 일은 없다.
+- `settle` 의 호출 계약은 이미 "다른 기록이 가리키지 않는 본문"만 settle 한다고 적는다. 본문은 자기 요청 ID 를 담아서 두 기록이 한 본문을 나누지 않는다.
+
+### 4.2 보관 기록
+
+settle 을 부르는 세 곳을 닫힌 타입 하나로 묶는다.
+
+```ocaml
+type settling_family = Librarian_history | Librarian_floor | Workspace_curator
+```
+
+- `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 새 호출처는 이 타입에 항목을 더해야 컴파일된다.
+- 각 항목은 살아 있는 기록 하나가 가리키는 ID 를 답한다. §3.2 의 표와 같고, `Progress` 의 모든 phase 를 와일드카드 없이 match 한다.
+- 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다. 보관 기록 중 `digest request_id` 가 `N` 의 digest 에 없는 것을 지운다. 지울 때는 그 날짜 디렉터리의 본문 파일도 같이 지운다(이미 쌓인 본문).
+- 이 pass 는 settlement barrier 와 workspace process lease 안에서 돈다. 시작할 때 본문 inventory 다음에, 그리고 날짜별 store 정리가 도는 24시간 주기에 같이 돈다. 새 주기는 만들지 않는다.
+
+### 4.3 두 단계로 지우지 않는 이유
+
+키퍼 리뷰는 "잘못 지우면 요청이 한 번 더 실행된다"는 이유로 두 단계 지우기를 권했다. 그 위험은 맞다. 살아 있는 부모가 가리키는 자식의 표시를 지우면, 부모는 자식이 없다고 보고 다시 만들 수 있다.
+
+다만 그 경우는 이 규칙에서 생기지 않는다.
+
+1. 부모는 자식을 만들기 전에 자식 ID 를 기록한다. `Lane_addon_request_progress` 의 이벤트 이름이 그 순서다. `Replacement_intended` 가 ID 를 적고(`Preparation_pending`), 자식이 저장된 뒤 `Preparation_confirmed` 가 된다. Curator 는 `Subdividing` 에서 `Subdivided` 로 간다. `.mli` 는 "confirm the retained child before ACK" 라고 적는다.
+2. 체인은 잎부터 옮긴다. 부모는 자식보다 늦게 보관 위치로 간다.
+3. 그래서 자식 표시가 보관돼 있고 살아 있는 기록이 그 ID 를 가리키지 않으면, 그 부모는 이미 보관 위치에 있다. 보관된 기록은 다시 살아나지 않는다.
+4. 새 기록이 가리키는 ID 는 새로 만든 ID 다. ID 마지막 칸이 그때 만든 UUIDv7 이다(`Request.minted_on`).
+5. 지우는 pass 가 도는 동안 settle 은 barrier 에 막힌다. 그래서 1~4 가 pass 안에서 바뀌지 않는다.
+
+한 번 확인해서 정확한 조건을 두 번 확인해도 결과가 같다. 두 단계는 표시 상태만 하나 더 만든다. 구현 층은 4 번(자식 ID 를 어디서 만드는지)을 세 곳 모두 코드로 확인한다(§7).
+
+## 5. 이 RFC 가 하지 않는 것
+
+- Lane instance 의 binding 과 관측: RFC-0497.
+- content-addressed blob(`evidence/`, `sequences/`)과 Curator 원장 판본 파일: 가리키는 쪽이 여럿이다. 보관 기록이 줄면 가리키는 쪽이 하나 줄 뿐이다.
+- 실행 기록(`exact_lane_run_registry` 의 `completed_retention`): 이미 레인마다 최근 2,000개로 정해져 있다.
+- 살아 있는 scope 옆에 남은 본문(멈춘 retain·settle 이 남긴 것): 이슈 #45320.
+
+## 6. 구현 순서
+
+1. L1 계획: §4.2 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `settling_family` 와 세 곳의 답 함수도 이 층에 들어간다.
+   - 확인: 배포 뒤 대상 수가 §2.2 와 같은 방법으로 잰 값과 맞는다.
+2. L2 본문: D1. `settle` 이 본문을 지운다. 이미 쌓인 본문은 L3 이 지운다.
+   - 확인: 배포 뒤 새 날짜 디렉터리에 `bodies/` 가 생기지 않는다.
+3. 운영자 확인: L1 수치를 보고 L3 을 병합한다. 설정 스위치는 두지 않는다.
+4. L3 지우기: §4.2 의 pass 가 지운다. 지운 수와 바이트를 한 줄 info 로그에 남긴다.
+   - 확인: 첫 pass 뒤 `tool-request-owners-settled` 가 거의 빈다. 이후 하루 크기가 settle 중에 멈춘 체인 수만큼만 남는다.
+
+## 7. 구현 층이 코드로 닫을 것
+
+- 세 곳에서 자식 ID 를 언제 만드는지 확인한다(§4.3 의 1·4 번). 부모가 자식 ID 를 기록하기 전에 자식 기록이 생기는 경로가 있으면 D2 는 그 경로를 막는 방법과 같이 다시 쓴다.
+- `Progress` 가 자식 ID 를 담는 곳을 모두 찾는다. §3.2 는 마저 끝내기가 묻는 ID 만 적었다. `Preparation_intended`, `Successor_intended` 처럼 ID 를 담는 이벤트가 더 있다. 다른 phase 가 보관된 ID 를 가리키면서 `settled` 를 묻지 않는다면 D2 에 영향이 없다. 다만 그 목록을 PR 에 적는다.
+- `lane_addon_store.mli` 의 틀린 주석(§3.1)을 고친다.
+- 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다.
+
+## 8. 열린 질문
+
+### Q1. 보관 위치를 사람이 디버깅에 쓰는가 (사용자 결정)
+
+앞선 RFC 는 "증거는 보관 위치에 남는다"고 적었다. 코드는 그 증거를 읽지 않는다. 운영 문서 중 보관 위치를 읽으라고 하는 것은 Curator hard cut 절차 하나다. 그 절차는 보관 위치를 다른 곳으로 옮겨 두라고 한다.
+
+- A (권함): 이 RFC 대로 지운다. 끝난 Librarian·Curator 일의 결과는 workspace memory 원장과 Keeper 기록에 남는다.
+- B: 기록은 이 RFC 대로 지우고, 본문만 날짜별 store 처럼 운영자 창(예: 7일) 동안 남긴다. 지금 하루 보관량이 0.5~0.9GB 라서 7일이면 4~6GB 다.
+
+## 9. 리뷰
+
+- 키퍼 리뷰어와 먼저 방향을 맞췄다.
+  - 받아들인 것: RFC-0497 과 따로 쓴다. 기간이나 개수가 아니라 가리키는 쪽이 없을 때 지운다. 가리키는 쪽의 범위에 Librarian durable 실행, floor 정리, Curator 가 모두 들어간다. 세기 → 운영자 확인 → 지우기 순서로 낸다.
+  - 바꾼 것: 리뷰어는 독자마다 읽은 위치(watermark)를 보자고 했다. 이 보관 위치의 독자는 순서대로 읽지 않는다. 살아 있는 부모가 가리키는 ID 만 묻는다. 그래서 watermark 대신 "살아 있는 기록이 가리키는 ID 집합"을 쓴다(§4.2).
+  - 받아들이지 않은 것: 두 단계 지우기. 이유는 §4.3 에 있다.

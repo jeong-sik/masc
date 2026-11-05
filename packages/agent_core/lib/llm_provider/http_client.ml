@@ -1079,16 +1079,6 @@ let end_connection ?cache ~origin connection verdict =
   | None -> Eio.Resource.close connection
 ;;
 
-(** The switch a request opens its connection on: the cache's long-lived
-    switch when there is a cache, so the connection can be parked and reused
-    after the request ends, otherwise the request's own switch, which closes
-    it. *)
-let connection_switch cache ~sw =
-  match cache with
-  | Some cache -> Http_client_cache.switch cache
-  | None -> sw
-;;
-
 (** Client wrapper that tracks the socket for explicit close.
     The caller provides the concrete URI so host resolution and TLS
     availability can be checked up front and reported as typed errors. *)
@@ -1345,7 +1335,6 @@ let post_sync_once_after_validation
   Eio.Switch.run
   @@ fun sw ->
   let { origin; header; body } = request in
-  let request_sw = connection_switch cache ~sw in
   let phase = ref Before_dispatch in
   let status = ref None in
   let connection = ref None in
@@ -1465,7 +1454,7 @@ let post_sync_once_after_validation
       with_headers_deadline (fun () ->
         let* conn =
           match cache with
-          | None -> make_connection ~sw:request_sw ~net ~origin
+          | None -> make_connection ~sw ~net ~origin
           | Some cache -> checkout_connection cache ~net ~origin
         in
         connection := Some conn;
@@ -1475,7 +1464,7 @@ let post_sync_once_after_validation
         Http_request_observer.dispatch_entered observation;
         let response, response_body =
           Cohttp_eio.Client.post
-            ~sw:request_sw
+            ~sw
             client
             ~headers:header
             ~body:(Cohttp_eio.Body.of_string body)
@@ -1768,7 +1757,6 @@ let with_post_stream
   let window_opened = Option.map (fun clock -> clock, Eio.Time.now clock) clock in
   Eio.Switch.run
   @@ fun sw ->
-  let request_sw = connection_switch cache ~sw in
   (* Phase 1a: the connection, the request and the response headers, one
      window under [deadline] (see [pre_header_deadline]); a refusal's body
      is then read under what that window has left, and a body that does not
@@ -1825,7 +1813,7 @@ let with_post_stream
           under_the_window (fun () ->
             let* conn =
               match cache with
-              | None -> make_connection ~sw:request_sw ~net ~origin
+              | None -> make_connection ~sw ~net ~origin
               | Some cache -> checkout_connection cache ~net ~origin
             in
             connection := Some conn;
@@ -1834,7 +1822,7 @@ let with_post_stream
             Http_request_observer.dispatch_entered observation;
             match
               Cohttp_eio.Client.post
-                ~sw:request_sw
+                ~sw
                 client
                 ~headers:hdr
                 ~body:(Cohttp_eio.Body.of_string body)

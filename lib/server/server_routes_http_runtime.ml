@@ -495,6 +495,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
+  let provider_connection_cache_json =
+    compute_section ~name:"provider_connection_cache" ?section_timings_ref
+      provider_connection_cache_json
+  in
   let disk_observation_json =
     compute_section ~name:"disk_observation" ?section_timings_ref (fun () ->
       Keeper_disk_pressure.snapshot_json
@@ -581,6 +585,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         () );
     ("fd_accountant", fd_accountant_json);
+    ("provider_connection_cache", provider_connection_cache_json);
     ("disk_observation", disk_observation_json);
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
@@ -736,6 +741,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "fd_accountant",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "fd_accountant" );
+    ( "provider_connection_cache",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "provider_connection_cache" );
     ( "disk_observation",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "disk_observation" );

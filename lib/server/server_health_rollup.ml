@@ -19,6 +19,7 @@ let cached_field_names =
     "keeper_fibers";
     "fd_observation";
     "fd_accountant";
+    "provider_connection_cache";
     "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";

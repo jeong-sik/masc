@@ -41,8 +41,11 @@ type stats =
 
 (** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
     connections kept per origin and [idle_ttl_seconds] is how long one may sit
-    idle. [clock], if supplied, drives a background fiber that closes expired
-    connections; without it they are closed when [sw] is released.
+    idle. {!checkout} never hands out a connection idle for longer; it closes
+    it instead. [clock], if supplied, drives a background fiber that closes
+    expired connections every [idle_ttl_seconds /. 2.]; without it they are
+    closed at the next {!checkout} for their origin or when [sw] is
+    released.
 
     @raise Invalid_argument if [max_idle_per_host < 1] or
     [idle_ttl_seconds <= 0]. *)
@@ -54,17 +57,14 @@ val create
   -> unit
   -> t
 
-(** The switch the cache was created with. A connection that will be parked
-    must be opened on it, because the switch of a single request ends before
-    the connection is reused. *)
-val switch : t -> Eio.Switch.t
-
 val stats : t -> stats
 
-(** A parked connection for the origin, now owned by the caller; otherwise the
-    result of [create], which must open its connection on the given switch.
-    Counts a reuse for the first case and a created connection for a [create]
-    that returns [Ok]. Always runs [create] once the cache is stopped. *)
+(** A parked connection for the origin idle for at most the TTL, now owned
+    by the caller; otherwise the result of [create], which must open its
+    connection on the given switch. Expired connections for the origin are
+    closed on the way. Counts a reuse for the first case and a created
+    connection for a [create] that returns [Ok]. Always runs [create] once
+    the cache is stopped. *)
 val checkout
   :  t
   -> Key.t

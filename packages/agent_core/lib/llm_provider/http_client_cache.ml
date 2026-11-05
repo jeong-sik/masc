@@ -30,6 +30,19 @@ type entry =
   ; last_used_at : float
   }
 
+(* Idle longer than the TTL: no request takes it, and it is closed. *)
+let is_expired ~idle_ttl_seconds ~now entry = now -. entry.last_used_at > idle_ttl_seconds
+
+let close_entries entries =
+  Eio.Cancel.protect (fun () ->
+    List.iter
+      (fun e ->
+         try Eio.Resource.close e.connection with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | _ -> ())
+      entries)
+;;
+
 type close_counts =
   { request_failed : int
   ; not_persistent : int
@@ -140,7 +153,7 @@ let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t
                let remaining =
                  Key_map.map
                    (List.filter (fun e ->
-                      if now -. e.last_used_at > cache.idle_ttl_seconds
+                      if is_expired ~idle_ttl_seconds:cache.idle_ttl_seconds ~now e
                       then (
                         expired := e :: !expired;
                         false)
@@ -150,21 +163,13 @@ let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t
                cache.entries <- remaining;
                !expired)
            in
-           Eio.Cancel.protect (fun () ->
-             List.iter
-               (fun e ->
-                  try Eio.Resource.close e.connection with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | _ -> ())
-               expired);
+           close_entries expired;
            loop ())
        in
        loop ())
    | None -> ());
   cache
 ;;
-
-let switch (cache : t) = cache.sw
 
 let stats (cache : t) : stats =
   Eio.Mutex.use_ro cache.mu (fun () ->
@@ -187,17 +192,31 @@ let stats (cache : t) : stats =
     })
 ;;
 
+(* The eviction fiber runs every half TTL, so an entry can outlive the TTL by
+   up to that much before it is closed. A request must not take it in that
+   time: the server may already have closed it. *)
 let take (cache : t) key : connection option =
   if Atomic.get cache.stop
   then None
-  else
-    Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-      match Key_map.find_opt key cache.entries with
-      | Some (e :: rest) ->
-        cache.entries <- Key_map.add key rest cache.entries;
-        Atomic.incr cache.reuse_count_total;
-        Some e.connection
-      | _ -> None)
+  else (
+    let now = cache.now () in
+    let taken, expired =
+      Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
+        let parked = Key_map.find_opt key cache.entries |> Option.value ~default:[] in
+        let expired, fresh =
+          List.partition (is_expired ~idle_ttl_seconds:cache.idle_ttl_seconds ~now) parked
+        in
+        match fresh with
+        | e :: rest ->
+          cache.entries <- Key_map.add key rest cache.entries;
+          Atomic.incr cache.reuse_count_total;
+          Some e.connection, expired
+        | [] ->
+          cache.entries <- Key_map.remove key cache.entries;
+          None, expired)
+    in
+    close_entries expired;
+    taken)
 ;;
 
 let park (cache : t) key connection : unit =

@@ -655,6 +655,29 @@ let fd_accountant_snapshot_json () =
     ]
 ;;
 
+let provider_connection_cache_json () =
+  match Provider_connection_cache_ref.stats () with
+  | None -> `Null
+  | Some stats ->
+    let closed = stats.closed_total in
+    let idle_max_per_origin =
+      List.fold_left (fun most (_origin, idle) -> max most idle) 0 stats.idle_per_host
+    in
+    `Assoc
+      [ "idle_total", `Int stats.total_idle
+      ; "idle_max_per_origin", `Int idle_max_per_origin
+      ; "reused_total", `Int stats.reuse_count_total
+      ; "created_total", `Int stats.create_count_total
+      ; ( "closed_total"
+        , `Assoc
+            [ "request_failed", `Int closed.request_failed
+            ; "not_persistent", `Int closed.not_persistent
+            ; "body_not_drained", `Int closed.body_not_drained
+            ; "transport_ended", `Int closed.transport_ended
+            ] )
+      ]
+;;
+
 let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
   `Assoc
     [ "schema", `String "masc.runtime_truth.v1"

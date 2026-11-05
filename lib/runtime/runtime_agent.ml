@@ -188,6 +188,7 @@ let observed_http_transport
     Llm_provider.Complete.make_http_transport
       ?clock
       ?body_timeout_s
+      ?connection_cache:(Provider_connection_cache_ref.for_this_domain ())
       ~sw
       ~net
       ()

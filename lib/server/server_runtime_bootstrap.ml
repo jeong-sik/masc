@@ -710,6 +710,11 @@ let owner_initialization_error_to_string = function
       "owner readiness publication failed (observed_phase=%s)"
       (Server_startup_state.phase_to_string observed_phase)
 
+(* Shorter than the first provider to close an idle connection in RFC-0492
+   §1.2 (api.z.ai, 25 s). A request takes no connection idle for longer, so it
+   does not take one api.z.ai has already closed. *)
+let provider_connection_idle_ttl_s = 20.0
+
 let initialize_owner_state_blocking
       ~sw
       ~runtime_sw
@@ -925,6 +930,10 @@ let initialize_owner_state_blocking
       | Fd_accountant.Storage_space_exhausted ->
         Keeper_disk_pressure.note_exception ~site exn);
   Log.Server.info "Fd_accountant OS resource observers installed";
+  Provider_connection_cache_ref.install ~sw ~clock
+    ~idle_ttl_seconds:provider_connection_idle_ttl_s;
+  Log.Server.info "Provider connection cache installed idle_ttl_s=%.0f"
+    provider_connection_idle_ttl_s;
   Runtime_log_sink.install ();
   Log.Server.info
     "Runtime_log_sink installed (agent core -> MASC structured log)";

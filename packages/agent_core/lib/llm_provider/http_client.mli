@@ -413,7 +413,8 @@ type cache_stats =
 (** Create a connection cache.
 
     [max_idle_per_host] caps the number of idle connections kept per origin.
-    [idle_ttl_seconds] is the maximum time an idle connection is kept.
+    [idle_ttl_seconds] is the longest a connection a request takes may have
+    sat idle; an older one is closed instead.
     [clock], if supplied, drives the background eviction fiber.
 
     @since 0.208.0 *)

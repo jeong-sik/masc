@@ -530,16 +530,24 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        else None
                      in
                      let role_lc = String.lowercase_ascii role in
+                     let history_source =
+                       Keeper_types_support.history_source_of_string source
+                     in
                      let is_internal =
-                       Keeper_types_support.is_internal_history_source source
+                       match history_source with
+                       | Some history_source ->
+                           Keeper_types_support.is_internal_history_source
+                             history_source
+                       | None -> false
                      in
                      let entry_kind =
-                       match source, role_lc with
-                       | "direct_user", _ | "direct_assistant", _ ->
+                       match history_source with
+                       | Some Keeper_types_support.Direct_user
+                       | Some Keeper_types_support.Direct_assistant ->
                            "direct_conversation"
-                       | "world_state_prompt", _ -> "internal_prompt"
-                       | "internal_assistant", _ -> "internal_reply"
-                       | _, _ ->
+                       | Some Keeper_types_support.World_state_prompt -> "internal_prompt"
+                       | Some Keeper_types_support.Internal_assistant -> "internal_reply"
+                       | None ->
                            (match role_lc with
                        | "assistant" -> "self_talk"
                        | "user" -> "input"

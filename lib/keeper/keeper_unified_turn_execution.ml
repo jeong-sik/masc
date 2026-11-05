@@ -252,13 +252,13 @@ let run (ctx : ctx)
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~answered_ask_inputs:(Keeper_unified_prompt.answered_ask_inputs observation)
-                 ~history_user_source:"world_state_prompt"
+                 ~history_user_source:Keeper_types_support.World_state_prompt
                  (* This is an ordinary durable conversation turn. The current
                     observation remains ephemeral dynamic context, while the
                     tiny [Continue.] cue and assistant response preserve normal
                     multi-turn ordering without a separate turn identity. *)
                  ~user_turn_record:Keeper_run_prompt.Record_user_turn
-                 ~history_assistant_source:"internal_assistant"
+                 ~history_assistant_source:Keeper_types_support.Internal_assistant
                  (* [deferred_runtime_lane] is the whole degraded-retry input.
                     This call also passed the lane's runtime and reason
                     separately, under a flag that said a retry had been

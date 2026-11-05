@@ -49,10 +49,16 @@ let keeper_history_summary_json
         let content =
           Keeper_context_core.text_of_history_jsonl_json j |> String.trim
         in
-        let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
+        let internal =
+          match
+            Keeper_types_support.history_source_of_string
+              (Safe_ops.json_string ~default:"" "source" j)
+          with
+          | Some source -> Keeper_types_support.is_internal_history_source source
+          | None -> false
+        in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-        if role = "" || content = ""
-           || Keeper_types_support.is_internal_history_source source
+        if role = "" || content = "" || internal
         then
           (conv_acc, addressed_acc, mention_counts, raw_count)
         else

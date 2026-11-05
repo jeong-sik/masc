@@ -226,9 +226,9 @@ let official_empty_turn config ~turn ~time =
 let official_turn config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config) in
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session
     (message "Original official-client question");
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant" session
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original official-client answer"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file" ~outcome:Tool_result.Ok;
   official_empty_turn config ~turn ~time

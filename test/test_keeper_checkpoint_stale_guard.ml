@@ -918,7 +918,7 @@ let test_autonomous_turn_sends_the_run_context_base_prompt () =
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
              ~absolute_turn:2)
-        ~history_user_source:"autonomous"
+        ~history_user_source:Keeper_types_support.World_state_prompt
         ~user_turn_record:Keeper_run_prompt.Skip_already_checkpointed_user_turn
         ~start_turn_count:ctx.start_turn_count
     in

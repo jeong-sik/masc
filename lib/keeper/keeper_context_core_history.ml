@@ -23,30 +23,21 @@ open Keeper_types_profile
    re-declaring the alias here to prevent a duplicate-definition error at
    the include site; reference the underlying module qualified instead. *)
 
-type history_line_action =
-  | Keep_main
-  | Move_internal
-  | Drop_line
-
-let classify_history_entry ~(source : string) : history_line_action =
-  if Keeper_types_support.is_prompt_history_source source
-  then Drop_line
-  else if Keeper_types_support.is_internal_history_source source
-  then Move_internal
-  else Keep_main
-
 let main_history_path ~(session_dir : string) : string =
   Filename.concat session_dir Keeper_types_support.history_file_name
 
 let internal_history_path ~(session_dir : string) : string =
   Filename.concat session_dir Keeper_types_support.internal_history_file_name
 
-let history_path_for_source ~(session_dir : string) ~(source : string option) :
-    string =
+(* The file a message goes to, or [None] when it is not written. *)
+let history_path_for_source ~(session_dir : string)
+    (source : Keeper_types_support.history_source) : string option =
   match source with
-  | Some source when Keeper_types_support.is_internal_history_source source ->
-      internal_history_path ~session_dir
-  | _ -> main_history_path ~session_dir
+  | Keeper_types_support.Direct_user | Keeper_types_support.Direct_assistant ->
+      Some (main_history_path ~session_dir)
+  | Keeper_types_support.Internal_assistant ->
+      Some (internal_history_path ~session_dir)
+  | Keeper_types_support.World_state_prompt -> None
 
 (* Wire vocabulary shared with the reader. *)
 let key_ts_unix = "ts_unix"
@@ -124,25 +115,17 @@ let append_line ~keeper_name ~turn_ref ~session_dir ~path line =
 
 let line_of_fields fields = Yojson.Safe.to_string (`Assoc fields) ^ "\n"
 
-let persist_message ~keeper_name ~turn_ref ?source session msg =
+let persist_message ~keeper_name ~turn_ref ~source session msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in
-  let source_text =
-    match source with
-    | Some raw -> String.trim raw
-    | None -> ""
-  in
-  if classify_history_entry ~source:source_text = Drop_line
-  then ()
-  else
-    let path = history_path_for_source ~session_dir:session.session_dir ~source in
+  match history_path_for_source ~session_dir:session.session_dir source with
+  | None -> ()
+  | Some path ->
     let now_ts = Time_compat.now () in
     match Keeper_context_core_message_json.message_to_json msg with
     | `Assoc fields ->
         let fields =
-          match source with
-          | Some source when String.trim source <> "" ->
-              (key_source, `String source) :: fields
-          | _ -> fields
+          (key_source, `String (Keeper_types_support.history_source_to_string source))
+          :: fields
         in
         let fields =
           (key_ts_unix, `Float now_ts)

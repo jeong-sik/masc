@@ -61,9 +61,9 @@ let string_field key fields =
 let test_a_turns_lines_carry_its_turn_ref () =
   with_session
   @@ fun session ->
-  History.persist_message ~keeper_name ~turn_ref ~source:"user" session
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session
     (message ~role:Types.User "question");
-  History.persist_message ~keeper_name ~turn_ref ~source:"assistant" session
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_assistant session
     (message ~role:Types.Assistant "answer");
   match lines_of (History.main_history_path ~session_dir:session.session_dir) with
   | [ user; assistant ] ->
@@ -114,7 +114,7 @@ let test_a_torn_tail_is_cut_by_the_next_append () =
   let path = History.main_history_path ~session_dir:session.session_dir in
   Fs_compat.mkdir_p session.session_dir;
   Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc {|{"kind":"mess|});
-  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "after");
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "after");
   match lines_of path with
   | [ line ] ->
     let fields = fields_of line in
@@ -141,7 +141,7 @@ let test_successful_fragments_do_not_report_failures () =
   with_session @@ fun session ->
   let before_append = fragment_failures ~site:"append" in
   let before_encode = fragment_failures ~site:"encode" in
-  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "saved");
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "saved");
   check (float 0.) "successful message has no append failure" before_append
     (fragment_failures ~site:"append");
   History.persist_tool_observation ~keeper_name ~turn_ref session
@@ -165,9 +165,9 @@ let test_source_owner_serializes_both_fragment_stores () =
   let locked = Masc.Keeper_checkpoint_store.with_session_lock
     ~session_dir:session.session_dir (fun canonical_session_dir ->
       let writers = List.map (fun write -> Eio.Fiber.fork_promise ~sw write)
-        [(fun () -> History.persist_message ~keeper_name ~turn_ref ~source:"user"
+        [(fun () -> History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user
             session (message ~role:Types.User "main after source publication"));
-         (fun () -> History.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant"
+         (fun () -> History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant
             session (message ~role:Types.Assistant "internal after source publication"));
          (fun () -> History.persist_tool_observation ~keeper_name ~turn_ref session
             ~tool_name:"masc_tasks" ~outcome:Tool_result.Ok)] in
@@ -206,7 +206,7 @@ let test_waiting_fragment_writer_propagates_cancellation () =
       let writer = Eio.Fiber.fork_promise ~sw (fun () ->
         Eio.Cancel.sub (fun cancellation ->
           Eio.Promise.resolve context_u cancellation;
-          History.persist_message ~keeper_name ~turn_ref session
+          History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session
             (message ~role:Types.User "cancelled before source release"))) in
       let lock_path = canonical_session_dir ^ ".checkpoint.lock" in
       while File_lock_eio.For_testing.holders_and_waiters ~lock_path < 2 do
@@ -222,7 +222,7 @@ let test_waiting_fragment_writer_propagates_cancellation () =
   (match locked with Ok () -> () | Error detail -> fail detail);
   check (float 0.) "cancellation is not an append failure" before
     (fragment_failures ~site:"append");
-  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "after cancellation");
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "after cancellation");
   check int "a later writer can still acquire the source lock" 1 (List.length (lines_of path))
 ;;
 
@@ -234,7 +234,7 @@ let test_a_refused_line_does_not_raise () =
   let path = History.main_history_path ~session_dir:session.session_dir in
   Fs_compat.mkdir_p path;
   let before = fragment_failures ~site:"append" in
-  History.persist_message ~keeper_name ~turn_ref session (message ~role:Types.User "lost");
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "lost");
   check (float 0.0001) "the refusal is counted" (before +. 1.0)
     (fragment_failures ~site:"append");
   check bool "the store is as it was" true
@@ -258,7 +258,7 @@ let test_persisted_message_preserves_reasoning_provenance () =
     @ [ "turn-origin", `Assoc [ "request", `String "fixture" ] ] in
   let original = { (message ~role:Types.Assistant "answer") with metadata;
     content = [ Types.Thinking { content = "reasoning"; signature = None }; Types.Text "answer" ] } in
-  History.persist_message ~keeper_name ~turn_ref ~source:"assistant" session original;
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_assistant session original;
   match lines_of (History.main_history_path ~session_dir:session.session_dir) with
   | [ line ] ->
       let json = Yojson.Safe.from_string line in

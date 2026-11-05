@@ -4809,7 +4809,7 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
           (!terminal_seen && owner.rfs_token==form.rfs_token && status=form_status
            && not (runtime_form_save_current state owner)
            && apply_runtime_form_save state owner status)
-    | P.Keeper_settings_save_changed (owner,status,_) ->
+    | P.Keeper_msg (P.Keeper_settings_save_changed (owner,status,_)) ->
         Alcotest.(check bool) "original refused settings result settles only its owner" true
           (owner.ksv_token==settings.ksv_token && status=settings_status
            && not (keeper_settings_save_current state owner)
@@ -4820,7 +4820,7 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
            && owner.ras_runtime_id=Some "codex.example"
            && not (runtime_assignment_current state owner)
            && apply_runtime_assignment state owner status)
-    | P.Keeper_creation_changed (owner,status) ->
+    | P.Keeper_msg (P.Keeper_creation_changed (owner,status)) ->
         Alcotest.(check bool) "each creation consumes only its own terminal result once" true
           (apply_keeper_creation_status state owner status)
     | _ -> Alcotest.fail "unexpected owned result" in
@@ -4882,7 +4882,7 @@ let test_operation_histories_keep_unfinished_and_recovery_owners () =
     | P.Runtime_form_save_changed (owner,status,_) ->
         Alcotest.(check bool) "form observation advances only its registered owner" true
           (apply_runtime_form_save state owner status)
-    | P.Keeper_settings_save_changed (owner,status,_) ->
+    | P.Keeper_msg (P.Keeper_settings_save_changed (owner,status,_)) ->
         Alcotest.(check bool) "settings observation advances only its registered owner" true
           (apply_keeper_settings_save state owner status)
     | P.Runtime_assignment_changed (owner,status,_) ->
@@ -5716,7 +5716,7 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   Alcotest.(check int) "completed source offered without its sibling" 1 (List.length offered);
   (match offered with
    | [{Protocol.ready_at_ns; message=Protocol.Workspace_scoped (authority, Some reading,
-        Protocol.Keeper_chat_history_loaded (request, Read.History, Error detail))}] ->
+        Protocol.Keeper_msg (Protocol.Keeper_chat_history_loaded (request, Read.History, Error detail)))}] ->
        Alcotest.(check int64) "original result observation retained" 11L ready_at_ns;
        Alcotest.(check string) "duplicate did not overwrite failure" "history refused" detail;
        Alcotest.(check bool) "original request identity retained" true (request == owner);

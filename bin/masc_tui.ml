@@ -2338,7 +2338,7 @@ let launch_keeper_creation state ~mailbox ~request ~declaration =
       ~host ~port in
   let deliver status =
     if publish_keeper_creation_status request ~observed_ns:(Mtime_clock.elapsed_ns ()) status then
-      enqueue_async mailbox (Keeper_creation_changed (request, status)) in
+      enqueue_async mailbox (Keeper_msg (Keeper_creation_changed (request, status))) in
   let interrupted sent detail =
     if sent then Creation_unconfirmed detail else Creation_not_sent detail in
   let sent = ref false in
@@ -2515,7 +2515,7 @@ let enqueue_dispatch_ack ~enqueue mailbox make_message =
 let enqueue_dispatch_start ~enqueue mailbox request was_replay =
   let acknowledged, acknowledge = Eio.Promise.create () in
   enqueue mailbox
-    (Keeper_chat_dispatch_started (request, was_replay, acknowledge));
+    (Keeper_msg (Keeper_chat_dispatch_started (request, was_replay, acknowledge)));
   Eio.Promise.await acknowledged
 
 (* Track the background server started by this TUI for readiness and child
@@ -2680,9 +2680,9 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
        | Ok () ->
            if start_first_post () then begin
              enqueue_async mailbox
-               (Keeper_chat_stream_unavailable
+               (Keeper_msg (Keeper_chat_stream_unavailable
                   ( request
-                  , "sending without a live view: no Eio clock to bound the stream" ));
+                  , "sending without a live view: no Eio clock to bound the stream" )));
              Masc_tui_http.post_keeper_chat ~expected_workspace ~admission_intent ~host ~port request
            end
            else Error (Keeper_chat.Transport_error "Workspace authority withdrawn"))
@@ -2718,8 +2718,8 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
           | deltas ->
               List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
                 | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
-                  enqueue_async mailbox (Keeper_chat_control_received
-                    (request.Keeper_chat.keeper_name, control_generation, receipt.chat_control_token))
+                  enqueue_async mailbox (Keeper_msg (Keeper_chat_control_received
+                    (request.Keeper_chat.keeper_name, control_generation, receipt.chat_control_token)))
                 | Keeper_chat_live.Accepted { interactive = None;_} | Keeper_chat_live.Run_started
                 | Keeper_chat_live.Checkpoint | Keeper_chat_live.External_effect_completed
                 | Keeper_chat_live.Run_finished | Keeper_chat_live.Batch_bound _
@@ -2746,7 +2746,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                   | None -> ())
                 deltas;
               enqueue_async mailbox
-                (Keeper_chat_stream_deltas (request, deltas)));
+                (Keeper_msg (Keeper_chat_stream_deltas (request, deltas))));
           (* A rejected frame can share a chunk with valid earlier frames.
              Deliver that prefix before closing, since live events need not
              all have reached the journal for a later replay. *)
@@ -2785,10 +2785,10 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
             if not was_unverified
             then
               enqueue_async mailbox
-                (Keeper_chat_stream_unavailable
+                (Keeper_msg (Keeper_chat_stream_unavailable
                    ( request
                    , Keeper_chat.unverified_retry_notice
-                       ~request_id:request.Keeper_chat.request_id error ));
+                       ~request_id:request.Keeper_chat.request_id error )));
             (* Re-POSTing the same operation id is the server's idempotent
                subscribe/reconcile path. The in-flight owner stays held until
                one watcher observes terminal truth, so NEXT cannot overlap a
@@ -2901,7 +2901,7 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_tool_approvals_loaded (request, expected_workspace, result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_tool_approvals_loaded (request, expected_workspace, result))))
     (fun () ->
       let open Result.Syntax in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
@@ -3512,7 +3512,7 @@ let launch_keeper_preparation_load state ~mailbox =
     let target = Details.requested_target request in
     let host = server_peer_host and port = state.port in
     launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Keeper_preparation_loaded (request,result))
+      ~deliver:(fun result -> Keeper_msg (Keeper_preparation_loaded (request,result)))
       (fun () -> Masc_tui_http.fetch_keeper_preparation_details ~host ~port target)) request;
   current != previous
 ;;
@@ -3530,7 +3530,7 @@ let launch_keeper_waiting_load ?change ?(exclusive = false) state ~mailbox =
       let host = server_peer_host and port = state.port in
       let snapshot = capture_keeper_waiting_snapshot state in
       Masc_tui_async_read.launch ~source:Masc_tui_async_read.Keeper_turns
-        ~deliver:(fun result -> enqueue_async mailbox (Keeper_waiting_loaded (request, snapshot, result)))
+        ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_waiting_loaded (request, snapshot, result))))
         (capture_workspace_json_read state (fun () ->
           Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for:None))
     ) request
@@ -3558,7 +3558,7 @@ let launch_keeper_turns_load state ~mailbox =
         state.keeper_turns_inflight <- false;
         state.keeper_turns_owed <- Masc_tui_owed_read.abandoned state.keeper_turns_owed)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result)))
+        enqueue_async mailbox (Keeper_msg (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result))))
       (capture_workspace_json_read state (fun () ->
         Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for))
   end
@@ -3762,7 +3762,7 @@ let launch_keeper_tool_modes_load state ~mailbox =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_tool_modes_loaded (result, ticket));
+      enqueue_async mailbox (Keeper_msg (Keeper_tool_modes_loaded (result, ticket)));
       (* Same trip, because both answer "what did somebody set about this
          Keeper" and a detail pane showing one fresh and one stale would be
          two different moments beside each other. No generation guard: this
@@ -3775,14 +3775,14 @@ let launch_keeper_tool_modes_load state ~mailbox =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_gate_settings_loaded settings)
+      enqueue_async mailbox (Keeper_msg (Keeper_gate_settings_loaded settings))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
          fork_workspace_job state ~sw run
      | None ->
          enqueue_async mailbox
-           (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", ticket)))
+           (Keeper_msg (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", ticket))))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   let enqueue_async = workspace_enqueue state in
@@ -3814,18 +3814,18 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
-          (Keeper_tool_mode_set (keeper_name, mode, result, generation))
+          (Keeper_msg (Keeper_tool_mode_set (keeper_name, mode, result, generation)))
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
           fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
-            (Keeper_tool_mode_set
+            (Keeper_msg (Keeper_tool_mode_set
                ( keeper_name,
                  mode,
                  Error "Eio switch is unavailable",
-                 generation )))
+                 generation ))))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~approval_id ~allow =
@@ -3853,15 +3853,15 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
       | exn -> Error (Printexc.to_string exn)
     in
     enqueue_async mailbox
-      (Keeper_chat_approval_answered (request, tool_call_id, allow, result))
+      (Keeper_msg (Keeper_chat_approval_answered (request, tool_call_id, allow, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
-        (Keeper_chat_approval_answered
-           (request, tool_call_id, allow, Error "Eio switch is unavailable"))
+        (Keeper_msg (Keeper_chat_approval_answered
+           (request, tool_call_id, allow, Error "Eio switch is unavailable")))
 
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
@@ -4239,7 +4239,7 @@ let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
   Masc_tui_async_read.launch
     ~source:Masc_tui_async_read.Keeper_schedule
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_schedules_loaded (request, result))))
     (capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target
         ~cursor:page.sp_cursor))
@@ -4336,7 +4336,7 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read state ~mailbox
-      ~deliver:(fun result -> Keeper_calls_loaded (generation, keeper_name, result))
+      ~deliver:(fun result -> Keeper_msg (Keeper_calls_loaded (generation, keeper_name, result)))
       (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100)
   end
 
@@ -4729,7 +4729,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
               in
               (* The admitted POST result has operation authority. The GET
                  below retains its separate, revocable observation stamp. *)
-              enqueue_async mailbox (Keeper_deletion_retry_done (operation_id, receipt));
+              enqueue_async mailbox (Keeper_msg (Keeper_deletion_retry_done (operation_id, receipt)));
               receipt
           in
           let* () = check_authority () in
@@ -4742,12 +4742,12 @@ let launch_keeper_deletions state ~mailbox ?retry () =
         with Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_deletions_loaded (generation, result))
+      enqueue_async mailbox (Keeper_msg (Keeper_deletions_loaded (generation, result)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~sw run
-    | None -> enqueue_async mailbox (Keeper_deletions_loaded
-        (generation, Error "Eio switch is unavailable"))
+    | None -> enqueue_async mailbox (Keeper_msg (Keeper_deletions_loaded
+        (generation, Error "Eio switch is unavailable")))
 
 let tree_diff_base_ref = "HEAD"
 
@@ -5413,7 +5413,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_config_view_loaded (request, result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_config_view_loaded (request, result))))
     (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
 
 let withdraw_keeper_items state =
@@ -5452,7 +5452,7 @@ let launch_keeper_settings_editor_read state ~mailbox request =
   let authority = key.ksk_authority and identity = Some request.ksr_expected in
   let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
   let enqueue_async = workspace_enqueue state in
-  let deliver result = enqueue_async mailbox (Keeper_settings_editor_loaded (request, result)) in
+  let deliver result = enqueue_async mailbox (Keeper_msg (Keeper_settings_editor_loaded (request, result))) in
   let superseded, resolve = Eio.Promise.create () in
   Masc_tui_types.supersede_keeper_settings_read state
     (Some (request.ksr_owner, fun () -> ignore (Eio.Promise.try_resolve resolve ())));
@@ -5535,7 +5535,7 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_items_loaded (request, result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_items_loaded (request, result))))
     (fun () ->
       let path = "/api/v1/keepers/"
         ^ Masc_tui_http.percent_encode_path_segment keeper_name ^ "/items?expected_workspace="
@@ -5601,11 +5601,11 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
     Masc_tui_loader.load_keeper_sandbox_name ~host ~port ~keeper_name) in
   Masc_tui_async_read.launch_independent_pair
     ~deliver_first:(fun result ->
-      enqueue_async mailbox (Keeper_sandbox_view_loaded
-        (request, Masc_tui_keeper_sandbox.Inventory_result result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_sandbox_view_loaded
+        (request, Masc_tui_keeper_sandbox.Inventory_result result))))
     ~deliver_second:(fun result ->
-      enqueue_async mailbox (Keeper_sandbox_view_loaded
-        (request, Masc_tui_keeper_sandbox.Name_result result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_sandbox_view_loaded
+        (request, Masc_tui_keeper_sandbox.Name_result result))))
     inventory name
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
@@ -5632,7 +5632,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
       | exn -> Error (Printexc.to_string exn)
     in
     enqueue_async mailbox
-      (Keeper_sandbox_logs_loaded (keeper_name, generation, result))
+      (Keeper_msg (Keeper_sandbox_logs_loaded (keeper_name, generation, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -5641,8 +5641,8 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
       `Stop_daemon)
   | None ->
     enqueue_async mailbox
-      (Keeper_sandbox_logs_loaded
-         (keeper_name, generation, Error "Eio switch is unavailable"))
+      (Keeper_msg (Keeper_sandbox_logs_loaded
+         (keeper_name, generation, Error "Eio switch is unavailable")))
 
 (* The Info tab's Board-attention rows. [start] answers [Already_loading] for a
    read already in flight for this Keeper, so the tab asks once per visit; a
@@ -5667,7 +5667,7 @@ let launch_keeper_board_quarantines state ~mailbox keeper_name =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_board_quarantines_loaded (request, result))
+      enqueue_async mailbox (Keeper_msg (Keeper_board_quarantines_loaded (request, result)))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
@@ -5676,8 +5676,8 @@ let launch_keeper_board_quarantines state ~mailbox keeper_name =
          `Stop_daemon)
      | None ->
        enqueue_async mailbox
-         (Keeper_board_quarantines_loaded
-            (request, Error "Eio switch is unavailable")))
+         (Keeper_msg (Keeper_board_quarantines_loaded
+            (request, Error "Eio switch is unavailable"))))
 
 (* Q acknowledges the oldest partition through its exact quarantine CAS. *)
 let launch_board_quarantine_requeue state ~mailbox ~keeper_name
@@ -6959,7 +6959,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
-          (Keeper_chat_file_changes_loaded (generation, keeper_name, result))
+          (Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)))
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
@@ -6968,10 +6968,10 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
               `Stop_daemon)
       | None ->
           enqueue_async mailbox
-            (Keeper_chat_file_changes_loaded
+            (Keeper_msg (Keeper_chat_file_changes_loaded
                ( generation
                , keeper_name
-               , Error "Eio switch is unavailable" ))
+               , Error "Eio switch is unavailable" )))
     end
   end
   end
@@ -8495,7 +8495,7 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~cursor =
       | exn -> Error (Keeper_chat_history.Page_read_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox
-      (Keeper_chat_older_loaded (generation, keeper_name, cursor, result))
+      (Keeper_msg (Keeper_chat_older_loaded (generation, keeper_name, cursor, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -8504,8 +8504,8 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~cursor =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Keeper_chat_older_loaded
-           (generation, keeper_name, cursor, Error (Keeper_chat_history.Page_read_failed "Eio switch is unavailable")))
+        (Keeper_msg (Keeper_chat_older_loaded
+           (generation, keeper_name, cursor, Error (Keeper_chat_history.Page_read_failed "Eio switch is unavailable"))))
   end
 
 let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
@@ -8528,7 +8528,7 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
     let read_authority = state.workspace_read_authority in
     Masc_tui_async_read.launch_with
       ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
-      ~deliver:(fun result -> enqueue_async mailbox (Keeper_native_tasks_loaded (keeper_name,result)))
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_native_tasks_loaded (keeper_name,result))))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let open Result.Syntax in
@@ -8569,7 +8569,7 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
     state.msg_child_content_inflight <- (keeper_name,mode) :: state.msg_child_content_inflight;
     Masc_tui_async_read.launch_with
       ~boundary_error:(fun detail -> Masc_tui_child_content.Transport detail)
-      ~deliver:(fun result -> enqueue_async mailbox (Keeper_child_content_loaded (keeper_name,result)))
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_child_content_loaded (keeper_name,result))))
       (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let open Result.Syntax in
@@ -8817,7 +8817,7 @@ let launch_keeper_composite_load state ~mailbox ~keeper_name =
           settle_composite_owed state ~keeper_name Masc_tui_owed_read.abandoned
         end)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Keeper_composite_loaded (authority, keeper_name, result)))
+        enqueue_async mailbox (Keeper_msg (Keeper_composite_loaded (authority, keeper_name, result))))
       (fun () -> Masc_tui_loader.load_keeper_composite ~host ~port ~keeper_name)
   end
 
@@ -9909,7 +9909,7 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_chat_copy_loaded (generation, keeper_name, result)))
+      enqueue_async mailbox (Keeper_msg (Keeper_chat_copy_loaded (generation, keeper_name, result))))
     (fun () -> Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name)
   end
 ;;
@@ -9956,7 +9956,7 @@ let launch_keeper_chat_operation_reads state ~mailbox ~keeper_name targets =
           let operation_state = read_keeper_chat_operation ~check_request ~host ~port
             ~keeper_name ~operation_id in
           enqueue_async mailbox
-            (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state})) targets)
+            (Keeper_msg (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state}))) targets)
 ;;
 
 let launch_unavailable_journal_operations state ~mailbox ~keeper_name =
@@ -10027,7 +10027,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
     let operation_state, journal, terminal_replay = Keeper_chat_log.read_with_operation_state
       ~read_operation ~read_journal in
     enqueue_async mailbox
-      (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay })
+      (Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay }))
   in
   match targets, Eio_context.get_switch_opt () with
   | [], Some _ | [], None -> ()
@@ -10605,7 +10605,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let expected_control_token = List.assoc_opt request.keeper_name state.keeper_chat_control_tokens in
   let generation = begin_keeper_chat_control state request.keeper_name in
   let on_control_token token = enqueue_async mailbox
-    (Keeper_chat_control_received (request.keeper_name, generation, token)) in
+    (Keeper_msg (Keeper_chat_control_received (request.keeper_name, generation, token))) in
   let host = server_peer_host in
   let port = state.port in
   let keeper_name = request.Keeper_chat.keeper_name in
@@ -10624,14 +10624,14 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_interrupt_done (request, generation, result))
+    enqueue_async mailbox (Keeper_msg (Keeper_chat_interrupt_done (request, generation, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
-        (Keeper_chat_interrupt_done (request, generation, Error "Eio switch is unavailable"))
+        (Keeper_msg (Keeper_chat_interrupt_done (request, generation, Error "Eio switch is unavailable")))
 
 let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
   let enqueue_async = workspace_enqueue state in
@@ -10641,7 +10641,7 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
   | None ->
     let generation = begin_keeper_chat_control state keeper_name in
     let on_control_token token = enqueue_async mailbox
-      (Keeper_chat_control_received (keeper_name, generation, token)) in
+      (Keeper_msg (Keeper_chat_control_received (keeper_name, generation, token))) in
     let item = { oi_keeper = keeper_name; oi_token = interrupt_token; oi_started_at = started_at
       ; oi_sent_ns = Mtime_clock.elapsed_ns (); oi_status = Interrupt_sending } in
     state.keeper_observed_interrupts <- item ::
@@ -10657,12 +10657,12 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result))
+      enqueue_async mailbox (Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result)))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> fork_workspace_job state ~sw run
      | None -> enqueue_async mailbox
-         (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, Error "Eio switch is unavailable")));
+         (Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, Error "Eio switch is unavailable"))));
     true
 ;;
 
@@ -10782,10 +10782,10 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_run_next_done (request, result)) in
+      enqueue_async mailbox (Keeper_msg (Keeper_run_next_done (request, result))) in
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~sw run
-    | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
+    | None -> enqueue_async mailbox (Keeper_msg (Keeper_run_next_done (request, Error "Eio switch is unavailable")))
   end
 ;;
 
@@ -11172,19 +11172,19 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
       | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
     in
     enqueue_dispatch_ack ~enqueue:enqueue_async mailbox (fun acknowledge ->
-      Keeper_chat_done (request, false, result, acknowledge))
+      Keeper_msg (Keeper_chat_done (request, false, result, acknowledge)))
   in
   (match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
-        (Keeper_chat_dispatch_blocked
-           (request, "Eio switch is unavailable")))
+        (Keeper_msg (Keeper_chat_dispatch_blocked
+           (request, "Eio switch is unavailable"))))
   end
   | (Workspace_identity_match, None)
   | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _) -> enqueue_async mailbox
-      (Keeper_chat_dispatch_blocked (request, "workspace identity is not verified"))
+      (Keeper_msg (Keeper_chat_dispatch_blocked (request, "workspace identity is not verified")))
 
 (* The joined line keeps the request identity the history row already carries,
    so the row is rewritten rather than duplicated. [append_user_history_once]
@@ -12147,8 +12147,8 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           if action = Inbox.Resume then
             Option.iter (fun generation ->
               enqueue_async mailbox
-                (Keeper_queue_resume_confirmed
-                   (keeper_name, generation, confirmation, resume_input_ids)))
+                (Keeper_msg (Keeper_queue_resume_confirmed
+                   (keeper_name, generation, confirmation, resume_input_ids))))
               control_generation in
         if not owner_paused then begin
           confirm Owner_already_active;
@@ -12219,7 +12219,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
      | Inbox.Inspect | Inbox.Inspect_peers _ -> ()
      | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
      | Cancel_event _ | Prioritize_event _ ->
-         enqueue_async mailbox (Keeper_queue_action_received (keeper_name, receipt)));
+         enqueue_async mailbox (Keeper_msg (Keeper_queue_action_received (keeper_name, receipt))));
     (* Keep each failed read visible beside any successful mutation receipt. *)
     let observe () =
     let waiting = match action with
@@ -12277,7 +12277,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     let result = try read () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
-    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, result)) in
+    enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, result))) in
   (* Said here, past both refusals above. The job can still send none: it
      checks the workspace and the control generation first and reports a
      failure of either, and without an Eio switch it does not start. *)
@@ -12299,7 +12299,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
               (String.concat " · " (cancelling @ ["Sending queue change…"]))));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run
-  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable"))
+  | None -> enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable")))
   end
   end
 ;;
@@ -18029,7 +18029,7 @@ let launch_keeper_log_read state ~mailbox ~intent keeper =
       supersede_keeper_log_read state
         (Some (request.klr_owner, fun () -> ignore (Eio.Promise.try_resolve supersede ())));
       let enqueue_async = workspace_enqueue state in
-      let deliver result = enqueue_async mailbox (Keeper_logs_loaded (request, result)) in
+      let deliver result = enqueue_async mailbox (Keeper_msg (Keeper_logs_loaded (request, result))) in
       log_keeper_log_read ~phase:"started" request ~outcome:"pending";
       let run () = Fun.protect
         ~finally:(fun () -> finish_keeper_log_read state request)
@@ -18085,7 +18085,7 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
    | Masc_tui_fetched.Started (next, _) -> state.keeper_execute_output <- next
    | Masc_tui_fetched.Already_loading -> ());
   let enqueue_async = workspace_enqueue state in
-  let deliver event = enqueue_async mailbox (Keeper_execute_streamed (stream, event)) in
+  let deliver event = enqueue_async mailbox (Keeper_msg (Keeper_execute_streamed (stream, event))) in
   (* The fiber that launches the job is also the only one that drains the
      mailbox, so a job that cannot start is reported to the state directly:
      queueing it could wait on a full mailbox that only this fiber empties. *)
@@ -19065,7 +19065,7 @@ let launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read =
       Option.iter (fun roster_request ->
         launch
           ~deliver:(fun roster_result ->
-            enqueue_async mailbox (Keeper_roster_reloaded { roster_request; roster_result }))
+            enqueue_async mailbox (Keeper_msg (Keeper_roster_reloaded { roster_request; roster_result })))
           (fun () ->
             Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace))
         (Masc_tui_types.begin_keeper_roster_read ~intent:Snapshot_read.Refresh state)
@@ -19074,7 +19074,7 @@ let launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read =
         launch
           ~deliver:(fun row_result ->
             enqueue_async mailbox
-              (Keeper_row_reloaded { row_request; row_keeper = keeper_name; row_result }))
+              (Keeper_msg (Keeper_row_reloaded { row_request; row_keeper = keeper_name; row_result })))
           (fun () ->
             Masc_tui_loader.load_keeper_row ~host ~port ~expected_workspace ~keeper_name))
         (Masc_tui_types.begin_keeper_row_read state)
@@ -20932,7 +20932,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_action_done (origin, keeper_name, action, result))
+    enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run_action
@@ -20945,7 +20945,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_action_done (origin, keeper_name, action, result))
+      enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
 
 (* The Board draft splits at the first newline: commit-message shape, one
    buffer covering title and body. Trimming the title keeps a draft whose
@@ -22477,16 +22477,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (* The read answers nothing the screen may use, but it is over: its
            slot is freed, so the roster's owed read starts again once the
            server's authority is back. *)
-        | Keeper_roster_reloaded observation ->
+        | Keeper_msg (Keeper_roster_reloaded observation) ->
           ignore (Masc_tui_types.take_keeper_roster_observation state observation)
-        | Keeper_row_reloaded observation ->
+        | Keeper_msg (Keeper_row_reloaded observation) ->
           ignore (Masc_tui_types.take_keeper_row_observation state observation)
         | Gate_snapshot_loaded (request, _, _) ->
           Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
             (Snapshot_read.request_id request)
-        | Keeper_chat_dispatch_started (_, _, acknowledge) ->
+        | Keeper_msg (Keeper_chat_dispatch_started (_, _, acknowledge)) ->
           ignore (Eio.Promise.try_resolve acknowledge false)
-        | Keeper_chat_done (_, _, _, acknowledge) ->
+        | Keeper_msg (Keeper_chat_done (_, _, _, acknowledge)) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
         | Workspace_operation (Goal_transition_done (goal_id, ticket, workspace, result)) ->
           record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
@@ -22540,12 +22540,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Chat_search_finished (_, _, _, _) | Workspace_scoped (_, _, _) | Workspace_operation _
         | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
         | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
-        | Lane_package_preview_loaded (_, _, _) | Keeper_queue_resume_confirmed (_, _, _, _)
+        | Lane_package_preview_loaded (_, _, _) | Keeper_msg (Keeper_queue_resume_confirmed (_, _, _, _)
         | Keeper_queue_action_received _
-        | Keeper_queue_loaded (_, _, _, _) | Lane_addons_loaded (_, _, _)
+        | Keeper_queue_loaded (_, _, _, _)) | Lane_addons_loaded (_, _, _)
         | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
-        | Lane_declaration_loaded (_, _, _, _, _) | Keeper_deletions_loaded (_, _)
-        | Msx_tick_withdrawn (_, _) | Keeper_deletion_retry_done (_, _) | Msx_frame_loaded (_, _)
+        | Lane_declaration_loaded (_, _, _, _, _) | Keeper_msg (Keeper_deletions_loaded (_, _))
+        | Msx_tick_withdrawn (_, _) | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_frame_loaded (_, _)
         | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _) | Dos_live_loaded (_, _)
         | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
@@ -22554,14 +22554,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
         | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
         | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
-        | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
+        | Keeper_msg (Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
         | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
-        | Keeper_chat_interrupt_done (_, _, _) | (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _))
-        | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
+        | Keeper_chat_interrupt_done (_, _, _)) | (Keeper_msg (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)))
+        | Keeper_msg (Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
-        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
+        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)) | Context_inspector_loaded (_, _, _)
         | Context_inspector_part_loaded (_, _)
-        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_streamed _) | Keeper_composite_loaded (_, _, _)
+        | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
         | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
         | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -22571,7 +22571,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Workspace_activity_loaded (_, _) | Memory_loaded _ | Memory_input_loaded (_, _)
         | Memory_facts_loaded (_, _) | Repository_changes_loaded (_, _)
         | Repository_changes_diff_loaded (_, _) | File_changes_loaded (_, _)
-        | Keeper_chat_file_changes_loaded (_, _, _) | Git_diff_loaded (_, _)
+        | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _)) | Git_diff_loaded (_, _)
         | Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
         | Browser_lane_clients_loaded (_, _) | Browser_lane_loaded (_, _)
         | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
@@ -22580,28 +22580,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Tools_read_loaded _ | Skill_evidence_loaded (_, _, _)
         | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
-        | Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _
-        | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
-        | Keeper_chat_control_received (_, _, _) | Gate_approval_resolved (_, _, _, _, _)
+        | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)) | Asks_reloaded _
+        | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
+        | Keeper_chat_control_received (_, _, _)) | Gate_approval_resolved (_, _, _, _, _)
         | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
-        | Surface_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
+        | Surface_tool_approval_answered (_, _, _, _, _, _) | Keeper_msg (Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
-        | Keeper_chat_dispatch_blocked (_, _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _
-        | Keeper_action_done (_, _, _, _)
+        | Keeper_chat_dispatch_blocked (_, _)) | Runtime_form_save_changed _ | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
+        | Keeper_action_done (_, _, _, _))
         | (Board_publication_done _ | Board_comment_done _) | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
+        | Schedule_wake_history_loaded (_, _) | Keeper_msg (Keeper_schedules_loaded (_, _))
         | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
-        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
+        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
         | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-        | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
+        | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_msg (Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
         | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
-        | Keeper_sandbox_logs_loaded (_, _, _) | Exact_activity_read (_, _)
+        | Keeper_sandbox_logs_loaded (_, _, _)) | Exact_activity_read (_, _)
         | Exact_activity_saved (_, _)
         | Machine_activity_read (_, _) | Machine_activity_saved (_, _)
         | Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
         | Runtime_param_written (_, _) | Prompts_loaded (_, _)
-        | Keeper_board_quarantines_loaded (_, _) | Board_quarantine_requeued (_, _, _)
+        | Keeper_msg (Keeper_board_quarantines_loaded (_, _)) | Board_quarantine_requeued (_, _, _)
         | Board_quarantines_bulk_progress (_, _, _, _, _, _)
         | Board_quarantines_bulk_requeued (_, _) | Presets_listed (_, _)
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
@@ -22672,7 +22672,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Some (installer,error) ->
             {view with loading=false;installer=Some installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
-  | Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids) ->
+  | Keeper_msg (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids)) ->
       settle_keeper_priority_control state keeper_name ~generation
         ~outcome:(match confirmation with
           | Owner_resumed -> Priority_superseded
@@ -22692,7 +22692,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox;
         dispatch_ready_run_next state ~mailbox keeper_name
       end
-  | Keeper_queue_action_received (keeper_name, receipt) ->
+  | Keeper_msg (Keeper_queue_action_received (keeper_name, receipt)) ->
       if not (List.mem keeper_name state.keeper_queue_readings) then
         state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
       (match state.queue_panel with
@@ -22706,7 +22706,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:Notice_reply (String.concat " · " receipt));
       dispatch_ready_run_next state ~mailbox keeper_name
-  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result) ->
+  | Keeper_msg (Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result)) ->
       let observation = match result with
         | Error reason -> Error reason
         | Ok (_, Error reason) -> Error reason
@@ -22716,9 +22716,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Ok _, Some page -> Ok page
              | Ok _, None -> Error "Keeper relationship page is unavailable") in
       ignore (stage_keeper_peer_reading state ~keeper_name ~token observation)
-  | Keeper_queue_loaded (keeper_name, control_generation,
+  | Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
-       | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result) ->
+       | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result)) ->
       Option.iter (fun generation -> settle_keeper_priority_control state keeper_name
         ~generation ~outcome:(match result with
           | Ok ([], _) when action = Masc_tui_queue_inspection.Resume -> Priority_unconfirmed
@@ -23209,7 +23209,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.http_refresh_started_ns)
         (take_approval_observation state early.eap_observation)
   | Asks_reloaded observation -> apply_asks_observation state observation
-  | Keeper_roster_reloaded observation ->
+  | Keeper_msg (Keeper_roster_reloaded observation) ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
         apply_keeper_roster_load state result;
@@ -23222,7 +23222,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
             resolve_opening_chat state ~base_path ~mailbox)
         (Masc_tui_types.take_keeper_roster_observation state observation)
-  | Keeper_row_reloaded observation ->
+  | Keeper_msg (Keeper_row_reloaded observation) ->
       Option.iter (fun result ->
         let keeper_name = observation.row_keeper in
         let read = Masc_tui_roster_owed.Read_row keeper_name in
@@ -24156,18 +24156,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())));
         launch_owed_board_post state ~mailbox
       end
-  | Keeper_deletion_retry_done (operation_id, result) ->
+  | Keeper_msg (Keeper_deletion_retry_done (operation_id, result)) ->
       let message = match result with
         | Ok () -> Printf.sprintf "Deletion retry %s accepted; refreshing inventory." operation_id
         | Error detail -> Printf.sprintf "Deletion retry %s not confirmed: %s. Refresh inventory before retrying." operation_id detail in
       state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
       report_action state (if Result.is_ok result then "system" else "error") message
-  | Keeper_deletions_loaded (generation, result) ->
+  | Keeper_msg (Keeper_deletions_loaded (generation, result)) ->
       apply_keeper_deletions_read state ~generation result;
       if generation = state.keeper_deletions_generation && Result.is_ok result
          && Option.is_some state.keeper_deletions_retry_receipt then
         launch_keeper_deletions state ~mailbox ()
-  | Keeper_settings_save_changed (request,status,observed_ns) ->
+  | Keeper_msg (Keeper_settings_save_changed (request,status,observed_ns)) ->
       let key = request.ksv_key in
       let current = keeper_settings_save_current state request in
       if apply_keeper_settings_save state request status then begin
@@ -24278,7 +24278,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | (Form_saved _ | Form_not_sent _ | Form_invalid_account _ | Form_refused _
                  | Form_conflict _ | Form_unconfirmed _), (None | Some _) -> ())
       end
-  | Keeper_creation_changed (request, status) ->
+  | Keeper_msg (Keeper_creation_changed (request, status)) ->
       if apply_keeper_creation_status state request status then begin
         let phase = match status with
           | Creation_checking -> "checking"
@@ -24334,7 +24334,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                report_action state "error"
                  (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
       end
-  | Keeper_action_done (origin, keeper_name, action, result) ->
+  | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
           (fun expected ->
@@ -24679,7 +24679,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)
-  | Keeper_calls_loaded (generation, keeper_name, result) -> (
+  | Keeper_msg (Keeper_calls_loaded (generation, keeper_name, result)) -> (
       let still_current =
         generation = state.keeper_calls_generation
         && Option.equal String.equal state.keeper_calls_keeper
@@ -24727,7 +24727,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           launch_keeper_calls_load ~force:true state ~mailbox keeper_name;
         launch_owed_keeper_calls state ~mailbox
       end)
-  | Keeper_settings_editor_loaded (request, result) ->
+  | Keeper_msg (Keeper_settings_editor_loaded (request, result)) ->
       if Masc_tui_types.take_keeper_settings_editor_read state request result then begin
         log_keeper_settings_read ~phase:"admitted" request
           ~outcome:(match result with Ok _ -> "ready" | Error _ -> "failed");
@@ -24735,7 +24735,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Ok _ -> ()
         | Error detail -> report_action state "error" detail
       end
-  | Keeper_config_view_loaded (request, result) -> (
+  | Keeper_msg (Keeper_config_view_loaded (request, result)) -> (
       let keeper_name = request.drr_keeper in
       let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
@@ -24750,7 +24750,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.keeper_config_view_error <- None
         | Error detail ->
             state.keeper_config_view_error <- Some detail)
-  | Keeper_items_loaded (request, result) -> (
+  | Keeper_msg (Keeper_items_loaded (request, result)) -> (
       let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
         match selected_keeper state with
@@ -24778,12 +24778,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail ->
             state.item_account <- None;
             state.item_account_error <- Some detail)
-  | Keeper_sandbox_view_loaded (request, result) -> (
+  | Keeper_msg (Keeper_sandbox_view_loaded (request, result)) -> (
       let selected_keeper = List.nth_opt state.keepers state.keeper_cursor
         |> Option.map (fun (keeper : keeper) -> keeper.k_name) in
       Masc_tui_types.apply_keeper_sandbox_result state ~selected_keeper
         ~authority_ready:(server_authority_ready state) request result)
-  | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
+  | Keeper_msg (Keeper_sandbox_logs_loaded (keeper_name, generation, result)) -> (
       let is_current =
         match state.keeper_sandbox_logs_inflight with
         | Some request ->
@@ -24859,7 +24859,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          now, so this arm no longer has to remember to do it. *)
       state.preset_detail <-
         Masc_tui_fetched.complete ~equal:String.equal state.preset_detail request result
-  | Keeper_board_quarantines_loaded (request, result) ->
+  | Keeper_msg (Keeper_board_quarantines_loaded (request, result)) ->
       state.keeper_board_quarantines <-
         Masc_tui_fetched.complete ~equal:String.equal
           state.keeper_board_quarantines request result
@@ -25755,7 +25755,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Option.equal String.equal state.schedule_wake_history_inflight
           (Some schedule_id)
       then state.schedule_wake_history_inflight <- None
-  | Keeper_schedules_loaded (request, result) ->
+  | Keeper_msg (Keeper_schedules_loaded (request, result)) ->
       let current = keeper_schedules_answer_current state request in
       apply_keeper_schedules_read state request result;
       if current then
@@ -25832,7 +25832,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            && Option.is_none state.ask_followup_error then
           launch_ask_followup_load state ~mailbox
       end
-  | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
+  | Keeper_msg (Keeper_chat_dispatch_started (request, was_replay, acknowledge)) ->
       let proceed = ref false in
       Fun.protect
         ~finally:(fun () -> Eio.Promise.resolve acknowledge !proceed)
@@ -25861,7 +25861,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               then state.msg_live <- Some entry.log;
               proceed := true
           | Some _ | None -> ())
-  | Keeper_chat_done (request, _was_replay, result, acknowledge) ->
+  | Keeper_msg (Keeper_chat_done (request, _was_replay, result, acknowledge)) ->
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -25904,7 +25904,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         drain_queued_message state ~base_path ~mailbox
       end;
       launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
-  | Keeper_chat_stream_deltas (request, deltas) ->
+  | Keeper_msg (Keeper_chat_stream_deltas (request, deltas)) ->
       (* Each Keeper can stream independently. Looking up the request keeps a
          background turn from replacing the selected Keeper's transcript and
          keeps its tool rows available when that turn settles. *)
@@ -26070,7 +26070,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
            then drain_queued_message state ~base_path ~mailbox
        | Some _ | None -> ())
-  | Keeper_chat_stream_unavailable (request, detail) ->
+  | Keeper_msg (Keeper_chat_stream_unavailable (request, detail)) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
        with
@@ -26079,7 +26079,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            entry.phase <- Turn_reconciling
        | Some _ | None -> ());
       append_chat_history state request Message_status detail
-  | Keeper_chat_approval_answered (request, tool_call_id, allow, result) ->
+  | Keeper_msg (Keeper_chat_approval_answered (request, tool_call_id, allow, result)) ->
       (* The operator answered a question that named a tool; echoing the call
          id back tells them nothing they can act on and nothing they can
          match to what they read. The live transcript still holds the call, so
@@ -26129,7 +26129,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              Message_status
          | Ok { remembered = false; settled = false } | Error _ -> Message_error)
         text
-  | Keeper_tool_approvals_loaded (request, expected_workspace, result) ->
+  | Keeper_msg (Keeper_tool_approvals_loaded (request, expected_workspace, result)) ->
       (match Snapshot_read.settle state.keeper_tool_approvals_read request with
        | None -> ()
        | Some read ->
@@ -26608,7 +26608,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            else if state.msx_open && state.msx_menu_open then
              launch_dos_live_poll state ~mailbox
        | Some _ | None -> ())
-  | Keeper_chat_control_received (keeper_name, generation, token) ->
+  | Keeper_msg (Keeper_chat_control_received (keeper_name, generation, token)) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
            the function changed nothing; the token is recorded either way
@@ -26621,9 +26621,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if control_finished then
           launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox
       end else launch_keeper_turns_load state ~mailbox
-  | Keeper_preparation_loaded (request, result) ->
+  | Keeper_msg (Keeper_preparation_loaded (request, result)) ->
       state.msg_preparation_details <- Masc_tui_preparation_details.receive request result state.msg_preparation_details
-  | Keeper_waiting_loaded (request, snapshot, result) ->
+  | Keeper_msg (Keeper_waiting_loaded (request, snapshot, result)) ->
       let usable = Keeper_waiting_read.accepts_event state.keeper_waiting_read request in
       let reconcile = Keeper_waiting_read.event_needs_reconciliation state.keeper_waiting_read request in
       let current = keeper_waiting_row_current state snapshot in
@@ -26656,7 +26656,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            end
            else if not usable && reconcile && Result.is_ok result then
              launch_keeper_waiting_load ~change:Waiting_all ~exclusive:true state ~mailbox)
-  | Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result) ->
+  | Keeper_msg (Keeper_turns_loaded (generation, waiting_snapshot, waiting_receipt, result)) ->
       state.keeper_turns_inflight <- false;
       (match result with
        | Ok { rows; waiting } ->
@@ -26807,7 +26807,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error detail ->
            report_action state "error"
              (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail))
-  | Keeper_gate_settings_loaded result ->
+  | Keeper_msg (Keeper_gate_settings_loaded result) ->
       (match result with
        | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
@@ -26820,7 +26820,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               the first successful read, the "last known" values are the
               defaults. *)
            state.keeper_gate_settings_unread <- Some detail)
-  | Keeper_tool_modes_loaded (result, ticket) ->
+  | Keeper_msg (Keeper_tool_modes_loaded (result, ticket)) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
          opened and closed in between (#37609 review) -- and when a later
@@ -26849,7 +26849,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Error detail ->
              state.tool_modes_owed <- failed_read state.tool_modes_owed;
              state.keeper_tool_modes_error <- Some detail)
-  | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
+  | Keeper_msg (Keeper_tool_mode_set (keeper_name, mode, result, generation)) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
       state.approval_flow <- flow;
       if not owned then ()
@@ -26920,7 +26920,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
-  | Keeper_run_next_done (request, result) ->
+  | Keeper_msg (Keeper_run_next_done (request, result)) ->
       (match settle_keeper_run_next state request result with
        | Run_next_untracked -> ()
        | (Run_next_received | Run_next_retired) as completion ->
@@ -26932,7 +26932,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Run_next_received, Ok _ -> ());
            dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name;
            refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name)
-  | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
+  | Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result)) ->
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
         | Ok (Not_signalled _) | Error _ -> Priority_unconfirmed);
@@ -26950,7 +26950,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Ok (Not_signalled { reason; detail }) ->
             Interrupt_declined (Option.value ~default:reason detail)
           | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
-  | Keeper_chat_interrupt_done (request, generation, result) ->
+  | Keeper_msg (Keeper_chat_interrupt_done (request, generation, result)) ->
       let keeper_name = request.Keeper_chat.keeper_name in
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
         | Ok (Masc_tui_interrupt_signal.Signalled _ | Pending_admission_paused) -> Priority_superseded
@@ -26986,7 +26986,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               and the outcome the transcript already recorded is the one that
               counts. *)
            ())
-  | Keeper_chat_dispatch_blocked (request, detail) ->
+  | Keeper_msg (Keeper_chat_dispatch_blocked (request, detail)) ->
       (* The POST never left. Nothing durable was written for it, so there is
          nothing to reconcile: say what happened and let the operator send
          again if they want to. *)
@@ -27052,8 +27052,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Masc_tui_fetched.complete
           ~equal:Masc_tui_context_inspector.same_part_key
           state.context_inspector_part request result
-  | Keeper_chat_copy_loaded (generation, _, _) when generation <> state.msg_copy_generation -> ()
-  | Keeper_chat_copy_loaded (_, keeper_name, result) ->
+  | Keeper_msg (Keeper_chat_copy_loaded (generation, _, _)) when generation <> state.msg_copy_generation -> ()
+  | Keeper_msg (Keeper_chat_copy_loaded (_, keeper_name, result)) ->
       state.msg_copy_pending <- None;
       let notice = chat_notice state ~keeper_name:(Some keeper_name) in
       (match result with
@@ -27118,7 +27118,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   (Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
                      keeper_name assessment characters (String.length row.text)
                      (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)))
-  | Keeper_chat_history_loaded (request, source, result) ->
+  | Keeper_msg (Keeper_chat_history_loaded (request, source, result)) ->
       (* The current refresh owns both slots until each has been admitted.
          A collected old result cannot settle a replacement request. *)
       let owned = match state.msg_history_inflight with
@@ -27215,7 +27215,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      ~now:(monotonic_now_s ()))
         end
       end
-  | Keeper_chat_first_page_loaded (request, result) ->
+  | Keeper_msg (Keeper_chat_first_page_loaded (request, result)) ->
       let owned = match state.msg_history_inflight with
         | Some current when current == request -> Keeper_history_read.settle_page request
         | Some _ | None -> false in
@@ -27257,13 +27257,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               launch_unavailable_journal_operations state ~mailbox ~keeper_name
         end
       end
-  | Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state} ->
+  | Keeper_msg (Keeper_chat_operation_loaded {keeper_name; operation_id; operation_state}) ->
       journal_read_finished state (keeper_name, Keeper_chat_log.Operation operation_id);
       Option.iter (fun log ->
         apply_keeper_chat_operation_state state ~journal_id:operation_id log
           (Result.map Option.some operation_state))
         (settled_log_for_request state ~keeper_name operation_id)
-  | Keeper_native_tasks_loaded (keeper_name,result) ->
+  | Keeper_msg (Keeper_native_tasks_loaded (keeper_name,result)) ->
       state.msg_native_tasks_inflight <- List.filter (fun (name,_) -> name <> keeper_name) state.msg_native_tasks_inflight;
       state.chat_native_tasks_owed <-
         settle_chat_journal state.chat_native_tasks_owed ~keeper:keeper_name
@@ -27276,7 +27276,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.msg_native_tasks <- (keeper_name,tasks) :: List.remove_assoc keeper_name state.msg_native_tasks;
       if List.mem keeper_name state.msg_native_tasks_audit_pending then
         launch_keeper_native_tasks_load ~mode:Masc_tui_native_tasks.Audit state ~mailbox ~keeper_name
-  | Keeper_child_content_loaded (keeper_name,result) ->
+  | Keeper_msg (Keeper_child_content_loaded (keeper_name,result)) ->
       state.msg_child_content_inflight <- List.remove_assoc keeper_name state.msg_child_content_inflight;
       state.chat_child_content_owed <-
         settle_chat_journal state.chat_child_content_owed ~keeper:keeper_name
@@ -27289,7 +27289,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.msg_child_content <- (keeper_name,snapshots) :: List.remove_assoc keeper_name state.msg_child_content;
       if List.mem keeper_name state.msg_child_content_audit_pending then
         launch_keeper_child_content_load ~mode:Masc_tui_child_content.Audit state ~mailbox ~keeper_name
-  | Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay } -> (
+  | Keeper_msg (Keeper_chat_journal_loaded { keeper_name; source; started_at; journal; operation_state; terminal_replay }) -> (
       let journal_id = Keeper_chat_log.source_key source in
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
@@ -27918,7 +27918,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   state.patch_modal_diff <- Some (request.rdr_path, diff);
                   state.patch_modal_error <- None
               | Error detail -> state.patch_modal_error <- Some detail))
-  | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
+  | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)) ->
       let still_current =
         generation = state.msg_file_changes_generation
         && Option.equal String.equal state.msg_file_changes_keeper
@@ -28060,7 +28060,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
-  | Keeper_composite_loaded (authority, keeper_name, result) ->
+  | Keeper_msg (Keeper_composite_loaded (authority, keeper_name, result)) ->
       if authority == state.detail_read_authority && server_authority_ready state then begin
         state.keeper_composite_inflight <- None;
         (match result with
@@ -28308,7 +28308,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 drain_queued_message state ~base_path ~mailbox;
                 ignore (launch_current_live_context state ~mailbox));
            launch_local_source_followup state ~mailbox Local_keepers)
-  | Keeper_logs_loaded (request, result) ->
+  | Keeper_msg (Keeper_logs_loaded (request, result)) ->
       let admission = take_keeper_log_read state request result in
       let keeper_name = (Masc_tui_fetched.request_key request.klr_request).klk_keeper in
       (match admission, result with
@@ -28331,14 +28331,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
         if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission;
       launch_owed_keeper_logs state ~mailbox
-  | Keeper_execute_streamed (stream, event) ->
+  | Keeper_msg (Keeper_execute_streamed (stream, event)) ->
       ignore (take_keeper_execute_stream state stream event)
   | Live_context_loaded (request, started_ns, result) ->
       let admitted = take_live_context_observation state request result in
       log_live_context_read ~phase:"observed" request ~started_ns
         ~outcome:(if not admitted then "discarded" else
           match result with Ok _ -> "received" | Error _ -> "failed")
-  | Keeper_chat_older_loaded (generation, keeper_name, cursor, result) ->
+  | Keeper_msg (Keeper_chat_older_loaded (generation, keeper_name, cursor, result)) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
          above a transcript they do not belong to. *)

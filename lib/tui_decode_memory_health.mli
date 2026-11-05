@@ -214,6 +214,12 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+val memory_keeper_totals_row : memory_keeper_health -> Keeper_memory_health_totals.Row.t
+(** What a decoded row contributes to the fleet totals. The server counts its
+    rows through the same {!Keeper_memory_health_totals.of_rows}, and the
+    snapshot decoder checks the server's totals and alert summary against it
+    when every row decoded. *)
+
 val decode_memory_health_snapshot :
   Yojson.Safe.t -> (memory_health_snapshot, string) result
 (** Decode the fleet memory-health snapshot served at

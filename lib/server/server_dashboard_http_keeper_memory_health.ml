@@ -476,14 +476,17 @@ let keeper_health ~config ~keepers_dir keeper_id =
     }
 ;;
 
-let alert_json ~code ~severity ~target ~label ~message =
-  `Assoc
-    [ "code", `String code
-    ; "severity", `String severity
-    ; "target", `String target
-    ; "label", `String label
-    ; "message", `String message
-    ]
+(* An alert keeps its severity beside its JSON, so the totals count it from
+   the value it was made with instead of reading it back. *)
+let alert ~code ~severity ~target ~label ~message =
+  ( severity
+  , `Assoc
+      [ "code", `String code
+      ; "severity", `String (Keeper_memory_health_totals.alert_severity_to_wire severity)
+      ; "target", `String target
+      ; "label", `String label
+      ; "message", `String message
+      ] )
 ;;
 
 let alerts (h : keeper_health) =
@@ -491,9 +494,9 @@ let alerts (h : keeper_health) =
     match h.read_error with
     | None -> []
     | Some message ->
-      [ alert_json
+      [ alert
           ~code:"snapshot_read_error"
-          ~severity:"warn"
+          ~severity:Keeper_memory_health_totals.Alert_warn
           ~target:"snapshot_read_error"
           ~label:"읽기"
           ~message
@@ -503,9 +506,9 @@ let alerts (h : keeper_health) =
     match h.source_read_error with
     | None -> []
     | Some message ->
-      [ alert_json
+      [ alert
           ~code:"source_snapshot_read_error"
-          ~severity:"warn"
+          ~severity:Keeper_memory_health_totals.Alert_warn
           ~target:"source_snapshot_read_error"
           ~label:"소스 읽기"
           ~message
@@ -524,9 +527,9 @@ let alerts (h : keeper_health) =
           Printf.sprintf " %d turns are unread." (atoms + official)
         | Some _, None | None, Some _ | None, None -> ""
       in
-      [ alert_json
+      [ alert
           ~code:"librarian_stopped"
-          ~severity:"warn"
+          ~severity:Keeper_memory_health_totals.Alert_warn
           ~target:"librarian_stopped"
           ~label:"Librarian"
           ~message:
@@ -544,18 +547,18 @@ let alerts (h : keeper_health) =
     then []
     else if h.snapshot_present
     then
-      [ alert_json
+      [ alert
           ~code:"librarian_failures"
-          ~severity:"warn"
+          ~severity:Keeper_memory_health_totals.Alert_warn
           ~target:"librarian_failures"
           ~label:"Librarian"
           ~message:
             "Librarian runs have failed since server start. The current-memory snapshot is available; see the last measured pass for the latest drain result."
       ]
     else
-      [ alert_json
+      [ alert
           ~code:"librarian_starvation"
-          ~severity:"error"
+          ~severity:Keeper_memory_health_totals.Alert_error
           ~target:"librarian_starvation"
           ~label:"Librarian"
           ~message:
@@ -570,9 +573,9 @@ let alerts (h : keeper_health) =
     if h.vision_ingest_errors <= 0
     then []
     else
-      [ alert_json
+      [ alert
           ~code:"vision_ingest_errors"
-          ~severity:"warn"
+          ~severity:Keeper_memory_health_totals.Alert_warn
           ~target:"vision_ingest_errors"
           ~label:"Vision"
           ~message:
@@ -590,13 +593,6 @@ let alerts (h : keeper_health) =
   @ vision_ingest_alert
 ;;
 
-let alert_severity = function
-  | `Assoc fields ->
-    (match List.assoc_opt "severity" fields with
-     | Some (`String severity) -> severity
-     | _ -> "warn")
-  | _ -> "warn"
-;;
 
 let keeper_health_entry_to_json (h : keeper_health) =
   `Assoc
@@ -689,8 +685,39 @@ let keeper_health_entry_to_json (h : keeper_health) =
       , match h.source_read_error with
         | Some message -> `String message
         | None -> `Null )
-    ; "alerts", `List (alerts h)
+    ; "alerts", `List (List.map snd (alerts h))
     ]
+;;
+
+let schema = "keeper.memory_os.current_health.v8"
+
+(* What a row contributes to the fleet totals (RFC-0487 §2.5). *)
+let totals_row (h : keeper_health) : Keeper_memory_health_totals.Row.t =
+  { Keeper_memory_health_totals.Row.facts = h.facts
+  ; observed_facts = h.observed_facts
+  ; derived_facts = h.derived_facts
+  ; support_invalidations = h.support_invalidations
+  ; snapshot_bytes = h.snapshot_bytes
+  ; added = h.added
+  ; removed = h.removed
+  ; source_facts = h.source_facts
+  ; source_invalidations = h.source_invalidations
+  ; source_snapshot_bytes = h.source_snapshot_bytes
+  ; unread_atom_turns = h.librarian.unread_atom_turns
+  ; unread_official_turns = h.librarian.unread_official_turns
+  ; continuity_unread_atoms = h.librarian.continuity_unread_atoms
+  ; librarian_failures = h.librarian_failures
+  ; vision_ingest_errors = h.vision_ingest_errors
+  ; read_error = Option.is_some h.read_error
+  ; source_read_error = Option.is_some h.source_read_error
+  ; snapshot_present = h.snapshot_present
+  ; librarian_stopped =
+      (match h.librarian.state with
+       | Some (Keeper_librarian_queue_refresh.Lane_unconfigured | Not_committed | Stopped _ | Raised _) ->
+         true
+       | Some (Off | Drained | Yielded_to_waiting_unit | Pending) | None -> false)
+  ; alerts = List.map fst (alerts h)
+  }
 ;;
 
 let keeper_memory_health_http_json ~base_path =
@@ -707,118 +734,33 @@ let keeper_memory_health_http_json ~base_path =
         (right.snapshot_bytes + right.source_snapshot_bytes)
         (left.snapshot_bytes + left.source_snapshot_bytes))
   in
-  let sum field =
-    List.fold_left (fun total entry -> total + field entry) 0 entries
-  in
-  let all_alerts = List.concat_map alerts entries in
-  let count_severity severity =
-    List.length
-      (List.filter
-         (fun alert -> String.equal (alert_severity alert) severity)
-         all_alerts)
-  in
+  let totals = Keeper_memory_health_totals.of_rows (List.map totals_row entries) in
   `Assoc
-    [ "schema", `String "keeper.memory_os.current_health.v8"
+    [ "schema", `String schema
     ; "generated_at", `Float generated_at
     ; "execution", Keeper_memory_execution_availability.(to_json (snapshot ~config ~mode:`Live))
     ; "keepers", `List (List.map keeper_health_entry_to_json entries)
-    ; ( "totals"
-      , `Assoc
-          [ "facts", `Int (sum (fun entry -> entry.facts))
-          ; "observed_facts", `Int (sum (fun entry -> entry.observed_facts))
-          ; "derived_facts", `Int (sum (fun entry -> entry.derived_facts))
-          ; ( "support_invalidations"
-            , `Int (sum (fun entry -> entry.support_invalidations)) )
-          ; "snapshot_bytes", `Int (sum (fun entry -> entry.snapshot_bytes))
-          ; "added", `Int (sum (fun entry -> entry.added))
-          ; "removed", `Int (sum (fun entry -> entry.removed))
-          ; "source_facts", `Int (sum (fun entry -> entry.source_facts))
-          ; ( "source_invalidations"
-            , `Int (sum (fun entry -> entry.source_invalidations)) )
-          ; ( "source_snapshot_bytes"
-            , `Int (sum (fun entry -> entry.source_snapshot_bytes)) )
-          ; ( "librarian_unread_turns"
-            , (match List.fold_left (fun total entry ->
-                 match total, entry.librarian.unread_atom_turns,
-                       entry.librarian.unread_official_turns with
-                 | Some total, Some atoms, Some official -> Some (total + atoms + official)
-                 | _ -> None) (Some 0) entries with
-               | Some total -> `Int total
-               | None -> `Null) )
-            (* Summed over the keepers whose lag is known, with the rest
-               counted beside it. A total that goes null when one keeper
-               cannot be measured would hide the keepers that can: most
-               keepers carry no continuity snapshot at all. *)
-          ; ( "librarian_continuity_unread_atoms"
-            , `Int
-                (List.fold_left
-                   (fun total entry ->
-                      match entry.librarian.continuity_unread_atoms with
-                      | Some atoms -> total + atoms
-                      | None -> total)
-                   0
-                   entries) )
-          ; ( "librarian_continuity_unmeasured"
-            , `Int
-                (List.fold_left
-                   (fun count entry ->
-                      match entry.librarian.continuity_unread_atoms with
-                      | Some _ -> count
-                      | None -> count + 1)
-                   0
-                   entries) )
-          ; ( "librarian_failures"
-            , `Int (sum (fun entry -> entry.librarian_failures)) )
-          ; ( "vision_ingest_errors"
-            , `Int (sum (fun entry -> entry.vision_ingest_errors)) )
-          ; ( "read_errors"
-            , `Int
-                (sum (fun entry ->
-                   match entry.read_error with
-                   | Some _ -> 1
-                   | None -> 0)) )
-          ; ( "source_read_errors"
-            , `Int
-                (sum (fun entry ->
-                   match entry.source_read_error with
-                   | Some _ -> 1
-                   | None -> 0)) )
-          ] )
-    ; ( "alert_summary"
-      , `Assoc
-          [ "total_alerts", `Int (List.length all_alerts)
-          ; "warn_alerts", `Int (count_severity "warn")
-          ; "error_alerts", `Int (count_severity "error")
-          ; ( "keepers_with_alerts"
-            , `Int
-                (sum (fun entry ->
-                   if alerts entry = [] then 0 else 1)) )
-          ; ( "snapshot_read_error_keepers"
-            , `Int
-                (sum (fun entry ->
-                   match entry.read_error with
-                   | Some _ -> 1
-                   | None -> 0)) )
-          ; ( "source_snapshot_read_error_keepers"
-            , `Int
-                (sum (fun entry ->
-                   match entry.source_read_error with
-                   | Some _ -> 1
-                   | None -> 0)) )
-          ; ( "librarian_stopped_keepers"
-            , `Int
-                (sum (fun entry ->
-                   match entry.librarian.state with
-                   | Some (Lane_unconfigured | Not_committed | Stopped _ | Raised _) -> 1
-                   | Some (Off | Drained | Yielded_to_waiting_unit | Pending) | None -> 0)) )
-          ; ( "librarian_starving_keepers"
-            , `Int
-                (sum (fun entry ->
-                   if entry.librarian_failures > 0 && not entry.snapshot_present
-                   then 1
-                   else 0)) )
-          ] )
+    ; "totals", Keeper_memory_health_totals.totals_to_json totals
+    ; "alert_summary", Keeper_memory_health_totals.alert_summary_to_json totals
     ]
+;;
+
+(* One Keeper's row, the way the fleet answer carries it under [keepers]. A
+   Keeper the fleet answer has no row for, one that left included, answers
+   [null]: the answer says so itself, under the same workspace receipt as a
+   row, instead of leaving it to a status a proxy could also send. The name is
+   matched against the Keepers the fleet would list, so it never names a file
+   on its own. *)
+let keeper_memory_health_row_http_json ~base_path ~keeper =
+  let config = Workspace.default_config base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let generated_at = Time_compat.now () in
+  let row =
+    if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
+    then keeper_health_entry_to_json (keeper_health ~config ~keepers_dir keeper)
+    else `Null
+  in
+  `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]
 ;;
 
 (* Preserve each store's own revision and evidence rather than synthesizing a

@@ -45,7 +45,6 @@ let load_context_from_checkpoint_classified =
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_core.Checkpoint.t option;
   checkpoint_bytes : int option;
   message_count : int;
 }

@@ -196,24 +196,17 @@ let resolve_masc_base_path path =
 let resolve_server_default_base_path path = resolve_masc_base_path path
 
 (* task-351: quarantine escape guard.
-   2026-08-25 04:38:30Z incident: a test-harness Workspace.init with a
-   temp-dir base request (test_warn_root_causes.ml, agent
-   "test-stale-task-hint") resolved its base to the live base path and
-   rewrote production state: messages seq 2604→1, backlog replaced.
-   Filesystem proof: <live base>/.masc/agents/test-stale-task-hint.json
-   (session_bound_at 04:38:30Z).
-
-   The primary cause — the MASC_TEST_ALLOW_BASE_PATH_OVERRIDE switch that
-   let a test executable resolve to a live base — was removed in #30487.
-   This guard is defense-in-depth: whatever future path makes a temp-dir
-   base request resolve outside temp, the resolution is refused and the
-   scratch dir is kept, so a temp-shaped base request can never resolve
-   to a non-temp base — whatever executable makes it, test-named or not.
-   Note the guard fires on the only remaining branch: a non-test-named
-   binary with an inherited MASC_BASE_PATH (| Some explicit -> explicit).
-   test_-prefixed executables keep temp on every branch already; scratch
-   dirs outside the four temp roots (e.g. a fixture dir inside the repo)
-   are not covered by this predicate — that is a separate concern. *)
+   A test-harness Workspace.init with a temp-dir base request must never
+   touch a live base path. Whatever path makes a temp-dir base request
+   resolve outside temp, the resolution is refused and the scratch dir is
+   kept, so a temp-shaped base request can never resolve to a non-temp
+   base — whatever executable makes it, test-named or not.
+   The guard fires on the only branch that can still do this: a
+   non-test-named binary with an inherited MASC_BASE_PATH (| Some explicit
+   -> explicit). test_-prefixed executables keep temp on every branch
+   already; scratch dirs outside the four temp roots (e.g. a fixture dir
+   inside the repo) are not covered by this predicate — that is a separate
+   concern. *)
 let temp_dir_roots =
   [ Filename.get_temp_dir_name (); "/tmp"; "/var/tmp"; "/dev/shm" ]
 

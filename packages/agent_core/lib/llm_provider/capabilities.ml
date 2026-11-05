@@ -481,8 +481,7 @@ let declared_image_input_for_provider_model ~catalog ~wire ~provider ~model_id =
 
     Returns [None] when no catalog is available or when the catalog has
     no entry whose [model_id] matches [model_id]. There is no in-code
-    fallback table: the former built-in static table was removed when
-    model specifications were externalized to the TOML catalog. *)
+    fallback table: model specifications come from the TOML catalog. *)
 
 let for_model_id_from_catalog catalog model_id =
   match catalog with

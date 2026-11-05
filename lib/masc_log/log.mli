@@ -96,8 +96,7 @@ val source_to_string : source -> string
 
 val legacy_stderr : level:level -> ?module_name:string -> string -> unit
 (** Mirror a stderr line into the dashboard log ring.  [~level] is
-    required as of RFC-0079; the prior [?level] option backed a
-    string-prefix classifier ([infer_legacy_level]) that has been removed. *)
+    required. *)
 
 val legacy_traceln : level:level -> ?module_name:string -> string -> unit
 (** Mirror an [Eio.traceln]-style line into the dashboard log ring.

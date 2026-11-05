@@ -78,12 +78,13 @@ let url_credential_re = Re.compile url_credential
 (** Common secret-bearing value patterns — structural prefixes only.
 
     Each pattern identifies a secret by its *structure* (a known prefix family
-    or the [://user:pass@] URL shape), not by a length heuristic. The former
-    generic "20+ alphanumeric run" matcher was removed: it classified ordinary
-    identifiers (keeper names, commit hashes, task ids) as secrets by length
-    alone, erasing them from observability fields, while every real prefix it
-    caught is already matched here in one shot (e.g. [sk-proj-...] via the
-    [sk-] body below). Known secret *values* loaded from the environment remain
+    or the [://user:pass@] URL shape), not by a length heuristic. A generic
+    "20+ alphanumeric run" matcher is deliberately absent: it would classify
+    ordinary identifiers (keeper names, commit hashes, task ids) as secrets by
+    length alone, erasing them from observability fields, while every real
+    prefix it would catch is already matched here in one shot (e.g.
+    [sk-proj-...] via the [sk-] body below). Known secret *values* loaded from
+    the environment remain
     redacted exactly by {!Keeper_secret_redaction}, which does not rely on this
     heuristic.
 

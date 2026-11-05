@@ -1,8 +1,7 @@
 (** RFC-0084 §3.2 — Typed tool capability.
 
     The closed-sum [kind] and [Set]-based granted/required model reads
-    capability truth from [Tool_catalog.metadata]. [Tool_dispatch]'s
-    mutable capability sets have been removed; dispatch owns routing,
+    capability truth from [Tool_catalog.metadata]. Dispatch owns routing,
     not capability authority.
 
     The module is named [Tool_capability] to make its narrow tool-registration

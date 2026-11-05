@@ -64,6 +64,40 @@ let test_each_list_footer_names_no_key_it_refuses () =
         keys)
     list_footer_refusals
 
+(* The footers above are read by substring, which cannot tell a one-letter key
+   from the end of another: "c:" is inside "Esc:". An item is "key:label" and
+   items are joined by two spaces, so a key names an item only right after a
+   separator. *)
+let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
+
+(* A key and the two footers of its surface: the one drawn where the key
+   answers and the one drawn where the dispatcher refuses it.
+   [t], [p], [/] and [n / N] act on the Work list; in a Goal detail [p] is
+   Pause and the other three have no list to act on. [c] replies to the post
+   that is open, so the Board list has nothing to reply to. *)
+let scoped_keys =
+  [ ( "Planning",
+      Keys.footer_hints_planning_goal_list,
+      Keys.footer_hints_planning_goal_detail,
+      [ "t"; "p"; "/"; "n / N" ] )
+  ; ( "Board",
+      Keys.footer_hints ~detail_open:true Masc_tui_types.Board,
+      Keys.footer_hints ~detail_open:false Masc_tui_types.Board,
+      [ "c" ] )
+  ]
+
+let test_a_scoped_key_is_named_only_where_it_answers () =
+  List.iter
+    (fun (name, answering, refusing, keys) ->
+      List.iter
+        (fun key ->
+          check bool (name ^ " names " ^ key ^ " where it answers") true
+            (names_item answering key);
+          check bool (name ^ " does not name " ^ key ^ " where it is refused")
+            false (names_item refusing key))
+        keys)
+    scoped_keys
+
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -83,6 +117,8 @@ let () =
             test_each_surface_scopes_a_key
         ; test_case "each list footer names no key it refuses" `Quick
             test_each_list_footer_names_no_key_it_refuses
+        ; test_case "a scoped key is named only where it answers" `Quick
+            test_a_scoped_key_is_named_only_where_it_answers
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

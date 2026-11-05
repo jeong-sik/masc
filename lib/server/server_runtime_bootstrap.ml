@@ -731,8 +731,13 @@ let owner_initialization_error_to_string = function
       (Server_startup_state.phase_to_string observed_phase)
 
 (* Shorter than the first provider to close an idle connection in RFC-0492
-   §1.2 (api.z.ai, 25 s). A request takes no connection idle for longer, so it
-   does not take one api.z.ai has already closed. *)
+   §1.2, where api.z.ai closed 25 s after the response was read. The cache
+   counts idle time on the monotonic clock from when it parks a connection,
+   which comes after that read, and a request takes none idle for longer than
+   this. A request still meets a connection api.z.ai has closed when the
+   read-to-park delay plus the time the next request takes to reach api.z.ai
+   exceed the 5 s between the two, or when api.z.ai closes sooner than §1.2
+   measured. *)
 let provider_connection_idle_ttl_s = 20.0
 
 let initialize_owner_state_blocking
@@ -950,7 +955,7 @@ let initialize_owner_state_blocking
       | Fd_accountant.Storage_space_exhausted ->
         Keeper_disk_pressure.note_exception ~site exn);
   Log.Server.info "Fd_accountant OS resource observers installed";
-  Provider_connection_cache_ref.install ~sw ~clock
+  Provider_connection_cache_ref.install ~sw ~mono_clock
     ~idle_ttl_seconds:provider_connection_idle_ttl_s;
   Log.Server.info "Provider connection cache installed idle_ttl_s=%.0f"
     provider_connection_idle_ttl_s;

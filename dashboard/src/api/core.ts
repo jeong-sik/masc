@@ -8,6 +8,7 @@ import type {
   OperatorSnapshot,
 } from '../types'
 import { sanitizeDashboardActorName } from '../lib/dashboard-actor'
+import { credentiallessRequest, noteRefusal, replayedRefusal } from './credentialless-refusal'
 import { isAbortError } from '../lib/async-state'
 import { parseUniqueJson } from '../lib/json-unique'
 import {
@@ -447,7 +448,23 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
   const owner = captureDashboardCredentialOwner()
   const managed = owner.token !== null && getStoredTokenMeta()?.source === 'dev'
   const managedRevision = managedDashboardActorRevision.peek()
+  const credentialless = sentBearerToken(requestInit.headers) === null
+    ? credentiallessRequest(requestInit.method, path, storedTokenRevision)
+    : null
+  if (credentialless !== null) {
+    const replayed = replayedRefusal(credentialless)
+    if (replayed !== null) return replayed
+  }
   const response = await fetch(path, requestInit)
+  // Kept before the caller sees the 401, so a poll that starts after it is
+  // answered from the table instead of sending the same request again.
+  if (credentialless !== null && response.status === 401) {
+    try {
+      await noteRefusal(credentialless, response.clone())
+    } catch (err) {
+      if (!isAbortError(err)) console.warn('[dashboard-auth] credentialless refusal was not kept', err)
+    }
+  }
   if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner, managed, managedRevision).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })

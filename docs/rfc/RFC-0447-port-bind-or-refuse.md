@@ -80,7 +80,7 @@ and handoff_failure =
 ```
 
 - 플래그 없는 `masc start` 는 lease 가 잡혀 있으면 기다리지 않고 거절한다. 종료를 요청받지 않은 정상 서버는 기다려도 끝나지 않는다.
-- 기다림은 `masc start --wait-for-previous-owner` 하나다. `masc restart` 가 전임에게 종료를 요청한 뒤 이 플래그로 후임을 띄운다([masc restart](RFC-masc-restart-replaces-the-workspace-server.md)). 후임은 workspace lease(`Host_config.base_path_lease_dir` 아래 파일) 를 `lockf F_LOCK` 으로 기다리고, 커널이 잠금을 넘길 때 깨어난다. 폴링 간격이 없다. 전임이 정상 종료하든 watchdog 이 exit 124 로 죽이든 fd 는 닫히고 잠금은 풀린다.
+- 기다림은 `masc start --wait-for-previous-owner` 하나다. `masc restart` 가 전임에게 종료를 요청한 뒤 이 플래그로 후임을 띄운다([masc restart](RFC-masc-restart-replaces-the-workspace-server.md)). 후임은 workspace lease(`Server_startup_takeover.lease_run_dir` 가 BasePath 로 고른 곳의 파일) 를 `lockf F_LOCK` 으로 기다리고, 커널이 잠금을 넘길 때 깨어난다. 폴링 간격이 없다. 전임이 정상 종료하든 watchdog 이 exit 124 로 죽이든 fd 는 닫히고 잠금은 풀린다.
 - 기한은 두지 않는다. 종료를 요청받은 전임은 자기 watchdog(`force_timeout_s`) 으로 반드시 끝난다. 기다림을 멈추려면 후임 프로세스를 끝낸다.
 - lease 가 풀린 뒤 bind 가 또 EADDRINUSE 면 재시도 없이 `Port_held_by_unknown_process` 다. 그 사이 다른 프로세스가 잡은 것이다.
 - 기동 경로는 어떤 프로세스에도 시그널을 보내지 않는다. `server_startup_takeover.ml` 의 `looks_like_server_command` 판정, SIGTERM, SIGKILL, takeover breadcrumb 는 지운다. 전임에게 종료를 요청하는 곳은 `masc setup` 의 stop 과 `masc restart` 둘이다. 둘 다 `Masc_cli_owner_upgrade.with_selected_owner` 로 `authorize_initial`(운영자 로그인) 과 `Owner_process_identity.capture` 가 같은 incarnation 임을 확인한 뒤 `request_termination` 을 부른다. SIGTERM 한 번, SIGKILL 없음은 `owner_process_identity.mli` 가 이미 정한 계약이다.

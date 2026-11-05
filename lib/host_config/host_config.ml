@@ -41,7 +41,6 @@ type t =
   ; test_mode : test_mode_kind
   ; log_dir : string
   ; run_dir : string
-  ; base_path_lease_dir : string
   ; base_path_lease_root : base_path_lease_root
   ; policy_dir : string
   ; base_path : string option
@@ -104,8 +103,6 @@ let host () =
        else Production)
   ; log_dir = tmp
   ; run_dir = tmp
-  ; base_path_lease_dir =
-      Option.value (get_opt base_path_lease_dir_env_key) ~default:tmp
   ; base_path_lease_root = base_path_lease_root_of_env get_opt
   ; policy_dir = tmp
   ; base_path =
@@ -219,8 +216,6 @@ let resolve ?base_path () =
     ; test_mode
     ; log_dir = tmp
     ; run_dir = tmp
-    ; base_path_lease_dir =
-        Option.value (get_opt base_path_lease_dir_env_key) ~default:tmp
     ; base_path_lease_root = base_path_lease_root_of_env get_opt
     ; policy_dir = tmp
     ; base_path =

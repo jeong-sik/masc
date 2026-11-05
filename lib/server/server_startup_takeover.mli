@@ -116,7 +116,7 @@ val lease_run_dir :
     lease. [Lease_dir_override] is returned as given. *)
 
 (** Acquire the process-lifetime owner lease below a current-UID-owned [0700]
-    private directory in the explicitly supplied host run root, then establish
+    private directory in [run_dir] ({!lease_run_dir} names it), then establish
     and validate [<base_path>/.masc]. A group- or world-writable [run_dir] is
     accepted only when its sticky bit prevents other UIDs from renaming the
     private directory. No fallback directory is selected.

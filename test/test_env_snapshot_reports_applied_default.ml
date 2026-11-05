@@ -190,8 +190,8 @@ let test_base_path_lease_directory_is_visible () =
   | [ reported ] ->
     check
       string
-      "the snapshot reports the host run-directory fallback"
-      "(host temp directory)"
+      "the snapshot reports the lease root beside the BasePath"
+      "<base path>/.masc-owner"
       reported
   | [] -> fail "MASC_BASE_PATH_LEASE_DIR is absent from the operator snapshot"
   | many -> failf "MASC_BASE_PATH_LEASE_DIR appears %d times" (List.length many)

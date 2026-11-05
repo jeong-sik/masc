@@ -352,6 +352,21 @@ let should_ring_for_new_ask ~arrived ~operator_is_watching_asks =
   (match arrived with [] -> false | _ :: _ -> true)
   && not operator_is_watching_asks
 
+(* What the desktop banner of a new question says: the asker for one question,
+   a count for several. The asker is external text -- an installation's title
+   is the package's own -- and the caller writes this inside an OSC 9 sequence
+   that a BEL ends. A name holding BEL or ESC would end the sequence there and
+   hand the rest to the terminal as commands, so the name is drawn as visible
+   text instead. *)
+let arrival_notification (arrived : Decode.ask_key list) =
+  match arrived with
+  | [ ask ] ->
+      Printf.sprintf "%s is waiting on a decision"
+        (Masc.Tui_terminal_text.sanitize_terminal_text
+           (Decode.ask_asker_label ask.Decode.ak_asker))
+  | [] | _ :: _ :: _ ->
+      Printf.sprintf "%d questions are waiting on a decision" (List.length arrived)
+
 let without question_id responses =
   List.filter (fun (id, _) -> not (String.equal id question_id)) responses
 

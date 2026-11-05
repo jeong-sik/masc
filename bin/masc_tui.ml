@@ -15769,16 +15769,8 @@ let apply_approvals_load state result =
    moves the cursor, so this writes out of band rather than through the frame.
    The banner names the Keeper or the installation so it says who is waiting. *)
 let notify_new_asks (arrived : Masc.Tui_decode_asks.ask_key list) =
-  let message =
-    match List.map (fun (ask : Masc.Tui_decode_asks.ask_key) -> ask.ak_asker) arrived with
-    | [ asker ] ->
-        Printf.sprintf "%s is waiting on a decision" (Masc.Tui_decode_asks.ask_asker_label asker)
-    | [] | _ :: _ :: _ ->
-        let count = List.length arrived in
-        Printf.sprintf "%s %s waiting on a decision"
-          (Masc_tui_message_layout.count_noun count "question") (if count = 1 then "is" else "are")
-  in
-  write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
+  write_to_terminal
+    (Printf.sprintf "\x07\x1b]9;%s\x07" (Ask.arrival_notification arrived))
 
 let record_applied_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) =
   if Masc_tui_frame_timing.enabled then begin

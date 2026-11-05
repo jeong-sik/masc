@@ -8062,6 +8062,18 @@ let observer_browser_scope state =
   if Option.is_some !browser_pointer_press then None
   else Masc_tui_types.observer_browser_scope_of_state state
 
+let debug_browser_scope = function
+  | None -> "none"
+  | Some (scope : Masc.Workspace_dataset_event.browser_scope) ->
+      let client = Option.value scope.client_id ~default:"-" in
+      let view = match scope.view with
+        | Masc.Workspace_dataset_event.Read -> "read"
+        | Masc.Workspace_dataset_event.Viewport -> "viewport"
+        | Masc.Workspace_dataset_event.Scene _ -> "scene"
+      in
+      Printf.sprintf "%s/%s/%d/%s"
+        (Browser_lane.Lane_name.to_wire scope.source) client scope.tab_id view
+
 let owe_machine_live_read state machine =
   let visible = match machine with
     | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
@@ -8097,7 +8109,11 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       owe_runtime_surface_read state
   | Masc.Workspace_dataset_event.Machine_live { machine } -> owe_machine_live_read state machine
   | Masc.Workspace_dataset_event.Browser_observation observation ->
-      if Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope then
+      let matches = Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope in
+      Log.Transport.warn "browser observation event scope=%s current=%s matches=%b"
+        (debug_browser_scope (Some observation.scope))
+        (debug_browser_scope (Masc_tui_types.observer_browser_scope_of_state state)) matches;
+      if matches then
         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health _ ->
       state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
@@ -9123,6 +9139,8 @@ let launch_owed_browser_observation state ~mailbox =
       state.browser_observation_owed <- owed;
       if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
          && Option.is_none !browser_pointer_press then begin
+        Log.Transport.warn "browser observation owed read due scope=%s"
+          (debug_browser_scope (observer_browser_scope state));
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
         match Browser_lane_view.cadence_operation ?viewport view with
         | Some operation ->
@@ -18714,6 +18732,8 @@ let reconcile_observer_machine state ~host ~port ~mailbox =
   let machine = Masc_tui_types.observer_machine_of_state state in
   let browser = observer_browser_scope state in
   if machine <> state.observer_machine || browser <> state.observer_browser then begin
+    Log.Transport.warn "browser observer scope change old=%s new=%s"
+      (debug_browser_scope state.observer_browser) (debug_browser_scope browser);
     Option.iter (fun owner -> Masc_tui_workspace_job.cancel_observation state ~key:owner)
       state.observer_stream_owner;
     state.observer_stream_owner <- None;

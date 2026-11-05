@@ -6,8 +6,8 @@ type t =
   ; module_filter : string
   ; since_seq : int option
   ; before_seq : int option
-  ; category_filter : string option
-  ; exclude_category : string list option
+  ; categories : Log.category_selector list option
+  ; exclude_categories : Log.category_selector list option
   }
 
 let default_limit = 200
@@ -19,6 +19,33 @@ let seq_param req key =
   | Some _ ->
     let seq = Server_utils.int_query_param req key ~default:(-1) in
     if seq < 0 then None else Some seq
+;;
+
+let category_selectors_param req key =
+  match Server_utils.query_param req key with
+  | None -> Ok None
+  | Some raw ->
+    let rec read acc = function
+      | [] -> Ok (match List.rev acc with [] -> None | selectors -> Some selectors)
+      | name :: rest ->
+        (match Log.category_selector_of_string_opt name with
+         | Some selector -> read (selector :: acc) rest
+         | None -> Error name)
+    in
+    raw
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun name -> name <> "")
+    |> read []
+;;
+
+let invalid_category_json ~param name =
+  `Assoc
+    [ "error", `String "invalid_log_category"
+    ; "message", `String "each name must be a log category or uncategorized"
+    ; "param", `String param
+    ; "value", `String name
+    ]
 ;;
 
 let of_request req =
@@ -39,40 +66,35 @@ let of_request req =
         ; "level", `String level_filter
         ])
   | Some applied_level ->
-    let exclude_category =
-      match Server_utils.query_param req "exclude_category" with
-      | None -> None
-      | Some raw ->
-        (match
-           String.split_on_char ',' raw
-           |> List.map String.trim
-           |> List.filter (fun s -> s <> "")
-         with
-         | [] -> None
-         | xs -> Some xs)
-    in
-    Ok
-      { limit
-      ; level_filter
-      ; applied_level
-      ; min_level = Log.level_to_int applied_level
-      ; module_filter = Option.value ~default:"" (Server_utils.query_param req "module")
-      ; since_seq = seq_param req "since_seq"
-      ; before_seq = seq_param req "before_seq"
-      ; category_filter = Server_utils.query_param req "category"
-      ; exclude_category
-      }
+    (match
+       ( category_selectors_param req "category"
+       , category_selectors_param req "exclude_category" )
+     with
+     | Error name, _ -> Error (invalid_category_json ~param:"category" name)
+     | Ok _, Error name -> Error (invalid_category_json ~param:"exclude_category" name)
+     | Ok categories, Ok exclude_categories ->
+       Ok
+         { limit
+         ; level_filter
+         ; applied_level
+         ; min_level = Log.level_to_int applied_level
+         ; module_filter = Option.value ~default:"" (Server_utils.query_param req "module")
+         ; since_seq = seq_param req "since_seq"
+         ; before_seq = seq_param req "before_seq"
+         ; categories
+         ; exclude_categories
+         })
 ;;
 
 let read t =
   Log.Ring.recent ~limit:t.limit ~min_level:t.min_level ~module_filter:t.module_filter
-    ?since_seq:t.since_seq ?before_seq:t.before_seq ?category_filter:t.category_filter
-    ?exclude_category:t.exclude_category ()
+    ?since_seq:t.since_seq ?before_seq:t.before_seq ?categories:t.categories
+    ?exclude_categories:t.exclude_categories ()
 ;;
 
 let to_json ~config t ~ring_bounds entries =
   Server_dashboard_logs_json.build ~config ~limit:t.limit ~level_filter:t.level_filter
     ~applied_level:t.applied_level ~min_level:t.min_level ~module_filter:t.module_filter
-    ~since_seq:t.since_seq ~before_seq:t.before_seq ~category_filter:t.category_filter
-    ~exclude_category:t.exclude_category ~ring_bounds entries
+    ~since_seq:t.since_seq ~before_seq:t.before_seq ~categories:t.categories
+    ~exclude_categories:t.exclude_categories ~ring_bounds entries
 ;;

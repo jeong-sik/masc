@@ -4,6 +4,7 @@ module Http = Http_server_eio
 module Keeper_api = Server_dashboard_http_keeper_api
 
 val trimmed_query_param : Httpun.Request.t -> string -> string option
+
 val agent_core_telemetry_limit_param : Httpun.Request.t -> int
 val agent_core_telemetry_provider_param : Httpun.Request.t -> string option
 

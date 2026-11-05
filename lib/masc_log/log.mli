@@ -25,6 +25,19 @@ type category =
   | Turn
   | Broadcast
 
+(** One choice in a log category filter: a category, or the entries that
+    carry none. *)
+type category_selector =
+  | Category of category
+  | Uncategorized
+
+val category_selector_to_string : category_selector -> string
+(** The wire name: the category's own name, or ["uncategorized"]. *)
+
+val category_selector_of_string_opt : string -> category_selector option
+(** Read a wire name, ignoring case and surrounding spaces. [None] for a name
+    that is neither a category nor ["uncategorized"]. *)
+
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 
@@ -156,15 +169,18 @@ module Ring : sig
     ?since_seq:int ->
     ?before_seq:int ->
     ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
-    ?category_filter:string ->
-    ?exclude_category:string list ->
+    ?categories:category_selector list ->
+    ?exclude_categories:category_selector list ->
     unit ->
     entry list
   (** Read a slice of the in-memory ring, newest-first by default.
       [since_seq] returns only entries strictly newer than the cursor (forward
       delta polling); [before_seq] returns only entries strictly older than the
       cursor (backward "load older" paging). Both are inclusive-exclusive on the
-      cursor and compose into a bounded window when supplied together. *)
+      cursor and compose into a bounded window when supplied together.
+      [categories] keeps the entries any selector matches and
+      [exclude_categories] drops them; [limit] counts the kept entries, so a
+      rare category fills the slice from the whole ring. *)
 
   val entry_to_json : entry -> Yojson.Safe.t
   val entry_of_json : Yojson.Safe.t -> entry

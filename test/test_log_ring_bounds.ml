@@ -62,7 +62,7 @@ let test_dashboard_logs_json_carries_ring_bounds () =
   let json =
     Server_dashboard_logs_json.build ~config ~limit:5 ~level_filter:"all"
       ~applied_level:Log.Info ~min_level:0 ~module_filter:"" ~since_seq:None
-      ~before_seq:None ~category_filter:None ~exclude_category:None
+      ~before_seq:None ~categories:None ~exclude_categories:None
       ~ring_bounds:bounds []
   in
   match member "ring" json with
@@ -84,6 +84,65 @@ let test_dashboard_logs_json_carries_ring_bounds () =
        | _ -> Alcotest.fail "dropped_before not a bool")
   | _ -> Alcotest.fail "ring field missing or not an object"
 
+let newest_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> Alcotest.fail "the ring is empty right after a write"
+
+let seqs entries = List.map (fun (entry : Log.Ring.entry) -> entry.seq) entries
+
+(* #30305: a kind that logs once an hour next to a tool line five times a
+   second never reaches a 200-entry slice; the selector has to choose before
+   the limit counts. *)
+let test_category_selector_reaches_past_the_slice () =
+  Log.Misc.info ~category:Log.Directive "ring-category directive";
+  let directive = newest_seq () in
+  for i = 1 to 300 do
+    Log.Misc.info ~category:Log.Tool "ring-category tool %d" i
+  done;
+  Alcotest.(check bool) "the unfiltered 200-entry slice misses the directive" false
+    (List.mem directive (seqs (Log.Ring.recent ~limit:200 ~module_filter:"Misc" ())));
+  let directives =
+    Log.Ring.recent ~limit:200 ~module_filter:"Misc"
+      ~categories:[ Log.Category Log.Directive ] ()
+  in
+  Alcotest.(check bool) "the directive selector finds it" true
+    (List.mem directive (seqs directives));
+  Alcotest.(check bool) "every kept entry is a directive" true
+    (List.for_all
+       (fun (entry : Log.Ring.entry) -> entry.category = Some Log.Directive)
+       directives)
+
+let test_uncategorized_and_exclusion_selectors () =
+  Log.Misc.info "ring-category plain";
+  let plain = newest_seq () in
+  Log.Misc.info ~category:Log.Fsm "ring-category fsm";
+  let fsm = newest_seq () in
+  let since_seq = plain - 1 in
+  Alcotest.(check (list int)) "uncategorized keeps the entry with no category"
+    [ plain ]
+    (seqs (Log.Ring.recent ~since_seq ~categories:[ Log.Uncategorized ] ()));
+  Alcotest.(check (list int)) "excluding fsm drops the fsm entry" [ plain ]
+    (seqs
+       (Log.Ring.recent ~since_seq ~exclude_categories:[ Log.Category Log.Fsm ] ()));
+  Alcotest.(check (list int)) "excluding uncategorized drops the plain entry"
+    [ fsm ]
+    (seqs (Log.Ring.recent ~since_seq ~exclude_categories:[ Log.Uncategorized ] ()))
+
+let test_category_param_reads_a_closed_list () =
+  let read target =
+    Server_logs_query.category_selectors_param
+      (Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target)
+      "category"
+  in
+  Alcotest.(check bool) "names become selectors in order" true
+    (read "/api/v1/dashboard/logs?category=tool,uncategorized"
+     = Ok (Some [ Log.Category Log.Tool; Log.Uncategorized ]));
+  Alcotest.(check bool) "an absent key reads as no filter" true
+    (read "/api/v1/dashboard/logs" = Ok None);
+  Alcotest.(check bool) "an unknown name is refused" true
+    (read "/api/v1/dashboard/logs?category=tool,provider" = Error "provider")
+
 let () =
   Alcotest.run "log_ring_bounds"
     [
@@ -93,5 +152,14 @@ let () =
           Alcotest.test_case "past capacity" `Quick test_bounds_past_capacity;
           Alcotest.test_case "dashboard logs json carries ring bounds" `Quick
             test_dashboard_logs_json_carries_ring_bounds;
+        ] );
+      ( "categories",
+        [
+          Alcotest.test_case "a selector reaches past the slice" `Quick
+            test_category_selector_reaches_past_the_slice;
+          Alcotest.test_case "uncategorized and exclusion selectors" `Quick
+            test_uncategorized_and_exclusion_selectors;
+          Alcotest.test_case "the category param reads a closed list" `Quick
+            test_category_param_reads_a_closed_list;
         ] );
     ]

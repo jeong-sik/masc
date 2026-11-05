@@ -722,22 +722,22 @@ let test_image_preview_input_barrier () =
   let prepared=match Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Error "unused") attachment with
     | Ok prepared -> prepared | Error _ -> fail "URL preparation failed" in
   let attempt=ref () in
-  let open_ready=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready (attempt,prepared))) in
+  let open_ready=Protocol.Board_msg (Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready (attempt,prepared)))) in
   check bool "external open waits for pending input" true
     (waits (scoped (Protocol.Workspace_operation open_ready)));
-  let retry=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_retry {attempt;prepared;opener="open"})) in
+  let retry=Protocol.Board_msg (Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_retry {attempt;prepared;opener="open"}))) in
   check bool "fallback opener also waits for pending input" true
     (waits (scoped retry));
-  let saved=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_saved_original "saved")) in
+  let saved=Protocol.Board_msg (Protocol.Board_attachment_saved (request, Ok (Protocol.Board_saved_original "saved"))) in
   check bool "completed save is not deferred" false
     (waits saved);
   let request : Catalog.read_request = {key=uri;owner=ref ()} in
-  let read=Protocol.Resource_read (request,Error "unavailable",Types.Share_journal_not_needed) in
+  let read=Protocol.Resource_msg (Protocol.Resource_read (request,Error "unavailable",Types.Share_journal_not_needed)) in
   let lookup : Types.resource_share_recovery_lookup =
     {recovery_lookup_owner=ref ();recovery_lookup_workspace=state.workspace_authority;
      recovery_lookup_origin={wi_base_path="/test";wi_masc_root="/test/.masc"};
      recovery_lookup_key=uri} in
-  let recovery=Protocol.Resource_share_recovery_loaded (lookup,Error "unavailable") in
+  let recovery=Protocol.Resource_msg (Protocol.Resource_share_recovery_loaded (lookup,Error "unavailable")) in
   let waits_owned message = Protocol.message_waits_for_input ~resource_read:(fun _ -> true)
       ~recovery_loaded:(fun _ -> true) message in
   List.iter (fun message ->

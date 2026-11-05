@@ -73,14 +73,14 @@ let take results shared round = Protocol.Delivery_round.take round
     {Protocol.ready_at_ns=ready.ready_at_ns;message=ready.message}) (Results.take_ready results))
 let ready = function Some value -> value | None -> fail "original operation reply not retained"
 let receipt = function
-  | Protocol.Task_cancel_done (task_id,expected_workspace,result) -> task_id,expected_workspace,result
+  | Protocol.Task_msg (Protocol.Task_cancel_done (task_id,expected_workspace,result)) -> task_id,expected_workspace,result
   | _ -> fail "original cancellation receipt changed kind or acquired a workspace envelope"
 let cancellation_outcome = function
   | Ok text -> Protocol.Task_cancel_confirmed text
   | Error detail -> Protocol.Task_cancel_refused detail
 let cancellation_message ~task_id ~expected_workspace result =
   let outcome = match result with Ok outcome | Error outcome -> outcome in
-  Protocol.Task_cancel_done (task_id,expected_workspace,outcome)
+  Protocol.Task_msg (Protocol.Task_cancel_done (task_id,expected_workspace,outcome))
 let launch results ~delivered ~task_id ~expected_workspace perform =
   Results.launch_session ~results
     ~boundary_error:(fun detail -> Protocol.Task_cancel_unconfirmed detail)
@@ -91,7 +91,7 @@ let launch results ~delivered ~task_id ~expected_workspace perform =
     (fun () -> Ok (cancellation_outcome (perform ())))
 let seed_shared () =
   let shared = Eio.Stream.create 1 in
-  let original = {Protocol.ready_at_ns=0L;message=Protocol.Harness_label_done (Ok "unrelated-original")} in
+  let original = {Protocol.ready_at_ns=0L;message=Protocol.Harness_msg (Protocol.Harness_label_done (Ok "unrelated-original"))} in
   Eio.Stream.add shared original;
   shared,original
 let after_shared results shared original =
@@ -212,7 +212,7 @@ let creation_reply state shared original =
   check bool "unrelated shared notification survives original Task completion" true (ready first == original);
   let next,_ = take round in
   match (ready next).message with
-  | Protocol.Task_dispatch_completed request -> request
+  | Protocol.Task_msg (Protocol.Task_dispatch_completed request) -> request
   | _ -> fail "Task creation acquired a foreign scope or lost its original request"
 
 let test_created_task_survives_workspace_withdrawal env () = Eio.Switch.run @@ fun sw ->
@@ -462,14 +462,14 @@ let launch_inspection results state call request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Task_creation_read_done (request,result)))
+    ~deliver:(fun result -> envelope (Protocol.Task_msg (Protocol.Task_creation_read_done (request,result))))
     (fun () -> inspect_actual call source)
 let rec owned_message results = match Results.take_ready results with
   | [] -> Eio.Fiber.yield ();owned_message results
   | [ready] -> ready.message
   | _ -> fail "fixture admitted unrelated owned results"
 let admit_inspection state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Task_creation_read_done (request,result) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Task_msg (Protocol.Task_creation_read_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then
       complete_task_creation_inspection state request result else false
   | _ -> fail "inspection lost its original workspace observation envelope"
@@ -640,10 +640,10 @@ let launch_original_inspection results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_task_read_done (request,result)))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_read_done (request,result))))
     (fun () -> actual_task_snapshot config request)
 let admit_original_inspection state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_task_read_done (request,result) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_read_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then
       complete_original_task_inspection state request result else false
   | _ -> fail "original Task observation lost its read scope"
@@ -794,10 +794,10 @@ let launch_history results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_task_history_done (request,result)))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_history_done (request,result))))
     (fun () -> history_snapshot config request)
 let admit_history state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_task_history_done (request,result) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_history_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then complete_original_history_inspection state request result else false
   | _ -> fail "history response lost original read envelope"
 let rec read_history_prefix results state config original ~earlier =
@@ -827,10 +827,10 @@ let launch_evidence results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_task_evidence_done (request,result)))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_evidence_done (request,result))))
     (fun () -> evidence_snapshot config request)
 let admit_evidence state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_task_evidence_done (request,result) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_evidence_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then complete_original_evidence_inspection state request result else false
   | _ -> fail "evidence response lost original read envelope"
 let check_submitted_note original expected = match Creation_read.evidence_observation original.tdr_inspection with

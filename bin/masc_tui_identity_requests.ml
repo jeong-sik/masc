@@ -10,7 +10,7 @@ let launch_github_view state ~host ~deliver keeper_name =
     ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let port = state.port in
   Masc_tui_async_read.launch
-    ~deliver:(fun result -> deliver (Github_identity_view_loaded (request, result)))
+    ~deliver:(fun result -> deliver (Github_msg (Github_identity_view_loaded (request, result))))
     (fun () -> Masc_tui_loader.load_keeper_github_identity_view ~host ~port ~keeper_name)
 ;;
 
@@ -22,8 +22,8 @@ let launch_view state ~host ~deliver keeper_name =
   let expectations = identity_expectations_for_keeper state keeper_name in
   Masc_tui_async_read.launch
     ~deliver:(function
-      | Ok (providers, attempts) -> deliver (Identity_providers_loaded (request, providers, attempts))
-      | Error detail -> deliver (Identity_providers_loaded (request, Error detail, [])))
+      | Ok (providers, attempts) -> deliver (Identity_msg (Identity_providers_loaded (request, providers, attempts)))
+      | Error detail -> deliver (Identity_msg (Identity_providers_loaded (request, Error detail, []))))
     (fun () ->
       (* Read completion first: a completed publication must precede the
          catalog snapshot that is installed before this attempt retires. *)
@@ -58,14 +58,14 @@ let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled 
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    deliver (Identity_switch_set (keeper_name, provider_id, enabled, result))
+    deliver (Identity_msg (Identity_switch_set (keeper_name, provider_id, enabled, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
     deliver
-      (Identity_switch_set
-         (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
+      (Identity_msg (Identity_switch_set
+         (keeper_name, provider_id, enabled, Error "Eio switch is unavailable")))
 ;;
 
 (* Recording an app the operator made. Answers on the same notice line a
@@ -112,13 +112,13 @@ let launch_app_save
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    deliver (Identity_app_saved (keeper_name, provider_id, result))
+    deliver (Identity_msg (Identity_app_saved (keeper_name, provider_id, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
     deliver
-      (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable"))
+      (Identity_msg (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable")))
 ;;
 
 (* Begin a login. The answer is a URL the operator has to open; nothing is
@@ -146,7 +146,7 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
             ~now:(Unix.gettimeofday ()) json in
           (match result with
            | Login_attached _ ->
-               if request_current () then deliver (Identity_refreshed (keeper_name, Ok ()))
+               if request_current () then deliver (Identity_msg (Identity_refreshed (keeper_name, Ok ())))
            | Login_started { url; expires_at; _ } ->
                (* Keep the wrapped URL on screen as well: a machine may not
                   have a browser opener. Retired requests cannot open it. *)
@@ -159,12 +159,12 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Login_failed (Printexc.to_string exn)
     in
-    deliver (Identity_login_started (request, result))
+    deliver (Identity_msg (Identity_login_started (request, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
-    deliver (Identity_login_started (request, Login_failed "Eio switch is unavailable"))
+    deliver (Identity_msg (Identity_login_started (request, Login_failed "Eio switch is unavailable")))
 ;;
 
 (* Ask every attached service again what tools it has. An operator action
@@ -200,11 +200,11 @@ let launch_refresh state ~host ~deliver ~fork ~keeper_name ~provider_ids =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    deliver (Identity_refreshed (keeper_name, result))
+    deliver (Identity_msg (Identity_refreshed (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
-  | None -> deliver (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
+  | None -> deliver (Identity_msg (Identity_refreshed (keeper_name, Error "Eio switch is unavailable")))
 ;;
 
 (* Detach one attached service: forget the stored token, drop the catalog,
@@ -226,12 +226,12 @@ let launch_disconnect state ~host ~deliver ~fork ~keeper_name ~provider_id =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    deliver (Identity_disconnected (keeper_name, provider_id, result))
+    deliver (Identity_msg (Identity_disconnected (keeper_name, provider_id, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
     deliver
-      (Identity_disconnected
-         (keeper_name, provider_id, Error "Eio switch is unavailable"))
+      (Identity_msg (Identity_disconnected
+         (keeper_name, provider_id, Error "Eio switch is unavailable")))
 ;;

@@ -21,7 +21,7 @@ let start_board_post_refresh state ~host ~port ~post_id ~launch =
     state.board_detail <- detail;
     let full_history = state.board_history_post_id = Some post_id in
     launch
-      ~deliver:(fun result -> Board_post_refresh_done (request, result))
+      ~deliver:(fun result -> Board_msg (Board_post_refresh_done (request, result)))
       (fun () ->
         Masc_tui_workspace_read.with_binding ~host ~port ~expected
           ~proof:Request_precondition (fun () ->
@@ -77,9 +77,9 @@ let start_board_post state ~host ~results ~admit ~report
   Masc_tui_workspace_result.launch state ~results ~boundary_error
     ~on_not_run:settle_not_run
     ~cancelled_by:(fun () ->
-      Board_publication_done (boundary_error "Board publication interrupted"))
+      Board_msg (Board_publication_done (boundary_error "Board publication interrupted")))
     ~deliver:(function
-      | Ok outcome | Error outcome -> Board_publication_done outcome)
+      | Ok outcome | Error outcome -> Board_msg (Board_publication_done outcome))
     (fun () ->
       let open Result.Syntax in
       let* () = admit request |> Result.map_error boundary_error in
@@ -131,7 +131,7 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_comment_done { request_id; post_id; sent_draft; result })
+    ~deliver:(fun result -> Board_msg (Board_comment_done { request_id; post_id; sent_draft; result }))
     (fun () ->
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
@@ -161,7 +161,7 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
-    ~deliver:(fun result -> Board_vote_done (target, result))
+    ~deliver:(fun result -> Board_msg (Board_vote_done (target, result)))
     (fun () ->
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with

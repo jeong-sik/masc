@@ -18,7 +18,7 @@ let launch_list state ~host ~launch ~check =
     let port = state.port in
     let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
     let captured_session = state.mcp_session in
-    launch ~deliver:(fun result -> Resources_listed (owner, result)) (fun () ->
+    launch ~deliver:(fun result -> Resource_msg (Resources_listed (owner, result))) (fun () ->
       let mcp =
         let* session_id = session ~host ~port captured_session in
         let* () = check () in
@@ -46,8 +46,8 @@ let launch_read state ~host ~share_origin ~launch ~check ~key =
         let content, journal = match result with
           | Ok pair -> pair
           | Error detail -> Error detail, Share_journal_unavailable (detail, []) in
-        Resource_read (request,
-          Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read content, journal))
+        Resource_msg (Resource_read (request,
+          Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read content, journal)))
       (fun () -> match key with
         | Catalog.Mcp_uri uri ->
           let content =

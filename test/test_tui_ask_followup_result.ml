@@ -106,10 +106,10 @@ let launch ?key state results request submission ~released perform =
     ~observe_job:(fun event ->
       Observation.emit read ~sources:None (Observation.Followup_job_event event);
       match event with Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
-    ~cancelled:(envelope (Protocol.Ask_followup_finished (read,
-      Error Projection.Followup_cancelled)))
-    ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (read,event,received_ns)))
-    ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (read,result)))
+    ~cancelled:(envelope (Protocol.Ask_msg (Protocol.Ask_followup_finished (read,
+      Error Projection.Followup_cancelled))))
+    ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_msg (Protocol.Ask_followup_observed (read,event,received_ns))))
+    ~deliver:(fun result -> envelope (Protocol.Ask_msg (Protocol.Ask_followup_finished (read,result))))
     (fun publish -> Fun.protect ~finally:finish (fun () ->
       Observation.emit read ~sources:None Observation.Followup_worker_entered;
       let result=try Eio.Fiber.first
@@ -126,14 +126,14 @@ let apply state message = match message with
   | Protocol.Workspace_scoped (authority,reading,inner) ->
     if not (Protocol.workspace_message_admitted state ~authority ~reading inner) then Refused else
       (match inner with
-       | Ask_followup_observed (read,event,received_ns) ->
+       | Ask_msg (Ask_followup_observed (read,event,received_ns)) ->
          (match Ui.take_ask_followup_event state read.afr_request read.afr_submission event with
           | Some result ->
             Observation.emit read ~sources:(Ui.current_ask_followup state)
               (Observation.Followup_source_applied (event,received_ns,Result.is_ok result));
             (match result with Ok _ -> Part (event,received_ns) | Error detail -> fail detail)
           | None -> Refused)
-       | Ask_followup_finished (read,result) ->
+       | Ask_msg (Ask_followup_finished (read,result)) ->
          (match Ui.finish_ask_followup_read state read.afr_request read.afr_submission result with
           | Some result ->
             Observation.emit read ~sources:(Ui.current_ask_followup state)
@@ -163,7 +163,7 @@ let exact_task state task_id =
   | Some (Ask_task_unlinked | Ask_task_missing _ | Ask_task_unavailable _) | None -> fail "actual original Task was lost"
 let occupied_queue () =
   let shared=Eio.Stream.create 1 in
-  Eio.Stream.add shared {Protocol.ready_at_ns=0L;message=Protocol.Harness_label_done (Ok "original unrelated notification")};shared
+  Eio.Stream.add shared {Protocol.ready_at_ns=0L;message=Protocol.Harness_msg (Protocol.Harness_label_done (Ok "original unrelated notification"))};shared
 
 let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base config ask resolution task_id state ->
   Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
@@ -358,7 +358,7 @@ let test_cancelled_dispatch_retains_unstarted_original_observation () = with_ans
 
 module Origin = Masc_tui_observation_origin
 let captured_read = function
-  | Protocol.Workspace_scoped (_,_,(Protocol.Ask_followup_observed (read,_,_) | Ask_followup_finished (read,_))) -> read
+  | Protocol.Workspace_scoped (_,_,(Protocol.Ask_msg (Protocol.Ask_followup_observed (read,_,_) | Ask_followup_finished (read,_)))) -> read
   | _ -> fail "actual original observation lost its provenance capsule"
 let first_read (batch : Protocol.async_msg Results.ready list) = match batch with
   | ready::_ -> captured_read ready.message | [] -> fail "actual original observation produced no retained messages"
@@ -479,9 +479,9 @@ let admit_task_observation state = function
   | Protocol.Workspace_scoped (authority,reading,message) ->
     Protocol.workspace_message_admitted state ~authority ~reading message &&
     (match message with
-     | Original_task_read_done (request,result) -> Ui.complete_original_task_inspection state request result
-     | Original_task_history_done (request,result) -> Ui.complete_original_history_inspection state request result
-     | Original_task_evidence_done (request,result) -> Ui.complete_original_evidence_inspection state request result
+     | Original_msg (Original_task_read_done (request,result)) -> Ui.complete_original_task_inspection state request result
+     | Original_msg (Original_task_history_done (request,result)) -> Ui.complete_original_history_inspection state request result
+     | Original_msg (Original_task_evidence_done (request,result)) -> Ui.complete_original_evidence_inspection state request result
      | _ -> fail "original Task inspection changed message kind")
   | _ -> fail "Task inspection lost its captured read authority"
 let actual_task_read ?reply_task_id config request =
@@ -552,7 +552,7 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
   let results=Results.create () in
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   let request=Ui.begin_original_task_inspection state |> require_inspection in
-  launch_task_observation state results request (fun result -> Protocol.Original_task_read_done (request,result))
+  launch_task_observation state results request (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (request,result)))
     (fun () -> actual_task_read config request);
   check bool "actual original Task observation admitted" true (admit_task_observation state (next_inspection_result results));
   (match Task_read.task_observation (inspect_source state) with
@@ -562,7 +562,7 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
    | _ -> fail "original Task disappeared behind unrelated listing failure");
   let rec history earlier =
     let request=Ui.begin_original_history_inspection state ~earlier ~limit:1 |> require_inspection in
-    launch_task_observation state results request (fun result -> Protocol.Original_task_history_done (request,result))
+    launch_task_observation state results request (fun result -> Protocol.Original_msg (Protocol.Original_task_history_done (request,result)))
       (fun () -> actual_history_read config request);
     check bool "actual original history page admitted" true (admit_task_observation state (next_inspection_result results));
     match Task_read.history_observation (inspect_source state) with
@@ -571,7 +571,7 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
   let observed=history false in
   check bool "original stored history retains submitted verification" true (List.mem verification_id observed.history_verifications);
   let failed=Ui.begin_original_history_inspection state ~earlier:false ~limit:1 |> require_inspection in
-  launch_task_observation state results failed (fun result -> Protocol.Original_task_history_done (failed,result))
+  launch_task_observation state results failed (fun result -> Protocol.Original_msg (Protocol.Original_task_history_done (failed,result)))
     (fun () -> actual_history_read ~reply_task_id:foreign_task config failed);
   check bool "actual foreign history is refused under original Task and prefix retained" true
     (admit_task_observation state (next_inspection_result results));
@@ -586,7 +586,7 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
   (match Task_read.evidence_basis (inspect_source state) with
    | Some {eb_source=Task_read.From_history;eb_observation=Selection_retained (Invalid_reply _)} -> ()
    | Some _ | None -> fail "retained history selection lost its original failure basis");
-  launch_task_observation state results request (fun result -> Protocol.Original_task_evidence_done (request,result))
+  launch_task_observation state results request (fun result -> Protocol.Original_msg (Protocol.Original_task_evidence_done (request,result)))
     (fun () -> actual_evidence_read config request);
   check bool "actual original submitted evidence admitted" true (admit_task_observation state (next_inspection_result results));
   (match Task_read.evidence_observation (inspect_source state) with
@@ -607,11 +607,11 @@ let test_retained_task_submission_keeps_selection_basis () = with_answer @@ fun 
   let results=Results.create () in
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   let original=Ui.begin_original_task_inspection state |> require_inspection in
-  launch_task_observation state results original (fun result -> Protocol.Original_task_read_done (original,result))
+  launch_task_observation state results original (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (original,result)))
     (fun () -> actual_task_read config original);
   check bool "actual submitted original Task admitted" true (admit_task_observation state (next_inspection_result results));
   let failed=Ui.begin_original_task_inspection state |> require_inspection in
-  launch_task_observation state results failed (fun result -> Protocol.Original_task_read_done (failed,result))
+  launch_task_observation state results failed (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (failed,result)))
     (fun () -> actual_task_read ~reply_task_id:foreign_task config failed);
   check bool "actual foreign Task reply settles as a rejected refresh" true (admit_task_observation state (next_inspection_result results));
   (match Task_read.task_observation (inspect_source state) with
@@ -637,7 +637,7 @@ let test_retained_task_submission_keeps_selection_basis () = with_answer @@ fun 
     (Ui.complete_original_task_inspection state retry (actual_task_read config retry));
   check bool "retired first evidence ticket cannot replace the next selection" false
     (Ui.complete_original_evidence_inspection state first (actual_evidence_read config first));
-  launch_task_observation state results selected (fun result -> Protocol.Original_task_evidence_done (selected,result))
+  launch_task_observation state results selected (fun result -> Protocol.Original_msg (Protocol.Original_task_evidence_done (selected,result)))
     (fun () -> actual_evidence_read config selected);
   check bool "original retained submission reads its actual stored proof" true (admit_task_observation state (next_inspection_result results));
   (match Task_read.evidence_observation (inspect_source state) with
@@ -659,13 +659,13 @@ let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun bas
   let results=Results.create () in
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   let request=Ui.begin_original_task_inspection state |> require_inspection in
-  launch_task_observation state results request (fun result -> Protocol.Original_task_read_done (request,result)) (fun () -> actual_task_read config request);
+  launch_task_observation state results request (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (request,result))) (fun () -> actual_task_read config request);
   let late=next_inspection_result results in
   Ui.close_task_inspection state ~reason:Task_read.Interrupted;
   check bool "same canonical Ask reopens" true (Ui.open_ask_task_inspection state);
   let fresh=Ui.begin_original_task_inspection state |> require_inspection in
   check bool "old visit cannot finish reopened original Task" false (admit_task_observation state late);
-  launch_task_observation state results fresh (fun result -> Protocol.Original_task_read_done (fresh,result)) (fun () -> actual_task_read config fresh);
+  launch_task_observation state results fresh (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (fresh,result))) (fun () -> actual_task_read config fresh);
   check bool "fresh exact Task observation applies" true (admit_task_observation state (next_inspection_result results));
   let retry=Ui.begin_original_task_inspection state |> require_inspection in
   check bool "read failure settles this original source" true
@@ -674,13 +674,13 @@ let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun bas
    | Masc_tui_fetched.Stale (Task_decode.In_backlog detail,Task_read.Read_failed _) -> check string "failure preserves original Task" task_id detail.task.id
    | _ -> fail "failure erased previous Task observation");
   let pending=Ui.begin_original_task_inspection state |> require_inspection in
-  launch_task_observation state results pending (fun result -> Protocol.Original_task_read_done (pending,result)) (fun () -> actual_task_read config pending);
+  launch_task_observation state results pending (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (pending,result))) (fun () -> actual_task_read config pending);
   let old_scope=next_inspection_result results in
   Ui.suspend_workspace_readings state;
   check bool "original Ask can reopen under a fresh read scope" true (Ui.open_ask_task_inspection state);
   let pending=Ui.begin_original_task_inspection state |> require_inspection in
   check bool "withdrawn read scope cannot finish the reopened source" false (admit_task_observation state old_scope);
-  launch_task_observation state results pending (fun result -> Protocol.Original_task_read_done (pending,result)) (fun () -> actual_task_read config pending);
+  launch_task_observation state results pending (fun result -> Protocol.Original_msg (Protocol.Original_task_read_done (pending,result))) (fun () -> actual_task_read config pending);
   let withdrawn=next_inspection_result results in
   let before=Masc.Workspace.get_tasks_raw config in
   Ui.begin_ask_submission_state state;

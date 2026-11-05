@@ -266,7 +266,8 @@ type memory_health_read =
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [code_msg] in [Code_msg],
    [keeper_msg] in [Keeper_msg]. One variant takes at most 244 constructors
-   with arguments (#48617). *)
+   with arguments (#48617). A domain with a single answer keeps it in
+   [async_msg], and so does a constructor that carries another [async_msg]. *)
 type code_msg =
   (* The scope travels with the directory. Without it a reply names a
      relative path, which two scopes can both have, and the handler had no
@@ -445,31 +446,53 @@ type keeper_msg =
       string Masc_tui_fetched.request
       * (Masc_tui_board_quarantine.t, string) result
 
-type async_msg =
+type chat_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
-  | Workspace_scoped of workspace_authority * unit ref option * async_msg
-  | Workspace_operation of async_msg
-  | Chat_command_read_completed of unit ref * async_msg
+  | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
+
+type workspace_msg =
   | Workspace_identity_unconfirmed of
       { detail : string
       ; latest : (Masc.Tui_decode.server_identity, string) result
         (* The identity the refusing probe read; it may name a workspace. *)
       ; prior_contact : Masc_tui_server_lifecycle.contact
       ; refresh_ticket : Http_refresh_order.ticket }
+  | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
+
+type schedule_msg =
   | Schedule_form_authority_refused of
       { action : string; detail : string; workspace : workspace_input_identity option }
       (** A schedule create/modify form refused by the workspace guard: the
           guard's withdrawal, then the refusal kept on the Schedules surface. *)
+  | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
+  (* Carries the schedule it was asked about: the reader can step to the next
+     row or close the detail while a load is in flight, and an answer that did
+     not say whose it was would be filed under whoever is open when it lands. *)
+  | Schedule_wake_history_loaded of
+      string * (schedule_wake_history, string) result
+  | Schedule_cancel_done of string * (string, string) result
+
+type lane_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_msg of keeper_msg
   | Lane_addons_loaded of int * Masc_tui_lane_addons.read_target * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
+  | Lane_inventory_loaded of
+      int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
+  (* Keyed by the lane / run they answer for: an answer that lands after the
+     operator left the list or the run is not this view's answer. *)
+  | Lane_runs_loaded of
+      Lane_run_identity.t * int * (float * string) option *
+      (Masc.Tui_decode.lane_run_page, string) result
+  | Lane_run_detail_loaded of
+      string * int * (Masc.Tui_decode.lane_run_detail, string) result
+
+type msx_msg =
   | Msx_tick_withdrawn of msx_poll_request * string
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
@@ -477,8 +500,8 @@ type async_msg =
       * (Masc_tui_msx_tick.activity * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result, string) result
   | Msx_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
-  | Dos_live_loaded of machine_live_request
-      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
+
+type voice_msg =
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -508,45 +531,33 @@ type async_msg =
   | Voice_failed of { keeper : string; error : string }
   (** A verified read-only preview. It does not finish the full refresh or
       grant workspace authority; the terminal bundle still owns both. *)
+
+type http_msg =
   | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
-  | Ask_answer_receipt_ready of ask_submission
-      (** The original submission owns the published receipt; this message only
-          asks the loop to observe it. *)
-  | Ask_followup_observed of ask_followup_read * Masc.Tui_decode_asks.ask_followup_event * int64
-  | Ask_followup_finished of ask_followup_read * Masc_tui_ask_projection.followup_result
-  (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset
   (** Diagnostic reader status; it grants no data or action authority. *)
-  | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
-  | Approvals_listing_superseded
-  | Approvals_summary_loaded of
-      Masc_tui_types.Snapshot_read.request
-      * Masc_tui_operator_projection.Listing_order.ticket
-      * Masc.Tui_decode.server_identity
-      * (approval_snapshot, string) result
-  | Surface_composer_released
   | Http_scoped_refresh_done of workspace_authority * currency_authority_request * http_scoped_surface_results
   | Http_scoped_refresh_failed of
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
       * (Masc.Tui_decode.server_identity, string) result option
         (* The last identity its probes read, if any. *)
       * Surface_read_order.request
-  | Board_post_refresh_done of
-      Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
-  | Approval_decision_done of
-      approval_item
-      * approval_decision
-      * (Masc_tui_operator_projection.confirm_outcome, string) result
-      * Masc_tui_operator_projection.Flow.generation
-      * (approval_snapshot, string) result
+
+type ask_msg =
+  | Ask_answer_receipt_ready of ask_submission
+      (** The original submission owns the published receipt; this message only
+          asks the loop to observe it. *)
+  | Ask_followup_observed of ask_followup_read * Masc.Tui_decode_asks.ask_followup_event * int64
+  | Ask_followup_finished of ask_followup_read * Masc_tui_ask_projection.followup_result
+  (** A workspace-bound roster can settle before unrelated readers. *)
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
      -- which may be someone else's answer. The submission carries the original
@@ -555,30 +566,80 @@ type async_msg =
       ask_submission
       * (Masc.Tui_decode_asks.answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
+  | Asks_reloaded of asks_observation
+      (** The questions read again on their own, after a change or a failure. *)
+
+type approvals_msg =
+  | Approvals_listing_superseded
+  | Approvals_summary_loaded of
+      Masc_tui_types.Snapshot_read.request
+      * Masc_tui_operator_projection.Listing_order.ticket
+      * Masc.Tui_decode.server_identity
+      * (approval_snapshot, string) result
+  | Approval_decision_done of
+      approval_item
+      * approval_decision
+      * (Masc_tui_operator_projection.confirm_outcome, string) result
+      * Masc_tui_operator_projection.Flow.generation
+      * (approval_snapshot, string) result
+
+type surface_msg =
+  | Surface_composer_released
+  | Surface_tool_approval_answered of
+      string
+      * string
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
+      * Masc_tui_operator_projection.Flow.generation
+
+type board_msg =
+  | Board_post_refresh_done of
+      Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
+  | Board_publication_done of
+      Masc_tui_types.workspace_authority Masc_tui_board_publication.outcome
+  | Board_comment_done of {
+      request_id : board_comment_request_id;
+      post_id : string;
+      sent_draft : string;
+      result : (string, string) result;
+    }
+  | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result
+  | Board_attachment_loaded of Masc_tui_board_reader.request * (Masc_tui_board_reader.content, string) result
+  | Board_attachment_prepared of Masc_tui_board_reader.preparation_request * (Masc_tui_detail_reading.row list, string) result
+  | Board_attachment_saved of Masc_tui_board_reader.request * (board_attachment_action_result, string) result
+  (* Keeper, partition, and what is known about the requeue's effect. *)
+  | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
+  | Board_quarantines_bulk_progress of
+      string * int * int * int * int * int
+  | Board_quarantines_bulk_requeued of
+      string * (string * Masc_tui_http.post_outcome) list
+
+type context_msg =
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Context_inspector_part_loaded of
       Masc_tui_context_inspector.part_key Masc_tui_fetched.request
       * (string, string) result
-  | Live_context_loaded of Masc_tui_context_state.request * int64
-      * (Masc.Tui_decode.context_observation, string) result
+
+type local_msg =
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
-  | Lane_inventory_loaded of
-      int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
-  | Clients_loaded of
-      int * (Masc.Tui_decode.clients_snapshot, string) result
-  (* Keyed by the lane / run they answer for: an answer that lands after the
-     operator left the list or the run is not this view's answer. *)
-  | Lane_runs_loaded of
-      Lane_run_identity.t * int * (float * string) option *
-      (Masc.Tui_decode.lane_run_page, string) result
-  | Lane_run_detail_loaded of
-      string * int * (Masc.Tui_decode.lane_run_detail, string) result
-  | Measurement_artifact_loaded of
-      string * int * (Measurement.t, string) result
+
+type verification_msg =
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
+  (* (message, noop): [noop = true] says the verdict already stood. *)
+  | Verification_verdict_done of (string * bool, string) result
+  | Verification_evidence_exported of Masc_tui_types.verification_export_request * (string, string) result
+  | Verification_evidence_loaded of
+      Masc_tui_types.verification_evidence_request * (Masc_tui_evidence_picture.evidence,
+                Masc_tui_types.Verification_evidence_read.failure) result
+
+type harness_msg =
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
+  | Harness_label_done of (string, string) result
+
+type fusion_msg =
   | Fusion_runs_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode_fusion.fusion_snapshot, string) result
   | Fusion_detail_loaded of
@@ -591,12 +652,12 @@ type async_msg =
   | Fusion_launch_options_loaded of
       int * (Masc.Tui_decode_fusion.fusion_launch_options, string) result
   | Fusion_launched of int * (string, string) result
+
+type memory_msg =
   (* Carries the generation of the form that asked: the answer to a read the
      operator already left must not land on another form. *)
   | Memory_recall_standing_loaded of
       int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
-  | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
-  | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, string) result
@@ -607,21 +668,16 @@ type async_msg =
   | Memory_facts_loaded of
       string Masc_tui_fetched.request
       * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
+
+type repository_msg =
+  | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Repository_changes_loaded of
       Masc.Tui_decode.repository_change_scope
       * (Masc.Tui_decode.repository_change_snapshot, string) result
   | Repository_changes_diff_loaded of
       repository_diff_request * (Masc.Tui_decode.git_diff, string) result
-  (* Carries the keeper it was asked about. The surface can be pointed at a
-     different keeper while a load is in flight, and an answer that did not
-     say whose it was would be filed under whoever is selected when it
-     lands. *)
-  | File_changes_loaded of
-      string * (Masc.Tui_decode.file_change_snapshot, string) result
-  (* Keyed by the path it answers for, for the same reason the file-change
-     message carries a keeper: an answer for a file the operator has since
-     left is not this view's answer. *)
-  | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+
+type browser_msg =
   | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
   | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
@@ -636,6 +692,8 @@ type async_msg =
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
     }
+
+type connectors_msg =
   | Connectors_status_loaded of Connector_read.request * Masc.Tui_decode_connectors.connector_snapshot
   | Connectors_loaded of Connector_read.request * (Masc.Tui_decode_connectors.connector_snapshot, string) result
   | Connector_unbind_all_done of {
@@ -644,15 +702,10 @@ type async_msg =
         (Masc_tui_connector_unbind.target * Masc_tui_connector_unbind.outcome)
         list;
     }
+
+type runtime_msg =
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_read_loaded of tools_read
-  | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
-  | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
-  | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
-  | Task_document_prepared of Masc_tui_types.task_document_request * (string list, string) result
-  | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
-  | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_source Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Runtime_lane_slots_written of
       Masc_tui_types.runtime_lane_list
       * (Masc_tui_types.slot_editor_target * Masc_tui_types.slot_editor_identity * Masc_tui_types.slot_editor_identity) option
@@ -665,10 +718,218 @@ type async_msg =
         string )
       result
   | Runtime_assignment_changed of runtime_assignment_request * runtime_assignment_status * int64
-  | Asks_reloaded of asks_observation
-      (** The questions read again on their own, after a change or a failure. *)
-  | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
+  | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
+  | Runtime_config_view_loaded of
+      int * string option * int64 * int64
+      * (Masc_tui_runtime_config_snapshot.t, string) result
+      (* Original read generation/model entry intent, request start and
+         prepared-result clocks; neither clock proves UI paint. *)
+  | Runtime_params_loaded of
+      (Masc.Tui_decode.runtime_param_row list, string) result
+  | Runtime_param_written of
+      runtime_param_edit option * (string, string) result
+
+type tools_msg =
+  | Tools_read_loaded of tools_read
+  | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
+  | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
+  | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
+  | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_source Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
+
+type task_msg =
+  | Task_document_prepared of Masc_tui_types.task_document_request * (string list, string) result
+  | Task_history_loaded of
+      string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
+  | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
+  | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
+  | Task_creation_read_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.receipt, Masc_tui_original_task_read.error) result
+
+type resource_msg =
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
+  | Resources_listed of
+      unit ref * (Masc_tui_resource_catalog.listing, string) result
+  | Resource_exported of string * (string, string) result
+  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
+  | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
+  | Resource_read of
+      Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
+      * Masc_tui_types.resource_share_journal_observation
+
+type gate_msg =
+  | Gate_snapshot_loaded of Snapshot_read.request * Masc.Tui_decode.server_identity *
+      (Masc.Tui_decode.gate_snapshot, string) result
+      (** The durable Gate beside the held calls: pending approvals that
+          survive nobody watching, and both lane modes. *)
+  | Gate_approval_resolved of
+      string * bool * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
+      (** approval id, approve, the resolve result, and the in-flight
+          generation this decision holds. Completion releases that slot, so
+          the header stops drawing [submitting] and a second press is admitted
+          again. *)
+  | Gate_auto_judge_retried of
+      string * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
+      (** approval id, captured workspace, rearm outcome, and the action slot this explicit retry
+          owns. The server accepts it only if every observed identity field
+          still matches the blocked row. *)
+  | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
+      (** The external-services lane the operator asked for, and whether the
+          server took it. *)
+
+type goal_msg =
+  | Goal_transition_done of string * string * string * (string, string) result
+  | Goal_confirmation_submitted of string * string * string * Masc_tui_planning_detail.receipt_authority * (string, string) result
+  | Goal_confirmation_loaded of
+      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, Masc_tui_planning_detail.confirmation_read_error) result
+  | Goal_timeline_loaded of
+      string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
+  | Goal_candle_loaded of
+      string Masc_tui_fetched.request * (unit ref * (string * Candle_goal_observation.t, Masc_tui_types.goal_candle_failure) result, string) result
+
+type exact_msg =
+  | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
+  | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
+
+type machine_msg =
+  | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
+  | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
+
+type preset_msg =
+  (* Where a preset answer goes: the chat pane that typed the command, or
+     the Config pane that pressed the key. *)
+  | Presets_listed of preset_sink * (Masc.Tui_decode.presets_snapshot, string) result
+  | Preset_detail_loaded of
+      string Masc_tui_fetched.request * (Masc.Tui_decode.preset_detail, string) result
+  (* The chat answer to [/preset show]. The pane's own detail rides on
+     [Preset_detail_loaded] with a cursor key; this one has a sink because a
+     typed command answers where it was typed. *)
+  | Preset_contents_shown of preset_sink * (Masc.Tui_decode.preset_detail, string) result
+  | Preset_saved of preset_save_pending
+      * (Masc.Tui_decode.preset_manifest, preset_save_failure) result
+  | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
+  | Preset_deleted of preset_sink * (string, string) result
+
+type play_msg =
+  | Play_room_received of Masc_tui_play_room.request * (string * Masc.Play_room.snapshot, string) result
+  | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invites, string) result
+  | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
+  | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
+
+type artifact_msg =
+  | Artifact_checks_loaded of unit Masc_tui_fetched.request
+      * (Masc_tui_artifact_checks.inventory, string) result
+  | Artifact_check_changed of Masc_tui_artifact_check_action.request
+      * (Masc.Published_artifact_check.t, string) result
+
+type github_msg =
+  | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
+  | Github_login_lines of string * string list
+  | Github_login_finished of string * (unit, string) result
+  | Github_token_saved of string * (Yojson.Safe.t, string) result
+
+type identity_msg =
+  | Identity_providers_loaded of
+      Masc_tui_types.detail_read_request
+      * ( Masc_tui_identity_model.identity_provider list
+          * Masc_tui_identity_model.identity_callback option
+        , string )
+        result
+      * (identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
+  | Identity_switch_set of
+      string * string * bool * (unit, string) result
+      (** keeper, provider, the state the operator asked for, and whether
+          the server took it. *)
+  | Identity_login_started of identity_login_request * Masc_tui_identity_model.identity_login_result
+  | Identity_refreshed of string * (unit, string) result
+  | Identity_app_saved of string option * string * (int, string) result
+      (** presentation Keeper, provider id, then recorded scope count *)
+  | Identity_disconnected of string * string * (Yojson.Safe.t, string) result
+      (** keeper, provider, then the server's receipt: what was deleted, and
+          separately how the provider's revoke went. *)
+
+type account_msg =
+  | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
+  | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
+  (* A removal's answer keeps what is known about its effect: removed, declined
+     by the server in its own words, or unknown. *)
+  | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
+      * Masc_tui_http.post_outcome
+
+type observer_msg =
+  | Observer_session_ready of string
+  | Observer_opened of {
+      session_id : string;
+      handshake : Sse_wire.observer_handshake option;
+    }
+  | Observer_received of string option * Masc_tui_observer.delivery list
+  | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
+  | Observer_retry_due of workspace_authority * unit ref
+  | Observer_recovery_ready of workspace_authority * unit ref * string option
+  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
+      * observer_recovery_origin * Sse_wire.observer_identity
+
+type fleet_msg =
+  | Fleet_stream_view of Masc_tui_fleet_stream.view
+  | Fleet_stream_reader_ended of string
+
+type original_msg =
+  | Original_task_read_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
+  | Original_task_history_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.history_snapshot, Masc_tui_original_task_read.error) result
+  | Original_task_evidence_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.evidence_snapshot, Masc_tui_original_task_read.error) result
+
+type async_msg =
+  | Chat_msg of chat_msg
+  | Workspace_scoped of workspace_authority * unit ref option * async_msg
+  | Workspace_operation of async_msg
+  | Chat_command_read_completed of unit ref * async_msg
+  | Workspace_msg of workspace_msg
+  | Schedule_msg of schedule_msg
+  | Lane_msg of lane_msg
+  | Keeper_msg of keeper_msg
+  | Msx_msg of msx_msg
+  | Dos_live_loaded of machine_live_request
+      * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result
+  | Voice_msg of voice_msg
+  | Http_msg of http_msg
+  | Ask_msg of ask_msg
+  | Http_surface_read_completed of Surface_read_context.t * async_msg
+  | Approvals_msg of approvals_msg
+  | Surface_msg of surface_msg
+  | Board_msg of board_msg
+  | Context_msg of context_msg
+  | Live_context_loaded of Masc_tui_context_state.request * int64
+      * (Masc.Tui_decode.context_observation, string) result
+  | Local_msg of local_msg
+  | Clients_loaded of
+      int * (Masc.Tui_decode.clients_snapshot, string) result
+  | Measurement_artifact_loaded of
+      string * int * (Measurement.t, string) result
+  | Verification_msg of verification_msg
+  | Harness_msg of harness_msg
+  | Fusion_msg of fusion_msg
+  | Memory_msg of memory_msg
+  | Repository_msg of repository_msg
+  (* Carries the keeper it was asked about. The surface can be pointed at a
+     different keeper while a load is in flight, and an answer that did not
+     say whose it was would be filed under whoever is selected when it
+     lands. *)
+  | File_changes_loaded of
+      string * (Masc.Tui_decode.file_change_snapshot, string) result
+  (* Keyed by the path it answers for, for the same reason the file-change
+     message carries a keeper: an answer for a file the operator has since
+     left is not this view's answer. *)
+  | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_msg of browser_msg
+  | Connectors_msg of connectors_msg
+  | Runtime_msg of runtime_msg
+  | Tools_msg of tools_msg
+  | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
+  | Task_msg of task_msg
+  | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
+  | Resource_msg of resource_msg
   | Sent_image_ready of {
       request : sent_image_read;
       result : image_preparation;
@@ -693,116 +954,17 @@ type async_msg =
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails
           (see [Masc_tui_browser.browser_url]). *)
-  | Gate_snapshot_loaded of Snapshot_read.request * Masc.Tui_decode.server_identity *
-      (Masc.Tui_decode.gate_snapshot, string) result
-      (** The durable Gate beside the held calls: pending approvals that
-          survive nobody watching, and both lane modes. *)
-  | Gate_approval_resolved of
-      string * bool * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
-      (** approval id, approve, the resolve result, and the in-flight
-          generation this decision holds. Completion releases that slot, so
-          the header stops drawing [submitting] and a second press is admitted
-          again. *)
-  | Gate_auto_judge_retried of
-      string * Masc.Tui_decode.server_identity * (unit, string) result * Masc_tui_operator_projection.Flow.generation
-      (** approval id, captured workspace, rearm outcome, and the action slot this explicit retry
-          owns. The server accepts it only if every observed identity field
-          still matches the blocked row. *)
-  | Gate_mode_set of Masc_tui_palette.gate_lane * string * (unit, string) result
-      (** The external-services lane the operator asked for, and whether the
-          server took it. *)
-  | Surface_tool_approval_answered of
-      string
-      * string
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-      * Masc_tui_operator_projection.Flow.generation
-  | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
-  | Board_publication_done of
-      Masc_tui_types.workspace_authority Masc_tui_board_publication.outcome
-  | Board_comment_done of {
-      request_id : board_comment_request_id;
-      post_id : string;
-      sent_draft : string;
-      result : (string, string) result;
-    }
-  | Board_vote_done of Masc_tui_types.board_vote_target * (string, string) result
-  | Goal_transition_done of string * string * string * (string, string) result
-  | Goal_confirmation_submitted of string * string * string * Masc_tui_planning_detail.receipt_authority * (string, string) result
-  | Goal_confirmation_loaded of
-      string Masc_tui_fetched.request * (Masc_tui_planning_detail.confirmation, Masc_tui_planning_detail.confirmation_read_error) result
-  | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
-  (* Carries the schedule it was asked about: the reader can step to the next
-     row or close the detail while a load is in flight, and an answer that did
-     not say whose it was would be filed under whoever is open when it lands. *)
-  | Schedule_wake_history_loaded of
-      string * (schedule_wake_history, string) result
+  | Gate_msg of gate_msg
+  | Goal_msg of goal_msg
   | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
-  | Schedule_cancel_done of string * (string, string) result
-  (* (message, noop): [noop = true] says the verdict already stood. *)
-  | Verification_verdict_done of (string * bool, string) result
-  | Harness_label_done of (string, string) result
-  | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
-  | Board_attachment_loaded of Masc_tui_board_reader.request * (Masc_tui_board_reader.content, string) result
-  | Board_attachment_prepared of Masc_tui_board_reader.preparation_request * (Masc_tui_detail_reading.row list, string) result
-  | Board_attachment_saved of Masc_tui_board_reader.request * (board_attachment_action_result, string) result
-  | Goal_timeline_loaded of
-      string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
-  | Goal_candle_loaded of
-      string Masc_tui_fetched.request * (unit ref * (string * Candle_goal_observation.t, Masc_tui_types.goal_candle_failure) result, string) result
-  | Task_history_loaded of
-      string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
-  | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
-  | Verification_evidence_exported of Masc_tui_types.verification_export_request * (string, string) result
-  | Verification_evidence_loaded of
-      Masc_tui_types.verification_evidence_request * (Masc_tui_evidence_picture.evidence,
-                Masc_tui_types.Verification_evidence_read.failure) result
-  | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
-  | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
-  | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
-  | Machine_activity_saved of Masc_tui_machine_activity.request * Masc_tui_machine_activity.write_result
-  | Runtime_config_view_loaded of
-      int * string option * int64 * int64
-      * (Masc_tui_runtime_config_snapshot.t, string) result
-      (* Original read generation/model entry intent, request start and
-         prepared-result clocks; neither clock proves UI paint. *)
-  | Runtime_params_loaded of
-      (Masc.Tui_decode.runtime_param_row list, string) result
-  | Runtime_param_written of
-      runtime_param_edit option * (string, string) result
+  | Exact_msg of exact_msg
+  | Machine_msg of machine_msg
   | Prompts_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode.prompts_snapshot, string) result
-  (* Keeper, partition, and what is known about the requeue's effect. *)
-  | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
-  | Board_quarantines_bulk_progress of
-      string * int * int * int * int * int
-  | Board_quarantines_bulk_requeued of
-      string * (string * Masc_tui_http.post_outcome) list
-  (* Where a preset answer goes: the chat pane that typed the command, or
-     the Config pane that pressed the key. *)
-  | Presets_listed of preset_sink * (Masc.Tui_decode.presets_snapshot, string) result
-  | Preset_detail_loaded of
-      string Masc_tui_fetched.request * (Masc.Tui_decode.preset_detail, string) result
-  (* The chat answer to [/preset show]. The pane's own detail rides on
-     [Preset_detail_loaded] with a cursor key; this one has a sink because a
-     typed command answers where it was typed. *)
-  | Preset_contents_shown of preset_sink * (Masc.Tui_decode.preset_detail, string) result
-  | Preset_saved of preset_save_pending
-      * (Masc.Tui_decode.preset_manifest, preset_save_failure) result
-  | Preset_restored of preset_sink * (Masc.Tui_decode.preset_restore_report, string) result
-  | Preset_deleted of preset_sink * (string, string) result
-  | Play_room_received of Masc_tui_play_room.request * (string * Masc.Play_room.snapshot, string) result
-  | Play_invites_listed of play_list_sink * (Masc.Tui_decode.play_invites, string) result
-  | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
-  | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
+  | Preset_msg of preset_msg
+  | Play_msg of play_msg
   | Librarian_input_loaded of string * (string list, string) result
-  | Artifact_checks_loaded of unit Masc_tui_fetched.request
-      * (Masc_tui_artifact_checks.inventory, string) result
-  | Artifact_check_changed of Masc_tui_artifact_check_action.request
-      * (Masc.Published_artifact_check.t, string) result
-  | Resources_listed of
-      unit ref * (Masc_tui_resource_catalog.listing, string) result
+  | Artifact_msg of artifact_msg
   | Code_msg of code_msg
   (* The Activity pane's Changes tab: the selected keeper's recorded file
      changes, stamped with the request so an answer for a keeper the
@@ -810,62 +972,12 @@ type async_msg =
   | Acting_pane_changes_loaded of
       Masc_tui_types.acting_pane_key Masc_tui_fetched.request
       * (Masc.Tui_decode.file_change_snapshot, string) result
-  | Resource_exported of string * (string, string) result
-  | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
-  | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
-  | Resource_read of
-      Masc_tui_resource_catalog.read_request * (Masc_tui_resource_catalog.reading, string) result
-      * Masc_tui_types.resource_share_journal_observation
-  | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
-  | Identity_providers_loaded of
-      Masc_tui_types.detail_read_request
-      * ( Masc_tui_identity_model.identity_provider list
-          * Masc_tui_identity_model.identity_callback option
-        , string )
-        result
-      * (identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
-  | Identity_switch_set of
-      string * string * bool * (unit, string) result
-      (** keeper, provider, the state the operator asked for, and whether
-          the server took it. *)
-  | Identity_login_started of identity_login_request * Masc_tui_identity_model.identity_login_result
-  | Identity_refreshed of string * (unit, string) result
-  | Identity_app_saved of string option * string * (int, string) result
-      (** presentation Keeper, provider id, then recorded scope count *)
-  | Identity_disconnected of string * string * (Yojson.Safe.t, string) result
-      (** keeper, provider, then the server's receipt: what was deleted, and
-          separately how the provider's revoke went. *)
-  | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
-  | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, string) result
-  (* A removal's answer keeps what is known about its effect: removed, declined
-     by the server in its own words, or unknown. *)
-  | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option
-      * Masc_tui_http.post_outcome
-  | Github_login_lines of string * string list
-  | Github_login_finished of string * (unit, string) result
-  | Github_token_saved of string * (Yojson.Safe.t, string) result
-  | Observer_session_ready of string
-  | Observer_opened of {
-      session_id : string;
-      handshake : Sse_wire.observer_handshake option;
-    }
-  | Observer_received of string option * Masc_tui_observer.delivery list
-  | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
-  | Observer_retry_due of workspace_authority * unit ref
-  | Observer_recovery_ready of workspace_authority * unit ref * string option
-  | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
-      * observer_recovery_origin * Sse_wire.observer_identity
-  | Fleet_stream_view of Masc_tui_fleet_stream.view
-  | Fleet_stream_reader_ended of string
-  | Original_task_read_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_history_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.history_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_evidence_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.evidence_snapshot, Masc_tui_original_task_read.error) result
-  | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
-  | Task_creation_read_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.receipt, Masc_tui_original_task_read.error) result
+  | Github_msg of github_msg
+  | Identity_msg of identity_msg
+  | Account_msg of account_msg
+  | Observer_msg of observer_msg
+  | Fleet_msg of fleet_msg
+  | Original_msg of original_msg
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was

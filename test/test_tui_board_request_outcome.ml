@@ -124,7 +124,7 @@ let start state results =
 let rec take_outcome results =
   match Results.take_ready results with
   | [] -> Eio.Fiber.yield (); take_outcome results
-  | [{ Results.message = Masc_tui_async_protocol.Board_publication_done outcome; _ }] -> outcome
+  | [{ Results.message = Masc_tui_async_protocol.Board_msg (Masc_tui_async_protocol.Board_publication_done outcome); _ }] -> outcome
   | _ -> fail "expected one unscoped Board publication completion"
 
 let with_results run =
@@ -500,7 +500,7 @@ let test_old_comment_result_cannot_settle_same_draft_retry () =
   check bool "old launch failure preserves successor arm" true state.board_compose_armed;
   let refreshes = ref 0 and reports = ref 0 in
   let apply = function
-    | Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; result } ->
+    | Masc_tui_async_protocol.Board_msg (Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; result }) ->
       Updates.comment_done state ~request_id ~post_id ~sent_draft
         ~report:(fun _ _ -> incr reports) ~refresh:(fun () -> incr refreshes)
         ~refresh_detail:(fun _ -> incr refreshes) result
@@ -510,9 +510,9 @@ let test_old_comment_result_cannot_settle_same_draft_retry () =
    | [old_result; current_result] ->
      apply old_result;
      (match old_result with
-      | Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; _ } ->
-        apply (Masc_tui_async_protocol.Board_comment_done
-          { request_id; post_id; sent_draft; result = Ok "late success" })
+      | Masc_tui_async_protocol.Board_msg (Masc_tui_async_protocol.Board_comment_done { request_id; post_id; sent_draft; _ }) ->
+        apply (Masc_tui_async_protocol.Board_msg (Masc_tui_async_protocol.Board_comment_done
+          { request_id; post_id; sent_draft; result = Ok "late success" }))
       | _ -> fail "expected the old comment result");
      check (option string) "old results preserve successor message"
        (Some "successor message") state.board_post_error;
@@ -551,7 +551,7 @@ let test_detail_read_binds_the_original_workspace () = with_fixture
       Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch;
       let rec take_detail () = match Results.take_ready results with
         | [] -> Eio.Fiber.yield (); take_detail ()
-        | [{ Results.message = Masc_tui_async_protocol.Board_post_refresh_done (_, result); _ }] -> result
+        | [{ Results.message = Masc_tui_async_protocol.Board_msg (Masc_tui_async_protocol.Board_post_refresh_done (_, result)); _ }] -> result
         | _ -> fail "expected one Board detail completion" in
       take_detail () in
     List.iter (fun full_history ->

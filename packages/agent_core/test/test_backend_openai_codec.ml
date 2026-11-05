@@ -2332,12 +2332,6 @@ let expect_responses_parse_error label expected json =
   | Ok _ -> Alcotest.fail (label ^ " should fail closed")
 ;;
 
-let expect_responses_parse_error_prefix label prefix json =
-  match Responses.parse_response_result (Yojson.Safe.to_string json) with
-  | Error { detail; _ } -> check_bool label true (String.starts_with ~prefix detail)
-  | Ok _ -> Alcotest.fail (label ^ " should fail closed")
-;;
-
 let test_responses_parse_reasoning_and_function_call () =
   match
     Responses.parse_response_result (responses_response_json () |> Yojson.Safe.to_string)
@@ -2414,34 +2408,56 @@ let test_responses_rejects_function_call_missing_call_id () =
        ])
 ;;
 
-let test_responses_rejects_function_call_non_object_arguments () =
-  expect_responses_parse_error
-    "non-object arguments"
-    "malformed_responses_function_call:call_weather:arguments:not_object"
-    (responses_with_output
-       [ `Assoc
-           [ "id", `String "fc_1"
-           ; "type", `String "function_call"
-           ; "call_id", `String "call_weather"
-           ; "name", `String "get_weather"
-           ; "arguments", `String {|["Paris"]|}
-           ]
-       ])
+(* A function_call whose argument text is not one JSON object is a call the
+   model made that cannot run. The response stands; the call waits in the
+   unreadable list at its place among the calls, and its replay group holds no
+   block. *)
+let expect_responses_unreadable label ~arguments ~expect_problem =
+  let call id args =
+    `Assoc
+      [ "id", `String ("fc_" ^ id)
+      ; "type", `String "function_call"
+      ; "call_id", `String id
+      ; "name", `String "get_weather"
+      ; "arguments", `String args
+      ]
+  in
+  let json =
+    responses_with_output
+      [ call "call_ok" {|{"city":"Seoul"}|}; call "call_weather" arguments ]
+  in
+  match Responses.parse_response_result (Yojson.Safe.to_string json) with
+  | Error { detail; _ } -> Alcotest.failf "%s: the response stands: %s" label detail
+  | Ok { response; _ } ->
+    (match response.content with
+     | [ ToolUse { id; _ } ] -> check_string (label ^ " readable call") "call_ok" id
+     | _ -> Alcotest.fail (label ^ ": expected the readable call alone in content"));
+    (match response.unreadable_tool_uses with
+     | [ call ] ->
+       check_string (label ^ " id") "call_weather" call.tool_use_id;
+       check_string (label ^ " text") arguments call.arguments;
+       Alcotest.(check int) (label ^ " place") 1 call.tool_use_ordinal;
+       check_bool (label ^ " problem") true (expect_problem call.arguments_problem)
+     | _ -> Alcotest.fail (label ^ ": expected one unreadable call"));
+    check_bool (label ^ " tool stop") true (response.stop_reason = StopToolUse)
 ;;
 
-let test_responses_rejects_function_call_malformed_arguments () =
-  expect_responses_parse_error_prefix
+let test_responses_keeps_function_call_non_object_arguments_unreadable () =
+  expect_responses_unreadable
+    "non-object arguments"
+    ~arguments:{|["Paris"]|}
+    ~expect_problem:(function
+      | Tool_call_input.Not_object -> true
+      | Tool_call_input.Invalid_json _ -> false)
+;;
+
+let test_responses_keeps_function_call_malformed_arguments_unreadable () =
+  expect_responses_unreadable
     "malformed arguments"
-    "malformed_responses_function_call:call_weather:arguments:json_parse_error:"
-    (responses_with_output
-       [ `Assoc
-           [ "id", `String "fc_1"
-           ; "type", `String "function_call"
-           ; "call_id", `String "call_weather"
-           ; "name", `String "get_weather"
-           ; "arguments", `String {|{"city":"Par|}
-           ]
-       ])
+    ~arguments:{|{"city":"Par|}
+    ~expect_problem:(function
+      | Tool_call_input.Invalid_json _ -> true
+      | Tool_call_input.Not_object -> false)
 ;;
 
 (* Regression for Codex P2 (#2048): a Responses result whose generation was cut
@@ -3936,13 +3952,13 @@ let () =
             `Quick
             test_responses_rejects_function_call_missing_call_id
         ; Alcotest.test_case
-            "rejects function_call non-object arguments"
+            "keeps function_call non-object arguments unreadable"
             `Quick
-            test_responses_rejects_function_call_non_object_arguments
+            test_responses_keeps_function_call_non_object_arguments_unreadable
         ; Alcotest.test_case
-            "rejects function_call malformed arguments"
+            "keeps function_call malformed arguments unreadable"
             `Quick
-            test_responses_rejects_function_call_malformed_arguments
+            test_responses_keeps_function_call_malformed_arguments_unreadable
         ; Alcotest.test_case
             "incomplete status wins over function_call (#2048)"
             `Quick

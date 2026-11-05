@@ -641,23 +641,22 @@ let parse_delta_tool_call_index ~position json =
          position)
 ;;
 
-let parse_delta_tool_call_arguments ~position function_json =
+(* Some explicitly OpenAI-compatible servers send the arguments as a complete
+   JSON value rather than the wire string fragment. This is a structural wire
+   variant, not a provider/model-name inference: the complete value replaces
+   the accumulator buffer instead of being concatenated. A value that is not an
+   object is still the model's argument text; the stream assembly judges it
+   the way it judges a fragment that does not parse, so one call with such
+   arguments does not fail the stream. *)
+let parse_delta_tool_call_arguments function_json =
   match assoc_field_opt "arguments" function_json with
   | None | Some `Null -> Ok None
   | Some (`String arguments) -> Ok (Some (Args_fragment arguments))
   | Some arguments ->
     (match Tool_call_input.validate_object arguments with
-     | Ok (arguments, _dropped) ->
-       (* Some explicitly OpenAI-compatible servers send a complete JSON object
-          rather than the wire string fragment. This is a structural wire
-          variant, not a provider/model-name inference: the complete value
-          replaces the accumulator buffer instead of being concatenated. *)
-       Ok (Some (Args_complete (Yojson.Safe.to_string arguments)))
+     | Ok (arguments, _dropped) -> Ok (Some (Args_complete (Yojson.Safe.to_string arguments)))
      | Error (Tool_call_input.Invalid_json _ | Tool_call_input.Not_object) ->
-       Error
-         (Printf.sprintf
-            "malformed_delta_tool_call:position:%d:arguments_invalid_type"
-            position))
+       Ok (Some (Args_complete (Yojson.Safe.to_string arguments))))
 ;;
 
 let parse_openai_delta_tool_call ~position = function
@@ -673,7 +672,7 @@ let parse_openai_delta_tool_call ~position = function
         let* tc_name =
           parse_optional_delta_string ~position ~field:"name" function_json
         in
-        let* tc_arguments = parse_delta_tool_call_arguments ~position function_json in
+        let* tc_arguments = parse_delta_tool_call_arguments function_json in
         Ok (tc_name, tc_arguments)
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _) ->
         Error

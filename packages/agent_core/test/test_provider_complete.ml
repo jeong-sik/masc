@@ -760,7 +760,7 @@ let test_ollama_parse_rejects_malformed_tool_call () =
   | Ok _ -> Alcotest.fail "expected malformed Ollama tool_call to fail closed"
 ;;
 
-let test_ollama_parse_rejects_non_object_tool_arguments () =
+let test_ollama_parse_keeps_non_object_tool_arguments_unreadable () =
   let body =
     {|{"model":"qwen3:8b","done":true,"done_reason":"tool_calls",
        "message":{"role":"assistant","content":"",
@@ -769,12 +769,20 @@ let test_ollama_parse_rejects_non_object_tool_arguments () =
          ]}}|}
   in
   match BOL.parse_ollama_response body with
-  | Error msg ->
-    Alcotest.(check string)
-      "non-object arguments rejected"
-      "malformed_ollama_tool_call_arguments:index:0:not_object"
-      msg
-  | Ok _ -> Alcotest.fail "expected non-object Ollama tool arguments to fail closed"
+  | Ok response ->
+    (* Not run and not repaired: the call leaves content for the unreadable
+       list, and the response stands. *)
+    Alcotest.(check int) "no runnable call" 0 (List.length response.content);
+    (match response.unreadable_tool_uses with
+     | [ call ] ->
+       Alcotest.(check string) "name" "get_weather" call.tool_name;
+       Alcotest.(check string) "argument text" "42" call.arguments;
+       (match call.arguments_problem with
+        | Llm_provider.Tool_call_input.Not_object -> ()
+        | Llm_provider.Tool_call_input.Invalid_json message ->
+          Alcotest.failf "expected not_object, got invalid json %s" message)
+     | _ -> Alcotest.fail "expected one unreadable call")
+  | Error msg -> Alcotest.failf "the response stands without the call: %s" msg
 ;;
 
 let ollama_tool_correlation_config () =
@@ -2332,9 +2340,9 @@ let () =
             `Quick
             test_ollama_parse_rejects_malformed_tool_call
         ; test_case
-            "ollama non-object tool arguments rejected"
+            "ollama non-object tool arguments kept unreadable"
             `Quick
-            test_ollama_parse_rejects_non_object_tool_arguments
+            test_ollama_parse_keeps_non_object_tool_arguments_unreadable
         ; test_case
             "ollama missing correlation rejects sync and stream"
             `Quick

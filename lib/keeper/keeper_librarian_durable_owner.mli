@@ -51,7 +51,10 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     publication callback, including recovery while Off. An actual host terminal
     [Outcome_unknown] returns [Pending (Worker_unknown, original)] after its
     immutable refusal is verified and retained. It never grants a fresh source
-    selection or submission, including after restart or while Off. Only shared
+    selection or submission, including after restart or while Off. An
+    [interrupted] cause also calls [wake]: inventory validation reads that
+    refusal as settled, so the next pass moves the original and selects its
+    range again (RFC-0500). Only shared
     submit-once pre-admission/Not_sent rules retry. New admission and every
     unfinished publication require the frozen prompt to cover its counterpart
     input. A receipt alone cannot authorize a new ACK of observations an old

@@ -2875,6 +2875,48 @@ let run_until_done ?(wakes=ref 0) fixture =
       go (attempts-1)
     | result -> result in
   go 16
+(* RFC-0500. The attempt a stopped server leaves: started by another
+   incarnation, with no outcome and no proof. *)
+let stopped_incarnation="0123456789abcdef0123456789abcdef"
+let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixture (fun ~sw:_ fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let hold=Atomic.make true in
+  fixture.set_response (fun capture ->
+    if Atomic.get hold then (ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release);
+    `OK,F.openai_response (answer capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    assert_pending (run_worker fixture);Eio.Promise.await arrived;
+    let record,capture=only_original fixture in
+    let exact=Capture.request capture |> get in
+    (* Written before the cut, so no host pass reads this process's marker. *)
+    io (fun () ->
+      let fields=match Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get with
+        | Some (`Assoc fields) -> fields
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None ->
+          fail "expected the retained host request" in
+      let attempts=match List.assoc_opt "attempts" fields with
+        | Some (`List attempts) -> attempts
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
+          fail "expected the host attempt history" in
+      let earlier=match List.rev attempts with
+        | `Assoc ["started",`String started_by]::earlier when started_by<>stopped_incarnation -> List.rev earlier
+        | [] | _::_ -> fail "the open attempt must be started by this process with no outcome" in
+      Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+        (`Assoc (List.map (fun (key,value) -> key,
+          if key="attempts" then `List (earlier @ [`Assoc ["started",`String stopped_incarnation]]) else value) fields))
+      |> get);
+    Atomic.set hold false;
+    (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+     | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+    let posts=F.post_count fixture.server in
+    (* No delivery follows the pass that retains the interrupted refusal, so
+       the passes reach the commit only through that pass's wake. *)
+    check bool "the next passes read the same range again and commit it" true (advanced (run_until_done fixture));
+    check bool "the interrupted original moved to the settled archive" true
+      (settled_on fixture ~date:(day_of record.request_id) record);
+    check bool "a new provider call judged the range" true (F.post_count fixture.server>posts);
+    check (list string) "the new original's answer reached Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir))))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
 let provider_refuses_the_read fixture =
@@ -3394,6 +3436,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Atoms);
   test_case "mixed checkpoint and official source stay pending after actual terminal unknown" `Quick
     (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Mixed);
+  test_case "an original a stopped server interrupted settles and its range is read again" `Quick
+    test_interrupted_original_settles_and_its_range_is_read_again;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);

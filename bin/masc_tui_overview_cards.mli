@@ -11,7 +11,10 @@
     the selected one. *)
 
 val row_lines : cells:int -> string -> string list
-(** The lines a row's text wraps to at [cells] cells, one at least. Nothing is
+(** The lines a row's text wraps to at [cells] cells, one at least. A row that
+    takes more than one line hangs the later lines two cells in, so it reads as
+    one row; a row that fits on a line is as it is, and so is one in a column
+    too narrow to leave eight cells of text beside the indent. Nothing is
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 

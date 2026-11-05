@@ -84,8 +84,6 @@ def list_value(value: Any, label: str) -> list[Any]:
 def completed_reply(operation: Json, operation_id: str) -> tuple[str, list[Any]]:
     if operation.get("operation_id") != operation_id:
         raise AcceptanceError("operation identity differs from the submitted operation")
-    if operation.get("schema") != "masc.keeper_chat_operation.v1":
-        raise AcceptanceError("unsupported chat operation schema")
     if chat_state(operation) is not ChatState.SUCCEEDED:
         detail = operation.get("failure_detail")
         raise AcceptanceError(

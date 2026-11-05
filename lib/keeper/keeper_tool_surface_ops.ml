@@ -1037,7 +1037,7 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
                ; "message", `String "Keeper chat operation was not found"
                ])
         | Ok true ->
-          let operation_json = Keeper_owner.Chat_operation.to_json operation in
+          let operation_json = Keeper_owner.Chat_operation.to_status_json operation in
           let data =
             match operation.state, operation_json with
             | Keeper_owner.Chat_operation.Succeeded { outcome_ref; _ }, `Assoc fields ->
@@ -1113,6 +1113,9 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
                (Keeper_owner.Chat_operation.to_json operation))))
 ;;
 
+(* The list keeps each operation's input because it is how the caller tells its
+   own queued operations apart. The status reply names one operation the caller
+   already chose, so it leaves the input out. *)
 let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
   match operation_target_arg args with
   | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json

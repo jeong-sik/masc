@@ -251,21 +251,17 @@ def validate_receipt(
     require(terminal.get("outcome_ref") == turn_ref, "terminal turn reference differs")
     try:
         trace_id, _ = natural_producer.parse_turn_ref(turn_ref)
-        natural_producer.validate_direct_message_source(
-            terminal.get("source"), keeper=keeper, submitted_by=submitted_by
-        )
     except natural_producer.ProducerError as error:
         raise JoinError(f"producer operation identity is invalid: {error}") from error
+    # The terminal record is the reduced status shape: it carries no source or
+    # execution digest, so the expected input digest stays a locally computed
+    # receipt field and is only format-checked here.
     expected_input_digest = required_string(
         operation, "expected_operation_input_digest", "producer operation"
     )
     require(
         proof.SHA256_RE.fullmatch(expected_input_digest) is not None,
         "producer expected operation input digest is invalid",
-    )
-    require(
-        terminal.get("execution_digest") == expected_input_digest,
-        "producer terminal execution digest differs from expected input",
     )
 
     lookup = required_object(receipt, "ledger_lookup", "producer receipt")

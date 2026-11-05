@@ -5474,6 +5474,16 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        check bool "agent status reads operation" true (Tool_result.is_success status);
        check string "agent status is queued" "Queued"
          Yojson.Safe.Util.(Tool_result.data status |> member "state" |> to_string);
+       let field_names result =
+         match Tool_result.data result with
+         | `Assoc fields -> List.map fst fields
+         | _ -> []
+       in
+       List.iter
+         (fun field ->
+            check bool ("agent status omits the submitted " ^ field) false
+              (List.mem field (field_names status)))
+         [ "input"; "source" ];
        let listed =
          Keeper_tool_surface_ops.keeper_delegate_list_body
            ~config
@@ -5484,6 +5494,10 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          (Tool_result.is_success listed);
        check int "agent list has one operation" 1
          Yojson.Safe.Util.(Tool_result.data listed |> to_list |> List.length);
+       check bool "agent list keeps the queued input" true
+         (match Tool_result.data listed with
+          | `List [ `Assoc fields ] -> List.mem_assoc "input" fields
+          | _ -> false);
        let operation =
          match
            Owner_registry.exact_operation

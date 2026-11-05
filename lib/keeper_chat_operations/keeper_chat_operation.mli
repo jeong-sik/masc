@@ -59,6 +59,15 @@ val is_terminal : state -> bool
 val to_json : t -> Yojson.Safe.t
 (** Internal operation facts, including the original diagnostic. *)
 
+val to_status_json : t -> Yojson.Safe.t
+(** What the Keeper that submitted the operation reads back: the operation id,
+    creation time, the batch execution id when the operation was coalesced, and
+    the state with its terminal facts. State and failure fields are the ones
+    {!to_json} reports. The admission and execution digests, [source] and the
+    queued [input] are left out; the reader sent that request. No [schema] key:
+    the reader asked the status tool about one operation it named, so the reply
+    needs no tag to say what kind of object it is. *)
+
 val public_failure_message : failure_kind -> string
 (** Fixed public message selected only by the closed failure kind. It never
     accepts a diagnostic, filesystem path or provider error payload. *)

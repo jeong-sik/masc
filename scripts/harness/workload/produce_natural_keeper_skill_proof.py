@@ -119,35 +119,6 @@ def validate_runtime_instance_id(value: str) -> None:
     )
 
 
-def validate_direct_message_source(
-    value: Any, *, keeper: str, submitted_by: str
-) -> None:
-    expected_thread = f"keeper:{keeper}"
-    expected = {
-        "schema": "masc.keeper_chat_operation.source.v2",
-        "submitted_by": submitted_by,
-        "thread_id": expected_thread,
-        "continuation_channel": {
-            "kind": "dashboard",
-            "thread_id": expected_thread,
-        },
-        "surface": {"kind": "agent"},
-        "channel": "agent",
-        "channel_user_id": "",
-        "channel_user_name": "",
-        "channel_workspace_id": "",
-        "conversation_id": None,
-        "external_message_id": None,
-        "workspace_id": None,
-        "extra_mentions": [],
-        "sender_keeper": None,
-        "user_row_origin": "needs_append",
-    }
-    require(
-        value == expected, "operation source differs from exact direct-message source"
-    )
-
-
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -549,7 +520,11 @@ def validate_acceptance(value: dict[str, Any]) -> str:
 
 
 def validate_operation(value: dict[str, Any], operation_id: str) -> str:
-    require(value.get("schema") == OPERATION_SCHEMA, "operation schema is unsupported")
+    # The status read names one operation the caller already chose, so the
+    # reply carries no schema tag and does not repeat the submitted request:
+    # no sequence, digests, source or input.  A Succeeded reply also carries
+    # completed_reply, which keeper_delegate_status_body appends to every
+    # Succeeded status: the reply objects, or an "unavailable" marker.
     require(value.get("operation_id") == operation_id, "operation identity changed")
     state = value.get("state")
     require(
@@ -557,20 +532,13 @@ def validate_operation(value: dict[str, Any], operation_id: str) -> str:
         "operation state is unknown",
     )
     state = cast(str, state)
-    base = {
-        "schema",
-        "operation_id",
-        "sequence",
-        "created_at",
-        "execution_digest",
-        "source",
-        "input",
-        "state",
-    }
+    base = {"operation_id", "created_at", "state"}
+    if "batch_execution_id" in value:
+        base = base | {"batch_execution_id"}
     extras = {
         "Queued": set(),
         "Running": {"started_at"},
-        "Succeeded": {"completed_at", "outcome_ref"},
+        "Succeeded": {"completed_at", "outcome_ref", "completed_reply"},
         "Failed": {
             "completed_at",
             "failure_kind",
@@ -580,28 +548,19 @@ def validate_operation(value: dict[str, Any], operation_id: str) -> str:
         "Cancelled": {"completed_at"},
     }[state]
     exact_fields(value, base | extras, "Keeper chat operation")
-    sequence = required_string(value, "sequence", "Keeper chat operation")
-    require(
-        sequence.isascii() and sequence.isdecimal(),
-        "operation sequence is not a nonnegative int64",
-    )
-    digest = required_string(value, "execution_digest", "Keeper chat operation")
-    require(
-        SHA256_RE.fullmatch(digest) is not None, "operation execution digest is invalid"
-    )
+    if "batch_execution_id" in value:
+        required_string(value, "batch_execution_id", "Keeper chat operation")
     required_number(value, "created_at", "Keeper chat operation")
-    require(isinstance(value.get("source"), dict), "operation source is not an object")
-    if state in NONTERMINAL_STATES:
-        require(
-            isinstance(value.get("input"), dict), "nonterminal operation lost input"
-        )
-    else:
-        require(value.get("input") is None, "terminal operation retained input")
+    if state not in NONTERMINAL_STATES:
         required_number(value, "completed_at", "Keeper chat operation")
     if state == "Running":
         required_number(value, "started_at", "Keeper chat operation")
     if state == "Succeeded":
         required_string(value, "outcome_ref", "Keeper chat operation")
+        require(
+            isinstance(value.get("completed_reply"), dict),
+            "Keeper chat operation.completed_reply is not an object",
+        )
     if state == "Failed":
         required_string(value, "failure_kind", "Keeper chat operation")
         required_string(value, "failure_detail", "Keeper chat operation")
@@ -617,24 +576,11 @@ def validate_producer_operation(
     value: dict[str, Any],
     *,
     operation_id: str,
-    keeper: str,
-    submitted_by: str,
-    message: str,
 ) -> str:
+    # The status reply does not repeat the submitted request, so the exact
+    # direct-message source and input the producer sent are not rechecked here;
+    # the operation id accepted at submission is the identity link.
     state = validate_operation(value, operation_id)
-    validate_direct_message_source(
-        value.get("source"), keeper=keeper, submitted_by=submitted_by
-    )
-    expected_input = direct_message_input(message)
-    require(
-        value.get("execution_digest") == canonical_json_digest(expected_input),
-        "operation execution digest differs from exact direct-message input",
-    )
-    if state in NONTERMINAL_STATES:
-        require(
-            value.get("input") == expected_input,
-            "nonterminal operation input differs from exact direct-message input",
-        )
     if state == "Succeeded":
         validate_turn_ref(
             required_string(value, "outcome_ref", "Keeper chat operation")
@@ -702,13 +648,7 @@ def run_producer(
             },
         )
         observations += 1
-        state = validate_producer_operation(
-            operation,
-            operation_id=operation_id,
-            keeper=keeper,
-            submitted_by=submitted_by,
-            message=message,
-        )
+        state = validate_producer_operation(operation, operation_id=operation_id)
         if state in TERMINAL_STATES:
             break
         now = monotonic()

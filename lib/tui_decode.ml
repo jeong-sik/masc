@@ -1058,26 +1058,38 @@ let is_success_http_status status_code = status_code >= 200 && status_code < 300
 (* A refused request usually answers [{"ok":false,"error":"..."}] with a
    4xx or 5xx status. Pasting that envelope into the pane hands the operator
    JSON to read when the server already wrote the sentence, so the sentence
-   wins and the envelope is the fallback. *)
+   wins and the envelope is the fallback.
+
+   The tool layer's own refusal, [{"status":"error","message":"..."}], reads
+   the same way whether it is the whole body or the message of the [ok:false]
+   wrapper. The voice config route, Board reactions and operator actions send
+   it as the whole body, and there the pane showed the JSON cut at the head
+   limit with the sentence's tail missing. *)
 let json_error_sentence body =
   let non_blank = function
     | `String message when String.trim message <> "" -> Some (String.trim message)
     | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None in
+  let envelope_sentence fields =
+    match List.assoc_opt "status" fields, List.assoc_opt "message" fields with
+    | Some (`String "error"), Some value -> non_blank value
+    | _ -> None in
   let tool_message message =
     match Yojson.Safe.from_string message with
-    | `Assoc fields when List.assoc_opt "status" fields = Some (`String "error") ->
-      (match List.assoc_opt "message" fields with Some value -> non_blank value | None -> None)
-    | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+    | `Assoc fields -> envelope_sentence fields
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
     | exception Yojson.Json_error _ -> None in
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
     match List.assoc_opt "error" fields with
     | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
     | Some _ | None ->
-      (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
-       | Some (`Bool false), Some (`String message) ->
-         (match tool_message message with Some _ as detail -> detail | None -> non_blank (`String message))
-       | _ -> None))
+      (match envelope_sentence fields with
+       | Some _ as sentence -> sentence
+       | None ->
+         (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
+          | Some (`Bool false), Some (`String message) ->
+            (match tool_message message with Some _ as detail -> detail | None -> non_blank (`String message))
+          | _ -> None)))
   | _ -> None
   | exception Yojson.Json_error _ -> None
 ;;

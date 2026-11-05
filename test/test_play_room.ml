@@ -113,7 +113,7 @@ let test_conflict_preserves_expiry () = workspace (fun base ->
 
 let test_first_stale_cleanup_is_silent () = workspace (fun base ->
   ignore (read base ());
-  let directory = Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path:base) "play" in
+  let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "play" in
   let db = Sqlite3.db_open (Filename.concat directory "room.sqlite3") in
   Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool)) (fun () ->
     let rc = Sqlite3.exec db

@@ -96,11 +96,15 @@ Keeper 의 provider 요청은 매번 새 TCP·TLS 연결을 열고, 응답을 �
 ### 3.1 캐시는 서버 프로세스에 하나다
 
 - 서버가 시작할 때 루트 switch 와 서버 clock 으로 `Http_client_cache.create` 를 한 번 부른다. 자리는 `lib/server/server_runtime_bootstrap.ml` 이 `Fd_accountant.install_observers` 를 부르는 곳 옆이다.
-- 캐시는 process 범위 자원이라 `Domain_pool_ref` 와 같은 모양의 `Provider_connection_cache_ref` 에 둔다. `Runtime_agent.transport_for_provider` 가 거기서 읽어 `make_http_transport ~connection_cache` 로 넘긴다. 설치되지 않았으면 `None` 이고 지금처럼 요청마다 닫는다.
+- 캐시는 `Provider_connection_cache_ref` 에 두고, 설치한 domain 을 같이 적는다. `Runtime_agent.transport_for_provider` 는 그 domain 에서만 캐시를 받아 `make_http_transport ~connection_cache` 로 넘긴다. 설치되지 않았거나 다른 domain 이면 `None` 이고 지금처럼 요청마다 닫는다.
 - 키는 지금처럼 scheme·host·port 다. 여러 Keeper 가 같은 origin 의 연결을 나눠 쓴다. 꺼낸 연결은 돌려놓기 전까지 그 요청만 쓴다.
 - `idle_ttl_seconds` 는 20초다. §1.2 에서 가장 먼저 닫은 api.z.ai(25초)보다 짧다. §1.4 에서 60초로 늘려도 얻는 비율은 0.2~5.3%p 다.
 - `max_idle_per_host` 는 기본값 8 을 둔다. 배포 뒤 `Http_client_cache.stats` 의 origin 별 idle 수로 다시 본다.
-- 연결은 캐시의 switch 위에 열린다. 꺼낸 요청은 다른 도메인에서 돌 수 있다. Eio 의 FD 래퍼(`Eio_unix.Rcfd`)는 도메인 사이에 FD 를 나눠 쓰도록 만들어졌다(`eio/unix/rcfd.mli`, Eio 1.3). 한 연결을 동시에 둘이 쓰지 않는 것은 checkout 이 지킨다.
+- 연결은 캐시의 switch 위에 열린다. 새 연결을 열 때 그 switch 에 fiber 를 붙인다. Eio 는 다른 domain 에서 switch 를 쓰면 `Invalid_argument "Switch accessed from wrong domain!"` 을 던진다(`eio/core/switch.ml` 의 `check_our_domain`, Eio 1.3).
+  - 그래서 캐시는 설치한 domain 의 요청만 쓴다. 다른 domain 에 캐시를 넘기면 그 요청은 provider 오류로 끝난다. 3층 시험이 이것을 재현했다.
+  - 지금 캐시를 쓰는 provider 요청(Keeper owner 턴, 자율 턴, 리뷰어, Fusion)은 모두 main domain 에서 돈다. serving domain 모드의 handler 는 Keeper owner mailbox 로 넘긴다.
+  - 통계는 어느 domain 에서든 읽는다. 캐시 상태는 `Eio.Mutex` 와 `Atomic` 이 지키고, Eio 는 둘 다 여러 domain 에서 써도 된다고 적었다(Eio README "Mutexes and Semaphores").
+  - 한 연결을 동시에 둘이 쓰지 않는 것은 checkout 이 지킨다.
 
 ### 3.2 돌려놓을지는 `Reuse_verdict.t` 하나로 정한다
 
@@ -134,6 +138,7 @@ val decide :
 
 - **Keeper 마다 캐시를 둔다.** 하지 않는다. Keeper 하나의 요청 사이 간격은 도구 실행 시간만큼 길다. origin 을 공유하면 다른 Keeper 가 막 끝낸 연결을 쓴다(§1.4).
 - **`Runtime_agent.config` 에 캐시 필드를 더해 위에서 넘긴다.** 하지 않는다. `Runtime_agent.default_config`·`build`·`run` 을 부르는 곳이 lib 안에 네 파일 여덟 곳이고, 모두 같은 프로세스 캐시를 넘겨야 한다. 프로세스 범위 자원은 `Domain_pool_ref` 처럼 한 곳에서 설치한다. 단점은 의존이 시그니처에 드러나지 않는 것이다. 설치가 없으면 지금 동작이라 시험은 바뀌지 않는다.
+- **domain 마다 캐시를 둔다(`Domain.DLS`).** 지금은 하지 않는다. 캐시를 쓰는 요청이 main domain 하나에서만 돈다(§3.1). domain 마다 두면 health 응답이 어느 캐시를 보여 줄지 정해야 한다.
 - **host 마다 TTL 을 다르게 둔다.** 지금은 하지 않는다. 20초와 60초의 차이가 작다(§1.4). 설정 키가 하나 늘어난다.
 - **꺼낼 때 소켓이 닫혔는지 먼저 본다.** 하지 않는다. Eio flow 에는 읽지 않고 닫힘을 보는 연산이 없다. 보고 난 뒤 보내기 전에 닫힐 수도 있어서 §3.3 의 실패를 없애지 못한다.
 - **HTTP/2 로 바꾼다.** 해당 없다. `cohttp-eio` 는 HTTP/1.1 만 쓴다.

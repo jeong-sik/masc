@@ -205,7 +205,10 @@ let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
 
-type image_input = { media_type : string; base64_data : string }
+type image_input = Runtime_official_client_tool.image_input =
+  { media_type : string
+  ; base64_data : string
+  }
 type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
   | Missing_reply
@@ -641,9 +644,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             ~cwd
             config
             ~prompt
-            ~images:(List.map (fun (image : image_input) ->
-              ({ media_type = image.media_type; base64_data = image.base64_data }
-               : Runtime_claude_code.image_input)) images)
+            ~images
         with
         | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total }
         | Error error -> claude_failed ~admission:false error))
@@ -676,9 +677,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_codex_app_server.Elicitation_cancelled _
          | Runtime_codex_app_server.Usage_windows_reported _
          | Runtime_codex_app_server.Turn_finished _ | Usage_reported {frame=Counted _; _ } -> ())
-       ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
-           ({ media_type = image.media_type; base64_data = image.base64_data }
-            : Runtime_codex_app_server.image_input)) images) with
+       ~mgr ~clock ~cwd config ~prompt ~images with
      | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | (Some (Runtime_codex_app_server.Thread_count _) | None) as usage -> optional_usage codex_usage usage) }
@@ -788,12 +787,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          config
          ~workspace_root
          ~prompt
-         ~images:
-           (List.map
-              (fun (image : image_input) ->
-                 ({ media_type = image.media_type; base64_data = image.base64_data }
-                  : Runtime_muse_serve.image_input))
-              images)
+         ~images
      with
      | Ok (result : Runtime_muse_serve.turn_result) ->
        (* The panel records the model the turn's last call ran on, as the

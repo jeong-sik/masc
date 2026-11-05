@@ -147,7 +147,10 @@ val run_panelist
     when the following model turn explicitly has no deadline. *)
 
 
-type image_input = { media_type : string; base64_data : string }
+type image_input = Runtime_official_client_tool.image_input =
+  { media_type : string
+  ; base64_data : string
+  }
 type response = { text : string; model : string; usage : Fusion_types.usage }
 type failure =
   | Missing_reply

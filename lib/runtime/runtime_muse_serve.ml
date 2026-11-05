@@ -124,7 +124,7 @@ type mcp_server =
   ; tool_names : string list
   }
 
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }
@@ -482,11 +482,8 @@ let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images
       let* () = valid_utf8 (where ^ ".media_type") image.media_type in
       let* () = valid_utf8 (where ^ ".base64_data") image.base64_data in
       let* () =
-        if List.mem image.media_type Runtime_official_client_tool.official_client_image_media_types
-        then Ok ()
-        else Error (Invalid_config (where ^ ".media_type is not supported by official clients")) in
-      let* () = Runtime_official_client_tool.validate_base64_image_data image.base64_data
-        |> Result.map_error (fun detail -> Invalid_config (where ^ ".base64_data " ^ detail)) in
+        Runtime_official_client_tool.validate_image_input ~where image
+        |> Result.map_error (fun detail -> Invalid_config detail) in
       validate_images (index + 1) rest in
   let* () = validate_images 0 images in
   match session_mode with

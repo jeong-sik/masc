@@ -87,23 +87,28 @@ type image_input =
    as a 400, or comes back as a turn rejection, several seconds later with the
    turn already started and the error attributed to the model or the thread
    rather than to the caller that built the image. *)
+let validate_image_input ~where image =
+  if not (List.mem image.media_type official_client_image_media_types)
+  then
+    Error
+      (Printf.sprintf
+         "%s.media_type %S is not one of %s"
+         where
+         image.media_type
+         (String.concat ", " official_client_image_media_types))
+  else (
+    match validate_base64_image_data image.base64_data with
+    | Error detail -> Error (where ^ ".base64_data " ^ detail)
+    | Ok () -> Ok ())
+;;
+
 let validate_image_inputs images =
   let rec loop index = function
     | [] -> Ok ()
     | image :: rest ->
-      let where = Printf.sprintf "images[%d]" index in
-      if not (List.mem image.media_type official_client_image_media_types)
-      then
-        Error
-          (Printf.sprintf
-             "%s.media_type %S is not one of %s"
-             where
-             image.media_type
-             (String.concat ", " official_client_image_media_types))
-      else (
-        match validate_base64_image_data image.base64_data with
-        | Error detail -> Error (where ^ ".base64_data " ^ detail)
-        | Ok () -> loop (index + 1) rest)
+      (match validate_image_input ~where:(Printf.sprintf "images[%d]" index) image with
+       | Error _ as error -> error
+       | Ok () -> loop (index + 1) rest)
   in
   loop 0 images
 ;;

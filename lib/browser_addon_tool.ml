@@ -9,7 +9,7 @@ let object_schema ?(open_fields=false) ~required properties = `Assoc [
 let text_schema = `Assoc ["type",`String "string"]
 let enum names = `Assoc ["type",`String "string";"enum",`List (List.map (fun value -> `String value) names)]
 let input_schema = object_schema ~required:["lane";"command"] [
-  "lane",enum ["live";"automation";"stagehand"];"clientId",text_schema;"uploadId",text_schema;
+  "lane",enum ["live";"automation"];"clientId",text_schema;"uploadId",text_schema;
   "command",object_schema ~required:["verb";"args"] [
     "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.cookies";"page.capture";
       "page.scene";"page.snapshot";"page.interact";"page.native_workflow";"session.open";"session.close";"session.status";
@@ -38,7 +38,6 @@ let parse json =
     | Some (`String "live"),Some client -> Ok (B.Live_route (Some client))
     | Some (`String "live"),None -> Ok (B.Live_route None)
     | Some (`String "automation"),None -> Ok B.Automation_route
-    | Some (`String "stagehand"),None -> Ok B.Stagehand_route
     | (None|Some _),(None|Some _) ->
         Error "lane must name the browser the host chose; a live lane also names its clientId" in
   let* raw=Option.to_result ~none:"command is required" (List.assoc_opt "command" fields) in
@@ -53,18 +52,18 @@ let parse json =
          |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_console _|B.Page_network _
          |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
          |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
-         |B.Page_context _|B.Page_instruct _|B.Page_locate _|B.Page_extract _ ->
+         |B.Page_context _|B.Page_locate _ ->
              Error "a live lane without a clientId answers only its task Space reclaim")
-    | B.Live_route (Some _)|B.Automation_route|B.Stagehand_route -> Ok () in
+    | B.Live_route (Some _)|B.Automation_route -> Ok () in
   let* ()=match route,verb with
-    | (B.Automation_route|Stagehand_route),B.Page_act (B.Action.Control _) ->
+    | B.Automation_route,B.Page_act (B.Action.Control _) ->
         Error B.handoff_refused
     | B.Live_route (Some _|None),B.Page_act (B.Action.Control _) -> Ok ()
-    | (B.Live_route _|Automation_route|Stagehand_route),
+    | (B.Live_route _|Automation_route),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
       |Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status
       |Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
-      |Page_instruct _|Page_locate _|Page_extract _) -> Ok () in
+      | Page_locate _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
     | None -> Ok None
     | Some (`String raw) -> let* id=B.client_id_of_string raw in Ok (Some (B.client_id_to_string id))
@@ -79,11 +78,11 @@ let transferable verb upload_id = match verb,upload_id with
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _|Open_window _|Control _)
   | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
-  | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
+  | Page_context _|Page_locate _),None -> Ok ()
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
       |On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
-    |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"
+    |Page_context _|Page_locate _),Some _ -> Error "uploadId applies only to an upload command"
 let result ~start_time ~failure data message : S.tool_result =
   let result=match failure with
     | Some (class_,effect_disposition) -> Tool_result.make_err ~tool_name:definition.name ~start_time

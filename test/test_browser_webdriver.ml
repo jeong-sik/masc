@@ -242,7 +242,7 @@ let test_selected_binary () =
 let test_browser_configuration () =
   let parse text = match Otoml.Parser.from_string_result text with
     | Error detail -> fail detail | Ok toml -> Browser_configuration.parse toml in
-  (match parse "" with Ok { Browser_configuration.automation = None; stagehand = None; _ } -> () | _ -> fail "missing browser config");
+  (match parse "" with Ok { Browser_configuration.automation = None; _ } -> () | _ -> fail "missing browser config");
   (* A table that is there names a Firefox to drive. *)
   check bool "an automation table with no driver is refused" true
     (Result.is_error (parse "[browser.automation]\n"));
@@ -250,12 +250,12 @@ let test_browser_configuration () =
 geckodriver = "/test/geckodriver"
 binary = "/test/Zen.app"
 |} with
-   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=Some "/test/Zen.app"}; stagehand = None; _ } -> ()
+   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=Some "/test/Zen.app"}; _ } -> ()
    | _ -> fail "explicit browser configuration lost");
   (match parse {|[browser]
 geckodriver = "/test/geckodriver"
 |} with
-   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=None}; stagehand = None; _ } -> ()
+   | Ok { Browser_configuration.automation = Some {driver="/test/geckodriver";binary=None}; _ } -> ()
    | _ -> fail "a driver without a binary lets geckodriver discover the browser");
   List.iter (fun (why, text) -> check bool why true (Result.is_error (parse text)))
     [ "a binary needs the driver that launches it", {|[browser]
@@ -267,28 +267,7 @@ geckodriver = "/test/geckodriver"
 binary = "Zen.app"|};
       "a non-string binary is refused", {|[browser]
 geckodriver = "/test/geckodriver"
-binary = false|};
-      "a Stagehand table needs its extension", {|[browser.stagehand]
-chrome = "/test/chrome"|};
-      "a Stagehand table needs its browser", {|[browser.stagehand]
-extension = "/test/extension"|};
-      "an empty Stagehand table needs its browser", {|[browser.stagehand]|};
-      "a misspelled Stagehand field does not disable the backend", {|[browser.stagehand]
-extention = "/test/extension"|};
-      "a relative Stagehand profile is refused", {|[browser.stagehand]
-chrome = "/test/chrome"
-extension = "/test/extension"
-profile = "profile"|} ];
-  (match parse {|[browser]
-geckodriver = "/test/geckodriver"
-
-[browser.stagehand]
-chrome = "/test/chrome"
-extension = "/test/extension"
-|} with
-   | Ok { Browser_configuration.automation = Some _;
-          stagehand = Some { chrome = "/test/chrome"; extension = "/test/extension"; profile = None }; _ } -> ()
-   | _ -> fail "both backends can be configured together")
+binary = false|} ]
 
 (* A browser worker starts its source from that source's table alone; with no
    runtime.toml or no table for it, the source does not start. *)
@@ -303,8 +282,6 @@ geckodriver = "/test/geckodriver"
     (Masc.Lane_addon_runtime.For_testing.browser_source_table configuration ~backend source) in
   check bool "automation starts from [browser.automation]" true
     (start (Some configuration) Lane.Backend.Automation C.Automation);
-  check bool "Stagehand has no table, so it does not start" false
-    (start (Some configuration) Lane.Backend.Stagehand C.Stagehand);
   check bool "with no runtime.toml nothing starts" false
     (start None Lane.Backend.Automation C.Automation)
 
@@ -316,10 +293,9 @@ let test_each_source_reads_the_table_at_its_path () =
   let module C = Browser_configuration in
   let keys = function
     | Any_source C.Automation -> {|geckodriver = "/test/geckodriver"|}
-    | Any_source C.Stagehand -> "chrome = \"/test/chrome\"\nextension = \"/test/extension\""
     | Any_source C.Live_bidi -> "firefox = \"/test/firefox\"\nprofile = \"/test/profile\""
     | Any_source C.Live_ego -> "command = \"/test/ego-browser\"\nspace = \"keepers\"" in
-  let sources = [ Any_source C.Automation; Any_source C.Stagehand; Any_source C.Live_bidi
+  let sources = [ Any_source C.Automation; Any_source C.Live_bidi
                 ; Any_source C.Live_ego ] in
   let path (Any_source source) = C.source_path source in
   let read (Any_source source) configuration = Option.is_some (C.source_table source configuration) in
@@ -345,9 +321,7 @@ let test_a_browser_table_takes_no_enabled_key () =
       check bool (table ^ " refuses enabled") true
         (Result.is_error (parse (Printf.sprintf "[%s]\n%senabled = true\n" table keys))))
     [ "browser.automation", "geckodriver = \"/test/geckodriver\"\n"
-    ; "browser.stagehand", "chrome = \"/test/chrome\"\nextension = \"/test/extension\"\n"
-    ; "browser.live", ""
-    ; "browser.stagehand", "" ]
+    ; "browser.live", "" ]
 
 (* A keeper's first question is whether a session already exists. Every other
    verb answers that only by being refused, which costs a lane round trip and

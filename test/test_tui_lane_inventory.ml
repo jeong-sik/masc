@@ -35,7 +35,7 @@ let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->
         object_ ["kind",str "exact";"configuration",configuration]
     | Lane_id.Browser id -> object_ ["kind",str "browser";"lane",str (Browser_lane.Lane_name.to_wire id)],
         (match id with Browser_lane.Lane_name.Live -> object_ ["kind",str "browser_clients";"addon",object_ ["kind",str "observed";"connected_clients",`Int 0]]
-        | Automation | Stagehand -> object_ ["kind",str "browser_executor";"addon",object_ ["kind",str "observed";"registered",`Bool true]])
+        | Automation -> object_ ["kind",str "browser_executor";"addon",object_ ["kind",str "observed";"registered",`Bool true]])
     | Lane_id.Machine id -> object_ ["kind",str "machine";"machine",str (Machine_lane.to_wire id)],
         object_ ["kind",str "machine";"activity",str "on";"publication",str "stable"] in
   row (Lane_id.to_wire (Lane_id.Builtin lane)) selection state)

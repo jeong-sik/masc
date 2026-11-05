@@ -85,7 +85,7 @@ let retirement_and_unpublished () = with_download (fun _root source _contents br
   check bool "unpublished source remains" true (Sys.file_exists source))
 (* A live connection this worker runs (the ego connection) is granted what
    it published, under its own route only; a route that names no
-   connection, and Stagehand, publish nothing and are refused. *)
+   connection publishes nothing and is refused. *)
 let live_route_grants_are_its_own () = with_download (fun _root source _contents broker ->
   let client value = B.Live_route (Some (ok (B.client_id_of_string value))) in
   let live=client "1b000000-0000-4000-8000-000000000001"
@@ -104,7 +104,7 @@ let live_route_grants_are_its_own () = with_download (fun _root source _contents
   List.iter (fun (name, route) ->
     check bool (name ^ " is not granted downloads") true
       (Result.is_error (Broker.bind broker ~actor ~route ~verb (payload source marker))))
-    ["a live route without a connection",B.Live_route None;"Stagehand",B.Stagehand_route])
+    ["a live route without a connection",B.Live_route None])
 let with_committed_download f = with_download (fun root source contents broker ->
   let marker=ok (Broker.publish broker source) in let id=grant broker source marker in
   let descriptor=descriptor (claim broker id) in commit broker id (publish root descriptor);

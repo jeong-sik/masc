@@ -5,7 +5,6 @@ type t =
   | Hitl_auto_judge
   | Board_attention
   | Verifier
-  | Browser_stagehand
   | Candle_appraiser
 [@@deriving enumerate]
 
@@ -14,7 +13,6 @@ let run_identity = function
   | Hitl_auto_judge -> Lane_run_identity.Hitl_auto_judge
   | Board_attention -> Lane_run_identity.Board_attention
   | Verifier -> Lane_run_identity.Verifier
-  | Browser_stagehand -> Lane_run_identity.Browser_stagehand
   | Candle_appraiser -> Lane_run_identity.Candle_appraiser
 ;;
 
@@ -35,7 +33,7 @@ type obligation =
    in the code (RFC every-lane-is-one-row-in-one-registry, decision d3). *)
 let obligation = function
   | Board_attention | Hitl_auto_judge -> Required
-  | Librarian | Verifier | Browser_stagehand | Candle_appraiser -> Optional
+  | Librarian | Verifier | Candle_appraiser -> Optional
 ;;
 
 (* Other work waits on these three verdicts: a task's completion on the
@@ -47,7 +45,7 @@ let obligation = function
 let admission_class : t -> Llm_provider.Admission_class.t = function
   | Verifier | Hitl_auto_judge | Board_attention -> Priority
   | Librarian -> Background
-  | Browser_stagehand | Candle_appraiser -> Standard
+  | Candle_appraiser -> Standard
 ;;
 
 let required_ids =

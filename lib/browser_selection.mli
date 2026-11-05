@@ -2,7 +2,7 @@
     grants no authority: the selected route is rechecked at normal admission. *)
 type preference = Automatic | Exact of Browser_lane.route
 type reason = Explicit_browser | Existing_login | Existing_work_session
-  | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
+  | Compatible_work_browser | Available_connected_browser
 type selected = { route : Browser_lane.route; reason : reason }
 type error = Binding_required | No_available_browser
   | Ambiguous_browsers of Browser_lane.route list
@@ -14,13 +14,11 @@ type work_browser =
   { activity : Browser_lane.activity; registered : bool
   ; session : Browser_lane.session_observation; locate : bool }
 (** [locate] observes the installed model consumer and selected output, not
-    merely the presence of a driver or a configured provider. For Chrome this
-    is the shared Stagehand consumer for observe, act and extract; task-required
-    sentence actions also require it before discovery or session creation. *)
+    merely the presence of a driver or a configured provider. *)
 type snapshot =
   { live_activity : Browser_lane.activity; live_clients : Browser_lane.client_info list
   ; live_space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list
-  ; automation : work_browser; stagehand : work_browser }
+  ; automation : work_browser }
 (** What one browser worker reported in its [Snapshot] reply, read by the host
     when it chooses. Executor registration alone never establishes an open
     browser. *)
@@ -32,7 +30,7 @@ val choose : ?required_actions:Browser_capabilities.operation list ->
 val bound : Browser_lane.verb -> bool
 (** The verb addresses a tab or document a browser already showed, so an
     automatic choice could land on another browser. *)
-type browser = Owned_automation | Owned_stagehand | Connected of Browser_lane.client_info
+type browser = Owned_automation | Connected of Browser_lane.client_info
 (** The concrete browser a chosen route names in the snapshot. *)
 val target : verb:Browser_lane.verb -> snapshot:snapshot -> Browser_lane.route ->
   (browser, Browser_lane.selection_error) result

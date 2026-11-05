@@ -57,7 +57,7 @@ live 연결 중 요청 대상과 로그인이 있는 연결에서 탭 목록과 
     운영자에게 알린다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
   일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
-  `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation과 stagehand 응답에는
+  `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation 응답에는
   `transport`가 없다.
 - 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.
   `BrowserSession status`로 상태를 읽고 `open`/`close`는 작업 소유권을 확인해 사용한다.

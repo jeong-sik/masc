@@ -87,7 +87,7 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
   and extension = connect Lane.Firefox in
   let live (info : Lane.client_info) = match target info.client_id with
     | Lane.Live_client client -> client
-    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+    | Lane.Automation -> fail "expected live target" in
   let polled_client = live polled and held_client = live held in
   let is_held () = match held_client.liveness with Lane.Worker_held -> true | Lane.Polled _ -> false in
   check bool "the worker holds its own connected client" true (Lane.hold_client ~client_id:held.client_id = Ok ());
@@ -117,7 +117,7 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in
-  let client = match pinned with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+  let client = match pinned with Lane.Live_client client -> client | Lane.Automation -> fail "expected live target" in
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
@@ -298,7 +298,7 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   List.iter (fun (info : Lane.client_info) ->
     let selected = target info.client_id in
     let client = match selected with Lane.Live_client client -> client
-      | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+      | Lane.Automation -> fail "expected live target" in
     List.iter (fun capability ->
       let verb = verb_asking_for capability in
       let name = Lane.live_transport_to_string info.transport ^ " " ^ Lane.live_capability_to_wire capability in
@@ -353,9 +353,8 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
   check bool "an extension answer names its client and its transport" true
     (stated extension = expected extension "web_extension");
   check bool "a BiDi answer names its own" true (stated bidi = expected bidi "webdriver_bidi");
-  check bool "the server's own browsers have no client and no transport" true
-    (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]
-     && Lane.target_connection_fields Lane.Stagehand = ["clientId", `Null]);
+  check bool "the server's own browser has no client and no transport" true
+    (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]);
   let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged";
     "browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"]] in
   check bool "a value supplied under those names is replaced, not kept beside the route's" true
@@ -416,7 +415,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
   let primary = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let primary_command = take info in
-  let client = match selected with Lane.Live_client client -> client | Lane.Automation | Lane.Stagehand -> fail "live target expected" in
+  let client = match selected with Lane.Live_client client -> client | Lane.Automation -> fail "live target expected" in
   check bool "optional observation refuses while primary request waits" true
     (Lane.issue_document_if_idle ~target:selected ~tab_id:1 ~timeout_sec:1.
        = Ok (Lane.Refused "optional_document_observation_busy"));
@@ -444,7 +443,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
   let selected = target info.client_id in
   let client = match selected with Lane.Live_client client -> client
-    | Lane.Automation | Lane.Stagehand -> fail "expected live target" in
+    | Lane.Automation -> fail "expected live target" in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   ignore (take info);
@@ -622,7 +621,7 @@ let test_native_control_wait_contract () =
   check string "wait activity names the Space operation" "wait_for_control" (Lane.activity_name verb);
   check (option int) "wait has Space scope" None (Lane.activity_scope verb);
   check bool "other browser backends refuse Space waits" true
-    (Option.is_some (Lane.automation_refusal verb) && not (Lane.verb_allowed_on_stagehand verb)
+    (Option.is_some (Lane.automation_refusal verb)
       && not (Lane.live_transport_serves Lane.Web_extension Lane.Operator_handoff)
       && not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
   List.iter (fun fields -> check bool "invalid wait input fails before dispatch" true
@@ -648,7 +647,7 @@ let test_native_page_management_contract () =
         && Lane.live_transport_serves Ego_task_space Page_management
         && not (Lane.live_transport_serves Webdriver_bidi Page_management)
         && not (Lane.live_transport_serves Web_extension Page_management)
-        && not (Lane.verb_allowed_on_automation verb) && not (Lane.verb_allowed_on_stagehand verb)))
+        && not (Lane.verb_allowed_on_automation verb)))
     [Lane.Action.Control (Adopt_tab {tab_id=2;label=None});Control (Adopt_tab {tab_id=2;label=Some "login"});Control (Release_tab 2)];
   List.iter (fun (action,fields) -> check bool "invalid lifecycle input is refused" true
     (Result.is_error (parse action fields)))

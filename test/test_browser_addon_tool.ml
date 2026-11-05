@@ -93,7 +93,7 @@ let control_identity ~sw ~owner =
               (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect))
         | Ok _ -> fail (label ^ ": control reached selection without an observed client"))
         ["automatic",[];"unnamed live",["lane",`String "live"];
-         "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]];
+         "automation",["lane",`String "automation"]];
       check bool "the named host-selected client admits control" true
         (ok (Tool.command (arguments verb))=(B.Live_route (Some client_id),verb));
       check bool "a worker route still requires its lane" true

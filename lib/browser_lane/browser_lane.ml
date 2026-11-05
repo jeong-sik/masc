@@ -5,11 +5,9 @@ module Native_input = Browser_native_input_contract
 
     A lane is one connected browser backend: "live" is the user's real
     Firefox/Zen through the extension's native-messaging host. "automation"
-    is the in-process OCaml WebDriver executor. "stagehand" is a Chromium the
-    server launches with the Stagehand runtime, reached over CDP
-    (RFC-browser-lane-stagehand). Only the live host long-polls this process
-    and posts results through the HTTP transport; automation and stagehand
-    own their sessions directly inside the server.
+    is the in-process OCaml WebDriver executor. Only the live host long-polls
+    this process and posts results through the HTTP transport; automation
+    owns its session directly inside the server.
 
     Verbs are a closed variant: an unknown verb is refused by name on every
     boundary (tool input, lane issue, backend), the same rule the observe
@@ -134,16 +132,12 @@ type verb =
   | Page_elements of { tab_id : int option; filter : elements_filter }
   | Page_act of Browser_action.t
   | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of elements_filter | `Frames | `Dialog ] }
-  (* Sentences for the Stagehand runtime (RFC-browser-lane-stagehand §3.2):
-     act on, locate, or extract from the page, with element choice left to
-     the model the runtime asks. *)
-  | Page_instruct of { tab_id : int; instruction : string }
+  (* Ask the model the automation executor calls for an element on the page. *)
   | Page_locate of { tab_id : int; instruction : string option }
-  | Page_extract of { tab_id : int; instruction : string; schema : Yojson.Safe.t option }
 
 (** Shared reply observation policy for built-in and Add-on callers. A timed-out
     observation does not establish that the browser effect did not happen.
-    Model-backed Stagehand verbs retain their executor-owned wait policy. *)
+    Model-backed locate retains its executor-owned wait policy. *)
 let reply_timeout_sec = function
   | Session_open _ | Session_close -> 60.
   | Session_status -> 10.
@@ -151,7 +145,7 @@ let reply_timeout_sec = function
   | Page_act action -> Action.reply_timeout_sec action
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _
-  | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
+  | Page_locate _ -> default_timeout_sec
 
 type reply_policy = Reply_window | Executor_owned
 let reply_policy = function
@@ -168,7 +162,7 @@ let reply_policy = function
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
-  | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
+  | Page_goto _ | Page_elements _ | Page_context _ | Page_locate _ -> Reply_window
 
 (* SDK-native navigation and selector/ref input need no MASC execution clock. Scene,
    coordinate and custom-waypoint adapters retain their existing guards. *)
@@ -202,8 +196,8 @@ let ego_reply_policy = function
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
     | Page_network _ | Page_cookies _ | Page_scene _ | Page_snapshot _
     | Page_native_workflow _ | Session_open _ | Session_close | Session_status
-    | Page_elements _ | Page_context _ | Page_instruct _
-    | Page_locate _ | Page_extract _) as verb -> reply_policy verb
+    | Page_elements _ | Page_context _
+    | Page_locate _) as verb -> reply_policy verb
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)
@@ -213,7 +207,7 @@ let elements_filter = function
   | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
   | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Session_close
-  | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> unfiltered_elements
+  | Session_status | Page_goto _ | Page_act _ | Page_locate _ -> unfiltered_elements
 ;;
 
 let verb_to_string = function
@@ -236,9 +230,7 @@ let verb_to_string = function
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
   | Page_context _ -> "page.context"
-  | Page_instruct _ -> "page.instruct"
   | Page_locate _ -> "page.locate"
-  | Page_extract _ -> "page.extract"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -461,14 +453,9 @@ let verb_json = function
       (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
-  | Page_instruct { tab_id; instruction } ->
-    `Assoc ["verb", `String "page.instruct"; "args", `Assoc ["tabId", `Int tab_id; "instruction", `String instruction]]
   | Page_locate { tab_id; instruction } ->
     `Assoc ["verb", `String "page.locate"; "args", `Assoc
       (["tabId", `Int tab_id] @ Option.to_list (Option.map (fun text -> "instruction", `String text) instruction))]
-  | Page_extract { tab_id; instruction; schema } ->
-    `Assoc ["verb", `String "page.extract"; "args", `Assoc
-      (["tabId", `Int tab_id; "instruction", `String instruction] @ Option.to_list (Option.map (fun s -> "schema", s) schema))]
 ;;
 
 (* Two different questions, two different classifications, both exhaustive
@@ -482,10 +469,10 @@ let verb_json = function
      automation backend. *)
 let verb_is_read = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
-  | Session_status | Page_locate _ | Page_extract _ -> true
-  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ | Page_instruct _ -> false
+  | Session_status | Page_locate _ -> true
+  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
 let verb_uses_model = function
-  | Page_instruct _ | Page_locate _ | Page_extract _ -> true
+  | Page_locate _ -> true
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _
   | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
@@ -618,13 +605,11 @@ let live_capability = function
   | Session_open _ | Session_close | Session_status
   | Page_act (Action.On_tab { interaction = (Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
       | Action.Block_requests _ | Action.Unblock_requests); _ }) -> None
-  | Page_instruct _ | Page_locate _ | Page_extract _ -> None
+  | Page_locate _ -> None
 ;;
 
 let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 
-(* Gecko's selected read-only locate consumer does not execute instructions. *)
-let sentence_verbs_refused = "act and extract require the stagehand lane"
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
 let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
 let handoff_refused = "Space control actions apply only to an ego connection on the live lane"
@@ -639,41 +624,14 @@ let automation_refusal = function
   | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _
   | Page_act (Action.Open_tab _ | Action.Open_window _ | Action.On_tab _)
   | Page_locate _ -> None
-  | Page_instruct _ | Page_extract _ -> Some sentence_verbs_refused
   | Page_snapshot _ -> Some snapshot_refused
 ;;
 let verb_allowed_on_automation verb = Option.is_none (automation_refusal verb)
-
-(* What the Stagehand backend serves once its executor is installed
-   (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
-   screenshots, text, element and scene reads, interaction, and the three
-   sentence verbs. Native tab creation and top-level history/close actions
-   are served; frames, dialogs, downloads, the idle document observer and
-   other BrowserAct actions are not served. *)
-let verb_allowed_on_stagehand = function
-  | Page_capture {options=Some _;_} -> false
-  | Page_native_workflow _ -> false
-  | Page_interact {action; _} when acts_on_snapshot_target action -> false
-  | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
-  | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
-  | Page_extract _ -> true
-  | Page_act (Action.Open_tab _) -> true
-  | Page_act (Action.Open_window _ | Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _ | Action.Adopt_tab _ | Action.Release_tab _)) -> false
-  | Page_act (Action.On_tab {frame_path;interaction;_}) ->
-    (match interaction with
-     | Action.Back | Forward | Reload | Close_tab -> frame_path = []
-     | Action.Stop_loading -> false
-     | Action.Upload _ | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
-     | Block_requests _ | Unblock_requests -> false)
-  | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
-  | Page_snapshot _ -> false
-;;
 
 let verb_allowed (lane : Lane_name.t) verb =
   match lane with
   | Live -> verb_allowed_on_live verb
   | Automation -> verb_allowed_on_automation verb
-  | Stagehand -> verb_allowed_on_stagehand verb
 ;;
 
 
@@ -706,7 +664,7 @@ let activity_rejection_with ~activity lane = function
   | Session_close | Session_status -> None
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Page_goto _ | Page_elements _
-  | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
+  | Page_act _ | Page_context _ | Page_locate _ ->
     match activity with
     | Enabled -> None
     | Disabled -> Some (Lane_off lane)
@@ -861,7 +819,7 @@ let activity_scope = function
   | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id}
   | Page_console {tab_id} | Page_network {tab_id} | Page_cookies {tab_id} | Page_capture {tab_id;_}
   | Page_scene {tab_id;_} | Page_snapshot {tab_id;_} | Page_context {tab_id;_}
-  | Page_instruct {tab_id;_} | Page_locate {tab_id;_} | Page_extract {tab_id;_}
+  | Page_locate {tab_id;_}
   | Page_act (Action.Control (Action.Adopt_tab {tab_id;_}|Action.Release_tab tab_id))
   | Page_act (Action.On_tab {tab_id;_}) -> Some tab_id
   | Page_read {tab_id;_} | Page_elements {tab_id;_} | Page_goto {tab_id;_} -> tab_id
@@ -878,7 +836,7 @@ let activity_name = function
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
     |Page_capture _|Page_scene _|Page_snapshot _|Session_open _|Session_close|Session_status|Page_goto _
     |Page_elements _|Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over)|On_tab _)
-    |Page_context _|Page_instruct _|Page_locate _|Page_extract _) as verb -> verb_to_string verb
+    |Page_context _|Page_locate _) as verb -> verb_to_string verb
 let activity_result = function
   | `Assoc fields ->
     (match List.assoc_opt "ok" fields,List.assoc_opt "effectPhase" fields with
@@ -909,7 +867,7 @@ let settle_activity client id outcome = match Hashtbl.find_opt client.interactio
   | None -> ()
   | Some work -> Hashtbl.replace client.last_activities work.actor {work;outcome};
       Hashtbl.remove client.interactions id
-type target = Automation | Live_client of client | Stagehand
+type target = Automation | Live_client of client
 let clients : (string, client) Hashtbl.t = Hashtbl.create 4
 let clients_mutex = Eio.Mutex.create ()
 (* Retain only IDs after disconnect; queues and page payloads must be reclaimed. *)
@@ -982,7 +940,7 @@ let client_json info =
   "space",client_space_to_json info.space;
   "interactions",`List (List.map interaction_activity_json active);
   "lastActivities",`List (List.map settled_activity_json settled)]
-let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
+let target_client_id = function Automation -> None | Live_client client -> Some client.info.client_id
 (* Where an answer came from, as every successful answer states it: a live
    connection's ID and how its browser is reached. The server's own browsers
    have no client, and no transport to name. *)
@@ -997,7 +955,7 @@ let live_connection_fields ~client_id ~transport ~space =
 let target_connection_fields = function
   | Live_client client ->
     live_connection_fields ~client_id:client.info.client_id ~transport:client.info.transport ~space:client.info.space
-  | Automation | Stagehand -> [client_id_field, `Null]
+  | Automation -> [client_id_field, `Null]
 (* Those fields read back from an answer, for a holder that keeps only what
    it can check. An answer states no connection, the server's own browser, or
    a live connection together with its transport. A client ID without its
@@ -1032,12 +990,11 @@ let with_connection_fields target fields =
 
 (* Which backend a request names. A browser client id belongs to the live
    source, so a request for the automation backend has nowhere to carry one. *)
-type route = Automation_route | Live_route of client_id option | Stagehand_route
+type route = Automation_route | Live_route of client_id option
 
 let route_lane_name = function
   | Automation_route -> Lane_name.Automation
   | Live_route _ -> Lane_name.Live
-  | Stagehand_route -> Lane_name.Stagehand
 ;;
 
 (* Why a live request names no browser to send its command to. Each case has
@@ -1123,7 +1080,6 @@ let resolve_target ~verb route =
   | Some rejection -> Error (Activity_rejected rejection)
   | None -> match route with
   | Automation_route -> Ok Automation
-  | Stagehand_route -> Ok Stagehand
   | Live_route selected ->
     Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
       prune_unlocked ();
@@ -1266,7 +1222,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
     Error (Selected_client_disconnected client.info.client_id)
   else match live_capability verb with
   | None ->
-    Ok (Rejected_before_effect "session ownership, direct navigation and sentence verbs belong to the server's lanes")
+    Ok (Rejected_before_effect "session ownership, direct navigation and model locate belong to the server's lanes")
   | Some capability when not (live_transport_serves client.info.transport capability) ->
     Error (Transport_unsupported
       { client_id = client.info.client_id; transport = client.info.transport; capability })
@@ -1350,18 +1306,11 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
        | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
        | Page_locate _ -> backend.execute verb
        | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _ | Page_snapshot _|Page_context _
-       | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _ | Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
-       | Page_instruct _|Page_extract _ ->
+       | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_interact _ | Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _ ->
            Watched_work.run (fun () -> backend.execute verb)
              ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let issue_automation ~verb ~timeout_sec =
   issue_automation_with ~activity_check:(activity_refusal Lane_name.Automation) ~verb ~timeout_sec
-type stagehand_backend = {execute : actor:string option -> verb -> answer; models : bool}
-let stagehand_executor : stagehand_backend option Atomic.t = Atomic.make None
-let install_stagehand_executor ?(models=true) executor =
-  Atomic.set stagehand_executor (Option.map (fun execute -> {execute;models}) executor)
-let stagehand_models_available () = match Atomic.get stagehand_executor with
-  | None -> false | Some backend -> backend.models
 type backend_observation = Live_clients of int | Executor_registered of bool
 type inventory_observation = { activity : activity; backend : backend_observation }
 (* Reading inventory must not prune clients or resolve their waiting requests. *)
@@ -1372,35 +1321,15 @@ let inventory_observation ?observed_activity lane =
   | Lane_name.Live -> Live_clients (Eio.Mutex.use_ro clients_mutex (fun () ->
       Hashtbl.fold (fun _ client count -> if connected client then count+1 else count) clients 0))
   | Lane_name.Automation -> Executor_registered (Option.is_some (Atomic.get automation_executor))
-  | Lane_name.Stagehand -> Executor_registered (Option.is_some (Atomic.get stagehand_executor))
   in { activity; backend }
-let issue_stagehand_with ~actor ~activity_check ~verb ~timeout_sec =
-  if not (verb_allowed_on_stagehand verb) then
-    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
-  else match activity_check verb with
-  | Some refusal -> refusal
-  | None -> match Atomic.get stagehand_executor with
-  | None -> Lane_absent
-  | Some backend when verb_uses_model verb && not backend.models ->
-    Rejected_before_effect "browser stagehand Exact Output is not selected"
-  | Some backend when verb_uses_model verb -> backend.execute ~actor verb
-  | Some backend ->
-    (match timeout_sec with
-     | None -> backend.execute ~actor verb
-     | Some timeout_sec -> Watched_work.run (fun () -> backend.execute ~actor verb)
-         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
-let issue_stagehand ~verb ~timeout_sec =
-  issue_stagehand_with ~actor:None ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb ~timeout_sec
 (* The lanes whose browser the server owns; sessions and navigation belong
    to them, and the live browser belongs to the operator. *)
-type server_lane = Server_automation | Server_stagehand
+type server_lane = Server_automation
 
 type session_observation = Browser_closed | Browser_open | Browser_changing | Browser_unknown
 let automation_session_observer : (unit -> session_observation) option Atomic.t = Atomic.make None
-let stagehand_session_observer : (unit -> session_observation) option Atomic.t = Atomic.make None
 let session_observer = function
   | Server_automation -> automation_session_observer
-  | Server_stagehand -> stagehand_session_observer
 let install_server_session_observer lane observer = Atomic.set (session_observer lane) observer
 let server_session_observation lane = match Atomic.get (session_observer lane) with
   | None -> Browser_unknown
@@ -1408,17 +1337,15 @@ let server_session_observation lane = match Atomic.get (session_observer lane) w
 
 let server_lane_of_name : Lane_name.t -> server_lane option = function
   | Lane_name.Automation -> Some Server_automation
-  | Lane_name.Stagehand -> Some Server_stagehand
   | Lane_name.Live -> None
 ;;
 
 let server_lane_name = function
   | Server_automation -> Lane_name.Automation
-  | Server_stagehand -> Lane_name.Stagehand
 ;;
 
 let server_lanes_expected =
-  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation; Server_stagehand ])
+  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation ])
 ;;
 
 let server_lane_refused = "lane must be " ^ server_lanes_expected
@@ -1429,51 +1356,20 @@ let server_lane_refused = "lane must be " ^ server_lanes_expected
 let parse_server_lane raw =
   match Lane_name.of_wire raw with
   | Some Lane_name.Live -> Error ("the live browser belongs to the operator; " ^ server_lane_refused)
-  | Some ((Lane_name.Automation | Lane_name.Stagehand) as name) ->
+  | Some (Lane_name.Automation as name) ->
     Option.to_result ~none:server_lane_refused (server_lane_of_name name)
   | None -> Error server_lane_refused
-;;
-
-(* Opening waits for Chromium, CDP, and Stagehand's own bounded attach. The
-   generic server-lane deadline can expire while those are still running,
-   leaving the caller unsure whether a browser opened. *)
-module Stagehand_open_budget = struct
-  (* On 2026-09-24 the port file appeared in 0.3–5.7 s, a CDP readiness
-     command in under 2 s, the extension worker in under 0.5 s, and init
-     answered in 0.6–5.1 s on Chrome Canary / Chrome for Testing. The server
-     and its TUI caller share these waits so a cold open cannot expire before
-     bounded startup finishes. The final CDP window covers process and HTTP
-     transport overhead; the server itself does not abandon the open then. *)
-  let devtools_port_timeout_s = 20.
-  let cdp_command_deadline_s = 30.
-  let service_worker_wait_s = 20.
-  let init_answer_s = 30.
-  let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
-  let http_timeout_s =
-    devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s
-    +. cdp_command_deadline_s
-end
-
-let stagehand_server_deadline verb ~timeout_sec =
-  match verb with
-  | Session_open _ -> None
-  | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
-  | Page_locate _ | Page_extract _ -> Some timeout_sec
 ;;
 
 let issue_server_lane lane ~verb ~timeout_sec =
   match lane with
   | Server_automation -> issue_automation ~verb ~timeout_sec
-  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec)
 ;;
 
 let issue_for_actor ~actor ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?actor client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
-  | Stagehand -> Ok (issue_stagehand_with ~actor ~activity_check:(activity_refusal Lane_name.Stagehand) ~verb
-      ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec))
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller
@@ -1489,9 +1385,6 @@ let issue_document_if_idle ~target ~tab_id ~timeout_sec =
           Ok (Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields)))
         | Some _ | None -> Ok (Answered (`Assoc fields)))
      | (Ok (Answered (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _))))))) | Ok (Lane_absent | (Timed_out | (Refused _ | Rejected_before_effect _))) | Error _) as answer -> answer)
-  (* The Stagehand backend has no idle document observer; the optional
-     source is unavailable there, as it is for a busy browser. *)
-  | Stagehand -> Ok Lane_absent
   | Automation ->
     match activity_refusal Lane_name.Automation (Page_document {tab_id}) with
     | Some refusal -> Ok refusal

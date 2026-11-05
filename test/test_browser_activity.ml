@@ -12,15 +12,9 @@ let test_config () =
   let config = parsed {|[browser.automation]
 geckodriver = "/fixture/geckodriver"
 binary = "/fixture/browser"
-[browser.stagehand]
-chrome = "/fixture/chrome"
-extension = "/fixture/extension"
-profile = "/fixture/profile"
 |} in
   check bool "automation paths" true
     (config.automation = Some {driver="/fixture/geckodriver";binary=Some "/fixture/browser"});
-  check bool "stagehand paths" true
-    (config.stagehand = Some {chrome="/fixture/chrome";extension="/fixture/extension";profile=Some "/fixture/profile"});
   let flat = parsed "[browser]\ngeckodriver = '/fixture/driver'\n" in
   let nested = parsed "[browser.automation]\ngeckodriver = '/fixture/driver'\n" in
   check bool "either automation location is read" true (Config.equal flat nested)
@@ -33,8 +27,6 @@ let invalid = [
   "wrong table type", "[browser]\nlive=false";
   "stray browser key", "[browser]\nenabled=false";
   "relative path", "[browser.automation]\ngeckodriver='driver'";
-  "partial stagehand", "[browser.stagehand]\nchrome='/fixture/chrome'";
-  "stagehand empty table", "[browser.stagehand]";
 ]
 
 let with_lane f = Eio_main.run (fun env ->
@@ -45,8 +37,7 @@ let with_lane f = Eio_main.run (fun env ->
     Eio.Switch.on_release sw (fun () ->
       Lane.install_activity_observer None;
       Lane.install_automation_executor None;
-      Lane.install_automation_document_observer None;
-      Lane.install_stagehand_executor None);
+      Lane.install_automation_document_observer None);
     f sw current))
 let refused = function Lane.Rejected_before_effect _ -> () | _ -> fail "new work must be refused before effect"
 let answer = Lane.Answered (`String "accepted")
@@ -56,19 +47,16 @@ let test_off_and_close () = with_lane (fun _ current ->
   let calls = ref [] in
   let execute verb = calls := verb :: !calls; answer in
   Lane.install_automation_executor (Some execute);
-  Lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));
   Lane.install_automation_document_observer (Some (fun ~tab_id:_ -> execute (Lane.Page_document {tab_id=1})));
   current := Disabled;
   refused (Lane.issue_automation ~verb:Tabs_list ~timeout_sec:1.);
   refused (Lane.issue_server_lane Server_automation ~verb:(Session_open {headless=None}) ~timeout_sec:1.);
-  refused (Lane.issue_stagehand ~verb:Tabs_list ~timeout_sec:None);
-  (match Lane.issue_for_actor ~actor:None ~target:Stagehand ~verb:Tabs_list ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   (match Lane.issue_document_if_idle ~target:Automation ~tab_id:1 ~timeout_sec:1. with Ok value -> refused value | Error _ -> fail "route");
   check int "off executes nothing" 0 (List.length !calls);
   List.iter (fun lane -> List.iter (fun verb ->
     is_answer (Lane.issue_server_lane lane ~verb ~timeout_sec:1.)) [Lane.Session_status;Session_close])
-    [Lane.Server_automation;Server_stagehand];
-  check int "both backends retain status and close" 4 (List.length !calls);
+    [Lane.Server_automation];
+  check int "the backend retains status and close" 2 (List.length !calls);
   (match Lane.inventory_observation Lane.Lane_name.Automation with
    | {activity=Disabled;backend=Executor_registered true} -> ()
    | _ -> fail "off and executor registration are independent");
@@ -89,7 +77,7 @@ let test_off_preselection () = with_lane (fun _ current ->
   List.iter (fun route -> List.iter (fun verb ->
     check bool "status and close still resolve server lanes" true
       (Result.is_ok (Lane.resolve_target ~verb route))) [Lane.Session_status;Session_close])
-    [Lane.Automation_route;Stagehand_route];
+    [Lane.Automation_route];
   current := Unobserved;
   rejected (Lane.Live_route None) Lane.Tabs_list "browser_activity_unavailable")
 
@@ -140,45 +128,28 @@ let test_live_retains_accepted () = with_lane (fun sw current ->
   (match Eio.Promise.await work with Ok (Ok (Answered value)) -> check bool "owned payload" true (value=payload) | _ -> fail "accepted live request lost");
   check bool "no new request queued" true (Lane.take_command ~client_info ~window_sec:0.001=Ok None))
 
-let test_stagehand_actor_route () = with_lane (fun _ _ ->
-  let owners = ref [] in
-  Lane.install_stagehand_executor (Some (fun ~actor _ -> owners:=actor::!owners;answer));
-  (match Lane.issue_for_actor ~actor:(Some "keeper-owner") ~target:Lane.Stagehand
-      ~verb:Lane.Tabs_list ~timeout_sec:1. with Ok value -> is_answer value | Error _ -> fail "actor route");
-  is_answer (Lane.issue_stagehand ~verb:Lane.Tabs_list ~timeout_sec:None);
-  check (list (option string)) "attributed and anonymous requests keep their own actor"
-    [Some "keeper-owner";None] (List.rev !owners))
-
-let test_stagehand_model_selection_and_wait () = with_lane (fun sw _ ->
+let test_locate_selection_and_wait () = with_lane (fun sw _ ->
   let calls=ref 0 in
-  Lane.install_stagehand_executor ~models:false (Some (fun ~actor:_ _ -> incr calls;answer));
-  List.iter (fun verb ->
-    match Lane.issue_for_actor ~actor:None ~target:Lane.Stagehand ~verb ~timeout_sec:0.001 with
-    | Ok value -> refused value | Error _ -> fail "model route")
-    [Lane.Page_locate {tab_id=0;instruction=None};Page_instruct {tab_id=0;instruction="submit"};
-      Page_extract {tab_id=0;instruction="read";schema=Some (`Assoc [])}];
-  check int "model selection off dispatches no model verb" 0 !calls;
-  is_answer (Lane.issue_stagehand ~verb:Lane.Tabs_list ~timeout_sec:None);
-  check int "model selection off preserves native commands" 1 !calls;
-  let delayed verb =
-    let entered,enter=Eio.Promise.create () and finished,finish=Eio.Promise.create () in
-    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve finish ())) (fun () ->
-      Lane.install_stagehand_executor ~models:true (Some (fun ~actor actual ->
-        incr calls;
-        check (option string) "original caller retained" (Some "model-owner") actor;
-        check bool "original work retained" true (actual=verb);
-        Eio.Promise.resolve enter ();Eio.Promise.await finished;answer));
-      let work=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:(Some "model-owner")
-        ~target:Lane.Stagehand ~verb ~timeout_sec:0.001) in
-      Eio.Promise.await entered;
-      (* Deliberately cross the supplied quick response clock. Only this fixture
-         uses a delay; model work/startup retain their original owner. *)
-      Time_compat.sleep 0.01;
-      check bool "original work survives the quick browser clock" true (Eio.Promise.peek work=None);
-      Eio.Promise.resolve finish ();
-      match Eio.Promise.await_exn work with
-      | Ok value -> is_answer value | Error _ -> fail "original route") in
-  List.iter delayed [Lane.Page_locate {tab_id=0;instruction=None};Session_open {headless=Some true}])
+  let locate = Lane.Page_locate {tab_id=0;instruction=None} in
+  Lane.install_automation_executor ~locate:false (Some (fun _ -> incr calls;answer));
+  refused (Lane.issue_automation ~verb:locate ~timeout_sec:0.001);
+  check int "locate selection off dispatches no model verb" 0 !calls;
+  is_answer (Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:1.);
+  check int "locate selection off preserves native commands" 1 !calls;
+  let entered,enter=Eio.Promise.create () and finished,finish=Eio.Promise.create () in
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve finish ())) (fun () ->
+    Lane.install_automation_executor ~locate:true (Some (fun actual ->
+      incr calls;
+      check bool "original work retained" true (actual=locate);
+      Eio.Promise.resolve enter ();Eio.Promise.await finished;answer));
+    let work=Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_automation ~verb:locate ~timeout_sec:0.001) in
+    Eio.Promise.await entered;
+    (* Deliberately cross the supplied quick response clock. Only this fixture
+       uses a delay; model work retains its original owner. *)
+    Time_compat.sleep 0.01;
+    check bool "original work survives the quick browser clock" true (Eio.Promise.peek work=None);
+    Eio.Promise.resolve finish ();
+    is_answer (Eio.Promise.await_exn work)))
 
 let () = run "Browser activity" [
   "configuration", test_case "paths retained and accepting locations" `Quick test_config
@@ -188,6 +159,5 @@ let () = run "Browser activity" [
     test_case "off and unavailable keep status/close" `Quick test_off_and_close;
     test_case "accepted automation request finishes" `Quick test_accepted_finishes;
     test_case "accepted live request survives off" `Quick test_live_retains_accepted;
-    test_case "stagehand route retains explicit actor" `Quick test_stagehand_actor_route;
-    test_case "stagehand model selection and original waiting scope" `Quick test_stagehand_model_selection_and_wait];
+    test_case "locate selection and original waiting scope" `Quick test_locate_selection_and_wait];
 ]

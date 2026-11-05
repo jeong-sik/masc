@@ -575,9 +575,6 @@ type exact_lane = Standalone_lane.t =
   | Hitl_auto_judge
   | Board_attention
   | Verifier
-  | Browser_stagehand
-      (** Answers the Stagehand extension's [llm.generate] for the browser
-          lane (RFC-browser-lane-stagehand §3.7). *)
   | Candle_appraiser
       (** Appraises the grade, Task relations and Keeper contribution weights of a confirmed Candle payout. *)
 

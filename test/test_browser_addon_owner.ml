@@ -142,117 +142,68 @@ let scenario () = Eio_main.run (fun env ->
     let pending = Eio.Fiber.fork_promise ~sw issue in
     let issued = command (Eio.Promise.await_exn poll) in
     let closing,begin_close=Eio.Promise.create () and settled,finish_close=Eio.Promise.create () in
-    let chrome_closing,begin_chrome_close=Eio.Promise.create ()
-    and chrome_settled,finish_chrome_close=Eio.Promise.create () in
-    let chrome_entered,enter_chrome=Eio.Promise.create () and chrome_wait,_=Eio.Promise.create () in
+    let input_entered,enter_input=Eio.Promise.create () and input_wait,_=Eio.Promise.create () in
     Fun.protect ~finally:(fun () ->
       (* Release test-owned barriers before the switch joins protected cleanup,
          including when an assertion or the test's liveness guard fails. *)
-      ignore (Eio.Promise.try_resolve finish_close ());
-      ignore (Eio.Promise.try_resolve finish_chrome_close ())) (fun () ->
-    let automation_calls=ref 0 and automation_cleanups=ref 0 and chrome_cleanups=ref 0
-    and chrome_calls=ref 0 and chrome_actors=ref [] in
+      ignore (Eio.Promise.try_resolve finish_close ())) (fun () ->
+    let automation_calls=ref 0 and automation_cleanups=ref 0 in
     ok (Owner.attach_automation owner ~locate:false
-      ~execute:(fun _ -> incr automation_calls;B.Answered (`Assoc ["ok",`Bool true;"data",`Null]))
+      ~execute:(fun verb ->
+        incr automation_calls;
+        (match verb with
+         | B.Page_interact _ -> Eio.Promise.resolve enter_input ();Eio.Promise.await input_wait
+         | _ -> ());
+        B.Answered (`Assoc ["ok",`Bool true;"data",`Null]))
       ~session:(fun () -> B.Browser_closed)
       ~document:(fun ~tab_id:_ -> B.Rejected_before_effect "no document")
       ~cleanup:(fun () -> incr automation_cleanups;ignore (Eio.Promise.try_resolve begin_close ());
         Eio.Promise.await settled;Ok ()));
-    check bool "unattached Chrome refuses before dispatch" true
-      (pre_effect (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;
-        actor=Some "keeper";timeout_sec=2.;only_if_idle=false})));
-    check bool "companion cannot attach without the owned Chrome backend" true
-      (Result.is_error (Owner.attach_extensions owner (fun _ -> fail "unattached companion ran")));
-    ok (Owner.attach_stagehand owner ~models:true
-      ~execute:(fun ~actor verb ->
-        incr chrome_calls;chrome_actors:=actor:: !chrome_actors;
-        (match verb with
-         | B.Page_interact _ -> Eio.Promise.resolve enter_chrome ();Eio.Promise.await chrome_wait
-         | _ -> ());
-        B.Answered (`Assoc ["ok",`Bool true;"data",`Null]))
-      ~session:(fun () -> B.Browser_closed)
-      ~cleanup:(fun () -> incr chrome_cleanups;Eio.Promise.resolve begin_chrome_close ();
-        Eio.Promise.await chrome_settled;Ok ()));
-    check bool "a second Chrome backend cannot replace the owner" true
-      (Result.is_error (Owner.attach_stagehand owner ~models:true
-        ~execute:(fun ~actor:_ _ -> fail "replacement must not run")
-        ~session:(fun () -> B.Browser_open) ~cleanup:(fun () -> fail "replacement must not close")));
-    let extension_entered,enter_extension=Eio.Promise.create ()
-    and extension_wait,_=Eio.Promise.create () in
-    let extension_calls=ref 0 and extension_cancelled=ref false in
-    ok (Owner.attach_extensions owner (fun _ ->
-      incr extension_calls; Eio.Promise.resolve enter_extension ();
-      Fun.protect ~finally:(fun () -> extension_cancelled:=true)
-        (fun () -> Eio.Promise.await extension_wait)));
-    check bool "a second companion cannot replace the owner" true
-      (Result.is_error (Owner.attach_extensions owner (fun _ -> fail "replacement companion ran")));
-    let extension=W.Extension (Masc.Browser_extension_protocol.Release incarnation) in
-    check bool "wrong incarnation cannot reach the private companion" true
-      (pre_effect (Owner.dispatch owner {W.incarnation=other_incarnation;command=extension}));
-    let extension_pending=Eio.Fiber.fork_promise ~sw (fun () -> send extension) in
-    Eio.Promise.await extension_entered;
-    check int "private extension executes once" 1 !extension_calls;
-    check bool "private extension wait does not hold owner admission" true
-      (match send W.Snapshot with W.Snapshot_result _ -> true
-       | Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _ -> false);
+    check bool "a second automation backend cannot replace the owner" true
+      (Result.is_error (Owner.attach_automation owner ~locate:false
+        ~execute:(fun _ -> fail "replacement must not run")
+        ~session:(fun () -> B.Browser_open)
+        ~document:(fun ~tab_id:_ -> fail "replacement must not read")
+        ~cleanup:(fun () -> fail "replacement must not close")));
     let owned=Owner.snapshot owner |> Yojson.Safe.Util.member "owned_backends" |> Masc.Browser_addon_inventory.owned_of_json |> ok in
     check bool "ready backend is visible without inventing an open session" true
-      (let automation,chrome=owned in automation.registered && chrome.registered
-        && automation.session=B.Browser_closed && chrome.session=B.Browser_closed
-        && automation.activity=B.Enabled && chrome.activity=B.Enabled);
+      (owned.registered && owned.session=B.Browser_closed && owned.activity=B.Enabled);
     check bool "an unselected locate consumer refuses before backend work" true
       (pre_effect (send (W.Issue {route=B.Automation_route;verb=B.Page_locate {tab_id=1;instruction=None};
         actor=Some "keeper";timeout_sec=2.;only_if_idle=false})));
     check int "selection off sends no backend command" 0 !automation_calls;
     ignore (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=Some "keeper";timeout_sec=2.;only_if_idle=false}));
     check int "owned backend command dispatched once" 1 !automation_calls;
-    ignore (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;actor=Some "chrome-keeper";
-      timeout_sec=2.;only_if_idle=false}));
-    check (list (option string)) "Chrome receives the original actor" [Some "chrome-keeper"] !chrome_actors;
-    let chrome_pending=Eio.Fiber.fork_promise ~sw (fun () ->
-      send (W.Issue {route=B.Stagehand_route;
+    let input_pending=Eio.Fiber.fork_promise ~sw (fun () ->
+      send (W.Issue {route=B.Automation_route;
         verb=B.Page_interact {frame_path=[];tab_id=7;expected_url=None;action=B.Hover (B.Selector "#row")};
-        actor=Some "chrome-keeper";timeout_sec=2.;only_if_idle=false})) in
-    Eio.Promise.await chrome_entered;
+        actor=Some "keeper";timeout_sec=2.;only_if_idle=false})) in
+    Eio.Promise.await input_entered;
     let retired=Eio.Fiber.fork_promise ~sw (fun () -> send W.Retire) in
-    Eio.Promise.await closing;Eio.Promise.await chrome_closing;
+    Eio.Promise.await closing;
     let also_retired=Eio.Fiber.fork_promise ~sw (fun () -> send W.Retire) in
-    check bool "retirement starts both cleanups before joining either" true (Eio.Promise.peek retired=None);
+    check bool "retirement starts the cleanup before joining it" true (Eio.Promise.peek retired=None);
     check bool "retirement fences new input before cleanup" true
       (pre_effect (send (W.Issue {route=B.Automation_route;verb=B.Session_status;actor=None;timeout_sec=2.;only_if_idle=false})));
-    check bool "retirement fences Chrome before cleanup" true
-      (pre_effect (send (W.Issue {route=B.Stagehand_route;verb=B.Session_status;actor=None;timeout_sec=2.;only_if_idle=false})));
-    check bool "retirement revokes private extension admission" true (pre_effect (send extension));
-    check bool "in-flight private extension outcome remains unknown" true
-      (match Eio.Promise.await_exn extension_pending with
-       | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
-       | Service_refusal {disposition=W.Not_started;_}
-       | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
-    check bool "retirement joins private extension cancellation" true !extension_cancelled;
-    check int "private extension is never replayed" 1 !extension_calls;
-    check bool "retirement removes both registry callbacks" true
-      (B.inventory_observation B.Lane_name.Automation |> fun automation ->
-        let chrome=B.inventory_observation B.Lane_name.Stagehand in
-        automation.backend=B.Executor_registered false && chrome.backend=B.Executor_registered false);
-    check bool "retired owner refuses a new Chrome backend" true
-      (Result.is_error (Owner.attach_stagehand owner ~models:true
-        ~execute:(fun ~actor:_ _ -> fail "retired owner must not execute")
-        ~session:(fun () -> B.Browser_open) ~cleanup:(fun () -> fail "retired owner must not acquire")));
+    check bool "retirement removes the registry callback" true
+      ((B.inventory_observation B.Lane_name.Automation).backend=B.Executor_registered false);
+    check bool "retired owner refuses a new automation backend" true
+      (Result.is_error (Owner.attach_automation owner ~locate:false
+        ~execute:(fun _ -> fail "retired owner must not execute")
+        ~session:(fun () -> B.Browser_open)
+        ~document:(fun ~tab_id:_ -> fail "retired owner must not read")
+        ~cleanup:(fun () -> fail "retired owner must not acquire")));
     Eio.Promise.resolve finish_close ();
-    Eio.Fiber.yield ();
-    check bool "one settled backend cannot release the other" true (Eio.Promise.peek retired=None);
-    Eio.Promise.resolve finish_chrome_close ();
-    check bool "retirement receipt follows both cleanups" true (receipt (Eio.Promise.await_exn retired));
+    check bool "retirement receipt follows the cleanup" true (receipt (Eio.Promise.await_exn retired));
     check bool "concurrent retirement joins the original cleanup" true (receipt (Eio.Promise.await_exn also_retired));
     check bool "repeated retirement observes the original result" true (receipt (send W.Retire));
     check int "automation cleanup executes once" 1 !automation_cleanups;
-    check int "Chrome cleanup executes once" 1 !chrome_cleanups;
-    check bool "in-flight Chrome input becomes unknown at retirement" true
-      (match Eio.Promise.await_exn chrome_pending with
+    check bool "in-flight input becomes unknown at retirement" true
+      (match Eio.Promise.await_exn input_pending with
        | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
        | W.Service_refusal {disposition=W.Not_started;_}
        | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
-    check int "Chrome input was not replayed" 2 !chrome_calls;
+    check int "input was not replayed" 2 !automation_calls;
     let result = Eio.Promise.await_exn pending in
     check bool "retirement does not prove no effect" true
       (match result with

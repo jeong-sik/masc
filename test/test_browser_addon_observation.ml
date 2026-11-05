@@ -23,7 +23,7 @@ let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
   "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
   "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
-  "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]
+  "owned_backends",`Assoc ["automation",work true]]
 (* The server reads the browser rows of the Lanes list from this cached
    observation, so what the worker published must read back whole. *)
 let published_reads_back () =
@@ -32,8 +32,7 @@ let published_reads_back () =
               client "01a16363-ef68-7000-aee1-37e1be230202" "zen"])) in
   let published=ok (Observation.read output) in
   check int "both connected clients read back" 2 (List.length published.clients);
-  check bool "the automation backend reads as registered" true published.automation.registered;
-  check bool "the Stagehand backend reads as not registered" false published.stagehand.registered
+  check bool "the automation backend reads as registered" true published.automation.registered
 (* The runtime keeps an observation with its row renamed under the
    installation (Lane_addon_runtime.namespace); the reader must find it. *)
 let namespaced_row_reads_back () =
@@ -47,7 +46,7 @@ let namespaced_row_reads_back () =
 let retired_is_not_connected () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
     (`Assoc ["state",`String "retired";"clients",`List [];
-      "owned_backends",`Assoc ["automation",work false;"stagehand",work false]])) in
+      "owned_backends",`Assoc ["automation",work false]])) in
   check bool "a retired worker's observation does not read as a connected browser" true
     (Result.is_error (Observation.read output))
 let duplicate_client () =

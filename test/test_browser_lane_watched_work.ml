@@ -152,7 +152,7 @@ let take_owned client = match Lane.take_command ~client_info:client ~window_sec:
 let test_ego_input_outlives_poll_lease () = with_lane @@ fun ~sw ~clock ->
   let info=connect ~transport:Lane.Ego_task_space ~sw ~clock Lane.Ego_lite in
   let target=live info in
-  let client=match target with Lane.Live_client c -> c | Lane.Automation|Lane.Stagehand -> fail "live" in
+  let client=match target with Lane.Live_client c -> c | Lane.Automation -> fail "live" in
   let issued=Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   let command=take_owned info in
@@ -173,7 +173,7 @@ let test_ego_input_outlives_poll_lease () = with_lane @@ fun ~sw ~clock ->
 let test_queued_native_work_is_not_liveness () = with_lane @@ fun ~sw ~clock ->
   let info=connect ~transport:Lane.Ego_task_space ~sw ~clock Lane.Ego_lite in
   let target=live info in
-  let client=match target with Lane.Live_client c -> c | Lane.Automation|Lane.Stagehand -> fail "live" in
+  let client=match target with Lane.Live_client c -> c | Lane.Automation -> fail "live" in
   let issued=Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   (* Consume the queue without an authenticated client poll: no execution owner. *)
@@ -188,7 +188,7 @@ let test_queued_native_work_is_not_liveness () = with_lane @@ fun ~sw ~clock ->
 let test_native_input_cancellation_releases_owner () = with_lane @@ fun ~sw ~clock ->
   let info=connect ~transport:Lane.Ego_task_space ~sw ~clock Lane.Ego_lite in
   let target=live info in
-  let client=match target with Lane.Live_client c -> c | Lane.Automation|Lane.Stagehand -> fail "live" in
+  let client=match target with Lane.Live_client c -> c | Lane.Automation -> fail "live" in
   let started,start=Eio.Promise.create () in
   let issued=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
     Eio.Promise.resolve start context;
@@ -205,7 +205,7 @@ let test_native_input_cancellation_releases_owner () = with_lane @@ fun ~sw ~clo
 let test_running_native_disconnect_is_final () = with_lane @@ fun ~sw ~clock ->
   let info=connect ~transport:Lane.Ego_task_space ~sw ~clock Lane.Ego_lite in
   let target=live info in
-  let client=match target with Lane.Live_client c -> c | Lane.Automation|Lane.Stagehand -> fail "live" in
+  let client=match target with Lane.Live_client c -> c | Lane.Automation -> fail "live" in
   let issued=Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target ~verb:native_click ~timeout_sec:window_s) in
   let command=take_owned info in

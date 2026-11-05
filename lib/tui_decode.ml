@@ -3512,13 +3512,6 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
-  | Standalone_lane.Browser_stagehand ->
-    { sla_output_meaning =
-        "Output meaning: structured answer to one Stagehand browser model request."
-    ; sla_evidence =
-        "Evidence: this lane does not yet retain standalone run records; \
-         inspect the browser operation response for its result."
-    }
 
 let standalone_lane_status_of_string = function
   | "off" -> Ok Standalone_off
@@ -3622,8 +3615,7 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Verifier
-    | Standalone_lane.Browser_stagehand -> Ok None
+    | Standalone_lane.Verifier -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -6079,8 +6071,7 @@ let decode_librarian_run_page json =
          | Lane_run_identity.Board_attention
          | Lane_run_identity.Workspace_curator
          | Lane_run_identity.Candle_appraiser
-         | Lane_run_identity.Verifier
-         | Lane_run_identity.Browser_stagehand -> None)
+         | Lane_run_identity.Verifier -> None)
       rows
   in
   let* lrp_next =
@@ -6325,8 +6316,7 @@ let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output 
   | Lane_run_identity.Board_attention
   | Lane_run_identity.Workspace_curator
   | Lane_run_identity.Candle_appraiser
-  | Lane_run_identity.Verifier
-  | Lane_run_identity.Browser_stagehand -> Ok Lane_run_not_gate_judgment
+  | Lane_run_identity.Verifier -> Ok Lane_run_not_gate_judgment
   | Lane_run_identity.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -6856,8 +6846,7 @@ let decode_lane_run_detail json =
       | Lane_run_identity.Hitl_auto_judge
       | Lane_run_identity.Workspace_curator
       | Lane_run_identity.Candle_appraiser
-      | Lane_run_identity.Verifier
-      | Lane_run_identity.Browser_stagehand ->
+      | Lane_run_identity.Verifier ->
         false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -6895,7 +6884,7 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Librarian, Some output -> decode_librarian_preflight output
     | (Lane_run_identity.Librarian, _) | (Lane_run_identity.Hitl_auto_judge, _)
     | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
-    | (Lane_run_identity.Verifier, _) | (Lane_run_identity.Browser_stagehand, _)
+    | (Lane_run_identity.Verifier, _)
     | (Lane_run_identity.Candle_appraiser, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
@@ -7005,8 +6994,7 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Verifier
-    | Lane_run_identity.Browser_stagehand -> decode_judgment ()
+    | Lane_run_identity.Verifier -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

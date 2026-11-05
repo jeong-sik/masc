@@ -46,7 +46,6 @@ let cancellation_scope () =
     check bool label false (W.ends_with_caller command))
     [ "unselected live", issue (B.Live_route None) B.Tabs_list
     ; "automation", issue B.Automation_route B.Tabs_list
-    ; "stagehand", issue B.Stagehand_route B.Tabs_list
     ; "downloads", issue (B.Live_route (Some client_id)) (B.Page_downloads {tab_id=7})
     ; "snapshot", W.Snapshot
     ; "retire", W.Retire

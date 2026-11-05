@@ -244,9 +244,9 @@ let operator_retain () = with_fixture (fun clock root config ->
     seed ~instance_id ~authority:(Lane_addon_lifecycle.authority_to_json
       (Lane_addon_lifecycle.Native_admission {installation_id=instance_id})) unconfirmed;
     (instance_id, admission, slot, root, left) in
-  (* A file only Stagehand's browser writes is unknown in an automation
+  (* A file no browser backend writes is unknown in an automation
      allocation. *)
-  let unknown = "stagehand.json" in
+  let unknown = "foreign.json" in
   let cleanup_refused id = Result.is_error
     (R.dispatch ~caller:"retain-tester" ~access:Lane_addon_sources.Operator_configuration ~config
       ~operation:R.Detach (`Assoc ["instance_id",`String id])) in
@@ -323,7 +323,7 @@ def handle(conn):
         lose=os.path.join(a.root,"lose-snapshot-"+a.incarnation)
         lost=False
         if op=="snapshot" and os.path.exists(lose): os.unlink(lose);lost=True
-        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False},"stagehand":{"activity":"disabled","registered":False,"session":"unknown","locate":False}}}}
+        if op=="snapshot": result={"reply":"receipt"} if lost or a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":{"automation":{"activity":"disabled","registered":False,"session":"closed","locate":False}}}}
         elif op=="poll":
             client=dict(req["client"]);client["interactions"]=[];client["lastActivities"]=[];client["spaceObservation"]=None;client["spacePresence"]={"spaceId":client["space"]["id"],"observedAt":1,"state":"present"} if client["transport"]=="ego_task_space" else None;clients[client["clientId"]]=client
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
@@ -580,7 +580,7 @@ hooks = ["validate_input", "validate_output"]
         (`Assoc (selection @ ["command",Browser_lane.verb_json
           (Browser_lane.Page_act (Browser_lane.Action.Control control))])))
       ["automatic",[];"unnamed live",["lane",`String "live"];
-       "automation",["lane",`String "automation"];"stagehand",["lane",`String "stagehand"]])
+       "automation",["lane",`String "automation"]])
     [Browser_lane.Action.Hand_off;Take_over];
   host_refusal "a repeated field is refused as input" (`Assoc ["command",Browser_lane.verb_json Browser_lane.Tabs_list;
     "command",Browser_lane.verb_json Browser_lane.Tabs_list]);

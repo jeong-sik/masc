@@ -15,7 +15,6 @@ let scenario () = Eio_main.run (fun env ->
         let model_waiting,model_wait=Eio.Promise.create () in
         let extension_waiting,extension_wait=Eio.Promise.create () in
         let locating,locate=Eio.Promise.create () in
-        let starting,start=Eio.Promise.create () in
         let workflowing,workflow=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
@@ -29,7 +28,6 @@ let scenario () = Eio_main.run (fun env ->
               if Yojson.Safe.Util.member "operation" request=`String "issue" then (
                 match Yojson.Safe.Util.(request |> member "command" |> member "verb") with
                 | `String "page.locate" -> ignore (Eio.Promise.try_resolve locate ())
-                | `String "session.open" -> ignore (Eio.Promise.try_resolve start ())
                 | `String "page.native_workflow" -> ignore (Eio.Promise.try_resolve workflow ())
                 | _ -> ignore (Eio.Promise.try_resolve enter ()));
               if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
@@ -63,14 +61,6 @@ let scenario () = Eio_main.run (fun env ->
               (fun () -> Eio.Promise.await locating;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
              | `Returned _ -> fail "model-backed issue must retain its caller-owned wait");
-            (match Eio.Fiber.first
-              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
-                (W.Issue {route=Browser_lane.Stagehand_route;
-                  verb=Browser_lane.Session_open {headless=Some true};actor=None;
-                  timeout_sec=0.001;only_if_idle=false})))
-              (fun () -> Eio.Promise.await starting;Eio.Time.sleep clock 0.03;`Waiting) with
-             | `Waiting -> ()
-             | `Returned _ -> fail "Chrome startup must retain its owner beyond the quick transport clock");
             let native=ok (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
               "expectedUrl",`String "https://example.org";"steps",`List [];"maxChars",`Int 1000])) in
             (match Eio.Fiber.first
@@ -121,7 +111,7 @@ let transport_policy () = Eio_main.run (fun env ->
             let owned=`Assoc ["activity",`String "disabled";"registered",`Bool false;
               "session",`String "closed";"locate",`Bool false] in
             W.Snapshot_result (`Assoc ["state",`String "serving";
-              "owned_backends",`Assoc ["automation",owned;"stagehand",owned];
+              "owned_backends",`Assoc ["automation",owned];
               "clients",`List (List.map W.client_to_json clients)]) in
           let click=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";
             frame_path=[];action=Browser_lane.Click "#send"} in
@@ -165,7 +155,7 @@ let transport_policy () = Eio_main.run (fun env ->
               refused "unselected live transport refused" (issue (Live_route None) click);
               read [ego;extension;bidi];
               List.iter (fun route -> List.iter (bounded route) [click;goto;reload;open_tab])
-                [Browser_lane.Automation_route;Stagehand_route;Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
+                [Browser_lane.Automation_route;Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
               List.iter (fun verb ->
                 issue_entered := Eio.Promise.create ();
                 match Eio.Fiber.first
@@ -306,7 +296,5 @@ let ()=run "browser addon private client" ["transport",[
   test_case "worker transport scopes SDK-owned waits" `Quick transport_policy;
   test_case "silent automation selector keeps reply window" `Quick
     (fun () -> silent_selector_reply_window Browser_lane.Automation_route);
-  test_case "silent Stagehand selector keeps reply window" `Quick
-    (fun () -> silent_selector_reply_window Browser_lane.Stagehand_route);
   test_case "fresh companion admission after connect" `Quick private_admission_after_connect;
   test_case "private payload errors and distinct reply kinds" `Quick private_reply_boundary]]

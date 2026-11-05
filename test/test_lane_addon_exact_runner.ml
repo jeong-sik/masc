@@ -639,7 +639,7 @@ let test_requested_shape_advances_http_without_replacing_baseline () =
     check int "first candidate dispatched once" 1 (F.post_count wrong);
     check int "second candidate dispatched once" 1 (F.post_count right))
 
-(* Stagehand's act answer has an object-or-null child, rather than the scalar
+(* An act answer with an object-or-null child, rather than the scalar
    nullable child covered by the quiz fixture above. Exercise the actual HTTP
    walk, host proof codec and Browser model waiter together. *)
 type act_action = Object_action | Null_action
@@ -666,7 +666,7 @@ let test_consumer_act_answer_survives_host_proof action_kind () =
       | Ok answer -> answer | Error detail -> fail detail in
     let output={Types.name="author";schema=baseline;request_schema=Types.Consumer_request_schema} in
     let package={package with exact_outputs=[output]} in
-    let original=request ~schema:requested "stagehand-act" in
+    let original=request ~schema:requested "object-or-null-act" in
     let models=Browser_addon_models.create ~incarnation:"0b000000-0000-4000-8000-000000000027"
       ~configuration:(Browser_addon_models.prepare_configuration ~store_root:(Filename.concat base_path "browser-receipts") ~outputs:[output])
       |> function Ok models -> models | Error detail -> fail detail in

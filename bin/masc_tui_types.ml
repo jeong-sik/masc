@@ -6337,7 +6337,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
+  type source = Browser_lane.Lane_name.t = Live | Automation
   type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
     space : Browser_lane.ego_space option;
@@ -6491,7 +6491,7 @@ module Browser_lane_view = struct
   (* One answer of the connection list: the connections and the BiDi host
      are as of the same read. *)
   type automatic_reason = Explicit_browser | Existing_login | Existing_work_session
-    | Preferred_work_browser | Compatible_work_browser | Available_connected_browser
+    | Compatible_work_browser | Available_connected_browser
   type recommendation = { lane : source; client_id : string option; reason : automatic_reason }
   type selection_error_kind = No_available_browser | Ambiguous_browsers | Binding_required
     | Automatic_unavailable | Invalid_automatic_response | Unrecognized_selection_error
@@ -6539,13 +6539,12 @@ module Browser_lane_view = struct
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen" | Ego_lite -> "ego lite"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
-    | Live, None | Automation, _ | Stagehand, _ -> None
+    | Live, None | Automation, _ -> None
   (* The browser a read goes to, when there is one. Live with none chosen has
      no browser to name; this used to answer "choose browser", and every row
      that put a name there read as nonsense ("choose browser page reader"). *)
   let browser_label t = match t.source, t.selected_client with
     | Automation, _ -> Some "browser"
-    | Stagehand, _ -> Some "Chromium"
     | Live, Some client -> Some (browser_name client.browser)
     | Live, None -> None
   let create () =
@@ -6558,7 +6557,7 @@ module Browser_lane_view = struct
       unavailable = Backends_not_reported; automatic = None; selection = Unbound;
       pending_open = false; advanced_choices = false }
   let switch_source source t = { (create ()) with source; unavailable=t.unavailable;
-    selection = (match source with Live -> Live_unbound | Automation | Stagehand -> Bound_explicit) }
+    selection = (match source with Live -> Live_unbound | Automation -> Bound_explicit) }
   let choose_automatic t = { (create ()) with unavailable=t.unavailable }
   let choose_work t = { (create ()) with clients = t.clients; bidi_host = t.bidi_host;
     inventory_report = t.inventory_report; unavailable = t.unavailable; automatic = t.automatic; selection = Work_unbound }
@@ -6583,8 +6582,8 @@ module Browser_lane_view = struct
         Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens")
   let prepare_open t =
     match t.selection, t.source with
-    | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session
-    | (Unbound | Work_unbound | Live_unbound), (Live | Automation | Stagehand)
+    | (Bound_automatic | Bound_explicit), Automation -> t, Open_session
+    | (Unbound | Work_unbound | Live_unbound), (Live | Automation)
     | (Bound_automatic | Bound_explicit), Live ->
         { (choose_work t) with pending_open = true }, Discover Read_after_discovery
   let discovery_continuation t = if t.pending_open then Open_session else Read
@@ -6654,16 +6653,15 @@ module Browser_lane_view = struct
     | None, None -> true
     | Some left, Some right -> same_client left right
     | None, Some _ | Some _, None -> false
-  type browser_choice = Automatic_browser | Work_browser | Connected_browser of client | Stagehand_browser | Automation_browser
+  type browser_choice = Automatic_browser | Work_browser | Connected_browser of client | Automation_browser
   let browser_choices t =
     [Automatic_browser; Work_browser]
     @ List.map (fun client -> Connected_browser client) (listed_clients t)
-    @ (if t.advanced_choices then [Stagehand_browser; Automation_browser] else [])
+    @ (if t.advanced_choices then [Automation_browser] else [])
   let browser_choice_selected t = function
     | Automatic_browser -> t.selection = Unbound || t.selection = Bound_automatic
     | Work_browser -> t.selection = Work_unbound
     | Connected_browser client -> t.source = Live && same_selected_client t.selected_client (Some client)
-    | Stagehand_browser -> t.source = Stagehand
     | Automation_browser -> t.source = Automation
   let transport_label = function
     | Browser_lane.Web_extension -> "WebExtension"
@@ -6755,10 +6753,10 @@ module Browser_lane_view = struct
      out. *)
   let connection_label t = match t.source, t.selected_client with
     | Live, Some client -> Some (browser_identity client)
-    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+    | Live, None | Automation, _ -> browser_label t
   let connection_summary t = match t.source, t.selected_client with
     | Live, Some client -> Some (browser_identity client)
-    | Live, None | Automation, _ | Stagehand, _ -> browser_label t
+    | Live, None | Automation, _ -> browser_label t
   let live_connection_row t =
     (match connection_summary t with
      | Some connection -> "  " ^ connection
@@ -6769,13 +6767,12 @@ module Browser_lane_view = struct
     | Work_browser -> "Work browser · separate session"
     | Connected_browser client ->
         browser_identity client ^ " · existing login"
-    | Stagehand_browser -> "Advanced: Stagehand Chromium · separate login"
     | Automation_browser -> "Advanced: native automation · separate login"
   (* The row under the picker for the highlighted choice. A live connection
      says what its transport leaves out and which transport serves that; the
      server's own browsers are described by their row. *)
   let browser_choice_detail = function
-    | Automatic_browser | Work_browser | Stagehand_browser | Automation_browser -> None
+    | Automatic_browser | Work_browser | Automation_browser -> None
     | Connected_browser client ->
         (match transport_lacks client.transport with
          | [] -> None
@@ -6786,7 +6783,7 @@ module Browser_lane_view = struct
                       | None -> "")))
   let browser_choice_observation = function
     | Connected_browser client -> space_observation_row client
-    | Automatic_browser | Work_browser | Stagehand_browser | Automation_browser -> None
+    | Automatic_browser | Work_browser | Automation_browser -> None
   (* Whether the connection a screenshot came from takes a drag. A live
      screenshot names its client, and the answer is the lane table's for that
      client's transport. It is unknown when the view no longer holds that
@@ -6797,7 +6794,7 @@ module Browser_lane_view = struct
       (Option.to_list t.selected_client @ listed_clients t)
   let screenshot_drag_support t (shot : screenshot) =
     match shot.source with
-    | Automation | Stagehand -> Drag_served
+    | Automation -> Drag_served
     | Live ->
         (match screenshot_client t shot with
          | None -> Drag_unknown
@@ -6823,7 +6820,7 @@ module Browser_lane_view = struct
     let send = Pointer_send (Viewport_pointer {tab_id = shot.tab_id; expected_url = shot.url; action}) in
     if busy t then Pointer_consumed
     else match shot.source, screenshot_client t shot with
-      | (Automation | Stagehand), _ | Live, None -> send
+      | Automation, _ | Live, None -> send
       | Live, Some client ->
           let capability = Browser_lane.live_capability_of_interaction action in
           if Browser_lane.live_transport_serves client.transport capability then send
@@ -7199,17 +7196,12 @@ module Browser_lane_view = struct
     match operation with
       | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
       | Open_session ->
-        let timeout_sec =
-          match source with
-          | Browser_lane.Lane_name.Stagehand -> Browser_lane.Stagehand_open_budget.http_timeout_s
-          | Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Live -> 65.0
-        in
-        Ok ("session", `Assoc ["action", `String "open"; "headless", `Bool false; lane], timeout_sec)
+        Ok ("session", `Assoc ["action", `String "open"; "headless", `Bool false; lane], 65.0)
       | Close_session -> Ok ("session", `Assoc ["action", `String "close"; lane], 65.0)
       | Goto url -> Ok ("goto", `Assoc ["url", `String url; lane], 65.0)
   let selected_client_available t = match t.selection, t.source, t.selected_client with
     | (Unbound | Work_unbound | Live_unbound), _, _ -> false
-    | (Bound_automatic | Bound_explicit), (Automation | Stagehand), _ -> true
+    | (Bound_automatic | Bound_explicit), Automation, _ -> true
     | (Bound_automatic | Bound_explicit), Live, None -> false
     | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
   let cadence_operation ?(viewport : screenshot option) t =
@@ -7255,12 +7247,11 @@ module Browser_lane_view = struct
     | Connected_browser client when browser_choice_selected t choice ->
         { t with selected_client = Some client; client_picker = None; selection = Bound_explicit; pending_open = false }
     | Automatic_browser when browser_choice_selected t choice -> { t with client_picker = None }
-    | (Stagehand_browser | Automation_browser) when browser_choice_selected t choice ->
+    | Automation_browser when browser_choice_selected t choice ->
         { t with client_picker=None; selection=Bound_explicit; pending_open=false }
     | Work_browser -> choose_work t
     | Automatic_browser -> choose_automatic t
     | Connected_browser client -> choose_client client t
-    | Stagehand_browser -> switch_source Stagehand t
     | Automation_browser -> switch_source Automation t
   let browser_choice_operation choice ~before after =
     match after.selection with
@@ -7277,12 +7268,12 @@ module Browser_lane_view = struct
          | None -> Error "Recommended browser is no longer connected; choose a browser"
          | Some client -> Ok { (choose_client client t) with selection = Bound_automatic;
              pending_open = t.pending_open })
-    | (Automation | Stagehand), None ->
+    | Automation, None ->
         Ok { t with source = recommendation.lane; selected_client = None;
           selection = Bound_automatic; selected_tab = None; reading = None; scene = None;
           scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
           scroll = 0; client_picker = None; read_view = Text_view }
-    | Live, None | (Automation | Stagehand), Some _ -> Error "Invalid recommended browser identity"
+    | Live, None | Automation, Some _ -> Error "Invalid recommended browser identity"
   let can_offer_work_browser = function
     | No_available_browser -> true
     | Ambiguous_browsers | Binding_required | Automatic_unavailable
@@ -7463,13 +7454,12 @@ module Browser_lane_view = struct
         | `String "explicit_browser" -> Ok Explicit_browser
         | `String "existing_login" -> Ok Existing_login
         | `String "existing_work_session" -> Ok Existing_work_session
-        | `String "preferred_work_browser" -> Ok Preferred_work_browser
         | `String "compatible_work_browser" -> Ok Compatible_work_browser
         | `String "available_connected_browser" -> Ok Available_connected_browser
         | _ -> Error "unknown automatic browser reason") "reason" data in
       match lane, client_id with
-      | Live, Some _ | (Automation | Stagehand), None -> Ok (Ok {lane;client_id;reason})
-      | Live, None | (Automation | Stagehand), Some _ -> Error "recommended browser identity does not match lane"
+      | Live, Some _ | Automation, None -> Ok (Ok {lane;client_id;reason})
+      | Live, None | Automation, Some _ -> Error "recommended browser identity does not match lane"
   let decode_automatic data =
     match data with
     | `Assoc fields ->
@@ -7480,7 +7470,7 @@ module Browser_lane_view = struct
              let* work = get decode_recommendation "work" json in
              (match work with
               | Ok {lane=Live;_} -> Error "work browser recommendation must name an owned session"
-              | Ok {lane=(Automation | Stagehand);_} | Error _ -> Ok (Some {browse;work})))
+              | Ok {lane=Automation;_} | Error _ -> Ok (Some {browse;work})))
     | _ -> Error "expected object"
   let decode_inventory_report fields =
     let issues=match List.filter (fun (key,_) -> key="inventoryIssues") fields with
@@ -7562,8 +7552,8 @@ module Browser_lane_view = struct
     let* value = field "clientId" json in
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
-    | (Automation | Stagehand), `Null -> Ok None
-    | Live, _ | Automation, _ | Stagehand, _ -> Error "browser client ID does not match source"
+    | Automation, `Null -> Ok None
+    | Live, _ | Automation, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* ()=match json with
       | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()

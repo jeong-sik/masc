@@ -2410,7 +2410,7 @@ let test_browser_screenshot_reaches_vision_reader () =
              | Browser_lane.Live_route (Some id) -> live_calls:=id::!live_calls;
                  assert (id=first.client_id)
              | Automation_route -> ()
-             | Live_route None|Stagehand_route -> failwith "unexpected screenshot route");
+             | Live_route None -> failwith "unexpected screenshot route");
             let data=match verb with
               | Browser_lane.Page_capture {tab_id=73;options=None} -> `Assoc ["tabId",`Int 73;
                   "url",`String "https://example.org/form";"title",`String "Form";

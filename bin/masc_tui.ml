@@ -6465,7 +6465,7 @@ let refresh_browser_lane state ~mailbox =
         (match view.selection, view.source with
          | Live_unbound, _ -> Discover Choose_client
          | (Unbound | Work_unbound), _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery
-         | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> Read)
+         | (Bound_automatic | Bound_explicit), Automation -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -14315,8 +14315,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
         let click = match shot.source with
-          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link"
-          | Browser_lane_view.Stagehand -> "click: control" in
+          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link" in
         (* A view that holds no clients answers "not listed" for a live shot. *)
         let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
         click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
@@ -14331,7 +14330,6 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
              (match Browser_lane_view.screenshot_client view shot with
               | Some client -> Browser_lane_view.browser_identity client
               | None -> "Selected browser")
-         | Stagehand, _ -> "Chromium work browser"
          | Automation, _ -> "Work browser"
          | Live, None -> "Selected browser") shot.tab_id shot.elapsed_ms; shot.url]
     ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
@@ -36533,9 +36531,6 @@ Use relative paths for resources already held in the package. -->
                  | "a" when view.advanced_choices && not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "c" when view.advanced_choices && not (busy view) ->
-                     state.browser_lane <- Some (switch_source Stagehand view);
-                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
@@ -36679,7 +36674,6 @@ Use relative paths for resources already held in the package. -->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "l" when view.advanced_choices -> switch_to Live
                  | "a" when view.advanced_choices -> switch_to Automation
-                 | "c" when view.advanced_choices -> switch_to Stagehand
                  | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)

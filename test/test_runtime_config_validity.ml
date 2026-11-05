@@ -2025,7 +2025,6 @@ check
   (list string)
   "public seed exact-output lane ids"
   [ "board_attention_exact"
-  ; "browser_stagehand_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
   ; "verifier_exact"
@@ -2965,7 +2964,6 @@ let test_judgment_lanes_join_the_priority_queue () =
     ; "hitl_auto_judge", "priority"
     ; "board_attention_exact", "priority"
     ; "verifier_exact", "priority"
-    ; "browser_stagehand_exact", "standard"
     ; "candle_appraiser", "standard"
     ]
     (List.map
@@ -7390,9 +7388,6 @@ max-context = 1024
 default = "local.sample"
 [browser.automation]
 geckodriver = "/fixture/geckodriver"
-[browser.stagehand]
-chrome = "/fixture/chrome"
-extension = "/fixture/extension"
 [machines.msx]
 enabled = %b
 [machines.dos]

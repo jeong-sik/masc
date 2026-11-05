@@ -6752,10 +6752,6 @@ let standalone_lane_json ?purpose ?(required = true) ?(status = "idle") ?(retain
     ]
      @ jev)
 
-let stagehand_lane_json () =
-  standalone_lane_json ~status:"no_retained_observation" ~retained:0
-    "browser_stagehand_exact" "Browser Stagehand"
-
 let replace_assoc_field name value = function
   | `Assoc fields ->
     `Assoc ((name, value) :: List.remove_assoc name fields)
@@ -6785,7 +6781,6 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "verifier_exact" "Verifier"
-            ; stagehand_lane_json ()
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]
@@ -6876,7 +6871,6 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ; standalone_lane_json "librarian_exact" "Librarian"
           ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
               "verifier_exact" "Verifier"
-          ; stagehand_lane_json ()
           ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
           ]
       ]
@@ -6922,7 +6916,6 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
         "librarian_exact" "Librarian"
     ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
         "verifier_exact" "Verifier"
-    ; stagehand_lane_json ()
     ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
     ]
   in
@@ -6987,7 +6980,6 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "verifier_exact" "Verifier"
-            ; stagehand_lane_json ()
             ; standalone_lane_json ~required:false "candle_appraiser" "Candle Appraiser"
             ] )
       ]

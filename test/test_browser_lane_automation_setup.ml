@@ -240,8 +240,7 @@ let test_a_table_with_no_driver_is_refused_untouched () =
 let test_other_browser_tables_are_not_touched () =
   with_fixture (fun fixture ->
     let others =
-      "\n[browser.live.bidi]\nfirefox = \"/opt/f\"\nprofile = \"/opt/p\"\n\n[browser.stagehand]\n\
-       chrome = \"/opt/c\"\nextension = \"/opt/e\"\n"
+      "\n[browser.live.bidi]\nfirefox = \"/opt/f\"\nprofile = \"/opt/p\"\n"
     in
     (* The paths need not exist: the loader reads them as text. *)
     write fixture.runtime (runtime_base ^ others);
@@ -249,7 +248,7 @@ let test_other_browser_tables_are_not_touched () =
     lines_kept "the other tables" (runtime_base ^ others) (read fixture.runtime);
     check bool "the bidi table still loads" true
       (match C.of_file fixture.runtime with
-       | Ok { C.live_bidi = Some _; stagehand = Some _; automation = Some _; _ } -> true
+       | Ok { C.live_bidi = Some _; automation = Some _; _ } -> true
        | Ok _ | Error _ -> false))
 
 (* --- what is refused leaves the file as it was --------------------------- *)

@@ -2,12 +2,11 @@
     filesystem operations must be offloaded by the server caller. *)
 type t
 (** The one browser source an allocation's worker serves, with the browser it
-    starts: an owned Gecko for automation, a Chrome for Stagehand, a live
-    Firefox for the owned BiDi connection. Ego's settings ride the worker's
+    starts: an owned Gecko for automation, a live Firefox for the owned BiDi
+    connection. Ego's settings ride the worker's
     arguments, and an external host worker starts no browser. *)
 type source =
   | Automation of Browser_addon_automation.configuration
-  | Stagehand of Browser_addon_stagehand.configuration
   | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
   | External_host
@@ -21,8 +20,8 @@ val check_retained : instance_id:string -> slot:string -> Yojson.Safe.t option -
     envelope and socket acquisition record in [slot]. An operator-retained
     allocation needs no backend decoding or child inspection: its resources
     belong to the operator. An explicit released record instead requires its
-    original allocation path to be absent. Other states compare each Chrome
-    and live BiDi child claim with its original descriptor. [None] permits no
+    original allocation path to be absent. Other states compare each live BiDi
+    child claim with its original descriptor. [None] permits no
     allocation record except an explicit released record. *)
 val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) result
 (** Before payload spawn, acquire the directory selected by the original native
@@ -87,7 +86,7 @@ type retain_error =
           it finds. *)
 val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
 (** The operator takes over an allocation whose release could not be confirmed.
-    The claim must be Settled and each Chrome and live BiDi child claim must
+    The claim must be Settled and each live BiDi child claim must
     already be Settled; unlike {!cleanup}, nothing is retired or signalled.
     The allocation's contents are not read or removed: the acquisition record
     becomes [retained] with the recorded directory identity, or, with no

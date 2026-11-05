@@ -28,8 +28,7 @@ val machine_of_kind : kind -> Machine_lane.t option
     other kinds. A new source kind must choose here. *)
 val offers : Lane_id.builtin -> kind list
 (** The source kinds a built-in lane offers a binding. [parse] accepts a
-    [browser_document] source only from a Browser Lane backend listed here;
-    Stagehand has no idle document observer and offers none. *)
+    [browser_document] source only from a Browser Lane backend listed here. *)
 type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_changed
   | Fusion_changed of string
 type refresh_interest

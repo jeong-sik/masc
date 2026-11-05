@@ -19,7 +19,7 @@ let lane_of_run_lane = function
   | Lane_run_identity.Board_attention -> Some Board_attention
   | Lane_run_identity.Workspace_curator -> Some Workspace_curator
   | Lane_run_identity.Candle_appraiser -> Some Candle_appraiser
-  | Lane_run_identity.Verifier | Lane_run_identity.Browser_stagehand -> None
+  | Lane_run_identity.Verifier -> None
 ;;
 
 let lane_of_standalone lane = lane_of_run_lane (Standalone_lane.run_identity lane)

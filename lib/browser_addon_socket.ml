@@ -5,13 +5,11 @@ module Requirement = Resource_requirement
    worker starts no browser. *)
 type source =
   | Automation of Browser_addon_automation.configuration
-  | Stagehand of Browser_addon_stagehand.configuration
   | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
   | External_host
 let source_backend = function
   | Automation _ -> Browser_lane.Backend.Automation
-  | Stagehand _ -> Browser_lane.Backend.Stagehand
   | Owned_firefox _ -> Browser_lane.Backend.Owned_firefox
   | Ego -> Browser_lane.Backend.Ego
   | External_host -> Browser_lane.Backend.External_host
@@ -40,7 +38,6 @@ let source_to_json source =
   let backend=Browser_lane.Backend.to_wire (source_backend source) in
   `Assoc (("backend",`String backend) :: match source with
     | Automation c -> ["configuration",Browser_addon_automation.configuration_to_json c]
-    | Stagehand c -> ["configuration",Browser_addon_stagehand.configuration_to_json c]
     | Owned_firefox c -> ["configuration",Browser_addon_live_bidi.configuration_to_json c]
     | Ego | External_host -> [])
 let source_of_json = function
@@ -58,8 +55,6 @@ let source_of_json = function
        (match Browser_lane.Backend.of_wire wire with
         | Some Browser_lane.Backend.Automation ->
           let* c=configuration Browser_addon_automation.configuration_of_json in Ok (Automation c)
-        | Some Browser_lane.Backend.Stagehand ->
-          let* c=configuration Browser_addon_stagehand.configuration_of_json in Ok (Stagehand c)
         | Some Browser_lane.Backend.Owned_firefox ->
           let* c=configuration Browser_addon_live_bidi.configuration_of_json in Ok (Owned_firefox c)
         | Some Browser_lane.Backend.Ego -> alone Ego
@@ -153,8 +148,6 @@ let acquire ~admission ~directory = protect (fun () ->
   let* ()=match source with
     | Automation configuration -> Fs_compat.save_file_atomic_strict (Filename.concat root "automation.json")
         (Yojson.Safe.to_string (Browser_addon_automation.configuration_to_json configuration))
-    | Stagehand c -> Fs_compat.save_file_atomic_strict (Filename.concat root "stagehand.json")
-        (Yojson.Safe.to_string (Browser_addon_stagehand.configuration_to_json c))
     | Owned_firefox c -> Fs_compat.save_file_atomic_strict (Filename.concat root "live-bidi.json")
         (Yojson.Safe.to_string (Browser_addon_live_bidi.configuration_to_json c))
     | Ego | External_host -> Ok () in
@@ -309,14 +302,6 @@ let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
         let* actual=Browser_addon_automation.configuration_of_json spec in
         if actual=configuration then Ok () else Error "owned browser configuration changed") in
       empty_tree (Filename.concat root "downloads")
-    | Some (Stagehand configuration) ->
-      let* ()=only ["stagehand.json";"chromium.log";"chromium-profiles"] "Chrome" in
-      let* ()=if confirmed && not (List.mem "stagehand.json" names) then Ok () else
-        let* value=read "stagehand.json" in
-        let* actual=Browser_addon_stagehand.configuration_of_json value in
-        if Browser_addon_stagehand.configuration_to_json actual=Browser_addon_stagehand.configuration_to_json configuration
-        then Ok () else Error "Chrome configuration changed" in
-      Browser_addon_stagehand.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
     | Some (Owned_firefox configuration) ->
       let* ()=only ["live-bidi.json";"live-firefox.log"] "live BiDi" in
       let* ()=if confirmed && not (List.mem "live-bidi.json" names) then Ok () else
@@ -336,7 +321,7 @@ let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
     let info=Unix.lstat path in
     match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
-    | Unix.S_REG when List.mem name ["automation.json";"webdriver.log";"models.json";"stagehand.json";"chromium.log";"live-bidi.json";"live-firefox.log"] ->
+    | Unix.S_REG when List.mem name ["automation.json";"webdriver.log";"models.json";"live-bidi.json";"live-firefox.log"] ->
         let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
         Unix.unlink path;Ok ()
     | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->
@@ -406,7 +391,6 @@ let check_retained ~instance_id ~slot context = protect (fun () ->
     | Missing|Acquired _|Cleaning _ ->
     let* _,source,_models=decode_context (root,fields) in
     match source with
-    | Stagehand c -> Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root
     | Owned_firefox c -> Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root
     | Automation _ | Ego | External_host -> Ok ())
 let cleanup ~admission ~directory ~kept_root = protect (fun () ->
@@ -430,7 +414,6 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
     | Missing|Acquired _|Cleaning _ ->
     let* _,source,models=decode_context (root,fields) in
     let* ()=match source with
-      | Stagehand c -> Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Automation _ | Ego | External_host -> Ok () in
     let release ()=
@@ -476,7 +459,7 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
         (* A source that starts a browser keeps its resources in the
            allocation; one acquired and gone was never confirmed released. *)
         let starts_browser=match source with
-          | Automation _ | Stagehand _ | Owned_firefox _ -> true | Ego | External_host -> false in
+          | Automation _ | Owned_firefox _ -> true | Ego | External_host -> false in
         (match identity,starts_browser with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
          | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false ->
@@ -514,10 +497,9 @@ let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failu
       let* backend=decode_backend fields in
       let* ()=match backend with
         | Browser_lane.Backend.(Automation|Ego|External_host) -> Ok ()
-        | Browser_lane.Backend.(Stagehand|Owned_firefox) ->
+        | Browser_lane.Backend.Owned_firefox ->
           let* source=decode_source fields in
           (match source with
-           | Stagehand c -> Browser_addon_stagehand.check_settled c ~incarnation ~directory:root
            | Owned_firefox c -> Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root
            | Automation _ | Ego | External_host ->
              Error "browser source descriptor names one backend and decodes as another") in

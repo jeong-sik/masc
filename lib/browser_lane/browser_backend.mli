@@ -10,7 +10,6 @@
 (** [all] (derived) lists every source in constructor order. *)
 type t =
   | Automation  (** the Gecko browser masc drives through geckodriver *)
-  | Stagehand  (** the Chrome masc drives through Stagehand *)
   | Owned_firefox  (** the live Firefox masc launches and reaches over BiDi *)
   | Ego  (** the ego lite task space masc opens *)
   | External_host  (** the clients an outside native host brings: a browser extension or a BiDi host *)

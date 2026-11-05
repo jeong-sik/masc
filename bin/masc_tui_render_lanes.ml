@@ -741,14 +741,14 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let observed_heading = match state.lane_inventory with
     | None -> "  All features"
+    (* The server announces when what this screen draws moves, so the time
+       the shown snapshot was taken says when it last changed, not how fresh
+       it is. *)
     | Some snapshot ->
-        let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.counts
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
                snapshot.Masc.Tui_decode_lane_inventory.rows) in
-        Printf.sprintf "  All features · observed %02d:%02d:%02d%s"
-          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
-          (if standings = "" then "" else " · " ^ standings) in
+        "  All features" ^ (if standings = "" then "" else " · " ^ standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     (Masc_tui_types.lane_inventory_notice_lines ~cols state);

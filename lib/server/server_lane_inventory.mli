@@ -70,6 +70,9 @@ val to_json : t -> Yojson.Safe.t
 (** Built-in row [ui_category] is the shared display role consumed by operator
     clients. It has no effect on selection, execution or configuration identity.
     Package roles remain on the current declaration and original workers. *)
+val drawn_json : t -> Yojson.Safe.t
+(** {!to_json} without the times the snapshot was taken at: what a reader
+    draws. Two snapshots of unchanged inputs give the same value. *)
 module For_testing : sig
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication

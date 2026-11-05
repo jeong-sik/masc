@@ -4247,25 +4247,25 @@ let ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id frame =
 
 exception Ask_followup_stream_closed
 
-let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
+let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
-  let writer = ref None and closed = ref false in
-  let mutex = Eio.Mutex.create () in
+  let response = ref None in
   let send frame =
-    let output = match !writer with
-      | Some writer -> writer
+    let output = match !response with
+      | Some output -> output
       | None ->
-        let response = Httpun.Response.create
-            ~headers:(keeper_chat_stream_headers (get_origin request)) `OK in
-        let output = Httpun.Reqd.respond_with_streaming reqd response in
-        writer := Some output;
+        let output = Server_sse_response.respond ~clock
+            ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+            (Httpun.Response.create
+               ~headers:(keeper_chat_stream_headers (get_origin request)) `OK) in
+        response := Some output;
         output in
     let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
-    if not (keeper_stream_send_raw output mutex closed
-        (Sse_wire.format_event_yojson ~event_type:"ask_followup" json))
-    then raise Ask_followup_stream_closed in
-  let close () = Option.iter (fun output ->
-      if not (Httpun.Body.Writer.is_closed output) then Httpun.Body.Writer.close output) !writer in
+    match Server_sse_response.send output
+        (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
+    | Server_sse_response.Written -> ()
+    | Closed | Stalled -> raise Ask_followup_stream_closed in
+  let close () = Option.iter Server_sse_response.close !response in
   try Fun.protect ~finally:close (fun () ->
     if not state_ready then
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
@@ -4285,7 +4285,7 @@ let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
   | exn -> Log.Keeper.warn ~keeper_name "ask followup stream ended ask_id=%s: %s"
       ask.ask_id (Printexc.to_string exn)
 
-let handle_keeper_asks_list state request reqd =
+let handle_keeper_asks_list ~clock state request reqd =
   let config = Mcp_server.workspace_config state in
   let expected = Uri.query (Uri.of_string request.Httpun.Request.target)
     |> List.filter (fun (name,_) -> name="expected_base_path" || name="expected_masc_root") in
@@ -4386,7 +4386,7 @@ let handle_keeper_asks_list state request reqd =
              match List.assoc_opt ask_id rows with
              | None -> respond_json_value_with_cors ~status:`Not_found request reqd
                  (keeper_chat_stream_error_json "canonical question is unavailable")
-             | Some (ask,resolution) -> stream_keeper_ask_followup
+             | Some (ask,resolution) -> stream_keeper_ask_followup ~clock
                  ~base_path ~workspace ~state_ready ~keeper_name ~ask ~resolution request reqd)
         else
         let progress_fields = match answer_progress_for with

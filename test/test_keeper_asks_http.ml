@@ -8,7 +8,9 @@ let wire_raw_response ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router
   let raw = Printf.sprintf "%s %s %s\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
       (Httpun.Method.to_string meth) target http_version (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
-  ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+  (* As gluten-eio does, the handler runs on the read side while the write
+     side drains: a streaming handler waits for each frame to be written. *)
+  let handled, handler_done = Eio.Promise.create () in
   let rec drain () = match Httpun.Server_connection.next_write_operation connection with
     | `Write iovecs ->
       let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
@@ -16,13 +18,18 @@ let wire_raw_response ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router
         total+iov.len) 0 iovecs in
       Httpun.Server_connection.report_write_result connection (`Ok written);
       drain ()
-    | `Yield when Buffer.length output=0 ->
+    | `Yield when Buffer.length output=0 || not (Eio.Promise.is_resolved handled) ->
       let ready,resolve = Eio.Promise.create () in
       Httpun.Server_connection.yield_writer connection (fun () -> Eio.Promise.resolve resolve ());
-      Eio.Promise.await ready;
+      if Eio.Promise.is_resolved handled then Eio.Promise.await ready
+      else Eio.Fiber.first (fun () -> Eio.Promise.await ready) (fun () -> Eio.Promise.await handled);
       drain ()
     | `Yield | `Close _ -> () in
-  drain ();
+  Eio.Fiber.both
+    (fun () ->
+      ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
+      Eio.Promise.resolve handler_done ())
+    drain;
   let raw = Buffer.contents output in
   let boundary = Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0 in
   let status = int_of_string (List.nth (String.split_on_char ' ' raw) 1) in
@@ -69,7 +76,8 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       Keeper_ask_store.record_ask ~base_path:config.base_path ask |> valid Fun.id;
       let router = Http_server_eio.Router.create ()
         |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
-             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list
+               ~clock:(Eio.Stdenv.clock env) state)
         |> Server_route.post Server_route.Always_public "/api/v1/keepers/ask-answer"
              (Server_routes_http_keeper_stream.handle_keeper_ask_answer ~actor:"operator" state) in
       let base = Unix.realpath config.base_path and root = Unix.realpath (Workspace.masc_dir config) in

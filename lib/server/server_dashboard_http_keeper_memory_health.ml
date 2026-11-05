@@ -564,10 +564,10 @@ let cached_keeper_health ~config ~keepers_dir keeper_id =
   let entry = cache_entry ~keepers_dir keeper_id in
   Stdlib.Mutex.protect entry.mutex (fun () ->
     match entry.value with
-    | Some health -> health
-    | None ->
+    | Some health when health.read_error = None -> health
+    | Some _ | None ->
         let health = !health_reader ~config ~keepers_dir keeper_id in
-        entry.value <- Some health;
+        entry.value <- (if health.read_error = None then Some health else None);
         health)
 
 let invalidate_after_write ~keepers_dir ~keeper_id =

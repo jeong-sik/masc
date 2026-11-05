@@ -63,7 +63,8 @@ let note_provider_failure runtime error =
         | Some seconds -> Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. seconds)
         | None -> Runtime_quota_window.note_observed_exhausted ~scope) runtime
   | Retry_after_observed {retry_class=Empty_completion _;_} -> note_answered runtime
-  | Retry_after_observed {retry_class=(Server_error | Network_transient | Provider_timeout | Provider_capacity);_}
+  | Retry_after_observed {retry_class=(Server_error | Network_transient | Provider_timeout
+                                       | Local_admission_timeout | Provider_capacity);_}
   | Rotate_now _ | Exhausted_visible_alive _ ->
       (* Like the shared one-shot walk, this call has no recurring Keeper
          recorder to retry a failed-attempt mark. Quota and rate-limit evidence

@@ -71,5 +71,10 @@ type t =
   | Unknown_after_dispatch
       (** Dispatched, and the result is unknown. Whether re-sending is allowed
           is the walk's effect rule, not this judgment. *)
+  | Local_admission
+      (** The wait expired in MASC's own permit queue or local capacity gate
+          ([Retry.Timeout] in the [Queue] or [Capacity_backpressure] phase).
+          Nothing reached this binding, so the failure says nothing about
+          it. *)
 
 val of_api_error : Retry.api_error -> t

@@ -448,6 +448,7 @@ let test_response_observed_per_class () =
     ; retry KFR.Server_error
     ; retry KFR.Network_transient
     ; retry KFR.Provider_timeout
+    ; retry KFR.Local_admission_timeout
     ; rotate KFR.Auth_failed
     ; rotate KFR.Authorization_refused
     ; rotate KFR.Model_unavailable
@@ -615,6 +616,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
+    ; "", retry KFR.Local_admission_timeout
     ; "with a reset", retry ~retry_after:3600.0 KFR.Hard_quota
     ];
   List.iter
@@ -768,6 +770,14 @@ let test_candidate_fault_route_agreement () =
     ; ( "Timeout"
       , Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
       , retry KFR.Provider_timeout )
+    ; ( "Timeout waiting for the first token"
+      , Llm_provider.Retry.Timeout
+          { message = "deadline"; phase = Some Llm_provider.Http_client.First_token }
+      , retry KFR.Provider_timeout )
+    ; ( "Timeout in the permit queue"
+      , Llm_provider.Retry.Timeout
+          { message = "deadline"; phase = Some Llm_provider.Http_client.Queue }
+      , retry KFR.Local_admission_timeout )
     ; ( "NetworkError"
       , Llm_provider.Retry.NetworkError
           { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
@@ -825,6 +835,7 @@ let test_route_factors_through_candidate_fault () =
          | Llm_provider.Candidate_fault.Refusal_unread -> "refusal_unread")
     | Llm_provider.Candidate_fault.Unattributed -> "unattributed"
     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> "unknown_after_dispatch"
+    | Llm_provider.Candidate_fault.Local_admission -> "local_admission"
   in
   let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
   let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
@@ -845,6 +856,10 @@ let test_route_factors_through_candidate_fault () =
     ; invalid_request Llm_provider.Retry.Refusal_body_not_received
     ; invalid_request Llm_provider.Retry.Unknown_invalid_request
     ; Llm_provider.Retry.Timeout { message = "deadline"; phase = None }
+    ; Llm_provider.Retry.Timeout
+        { message = "deadline"; phase = Some Llm_provider.Http_client.Queue }
+    ; Llm_provider.Retry.Timeout
+        { message = "deadline"; phase = Some Llm_provider.Http_client.Capacity_backpressure }
     ; Llm_provider.Retry.NetworkError
         { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
     ]
@@ -869,6 +884,23 @@ let test_route_factors_through_candidate_fault () =
     "one judgment, one route class (no second table beside Candidate_fault)"
     []
     splits
+
+(* A provider timeout carries its phase too. The route reads it with
+   [Llm_provider.Error.is_local_admission_timeout], the same question the
+   API-side judgment answers. *)
+let test_provider_timeout_names_local_admission () =
+  let timeout phase =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.Timeout { provider = "p"; timeout_phase = phase; detail = "d" })
+  in
+  let retry retry_class = KFR.Retry_after_observed { retry_class; retry_after = None } in
+  check_route "permit queue" (retry KFR.Local_admission_timeout)
+    (timeout (Some Llm_provider.Http_client.Queue));
+  check_route "local capacity" (retry KFR.Local_admission_timeout)
+    (timeout (Some Llm_provider.Http_client.Capacity_backpressure));
+  check_route "first token" (retry KFR.Provider_timeout)
+    (timeout (Some Llm_provider.Http_client.First_token));
+  check_route "no phase" (retry KFR.Provider_timeout) (timeout None)
 
 let test_model_absent_classifier () =
   (* The classifier and the route must agree: model-absence is the typed
@@ -955,6 +987,10 @@ let () =
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
+        ; Alcotest.test_case
+            "timeout names local admission"
+            `Quick
+            test_provider_timeout_names_local_admission
         ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
         ; Alcotest.test_case
             "wire error rotates"

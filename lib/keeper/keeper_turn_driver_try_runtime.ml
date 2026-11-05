@@ -82,7 +82,8 @@ let candidate_access_should_try_next error =
          | Output_dialect
          | Refusal_unread )
      | Llm_provider.Candidate_fault.Unattributed
-     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch
+     | Llm_provider.Candidate_fault.Local_admission -> false)
   | None ->
     (match error with
      | Agent_core.Error.Provider provider_error ->
@@ -131,7 +132,8 @@ let attempt_rejected_should_try_next error =
          | Window
          | Deadline
          | Output_dialect )
-     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch
+     | Llm_provider.Candidate_fault.Local_admission -> false)
   | None -> false
 ;;
 
@@ -162,6 +164,7 @@ let context_overflow_should_try_next error =
          | Output_dialect
          | Refusal_unread )
      | Llm_provider.Candidate_fault.Unattributed
-     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
+     | Llm_provider.Candidate_fault.Unknown_after_dispatch
+     | Llm_provider.Candidate_fault.Local_admission -> false)
   | None -> false
 ;;

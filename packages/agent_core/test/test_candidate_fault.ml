@@ -40,7 +40,24 @@ let expected_of_api_error (api : Llm_provider.Retry.api_error)
        Llm_provider.Candidate_fault.Unattributed)
   | Llm_provider.Retry.NetworkError _ ->
     Llm_provider.Candidate_fault.Unknown_after_dispatch
-  | Llm_provider.Retry.Timeout _ ->
+  | Llm_provider.Retry.Timeout
+      { phase = Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure)
+      ; message = _ } ->
+    Llm_provider.Candidate_fault.Local_admission
+  | Llm_provider.Retry.Timeout
+      { phase =
+          ( None
+          | Some
+              ( Llm_provider.Http_client.First_token
+              | Llm_provider.Http_client.Wall_clock
+              | Llm_provider.Http_client.Http_operation
+              | Llm_provider.Http_client.Non_streaming_body
+              | Llm_provider.Http_client.Stream_body
+              | Llm_provider.Http_client.Stream_idle _
+              | Llm_provider.Http_client.Provider_step
+              | Llm_provider.Http_client.Cli_stdout_idle
+              | Llm_provider.Http_client.Unknown_timeout ) )
+      ; message = _ } ->
     Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Deadline
 ;;
 
@@ -66,6 +83,7 @@ let ordinal (t : Llm_provider.Candidate_fault.t) : int =
   | Llm_provider.Candidate_fault.Binding b -> ordinal_of_binding b
   | Llm_provider.Candidate_fault.Unattributed -> 100
   | Llm_provider.Candidate_fault.Unknown_after_dispatch -> 101
+  | Llm_provider.Candidate_fault.Local_admission -> 102
 ;;
 
 let assert_api name api =
@@ -134,6 +152,14 @@ let api_cases : (string * Llm_provider.Retry.api_error) list =
     , Llm_provider.Retry.NetworkError
         { message = ""; kind = Llm_provider.Http_client.Connection_refused } )
   ; "timeout", Llm_provider.Retry.Timeout { message = ""; phase = None }
+  ; ( "timeout_first_token"
+    , Llm_provider.Retry.Timeout
+        { message = ""; phase = Some Llm_provider.Http_client.First_token } )
+  ; ( "timeout_queue"
+    , Llm_provider.Retry.Timeout { message = ""; phase = Some Llm_provider.Http_client.Queue } )
+  ; ( "timeout_capacity_backpressure"
+    , Llm_provider.Retry.Timeout
+        { message = ""; phase = Some Llm_provider.Http_client.Capacity_backpressure } )
   ]
 ;;
 

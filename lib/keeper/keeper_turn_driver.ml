@@ -572,7 +572,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
           { retry_class =
               ( Route.Rate_limited | Route.Hard_quota | Route.Provider_capacity
               | Route.Server_error | Route.Empty_completion _
-              | Route.Network_transient | Route.Provider_timeout )
+              | Route.Network_transient | Route.Provider_timeout
+              | Route.Local_admission_timeout )
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -614,6 +615,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
               | Route.Network_transient | Route.Provider_timeout
+              | Route.Local_admission_timeout
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -877,34 +879,6 @@ let attempt_runtime_candidates
        let note_rate_limit retry_after =
          observe_standing (Runtime_candidate_standing.Rate_limited {retry_after})
        in
-       (* The route calls every timeout a provider timeout, including one that
-          expired in MASC's own admission -- a permit queue or local capacity
-          -- before anything was sent. That says nothing about the candidate.
-          The typed phase is read here because the route does not carry it. *)
-       let expired_in_admission =
-         match error with
-         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) ->
-           Llm_provider.Error.timeout_phase_is_local_admission phase
-         | Agent_core.Error.Provider provider_error ->
-           Llm_provider.Error.is_local_admission_timeout provider_error
-         | Agent_core.Error.Api
-             ( Llm_provider.Retry.RateLimited _
-             | Llm_provider.Retry.Overloaded _
-             | Llm_provider.Retry.ServerError _
-             | Llm_provider.Retry.AuthError _
-             | Llm_provider.Retry.AuthorizationError _
-             | Llm_provider.Retry.PaymentRequired _
-             | Llm_provider.Retry.InvalidRequest _
-             | Llm_provider.Retry.NotFound _
-             | Llm_provider.Retry.ContextOverflow _
-             | Llm_provider.Retry.InputCapacity _
-             | Llm_provider.Retry.NetworkError _ )
-         | Agent_core.Error.Agent _
-         | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
-         | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
-         | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _
-         | Agent_core.Error.Internal_carried _ -> false
-       in
        let note_failed_attempt failure =
          match walk_owner with
          | Fleet_keeper_turn recorder ->
@@ -959,8 +933,13 @@ let attempt_runtime_candidates
           note_failed_attempt Runtime_candidate_backpressure.Network_transient
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
-          if not expired_in_admission
-          then note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
+          note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
+        (* The wait expired in MASC's own admission before anything was sent,
+           which says nothing about the candidate. *)
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Local_admission_timeout
+            ; retry_after = _
+            } -> ()
         (* A 529 or a provider capacity pool refused this candidate without
            an answer. The next candidate is a different pool. *)
         | Keeper_runtime_failure_route.Retry_after_observed

@@ -74,12 +74,12 @@ let test_change_metadata () = workspace (fun base ->
 
 let test_tab_membership_changes () = workspace (fun base ->
   ignore (perform base "alice" (action "join"));
-  let _, second_tab = perform_change ~base_path:base ~now:101. "alice" (action ~client:"tab2" "join") in
-  check (pair bool bool) "the same public member is not duplicated" (false, false) (flags second_tab);
-  let remaining, first_leave = perform_change ~base_path:base ~now:102. "alice" (action "leave") in
+  let _, second_tab = perform_change ~base_path:base ~now:100. "alice" (action ~client:"tab2" "join") in
+  check (pair bool bool) "same-time joins do not duplicate the public member" (false, false) (flags second_tab);
+  let remaining, first_leave = perform_change ~base_path:base ~now:100. "alice" (action "leave") in
   check (pair bool bool) "one tab leaving is not a public change" (false, false) (flags first_leave);
   check (list string) "the other tab retains public membership" ["alice"] (names remaining);
-  let empty, final_leave = perform_change ~base_path:base ~now:103. "alice" (action ~client:"tab2" "leave") in
+  let empty, final_leave = perform_change ~base_path:base ~now:100. "alice" (action ~client:"tab2" "leave") in
   check (pair bool bool) "the final tab leaving is a public change" (false, true) (flags final_leave);
   check (list string) "the final tab removes public membership" [] (names empty))
 
@@ -90,6 +90,38 @@ let test_expiry_announces_once () = workspace (fun base ->
   check (list string) "the expired public member is gone" [] (names expired);
   let _, repeated = perform_change ~base_path:base ~now:161. "expiring" (action ~client:"expiry" "read") in
   check (pair bool bool) "an already invisible member is not announced again" (false, false) (flags repeated))
+
+let test_backward_clock_expiry () = workspace (fun base ->
+  ignore (perform_change ~base_path:base ~now:200. "alice" (action "join"));
+  ignore (perform_change ~base_path:base ~now:100. "alice" (action "join"));
+  let expired, change = perform_change ~base_path:base ~now:161. "alice" (action "read") in
+  check (pair bool bool) "a backward-clock Join still expires after its committed snapshot" (false, true) (flags change);
+  check (list string) "the expired member is absent" [] (names expired))
+
+let test_conflict_preserves_expiry () = workspace (fun base ->
+  ignore (perform_change ~base_path:base "alice" (action "join"));
+  ignore (perform_change ~base_path:base "alice" (action ~id:"first" ~text:"hello" "say"));
+  let _, before = perform_change ~base_path:base ~now:150. "alice" (action "read") in
+  check (pair bool bool) "the member is present before expiry" (false, false) (flags before);
+  let conflict = ok (Room.parse_action (action ~id:"first" ~text:"changed" "say")) in
+  (match Room.perform_with_change ~base_path:base ~who:"alice" ~speaker:Room.Participant ~now:160.5 conflict with
+   | Error (Room.Conflict _) -> ()
+   | Ok _ | Error _ -> fail "the conflicting retry must not commit");
+  let expired, change = perform_change ~base_path:base ~now:160.5 "alice" (action "read") in
+  check (pair bool bool) "a rollback does not consume the pending expiry" (false, true) (flags change);
+  check (list string) "the successful read still removes the expired member" [] (names expired))
+
+let test_first_stale_cleanup_is_silent () = workspace (fun base ->
+  ignore (read base ());
+  let directory = Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path:base) "play" in
+  let db = Sqlite3.db_open (Filename.concat directory "room.sqlite3") in
+  Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool)) (fun () ->
+    let rc = Sqlite3.exec db
+      "INSERT INTO members(who,client_id,speaker,machine,seen_at) VALUES ('stale','raw','participant','dos',100.)" in
+    check bool "seed an already stale raw row" true (Sqlite3.Rc.is_success rc));
+  let expired, change = perform_change ~base_path:base ~now:160.5 "reader" (action "read") in
+  check (pair bool bool) "first cleanup of an already invisible row is silent" (false, false) (flags change);
+  check (list string) "stale raw membership remains invisible" [] (names expired))
 
 let test_presence () = workspace (fun base ->
   check (list string) "reading alone does not join" [] (names (read base ()));
@@ -184,6 +216,9 @@ let () = run "public play room" ["room", [
   test_case "actual changes carry message and public membership effects" `Quick test_change_metadata;
   test_case "only the final tab leaving changes public membership" `Quick test_tab_membership_changes;
   test_case "public expiry announces once" `Quick test_expiry_announces_once;
+  test_case "backward-clock presence expires after its committed snapshot" `Quick test_backward_clock_expiry;
+  test_case "a conflict does not consume public expiry" `Quick test_conflict_preserves_expiry;
+  test_case "first stale raw cleanup is silent" `Quick test_first_stale_cleanup_is_silent;
   test_case "presence across tabs, expiry and read-only reads" `Quick test_presence;
   test_case "strict public request" `Quick test_invalid;
   test_case "unicode spaces beside text are kept" `Quick test_unicode_space_with_text;

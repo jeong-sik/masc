@@ -2,6 +2,7 @@
 
 [2026-11-05 보고서](2026-11-05-tool-efficiency.md)의 같은 결과 되받기와 blob 수치를 `runtime_profile`(Keeper 가 쓰는 모델·계정 묶음의 이름)별로 나눈 기록이에요.
 측정 도구와 재는 법은 [`docs/evidence/tool-efficiency-by-profile-2026-11/`](../evidence/tool-efficiency-by-profile-2026-11/README.md) 에 있어요.
+마지막 절은 같은 보고서의 위임 실패 항목에 원인을 더해요. 그 절은 스크립트가 없는 일회성 측정이에요.
 
 ## 한눈에
 
@@ -10,6 +11,7 @@
 - 같은 Keeper `code-reviewer` 가 이 프로필에서 낸 42,304호출 중 20,163이 `masc_schedule_notes_list` 예요(47.7%). 같은 기간 다른 프로필에서 낸 3,615호출 중에는 1번이에요. 11-05 에는 다른 프로필로 2,358호출을 내는 동안 0번이에요. 이 Keeper 에서는 호출 패턴이 프로필을 따라가요.
 - blob 으로 넘친 결과는 프로필 하나의 일이 아니에요. 이 프로필을 빼도 나머지 결과 바이트의 49.4%(218.0/441.4 MB)가 blob 이에요.
 - 이 프로필은 11-01(50,204호출)과 11-02(26,424호출)에만 있어요. 11-03 부터는 호출이 없고 11-05 에도 없어요. 전체 호출은 같은 시기에 58,600 → 49,075 → 18,315 → 25,797(11-01 → 11-04)로 줄었어요. 그래서 11-05 에 배포한 수리 앞뒤를 전체 값으로 비교하면 프로필이 바뀐 차이가 같이 들어가요. 수리 효과는 같은 프로필 안에서만 잴 수 있어요.
+- 위임 작업 501건 중 39건(7.8%)이 서버 종료(SIGTERM) 30초 안에 끝나며 잘렸어요. 이 시간은 10.9시간 이상이에요(마지막 절).
 
 ## 프로필별 (11-01 ~ 11-04)
 
@@ -52,6 +54,16 @@
 - `music-sensei` 턴은 입력 `{"compact": true, "hearth": "sandbox", "limit": 3, "sort_by": "recent"}` 로 평균 16초에 한 번 Board 목록을 불러요. 결과는 `snapshot` 과 `revision` 을 담은 500~700바이트예요.
 - `masc_board_list` 에는 변경이 없으면 짧게 답하는 `if_revision` 인자가 있어요. 이 턴의 호출에는 없었어요. 11-01~11-04 에도 원장 전체 1,052호출 중 5번만 썼어요(2026-11-05 보고서 "2. 도구별 병폐").
 - 두 Keeper 가 왜 턴을 끝내지 않고 같은 호출을 되풀이했는지는 대화를 읽지 않아서 몰라요. 고치기 전에 그 이유를 봐야 해요.
+
+## 위임이 잘리는 원인은 서버 종료예요 (11-01 ~ 11-05)
+
+- 위임 작업 501건은 성공 420, `Turn_cancelled` 40, `Turn_exception` 38, 취소 3으로 끝났어요.
+- `Turn_cancelled` 40건 중 39건(사유 "Keeper owner stopped the active turn")이 `Received SIGTERM, shutting down gracefully` 로그 시각에서 30초 안에 끝났어요. 같은 기간 SIGTERM 종료는 60번이에요(UTC 날짜별 10, 4, 8, 29, 9번).
+- 종료 때 `Shutdown_hooks` 가 `Keeper_owner_registry.begin_stopping_all` 을 불러 돌던 턴을 `Stop_active_child` 로 멈춰요(`lib/server/server_bootstrap_loops.ml`, `lib/keeper/keeper_owner.ml`).
+- 잘린 위임 39건이 돌던 시간은 합계 10.9시간 이상이에요. `completed_at - started_at` 의 합이고, `started_at` 이 마지막 조각의 시작이라서 하한이에요. 중앙값 685초, 90백분위 2,388초, 최대 4,979초예요.
+- Keeper 사이의 요청은 대상 Keeper 큐에 넣는 일반 메시지라서 잘린 위임은 다시 시도하지 않아요. 위임한 Keeper 가 다시 보내지 않으면 그 시간은 사라져요.
+- 재는 법: `<base>/.masc/keepers/*/chat-operations.sqlite3` 의 `operations` 에서 `source_json` 에 `sender_keeper` 가 있고 `created_at` 이 11-01 이후인 행을 읽어요. `failure_kind` 가 `Turn_cancelled` 인 행의 `completed_at` 이 `<base>/.masc/logs/system_log_*.jsonl` 의 `Received SIGTERM` 행 `ts` 에서 30초 안인지 세요.
+- 확인하지 못한 것: 종료 때 10초 유예 안에 끝난 위임이 몇 건인지. 11-04 에 SIGTERM 이 29번인 이유(배포인지 반복 재시작인지). 잘린 위임을 위임한 Keeper 가 다시 보냈는지.
 
 ## 다시 재는 법
 

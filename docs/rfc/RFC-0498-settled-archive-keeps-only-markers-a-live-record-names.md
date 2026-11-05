@@ -162,10 +162,11 @@ type owner_family =
   | 완료 검토·Goal 증명 검토 | 101, 8 | 0 |
 
   그래서 기록을 항목에 넣는 일은 (package, tool) 이 아니라 기록 종류로 한다. Librarian 기록의 종류는 배포 전 검사가 이미 쓰는 `Keeper_librarian_store_preflight.purpose` 가 정한다. Curator 와 두 review 는 종류가 하나라서 (package, tool) 로 정한다. 종류를 정하지 못한 기록이 하나라도 있으면 pass 는 아무것도 지우지 않는다. 배포 전 검사는 이런 기록을 `Ok ()` 로 넘기지만, 이 pass 는 오류로 본다.
-- 종류마다의 답은 그 종류의 typed decoder 가 기록에서 꺼내는 요청 ID 다. 가리키는 기록이 살아 있는지는 묻지 않는다.
-  - 세 gate 는 부모 실행 ID(`parent_execution_id`, `keeper_librarian_original_gate.ml:69`)와 `predecessor` 다.
+- 종류마다의 답은 두 집합의 합이다. 하나는 그 기록의 progress 이벤트가 담은 요청 ID 전부다. 다른 하나는 그 종류의 typed decoder 가 요청 구조에서 꺼내는 요청 ID 다. 가리키는 기록이 살아 있는지는 묻지 않는다.
+  - 구조에서 꺼내는 ID: 세 gate 는 부모 실행 ID(`parent_execution_id`, `keeper_librarian_original_gate.ml:69`)와 `predecessor` 다.
   - history 실행은 `predecessor` 다(`keeper_librarian_durable_request.ml:151`). floor step 과 admission 실행, part 는 구현 층이 각 decoder 에서 같은 방식으로 적는다.
   - 배포 전 검사의 validator 를 그대로 쓰지 않는 까닭: 그 validator 는 부모가 없으면 오류다. 실행이 먼저 보관되고 gate 가 남은 상태(`settle_orphan_gates` 가 다루는 고아 gate)는 정상인데, validator 로는 그때마다 pass 가 멈춘다. 이 pass 에서는 고아 gate 가 가리키는 실행 ID 가 `N` 에 들어가야 한다. 그래야 `settled` 가 `true` 를 답한다.
+  - §3.2 의 네 호출처가 `settled` 에 넘기는 ID 는 progress 이벤트의 ID(history·Curator `finish_settling`)와 gate 의 부모 실행 ID(history·floor `settle_orphan_gates`) 둘뿐이다. 둘 다 이 합에 들어 있다. `predecessor` 는 `settled` 에 넘기지 않지만 넣어도 표시를 조금 더 붙잡을 뿐이다. 1층 PR 은 네 호출처마다 그 호출처가 묻는 ID 가 `N` 에 있음을 시험으로 보인다.
   - `purpose` 는 접두사를 차례로 맞대는 분류다. floor step 의 접두사 `keeper-librarian-floor-step-` 는 floor step gate 접두사의 앞부분이라, gate 를 먼저 맞대야 맞는다. 잘못 분류된 기록은 다른 종류의 decoder 를 만나 오류가 되고, pass 는 아무것도 지우지 않는다. 그래서 잘못 지우지는 않는다. scope 이름을 하나의 typed codec 으로 바꾸는 일은 이 RFC 의 범위가 아니다(§5).
 - 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. scope 는 Keeper 목록이 아니라 `tool-request-owners/` 아래 디렉터리를 훑어 모은다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다.
 - scope 하나, 기록 하나라도 읽지 못하거나 decode 하지 못하면 그 pass 는 아무것도 지우지 않고 끝난다. 어느 항목에도 속하지 않는 scope 가 있어도 같다.

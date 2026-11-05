@@ -1309,7 +1309,7 @@ let test_aborted_replacement_cleans_predecessor_presence env =
 let test_readiness_loss_cleans_predecessor_presence env =
   let readiness_checks = ref 0 in
   Play_fixture.with_fixture env
-    ~ready:(fun () -> incr readiness_checks; !readiness_checks < 3)
+    ~ready:(fun () -> incr readiness_checks; !readiness_checks < 4)
     (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
       let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
       Alcotest.(check int) "the established Observer opens" 200 (Play_fixture.await clock first.response);

@@ -4314,18 +4314,20 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
                 Keeper_runtime_failure_route.Fenced_observation_unavailable
           }
       in
-      let decide () =
+      let decide ~now =
         describe_dispatch ~now
           (Driver.next_dispatch_after_failure ~now ~route:fenced
              ~assignment_id:"quota_lane" None)
       in
       Alcotest.(check string) "a fenced failure on a serving path keeps ordinary cadence"
-        "no provider wait" (decide ());
+        "no provider wait" (decide ~now);
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 88441.0);
       Alcotest.(check string) "a fenced failure waits for the quota its attempt recorded"
-        "wait 88441s for other.test_model" (decide ())))
+        "wait 88441s for other.test_model" (decide ~now);
+      Alcotest.(check string) "the stated reset ends the wait"
+        "no provider wait" (decide ~now:(now +. 88442.0))))
 ;;
 
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same

@@ -1235,8 +1235,8 @@ let test_stale_reconnect_cannot_replace_successor env =
       (fun ~base_path ~who ~speaker ~now action ->
         incr calls;
         if !calls = 1 then begin
-          Eio.Promise.resolve paused ();
-          Eio.Promise.await resume
+          Eio.Promise.resolve resume ();
+          Eio.Promise.await paused
         end;
         Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
       (fun () ->
@@ -1269,8 +1269,8 @@ let test_disconnect_before_lease_install_cleans_up env =
       (fun ~base_path ~who ~speaker ~now action ->
         if not !entered then begin
           entered := true;
-          Eio.Promise.resolve paused ();
-          Eio.Promise.await resume
+          Eio.Promise.resolve resume ();
+          Eio.Promise.await paused
         end;
         Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
       (fun () ->

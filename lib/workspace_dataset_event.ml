@@ -9,6 +9,7 @@ module Kind = struct
     | Verification_requests
     | Harness_verdicts
     | Clients
+    | Account_emails
     | Keeper_oauth_attempts
 
   let to_wire = function
@@ -16,6 +17,7 @@ module Kind = struct
     | Verification_requests -> "verification_requests"
     | Harness_verdicts -> "harness_verdicts"
     | Clients -> "clients"
+    | Account_emails -> "account_emails"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
   ;;
 
@@ -24,6 +26,7 @@ module Kind = struct
     | "verification_requests" -> Some Verification_requests
     | "harness_verdicts" -> Some Harness_verdicts
     | "clients" -> Some Clients
+    | "account_emails" -> Some Account_emails
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
     | _ -> None
   ;;
@@ -34,6 +37,7 @@ type dataset =
   | Verification_requests
   | Harness_verdicts
   | Clients
+  | Account_emails
   | Keeper_oauth_attempts of { keeper : string }
 
 let kind = function
@@ -41,6 +45,7 @@ let kind = function
   | Verification_requests -> Kind.Verification_requests
   | Harness_verdicts -> Kind.Harness_verdicts
   | Clients -> Kind.Clients
+  | Account_emails -> Kind.Account_emails
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
 ;;
 
@@ -50,7 +55,7 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
    one Keeper carries its name; the others carry nothing. A later dataset can
    name an instance instead, and joins here. *)
 let subject_fields = function
-  | Repositories | Verification_requests | Harness_verdicts | Clients -> []
+  | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails -> []
   | Keeper_oauth_attempts { keeper } -> [ ("keeper", `String keeper) ]
 ;;
 
@@ -70,6 +75,7 @@ let of_fields fields =
      | Some Kind.Verification_requests -> Ok Verification_requests
      | Some Kind.Harness_verdicts -> Ok Harness_verdicts
      | Some Kind.Clients -> Ok Clients
+     | Some Kind.Account_emails -> Ok Account_emails
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

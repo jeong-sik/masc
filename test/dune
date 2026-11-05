@@ -3324,6 +3324,8 @@
 
 (include stanzas/test_workspace_agent_record.inc)
 
+(include stanzas/test_tui_local_keeper_meta_moved.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
 (include stanzas/test_workspace_init_state_parity.inc)

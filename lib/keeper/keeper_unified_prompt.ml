@@ -1,19 +1,11 @@
 (** Keeper_unified_prompt — Build a single unified prompt from keeper identity
     and world observation.
 
-    Sections removed in #6814: Available Tools (AGENT_CORE tool schema handles),
-    Recent Tool Activity, Last Cycle Outcome, Tool Diversity Signal,
-    Peer Keepers, Your Recent Board Posts,
-    Behavioral Self-Assessment, Actionable Routes, Signal Interpretation.
-    Telemetry for removed sections is preserved via decision_audit and
-    independent storage paths.
-
-    "Your Recent Board Posts" was later restored as the [Own_board_posts]
-    context layer: raw observation rows (post_id, updated_at, title, preview)
-    with no advisory wording. #6814 was right to remove the scolding text; the
-    side effect was that a keeper could never see its own published posts
-    in-prompt (board events are cursor-based and exclude self-authors), which
-    produced near-duplicate posting loops in production.
+    The [Own_board_posts] context layer lists the keeper's own published
+    posts as raw observation rows (post_id, updated_at, title, preview) with
+    no advisory wording. Board events are cursor-based and exclude
+    self-authors, so a keeper sees its own published posts in the prompt
+    through this layer.
 
     @since Unified Keeper Loop *)
 

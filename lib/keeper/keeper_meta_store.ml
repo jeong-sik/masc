@@ -566,12 +566,10 @@ let keepalive_keeper_names config =
       if declarative_autoboot_enabled_by_default config name then Some name
       else None
     | Error msg ->
-      (* Issue #8377: was [_ -> None] which collapsed read/parse
-         failures silently into "name disappeared". Discovery would
-         treat a corrupt meta file as if the keeper was deleted,
-         hiding the operational issue. Now logs and excludes so the
-         degraded state is operator-visible.  Issue #28844: the WARN
-         fires on failure-state transitions only, not per scan. *)
+      (* A meta file that cannot be read or parsed is logged and excluded,
+         so discovery never treats a corrupt file as a deleted keeper and the
+         degraded state is operator-visible. The WARN fires on
+         failure-state transitions only, not per scan. *)
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "keepalive_read")]

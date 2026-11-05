@@ -582,7 +582,6 @@ let run_keeper_invocation_turn_admitted_inner
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
-      (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
       let masc_root = Workspace.masc_dir ctx.config in
       let trajectory_acc =

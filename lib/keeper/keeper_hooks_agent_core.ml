@@ -913,10 +913,8 @@ let make_hooks
          | exn ->
              if not !log_committed
              then Keeper_execution_join.discard ~invocation;
-             (* P2 silent-failure fix (same pattern as the broadcast site
-                above at line ~1098): tool-call audit log write failures
-                were dropped without trace.  Loss of these rows leaves
-                downstream replay / debugging tools with gaps that look
+             (* A failed tool-call audit log write is counted: a lost row leaves
+                downstream replay / debugging tools with a gap that looks
                 identical to "no tool calls in this turn." *)
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string LifecycleCallbackFailures)

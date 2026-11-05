@@ -285,9 +285,8 @@ let links_to_json links =
       ("tool_call_log_path", json_of_string_opt links.tool_call_log_path);
     ]
 
-(* Allowlist-based public projection.
-   The previous substring-based redaction (§2 anti-pattern) has been removed;
-   public filtering now uses explicit allowlists in {!public_projection_of_decision}. *)
+(* Allowlist-based public projection: public filtering uses explicit
+   allowlists in {!public_projection_of_decision}. *)
 
 let decision_public_allowlist =
   StringSet.of_list

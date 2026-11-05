@@ -1,10 +1,5 @@
 (** Keeper_memory_recall — history/tail JSONL reading for memory surfaces.
-
-    The keyword-classifier recall eval ([is_memory_recall_query],
-    [expected_topic_hint], [evaluate_memory_recall]) was removed with the
-    legacy memory bank: recall is the keeper's own judgment via the
-    [keeper_memory_search] tool, not a substring heuristic. What remains
-    here is the typed file-reading substrate those surfaces share. *)
+    This is the typed file-reading substrate those surfaces share. *)
 
 (* Whether the final returned line was newline-terminated in the file.
    [Partial_last_line] means an append was in flight when the read happened,

@@ -3143,14 +3143,15 @@ let test_start_authority_is_user_context_not_standing_system () =
     List.iteri (fun index event ->
       let system_marker = Filename.concat base_path (Printf.sprintf "authority-system-%d" index) in
       let prompt_marker = Filename.concat base_path (Printf.sprintf "authority-input-%d" index) in
-      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
-        |> A.with_system_observations ~base_text:"BASE"
-          ~observations:(A.Active_goals goal_text ::
-            Option.to_list (Option.map (fun text -> A.Completion_authority text) event)) in
+      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
+          ~blocks:(Option.to_list
+            (Option.map (fun text -> Prompt_block_id.Completion_authority, text) event))
+        |> A.with_system_observations ~base_text:"BASE" ~observations:[A.Active_goals goal_text] in
       let reads = ref 0 in
       let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
         | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
           Agent_core.Hooks.AdjustParams {current_params with
+            extra_system_context=assembly.A.extra_system_context;
             system_prompt_override=A.system_prompt_override
               ~previous:current_params.system_prompt_override assembly}
         | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
@@ -3182,7 +3183,11 @@ let test_start_authority_is_user_context_not_standing_system () =
         expected_system system;
       let expected = match event with
         | None -> "OWNER"
-        | Some text -> "USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER" in
+        | Some text ->
+          "SYSTEM:\n" ^ Host.encode_history_message
+            { Agent_core.Types.origin = System_context; role = System; content = [ Text text ]
+            ; name = None; tool_call_id = None; metadata = [] }
+          ^ "\n\nOWNER" in
       check string "current event delivered once; absent event sends owner only" expected user;
       if index > 1 then check bool "later owner cannot borrow first approval keys" false
         (String_util.contains_substring user first_event))

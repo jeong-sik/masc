@@ -1174,9 +1174,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       | Runtime_codex_app_server.Start ->
         let projection = Host.start_prompt prepared prompt in
         Keeper_context_submission_link.text projection,
-        Host.start_held_context ?composed_context prepared.messages, projection
+        Host.start_held_context ?turn_observation:prepared.turn_observation
+          ?composed_context prepared.messages, projection
       | Runtime_codex_app_server.Resume _ ->
-        let delivery = Host.resume_prompt ~goal:prompt ?composed_context
+        let delivery = Host.resume_prompt ~goal:prompt
+          ?turn_observation:prepared.turn_observation ?composed_context
           ~held:previously_held prepared.messages in
         delivery.prompt, delivery.held_context, delivery.context_projection
     in

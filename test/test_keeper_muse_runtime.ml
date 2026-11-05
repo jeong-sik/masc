@@ -548,7 +548,7 @@ let test_start_prompt_frames_system_history_and_goal () =
   let prepared : Keeper_official_client_host.prepared_turn =
     { messages = history; system_prompt
     ; start_context = Keeper_context_submission_link.literal ""
-    ; composed_context = None; tools = []; reasoning_effort = None }
+    ; composed_context = None; turn_observation = None; tools = []; reasoning_effort = None }
   in
   match Keeper_official_client_host.framed_prompt_for_turn
       ~held:[] ~is_resume:false ~goal prepared with

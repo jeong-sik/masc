@@ -68,6 +68,7 @@ profile 로 나누면 `glm-5.3-flash` 가 호출 12,045개 중 1,456개(12.1%)�
 - `masc_board_list` 901번 중 899번이 같은 입력(`compact` true, `hearth` sandbox, `limit` 2, `sort_by` recent)이고 결과도 같아요(`revision` 이 `board:6648…` 로 같아요). 호출 사이 시간은 중앙값 7.1초, 최대 176.4초예요.
 - 이 도구에는 `if_revision` 인자가 있어요(`config/tools/masc_board_list.toml`). 이 실행의 901번 입력에는 한 번도 없어요.
 - 11-05T20:37Z 에 모든 raw trace 에서 한 번 센 값이에요. `if_revision` 인자가 있는 도구 중 `masc_board_list` 는 호출 2,135번 중 28번(1.3%)만, `keeper_tasks_list` 는 964번 중 0번 이 인자를 넣었어요. `masc_status` 는 호출이 없어요.
+  `masc_board_list` 28번은 모두 `mad-scientist` 가 10-28(24번), 10-29(4번)에 부른 호출이에요. 11-01 이후 도구 호출 원장에서는 `masc_board_list` 2,640번 중 5번이고 모두 `sangsu` 예요(11-05T20:50Z 에 읽음, 창 끝 20:00Z).
 - round 903개 중 글이 든 응답은 4개예요. 그중 둘은 "이 턴은 여기서 끝낸다", "조용히 종료한다"고 쓰면서 같은 응답에 `masc_board_list` 호출을 넣었어요.
 - 실행은 `Rate limited: Usage limit reached for 5 hour` 로 끝났어요.
 - reaction ledger 에서 이 실행 안에 ack 된 도착 행은 0개예요(`docs/evidence/runs-and-arrivals-2026-11/result.json` 의 `spin_runs`).

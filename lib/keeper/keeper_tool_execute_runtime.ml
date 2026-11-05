@@ -585,9 +585,8 @@ let handle_tool_execute_typed
           | Masc_exec.Sandbox_target.Host
           | Docker _ | Micro_vm _ -> model_location_fields
           | Ssh { endpoint; _ } ->
-            let root = Keeper_sandbox_remote.keeper_root
-              ~remote_root:endpoint.remote_root ~keeper_name:meta.name in
-            model_execute_location_fields ~remote_workspace_root:(Some root)
+            model_execute_location_fields
+              ~remote_workspace_root:(Some endpoint.workspace_root)
               ~config ~meta ~args ~cwd
           | Masc_exec.Sandbox_target.Delegated _ ->
             (* Unreachable from a profile-built target today (no profile

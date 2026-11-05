@@ -197,6 +197,7 @@ let test_ssh_redirect_is_named_and_never_opens_host_file () =
       ; identity_file = "/key"
       ; known_hosts_file = "/known-hosts"
       ; remote_root = "/srv/masc/playground"
+      ; workspace_root = "/srv/masc/playground/keeper"
       ; connect_timeout_sec = 1
       ; env_allowlist = []
       ; allowed_paths = []

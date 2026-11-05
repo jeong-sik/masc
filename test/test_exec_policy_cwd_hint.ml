@@ -291,7 +291,8 @@ let dummy_ssh_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
   ; port = 22
   ; identity_file = "/base/.masc/ssh/test.key"
   ; known_hosts_file = "/base/.masc/ssh/known_hosts.d/test"
-  ; remote_root = "/srv/masc/playground/keeper"
+  ; remote_root = "/masc-work"
+  ; workspace_root = "/masc-work/keeper"
   ; connect_timeout_sec = 10
   ; env_allowlist = [ "PATH" ]
   ; allowed_paths = []
@@ -443,6 +444,72 @@ let test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target () =
     expect_outside "micro_vm cwd /etc" micro_vm_target (shell_ir ~cwd:"/etc" ~workdir []))
 ;;
 
+(* An ssh command runs in the Keeper's own root on the endpoint, and Execute
+   reports its cwd under that root, so the Keeper names absolute paths there.
+   The root admits only itself and what lies below it: not the endpoint's
+   shared [remote_root], not a sibling Keeper, and not a [..] walk out. *)
+let test_execute_shell_ir_ssh_admits_the_keepers_own_endpoint_root () =
+  with_temp_tree (fun workdir ->
+    let ssh_target =
+      Masc_exec.Sandbox_target.ssh ~endpoint:dummy_ssh_endpoint ~runner:dummy_runner ()
+    in
+    let micro_vm_target =
+      Masc_exec.Sandbox_target.micro_vm
+        ~image:"masc-test:latest"
+        ~runner:dummy_runner
+        ()
+    in
+    let validate sandbox ir =
+      Keeper_tooling.Execute_shell_ir.validate_paths ~sandbox ~workdir ir
+    in
+    let expect_ok label sandbox ir =
+      match validate sandbox ir with
+      | Ok () -> ()
+      | Error msg -> Alcotest.failf "%s must be allowed, got: %s" label msg
+    in
+    let expect_outside label sandbox ir =
+      match validate sandbox ir with
+      | Error msg ->
+        Alcotest.(check bool)
+          (label ^ " surfaces path_outside_whitelist")
+          true
+          (String_util.contains_substring_ci msg outside_whitelist_prefix)
+      | Ok () -> Alcotest.failf "%s must be rejected" label
+    in
+    expect_ok
+      "ssh cd /masc-work/keeper"
+      ssh_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work/keeper" ]);
+    expect_ok
+      "ssh mkdir -p /masc-work/keeper/out"
+      ssh_target
+      (stage ~bin_name:"mkdir" ~workdir [ "-p"; "/masc-work/keeper/out" ]);
+    expect_ok
+      "ssh sh -c cp into /masc-work/keeper"
+      ssh_target
+      (stage ~bin_name:"sh" ~workdir [ "-c"; "cp a /masc-work/keeper/pin-overlay/" ]);
+    expect_outside
+      "ssh cd /masc-work (the shared remote_root)"
+      ssh_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work" ]);
+    expect_outside
+      "ssh cd /masc-work/other (a sibling Keeper)"
+      ssh_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work/other" ]);
+    expect_outside
+      "ssh cd /masc-work/keeper-two (a sibling sharing the prefix)"
+      ssh_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work/keeper-two" ]);
+    expect_outside
+      "ssh cd /masc-work/keeper/../other"
+      ssh_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work/keeper/../other" ]);
+    expect_outside
+      "micro_vm cd /masc-work/keeper"
+      micro_vm_target
+      (stage ~bin_name:"cd" ~workdir [ "/masc-work/keeper" ]))
+;;
+
 let test_subst_child_redirect_is_jailed () =
   with_temp_tree (fun workdir ->
     (* The jail descends into a substitution's child stages: their cwd and
@@ -538,6 +605,10 @@ let () =
             "execute_shell_ir ssh allowed_paths widen only the ssh target"
             `Quick
             test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target
+        ; Alcotest.test_case
+            "execute_shell_ir ssh admits the keeper's own endpoint root"
+            `Quick
+            test_execute_shell_ir_ssh_admits_the_keepers_own_endpoint_root
         ] )
     ]
 ;;

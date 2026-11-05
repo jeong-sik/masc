@@ -104,7 +104,7 @@ let create ?ssh_bin ~base_path ~keeper_name
        openssh)
 ;;
 
-let sandbox_endpoint ~base_path (endpoint : Exec_ssh_endpoint.t)
+let sandbox_endpoint ~base_path ~workspace_root (endpoint : Exec_ssh_endpoint.t)
     : Masc_exec.Sandbox_target.ssh_endpoint =
   { name = endpoint.name
   ; host = endpoint.host
@@ -113,6 +113,7 @@ let sandbox_endpoint ~base_path (endpoint : Exec_ssh_endpoint.t)
   ; identity_file = resolve_path ~base_path endpoint.identity_file
   ; known_hosts_file = resolve_path ~base_path endpoint.known_hosts_file
   ; remote_root = endpoint.remote_root
+  ; workspace_root
   ; connect_timeout_sec = endpoint.connect_timeout_sec
   ; env_allowlist = endpoint.env_allowlist
   ; allowed_paths = endpoint.allowed_paths

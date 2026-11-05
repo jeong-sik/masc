@@ -82,10 +82,11 @@ type pipeline_runner =
   stages:pipeline_stage list ->
   run_outcome
 
-(** SSH endpoint identity carried by an [Ssh] target.  Deliberately a
-    standalone record, not [Exec_ssh_endpoint.t]: [lib/exec] stays
-    dependency-clean and the keeper layer converts its config-layer record
-    into this one at target construction.  [max_concurrent_sessions] and
+(** SSH endpoint identity, plus the Keeper's own root on it, carried by an
+    [Ssh] target.  Deliberately a standalone record, not
+    [Exec_ssh_endpoint.t]: [lib/exec] stays dependency-clean and the keeper
+    layer converts its config-layer record into this one at target
+    construction.  [max_concurrent_sessions] and
     [capabilities] are keeper-side runner/preflight concerns and stay out. *)
 type ssh_endpoint = {
   name : string;
@@ -95,14 +96,19 @@ type ssh_endpoint = {
   identity_file : string;
   known_hosts_file : string;
   remote_root : string;
+  workspace_root : string;
+      (** This Keeper's directory on the endpoint, below [remote_root].
+          Execute runs and reports its cwd here, so a command may name
+          paths under it; the path check compares it lexically, never
+          through the host filesystem. *)
   connect_timeout_sec : int;
   env_allowlist : string list;
   allowed_paths : string list;
       (** Extra endpoint-side roots an Execute command on this endpoint may
-          name, beyond the keeper workdir and [/tmp].  Absolute and
-          normalized (the config parser refuses anything else); the path
-          check compares them lexically, never through the host
-          filesystem. *)
+          name, beyond [workspace_root], the keeper workdir and [/tmp].
+          Absolute and normalized (the config parser refuses anything
+          else); the path check compares them lexically, never through the
+          host filesystem. *)
 }
 
 type t =

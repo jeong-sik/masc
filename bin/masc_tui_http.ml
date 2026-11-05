@@ -1506,6 +1506,20 @@ let fetch_workspace_file_catalog ?keeper ?repo ~expected_workspace ~host ~port ~
   in
   Result.bind reading Masc.Tui_decode.decode_workspace_file_catalog
 
+(** The local branches of the checkout that owns [path] ([/api/v1/git/branches]). *)
+let fetch_git_branches ?keeper ?repo ~expected_workspace ~host ~port ~path () =
+  let route =
+    "/api/v1/git/branches?path=" ^ percent_encode_query_value path
+    ^ keeper_query_suffix keeper ^ repo_query_suffix repo
+  in
+  let reading =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+      ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+        get_json ~host ~port ~path:route)
+    |> Result.map_error (fun detail -> "branches: " ^ detail)
+  in
+  Result.bind reading Masc.Tui_decode.decode_git_branches
+
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
 let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) ~(limit : int) () :

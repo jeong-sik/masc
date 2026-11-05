@@ -600,6 +600,74 @@ let test_catalog_decoder_keeps_identity_and_rejects_missing_data () =
     ; `Assoc ["root", `String ""; "files", `List [`String ""]]
     ]
 
+let branch_json ?(current = false) ?(upstream = `Null) ?(epoch = 1787000000)
+    ?(subject = "subject") name =
+  `Assoc
+    [ "name", `String name; "current", `Bool current; "upstream", upstream
+    ; "commit_epoch", `Int epoch; "subject", `String subject ]
+
+let branches_json ?(truncated = false) branches =
+  `Assoc [ "root", `String "repos/example"; "branches", `List branches
+         ; "truncated", `Bool truncated ]
+
+let test_branches_decoder_keeps_order_and_every_upstream_shape () =
+  let tracking ahead behind =
+    `Assoc [ "name", `String "origin/x"; "ahead", `Int ahead; "behind", `Int behind ] in
+  match
+    Decode.decode_git_branches
+      (branches_json ~truncated:true
+         [ branch_json ~current:true ~upstream:(tracking 2 1) "feat/x"
+         ; branch_json ~upstream:(`Assoc [ "name", `String "origin/y"; "ahead", `Null; "behind", `Null ])
+             "gone"
+         ; branch_json ~subject:"fix: tab\tand : colon" "loose" ])
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok found ->
+      Alcotest.(check string) "root" "repos/example" found.gbs_root;
+      Alcotest.(check bool) "truncated" true found.gbs_truncated;
+      Alcotest.(check (list string)) "server order"
+        [ "feat/x"; "gone"; "loose" ]
+        (List.map (fun (b : Decode.git_branch) -> b.gb_name) found.gbs_branches);
+      (match found.gbs_branches with
+       | [ first; second; third ] ->
+           Alcotest.(check bool) "current mark" true first.gb_current;
+           Alcotest.(check bool) "tracking counts" true
+             (first.gb_upstream
+              = Decode.Repository_tracking { upstream = "origin/x"; ahead = 2; behind = 1 });
+           Alcotest.(check bool) "gone upstream has no counts" true
+             (second.gb_upstream = Decode.Repository_upstream_gone "origin/y");
+           Alcotest.(check bool) "null is no upstream" true
+             (third.gb_upstream = Decode.Repository_no_upstream);
+           Alcotest.(check string) "subject is kept" "fix: tab\tand : colon" third.gb_subject
+       | _ -> Alcotest.fail "expected three branches")
+
+let test_branches_decoder_refuses_bad_rows () =
+  let rejected label json =
+    match Decode.decode_git_branches json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " became a usable branch list")
+  in
+  rejected "an empty name" (branches_json [ branch_json "" ]);
+  rejected "a negative time" (branches_json [ branch_json ~epoch:(-1) "a" ]);
+  rejected "counts that are not integers"
+    (branches_json
+       [ branch_json ~upstream:(`Assoc [ "name", `String "o/a"; "ahead", `String "2"; "behind", `Int 1 ]) "a" ]);
+  rejected "only one count"
+    (branches_json
+       [ branch_json ~upstream:(`Assoc [ "name", `String "o/a"; "ahead", `Int 2; "behind", `Null ]) "a" ]);
+  rejected "a negative count"
+    (branches_json
+       [ branch_json ~upstream:(`Assoc [ "name", `String "o/a"; "ahead", `Int (-1); "behind", `Int 0 ]) "a" ]);
+  rejected "an upstream that is a string" (branches_json [ branch_json ~upstream:(`String "origin/a") "a" ]);
+  rejected "a missing current flag"
+    (branches_json
+       [ `Assoc [ "name", `String "a"; "upstream", `Null; "commit_epoch", `Int 1
+                ; "subject", `String "s" ] ]);
+  rejected "a missing truncated flag"
+    (`Assoc [ "root", `String ""; "branches", `List [] ]);
+  rejected "branches that are not a list"
+    (`Assoc [ "root", `String ""; "branches", `Null; "truncated", `Bool false ])
+
 let test_finder_ready_content_cannot_borrow_reconfirmed_authority () =
   let state, _ = finder_fixture () in
   let request = finder_select state "lib/new.ml" in
@@ -1742,6 +1810,10 @@ let () =
             test_finder_does_not_borrow_changed_owners
         ; Alcotest.test_case "catalog decoder keeps identity and refuses malformed data" `Quick
             test_catalog_decoder_keeps_identity_and_rejects_missing_data
+        ; Alcotest.test_case "branches decoder keeps order and every upstream shape" `Quick
+            test_branches_decoder_keeps_order_and_every_upstream_shape
+        ; Alcotest.test_case "branches decoder refuses bad rows" `Quick
+            test_branches_decoder_refuses_bad_rows
         ; Alcotest.test_case "received success yields to queued input" `Quick
             test_finder_success_yields_to_pending_input
         ; Alcotest.test_case "ready content cannot borrow reconfirmed read authority" `Quick

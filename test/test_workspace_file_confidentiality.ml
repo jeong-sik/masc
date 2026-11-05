@@ -493,6 +493,39 @@ let test_branches_list_the_owning_checkout () =
           | Some _ | None -> Alcotest.fail "branches is not a list")
      | _ -> Alcotest.fail "answer is not an object"))
 
+(* The TUI reads this answer with its own decoder; a shape the decoder refuses
+   would leave the screen with an error while the route looked fine. *)
+let test_branches_answer_decodes_in_the_tui () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    commit_git ~cwd:base "first";
+    catalog_git ~cwd:base [ "checkout"; "-b"; "feat/x" ];
+    commit_git ~cwd:base "second";
+    catalog_git ~cwd:base [ "branch"; "--set-upstream-to=main" ];
+    catalog_git ~cwd:base [ "branch"; "loose"; "main" ];
+    let json = W.For_testing.workspace_branches_json (branches_or_fail ~base ~path:"") in
+    match Masc.Tui_decode.decode_git_branches json with
+    | Error detail -> Alcotest.fail detail
+    | Ok decoded ->
+        check int "every branch decodes" 3 (List.length decoded.gbs_branches);
+        let find name =
+          List.find_opt (fun (b : Masc.Tui_decode.git_branch) -> String.equal b.gb_name name)
+            decoded.gbs_branches
+        in
+        (match find "feat/x" with
+         | Some branch ->
+             check bool "the checked-out branch" true branch.gb_current;
+             check bool "one commit ahead of main" true
+               (branch.gb_upstream
+                = Masc.Tui_decode.Repository_tracking
+                    { upstream = "main"; ahead = 1; behind = 0 })
+         | None -> Alcotest.fail "feat/x is missing");
+        (match find "loose" with
+         | Some branch ->
+             check bool "no upstream decodes as none" true
+               (branch.gb_upstream = Masc.Tui_decode.Repository_no_upstream)
+         | None -> Alcotest.fail "loose is missing"))
+
 let test_branches_stop_at_workspace_and_keep_nested_prefix () =
   with_temp_dir (fun parent ->
     catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
@@ -1027,6 +1060,8 @@ let () =
     ; ( "branch list"
       , [ test_case "lists the owning checkout" `Quick
             test_branches_list_the_owning_checkout
+        ; test_case "the answer decodes in the TUI" `Quick
+            test_branches_answer_decodes_in_the_tui
         ; test_case "stops at selected workspace and keeps nested prefix" `Quick
             test_branches_stop_at_workspace_and_keep_nested_prefix
         ; test_case "distinguishes empty checkout and unavailable directory" `Quick

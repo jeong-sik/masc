@@ -126,8 +126,29 @@ def blob_call(
     shape: str,
     outcome: str,
     sha: str | None = None,
+    stamp: float = 0.0,
 ) -> blobs.BlobCall:
-    return blobs.BlobCall(day, keeper, tool, form, shape, outcome, sha)
+    return blobs.BlobCall(day, keeper, tool, form, shape, outcome, sha, stamp)
+
+
+def stamped_call(keeper: str, stamp: float, form: str = "alone") -> blobs.BlobCall:
+    return blob_call("2026-11-01", keeper, "t", form, "not_an_object", "refused_before_run", None, stamp)
+
+
+def stored_request(
+    keeper: str, model: str, captured_at: float, arguments: int = 0, stored: int = 0
+) -> blobs.HistoryRequest:
+    return blobs.HistoryRequest(keeper, model, 1000, arguments, 0, 0, 0, 0, captured_at, stored)
+
+
+def attributed_pairs(calls: list[blobs.BlobCall], requests: list[blobs.HistoryRequest]) -> list[tuple[str, str]]:
+    return [(item.keeper, item.label) for item in blobs.attribute_calls(calls, requests)]
+
+
+class IsoUtcTest(unittest.TestCase):
+    def test_a_time_is_written_in_utc_with_its_offset(self) -> None:
+        self.assertEqual(blobs.iso_utc(0.0), "1970-01-01T00:00:00+00:00")
+        self.assertEqual(blobs.iso_utc(NOON), "2026-11-01T12:00:00+00:00")
 
 
 class NumberOfTest(unittest.TestCase):
@@ -250,7 +271,8 @@ class ReadBlobCallsTest(unittest.TestCase):
     def test_a_row_with_a_blob_input_becomes_one_call(self) -> None:
         calls = self.read([ledger_row(NOON, "alpha", "Write", {"_blob": envelope()}, wire_outcome="error")])
         self.assertEqual(
-            calls, [blob_call("2026-11-01", "alpha", "Write", "alone", "complete_envelope", "refused_before_run", SHA_A)]
+            calls,
+            [blob_call("2026-11-01", "alpha", "Write", "alone", "complete_envelope", "refused_before_run", SHA_A, NOON)],
         )
 
     def test_rows_without_a_blob_input_are_skipped(self) -> None:
@@ -426,6 +448,25 @@ class MessageBlobTest(unittest.TestCase):
         self.assertEqual(blobs.message_blob(self.base, content_ref(sha)), {"x": 1})
 
 
+class StoredWithSizeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = pathlib.Path(self._tmp.name)
+        put_blob(self.base, SHA_A, "x" * 10)
+
+    def test_a_blob_with_exactly_the_size_is_stored(self) -> None:
+        self.assertTrue(blobs.stored_with_size(self.base, SHA_A, 10))
+
+    def test_a_blob_of_another_size_is_not(self) -> None:
+        self.assertFalse(blobs.stored_with_size(self.base, SHA_A, 9))
+        self.assertFalse(blobs.stored_with_size(self.base, SHA_A, 11))
+
+    def test_a_missing_blob_is_not_stored_whatever_the_size(self) -> None:
+        self.assertFalse(blobs.stored_with_size(self.base, SHA_B, 0))
+        self.assertFalse(blobs.stored_with_size(self.base, SHA_B, 10))
+
+
 class ReadHistoryRequestsTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -444,7 +485,7 @@ class ReadHistoryRequestsTest(unittest.TestCase):
         saved = 1000 - ENVELOPE_JSON_BYTES
         self.assertEqual(
             requests,
-            [blobs.HistoryRequest("alpha", "deepseek", 5000, 2, 2 * saved, 2, 2 * (500 - len(text)), 0)],
+            [blobs.HistoryRequest("alpha", "deepseek", 5000, 2, 2 * saved, 2, 2 * (500 - len(text)), 0, NOON)],
         )
         self.assertEqual(envelopes, {SHA_A: 1000})
 
@@ -516,6 +557,28 @@ class ReadHistoryRequestsTest(unittest.TestCase):
 
     def test_no_keeper_directory_means_no_requests(self) -> None:
         self.assertEqual(self.read(), ([], {}))
+
+    def test_a_demoted_argument_is_stored_only_when_its_blob_has_the_original_size(self) -> None:
+        put_blob(self.base, SHA_A, "x" * 1000)
+        put_blob(self.base, SHA_B, "y" * 10)
+        message = put_message(
+            self.base,
+            [
+                tool_use({"_blob": envelope(SHA_A, 1000)}),
+                tool_use({"_blob": envelope(SHA_B, 2000)}),
+                tool_use({"_blob": envelope(SHA_C, 3000)}),
+            ],
+        )
+        write_captures(self.base, "alpha", DAY, [capture_row(NOON, 5000, [message])])
+        requests, _ = self.read()
+        self.assertEqual((requests[0].arguments, requests[0].stored_arguments), (3, 1))
+
+    def test_a_stored_argument_is_counted_in_every_request_that_shows_it(self) -> None:
+        put_blob(self.base, SHA_A, "x" * 1000)
+        message = put_message(self.base, [tool_use({"_blob": envelope(SHA_A, 1000)})])
+        write_captures(self.base, "alpha", DAY, [capture_row(NOON, 100, [message, message]), capture_row(NOON + 1, 100, [message])])
+        requests, _ = self.read()
+        self.assertEqual([(request.arguments, request.stored_arguments) for request in requests], [(2, 2), (1, 1)])
 
     def test_a_demoted_hash_keeps_its_original_size(self) -> None:
         first = put_message(self.base, [tool_use({"_blob": envelope(SHA_A, 1000)})])
@@ -752,6 +815,252 @@ class SummarizeHistoryTest(unittest.TestCase):
         self.assertEqual(self.summary({SHA_A: 6})["stored_and_same_size"], 1)
 
 
+class AttributeCallsTest(unittest.TestCase):
+    def test_a_call_between_two_requests_of_one_model_takes_that_model(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 30.0)]
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0)], requests), [("k", "m1")])
+
+    def test_a_call_between_two_models_stays_unattributed(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m2", 30.0)]
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0)], requests), [("k", blobs.NEIGHBOURS_DIFFER)])
+
+    def test_a_call_before_the_first_or_after_the_last_request_has_no_neighbour(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 30.0)]
+        calls = [stamped_call("k", 5.0), stamped_call("k", 35.0)]
+        self.assertEqual(attributed_pairs(calls, requests), [("k", blobs.NO_NEIGHBOUR), ("k", blobs.NO_NEIGHBOUR)])
+
+    def test_a_keeper_without_a_stored_request_has_no_neighbour(self) -> None:
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0)], []), [("k", blobs.NO_NEIGHBOUR)])
+
+    def test_a_request_written_at_the_call_time_closes_the_calls_turn(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m2", 20.0), stored_request("k", "m2", 30.0)]
+        # At 20.0 the neighbours are the m1 request at 10.0 and the m2 request at 20.0.
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0)], requests), [("k", blobs.NEIGHBOURS_DIFFER)])
+        # An instant later both neighbours are m2.
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.5)], requests), [("k", "m2")])
+
+    def test_another_keepers_requests_are_not_neighbours(self) -> None:
+        requests = [stored_request("other", "m1", 10.0), stored_request("other", "m1", 30.0)]
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0)], requests), [("k", blobs.NO_NEIGHBOUR)])
+
+    def test_each_call_keeps_the_keeper_that_made_it_and_that_keepers_model(self) -> None:
+        requests = [
+            stored_request("a", "m1", 10.0),
+            stored_request("a", "m1", 30.0),
+            stored_request("b", "m2", 10.0),
+            stored_request("b", "m2", 30.0),
+        ]
+        calls = [stamped_call("b", 20.0), stamped_call("a", 21.0)]
+        self.assertEqual(attributed_pairs(calls, requests), [("b", "m2"), ("a", "m1")])
+
+    def test_each_attributed_call_keeps_its_time(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 30.0)]
+        calls = [stamped_call("k", 25.0), stamped_call("k", 15.0)]
+        self.assertEqual(
+            blobs.attribute_calls(calls, requests),
+            [blobs.AttributedCall("k", "m1", 25.0), blobs.AttributedCall("k", "m1", 15.0)],
+        )
+
+    def test_only_alone_calls_are_attributed(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 30.0)]
+        self.assertEqual(attributed_pairs([stamped_call("k", 20.0, "mixed")], requests), [])
+
+    def test_requests_need_not_arrive_in_time_order(self) -> None:
+        requests = [stored_request("k", "m1", 30.0), stored_request("k", "m2", 10.0), stored_request("k", "m1", 20.0)]
+        # Sorted by time: m2 at 10, m1 at 20, m1 at 30. The call at 25 sits between the two m1 requests.
+        self.assertEqual(attributed_pairs([stamped_call("k", 25.0)], requests), [("k", "m1")])
+
+
+class SummarizeModelsTest(unittest.TestCase):
+    REQUESTS = [
+        stored_request("k", "m1", 10.0, arguments=2, stored=2),
+        stored_request("k", "m1", 30.0, arguments=0),
+        stored_request("k", "m2", 50.0, arguments=1),
+    ]
+
+    def test_requests_and_demoted_arguments_are_counted_per_model(self) -> None:
+        result = blobs.summarize_models([], self.REQUESTS, self.REQUESTS)
+        self.assertEqual(
+            (result["stored_requests"], result["with_demoted_arguments"], result["with_demoted_arguments_percent"]),
+            (3, 2, 66.7),
+        )
+        self.assertEqual(
+            result["requests_by_model"],
+            {
+                "m1": {"requests": 2, "with_demoted_arguments": 1, "with_stored_demotion": 1},
+                "m2": {"requests": 1, "with_demoted_arguments": 1, "with_stored_demotion": 0},
+            },
+        )
+
+    def test_the_last_alone_call_is_kept_per_model_and_per_unattributed_label(self) -> None:
+        calls = [
+            stamped_call("k", 25.0),
+            stamped_call("k", 15.0),
+            stamped_call("k", 20.0, "mixed"),
+            stamped_call("k", 70.0),
+            stamped_call("k", 5.0),
+        ]
+        result = blobs.summarize_models(calls, self.REQUESTS, self.REQUESTS)
+        self.assertEqual(
+            result["last_alone_call_by_model"],
+            {"m1": "1970-01-01T00:00:25+00:00", blobs.NO_NEIGHBOUR: "1970-01-01T00:01:10+00:00"},
+        )
+
+    def test_a_demoted_argument_without_a_stored_blob_is_not_a_stored_demotion(self) -> None:
+        result = blobs.summarize_models([], self.REQUESTS, self.REQUESTS)
+        self.assertEqual((result["with_stored_demotion"], result["with_stored_demotion_percent"]), (1, 33.3))
+
+    def test_the_last_stored_demotion_is_kept_per_model_whatever_the_order(self) -> None:
+        requests = [
+            stored_request("k", "m1", 30.0, arguments=1, stored=1),
+            stored_request("k", "m1", 10.0, arguments=1, stored=1),
+            stored_request("k", "m1", 40.0, arguments=1),
+            stored_request("k", "m2", 5.0, arguments=1, stored=1),
+            stored_request("k", "m2", 7.0),
+            stored_request("k", "m3", 9.0, arguments=1),
+        ]
+        result = blobs.summarize_models([], requests, requests)
+        self.assertEqual(
+            result["last_stored_demotion_by_model"],
+            {"m1": "1970-01-01T00:00:30+00:00", "m2": "1970-01-01T00:00:05+00:00"},
+        )
+
+    def test_alone_calls_are_counted_and_attributed(self) -> None:
+        calls = [stamped_call("k", 20.0), stamped_call("k", 20.5, "mixed"), stamped_call("k", 70.0)]
+        result = blobs.summarize_models(calls, self.REQUESTS, self.REQUESTS)
+        self.assertEqual(result["alone_calls"], 2)
+        self.assertEqual(result["alone_calls_by_model"], {"m1": 1, blobs.NO_NEIGHBOUR: 1})
+
+    def test_alone_calls_are_also_counted_per_keeper_and_model(self) -> None:
+        requests = [
+            stored_request("a", "m1", 10.0),
+            stored_request("a", "m1", 30.0),
+            stored_request("b", "m2", 10.0),
+            stored_request("b", "m2", 30.0),
+        ]
+        calls = [
+            stamped_call("a", 20.0),
+            stamped_call("a", 25.0),
+            stamped_call("b", 20.0),
+            stamped_call("b", 40.0),
+            stamped_call("a", 26.0, "mixed"),
+        ]
+        result = blobs.summarize_models(calls, requests, requests)
+        self.assertEqual(result["alone_calls"], 4)
+        self.assertEqual(result["alone_calls_by_model"], {"m1": 2, "m2": 1, blobs.NO_NEIGHBOUR: 1})
+        self.assertEqual(
+            result["alone_calls_by_keeper_and_model"], {"a": {"m1": 2}, "b": {"m2": 1, blobs.NO_NEIGHBOUR: 1}}
+        )
+
+    def test_neighbours_may_lie_outside_the_requests_being_counted(self) -> None:
+        result = blobs.summarize_models([stamped_call("k", 20.0)], [], self.REQUESTS)
+        self.assertEqual(result["alone_calls_by_model"], {"m1": 1})
+        self.assertEqual(
+            (result["stored_requests"], result["with_demoted_arguments_percent"], result["with_stored_demotion_percent"]),
+            (0, None, None),
+        )
+
+
+class SummarizeTurnsTest(unittest.TestCase):
+    def test_calls_between_two_requests_belong_to_the_turn_the_later_one_closes(self) -> None:
+        requests = [
+            stored_request("k", "m1", 10.0, arguments=1, stored=1),
+            stored_request("k", "m1", 20.0, arguments=1, stored=1),
+            stored_request("k", "m1", 30.0),
+        ]
+        calls = [stamped_call("k", 5.0), stamped_call("k", 15.0), stamped_call("k", 25.0), stamped_call("k", 35.0)]
+        self.assertEqual(
+            blobs.summarize_turns(calls, requests),
+            {
+                "m1": {
+                    "no_stored_demotion": {"calls": 1, "turns": 1, "turns_with_call": 1},
+                    "stored_demotion": {"calls": 1, "turns": 1, "turns_with_call": 1},
+                }
+            },
+        )
+
+    def test_a_call_at_a_request_time_belongs_to_the_turn_that_request_closes(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 20.0)]
+        calls = [stamped_call("k", 10.0), stamped_call("k", 20.0)]
+        row = blobs.summarize_turns(calls, requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 1, "turns": 1, "turns_with_call": 1})
+
+    def test_several_calls_in_one_turn_count_once_as_a_turn_with_a_call(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 20.0)]
+        calls = [stamped_call("k", 12.0), stamped_call("k", 14.0), stamped_call("k", 16.0)]
+        row = blobs.summarize_turns(calls, requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 3, "turns": 1, "turns_with_call": 1})
+
+    def test_calls_need_not_arrive_in_time_order(self) -> None:
+        requests = [stored_request("k", "m1", 13.0), stored_request("k", "m1", 20.0)]
+        calls = [stamped_call("k", 16.0), stamped_call("k", 12.0), stamped_call("k", 14.0)]
+        # In (13, 20] fall the calls at 16 and 14. The call at 12 belongs to an earlier turn.
+        row = blobs.summarize_turns(calls, requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 2, "turns": 1, "turns_with_call": 1})
+
+    def test_a_turn_without_a_call_is_counted_with_zero_calls(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 20.0)]
+        row = blobs.summarize_turns([], requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 0, "turns": 1, "turns_with_call": 0})
+
+    def test_only_alone_calls_of_the_same_keeper_count(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 20.0)]
+        calls = [stamped_call("k", 15.0, "mixed"), stamped_call("other", 15.0)]
+        row = blobs.summarize_turns(calls, requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 0, "turns": 1, "turns_with_call": 0})
+
+    def test_the_model_is_the_one_of_the_request_that_closes_the_turn(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m2", 20.0, arguments=1, stored=1)]
+        result = blobs.summarize_turns([stamped_call("k", 15.0)], requests)
+        self.assertEqual(result, {"m2": {"stored_demotion": {"calls": 1, "turns": 1, "turns_with_call": 1}}})
+
+    def test_a_keepers_first_request_closes_no_turn(self) -> None:
+        self.assertEqual(blobs.summarize_turns([stamped_call("k", 5.0)], [stored_request("k", "m1", 10.0)]), {})
+
+    def test_each_keeper_has_its_own_turns_and_requests_need_not_come_in_order(self) -> None:
+        requests = [
+            stored_request("b", "m1", 40.0),
+            stored_request("a", "m1", 20.0),
+            stored_request("b", "m1", 30.0),
+            stored_request("a", "m1", 10.0),
+        ]
+        calls = [stamped_call("a", 15.0), stamped_call("b", 35.0), stamped_call("b", 36.0)]
+        row = blobs.summarize_turns(calls, requests)["m1"]["no_stored_demotion"]
+        self.assertEqual(row, {"calls": 3, "turns": 2, "turns_with_call": 2})
+
+    def test_a_demoted_argument_without_a_stored_blob_does_not_count_as_stored_demotion(self) -> None:
+        requests = [stored_request("k", "m1", 10.0), stored_request("k", "m1", 20.0, arguments=3, stored=0)]
+        self.assertEqual(list(blobs.summarize_turns([], requests)["m1"]), ["no_stored_demotion"])
+
+
+class SummarizeSplitTest(unittest.TestCase):
+    REQUESTS = [
+        stored_request("k", "m1", 10.0, arguments=1),
+        stored_request("k", "m1", 20.0, arguments=1),
+        stored_request("k", "m1", 30.0, arguments=0),
+        stored_request("k", "m1", 40.0, arguments=0),
+    ]
+    CALLS = [stamped_call("k", 15.0), stamped_call("k", 25.0), stamped_call("k", 30.0), stamped_call("k", 35.0)]
+
+    def test_what_comes_before_the_instant_and_what_comes_at_or_after_it_are_summarized_apart(self) -> None:
+        result = blobs.summarize_split(self.CALLS, self.REQUESTS, 30.0)
+        before, after = result["before"], result["after"]
+        assert isinstance(before, dict) and isinstance(after, dict)
+        self.assertEqual((before["stored_requests"], before["with_demoted_arguments"], before["alone_calls"]), (2, 2, 2))
+        self.assertEqual((after["stored_requests"], after["with_demoted_arguments"], after["alone_calls"]), (2, 0, 2))
+
+    def test_a_call_near_the_instant_still_finds_its_neighbours_on_the_other_side(self) -> None:
+        result = blobs.summarize_split(self.CALLS, self.REQUESTS, 30.0)
+        before, after = result["before"], result["after"]
+        assert isinstance(before, dict) and isinstance(after, dict)
+        # The call at 25 has the request at 30 after it, which is on the other side of the instant.
+        self.assertEqual(before["alone_calls_by_model"], {"m1": 2})
+        self.assertEqual(after["alone_calls_by_model"], {"m1": 2})
+
+    def test_the_instant_is_reported_in_utc(self) -> None:
+        self.assertEqual(blobs.summarize_split([], [], 30.0)["at"], "1970-01-01T00:00:30+00:00")
+
+
 class MainTest(unittest.TestCase):
     """Runs the command on a store that holds one of everything, so each reader feeds the right section."""
 
@@ -760,7 +1069,7 @@ class MainTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.base = pathlib.Path(self._tmp.name)
 
-    def run_main(self) -> dict[str, object]:
+    def run_main(self, *extra: str) -> dict[str, object]:
         out = self.base / "result.json"
         argv = [
             "measure_blob_inputs.py",
@@ -772,6 +1081,7 @@ class MainTest(unittest.TestCase):
             "2026-11-02",
             "--until",
             "2026-11-02T06:00:00Z",
+            *extra,
             "--json-out",
             str(out),
         ]
@@ -779,7 +1089,63 @@ class MainTest(unittest.TestCase):
             self.assertEqual(blobs.main(), 0)
         return json.loads(out.read_text(encoding="utf-8"))
 
+    def test_the_models_section_follows_the_stored_requests_and_a_split_divides_the_calls(self) -> None:
+        self.fill_store()
+        result = self.run_main("--split", "2026-11-02T00:00:00Z")
+        models = result["by_model"]
+        assert isinstance(models, dict)
+        self.assertEqual(
+            models["requests_by_model"],
+            {"deepseek": {"requests": 2, "with_demoted_arguments": 1, "with_stored_demotion": 1}},
+        )
+        self.assertEqual(models["with_stored_demotion"], 1)
+        self.assertEqual(models["last_stored_demotion_by_model"], {"deepseek": "2026-11-02T01:00:00+00:00"})
+        # Of alpha's four alone calls, only the one at +2h lies between two stored requests (+1h and +3h).
+        self.assertEqual(models["alone_calls_by_model"], {"deepseek": 1, blobs.NO_NEIGHBOUR: 3})
+        self.assertEqual(models["alone_calls_by_keeper_and_model"], {"alpha": {"deepseek": 1, blobs.NO_NEIGHBOUR: 3}})
+        self.assertEqual(
+            models["last_alone_call_by_model"],
+            {"deepseek": "2026-11-02T02:00:00+00:00", blobs.NO_NEIGHBOUR: "2026-11-02T01:00:00+00:00"},
+        )
+        split = result["split"]
+        assert isinstance(split, dict)
+        self.assertEqual(split["at"], "2026-11-02T00:00:00+00:00")
+        before, after = split["before"], split["after"]
+        self.assertEqual((before["stored_requests"], before["alone_calls"]), (0, 2))
+        self.assertEqual((after["stored_requests"], after["alone_calls"]), (2, 2))
+        self.assertEqual(after["alone_calls_by_model"], {"deepseek": 1, blobs.NO_NEIGHBOUR: 1})
+
+    def test_each_turn_is_counted_under_the_model_and_the_exposure_of_the_request_that_closes_it(self) -> None:
+        self.fill_store()
+        # The request at +3h closes the turn that made the call at +2h. It shows no stored demotion.
+        self.assertEqual(
+            self.run_main()["turns_by_model"],
+            {"deepseek": {"no_stored_demotion": {"calls": 1, "turns": 1, "turns_with_call": 1}}},
+        )
+
+    def test_without_a_split_the_summary_has_no_split_section(self) -> None:
+        self.fill_store()
+        self.assertNotIn("split", self.run_main())
+
     def test_the_ledger_and_the_captures_feed_their_own_sections(self) -> None:
+        self.fill_store()
+        result = self.run_main()
+        self.assertEqual(result["window"], {"from": "2026-11-01", "to": "2026-11-02", "until": "2026-11-02T06:00:00+00:00"})
+        calls = result["blob_calls"]
+        assert isinstance(calls, dict)
+        self.assertEqual((calls["calls"], calls["alone"], calls["mixed"]), (5, 4, 1))
+        self.assertEqual(calls["shape_alone"], {"complete_envelope": 3, "wrapped_arguments": 1})
+        self.assertEqual(calls["complete_envelope_alone"], {"calls": 3, "hash_in_store": 1, "hash_not_in_store": 2})
+        self.assertEqual(calls["by_day"], {"2026-11-01": {"alone": 2, "mixed": 1}, "2026-11-02": {"alone": 2}})
+        history = result["history_arguments"]
+        assert isinstance(history, dict)
+        self.assertEqual((history["requests"], history["with_demoted_arguments"]), (2, 1))
+        self.assertEqual((history["distinct_demoted_arguments"], history["stored_and_same_size"]), (1, 1))
+        rows = history["by_keeper_and_model"]
+        assert isinstance(rows, list)
+        self.assertEqual((rows[0]["keeper"], rows[0]["model"], rows[0]["demoted_arguments_median"]), ("alpha", "deepseek", 1))
+
+    def fill_store(self) -> None:
         put_blob(self.base, SHA_B, "x" * 10)
         write_ledger(
             self.base,
@@ -790,25 +1156,25 @@ class MainTest(unittest.TestCase):
                 ledger_row(NOON, "beta", "Edit", {"_blob": envelope(SHA_D), "x": 1}, disposition="completed", wire_outcome="ok"),
             ],
         )
-        write_ledger(self.base, NEXT_DAY, [ledger_row(MIDNIGHT + HOUR, "alpha", "Write", {"_blob": {"content": "c"}}, wire_outcome="error")])
+        write_ledger(
+            self.base,
+            NEXT_DAY,
+            [
+                ledger_row(MIDNIGHT + HOUR, "alpha", "Write", {"_blob": {"content": "c"}}, wire_outcome="error"),
+                ledger_row(MIDNIGHT + 2 * HOUR, "alpha", "Write", {"_blob": envelope(SHA_D)}, wire_outcome="error"),
+            ],
+        )
         put_blob(self.base, SHA_C, "y" * 1000)
         demoted = put_message(self.base, [tool_use({"_blob": envelope(SHA_C, 1000)}), tool_result(marker(SHA_A, 500))])
-        write_captures(self.base, "alpha", NEXT_DAY, [capture_row(MIDNIGHT + HOUR, 5000, [demoted], model="deepseek")])
-        result = self.run_main()
-        self.assertEqual(result["window"], {"from": "2026-11-01", "to": "2026-11-02", "until": "2026-11-02T06:00:00+00:00"})
-        calls = result["blob_calls"]
-        assert isinstance(calls, dict)
-        self.assertEqual((calls["calls"], calls["alone"], calls["mixed"]), (4, 3, 1))
-        self.assertEqual(calls["shape_alone"], {"complete_envelope": 2, "wrapped_arguments": 1})
-        self.assertEqual(calls["complete_envelope_alone"], {"calls": 2, "hash_in_store": 1, "hash_not_in_store": 1})
-        self.assertEqual(calls["by_day"], {"2026-11-01": {"alone": 2, "mixed": 1}, "2026-11-02": {"alone": 1}})
-        history = result["history_arguments"]
-        assert isinstance(history, dict)
-        self.assertEqual((history["requests"], history["with_demoted_arguments"]), (1, 1))
-        self.assertEqual((history["distinct_demoted_arguments"], history["stored_and_same_size"]), (1, 1))
-        rows = history["by_keeper_and_model"]
-        assert isinstance(rows, list)
-        self.assertEqual((rows[0]["keeper"], rows[0]["model"], rows[0]["demoted_arguments_median"]), ("alpha", "deepseek", 1))
+        write_captures(
+            self.base,
+            "alpha",
+            NEXT_DAY,
+            [
+                capture_row(MIDNIGHT + HOUR, 5000, [demoted], model="deepseek"),
+                capture_row(MIDNIGHT + 3 * HOUR, 5000, [], model="deepseek"),
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -32,8 +32,20 @@ Definitions:
   are the envelope's `bytes` minus the size of that object as compact JSON.
 - demoted result: a `tool_result` block of a captured message whose `content` starts
   with `[masc:blob`. Saved bytes are the marker's `bytes=` value minus its length.
-- stored and same size: a distinct demoted-argument hash whose blob exists with
-  exactly the envelope's `bytes`.
+- stored and same size: a hash whose blob exists with exactly the envelope's `bytes`.
+- stored demotion: a demoted argument that is stored and same size. A request shows
+  one when at least one of its demoted arguments is. A refused `_blob` call the model
+  made up shows up in later requests as a lone envelope too, but its hash has no such
+  blob, so it is a demoted argument and not a stored demotion.
+- turn: the calls of one Keeper in (previous stored request, this stored request]
+  belong to the turn this request closes. The interval covers more than one turn when
+  a turn left no stored request.
+- model of a call: the model both neighbouring stored requests of the Keeper share.
+  A call with a stored request missing on one side, or two different models, is
+  reported apart as unattributed.
+
+`--split <time>` adds the same model summary for what came before and what came at or
+after that time, for example a deploy.
 
 Usage:
     docs/evidence/blob-input-2026-11/measure_blob_inputs.py --base-path ~/me \
@@ -48,6 +60,7 @@ import pathlib
 import re
 import statistics
 import sys
+from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -83,6 +96,10 @@ NOT_AN_OBJECT = "not_an_object"
 REFUSED_BEFORE_RUN = "refused_before_run"
 COMPLETED = "completed"
 OTHER = "other"
+STORED_DEMOTION = "stored_demotion"
+NO_STORED_DEMOTION = "no_stored_demotion"
+NO_NEIGHBOUR = "unattributed: no stored request on one side"
+NEIGHBOURS_DIFFER = "unattributed: the stored requests on both sides use different models"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +111,7 @@ class BlobCall:
     shape: str
     outcome: str
     sha256: str | None
+    stamp: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +131,19 @@ class HistoryRequest:
     results: int
     result_saved: int
     unreadable: int
+    captured_at: float = 0.0
+    stored_arguments: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AttributedCall:
+    keeper: str
+    label: str
+    stamp: float
+
+
+def iso_utc(stamp: float) -> str:
+    return datetime.fromtimestamp(stamp, timezone.utc).isoformat()
 
 
 def number_of(value: object) -> float | None:
@@ -196,6 +227,7 @@ def read_blob_calls(base: pathlib.Path, first: date, last: date, since: float, u
                             *classified[:2],
                             outcome_of(row),
                             classified[2],
+                            stamp,
                         )
                     )
     return calls
@@ -203,6 +235,14 @@ def read_blob_calls(base: pathlib.Path, first: date, last: date, since: float, u
 
 def blob_path(base: pathlib.Path, sha: str) -> pathlib.Path:
     return base / ".masc" / "tool_blobs" / sha[:BLOB_DIR_PREFIX_CHARS] / sha
+
+
+def stored_with_size(base: pathlib.Path, sha: str, size: int) -> bool:
+    """The blob store holds [sha] with exactly [size] bytes, which is how `Keeper_model_input_demotion` writes it."""
+    try:
+        return blob_path(base, sha).stat().st_size == size
+    except OSError:
+        return False
 
 
 def compact_json_bytes(value: object) -> int:
@@ -271,7 +311,7 @@ def read_history_requests(
                     body = number_of(wire.get("body_bytes")) if isinstance(wire, dict) else None
                     if captured is None or body is None or not since <= captured <= until:
                         continue
-                    arguments = argument_saved = results = result_saved = unreadable = 0
+                    arguments = argument_saved = stored_arguments = results = result_saved = unreadable = 0
                     messages = row.get("messages")
                     for message in messages if isinstance(messages, list) else []:
                         artifact = message.get("artifact") if isinstance(message, dict) else None
@@ -288,6 +328,7 @@ def read_history_requests(
                             envelopes[sha] = original
                             arguments += 1
                             argument_saved += original - envelope_bytes
+                            stored_arguments += 1 if stored_with_size(base, sha, original) else 0
                         results += demotion.results
                         result_saved += demotion.result_saved
                     model = wire.get("model") if isinstance(wire, dict) else None
@@ -301,6 +342,8 @@ def read_history_requests(
                             results,
                             result_saved,
                             unreadable,
+                            captured,
+                            stored_arguments,
                         )
                     )
     return requests, envelopes
@@ -387,13 +430,7 @@ def summarize_history(
             "with_demoted_arguments": sum(1 for item in items if item.arguments > 0),
         }
     carrying_total = sum(1 for request in requests if request.arguments > 0)
-    same_size = 0
-    for sha, original in envelopes.items():
-        try:
-            if blob_path(base, sha).stat().st_size == original:
-                same_size += 1
-        except OSError:
-            continue
+    same_size = sum(1 for sha, original in envelopes.items() if stored_with_size(base, sha, original))
     return {
         "requests": len(requests),
         "with_demoted_arguments": carrying_total,
@@ -403,6 +440,128 @@ def summarize_history(
         "stored_and_same_size": same_size,
         "by_keeper_and_model": rows[:TOP_HISTORY_ROWS],
         "requests_by_keeper_and_model": dict(sorted(requests_by_keeper.items())),
+    }
+
+
+def attribute_calls(calls: list[BlobCall], requests: list[HistoryRequest]) -> list[AttributedCall]:
+    """Each `alone` call with its Keeper, its time and the model the Keeper's stored requests on both sides of it share.
+
+    A stored request is written when a turn ends, so the first one at or after a call closes the turn that made it
+    and the one before it closes the turn before. When the two differ or one is missing, the call stays unattributed.
+    """
+    by_keeper: dict[str, list[HistoryRequest]] = defaultdict(list)
+    for request in sorted(requests, key=lambda item: item.captured_at):
+        by_keeper[request.keeper].append(request)
+    stamps = {keeper: [item.captured_at for item in items] for keeper, items in by_keeper.items()}
+    attributed: list[AttributedCall] = []
+    for call in calls:
+        if call.form != ALONE:
+            continue
+        items = by_keeper.get(call.keeper, [])
+        index = bisect_left(stamps.get(call.keeper, []), call.stamp)
+        if index == 0 or index == len(items):
+            label = NO_NEIGHBOUR
+        elif items[index - 1].model == items[index].model:
+            label = items[index].model
+        else:
+            label = NEIGHBOURS_DIFFER
+        attributed.append(AttributedCall(call.keeper, label, call.stamp))
+    return attributed
+
+
+def summarize_models(
+    calls: list[BlobCall], requests: list[HistoryRequest], neighbours: list[HistoryRequest]
+) -> dict[str, object]:
+    """Stored requests and `alone` calls per model.
+
+    [neighbours] is every stored request, so a call near the edge of [calls] still finds the requests on both sides.
+    """
+    per_model: dict[str, Counter[str]] = defaultdict(Counter)
+    last_stored: dict[str, float] = {}
+    for request in requests:
+        per_model[request.model]["requests"] += 1
+        if request.arguments > 0:
+            per_model[request.model]["with_demoted_arguments"] += 1
+        if request.stored_arguments > 0:
+            per_model[request.model]["with_stored_demotion"] += 1
+            last_stored[request.model] = max(request.captured_at, last_stored.get(request.model, request.captured_at))
+    carrying = sum(counts["with_demoted_arguments"] for counts in per_model.values())
+    with_stored = sum(counts["with_stored_demotion"] for counts in per_model.values())
+    attributed = attribute_calls(calls, neighbours)
+    calls_by_keeper: dict[str, Counter[str]] = defaultdict(Counter)
+    last_call: dict[str, float] = {}
+    for item in attributed:
+        calls_by_keeper[item.keeper][item.label] += 1
+        last_call[item.label] = max(item.stamp, last_call.get(item.label, item.stamp))
+    return {
+        "stored_requests": len(requests),
+        "with_demoted_arguments": carrying,
+        "with_demoted_arguments_percent": percent(carrying, len(requests)),
+        "with_stored_demotion": with_stored,
+        "with_stored_demotion_percent": percent(with_stored, len(requests)),
+        "alone_calls": len(attributed),
+        "alone_calls_by_model": dict(sorted(Counter(item.label for item in attributed).items())),
+        "last_alone_call_by_model": {label: iso_utc(stamp) for label, stamp in sorted(last_call.items())},
+        "alone_calls_by_keeper_and_model": {
+            keeper: dict(sorted(counts.items())) for keeper, counts in sorted(calls_by_keeper.items())
+        },
+        "requests_by_model": {
+            model: {
+                "requests": counts["requests"],
+                "with_demoted_arguments": counts["with_demoted_arguments"],
+                "with_stored_demotion": counts["with_stored_demotion"],
+            }
+            for model, counts in sorted(per_model.items())
+        },
+        "last_stored_demotion_by_model": {model: iso_utc(stamp) for model, stamp in sorted(last_stored.items())},
+    }
+
+
+def summarize_turns(calls: list[BlobCall], requests: list[HistoryRequest]) -> dict[str, dict[str, dict[str, int]]]:
+    """`alone` calls per turn, by the model of the request that closes the turn and whether that request shows a stored demotion.
+
+    The calls of one Keeper in (previous stored request, this stored request] belong to the turn this request closes.
+    The interval covers more than one turn when a turn left no stored request. A Keeper's first stored request closes
+    no turn here, and calls before it or after its last stored request are not counted.
+    """
+    call_times: dict[str, list[float]] = defaultdict(list)
+    for call in calls:
+        if call.form == ALONE:
+            call_times[call.keeper].append(call.stamp)
+    for times in call_times.values():
+        times.sort()
+    by_keeper: dict[str, list[HistoryRequest]] = defaultdict(list)
+    for request in sorted(requests, key=lambda item: item.captured_at):
+        by_keeper[request.keeper].append(request)
+    totals: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
+    for keeper, items in by_keeper.items():
+        times = call_times.get(keeper, [])
+        for previous, closing in zip(items, items[1:]):
+            made = bisect_right(times, closing.captured_at) - bisect_right(times, previous.captured_at)
+            row = totals[closing.model][STORED_DEMOTION if closing.stored_arguments > 0 else NO_STORED_DEMOTION]
+            row["turns"] += 1
+            row["calls"] += made
+            row["turns_with_call"] += 1 if made else 0
+    return {
+        model: {exposure: dict(sorted(row.items())) for exposure, row in sorted(by_exposure.items())}
+        for model, by_exposure in sorted(totals.items())
+    }
+
+
+def summarize_split(calls: list[BlobCall], requests: list[HistoryRequest], split_at: float) -> dict[str, object]:
+    """The same summary before and after one instant. A call or request exactly at [split_at] counts as after."""
+    return {
+        "at": iso_utc(split_at),
+        "before": summarize_models(
+            [call for call in calls if call.stamp < split_at],
+            [request for request in requests if request.captured_at < split_at],
+            requests,
+        ),
+        "after": summarize_models(
+            [call for call in calls if call.stamp >= split_at],
+            [request for request in requests if request.captured_at >= split_at],
+            requests,
+        ),
     }
 
 
@@ -420,6 +579,12 @@ def main() -> int:
     parser.add_argument("--from-date", type=parse_day, required=True, help="first UTC day, YYYY-MM-DD")
     parser.add_argument("--to-date", type=parse_day, required=True, help="last UTC day, YYYY-MM-DD")
     parser.add_argument("--until", type=parse_until, required=True, help="ignore anything after this ISO-8601 time")
+    parser.add_argument(
+        "--split",
+        type=parse_until,
+        default=None,
+        help="also summarize before and after this ISO-8601 time, e.g. a deploy; a request or call at it counts as after",
+    )
     parser.add_argument("--json-out", default=None, help="write the summary to this file")
     args = parser.parse_args()
     base = masc_base_path.require(parser, args.base_path, "--base-path")
@@ -432,15 +597,19 @@ def main() -> int:
         if call.form == ALONE and call.sha256 is not None
     }
     requests, envelopes = read_history_requests(base, args.from_date, args.to_date, since, args.until)
-    summary = {
+    summary: dict[str, object] = {
         "window": {
             "from": args.from_date.isoformat(),
             "to": args.to_date.isoformat(),
-            "until": datetime.fromtimestamp(args.until, timezone.utc).isoformat(),
+            "until": iso_utc(args.until),
         },
         "blob_calls": summarize_blob_calls(calls, stored),
         "history_arguments": summarize_history(requests, envelopes, base),
+        "by_model": summarize_models(calls, requests, requests),
+        "turns_by_model": summarize_turns(calls, requests),
     }
+    if args.split is not None:
+        summary["split"] = summarize_split(calls, requests, args.split)
     text = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)
     print(text)
     if args.json_out:

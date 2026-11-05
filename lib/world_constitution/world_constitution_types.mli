@@ -26,11 +26,8 @@ end
 
 type evidence = {
   uri : string;
-      (** Where the world talked this norm over: a board post or comment id,
-          or a file a watcher bound. *)
-  sha256 : string option;
-      (** Present when the evidence is a file snapshot rather than a ledger
-          row. *)
+      (** Where the world talked this norm over: a board post or comment
+          id. *)
 }
 
 type t = private {

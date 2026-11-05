@@ -26,7 +26,6 @@ end
 
 type evidence = {
   uri : string;
-  sha256 : string option;
 }
 
 type t = {

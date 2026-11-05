@@ -89,7 +89,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
     let evidence =
       match string_arg args "evidence_uri" with
       | None -> []
-      | Some uri -> [ { World_constitution_types.uri; sha256 = None } ]
+      | Some uri -> [ { World_constitution_types.uri } ]
     in
     match
       World_constitution_types.make

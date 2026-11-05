@@ -677,11 +677,11 @@ type output_destination =
     }
 
 type input_origin =
-  | Inherited
+  | Plumbed
   | From_string of string
   | Read_from of { path : string }
 
-(* [Inherited] / [Captured] mean the stage takes the pipeline's own plumbing:
+(* [Plumbed] / [Captured] mean the stage takes the pipeline's own plumbing:
    the pipe from the stage before it (for the first stage, an input already
    at its end), the pipe to the stage after it, the stderr this runtime
    collects. A file replaces that plumbing for one stream,
@@ -697,7 +697,7 @@ type pipeline_stage = {
 }
 
 let plumbed_stage ~argv ~env ~cwd =
-  { argv; env; cwd; stdin = Inherited; stdout = Captured; stderr = Captured }
+  { argv; env; cwd; stdin = Plumbed; stdout = Captured; stderr = Captured }
 ;;
 
 (* Opening a stage's file happens deep inside the spawn loop, where a Result
@@ -709,7 +709,7 @@ exception Pipeline_redirect_failed of string
 let stage_holds_a_file { stdin; stdout; stderr; _ } =
   let source_is_a_file =
     match stdin with
-    | Inherited | From_string _ -> false
+    | Plumbed | From_string _ -> false
     | Read_from _ -> true
   in
   let sink_is_a_file = function
@@ -1089,7 +1089,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
            let open Result.Syntax in
            let* stdin_source =
              match stdin with
-             | Inherited -> Ok None
+             | Plumbed -> Ok None
              | From_string content ->
                Ok (Some (Eio.Flow.string_source content :> Eio.Flow.source_ty Eio.Resource.t))
              | Read_from { path } ->
@@ -1488,7 +1488,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                         | Error message -> raise (Pipeline_redirect_failed message))
                    in
                    let source_flow ~fallback = function
-                     | Inherited -> fallback
+                     | Plumbed -> fallback
                      | From_string content ->
                        Some
                          (Eio.Flow.string_source content

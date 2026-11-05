@@ -43,7 +43,7 @@ let set_redirect_target plan fd target =
   | 2 -> Ok { plan with stderr_target = target }
   | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
 
-(* Streams the child holds a file for. [Captured] / [Inherited] mean the
+(* Streams the child holds a file for. [Captured] / [Plumbed] mean the
    stream stays on the capture path, so a command with no file redirect
    produces exactly the plumbing it did before. *)
 type attachments = {
@@ -53,7 +53,7 @@ type attachments = {
 }
 
 let no_attachments =
-  { stdin_from = Process_eio.Inherited
+  { stdin_from = Process_eio.Plumbed
   ; stdout_to = Process_eio.Captured
   ; stderr_to = Process_eio.Captured
   }
@@ -64,7 +64,7 @@ let no_attachments =
    redirect puts one here, and the path that discards attachments would drop
    it without a word. *)
 let holds_a_source = function
-  | Process_eio.Inherited -> false
+  | Process_eio.Plumbed -> false
   | Process_eio.From_string _ | Process_eio.Read_from _ -> true
 
 let holds_a_sink = function
@@ -560,7 +560,7 @@ let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_ch
                        (fun () -> really_input_string ic (in_channel_length ic)))
                 with Sys_error _ -> None)
              | Process_eio.From_string content -> Some content
-             | Process_eio.Inherited -> stdin_content
+             | Process_eio.Plumbed -> stdin_content
            in
            (match
               runner
@@ -601,10 +601,10 @@ let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_ch
           match attachments.stdin_from with
           | Process_eio.Read_from _ as declared -> declared
           | Process_eio.From_string _ as declared -> declared
-          | Process_eio.Inherited ->
+          | Process_eio.Plumbed ->
             (match stdin_content with
              | Some content -> Process_eio.From_string content
-             | None -> Process_eio.Inherited)
+             | None -> Process_eio.Plumbed)
         in
         (match
            Process_eio.run_argv_with_redirects

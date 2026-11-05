@@ -1045,7 +1045,7 @@ let test_run_argv_pipeline_streaming_timeout_preserves_stderr () =
       ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
       [
         {
-          Process_eio.stdin = Process_eio.Inherited;
+          Process_eio.stdin = Process_eio.Plumbed;
           stdout = Process_eio.Captured;
           stderr = Process_eio.Captured;
           argv =
@@ -1292,7 +1292,7 @@ let test_run_argv_pipeline_timeout_reaps_all_stages () =
          ~timeout_sec:0.5
       [
         {
-          Process_eio.stdin = Process_eio.Inherited;
+          Process_eio.stdin = Process_eio.Plumbed;
           stdout = Process_eio.Captured;
           stderr = Process_eio.Captured;
           argv = [ "/bin/sh"; "-c"; "echo stage1-output; sleep 5" ];
@@ -1424,7 +1424,7 @@ let cancel_closed_output_child ~redirected () =
       let outcome = Eio.Fiber.first
         (fun () ->
           ignore (Process_eio.run_argv_with_redirects
-            ~stdin:Process_eio.Inherited ~stdout:destination ~stderr:destination
+            ~stdin:Process_eio.Plumbed ~stdout:destination ~stderr:destination
             [ "/bin/sh"; "-c"; script ]);
           `Exited)
         (fun () ->

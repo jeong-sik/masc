@@ -28,7 +28,7 @@ let with_runtime f =
   f ()
 ;;
 
-let run ?(stdin = Process_eio.Inherited) ?(stdout = Process_eio.Captured)
+let run ?(stdin = Process_eio.Plumbed) ?(stdout = Process_eio.Captured)
       ?(stderr = Process_eio.Captured) argv =
   Process_eio.run_argv_with_redirects ~stdin ~stdout ~stderr argv
 ;;

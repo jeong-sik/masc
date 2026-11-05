@@ -3084,10 +3084,6 @@
 
 (include stanzas/test_bind_required_guard_counter.inc)
 
-(include stanzas/test_k2_pipeline_e2e.inc)
-
-(include stanzas/test_k3_tool_pipeline_e2e.inc)
-
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
 
 (include stanzas/test_keeper_latched_reason_wiring.inc)

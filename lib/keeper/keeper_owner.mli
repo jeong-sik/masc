@@ -40,6 +40,8 @@ and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime
 
 type operation_projection =
   { queued_count : int
+  ; oldest_queued_created_at : float option
+      (** When the oldest of [queued_count] operations was admitted. *)
   ; has_claimable_queued : bool
       (** Original queued executions eligible for claim at the last Owner
           mutation or retry wake. Approval waits and cooling retries are

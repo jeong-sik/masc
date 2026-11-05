@@ -7073,8 +7073,9 @@ module Browser_lane_view = struct
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand), _ -> true
     | (Bound_automatic | Bound_explicit), Live, None -> false
     | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
-  let cadence_operation ?(viewport : screenshot option) t =
-    if busy t || awaiting_browser t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
+  let cadence_operation ?(allow_inflight = false) ?(viewport : screenshot option) t =
+    if (not allow_inflight && (busy t || Option.is_some t.refresh_pending))
+       || awaiting_browser t || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
@@ -7091,7 +7092,12 @@ module Browser_lane_view = struct
       | Some _, Text_view -> Some Read_refresh
   let observation_scope ?(image_open = false) ?viewport t =
     let operation =
-      cadence_operation ?viewport:(if image_open then viewport else None) t
+      match t.load with
+      | Loading (_, operation) when not (operation_is_read operation) -> None
+      | Idle when Option.is_some t.refresh_pending -> None
+      | Loading _ | Idle | No_browser | Failed _ ->
+          cadence_operation ~allow_inflight:true
+            ?viewport:(if image_open then viewport else None) t
     in
     match t.selected_tab, operation with
     | Some tab_id, Some Read_refresh ->

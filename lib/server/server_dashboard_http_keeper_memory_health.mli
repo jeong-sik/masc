@@ -6,7 +6,8 @@ type keeper_health
 val keeper_memory_health_http_json : base_path:string -> Yojson.Safe.t
 
 val install : unit -> unit
-(** Refresh only the changed Keeper after a durable journal commit. *)
+(** Invalidate only the changed Keeper after a durable journal commit. The next
+    visible read recomputes that Keeper outside the store locks, not the fleet. *)
 
 module For_testing : sig
   val keeper_health : config:Workspace.config -> keepers_dir:string -> string -> keeper_health

@@ -570,17 +570,15 @@ let cached_keeper_health ~config ~keepers_dir keeper_id =
         entry.value <- Some health;
         health)
 
-let refresh_after_write ~keepers_dir ~keeper_id =
+let invalidate_after_write ~keepers_dir ~keeper_id =
   let keepers_dir = health_directory_identity keepers_dir in
   let base_path = Stdlib.Mutex.protect health_cache_mutex (fun () ->
     Hashtbl.find_opt health_base_paths keepers_dir) in
   match base_path with
   | None -> ()
   | Some base_path ->
-      let config = Workspace.default_config base_path in
       let entry = cache_entry ~keepers_dir keeper_id in
-      Stdlib.Mutex.protect entry.mutex (fun () ->
-        entry.value <- Some (!health_reader ~config ~keepers_dir keeper_id));
+      Stdlib.Mutex.protect entry.mutex (fun () -> entry.value <- None);
       Dashboard_cache.invalidate (Printf.sprintf "keeper_memory_health:%s" base_path);
       Workspace_dataset_event.announce ~base_path
         (Workspace_dataset_event.Memory_health { keeper = keeper_id })
@@ -588,11 +586,11 @@ let refresh_after_write ~keepers_dir ~keeper_id =
 let install () =
   let retained = ref [] in
   let register restore = retained := restore :: !retained in
-  register (Keeper_memory_os_current.install_commit_observer refresh_after_write);
-  register (Keeper_memory_source_current.install_commit_observer refresh_after_write);
-  register (Keeper_librarian_progress.install_commit_observer refresh_after_write);
+  register (Keeper_memory_os_current.install_commit_observer invalidate_after_write);
+  register (Keeper_memory_source_current.install_commit_observer invalidate_after_write);
+  register (Keeper_librarian_progress.install_commit_observer invalidate_after_write);
   let refresh ~config ~keeper_name =
-    refresh_after_write
+    invalidate_after_write
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path)
       ~keeper_id:keeper_name
@@ -961,7 +959,7 @@ module For_testing = struct
       Hashtbl.reset health_cache;
       Hashtbl.reset health_base_paths);
     health_reader := reader;
-    let restore = Keeper_memory_os_current.install_commit_observer refresh_after_write in
+    let restore = Keeper_memory_os_current.install_commit_observer invalidate_after_write in
     Fun.protect
       ~finally:(fun () ->
         restore ();

@@ -576,6 +576,11 @@ let test_trim_text_page_drops_only_padding () =
     ; ("leading spaces stay", "  A  ", "  A")
     ; ("a tab is not padding", "A\t \n", "A\t")
     ; ("a no-break space is not padding", "A\xc2\xa0 ", "A\xc2\xa0")
+    ; ("a carriage return is not padding", "A\r \n", "A\r")
+    ; ("a NUL is not padding", "A\000 \n", "A\000")
+    ; ("a tail row of only a tab stays", "A\n\t", "A\n\t")
+    ; ("a tail row of only a no-break space stays", "A\n\xc2\xa0", "A\n\xc2\xa0")
+    ; ("a tail row of only a NUL stays", "A\n\000", "A\n\000")
     ; ( "multibyte glyphs stay whole"
       , "\xe2\x94\x80\xe2\x94\x80  \n  \n"
       , "\xe2\x94\x80\xe2\x94\x80" )
@@ -584,9 +589,10 @@ let test_trim_text_page_drops_only_padding () =
     ]
 ;;
 
-(* [screen_text] is the machine's own page minus its padding. The page is
-   read straight from the lane, so the check does not assume what the program
-   drew beyond the HI it is known to print. *)
+(* The wiring: [screen_text] is the machine's own page minus its padding. The
+   page is read straight from the lane, so the check does not assume what the
+   program drew beyond the HI it is known to print. The function's own
+   behaviour is pinned by the table above and by the blank page below. *)
 let test_screen_text_is_the_text_page_without_padding () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -603,6 +609,31 @@ let test_screen_text_is_the_text_page_without_padding () =
     check string "the result is that page without the padding"
       (Dos_tools.trim_text_page page) text;
     check bool "the glyphs are still there" true (contains "HI" text))
+;;
+
+(* What the change is for: a program that never writes text leaves the page as
+   the machine made it, a grid of spaces. The page the lane holds is padding
+   and nothing else, and the tool result carries no text at all. The
+   expectation does not call the function under test.
+
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              int 20h *)
+let blank_com = "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+
+let test_a_blank_text_page_comes_back_empty () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "blank.com" blank_com;
+    let result = load ~base_path "blank.com" in
+    check bool "load succeeds" true (is_completed result);
+    let page =
+      match Dos_lane.screen () with
+      | Ok observation -> observation.Dos_lane.screen_text
+      | Error _ -> fail "machine gone"
+    in
+    check bool "the machine hands over a padded page" true (String.length page > 0);
+    check bool "that holds spaces and row breaks only" true
+      (String.for_all (fun c -> c = ' ' || c = '\n') page);
+    check string "the result has no text" "" (string_field "screen_text" result))
 ;;
 
 (* The load and the screen say which DOS core answered. Two servers built
@@ -2764,6 +2795,7 @@ let () =
         ; test_case "text page trim" `Quick test_trim_text_page_drops_only_padding
         ; test_case "screen text without padding" `Quick
             test_screen_text_is_the_text_page_without_padding
+        ; test_case "blank text page" `Quick test_a_blank_text_page_comes_back_empty
         ; test_case "load and screen name the core" `Quick
             test_load_and_screen_name_the_core
         ; test_case "meta names the core without a machine" `Quick

@@ -35,15 +35,15 @@ let reject ?(data = `Null) ~tool_name ~start_time message =
     ~effect_disposition:Tool_result.Proven_pre_effect ~start_time ~data message
 ;;
 
-(* The machine pads its text page to a full grid: every row out to 80 columns
-   and the page down to 25 rows, all U+0020. A program that draws in a
-   graphics mode leaves that page blank, and the whole grid of spaces, about
-   2 KB, still went out with every observation. Dropping the spaces after a
-   row's last glyph and the empty rows after the last glyph moves no glyph:
-   each keeps its column and its row, and empty rows in the middle stay.
-   Only U+0020 counts as padding. The page is UTF-8 and no multibyte
-   sequence contains the byte 0x20, so a cut never lands inside a code
-   point. *)
+(* The machine pads its text page to a full grid, 80x25 or 40x25 by video
+   mode, all U+0020 where nothing was written. A graphics mode leaves the
+   text page as it was, which for a game that never wrote text is a blank
+   grid, and that grid of spaces (about 2 KB at 80x25) went out with every
+   observation. Dropping the spaces after a row's last glyph and the empty
+   rows after the last glyph moves no glyph: each keeps its column and its
+   row, and empty rows in the middle stay. Only U+0020 counts as padding. The
+   page is UTF-8 and no multibyte sequence contains the byte 0x20, so a cut
+   never lands inside a code point. *)
 let trim_text_page page =
   let rec padding_start row i =
     if i > 0 && row.[i - 1] = ' ' then padding_start row (i - 1) else i

@@ -691,6 +691,8 @@ let keeper_health_entry_to_json (h : keeper_health) =
 
 let schema = "keeper.memory_os.current_health.v8"
 
+let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
+
 (* What a row contributes to the fleet totals (RFC-0487 §2.5). *)
 let totals_row (h : keeper_health) : Keeper_memory_health_totals.Row.t =
   { Keeper_memory_health_totals.Row.facts = h.facts

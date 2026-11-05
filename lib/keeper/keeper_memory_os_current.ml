@@ -1091,12 +1091,20 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
    snapshot already reached disk, so append failure warns. Destructive
    removals below use [append_journal_line_strict] and a prepared receipt so
    their originals and reasons survive failed journal finalization.
-   Cancellation is never absorbed. *)
+   Cancellation is never absorbed.
+
+   These lines are the ones a memory health row reader is told about here.
+   A publication's line and a removal receipt's line are written while the
+   publication receipt is still on disk; a row read in that window recovers
+   the publication again. The commit notification that follows them, after
+   the locks unwind, announces those (RFC-0487). A removal line written by the
+   recovery of a publication that never reached its target follows no commit
+   and is read when the fleet answer is read next. *)
 let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   try
     match append_journal_line_strict ~keepers_dir ~keeper_id json with
-    | Ok () -> ()
+    | Ok () -> Keeper_memory_health_input.written ~keepers_dir ~keeper_id
     | Error detail -> Log.Keeper.warn "%s" detail
   with
   | Eio.Cancel.Cancelled _ as error -> raise error

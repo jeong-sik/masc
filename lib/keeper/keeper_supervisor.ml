@@ -218,12 +218,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
       empty_sweep_acc
       entry_cohorts
   in
-  let unregister_exact_and_drop (entry : Keeper_registry.registry_entry) =
+  let unregister_exact_entry (entry : Keeper_registry.registry_entry) =
     match Keeper_registry.unregister_exact entry with
-    | Keeper_registry.Exact_unregistered ->
-      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
+    | Keeper_registry.Exact_unregistered | Keeper_registry.Exact_entry_missing ->
       ()
-    | Keeper_registry.Exact_entry_missing -> ()
     | Keeper_registry.Exact_entry_replaced ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string SupervisorCleanupFailures)
@@ -238,12 +236,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
         entry.name
         (Keeper_lifecycle_reservation.snapshot_to_string owner)
   in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       (* K4c — reclaim only when this exact lane was removed. A stale
-          sweep must not drop the accumulator of a newer same-name lane. *)
-       unregister_exact_and_drop entry)
-    final_acc.to_unregister;
+  List.iter unregister_exact_entry final_acc.to_unregister;
   let restart_list = final_acc.to_restart in
   (* Restart crashed keepers *)
   List.iter
@@ -498,9 +491,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
          ();
          Log.Keeper.error "%s: cannot read meta for restart, removing" old_entry.name;
-         (* K4c — restart-meta read failure: abandon only the exact crashed
-            lane observed by this sweep. *)
-         unregister_exact_and_drop old_entry)
+         (* Restart-meta read failure: abandon only the exact crashed lane
+            observed by this sweep. *)
+         unregister_exact_entry old_entry)
     restart_list;
   (* Reconcile LAST — only orphaned durable keepers. A paused Keeper remains
      durable until an operator explicitly resumes, stops, or removes it. *)

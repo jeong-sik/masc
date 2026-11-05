@@ -164,17 +164,6 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-(** Tier K5 — registry size for the per-keeper tool-emission
-    accumulator (Tier K4c). Operators can alert on divergence from
-    the active keeper count — a steady-state leak shows up as the
-    gauge climbing past live keeper count without trending back
-    down on keeper_down / supervisor cleanup. No labels. *)
-
-(** Tier K6 — per-keeper tagged tool-emission push counter. Labels:
-    [keeper]. Incremented by [Keeper_tool_emission_hook.push] each
-    time the PostToolUse hook captures a parsed JSON tool result
-    into the keeper's accumulator. *)
-
 (** #13387: per-keeper count of allowed tools that the diversity
     analyzer classifies as unused or below threshold. Labels:
     [keeper]. *)

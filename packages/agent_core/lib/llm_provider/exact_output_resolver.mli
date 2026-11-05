@@ -9,6 +9,9 @@ type projection_target = private
   ; capabilities : Capabilities.capabilities
   ; anthropic_thinking_control : Capabilities.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
+      (** What the binding sends on every request besides auth and the
+          entity headers; empty on a catalog wire. *)
   ; model_admitted : bool
   }
 
@@ -123,6 +126,7 @@ type selected_target = private
   ; capabilities : Capabilities.capabilities
   ; anthropic_thinking_control : Capabilities.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
   ; identity : target_identity
   ; generation : catalog_generation
   ; evidence : catalog_evidence

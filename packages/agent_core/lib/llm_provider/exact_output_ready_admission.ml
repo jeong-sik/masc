@@ -121,6 +121,7 @@ type request_target =
   ; capabilities : Caps.capabilities
   ; anthropic_thinking_control : Caps.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
   ; model_admitted : bool
   }
 
@@ -166,6 +167,7 @@ let request_target_of_selected (target : Resolver.selected_target) =
   ; capabilities = target.capabilities
   ; anthropic_thinking_control = target.anthropic_thinking_control
   ; body_timeout_s = target.body_timeout_s
+  ; declared_headers = target.declared_headers
   ; model_admitted = Resolver.selected_target_model_admitted target
   }
 ;;
@@ -175,6 +177,7 @@ let request_target_of_projection (target : Resolver.projection_target) =
   ; capabilities = target.capabilities
   ; anthropic_thinking_control = target.anthropic_thinking_control
   ; body_timeout_s = target.body_timeout_s
+  ; declared_headers = target.declared_headers
   ; model_admitted = target.model_admitted
   }
 ;;
@@ -415,6 +418,7 @@ let project_request_body ~target ~messages requirement =
   match
     Plan.preflight
       ~config
+      ~declared_headers:target.declared_headers
       ~messages
       ~body_timeout_s:target.body_timeout_s
       ~anthropic_thinking_control:target.anthropic_thinking_control
@@ -432,6 +436,7 @@ let admit ~target ~messages requirement =
   let* preflight =
     Plan.preflight
       ~config:(exact_config request_target response_format)
+      ~declared_headers:request_target.declared_headers
       ~messages
       ~body_timeout_s:request_target.body_timeout_s
       ~anthropic_thinking_control:request_target.anthropic_thinking_control
@@ -483,6 +488,7 @@ let admit_candidate_request
   let* preflight =
     Plan.preflight
       ~config:(exact_config request_target response_format)
+      ~declared_headers:request_target.declared_headers
       ~messages
       ~body_timeout_s:request_target.body_timeout_s
       ~anthropic_thinking_control:request_target.anthropic_thinking_control

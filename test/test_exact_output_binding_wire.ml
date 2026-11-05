@@ -36,7 +36,16 @@ let require_ok label = function
    leaves the process, so the value only has to be positive and finite. *)
 let exact_body_timeout_s = 180.0
 
-let runtime_toml ~protocol ~endpoint ~stance ~lane_slot =
+let runtime_toml ~provider_headers ~protocol ~endpoint ~stance ~lane_slot =
+  let provider_headers =
+    match provider_headers with
+    | [] -> ""
+    | headers ->
+      "[providers.ollama_cloud.headers]\n"
+      ^ String.concat
+          ""
+          (List.map (fun (name, value) -> Printf.sprintf "%S = %S\n" name value) headers)
+  in
   Printf.sprintf
     {|[runtime]
 default = "ollama_cloud.deepseek-flash"
@@ -49,7 +58,7 @@ exact-body-timeout-s = %.1f
 [providers.ollama_cloud.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
-[models.deepseek-flash]
+%s[models.deepseek-flash]
 api-name = "deepseek-v4.1-flash"
 tools-support = true
 thinking-support = true
@@ -69,6 +78,7 @@ thinking-support = true
     protocol
     endpoint
     exact_body_timeout_s
+    provider_headers
     stance
 ;;
 
@@ -95,7 +105,7 @@ thinking-control-format = "none"|}
 
 type publication = Boot_config | Explicit_file | Captured_observation
 
-let with_runtime ?(publication = Boot_config) f =
+let with_runtime ?(publication = Boot_config) ?(provider_headers = []) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -119,13 +129,14 @@ let with_runtime ?(publication = Boot_config) f =
              (match publication with Boot_config -> "runtime.toml"
                | Explicit_file | Captured_observation -> "manual-probe.toml") in
          Fs_compat.save_file path
-           (runtime_toml ~protocol ~endpoint ~stance
+           (runtime_toml ~provider_headers ~protocol ~endpoint ~stance
               ~lane_slot:"ollama_cloud.deepseek-flash");
          (match publication with
           | Boot_config -> ()
           | Explicit_file | Captured_observation ->
             Fs_compat.save_file (Filename.concat root "runtime.toml")
-              (runtime_toml ~protocol ~endpoint ~stance ~lane_slot:"ambient.missing"));
+              (runtime_toml ~provider_headers ~protocol ~endpoint ~stance
+                 ~lane_slot:"ambient.missing"));
          let observation = match publication with
            | Boot_config | Explicit_file ->
              Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
@@ -215,6 +226,7 @@ let check_wire label ~(keeper : PC.t) ~(exact : PC.t) =
 let preflight (projected : Resolver.projection_target) =
   Plan.preflight
     ~config:projected.config
+    ~declared_headers:projected.declared_headers
     ~messages
     ~body_timeout_s:projected.body_timeout_s
     ~anthropic_thinking_control:projected.anthropic_thinking_control
@@ -334,6 +346,37 @@ let test_observation_survives_source_file_change () =
   check_wire "captured observation after path corruption" ~keeper ~exact:projected.config
 ;;
 
+(* OpenCode Go answers 400 MissingSessionID to a request without its
+   [x-opencode-session] header. The Keeper requests on such a binding carried
+   it, but the exact slot was built with no headers at all, so every
+   Librarian and Board call on that slot was refused (11-04). The exact
+   request now carries what the binding declares; the plan keeps writing the
+   entity headers itself. *)
+let test_declared_provider_headers_reach_the_exact_request () =
+  with_runtime ~provider_headers:[ "x-opencode-session", "masc-keeper-fleet" ]
+  @@ fun load ->
+  let keeper, admitted =
+    load
+      ~protocol:"openai-compatible-http"
+      ~endpoint:"https://ollama.com/v1"
+      ~stance:declared_effort
+  in
+  check
+    (option string)
+    "the Keeper request carries the declared header"
+    (Some "masc-keeper-fleet")
+    (List.assoc_opt "x-opencode-session" keeper.PC.headers);
+  let projected = EO.projection_target admitted in
+  check
+    (list (pair string string))
+    "the exact slot carries the same declared header and no entity header"
+    [ "x-opencode-session", "masc-keeper-fleet" ]
+    (projected.declared_headers :> (string * string) list);
+  match preflight (exact_view keeper) with
+  | Ok _ -> ()
+  | Error _ -> fail "declared headers are not caller-supplied headers"
+;;
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -344,6 +387,9 @@ let () =
     "Exact binding wire"
     [ ( "wire"
       , [ test_case
+            "a binding's declared headers reach its exact request"
+            `Quick test_declared_provider_headers_reach_the_exact_request
+        ; test_case
             "captured configuration still publishes its lane after the path changes"
             `Quick test_observation_survives_source_file_change
         ; test_case

@@ -454,6 +454,7 @@ let freeze_serialization
 
 let preflight
       ~config:(original_config : Provider_config.t)
+      ~declared_headers
       ~messages
       ~body_timeout_s
       ~anthropic_thinking_control
@@ -514,6 +515,7 @@ let preflight
                  let body_sha256 = sha256 body in
                  let headers =
                    auth_headers
+                   @ Exact_output_declared_headers.to_list declared_headers
                    @ [ "Content-Type", "application/json"
                      ; "Content-Length", string_of_int (String.length body)
                      ]
@@ -808,7 +810,8 @@ let[@warning "-32"] deadline_fixture_config () =
 
 let%test "exact preflight refuses a connect-only wire" =
   match
-    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+    preflight ~config:(deadline_fixture_config ())
+      ~declared_headers:Exact_output_declared_headers.empty ~messages:[Types.user_msg "Hello"]
       ~body_timeout_s:None ~anthropic_thinking_control:None
   with
   | Error (Missing_deadline _) -> true
@@ -832,7 +835,8 @@ let%test "exact preflight refuses a connect-only wire" =
 
 let%test "exact preflight admits a connect and body wire" =
   match
-    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+    preflight ~config:(deadline_fixture_config ())
+      ~declared_headers:Exact_output_declared_headers.empty ~messages:[Types.user_msg "Hello"]
       ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
   with
   | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
@@ -851,7 +855,8 @@ let%test "exact preflight freezes refreshed credentials until a new plan is prep
     ~auth_scheme:Bearer_token
     ~credential_source:(Refreshable_credential (fun () ->
       incr calls; Ok (Secret.of_string !token))) () in
-  let prepare () = preflight ~config ~messages:[Types.user_msg "Hello"]
+  let prepare () = preflight ~config
+    ~declared_headers:Exact_output_declared_headers.empty ~messages:[Types.user_msg "Hello"]
     ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None in
   match prepare () with
   | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
@@ -876,7 +881,8 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
         ~model_capabilities_override:Capabilities.default_capabilities
         ~auth_scheme:Bearer_token ~headers () in
     match
-      preflight ~config ~messages:[Types.user_msg "Hello"]
+      preflight ~config ~declared_headers:Exact_output_declared_headers.empty
+        ~messages:[Types.user_msg "Hello"]
         ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
     with
     | Error (Caller_supplied_header_not_allowed reported) ->
@@ -903,4 +909,33 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
        [ ("content-type", "application/json"); ("X-Custom", "v") ]
   && test_headers (Some "X-First")
        [ ("Content-Type", "application/json"); ("X-First", "1"); ("X-Second", "2") ]
+;;
+
+let%test "exact preflight sends the binding's declared headers and fingerprints them" =
+  let prepare declared =
+    preflight ~config:(deadline_fixture_config ())
+      ~declared_headers:(Exact_output_declared_headers.of_binding_headers declared)
+      ~messages:[Types.user_msg "Hello"]
+      ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
+  in
+  let plan_of declared =
+    match prepare declared with
+    | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
+    | Ok admitted ->
+      (match finalize_unmeasured admitted with
+       | Ok plan -> admitted, plan
+       | Error _ -> failwith "an unmeasured plan should finalize")
+  in
+  let bare_preflight, bare = plan_of [] in
+  let session_preflight, session =
+    plan_of [ "Content-Type", "application/json"; "x-opencode-session", "fleet" ]
+  in
+  let names (admitted : preflight) =
+    List.map (fun (name, _) -> String.lowercase_ascii name) admitted.wire.headers
+  in
+  List.assoc_opt "x-opencode-session" session_preflight.wire.headers = Some "fleet"
+  && List.assoc_opt "x-opencode-session" bare_preflight.wire.headers = None
+  && List.length (List.filter (String.equal "content-type") (names session_preflight)) = 1
+  && List.assoc_opt "Content-Type" session_preflight.wire.headers = Some "application/json"
+  && fingerprint bare <> fingerprint session
 ;;

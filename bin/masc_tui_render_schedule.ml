@@ -537,7 +537,10 @@ let system_log_level_width = 7
 let system_log_module_width = 16
 let system_log_keeper_width = 12
 let system_log_category_width = 9
-let system_log_minimum_message_width = 12
+(* The message is what the list is read for, so it is the last column to lose
+   cells. Thirty is the Board title's floor ([board_minimum_title_width]):
+   below it the table drops category, then keeper, then module. *)
+let system_log_minimum_message_width = 30
 
 type system_log_row_values = {
   slog_time : string;

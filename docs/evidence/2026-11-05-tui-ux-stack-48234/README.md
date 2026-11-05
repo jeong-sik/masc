@@ -1,9 +1,9 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6 and 8 to 11 of the stack (#48231, #48232, #48233, #48250,
-#48254, #48266, #48289, #48292, #48299, #48306). Layer 7 is the first version of
-this document. Layers 6 and 8 to 11 were added to it by the layer that carries
-this text.
+Scope: layers 1 to 6, 8 to 11 and 13 to 17 of the stack (#48231, #48232, #48233,
+#48250, #48254, #48266, #48289, #48292, #48299, #48306, #48327, #48329, #48341,
+#48344, #48350). Layer 7 is the first version of this document. Layer 12 added
+layers 6 and 8 to 11. The layer that carries this text added layers 13 to 17.
 
 ## Source
 
@@ -19,6 +19,10 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 9) | `31d56f094eb2407c43a798fe28a655acb5bb5d41` | 41891144314 | `bc4ab5e3b3eceb61d592e41c7b36086d4933fc4f0dc37ef0fbb15c84f60108e2` | `121c5a7df6451a861c66d6ecdf29bc4aa2b76338c3b9bf7764afdea88c965644` |
 | After (layers 1 to 10) | `cf512249ace0a8004473911ffd498e018e8ffd2b` | 41893673935 | `72b75b64133b8958647af57c81adc81c4d00dea267c81c11fc8a0b13da58b8dd` | `6ff4917f53ff0b47e3fb48a6f35b5e7a08f74206b6380f92f8345294cc5fd478` |
 | After (layers 1 to 11) | `8969a8b26271b91b109849c96588c1f64d02f8ee` | 41895649701 | `15455664f4f711583f9e80554ed92c8234f2b09266aff89ca8a74b40124c7a5a` | `743b72a707f3eb76777b6ae6bf630b3dee1293727c9f1c3c132f1283c66329af` |
+| After (layers 1 to 13) | `a91bcfe34a7163537d732604111babe587a2e166` | 41902049950 | `217ce2ec9cc4c4924d8bd4bc602e64f3848ed4a9c5e06a9099ba9f43f3c2ae24` | `45624e505eed03820a9e0c27d1e4b66155e9598f1240e0694e19c2a0e961b3cb` |
+| After (layers 1 to 14) | `b4024cd1b69969af074544e33dbcbe7ed2e91bb9` | 41902957736 | `e274ba9288ff5ee1a40d6988c8291ad62a97b88899e4cf85c49638869952baa2` | `108103f1eb58106a2088d3298a304dc1b5e2e3bbd351e8b8ec5f06ce0e3b2280` |
+| After (layers 1 to 16) | `3a2c8c907ada34d56ab902c35d5c445ef81a3351` | 41907039543 | `0a7e5caff4a8edc16a19df2c4cc68cc1572585a9a352ecf6934e1ff5aa498ff8` | `a3d493e9b978ca472df16d9e6caf6f16e893124d4bb64fe0e81af9673b8a3a24` |
+| After (layers 1 to 17) | `9257388f916e738faf8c7acd2115a8101368c7d0` | 41909034875 | `ad08fcc424bbcc32076b440fd142b2c6d7c71d7aa75d849d059ef0f1aa0ea1c0` | `bc0396352e13b30b2ac262552ee0e7cabe04d8266b612a3b59dc1eaf5b916d1c` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -35,7 +39,9 @@ artifacts were uploaded after that failure.
   comparisons, and 56x24, 68x24, 88x24 and 100x30 for the title rows of layer
   10. Screens opened with the command palette (`:`, then `go <name>`
   and Enter) are the ones with no key path from the Dashboard that the capture
-  needed.
+  needed. Layers 13 to 17 used 200x55 and 120x35 (Dashboard), 100x30 and 80x24
+  (Features), 120x35 (the footers of layers 15 and 16) and 120x35 and 80x24 (System
+  menu).
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -251,6 +257,149 @@ sides; the style is not.
 ![Approvals question heading before](approvals-questions-before.png)
 ![Approvals question heading after](approvals-questions-after.png)
 
+### Layer 13: Dashboard lists every reason (#48327)
+
+Dashboard at 120x35 and 200x55. The server of the fixture reports three
+reasons it needs the operator, so the footer starts with `ACTION NEEDED 3` on
+both sides and names the first reason only. Before is the layers 1 to 11 build,
+after is the layers 1 to 13 build.
+
+```
+120x35  before  no card; the right column ends with the Status card
+120x35  after   a card `Action needed (3)` under the Status card, one row per reason:
+                keeper_fleet_safety:no_executable_keeper_fibers
+                keeper_identity_drift:configured_keeper_without_runtim / e_meta
+                keeper_memory_execution:addon_unattached
+200x55  after   the same three rows, each on one line
+```
+
+The second reason is 60 cells wide and the text area of the card is 54, so it
+wraps at the card edge. The Continue card on the left grows to end on the same row as the
+right column. The footer is the same on both sides.
+
+![Dashboard before](dashboard-action-needed-120-before.png)
+![Dashboard after](dashboard-action-needed-120-after.png)
+
+### Layer 14: summary rows leave out whole items (#48329)
+
+Features, opened with `go Features`. Before is the layers 1 to 11 build, after
+is the layers 1 to 14 build.
+
+```
+80x24   before  All features · observed 05:21:12 · 4 ready · 2 waiting · 1 failing · 4 not …
+80x24   after   All features · observed 05:21:22 · 4 ready · 2 waiting · 1 failing
+100x30  before  All features · observed 05:21:15 · 4 ready · 2 waiting · 1 failing · 4 not set up
+100x30  after   All features · observed 05:21:25 · 4 ready · 2 waiting · 1 failing · 4 not set up
+```
+
+At 80 cells the item `4 not set up` does not fit and the row used to end in
+the middle of it. It now ends at the last item that fits. At 100 cells every
+item fits and the row is the same on both sides. The Keepers summary row
+(`! 0 attention ▶ 0 active ...`) is the same before and after at 60, 66, 80,
+100 and 120 cells on this fixture, because layer 8 already left out whole items
+there; layer 14 moves that rule into the function the Features row shares.
+
+![Features summary before](features-summary-80-before.png)
+![Features summary after](features-summary-80-after.png)
+
+### Layers 15 and 16: the back key follows the open detail (#48341, #48344)
+
+`Left` closes an open detail or diff. With none open it does nothing. `Esc`
+closes it too and, on a list, leaves the screen. The layers 1 to 11 build was
+driven at 120x35: on each list below, the title row is the same after `Left`,
+and after `Esc` it names the screen the key went to.
+
+| List, nothing open | After `Left` | After `Esc` |
+| --- | --- | --- |
+| Work Goals | same screen | Dashboard |
+| Board | same screen | Dashboard |
+| Schedules | same screen | Work (Goals) |
+| Task Review | same screen | Work (Goals) |
+| Task Verdicts | same screen | Work (Goals) |
+| System Logs | same screen | Activity (Events) |
+| Changes | same screen | Keepers list |
+| Runtime | same screen | Config |
+
+Footers at 120x35 with the list on screen. Before is the layers 1 to 11 build,
+after is the layers 1 to 16 build. The leading `ACTION NEEDED 3 · ...` row, where
+there is one, is left out of the lines below.
+
+```
+Work Goals     before  Right / Enter:detail  Left / Esc:back  q:quit  …?
+               after   Right / Enter:detail  Esc:back  q:quit  …?
+Board          before  j/k:move  s:sort  Ctrl-W:pane  PgUp/PgDn:page  Right / Enter:read  Left / Esc:back  v / V:up / down  q:quit  …?
+               after   j/k:move  s:sort  Ctrl-W:pane  PgUp/PgDn:page  Right / Enter:read  Esc:back  v / V:up / down  q:quit  …?
+Schedules      before  Right / Enter:details  Left / Esc:back  q:quit  …?
+               after   Right / Enter:details  Esc:back  q:quit  …?
+Task Review    before  j/k:move  v:next Work tab  Right / Enter:details  Left / Esc:back  a / x:approve / reject  q:quit  …?
+               after   j/k:move  v:next Work tab  h:queue / history  Right / Enter:details  Esc:back  a / x:approve / reject  q:quit  …?
+Task Verdicts  before  j/k:move  v:next Work tab  PgUp/PgDn:page  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  q:quit  …?
+               after   j/k:move  v:next Work tab  PgUp/PgDn:page  Right / Enter:verdict  Esc:back  y / x:agree / overrule  q:quit  …?
+System Logs    before  Right / Enter:detail  Left / Esc:back  q:quit  …?
+               after   Right / Enter:detail  Esc:back  q:quit  …?
+Changes        before  j/k:move  [ / ]:keeper  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:written diff  Left / Esc:back  q:quit  …?
+               after   Right / Enter:written diff  Esc:back  q:quit  …?
+Runtime        before  Right / Enter:detail  Left / Esc:back  q:quit  …?
+               after   Right / Enter:detail  Esc:back  q:quit  …?
+```
+
+`Left / Esc:back` becomes `Esc:back` in the lines above, which frees seven cells.
+On the Task Review list one more item fits in them: `h:queue / history`.
+
+On the Changes list the footer did not start with the `ACTION NEEDED` row
+before layer 16 and does now, like the Goals, Schedules, Logs and Runtime lists.
+The footer never drops `Right / Enter:written diff`, `Esc:back`, `q:quit` and the
+`…?` help mark, and it gives up the other keys before it gives up the notice.
+Those items take 55 cells with `Left / Esc:back` and 48 with `Esc:back`. With the
+65-cell notice and a gap of two cells that is 122 cells against 115, in a row of
+120. So the notice did not fit before and fits now, and `j/k:move`,
+`[ / ]:keeper`, `PgUp/PgDn:page` and `Home/End:top/bottom` no longer fit beside
+it and are left out of the line above. They stay in the `?` cheat sheet. The
+widths come from the footer strings shown above, not from a measurement of the
+fitting code. The Goals, Schedules, Logs and Runtime lists already left their
+movement items out on both sides. The Board, Task Review and Task Verdicts
+footers carry no such row on either side.
+
+With a detail open the footer still names `Left / Esc`, on both sides:
+
+```
+Work Goal detail   before  z:Candle  j/k:move  Left / Esc:back  q:quit  …?
+                   after   z:Candle  j/k:move  Left / Esc:back  q:quit  …?
+Board post         before  j/k:body  v / V:up / down  Left / Esc:back  …?
+                   after   j/k:body  v / V:up / down  Left / Esc:back  …?
+Task Review detail before  Left / Esc:back  a / x:approve / reject  q:quit  …?
+                   after   Left / Esc:back  a / x:approve / reject  q:quit  …?
+Runtime detail     before  j/k:스크롤  Left / Esc:목록  행 1-28/38  …?
+                   after   j/k:스크롤  Left / Esc:목록  행 1-28/38  …?
+```
+
+The Runtime detail footer is in Korean and the Runtime list footer in English
+on both sides. Layers 15 and 16 do not change that.
+
+![List footers before](list-footers-before.png)
+![List footers after](list-footers-after.png)
+![Detail footers before](detail-footers-before.png)
+![Detail footers after](detail-footers-after.png)
+
+### Layer 17: the System menu row leaves out the language chip whole (#48350)
+
+System tab, Config view (`Tab` six times from the Dashboard). The row under the
+title lists the views and, to the right, the language chip. Before is the
+layers 1 to 11 build, after is the layers 1 to 17 build.
+
+```
+80x24   before  시스템 메뉴: 9:런타임 · s:리소스 · t:도구·스킬 · A:활동 · L:로그   [언어:KO…
+80x24   after   시스템 메뉴: 9:런타임 · s:리소스 · t:도구·스킬 · A:활동 · L:로그
+120x35  before  시스템 메뉴: 9:런타임 · s:리소스 · t:도구·스킬 · A:활동 · L:로그   [언어:KO 전환]
+120x35  after   시스템 메뉴: 9:런타임 · s:리소스 · t:도구·스킬 · A:활동 · L:로그   [언어:KO 전환]
+```
+
+At 80 cells the chip does not fit and the row used to end in the middle of it.
+It now ends at the last view. At 120 cells the row is the same on both sides.
+
+![System menu row before, 80x24](system-menu-80-before.png)
+![System menu row after, 80x24](system-menu-80-after.png)
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -259,6 +408,18 @@ sides; the style is not.
   drawn.
 - Layer 10 at 200x55 and the Features lane history of lanes other than
   Librarian and HITL Auto Judge at 120x35.
+- Layers 15 and 16 on the Code project root and on Repositories. Their back
+  key depends on more than a list and one detail (tree, file, history, Git
+  changes, activity), so their list footers still name `Left / Esc`.
+- Schedules, Task Verdicts and Changes with a detail or diff open: the fixture
+  has no schedule, verdict or file change, so those detail footers were not
+  drawn. Task Review, Work Goals, Board and Runtime details were.
+- The Changes list footer without an `ACTION NEEDED` row: the fixture always
+  reports three reasons, so the footer that fits all its items was not drawn.
+- Layer 13 on a server that reports no reason, and with a reason too long for
+  the card at 80x24: the Dashboard was captured at 120x35 and 200x55 only.
+- Layer 17 with the English UI and at widths between 80 and 120 cells: the
+  System tab was captured at 80x24 and 120x35 with the Korean UI.
 - Layer 4, Harness detail and the Code draft keys: the fixture has no Harness
   verdicts and no repository, so neither screen was reached.
 - Only the 120x35 Keepers list was measured for column positions. The 200x55

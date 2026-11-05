@@ -121,13 +121,19 @@ let scope_for_hash hash=scope_prefix ^ hash
 let scope owner=scope_for_hash (owner_hash owner)
 let fresh_request_id owner=Yojson.Safe.to_string (`List [
   `String "keeper-librarian";`String (owner_hash owner);`String (Random_id.uuid_v7 ())])
-let scope_of_request_id request_id =
+let parse_request_id request_id =
   let* json=parse request_id in
   match json with
   | `List [`String "keeper-librarian";`String hash;`String nonce]
       when String_util.is_lowercase_sha256_hex hash && Yojson.Safe.to_string json=request_id ->
-    let+ _=Random_id.parse_uuid_v7 nonce in scope_for_hash hash
+    let+ nonce=Random_id.parse_uuid_v7 nonce in hash,nonce
   | _ -> Error "Invalid original Librarian execution request ID"
+let scope_of_request_id request_id =
+  let+ hash,_=parse_request_id request_id in scope_for_hash hash
+let minted_on request_id =
+  let* _,nonce=parse_request_id request_id in
+  let+ time_ms=Random_id.uuid_v7_time_ms nonce in
+  Jsonl_writer.day_key ~ts:(Int64.to_float time_ms /. 1000.)
 let package_id = Keeper_librarian_addon.package_id
 let tool = Keeper_librarian_addon.tool Keeper_librarian_addon.Admission
 let observe_record_owner ~base_path ~keepers_dir (retained:Owner.retained) =

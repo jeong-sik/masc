@@ -151,6 +151,7 @@ type part_result =
   | Children of Parts.part * Parts.part
   | Waiting of string
   | Addon_off
+  | Reprepared
 let source original part = Parts.Original_execution {
   part_id=Parts.part_id part;execution_id=original.record.request_id}
 let local_admit actual ~destination:expected ~publish =
@@ -163,10 +164,36 @@ let partition ~store ~config ~reserved ~owner part evidence =
       ~parent:part ~evidence ~partition_id:(id ()) ~left_id:(id ()) ~right_id:(id ())
       ~admit:(local_admit actual)))
   |> Result.map (fun (left,right) -> Children (left,right))
-let size_refused ~store ~config ~reserved ~owner ~inventory part original =
+(* The retained refusal of an execution that ended at the execution stage.
+   Submit returns Refused for these phases only; others carry no evidence. *)
+let execution_refusal original =
+  match Progress.phase original.record.Owner.progress with
+  | Progress.Rejected {stage=Progress.Execution;evidence}
+  | Subdividing ({stage=Progress.Execution;evidence},_)
+  | Subdivided ({stage=Progress.Execution;evidence},_) ->
+    let* exact=Capture.request original.capture in
+    let* schema=Option.to_result ~none:"Original admission schema is absent" exact.schema in
+    let+ retained=Exact.retained_final_of_json ~schema evidence in Some retained
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+  | Subdividing ({stage=Progress.Before_dispatch;_},_)
+  | Subdivided ({stage=Progress.Before_dispatch;_},_) -> Ok None
+let refusal_label = function
+  | Exact.Retained_unknown Exact.Interrupted -> "outcome_unknown interrupted"
+  | Retained_unknown Exact.Cut -> "outcome_unknown cut"
+  | Retained_unknown Exact.Raised -> "outcome_unknown raised"
+  | Retained_call (Answered _) -> "answered"
+  | Retained_call (Invalid_output _) -> "invalid_output"
+  | Retained_call (Input_refused _) -> "input_refused"
+  | Retained_call (Output_limit_reached _) -> "output_limit_reached"
+  | Retained_not_allowed _ -> "not_allowed"
+  | Retained_request_id_reused -> "request_id_reused"
+let size_refused ~store ~config ~reserved ~owner ~inventory ~refusal part original =
   match io (fun () -> Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
     ~parent:part ~execution_id:original.record.request_id) with
-  | Error _ -> Ok (Waiting "Original host execution has no exclusive input-capacity proof")
+  | Error _ ->
+    let cause=Option.fold ~none:"" ~some:(fun retained -> ": " ^ refusal_label retained) refusal in
+    Ok (Waiting ("Original host execution has no exclusive input-capacity proof" ^ cause))
   | Ok evidence -> match Queue.split (Parts.batch part) with
     | None -> Ok (Terminal (source original part,false))
     | Some _ -> partition ~store ~config ~reserved ~owner part evidence
@@ -226,6 +253,22 @@ let answered ~store ~config ~reserved ~owner ~inventory part original =
   match parsed with
   | Keeper_librarian_runtime.Deferred -> Ok (Terminal (source original part,false))
   | Accepted accepted -> gate_result ~store ~config ~reserved ~owner ~inventory part original proposal accepted
+(* RFC-0500. The process that started this execution's attempt stopped
+   before it ended, so no judgment reached the host. The execution settles
+   and the walk evaluates its part again, which captures a fresh execution.
+   No other record names it. A gate intent follows only [Judged], which a
+   refused execution never passed. A partition names only an execution with
+   a size proof, and the forest check of [discover] refuses any other.
+   An interrupted execution repeats only if the server stops again: one that
+   this process cuts is [Cut] and keeps blocking. *)
+let settle_interrupted ~store ~owner original =
+  let* date=Capture.minted_on original.record.request_id in
+  let* ()=io (fun () -> Owner.settle ~store ~date (Owner.listed original.record))
+    |> Result.map_error Owner.settle_error_to_string in
+  Log.Keeper.info ~keeper_name:(Capture.keeper_id owner)
+    "Librarian explicit admission settled interrupted execution %s; its part is prepared again"
+    original.record.request_id;
+  Ok Reprepared
 (* A part with no original yet, or one still before admission, can only move
    through a live worker read and submit. *)
 let needs_worker = function
@@ -254,7 +297,14 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
   | Dispatch.Pending ((Capacity | Worker_pending | Worker_unknown | Worker_unreachable
       | Missing_after_dispatch | Journal_recheck),_) -> Ok (Waiting "Original Librarian Addon request is pending")
   | Refused (_,record) ->
-    size_refused ~store ~config ~reserved ~owner ~inventory part {original with record}
+    let original={original with record} in
+    let* refusal=execution_refusal original in
+    (match refusal with
+     | Some (Exact.Retained_unknown Exact.Interrupted) -> settle_interrupted ~store ~owner original
+     | Some (Exact.Retained_unknown (Exact.Cut | Exact.Raised)
+         | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
+         | Retained_not_allowed _ | Retained_request_id_reused)
+     | None -> size_refused ~store ~config ~reserved ~owner ~inventory ~refusal part original)
   | Answered (_,record) | Commit_pending record ->
     answered ~store ~config ~reserved ~owner ~inventory part {original with record}
   | Settled record ->
@@ -363,7 +413,8 @@ let run_queue ~base_path ~keeper_name =
          Ok (if committed then Settled {has_more=false} else Pending reason)
        | Ok Addon_off -> if committed then Ok (Settled {has_more=false}) else addon_unattached ()
        | Ok (Terminal (_,did_commit)) -> walk ~committed:(committed || did_commit) rest
-       | Ok (Children (left,right)) -> walk ~committed (left::right::rest)) in
+       | Ok (Children (left,right)) -> walk ~committed (left::right::rest)
+       | Ok Reprepared -> walk ~committed (part::rest)) in
   walk ~committed:false parts
 let run_enabled ~base_path ~keeper_name =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in

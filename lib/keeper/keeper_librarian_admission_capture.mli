@@ -51,6 +51,9 @@ val scope_of_request_id : string -> (string, string) result
     Queue-generation scope hash and UUIDv7. Parsing only computes a Store
     lookup scope; original
     capture/physical equality must still be checked before any effect. *)
+val minted_on : string -> (string, string) result
+(** The UTC day, [YYYY-MM-DD], this execution request ID was minted. An
+    interrupted execution settles under that day (RFC-0500). *)
 val package_id : string
 val tool : string
 val create : request_id:string -> parent_part_id:string -> owner:owner ->

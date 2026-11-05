@@ -308,8 +308,6 @@ pre.mermaid svg,
    pull slid the frame under the sidebar and the table of contents. */
 .sl-markdown-content img[src$="-overview.png"],
 .sl-markdown-content img[src$="-keepers.png"],
-.sl-markdown-content img[src$="-lanes.png"],
-.sl-markdown-content img[src$="-approvals.png"],
 .sl-markdown-content img[src$="-activity.png"] {
 	width: 100%;
 	max-width: none;
@@ -320,8 +318,6 @@ pre.mermaid svg,
 @media (min-width: 72rem) {
 	.sl-markdown-content img[src$="-overview.png"],
 	.sl-markdown-content img[src$="-keepers.png"],
-	.sl-markdown-content img[src$="-lanes.png"],
-	.sl-markdown-content img[src$="-approvals.png"],
 	.sl-markdown-content img[src$="-activity.png"] {
 		width: calc(100% + 3.5rem);
 		margin-inline: -1.75rem;

@@ -45,12 +45,16 @@ type msg =
 
 (** The protocol and the loop decide by kind, not by answer: whether an answer
     is a read, whether it waits for input, whether it carries an operation
-    receipt, and what is left to clean up when its workspace has changed. An
-    answer that needs another decision adds a kind, and each of those matches
-    stops compiling until it decides. *)
+    receipt, what is left to clean up when its workspace has changed, and
+    whether it is stamped with the workspace that asked. A new answer that
+    takes an existing kind takes all of that kind's decisions without a
+    compile error. An answer that needs another decision adds a kind, and
+    then each match on the kind stops compiling until it decides. *)
 type answer_kind =
-  | Read  (** Reads the workspace that asked. *)
-  | Save  (** The outcome of the draft save. *)
+  | Read  (** Reads the workspace that asked, and is stamped with it. *)
+  | Save
+      (** The outcome of the draft save. It is not stamped, so navigation
+          cannot lose it. *)
 
 val answer_kind : msg -> answer_kind
 

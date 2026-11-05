@@ -98,9 +98,9 @@ val start_lsp_question
 
 val save_draft : Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_code_results.msg -> unit) -> (unit, string) result
-(** Deliver this effect acknowledgement without a workspace stamp so
-    navigation cannot lose the submitted draft's outcome. The UI still settles
-    only its original ticket. *)
+(** The outcome is a [Save] answer, which the loop delivers without a
+    workspace stamp so navigation cannot lose the submitted draft's outcome.
+    The UI still settles only its original ticket. *)
 
 val reread_draft : Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_code_results.msg -> unit) -> (unit, string) result

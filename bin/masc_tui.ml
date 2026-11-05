@@ -1838,12 +1838,17 @@ let workspace_enqueue state =
   let envelope = capture_workspace_message state in
   fun mailbox message -> enqueue_async mailbox (envelope message)
 
-(* A Code request's answers. The stamp is taken when the request starts, as in
-   [workspace_enqueue], so an answer that arrives after the workspace changed
-   still names the workspace that asked. *)
+(* Every Code answer is wrapped in [Code_msg] here. A read is stamped when its
+   request starts, as in [workspace_enqueue], so a read that arrives after the
+   workspace changed still names the workspace that asked. The draft save goes
+   unstamped: it settles a write already sent, and navigation must not lose
+   its outcome. *)
 let deliver_code state =
   let enqueue = workspace_enqueue state in
-  fun mailbox answer -> enqueue mailbox (Code_msg answer)
+  fun mailbox answer ->
+    match Code_results.answer_kind answer with
+    | Code_results.Read -> enqueue mailbox (Code_msg answer)
+    | Code_results.Save -> enqueue_async mailbox (Code_msg answer)
 
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
@@ -38260,7 +38265,7 @@ Use relative paths for resources already held in the package. -->
        | Some "e" when state.view = Code && code_edit_focus state -> edit_code_draft ()
        | Some "S" when state.view = Code && code_edit_focus state ->
            (match Masc_tui_code_requests.save_draft state ~host:server_peer_host
-             ~deliver:(fun answer -> enqueue_async async_messages (Code_msg answer)) with
+             ~deliver:(deliver_code state async_messages) with
             | Ok () -> () | Error detail -> report_action state "error" detail)
        | Some "V" when state.view = Code && code_edit_focus state ->
            (match current_code_draft state with

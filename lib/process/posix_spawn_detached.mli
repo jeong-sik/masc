@@ -6,9 +6,7 @@
     process group of its own (not a session of its own), reads [/dev/null]
     and writes [output] on both stdout and stderr. Nothing stops it on its
     own: when [sw] is released this process only stops waiting for it, and
-    once this process has exited the child is reaped by whoever adopts it.
-    A caller that no longer wants it runs {!stop_group}, also once this
-    process has exited and another holds only its number. *)
+    once this process has exited the child is reaped by whoever adopts it. *)
 
 type t = {
   pid : int;  (** Also the child's process group. *)
@@ -32,36 +30,12 @@ val spawn :
   output:Unix.file_descr ->
   (t, string) result
 
-(** Whether a process other than a reaped child is left in [t]'s group: the
-    child's own children stay there unless they leave it. Darwin answers
-    EPERM for a group whose members are all exiting or zombies, which reads
-    as none left (see {!Process_group_members}). *)
-val group_has_members : t -> bool
-
 (** Whether a process is left in the group numbered [group]. [false] for 0
     and 1, which kill(2) reads as this process's own group and as every
     process: so neither is ever signalled here. A group whose processes
     another account owns is there, whether or not this process may signal
     it. *)
 val group_id_has_members : int -> bool
-
-type stopped =
-  | Ended_on_term  (** The group emptied within the grace after SIGTERM. *)
-  | Killed_after_grace
-      (** Members were left after the grace and got SIGKILL. The stop waits up
-          to a second more for them to end; whether they did is
-          {!group_id_has_members}' to say. *)
-  | Left_alone
-      (** [same_group] said the number no longer names the group meant, so
-          the signal due then was not sent. *)
-
-(** Ends the group numbered [group]: SIGTERM, then SIGKILL for whatever is
-    left after [grace_s] seconds. Before each signal [same_group ()] says
-    whether the number still names the group meant: a group that empties
-    gives its number up, and a later process may lead a group with it. Only
-    that group is signalled, and only while it has members. *)
-val stop_group :
-  clock:_ Eio.Time.clock -> grace_s:float -> same_group:(unit -> bool) -> int -> stopped
 
 (** When the process numbered [pid] started, as a token no later process
     given that number shares: Darwin's p_starttime to the microsecond, from

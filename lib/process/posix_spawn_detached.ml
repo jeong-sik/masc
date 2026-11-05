@@ -117,53 +117,6 @@ let group_id_has_members group =
   | exception Unix.Unix_error (Unix.EPERM, _, _) ->
     Option.value ~default:true (Process_group_members.live_member_left group)
 
-let group_has_members t = group_id_has_members t.pid
-
-let signal_group_id group signal =
-  if group_id_has_members group then
-    match Unix.kill (-group) signal with
-    | () -> ()
-    (* It emptied between the two calls, or its processes are not this
-       account's to signal. *)
-    | exception Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
-
-type stopped = Ended_on_term | Killed_after_grace | Left_alone
-
-let group_poll_s = 0.1
-
-(* SIGKILL ends a process once it returns to user space; one in an
-   uninterruptible wait ends later. *)
-let kill_settle_s = 1.
-
-let await_empty ~clock ~seconds group =
-  let deadline = Monotonic_deadline.after ~seconds in
-  let rec wait () =
-    if group_id_has_members group && not (Monotonic_deadline.passed deadline) then (
-      Eio.Time.sleep clock group_poll_s;
-      wait ())
-  in
-  wait ()
-
-(* A group that empties gives its number up, and a later process may lead a
-   group with it, so the number is checked again before each signal. *)
-let stop_group ~clock ~grace_s ~same_group group =
-  if not (same_group ()) then Left_alone
-  else (
-    signal_group_id group Sys.sigterm;
-    let deadline = Monotonic_deadline.after ~seconds:grace_s in
-    let rec wait () =
-      if not (group_id_has_members group) then Ended_on_term
-      else if not (Monotonic_deadline.passed deadline) then (
-        Eio.Time.sleep clock group_poll_s;
-        wait ())
-      else if same_group () then (
-        signal_group_id group Sys.sigkill;
-        await_empty ~clock ~seconds:kill_settle_s group;
-        Killed_after_grace)
-      else Left_alone
-    in
-    wait ())
-
 external process_group_of : int -> int = "masc_process_group_of"
 
 let group_of_pid pid =

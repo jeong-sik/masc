@@ -83,7 +83,7 @@ let window_for_phase config = function
   | Tool_item_running -> None
 ;;
 
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }
@@ -2448,14 +2448,6 @@ let rec await_turn_terminal io ~terminal_tools_closed ~tools ~tool_call_count ~t
       ~streamed_texts ~on_stream_event
 ;;
 
-(* Media types the app-server image item accepts, mirroring the closed set the
-   analyze_image tool and the dashboard composer already use. Defined next to
-   the tool-result projection that applies the same set, so the two paths into
-   the same wire item cannot drift. *)
-let supported_image_media_types =
-  Runtime_official_client_tool.official_client_image_media_types
-;;
-
 (* The app-server README is explicit: the [image] input variant takes an inline
    data URL and rejects remote HTTP(S) URLs, so the payload is inlined here
    rather than handed over as a link the server would refuse. *)
@@ -2466,30 +2458,6 @@ let image_input_item (image : image_input) =
       , `String
           (Printf.sprintf "data:%s;base64,%s" image.media_type image.base64_data) )
     ]
-;;
-
-(* Fail closed before the process boundary. A malformed data URL comes back as a
-   turn rejection several seconds later, attributed to the thread rather than to
-   the caller that built it. *)
-let validate_images images =
-  let rec loop index = function
-    | [] -> Ok ()
-    | image :: rest ->
-      let where = Printf.sprintf "images[%d]" index in
-      if not (List.mem image.media_type supported_image_media_types)
-      then
-        Error
-          (Invalid_config
-             (Printf.sprintf
-                "%s.media_type %S is not one of %s"
-                where
-                image.media_type
-                (String.concat ", " supported_image_media_types)))
-      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
-        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
-        | Ok () -> loop (index + 1) rest
-  in
-  loop 0 images
 ;;
 
 let optional_field name = function
@@ -3144,8 +3112,8 @@ let validate_dynamic_tools tools =
 ;;
 
 let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images =
-  match validate_images images with
-  | Error _ as invalid -> invalid
+  match Runtime_official_client_tool.validate_image_inputs images with
+  | Error detail -> Error (Invalid_config detail)
   | Ok () ->
   match validate_config config ~cwd ~thread_mode ~prompt with
   | Error _ as error -> error

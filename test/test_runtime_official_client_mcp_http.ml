@@ -694,7 +694,7 @@ let test_turn_cancel_reaches_active_tool_and_releases_dispatch () =
 ;;
 
 (* Claude Code is the client behind this transport, and its initial-image path
-   ([Runtime_claude_code.validate_images]) refuses anything outside the shared
+   ([Runtime_official_client_tool.validate_image_inputs]) refuses anything outside the shared
    set before it spawns. MCP's own ImageContent leaves the set open, so without
    the same gate here a tool result reached the provider in a format the turn
    path had already rejected -- and only after the tool had run. *)
@@ -982,6 +982,37 @@ let test_host_stop_drains_admitted_peers_and_refuses_late_execution ~peer_fails 
         (Runtime_official_client_mcp_http.For_testing.snapshot bridge).retained_tool_reservations))
 ;;
 
+(* A turn image and a tool-result image are judged by the same media-type set
+   and the same Base64 rule, and the error names the first bad image. *)
+let test_turn_images_are_judged_by_the_shared_rules () =
+  let image media_type base64_data : Runtime_official_client_tool.image_input =
+    { media_type; base64_data }
+  in
+  let valid media_type = image media_type "aGVsbG8=" in
+  let validate = Runtime_official_client_tool.validate_image_inputs in
+  let refusal images =
+    match validate images with
+    | Ok () -> fail "the images were accepted"
+    | Error detail -> detail
+  in
+  check (result unit string) "no images" (Ok ()) (validate []);
+  check (result unit string) "every media type of the shared set" (Ok ())
+    (validate (List.map valid Runtime_official_client_tool.official_client_image_media_types));
+  check string "a media type outside the set names its image and the set"
+    ("images[1].media_type \"image/tiff\" is not one of "
+     ^ String.concat ", " Runtime_official_client_tool.official_client_image_media_types)
+    (refusal [ valid "image/png"; valid "image/tiff" ]);
+  check string "empty data" "images[0].base64_data must not be empty"
+    (refusal [ image "image/png" "" ]);
+  check string "newline in data" "images[0].base64_data must not contain newlines"
+    (refusal [ image "image/png" "aGVs\nbG8=" ]);
+  check string "not Base64" "images[0].base64_data must contain valid Base64 data"
+    (refusal [ image "image/png" "not base64!" ]);
+  check string "the first bad image is the one named"
+    "images[0].base64_data must not be empty"
+    (refusal [ image "image/png" ""; valid "image/tiff" ])
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -994,6 +1025,8 @@ let () =
             test_unsupported_media_is_a_delivery_error
         ; test_case "image media type outside the shared set is refused" `Quick
             (fun () -> test_image_media_type_outside_the_shared_set_is_refused ())
+        ; test_case "turn images are judged by the shared rules" `Quick
+            test_turn_images_are_judged_by_the_shared_rules
         ; test_case "malformed Base64 tool image preserves explicit failure and receipt" `Quick
             (fun () -> test_image_media_type_outside_the_shared_set_is_refused
               ~media_type:"image/png" ~data:"%%%" ~expected:["valid Base64"] ())

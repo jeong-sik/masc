@@ -115,12 +115,22 @@ val notify_response_sent : (unit -> unit) option -> unit
 
 val official_client_image_media_types : string list
 (** The closed media-type set an official-client image item accepts, on either
-    transport. Shared with {!Runtime_codex_app_server.validate_images} and
-    {!Runtime_claude_code.validate_images} so a turn image and a tool-result
-    image are judged by one list. *)
+    transport. {!validate_image_inputs} reads it, so a turn image and a
+    tool-result image are judged by one list. *)
 
 val validate_base64_image_data : string -> (unit, string) result
 (** Shared initial-image and tool-result validation before client delivery. *)
+
+(** One image attached to a turn's user message. [base64_data] is the raw
+    base64 payload with no data-URL prefix and no newlines. *)
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+val validate_image_inputs : image_input list -> (unit, string) result
+(** Check a turn's images before the client starts. The error names the first
+    bad image, as [images[N].media_type ...] or [images[N].base64_data ...]. *)
 
 val project_content :
   content_transport -> content:string ->

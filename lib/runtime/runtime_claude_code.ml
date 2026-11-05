@@ -111,7 +111,7 @@ let timeout_s_for_phase config ~turn_admitted =
   else Some config.admission_timeout_s
 ;;
 
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }
@@ -3137,37 +3137,6 @@ let validate_config config ~session_mode ~prompt =
     | Start | Resume _ -> Ok ()
 ;;
 
-(* Media types the stream-json image block accepts. Same closed set as the
-   analyze_image tool schema and the dashboard composer, so a file the operator
-   can attach is a file this transport can carry. *)
-let supported_image_media_types =
-  Runtime_official_client_tool.official_client_image_media_types
-;;
-
-(* Fail closed before spawning the CLI. A malformed image reaches the provider
-   as a 400 several seconds later, with the turn already started and the error
-   attributed to the model rather than to the caller that built the block. *)
-let validate_images images =
-  let rec loop index = function
-    | [] -> Ok ()
-    | image :: rest ->
-      let where = Printf.sprintf "images[%d]" index in
-      if not (List.mem image.media_type supported_image_media_types)
-      then
-        Error
-          (Invalid_config
-             (Printf.sprintf
-                "%s.media_type %S is not one of %s"
-                where
-                image.media_type
-                (String.concat ", " supported_image_media_types)))
-      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
-        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
-        | Ok () -> loop (index + 1) rest
-  in
-  loop 0 images
-;;
-
 let validate_dynamic_tools tools =
   let valid_tool_character = function
     | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
@@ -3197,7 +3166,10 @@ let validate_dynamic_tools tools =
 
 let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt ~images =
   let* () = validate_config config ~session_mode ~prompt in
-  let* () = validate_images images in
+  let* () =
+    Runtime_official_client_tool.validate_image_inputs images
+    |> Result.map_error (fun detail -> Invalid_config detail)
+  in
   validate_dynamic_tools dynamic_tools
 ;;
 

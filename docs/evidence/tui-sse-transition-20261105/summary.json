@@ -23,7 +23,12 @@
     "run": 41963750774,
     "source": "5c1420fb9703c78ff403929d3f04563539a4a478",
     "suite_count": 20,
-    "result": "in_progress",
+    "result": "success",
+    "suite_evidence": "remote-targeted-suites.txt",
+    "lane_inventory_pty_ok_seconds": 498,
+    "spectator_pty_ok_seconds": 20,
+    "memory_pty_ok_seconds": 23,
+    "browser_pty_ok_seconds": 21,
     "previous": {
       "run": 41961038163,
       "result": "failure",
@@ -146,7 +151,7 @@
   "remaining_work": [
     "Play room still polls POST /api/v1/play/room every two seconds while active, including presence renewal; server-owned presence and change notification design is still required.",
     "Browser change detection is server sampling every two seconds, not backend-native browser events.",
-    "The targeted 20-suite run and independent whole-branch review are not yet complete at this capture.",
+    "The targeted 20-suite run passed; the independent whole-branch review is still in progress at this capture.",
     "Real Browser backends were not exercised; PTY peers are HTTP/SSE fixtures.",
     "Native browser-lane proof retains the four failed suites named above; missing Node fixture modules and Browser tool/vision assertion failures are not claimed to be pre-existing.",
     "PR #48180 is closed with no open replacement at capture time; merge/conflict handling belongs to another owner.",

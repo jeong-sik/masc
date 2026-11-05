@@ -18,7 +18,7 @@ TUI 렌더링 최적화는 별도 완료 증거인 [`tui-smoothness-20261104`](.
 - embedded `--build-commit`: 위 production source와 동일
 - `41960925440`: `pr-type-check.yml`, **성공**
 - `41961038163`: 첫 20개 targeted suite, Browser hidden 경합 1건과 Lane cold-build 600초 초과로 **실패**
-- `41963750774`: hidden 진입을 보정한 20개 targeted suite, **실행 중**
+- `41963750774`: hidden 진입을 보정한 20개 targeted suite, **성공**
 - `41963753486`: test-only head `5c1420fb9703c78ff403929d3f04563539a4a478`의 `pr-type-check.yml`, **성공**
 - 독립 whole-branch review: **대기**
 
@@ -71,6 +71,7 @@ PYTHONPATH=test python3 docs/evidence/tui-sse-transition-20261105/measure_browse
 ```
 
 - `candidate-{browser,memory,spectator,lane}-requests.json`: 최종 phase별 요청 수와 통과 여부
+- `remote-targeted-suites.txt`: 20/20 `OK`와 Lane 498초·spectator 20초·Memory 23초·Browser 21초를 확인한 suite 요약
 - `candidate-{browser,memory,spectator,lanes}-result.log`: 최종 PTY 결과
 - `candidate-browser-idle-result.log`, `candidate-help.txt`: 고정 idle와 CLI 결과
 - `baseline-{browser,browser-idle,spectator,memory}-result.log`: 기준선 결과와 실패를 그대로 보존

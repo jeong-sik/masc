@@ -1,0 +1,26 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/41963750774
+Source: 5c1420fb9703c78ff403929d3f04563539a4a478
+Result: success; 20/20 OK, no failed suite or timeout.
+Artifact: suite-runner-log, artifact id 13386103803.
+This is the selected suite-result summary derived from ci-run-tests.log, not the full 3 MB runner log.
+
+@runtest-test_tui_lane_inventory_push: OK in 498s
+@runtest-test_tui_spectator_push: OK in 20s
+@runtest-test_tui_memory_push: OK in 23s
+@runtest-test_tui_browser_push: OK in 21s
+test/test_machine_spectator: OK in 1s
+test/test_tui_execute_stream_http: OK in 32s
+test/test_tui_server_identity_refresh: OK in 0s
+test/test_tui_observer: OK in 0s
+test/test_tui_acting: OK in 0s
+test/test_tui_lane_read_decision: OK in 0s
+test/test_server_lane_inventory: OK in 1s
+test/test_lane_addon_actions: OK in 0s
+test/test_lane_addon_live_route: OK in 1s
+test/test_keeper_skill_activation_ledger: OK in 0s
+test/test_server_dashboard_http_keeper_memory_health: OK in 1s
+test/test_dashboard_http_core: OK in 6s
+test/test_tui_lane_inventory_notifications: OK in 0s
+test/test_browser_surface: OK in 0s
+test/test_browser_spectator: OK in 0s
+test/test_tui_browser_lane: OK in 0s

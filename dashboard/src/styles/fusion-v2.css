@@ -100,18 +100,11 @@
   opacity: 0.55;
 }
 
-.v2-fusion-surface .fus-scroll {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
 .v2-fusion-surface .fus-head {
   align-items: flex-start;
 }
 
-.v2-fusion-surface .fus-refresh,
-.v2-fusion-surface .fus-action {
+.v2-fusion-surface .fus-refresh {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -126,8 +119,7 @@
   padding: 0 12px;
 }
 
-.v2-fusion-surface .fus-refresh:hover,
-.v2-fusion-surface .fus-action:hover {
+.v2-fusion-surface .fus-refresh:hover {
   border-color: var(--color-border-strong);
   background: var(--color-bg-hover);
 }
@@ -137,13 +129,6 @@
   opacity: 0.6;
 }
 
-.v2-fusion-surface .fus-action.primary {
-  border-color: var(--ok-border);
-  background: var(--ok-soft);
-  color: var(--ok-fg);
-}
-
-.v2-fusion-surface .fus-top-kpis,
 .v2-fusion-surface .fus-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -192,14 +177,6 @@
   color: var(--volt-strong);
 }
 
-.v2-fusion-surface .fus-layout {
-  display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  min-height: 0;
-}
-
 .v2-fusion-surface .fus-list,
 .v2-fusion-surface .fus-detail,
 .v2-fusion-surface .fus-empty {
@@ -216,18 +193,6 @@
   max-height: calc(100vh - 180px);
   min-height: 420px;
   overflow: hidden;
-}
-
-.v2-fusion-surface .fus-list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--fus-line);
-  color: var(--fus-muted);
-  font-size: var(--fs-12);
-  font-weight: 800;
-  padding: 12px 14px;
-  text-transform: uppercase;
 }
 
 .v2-fusion-surface .fus-run-scroll {
@@ -268,28 +233,20 @@
   box-shadow: inset 2px 0 0 var(--volt);
 }
 
-.v2-fusion-surface .fus-row-top,
 .v2-fusion-surface .fus-row-meta,
 .v2-fusion-surface .fus-detail-meta,
-.v2-fusion-surface .fus-panel-head,
-.v2-fusion-surface .fus-panel-foot,
-.v2-fusion-surface .fus-section-head,
 .v2-fusion-surface .fus-sink {
   display: flex;
   align-items: center;
 }
 
-.v2-fusion-surface .fus-row-top,
-.v2-fusion-surface .fus-panel-head,
-.v2-fusion-surface .fus-section-head,
 .v2-fusion-surface .fus-sink {
   justify-content: space-between;
   gap: 10px;
 }
 
 .v2-fusion-surface .fus-row-meta,
-.v2-fusion-surface .fus-detail-meta,
-.v2-fusion-surface .fus-panel-foot {
+.v2-fusion-surface .fus-detail-meta {
   color: var(--fus-muted);
   font-size: var(--fs-11);
   gap: 8px;
@@ -302,20 +259,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.v2-fusion-surface .fus-row-question {
-  color: var(--fus-text);
-  font-size: var(--fs-13);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.v2-fusion-surface .fus-run-mark {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
 }
 
 /* .fus-rdot overrides removed — the live class matches the vendored prototype
@@ -371,12 +314,6 @@
   padding: 16px;
 }
 
-.v2-fusion-surface .fus-detail-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
 .v2-fusion-surface .fus-detail-title {
   min-width: 0;
 }
@@ -413,13 +350,6 @@
   font-weight: 800;
 }
 
-.v2-fusion-surface .fus-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.v2-fusion-surface .fus-question,
 .v2-fusion-surface .fus-judge,
 .v2-fusion-surface .fus-resolved,
 .v2-fusion-surface .fus-sink {
@@ -429,7 +359,6 @@
   padding: 14px;
 }
 
-.v2-fusion-surface .fus-question p,
 .v2-fusion-surface .fus-resolved p,
 .v2-fusion-surface .fus-sink p {
   color: var(--fus-text);
@@ -480,37 +409,6 @@
   overflow-wrap: anywhere;
 }
 
-.v2-fusion-surface .fus-corr-sep {
-  color: var(--fus-muted);
-  margin: 0 6px;
-}
-
-.v2-fusion-surface .fus-label {
-  color: var(--fus-muted);
-  font-size: var(--fs-11);
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.v2-fusion-surface .fus-section-head h3 {
-  color: var(--fus-text);
-  font-size: var(--fs-14);
-  font-weight: 800;
-  margin: 0;
-}
-
-.v2-fusion-surface .fus-section-head span {
-  color: var(--fus-muted);
-  font-size: var(--fs-12);
-  font-weight: 700;
-}
-
 /* .fus-panel-grid override removed (base + both media-query rules below) so the
    vendored prototype rule (keeper-v2/fusion.css:97) governs: a single
    `repeat(auto-fit, minmax(248px, 1fr))` that collapses columns intrinsically as
@@ -536,15 +434,6 @@
   border-top-color: var(--bad-30);
 }
 
-.v2-fusion-surface .fus-panel-model {
-  color: var(--fus-text);
-  font-size: var(--fs-13);
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .v2-fusion-surface .fus-panel-body {
   color: var(--fus-text);
   flex: 1;
@@ -552,104 +441,6 @@
   line-height: 1.52;
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.v2-fusion-surface .fus-panel-foot {
-  border-top: 1px solid var(--fus-line);
-  justify-content: flex-start;
-  padding-top: 8px;
-}
-
-.v2-fusion-surface .fus-synthesis {
-  color: var(--fus-text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: var(--fs-12);
-  line-height: 1.55;
-  margin: 10px 0 0;
-  max-height: 320px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
-
-.v2-fusion-surface .fus-judge-evidence {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.v2-fusion-surface .fus-judge-evidence-head,
-.v2-fusion-surface .fus-jgroup h4 {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.v2-fusion-surface .fus-judge-evidence-head {
-  border-top: 1px solid var(--fus-line);
-  color: var(--fus-muted);
-  font-size: var(--fs-11);
-  font-weight: 800;
-  padding-top: 12px;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-judge-evidence-head span:last-child {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: var(--fs-10);
-  font-weight: 700;
-  text-transform: none;
-}
-
-.v2-fusion-surface .fus-jgroup {
-  border-top: 1px solid var(--fus-line);
-  padding-top: 10px;
-}
-
-.v2-fusion-surface .fus-jgroup h4 {
-  color: var(--fus-text);
-  font-size: var(--fs-12);
-  font-weight: 800;
-  margin: 0 0 8px;
-}
-
-.v2-fusion-surface .fus-jrows {
-  display: grid;
-  gap: 8px;
-}
-
-.v2-fusion-surface .fus-jrow {
-  color: var(--fus-text);
-  display: grid;
-  gap: 6px;
-  font-size: var(--fs-12);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.v2-fusion-surface .fus-jrow p,
-.v2-fusion-surface .fus-jgroup ul {
-  margin: 0;
-}
-
-.v2-fusion-surface .fus-jgroup ul {
-  color: var(--fus-text);
-  display: grid;
-  gap: 6px;
-  padding-left: 20px;
-}
-
-.v2-fusion-surface .fus-jgroup-split {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.v2-fusion-surface .fus-model-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .v2-fusion-surface .fus-model-chip,
@@ -674,27 +465,8 @@
   text-transform: uppercase;
 }
 
-.v2-fusion-surface .fus-position {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
-}
-
-.v2-fusion-surface .fus-position span:first-child {
-  color: var(--fus-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: var(--fs-11);
-}
-
-.v2-fusion-surface .fus-empty-inline,
 .v2-fusion-surface .fus-empty {
   color: var(--fus-muted);
-}
-
-.v2-fusion-surface .fus-empty-inline {
-  border: 1px dashed var(--fus-line);
-  border-radius: var(--r-3);
-  padding: 20px;
 }
 
 .v2-fusion-surface .fus-empty {
@@ -706,20 +478,6 @@
   min-height: 300px;
   padding: 32px;
   text-align: center;
-}
-
-.v2-fusion-surface .fus-empty-mark {
-  align-items: center;
-  border: 1px solid var(--ok-border);
-  border-radius: var(--r-3);
-  background: var(--ok-soft);
-  color: var(--ok-fg);
-  display: inline-flex;
-  font-size: 22px;
-  font-weight: 800;
-  height: 48px;
-  justify-content: center;
-  width: 48px;
 }
 
 .v2-fusion-surface .fus-empty h2 {
@@ -736,120 +494,6 @@
   max-width: 520px;
 }
 
-.v2-fusion-surface .fus-reconcile {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-3);
-  background: var(--fus-panel);
-  padding: 14px 14px;
-}
-
-.v2-fusion-surface .fus-reconcile-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.v2-fusion-surface .fus-reconcile-head h2 {
-  margin: 0;
-  color: var(--fus-text);
-  font-size: var(--fs-13);
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-reconcile-head p {
-  margin: 4px 0 0;
-  color: var(--fus-muted);
-  font-size: var(--fs-12);
-  line-height: 1.45;
-}
-
-.v2-fusion-surface .fus-reconcile-summary {
-  flex: none;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-1);
-  background: var(--fus-panel-strong);
-  color: var(--fus-muted);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-11);
-  padding: 6px 8px;
-  white-space: nowrap;
-}
-
-.v2-fusion-surface .fus-reconcile-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.v2-fusion-surface .fus-reconcile-col {
-  min-width: 0;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-2);
-  background: var(--fus-panel-strong);
-  padding: 10px;
-}
-
-.v2-fusion-surface .fus-reconcile-col-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  color: var(--fus-muted);
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-reconcile-col-head b {
-  color: var(--fus-text);
-  font-size: var(--fs-12);
-}
-
-.v2-fusion-surface .fus-reconcile-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.v2-fusion-surface .fus-reconcile-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 8px;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-1);
-  background: color-mix(in srgb, var(--color-bg-surface) 70%, transparent);
-  color: var(--fus-text);
-  padding: 8px 8px;
-  text-align: left;
-}
-
-button.fus-reconcile-row {
-  cursor: pointer;
-}
-
-button.fus-reconcile-row:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-hover);
-}
-
-.v2-fusion-surface .fus-reconcile-row.registry-only {
-  border-color: color-mix(in srgb, var(--warn-fg) 28%, var(--fus-line));
-}
-
-.v2-fusion-surface .fus-reconcile-row.board-only {
-  border-color: color-mix(in srgb, var(--volt-strong) 24%, var(--fus-line));
-}
-
 .v2-fusion-surface .fus-reconcile-id {
   min-width: 0;
   overflow: hidden;
@@ -860,16 +504,7 @@ button.fus-reconcile-row:hover {
   font-weight: 760;
 }
 
-.v2-fusion-surface .fus-reconcile-note {
-  grid-column: 1 / -1;
-  color: var(--fus-muted);
-  font-size: var(--fs-11);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.v2-fusion-surface .fus-reconcile-empty,
-.v2-fusion-surface .fus-reconcile-more {
+.v2-fusion-surface .fus-reconcile-empty {
   margin: 8px 0 0;
   color: var(--fus-muted);
   font-size: 11.5px;
@@ -877,9 +512,6 @@ button.fus-reconcile-row:hover {
 }
 
 @media (max-width: 1100px) {
-  .v2-fusion-surface .fus-layout {
-    grid-template-columns: 1fr;
-  }
 
   .v2-fusion-surface .fus-list {
     position: static;
@@ -890,38 +522,15 @@ button.fus-reconcile-row:hover {
   .v2-fusion-surface .fus-run-scroll {
     max-height: 360px;
   }
-
-  .v2-fusion-surface .fus-reconcile-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {
-  .v2-fusion-surface .fus-top-kpis,
   .v2-fusion-surface .fus-kpis {
     grid-template-columns: 1fr;
   }
 
-  .v2-fusion-surface .fus-jgroup-split {
-    grid-template-columns: 1fr;
-  }
-
-  .v2-fusion-surface .fus-detail-head,
-  .v2-fusion-surface .fus-actions,
-  .v2-fusion-surface .fus-reconcile-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .v2-fusion-surface .fus-action,
-  .v2-fusion-surface .fus-refresh,
-  .v2-fusion-surface .fus-reconcile-summary {
+  .v2-fusion-surface .fus-refresh {
     width: 100%;
-  }
-
-  .v2-fusion-surface .fus-reconcile-summary {
-    overflow-wrap: anywhere;
-    white-space: normal;
   }
 
   .v2-fusion-surface .fus-list-refresh {
@@ -956,53 +565,11 @@ button.fus-reconcile-row:hover {
 
 /* RFC-0266 §7 Phase 4 — fusion run status panel (registry-backed live strip).
    Reuses the `.fus-status.tone-*` chip; only layout is defined here. */
-.v2-fusion-surface .fus-runs-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-2);
-  background: var(--fus-panel);
-  padding: 12px 14px;
-}
-
-.v2-fusion-surface .fus-runs-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.v2-fusion-surface .fus-runs-head h2 {
-  font-size: var(--fs-12);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--fus-muted);
-  margin: 0;
-}
 
 .v2-fusion-surface .fus-runs-head-meta {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.v2-fusion-surface .fus-runs-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-11);
-  font-weight: 700;
-  color: var(--warn-fg);
-}
-
-.v2-fusion-surface .fus-runs-live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--warn-fg);
-  animation: fus-runs-pulse 1.6s ease-in-out infinite;
 }
 
 .v2-fusion-surface .fus-runs-count {
@@ -1018,7 +585,6 @@ button.fus-reconcile-row:hover {
   padding: 4px 0;
 }
 
-.v2-fusion-surface .fus-runs-error,
 .v2-fusion-surface .fus-board-error {
   display: grid;
   gap: 4px;
@@ -1029,7 +595,6 @@ button.fus-reconcile-row:hover {
   padding: 8px 10px;
 }
 
-.v2-fusion-surface .fus-runs-error-k,
 .v2-fusion-surface .fus-board-error-k {
   font-size: var(--fs-10);
   font-weight: 800;
@@ -1037,37 +602,11 @@ button.fus-reconcile-row:hover {
   text-transform: uppercase;
 }
 
-.v2-fusion-surface .fus-runs-error-v,
 .v2-fusion-surface .fus-board-error-v {
   color: var(--fus-text);
   font-size: var(--fs-12);
   line-height: 1.45;
   overflow-wrap: anywhere;
-}
-
-.v2-fusion-surface .fus-runs-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.v2-fusion-surface .fus-runs-card {
-  display: grid;
-  gap: 8px;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-1);
-  background: var(--fus-panel-strong);
-  padding: 8px 10px;
-}
-
-.v2-fusion-surface .fus-runs-card-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
 }
 
 .v2-fusion-surface .fus-runs-id {
@@ -1092,114 +631,6 @@ button.fus-reconcile-row:hover {
 
 /* Failure attribution on a failed registry card: machine code chip + human
    detail. Only rendered for `failed` runs (fusion-runs-panel FusionRunStatusCard). */
-.v2-fusion-surface .fus-runs-reason {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-size: var(--fs-11);
-}
-
-.v2-fusion-surface .fus-runs-code {
-  flex: 0 0 auto;
-  border: 1px solid var(--bad-30);
-  border-radius: var(--r-0);
-  background: var(--bad-10);
-  color: var(--bad-light);
-  font-size: var(--fs-10);
-  padding: 1px 6px;
-}
-
-.v2-fusion-surface .fus-runs-reason-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fus-muted);
-}
-
-.v2-fusion-surface .fus-runs-pipe {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.v2-fusion-surface .fus-runs-pipe-node {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: var(--fus-muted);
-  font-size: var(--fs-10);
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-runs-pipe-node:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  left: calc(100% - 8px);
-  top: 50%;
-  border-top: 1px solid var(--fus-line);
-}
-
-.v2-fusion-surface .fus-runs-pipe-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  background: var(--color-bg-surface);
-  flex: 0 0 auto;
-}
-
-.v2-fusion-surface .fus-runs-pipe-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="done"] {
-  color: var(--ok-fg);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="done"] .fus-runs-pipe-dot {
-  background: var(--ok-fg);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="active"] {
-  color: var(--warn-fg);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="active"] .fus-runs-pipe-dot {
-  background: var(--warn-fg);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn-fg) 16%, transparent);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="failed"] {
-  color: var(--bad-light);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="failed"] .fus-runs-pipe-dot {
-  background: var(--bad-light);
-}
-
-.v2-fusion-surface .fus-runs-pipe-node[data-state="pending"] {
-  color: var(--fus-muted);
-}
-
-.v2-fusion-surface .fus-runs-preset {
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-1);
-  padding: 2px 6px;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: var(--fs-10);
-}
 
 @keyframes fus-runs-pulse {
   0%,
@@ -1211,26 +642,11 @@ button.fus-reconcile-row:hover {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .v2-fusion-surface .fus-runs-live-dot {
-    animation: none;
-  }
-}
-
 @media (max-width: 720px) {
-  .v2-fusion-surface .fus-runs-card-main,
   .v2-fusion-surface .fus-runs-meta {
     align-items: flex-start;
     flex-direction: column;
     margin-left: 0;
-  }
-
-  .v2-fusion-surface .fus-runs-pipe {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .v2-fusion-surface .fus-runs-pipe-node:not(:last-child)::after {
-    display: none;
   }
 }
 
@@ -1273,7 +689,6 @@ button.fus-reconcile-row:hover {
 .v2-fusion-surface .fus-prompt,
 .v2-fusion-surface .fus-resolved-body,
 .v2-fusion-surface .fus-panel-body,
-.v2-fusion-surface .fus-jrow,
 .v2-fusion-surface .fus-gap-miss,
 .v2-fusion-surface .fus-pos-s,
 .v2-fusion-surface .fus-claim p,

@@ -901,18 +901,10 @@ export interface DashboardFullHealthResponse {
 // --- Runtime provider reachability probe ---
 
 export type {
-  DashboardRuntimeProviderProbeStatus,
-  DashboardRuntimeProbeStatus,
-  DashboardRuntimeProbeRefreshState,
   DashboardRuntimeProviderProbe,
-  DashboardRuntimeProviderProbeSummary,
   DashboardRuntimeProbePayload,
   DashboardRuntimeProbeResponse,
 } from './schemas/runtime-probe'
-
-export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
-  return get('/api/v1/tool-metrics')
-}
 
 export type { ToolMetricsSeriesRequest }
 

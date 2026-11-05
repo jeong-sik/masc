@@ -2,7 +2,7 @@
 // Transport ownership lives in dashboard-ws.ts; this module only applies the
 // typed events that arrive through that single WebSocket connection.
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { signal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 import { formatCost } from './lib/format-number'
@@ -870,6 +870,3 @@ function handleEvent(event: SSEEvent): void {
       })
   }
 }
-
-// Re-export as readable signal for components
-export const totalEvents: ReadonlySignal<number> = eventCount

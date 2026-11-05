@@ -8,7 +8,6 @@ import { errorMessageOr } from '../lib/format-string'
 import {
   applyFetchFailed,
   applyFetchSucceeded,
-  evidenceFreshData,
   loadingEvidence,
   type EvidenceState,
 } from './keeper-detail-evidence-state'
@@ -73,10 +72,6 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
     }
   }, [keeperName])
   return evidence
-}
-
-export function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot | null {
-  return evidenceFreshData(useKeeperCompositeEvidence(keeperName))
 }
 
 export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperRuntimeTraceResponse> {

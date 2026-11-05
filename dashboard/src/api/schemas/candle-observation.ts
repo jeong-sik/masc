@@ -5,7 +5,6 @@ export * from '../../lib/candle-observation'
 export const CandleAmountSchema = Schema.String.pipe(
   Schema.filter(isCandleAmount),
 )
-export const CandleBalanceSchema = Schema.NullOr(CandleAmountSchema)
 export const CandleAccountRevisionSchema = Schema.NullOr(Schema.String.pipe(
   Schema.filter(isCandleAccountRevision),
 ))

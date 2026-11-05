@@ -84,8 +84,6 @@ export const KeeperChatHistoryAudioClipSchema = object({
   expired: optional(boolean()),
 })
 
-export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>
-
 const KeeperChatTableCellSchema = union([
   string(),
   object({
@@ -230,8 +228,6 @@ export const KeeperChatBlockSchema = union([
   }),
 ])
 
-export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
-
 // `object`, not `strictObject`: this row-level schema feeds a tolerant
 // per-row drop, so an unknown key here does not reject one field — it
 // silently deletes the whole message from the transcript. #28225 adding
@@ -260,8 +256,6 @@ export const KeeperChatHistoryStreamContractSchema = object({
   // reason as `source`/`status`.
   delivery_receipt: optional(string()),
 })
-
-export type KeeperChatHistoryStreamContract = InferOutput<typeof KeeperChatHistoryStreamContractSchema>
 
 const KeeperAutonomousTurnSchema = object({
   turn_id: string(),

@@ -321,23 +321,9 @@ export const KeeperCompositeSnapshotSchema = object({
 
 export type KeeperCompositeSnapshot = InferOutput<typeof KeeperCompositeSnapshotSchema>
 export type KeeperCompositeInvariants = InferOutput<typeof KeeperCompositeInvariantsSchema>
-export type KeeperCompositeMeasurement = InferOutput<typeof KeeperCompositeMeasurementSchema>
-export type KeeperPhaseDiagnosis = InferOutput<typeof KeeperPhaseDiagnosisSchema>
-export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRowSchema>
-export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
-export type KeeperLiveTurn = InferOutput<typeof KeeperLiveTurnSchema>
-export type KeeperRunState = InferOutput<typeof KeeperRunStateSchema>
-export type KeeperLastSkip = InferOutput<typeof KeeperLastSkipSchema>
-export type KeeperTurnAttempt = InferOutput<typeof KeeperTurnAttemptSchema>
-export type KeeperBoardCursor = InferOutput<typeof KeeperBoardCursorSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
 export type KeeperSecretProjection = InferOutput<typeof KeeperSecretProjectionSchema>
-export type KeeperSecretFileMount = InferOutput<typeof KeeperSecretFileMountSchema>
-export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
-export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
-export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
-export type KeeperCompositeRuntimeState = InferOutput<typeof KeeperCompositeRuntimeStateSchema>
 
 export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {

@@ -23,12 +23,10 @@ import {
 export type GoalVerificationReviewKind = 'proof'
 export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised' | 'superseded' | 'review_cancelled'
 
-// RFC-0444 §2.3 row 7: every row names its arm. A review is one Goal proof
-// run; a skipped scan is a verifier pass the goal store refused, which
-// reviewed nothing and carries the goal_store_unavailable envelope's members.
-export type GoalVerificationRowKind = 'review' | 'scan_skipped'
 export type { GoalStoreMirrorStatus, GoalStoreResetStep, GoalStoreUnavailableReason } from '../types/goal-store-unavailable'
 
+// A verifier pass the goal store refused: it reviewed nothing and carries the
+// goal_store_unavailable envelope's members.
 export interface GoalVerificationScanSkippedRecord {
   runId: string
   startedAt: number

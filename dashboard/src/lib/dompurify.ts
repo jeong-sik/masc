@@ -21,8 +21,6 @@ function getPurifier(): DOMPurify {
   return purifier
 }
 
-export type SanitizeConfig = Config
-
 export function sanitizeHtml(raw: string, config?: Config): string {
   const activePurifier = getPurifier()
   if (!purifierPassedSmokeTest) return fallbackSanitizeHtml(raw)

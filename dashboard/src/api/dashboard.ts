@@ -71,7 +71,6 @@ export {
 export type {
   GoalVerificationReviewKind,
   GoalVerificationRunStatus,
-  GoalVerificationRowKind,
   GoalVerificationRunRecord,
   GoalVerificationScanSkippedRecord,
   DashboardGoalVerificationRunsResponse,
@@ -145,15 +144,11 @@ export type {
   DashboardExecutionTrustResponse,
   ToolQualityHourlyPoint,
   ToolQualityResponse,
-  DashboardPerfRow,
-  DashboardPerfComparisonRow,
-  DashboardPerfResponse,
 } from './dashboard-execution'
 export {
   fetchDashboardExecution,
   fetchDashboardExecutionTrust,
   fetchToolQuality,
-  fetchDashboardPerf,
   fetchDashboardMemory,
 } from './dashboard-execution'
 
@@ -340,7 +335,6 @@ export type {
 
 export type {
   DashboardRuntimeProviderProbe,
-  DashboardRuntimeProviderProbeSummary,
   DashboardRuntimeProbePayload,
   DashboardRuntimeProbeResponse,
   PromptSource,
@@ -348,7 +342,6 @@ export type {
   DashboardRuntimePromptAsset,
 } from './dashboard-tools-prompts'
 export {
-  fetchToolMetrics,
   fetchToolMetricsSeries,
   fetchDashboardRuntimeProbe,
   fetchDashboardFullHealth,

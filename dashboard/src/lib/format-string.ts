@@ -27,12 +27,6 @@ export const MISSING_DATA_DASH = '--'
  */
 export const UNKNOWN_STATUS_LABEL = '확인 필요'
 
-/** Capitalize first character. Returns empty string unchanged. */
-export function capitalize(text: string): string {
-  if (!text) return text
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
 /**
  * String presence check without trimming. Treats `''` as absent but keeps
  * whitespace-only strings (`'   '`) as present.

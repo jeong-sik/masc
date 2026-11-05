@@ -1,0 +1,64 @@
+(** Idle connection cache behind {!Http_client.cache}.
+
+    Parks reusable transport connections per origin, closes the ones idle for
+    longer than [idle_ttl_seconds], and closes every parked connection when the
+    switch the cache was created with is released. *)
+
+type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
+
+(** Host identity for connection reuse. Path, query, and auth are not part of
+    it: a connection to the same origin can carry requests with different URLs
+    and headers. *)
+module Key : sig
+  type t =
+    { scheme : string
+    ; host : string
+    ; port : int
+    }
+end
+
+type t
+
+(** Snapshot of the cache for observability. *)
+type stats =
+  { idle_per_host : (string * int) list
+  ; total_idle : int
+  ; reuse_count_total : int
+  ; create_count_total : int
+  }
+
+(** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
+    connections kept per origin and [idle_ttl_seconds] is how long one may sit
+    idle. [clock], if supplied, drives a background fiber that closes expired
+    connections; without it they are closed when [sw] is released.
+
+    @raise Invalid_argument if [max_idle_per_host < 1] or
+    [idle_ttl_seconds <= 0]. *)
+val create
+  :  sw:Eio.Switch.t
+  -> ?clock:_ Eio.Time.clock
+  -> ?max_idle_per_host:int
+  -> ?idle_ttl_seconds:float
+  -> unit
+  -> t
+
+(** The switch the cache was created with. A connection that will be parked
+    must be opened on it, because the switch of a single request ends before
+    the connection is reused. *)
+val switch : t -> Eio.Switch.t
+
+val stats : t -> stats
+
+(** A parked connection for the origin, now owned by the caller; otherwise the
+    result of [create], which must open its connection on the given switch.
+    Counts a reuse for the first case and a created connection for a [create]
+    that returns [Ok]. Always runs [create] once the cache is stopped. *)
+val checkout
+  :  t
+  -> Key.t
+  -> create:(sw:Eio.Switch.t -> (connection, 'e) result)
+  -> (connection, 'e) result
+
+(** Parks the connection for later reuse, or closes it when the origin already
+    holds [max_idle_per_host] idle connections or the cache is stopped. *)
+val return : t -> Key.t -> connection -> unit

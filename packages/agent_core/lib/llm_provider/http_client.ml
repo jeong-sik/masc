@@ -871,7 +871,7 @@ type post_sync_once_error =
       ; error : http_error
       }
 
-type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
+type connection = Http_client_cache.connection
 
 let add_connection_close headers = ("connection", "close") :: headers
 
@@ -883,218 +883,45 @@ let maybe_add_connection_close ?cache headers =
 
 (* ── Connection cache ──────────────────────────────────────── *)
 
-(** Host identity for connection reuse. The cache intentionally ignores
-    path, query, and auth: a connection to the same origin can carry
-    requests with different URLs and headers. *)
-module Cache_key = struct
-  type t =
-    { scheme : string
-    ; host : string
-    ; port : int
-    }
+type cache = Http_client_cache.t
 
-  let compare a b =
-    match String.compare a.scheme b.scheme with
-    | 0 ->
-      (match String.compare a.host b.host with
-       | 0 -> Int.compare a.port b.port
-       | n -> n)
-    | n -> n
-  ;;
-
-  let of_origin (origin : validated_uri) =
-    { scheme = http_scheme_to_string origin.scheme
-    ; host = origin.host
-    ; port = origin.port
-    }
-  ;;
-
-  let%test "Cache_key.of_origin resolves https port 443 once" =
-    match parse_uri "https://example.com/path" with
-    | Ok origin ->
-      let key = of_origin origin in
-      key.scheme = "https" && key.host = "example.com" && key.port = 443
-    | Error _ -> false
-  ;;
-
-  let%test "Cache_key.of_origin resolves http port 80 once" =
-    match parse_uri "http://example.com/path" with
-    | Ok origin ->
-      let key = of_origin origin in
-      key.scheme = "http" && key.host = "example.com" && key.port = 80
-    | Error _ -> false
-  ;;
-
-  let%test "Cache_key.of_origin preserves explicit port" =
-    match parse_uri "https://example.com:8443/path" with
-    | Ok origin -> (of_origin origin).port = 8443
-    | Error _ -> false
-  ;;
-end
-
-module Cache_map = Map.Make (Cache_key)
-
-type cache_entry =
-  { connection : connection
-  ; last_used_at : float
-  }
-
-type cache_stats =
+type cache_stats = Http_client_cache.stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
   }
 
-type cache =
-  { sw : Eio.Switch.t
-  ; mu : Eio.Mutex.t
-  ; max_idle_per_host : int
-  ; idle_ttl_seconds : float
-  ; mutable entries : cache_entry list Cache_map.t
-  ; reuse_count_total : int Atomic.t
-  ; create_count_total : int Atomic.t
-  ; stop : bool Atomic.t
-  ; now : unit -> float
+let create_cache = Http_client_cache.create
+let cache_stats = Http_client_cache.stats
+
+let cache_key_of_origin (origin : validated_uri) : Http_client_cache.Key.t =
+  { Http_client_cache.Key.scheme = http_scheme_to_string origin.scheme
+  ; host = origin.host
+  ; port = origin.port
   }
-
-let create_cache ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : cache
-  =
-  if max_idle_per_host < 1
-  then invalid_arg "Http_client.create_cache: max_idle_per_host must be >= 1";
-  if idle_ttl_seconds <= 0.0
-  then invalid_arg "Http_client.create_cache: idle_ttl_seconds must be > 0";
-  let cache =
-    let now =
-      match clock with
-      | Some clock -> fun () -> Eio.Time.now clock
-      | None -> Unix.gettimeofday
-    in
-    { sw
-    ; mu = Eio.Mutex.create ()
-    ; max_idle_per_host
-    ; idle_ttl_seconds
-    ; entries = Cache_map.empty
-    ; reuse_count_total = Atomic.make 0
-    ; create_count_total = Atomic.make 0
-    ; stop = Atomic.make false
-    ; now
-    }
-  in
-  Eio.Switch.on_release sw (fun () ->
-    Atomic.set cache.stop true;
-    let leftover =
-      Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-        let all =
-          Cache_map.fold
-            (fun _ entries acc -> List.rev_append entries acc)
-            cache.entries
-            []
-        in
-        cache.entries <- Cache_map.empty;
-        all)
-    in
-    Eio.Cancel.protect (fun () ->
-      List.iter
-        (fun e ->
-           try Eio.Resource.close e.connection with
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | _ -> ())
-        leftover));
-  (* Eviction daemon: reap entries past [idle_ttl_seconds] when a clock
-     is supplied. A regular infinite fiber would prevent normal switch
-     completion, and the release hook that sets [stop] only runs after all
-     fibers finish. Without a clock the cache still works; stale entries
-     are closed on switch release. *)
-  (match clock with
-   | Some clock ->
-     Eio.Fiber.fork_daemon ~sw (fun () ->
-       let rec loop () =
-         if Atomic.get cache.stop
-         then `Stop_daemon
-         else (
-           Eio.Time.sleep clock (cache.idle_ttl_seconds /. 2.0);
-           let now = cache.now () in
-           let expired =
-             Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-               let expired = ref [] in
-               let remaining =
-                 Cache_map.map
-                   (List.filter (fun e ->
-                      if now -. e.last_used_at > cache.idle_ttl_seconds
-                      then (
-                        expired := e :: !expired;
-                        false)
-                      else true))
-                   cache.entries
-               in
-               cache.entries <- remaining;
-               !expired)
-           in
-           Eio.Cancel.protect (fun () ->
-             List.iter
-               (fun e ->
-                  try Eio.Resource.close e.connection with
-                  | Eio.Cancel.Cancelled _ as exn -> raise exn
-                  | _ -> ())
-               expired);
-           loop ())
-       in
-       loop ())
-   | None -> ());
-  cache
 ;;
 
-let cache_stats (cache : cache) : cache_stats =
-  Eio.Mutex.use_ro cache.mu (fun () ->
-    let idle_per_host =
-      Cache_map.bindings cache.entries
-      |> List.map (fun ({ Cache_key.scheme; host; port }, v) ->
-        Printf.sprintf "%s://%s:%d" scheme host port, List.length v)
-    in
-    let total_idle = List.fold_left (fun acc (_, n) -> acc + n) 0 idle_per_host in
-    { idle_per_host
-    ; total_idle
-    ; reuse_count_total = Atomic.get cache.reuse_count_total
-    ; create_count_total = Atomic.get cache.create_count_total
-    })
+let%test "cache_key_of_origin resolves https port 443 once" =
+  match parse_uri "https://example.com/path" with
+  | Ok origin ->
+    cache_key_of_origin origin
+    = { Http_client_cache.Key.scheme = "https"; host = "example.com"; port = 443 }
+  | Error _ -> false
 ;;
 
-(** Find a warm client for [origin] and remove it from the cache so it is
-    owned by the caller. Returns [None] if no entry is available. *)
-let cache_take (cache : cache) origin : cache_entry option =
-  if Atomic.get cache.stop
-  then None
-  else (
-    let key = Cache_key.of_origin origin in
-    Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-      match Cache_map.find_opt key cache.entries with
-      | Some (e :: rest) ->
-        cache.entries <- Cache_map.add key rest cache.entries;
-        Atomic.incr cache.reuse_count_total;
-        Some e
-      | _ -> None))
+let%test "cache_key_of_origin resolves http port 80 once" =
+  match parse_uri "http://example.com/path" with
+  | Ok origin ->
+    cache_key_of_origin origin
+    = { Http_client_cache.Key.scheme = "http"; host = "example.com"; port = 80 }
+  | Error _ -> false
 ;;
 
-(** Park a client back into the cache, or close it if the per-host cap
-    is reached. [close] is the entry's own shutdown function. *)
-let cache_return (cache : cache) origin (entry : cache_entry) : unit =
-  if Atomic.get cache.stop
-  then Eio.Resource.close entry.connection
-  else (
-    let key = Cache_key.of_origin origin in
-    let now = cache.now () in
-    let entry = { entry with last_used_at = now } in
-    let parked =
-      Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-        let existing = Cache_map.find_opt key cache.entries |> Option.value ~default:[] in
-        if List.length existing < cache.max_idle_per_host
-        then (
-          cache.entries <- Cache_map.add key (entry :: existing) cache.entries;
-          true)
-        else false)
-    in
-    if not parked then Eio.Resource.close entry.connection)
+let%test "cache_key_of_origin preserves explicit port" =
+  match parse_uri "https://example.com:8443/path" with
+  | Ok origin -> (cache_key_of_origin origin).Http_client_cache.Key.port = 8443
+  | Error _ -> false
 ;;
 
 (** Resolve [origin] and prepare the TLS wrapper if needed.
@@ -1239,6 +1066,28 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
   | Failure msg -> Error (unknown_network_error msg)
 ;;
 
+(** A parked connection to [origin] from [cache], or a new one opened on the
+    cache's switch so that it can be parked after the request's own switch
+    ends. *)
+let checkout_connection cache ~net ~origin =
+  Http_client_cache.checkout cache (cache_key_of_origin origin) ~create:(fun ~sw ->
+    make_connection ~sw ~net ~origin)
+;;
+
+let return_connection cache ~origin connection =
+  Http_client_cache.return cache (cache_key_of_origin origin) connection
+;;
+
+(** The switch a request opens its connection on: the cache's long-lived
+    switch when there is a cache, so the connection can be parked and reused
+    after the request ends, otherwise the request's own switch, which closes
+    it. *)
+let connection_switch cache ~sw =
+  match cache with
+  | Some cache -> Http_client_cache.switch cache
+  | None -> sw
+;;
+
 (** Client wrapper that tracks the socket for explicit close.
     The caller provides the concrete URI so host resolution and TLS
     availability can be checked up front and reported as typed errors. *)
@@ -1267,14 +1116,7 @@ let with_client ?cache ~sw ~net ~origin f =
             (Printexc.to_string exn))
       (fun () -> f ~sw client)
   | Some cache ->
-    let* conn, was_cached =
-      match cache_take cache origin with
-      | Some e -> Ok (e.connection, true)
-      | None ->
-        let+ conn = make_connection ~sw:cache.sw ~net ~origin in
-        Atomic.incr cache.create_count_total;
-        conn, false
-    in
+    let* conn = checkout_connection cache ~net ~origin in
     let client =
       Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> (conn :> _ Eio.Flow.two_way))
     in
@@ -1283,7 +1125,7 @@ let with_client ?cache ~sw ~net ~origin f =
       ~finally:(fun () ->
         try
           if !ok
-          then cache_return cache origin { connection = conn; last_used_at = 0.0 }
+          then return_connection cache ~origin conn
           else Eio.Resource.close conn
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1491,11 +1333,7 @@ let post_sync_once_after_validation
   Eio.Switch.run
   @@ fun sw ->
   let { origin; header; body } = request in
-  let request_sw =
-    match cache with
-    | Some cache -> cache.sw
-    | None -> sw
-  in
+  let request_sw = connection_switch cache ~sw in
   let phase = ref Before_dispatch in
   let status = ref None in
   let connection = ref None in
@@ -1596,13 +1434,7 @@ let post_sync_once_after_validation
         let* conn =
           match cache with
           | None -> make_connection ~sw:request_sw ~net ~origin
-          | Some cache ->
-            (match cache_take cache origin with
-             | Some entry -> Ok entry.connection
-             | None ->
-               let+ conn = make_connection ~sw:cache.sw ~net ~origin in
-               Atomic.incr cache.create_count_total;
-               conn)
+          | Some cache -> checkout_connection cache ~net ~origin
         in
         connection := Some conn;
         let client =
@@ -1716,7 +1548,7 @@ let post_sync_once_after_validation
          with
          | Some cache, true ->
            (try
-              cache_return cache origin { connection = conn; last_used_at = 0.0 };
+              return_connection cache ~origin conn;
               connection := None;
               Ok ()
             with
@@ -1973,14 +1805,7 @@ let with_post_stream
   let window_opened = Option.map (fun clock -> clock, Eio.Time.now clock) clock in
   Eio.Switch.run
   @@ fun sw ->
-  (* When a cache is active, bind the transport to the cache's long-lived
-     switch so the connection can be reused across requests. Otherwise use
-     the per-call switch for one-shot cleanup. *)
-  let request_sw =
-    match cache with
-    | Some c -> c.sw
-    | None -> sw
-  in
+  let request_sw = connection_switch cache ~sw in
   (* Phase 1a: the connection, the request and the response headers, one
      window under [deadline] (see [pre_header_deadline]); a refusal's body
      is then read under what that window has left, and a body that does not
@@ -2032,13 +1857,7 @@ let with_post_stream
             let* conn =
               match cache with
               | None -> make_connection ~sw:request_sw ~net ~origin
-              | Some cache ->
-                (match cache_take cache origin with
-                 | Some e -> Ok e.connection
-                 | None ->
-                   let+ conn = make_connection ~sw:cache.sw ~net ~origin in
-                   Atomic.incr cache.create_count_total;
-                   conn)
+              | Some cache -> checkout_connection cache ~net ~origin
             in
             connection := Some conn;
             let tracked_conn, transport_eof_seen = track_connection_eof conn in
@@ -2244,7 +2063,7 @@ let with_post_stream
   (match body_result, cache with
    | Ok _, Some cache
      when response_is_reusable && Eio.Buf_read.eof_seen reader && not !transport_eof_seen
-     -> cache_return cache origin { connection = conn; last_used_at = 0.0 }
+     -> return_connection cache ~origin conn
    | Ok _, Some _ | Ok _, None -> Eio.Resource.close conn
    | Error _, _ -> Eio.Resource.close conn);
   body_result

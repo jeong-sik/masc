@@ -449,6 +449,40 @@ let empty_turn_fence
     { runtime_id = scope; effect_disposition; cause = empty_turn_cause ~scope }
 ;;
 
+(* A provider error records the candidate whose error ended the turn, and
+   the blocker the operator reads names it. Without that, a 402 from the
+   metered tail of a cascade read the same as one from the head. *)
+let test_a_provider_error_names_the_runtime_that_returned_it () =
+  let err =
+    Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message = "Insufficient Balance" })
+  in
+  let raw_error = Agent_core.Error.to_string err in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
+  let runtime_id = "deepseek.deepseek-v4-flash" in
+  match
+    Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+      ~core_error:err terminal ~raw_error
+      ~terminal_error_origin:
+        (Keeper_unified_turn_types.Terminal_error_from { runtime_id; attempt = 3 })
+  with
+  | Some (Keeper_registry.Provider_runtime_error record as reason) ->
+    Alcotest.(check (option string)) "the failing candidate is recorded"
+      (Some runtime_id) record.runtime_id;
+    (match
+       Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+         ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)
+         reason
+     with
+     | None -> Alcotest.fail "a provider error must produce a blocker surface"
+     | Some surface ->
+       Alcotest.(check string) "the summary names the runtime"
+         (Printf.sprintf "Provider runtime error from %s (%s): %s" runtime_id
+            record.code record.detail)
+         (Lazy.force surface.Keeper_status_bridge.summary))
+  | Some _ -> Alcotest.fail "a 402 must record a provider runtime error"
+  | None -> Alcotest.fail "a 402 must record a failure reason"
+;;
+
 let test_fenced_empty_turn_is_recorded_with_its_marker () =
   let scope = "openrouter" in
   let fence = empty_turn_fence ~scope () in
@@ -463,7 +497,7 @@ let test_fenced_empty_turn_is_recorded_with_its_marker () =
   in
   match
     Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-      ~core_error:err terminal ~raw_error
+      ~core_error:err terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
   with
   | Some (Keeper_registry.Provider_runtime_error record) ->
     Alcotest.(check (option string))
@@ -529,7 +563,7 @@ let test_fenced_non_empty_turn_keeps_no_marker () =
   let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
   (match
      Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-       ~core_error:err terminal ~raw_error
+       ~core_error:err terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
    with
    | Some (Keeper_registry.Provider_runtime_error record) ->
      Alcotest.(check (option string))
@@ -566,7 +600,7 @@ let test_fenced_empty_turn_with_a_possible_effect_keeps_no_marker () =
       let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
       match
         Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-          ~core_error:err terminal ~raw_error
+          ~core_error:err terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
       with
       | Some (Keeper_registry.Provider_runtime_error record as reason) ->
         Alcotest.(check (option string))
@@ -851,6 +885,12 @@ let () =
           "an appended receipt announces the Keeper row"
           `Quick
           test_receipt_append_announces_the_keeper_row
+      ] );
+    ( "provider error attribution"
+    , [ Alcotest.test_case
+          "a provider error names the runtime that returned it"
+          `Quick
+          test_a_provider_error_names_the_runtime_that_returned_it
       ] );
     ( "fenced empty-turn marker"
     , [ Alcotest.test_case

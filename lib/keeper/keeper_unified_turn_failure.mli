@@ -6,6 +6,7 @@ val record_failure_observation
   -> terminal_reason:Keeper_turn_terminal.t
   -> err:Agent_core.Error.t
   -> error_text:string
+  -> terminal_error_origin:Keeper_unified_turn_types.keeper_cycle_failed_terminal_origin
   -> unit
 (** Record one turn failure: advance the durable crash-accounting streak and
     health, then replace the live reason with this failure's typed cause (or

@@ -1185,7 +1185,8 @@ let run_keeper_cycle
                     ~meta
                     ~terminal_reason
                     ~err
-                    ~error_text:e_str;
+                    ~error_text:e_str
+                    ~terminal_error_origin:runtime_attribution.terminal_error_origin;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
                      after Agent.run() — success path emits via
                      Keeper_unified_turn_success → keeper_unified_metrics_snapshot;

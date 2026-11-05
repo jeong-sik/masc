@@ -2009,7 +2009,7 @@ max-concurrent = 1
        let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
        let reason =
          Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-           ~core_error terminal ~raw_error
+           ~core_error terminal ~raw_error ~terminal_error_origin:Masc.Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
        in
        Masc.Keeper_registry.set_failure_reason ~base_path:config.base_path
          keeper_name reason;
@@ -3232,7 +3232,7 @@ let () =
   let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
   (match
      Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-       ~core_error terminal ~raw_error
+       ~core_error terminal ~raw_error ~terminal_error_origin:Masc.Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
    with
    | Some (Masc.Keeper_registry.Provider_runtime_error { detail; code; _ }) ->
      check

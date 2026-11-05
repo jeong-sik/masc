@@ -656,10 +656,9 @@ let fd_accountant_snapshot_json () =
 ;;
 
 let provider_connection_cache_json () =
-  match Provider_connection_cache_ref.get () with
+  match Provider_connection_cache_ref.stats () with
   | None -> `Null
-  | Some cache ->
-    let stats = Llm_provider.Http_client.cache_stats cache in
+  | Some stats ->
     let closed = stats.closed_total in
     `Assoc
       [ ( "idle_per_origin"

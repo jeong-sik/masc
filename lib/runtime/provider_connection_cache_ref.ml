@@ -1,3 +1,23 @@
-let cache : Llm_provider.Http_client.cache option Atomic.t = Atomic.make None
-let install installed = Atomic.set cache (Some installed)
-let get () = Atomic.get cache
+type installed =
+  { cache : Llm_provider.Http_client.cache
+  ; domain : Domain.id
+  }
+
+let installed : installed option Atomic.t = Atomic.make None
+
+let install ~sw ~clock ~idle_ttl_seconds =
+  let cache = Llm_provider.Http_client.create_cache ~sw ~clock ~idle_ttl_seconds () in
+  Atomic.set installed (Some { cache; domain = Domain.self () })
+;;
+
+let for_this_domain () =
+  match Atomic.get installed with
+  | Some { cache; domain } when domain = Domain.self () -> Some cache
+  | Some _ | None -> None
+;;
+
+let stats () =
+  Option.map
+    (fun { cache; domain = _ } -> Llm_provider.Http_client.cache_stats cache)
+    (Atomic.get installed)
+;;

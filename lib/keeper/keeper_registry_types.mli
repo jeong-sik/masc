@@ -110,9 +110,6 @@ type 'a turn_phase_witness =
 
 type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
 
-val witness_to_turn_phase : packed_turn_phase -> turn_phase
-val turn_phase_to_witness : turn_phase -> packed_turn_phase
-
 (** Diagnostic label using the constructor name (e.g. ["Turn_routing"]).
     Used by the [Turn_phase_transition_violation] [Printexc] printer to
     render the rejected pair.  Distinct from
@@ -225,9 +222,6 @@ type 'a decision_stage_witness =
 
 type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
 
-val witness_to_stage : 'a decision_stage_witness -> decision_stage
-val stage_to_witness : decision_stage -> packed_decision_stage
-
 (** Decision stages valid as ADVANCE targets within a turn.  Excludes
     [Decision_undecided] (the initial state set only by [mark_turn_started]
     / [mark_agent_core_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
@@ -240,21 +234,6 @@ type decision_stage_active =
 val decision_stage_active_to_packed
   :  decision_stage_active
   -> packed_decision_stage
-
-(** Diagnostic label using the constructor name (e.g.
-    ["Decision_guard_ok"]). *)
-val packed_decision_stage_label : packed_decision_stage -> string
-
-(** Living-matrix documentation of the decision-stage transition relation.
-    Forbidden [<active>_to_undecided] pairs are unrepresentable through the
-    [decision_stage_active] target type, so this validator no longer raises;
-    it exists as a compile-time fixture that enumerates every admitted pair.
-    Adding a new variant to either side will trigger Warning 8 here, forcing
-    the maintainer to classify the new pair. *)
-val validate_decision_transition
-  :  from:decision_stage
-  -> to_:decision_stage_active
-  -> unit
 
 type turn_attempt_state = {
   turn_id : int;

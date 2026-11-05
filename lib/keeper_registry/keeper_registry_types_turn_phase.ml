@@ -41,24 +41,6 @@ type 'a turn_phase_witness =
 
 type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
 
-let turn_phase_to_witness : turn_phase -> packed_turn_phase = function
-  | Turn_idle -> Packed Turn_idle
-  | Turn_prompting -> Packed Turn_prompting
-  | Turn_routing -> Packed Turn_routing
-  | Turn_executing -> Packed Turn_executing
-  | Turn_finalizing -> Packed Turn_finalizing
-  | Turn_exhausted -> Packed Turn_exhausted
-;;
-
-let witness_to_turn_phase : packed_turn_phase -> turn_phase = function
-  | Packed Turn_idle -> Turn_idle
-  | Packed Turn_prompting -> Turn_prompting
-  | Packed Turn_routing -> Turn_routing
-  | Packed Turn_executing -> Turn_executing
-  | Packed Turn_finalizing -> Turn_finalizing
-  | Packed Turn_exhausted -> Turn_exhausted
-;;
-
 (* Diagnostic label for invalid-transition error messages.  Must stay in
    sync with the [turn_phase] variant — adding a constructor will fail
    compilation here, which forces the operator to extend

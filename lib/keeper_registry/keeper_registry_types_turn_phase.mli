@@ -28,8 +28,6 @@ type 'a turn_phase_witness =
 
 type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
 
-val turn_phase_to_witness : turn_phase -> packed_turn_phase
-val witness_to_turn_phase : packed_turn_phase -> turn_phase
 val packed_turn_phase_label : packed_turn_phase -> string
 
 module Turn_phase_transition : sig

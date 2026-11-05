@@ -17,9 +17,6 @@ type 'a decision_stage_witness =
 
 type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
 
-val witness_to_stage : 'a decision_stage_witness -> decision_stage
-val stage_to_witness : decision_stage -> packed_decision_stage
-
 type decision_stage_active =
   | Decision_active_guard_ok
   | Decision_active_tool_policy_selected
@@ -27,10 +24,3 @@ type decision_stage_active =
 val decision_stage_active_to_packed
   :  decision_stage_active
   -> packed_decision_stage
-
-val packed_decision_stage_label : packed_decision_stage -> string
-
-val validate_decision_transition
-  :  from:decision_stage
-  -> to_:decision_stage_active
-  -> unit

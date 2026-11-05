@@ -602,75 +602,6 @@ let content_type_of_response_headers resp_headers =
      | trimmed -> Some trimmed)
 ;;
 
-let header_has_token headers name token =
-  match Http.Header.get headers name with
-  | None -> false
-  | Some value ->
-    value
-    |> String.split_on_char ','
-    |> List.exists (fun value ->
-      String.equal
-        (String.lowercase_ascii (String.trim value))
-        (String.lowercase_ascii token))
-;;
-
-let valid_single_content_length = function
-  | [ value ] ->
-    let value = String.trim value in
-    (not (String.equal value ""))
-    && String.for_all
-         (function
-           | '0' .. '9' -> true
-           | _ -> false)
-         value
-    && Option.is_some (Int64.of_string_opt value)
-  | [] | _ :: _ :: _ -> false
-;;
-
-let response_connection_is_reusable ~request_headers response =
-  let response_headers = Cohttp.Response.headers response in
-  let status = Cohttp.Response.status response |> Cohttp.Code.code_of_status in
-  let response_allows_persistence =
-    match Cohttp.Response.version response with
-    | `HTTP_1_1 -> true
-    | `HTTP_1_0 -> header_has_token response_headers "connection" "keep-alive"
-    | `Other _ -> false
-  in
-  let is_upgrade =
-    status = 101
-    || Option.is_some (Http.Header.get response_headers "upgrade")
-    || header_has_token response_headers "connection" "upgrade"
-  in
-  let response_has_no_body =
-    (status >= 100 && status < 200) || status = 204 || status = 304
-  in
-  let response_framing =
-    match
-      ( Http.Header.get_multi response_headers "content-length"
-      , Http.Header.get_multi response_headers "transfer-encoding" )
-    with
-    | [], [] -> `Absent
-    | content_lengths, [] when valid_single_content_length content_lengths ->
-      `Content_length
-    | [], _ :: _ ->
-      (match Cohttp.Header.get_transfer_encoding response_headers with
-       | Cohttp.Transfer.Chunked -> `Final_chunked
-       | Cohttp.Transfer.Fixed _ | Cohttp.Transfer.Unknown -> `Invalid)
-    | _ -> `Invalid
-  in
-  let response_is_self_delimited =
-    match response_framing with
-    | `Content_length | `Final_chunked -> true
-    | `Absent -> response_has_no_body
-    | `Invalid -> false
-  in
-  (not is_upgrade)
-  && response_allows_persistence
-  && response_is_self_delimited
-  && (not (header_has_token request_headers "connection" "close"))
-  && not (header_has_token response_headers "connection" "close")
-;;
-
 (* ── Public API ────────────────────────────────────────────── *)
 
 type one_dispatch_phase =
@@ -885,11 +816,19 @@ let maybe_add_connection_close ?cache headers =
 
 type cache = Http_client_cache.t
 
+type cache_close_counts = Http_client_cache.close_counts =
+  { request_failed : int
+  ; not_persistent : int
+  ; body_not_drained : int
+  ; transport_ended : int
+  }
+
 type cache_stats = Http_client_cache.stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
+  ; closed_total : cache_close_counts
   }
 
 let create_cache = Http_client_cache.create
@@ -1074,8 +1013,12 @@ let checkout_connection cache ~net ~origin =
     make_connection ~sw ~net ~origin)
 ;;
 
-let return_connection cache ~origin connection =
-  Http_client_cache.return cache (cache_key_of_origin origin) connection
+(** Ends a request's connection. One from [cache] goes back through
+    [verdict] (RFC-0492 §3.2); one opened for the request alone is closed. *)
+let end_connection ?cache ~origin connection verdict =
+  match cache with
+  | Some cache -> Http_client_cache.release cache (cache_key_of_origin origin) connection verdict
+  | None -> Eio.Resource.close connection
 ;;
 
 (** The switch a request opens its connection on: the cache's long-lived
@@ -1097,10 +1040,9 @@ let connection_switch cache ~sw =
     evicts it. When [cache] is omitted the client is created for a single
     request and closed immediately after [f] returns.
 
-    [f] receives the caller switch and must return an
-    [('a, http_error) result]. The wrapper distinguishes [Ok] from [Error]
-    for cache lifecycle decisions; exceptions are treated as fatal for the
-    connection. *)
+    [f] receives the caller switch and returns its result with the
+    {!Reuse_verdict.t} for the exchange it read. [Error] and exceptions close
+    the connection as [Request_failed]. *)
 let with_client ?cache ~sw ~net ~origin f =
   match cache with
   | None ->
@@ -1114,20 +1056,18 @@ let with_client ?cache ~sw ~net ~origin f =
             "http_client"
             "with_client one-shot close failed: %s"
             (Printexc.to_string exn))
-      (fun () -> f ~sw client)
+      (fun () ->
+         let* result, (_ : Reuse_verdict.t) = f ~sw client in
+         Ok result)
   | Some cache ->
     let* conn = checkout_connection cache ~net ~origin in
     let client =
       Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> (conn :> _ Eio.Flow.two_way))
     in
-    let ok = ref false in
+    let verdict = ref (Reuse_verdict.Close Request_failed) in
     Fun.protect
       ~finally:(fun () ->
-        try
-          if !ok
-          then return_connection cache ~origin conn
-          else Eio.Resource.close conn
-        with
+        try end_connection ~cache ~origin conn !verdict with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
           Diag.warn
@@ -1135,8 +1075,8 @@ let with_client ?cache ~sw ~net ~origin f =
             "with_client cleanup failed: %s"
             (Printexc.to_string exn))
       (fun () ->
-         let* result = f ~sw client in
-         ok := true;
+         let* result, reuse = f ~sw client in
+         verdict := reuse;
          Ok result)
 module Safe_cohttp_response_flow = struct
   let min_chunk_read_len = 65_536
@@ -1235,11 +1175,12 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
         let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
         Ok
-          { status = code
-          ; body = body_str
-          ; retry_after_header = retry_after_header_of_response_headers resp_headers
-          ; content_type = content_type_of_response_headers resp_headers
-          })))
+          ( { status = code
+            ; body = body_str
+            ; retry_after_header = retry_after_header_of_response_headers resp_headers
+            ; content_type = content_type_of_response_headers resp_headers
+            }
+          , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
 (* Same receipt shape as get_sync over the DELETE verb. The Files API deletes
@@ -1265,11 +1206,12 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
         let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
         Ok
-          { status = code
-          ; body = body_str
-          ; retry_after_header = retry_after_header_of_response_headers resp_headers
-          ; content_type = content_type_of_response_headers resp_headers
-          })))
+          ( { status = code
+            ; body = body_str
+            ; retry_after_header = retry_after_header_of_response_headers resp_headers
+            ; content_type = content_type_of_response_headers resp_headers
+            }
+          , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
 let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
@@ -1314,11 +1256,12 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
           ~request_body:body
           ~response_body:body_str;
         Ok
-          { status = code
-          ; body = body_str
-          ; retry_after_header = retry_after_header_of_response_headers resp_headers
-          ; content_type = content_type_of_response_headers resp_headers
-          })))
+          ( { status = code
+            ; body = body_str
+            ; retry_after_header = retry_after_header_of_response_headers resp_headers
+            ; content_type = content_type_of_response_headers resp_headers
+            }
+          , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
 let post_sync_once_after_validation
@@ -1351,12 +1294,24 @@ let post_sync_once_after_validation
     | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
       invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
   in
-  let release_connection () =
+  let release_connection reason =
     match !connection with
     | None -> ()
     | Some conn ->
       connection := None;
-      close_connection conn
+      (match cache with
+       | Some _ ->
+         (try
+            Eio.Cancel.protect (fun () ->
+              end_connection ?cache ~origin conn (Close reason))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Diag.warn
+              "http_client"
+              "post_sync_once cleanup failed: %s"
+              (Printexc.to_string exn))
+       | None -> close_connection conn)
   in
   (* An unclassified exception is still a transport failure, and this function
      returns a result. Re-raising it made the return type a half-truth: cohttp-eio
@@ -1377,7 +1332,7 @@ let post_sync_once_after_validation
     match classify_network_exn exn with
     | Some error -> error
     | None ->
-      release_connection ();
+      release_connection Request_failed;
       Reserved_exn.reraise_if_reserved exn;
       ProviderFailure
         { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
@@ -1471,13 +1426,13 @@ let post_sync_once_after_validation
           , retry_after_header ))
     with
     | Eio.Time.Timeout as exn ->
-      release_connection ();
+      release_connection Request_failed;
       raise exn
     | exn -> fail_exn exn
   in
   match post_result with
   | Error error ->
-    release_connection ();
+    release_connection Request_failed;
     fail error
   | Ok
       ( conn
@@ -1510,7 +1465,7 @@ let post_sync_once_after_validation
           invalid_arg "Http_client.post_sync_once: inconsistent total deadline state"
       with
       | Eio.Time.Timeout as exn ->
-        release_connection ();
+        release_connection Body_not_drained;
         raise exn
       | exn -> `Failed (http_error_of_exn exn)
     in
@@ -1528,38 +1483,32 @@ let post_sync_once_after_validation
     in
     (match body_outcome with
      | `Failed error ->
-       release_connection ();
+       release_connection Request_failed;
        fail error
      | `Deadline_passed timeout_s when is_success_status response_status ->
        (* The body is the answer; without it there is none. *)
-       release_connection ();
+       release_connection Body_not_drained;
        fail (total_deadline_error timeout_s)
      | `Deadline_passed _ ->
        (* A refusing status line is the provider's answer, and it is already
           in hand with its headers: a body that does not arrive in time does
           not turn the refusal into silence. The connection has unread
           bytes on it and is not parked. *)
-       release_connection ();
+       release_connection Body_not_drained;
        Ok (response_of Not_received_in_window)
      | `Body response_body ->
        let release_result =
-         match
-           cache, response_connection_is_reusable ~request_headers:header response
-         with
-         | Some cache, true ->
-           (try
-              return_connection cache ~origin conn;
-              connection := None;
-              Ok ()
-            with
-            | exn -> fail_exn exn)
-         | Some _, false | None, _ ->
-           release_connection ();
+         try
+           end_connection ?cache ~origin conn
+             (Reuse_verdict.decide ~request_headers:header ~response ~body:`Drained);
+           connection := None;
            Ok ()
+         with
+         | exn -> fail_exn exn
        in
        (match release_result with
         | Error error ->
-          release_connection ();
+          release_connection Request_failed;
           fail error
         | Ok () -> Ok (response_of (Received response_body))))
 ;;
@@ -1850,7 +1799,13 @@ let with_post_stream
       (* Held outside the window for the cancellation that comes from
          outside it, at the handoff. *)
       let connection = ref None in
-      let close_connection () = Option.iter Eio.Resource.close !connection in
+      let close_connection () =
+        match !connection with
+        | None -> ()
+        | Some conn ->
+          connection := None;
+          end_connection ?cache ~origin conn (Close Request_failed)
+      in
       let* answer =
         match
           under_the_window (fun () ->
@@ -1888,14 +1843,14 @@ let with_post_stream
                  an outer cancel; either way the socket must not outlive the
                  request on the cache's switch, and the cancellation itself
                  is not something to classify. *)
-              Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
+              Eio.Cancel.protect close_connection;
               raise exn
             | exception exn ->
               (* A peer that closes during the request or the status line
                  reads as End_of_file through the tracked connection; an
                  exception the classifier does not know is that EOF when the
                  tracker saw one, and escapes otherwise. *)
-              Eio.Resource.close conn;
+              close_connection ();
               (match classify_network_exn exn with
                | Some e -> Error e
                | None when !transport_eof_seen -> Error (eof_error exn)
@@ -1925,7 +1880,9 @@ let with_post_stream
            is never reused. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
         Fun.protect
-          ~finally:(fun () -> Eio.Cancel.protect (fun () -> Eio.Resource.close conn))
+          ~finally:(fun () ->
+            Eio.Cancel.protect (fun () ->
+              end_connection ?cache ~origin conn (Close Request_failed)))
           (fun () ->
              let read_body () =
                match read_response_body resp_body with
@@ -1968,15 +1925,15 @@ let with_post_stream
               framing is delimited BY the close, so its EOF arrives precisely
               because the peer went away. The same predicate the synchronous
               path uses answers the second question. *)
-           let reusable = response_connection_is_reusable ~request_headers:hdr resp in
+           let reuse = Reuse_verdict.decide ~request_headers:hdr ~response:resp in
            let safe_body = safe_cohttp_response_flow resp_body in
            let reader =
              Eio.Buf_read.of_flow ~max_size:Api_common.max_response_body safe_body
            in
-           Ok (origin, conn, reusable, transport_eof_seen, reader)
+           Ok (origin, conn, reuse, transport_eof_seen, reader)
          with
          | exn ->
-           Eio.Resource.close conn;
+           end_connection ?cache ~origin conn (Close Request_failed);
            (match classify_network_exn exn with
             | Some e -> Error e
             | None when !transport_eof_seen -> Error (eof_error exn)
@@ -2029,7 +1986,7 @@ let with_post_stream
 
      The connection is parked back into the cache only after [f] returns
      successfully, ensuring the reader is no longer using the flow. *)
-  let* origin, conn, response_is_reusable, transport_eof_seen, reader = post_result in
+  let* origin, conn, reuse, transport_eof_seen, reader = post_result in
   let pre_header_elapsed_s =
     match window_opened with
     | Some (clock, opened_at) -> Eio.Time.now clock -. opened_at
@@ -2057,15 +2014,18 @@ let with_post_stream
          (* Unclassified exceptions (including cancellation) escape, so close
               the connection before re-raising to avoid leaking a cached socket
               bound to the long-lived cache switch. *)
-         Eio.Cancel.protect (fun () -> Eio.Resource.close conn);
+         Eio.Cancel.protect (fun () ->
+           end_connection ?cache ~origin conn (Close Request_failed));
          raise exn)
   in
-  (match body_result, cache with
-   | Ok _, Some cache
-     when response_is_reusable && Eio.Buf_read.eof_seen reader && not !transport_eof_seen
-     -> return_connection cache ~origin conn
-   | Ok _, Some _ | Ok _, None -> Eio.Resource.close conn
-   | Error _, _ -> Eio.Resource.close conn);
+  let body =
+    match body_result with
+    | Error _ -> `Failed
+    | Ok _ when !transport_eof_seen -> `Transport_ended
+    | Ok _ when not (Eio.Buf_read.eof_seen reader) -> `Not_drained
+    | Ok _ -> `Drained
+  in
+  end_connection ?cache ~origin conn (reuse ~body);
   body_result
 ;;
 

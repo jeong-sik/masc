@@ -30,12 +30,34 @@ type entry =
   ; last_used_at : float
   }
 
+type close_counts =
+  { request_failed : int
+  ; not_persistent : int
+  ; body_not_drained : int
+  ; transport_ended : int
+  }
+
 type stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
+  ; closed_total : close_counts
   }
+
+type close_counters =
+  { request_failed_total : int Atomic.t
+  ; not_persistent_total : int Atomic.t
+  ; body_not_drained_total : int Atomic.t
+  ; transport_ended_total : int Atomic.t
+  }
+
+let close_counter counters : Reuse_verdict.close_reason -> int Atomic.t = function
+  | Request_failed -> counters.request_failed_total
+  | Not_persistent -> counters.not_persistent_total
+  | Body_not_drained -> counters.body_not_drained_total
+  | Transport_ended -> counters.transport_ended_total
+;;
 
 type t =
   { sw : Eio.Switch.t
@@ -45,6 +67,7 @@ type t =
   ; mutable entries : entry list Key_map.t
   ; reuse_count_total : int Atomic.t
   ; create_count_total : int Atomic.t
+  ; closed : close_counters
   ; stop : bool Atomic.t
   ; now : unit -> float
   }
@@ -67,6 +90,12 @@ let create ~sw ?clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) () : t
     ; entries = Key_map.empty
     ; reuse_count_total = Atomic.make 0
     ; create_count_total = Atomic.make 0
+    ; closed =
+        { request_failed_total = Atomic.make 0
+        ; not_persistent_total = Atomic.make 0
+        ; body_not_drained_total = Atomic.make 0
+        ; transport_ended_total = Atomic.make 0
+        }
     ; stop = Atomic.make false
     ; now
     }
@@ -149,6 +178,12 @@ let stats (cache : t) : stats =
     ; total_idle
     ; reuse_count_total = Atomic.get cache.reuse_count_total
     ; create_count_total = Atomic.get cache.create_count_total
+    ; closed_total =
+        { request_failed = Atomic.get cache.closed.request_failed_total
+        ; not_persistent = Atomic.get cache.closed.not_persistent_total
+        ; body_not_drained = Atomic.get cache.closed.body_not_drained_total
+        ; transport_ended = Atomic.get cache.closed.transport_ended_total
+        }
     })
 ;;
 
@@ -165,7 +200,7 @@ let take (cache : t) key : connection option =
       | _ -> None)
 ;;
 
-let return (cache : t) key connection : unit =
+let park (cache : t) key connection : unit =
   if Atomic.get cache.stop
   then Eio.Resource.close connection
   else (
@@ -180,6 +215,14 @@ let return (cache : t) key connection : unit =
         else false)
     in
     if not parked then Eio.Resource.close connection)
+;;
+
+let release (cache : t) key connection (verdict : Reuse_verdict.t) : unit =
+  match verdict with
+  | Park -> park cache key connection
+  | Close reason ->
+    Atomic.incr (close_counter cache.closed reason);
+    Eio.Resource.close connection
 ;;
 
 let checkout (cache : t) key ~create =

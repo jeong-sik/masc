@@ -44,6 +44,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
 
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
+module Fleet_results = Masc_tui_fleet_results
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
@@ -1858,6 +1859,14 @@ let deliver_context state =
   fun mailbox answer ->
     match Context_results.answer_kind answer with
     | Context_results.Read -> enqueue mailbox (Context_msg answer)
+
+(* Every fleet stream answer is wrapped in [Fleet_msg] here, stamped when the
+   stream starts, as in [workspace_enqueue]. *)
+let deliver_fleet state =
+  let enqueue = workspace_enqueue state in
+  fun mailbox answer ->
+    match Fleet_results.answer_kind answer with
+    | Fleet_results.Read -> enqueue mailbox (Fleet_msg answer)
 
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
@@ -18942,13 +18951,13 @@ let schedule_observer_retry state ~mailbox owner =
    ends only when the workspace withdraws it, and the withdrawal resets
    [state.fleet_stream_reader], so the next refresh starts another. *)
 let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
-  let enqueue_async = workspace_enqueue state in
+  let deliver = deliver_fleet state mailbox in
   let exception Close_connection in
   state.fleet_stream_reader <-
     Fleet_stream_following Masc_tui_fleet_stream.Awaiting_first_reading;
   let run () =
     match Eio_context.get_clock_opt () with
-    | None -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended "Eio clock is unavailable"))
+    | None -> deliver (Fleet_results.Fleet_stream_reader_ended "Eio clock is unavailable")
     | Some clock ->
         let reader = Masc_tui_fleet_stream.create () in
         let posted = ref Masc_tui_fleet_stream.Awaiting_first_reading in
@@ -18956,7 +18965,7 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
           let view = Masc_tui_fleet_stream.view reader in
           if view <> !posted then begin
             posted := view;
-            enqueue_async mailbox (Fleet_msg (Fleet_stream_view view))
+            deliver (Fleet_results.Fleet_stream_view view)
           end
         in
         let read_one_connection () =
@@ -18995,8 +19004,8 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
       fork_workspace_job ~observation:true state ~sw (fun () ->
         try run () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended (Printexc.to_string exn))))
-  | None -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended "Eio switch is unavailable"))
+        | exn -> deliver (Fleet_results.Fleet_stream_reader_ended (Printexc.to_string exn)))
+  | None -> deliver (Fleet_results.Fleet_stream_reader_ended "Eio switch is unavailable")
 
 (* The stream is opened only after a refresh confirmed the workspace, and it
    asks the server for that workspace, which the fleet read it replaced did
@@ -22560,6 +22569,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Context_msg answer ->
           (match Context_results.answer_kind answer with
            | Context_results.Read -> ())
+        | Fleet_msg answer ->
+          (match Fleet_results.answer_kind answer with
+           | Fleet_results.Read -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
         | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
         | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
@@ -22641,7 +22653,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Fleet_msg (Fleet_stream_view _ | Fleet_stream_reader_ended _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -24082,17 +24094,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
           ~before
       end
-  | Fleet_msg (Fleet_stream_view view) ->
-      (* A view from a job that is no longer followed has no screen to go to. *)
-      (match state.fleet_stream_reader with
-       | Fleet_stream_following _ -> state.fleet_stream_reader <- Fleet_stream_following view
-       | Fleet_stream_idle -> ())
-  | Fleet_msg (Fleet_stream_reader_ended detail) ->
-      (* The job reconnects by itself and ends only when withdrawn, so an end
-         it reports is a failure of the job: say so, draw nothing more from
-         it, and let the next refresh start another. *)
-      Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
-      state.fleet_stream_reader <- Fleet_stream_idle
+  | Fleet_msg answer -> Fleet_results.apply state answer
   | Http_msg (Http_refresh_failed (err, approval_ticket, refresh_ticket)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;

@@ -279,10 +279,9 @@ type memory_health_read =
 
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
-   domain whose module applies its own answers declares the type there:
-   [Code_msg] carries [Masc_tui_code_results.msg], and [Context_msg] carries
-   [Masc_tui_context_results.msg]. One variant takes at most 244
-   constructors with arguments (#48617). A domain with a single answer
+   domain whose module applies its own answers declares the type there, as
+   [Code_msg] carries [Masc_tui_code_results.msg]. One variant takes at most
+   244 constructors with arguments (#48617). A domain with a single answer
    keeps it in [async_msg], and so does a constructor that carries another
    [async_msg]. *)
 
@@ -833,10 +832,6 @@ type observer_msg =
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 
-type fleet_msg =
-  | Fleet_stream_view of Masc_tui_fleet_stream.view
-  | Fleet_stream_reader_ended of string
-
 type original_msg =
   | Original_task_read_done of Masc_tui_types.task_inspection_request
       * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
@@ -940,7 +935,7 @@ type async_msg =
   | Identity_msg of identity_msg
   | Account_msg of account_msg
   | Observer_msg of observer_msg
-  | Fleet_msg of fleet_msg
+  | Fleet_msg of Masc_tui_fleet_results.msg
   | Original_msg of original_msg
 
 (* Every async result carries the instant it was ready, so the loop can say
@@ -1056,6 +1051,9 @@ let rec workspace_message_is_read = function
   | Context_msg answer ->
       (match Masc_tui_context_results.answer_kind answer with
        | Masc_tui_context_results.Read -> true)
+  | Fleet_msg answer ->
+      (match Masc_tui_fleet_results.answer_kind answer with
+       | Masc_tui_fleet_results.Read -> true)
   | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) -> true
   | Chat_msg (Chat_search_finished _) -> true
@@ -1184,8 +1182,6 @@ let rec workspace_message_is_read = function
   | Observer_msg (Observer_session_ready _ | Observer_opened _
   | Observer_received _
   | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
-  | Fleet_msg (Fleet_stream_view _
-  | Fleet_stream_reader_ended _)
   | Keeper_msg (Keeper_chat_dispatch_started _)
     -> true
   | Voice_msg (Voice_wizard_saved _)
@@ -1285,6 +1281,9 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Context_msg answer ->
       (match Masc_tui_context_results.answer_kind answer with
        | Masc_tui_context_results.Read -> false)
+  | Fleet_msg answer ->
+      (match Masc_tui_fleet_results.answer_kind answer with
+       | Masc_tui_fleet_results.Read -> false)
   | Sent_image_ready _ | Image_render_ready _ -> true
   | Board_msg (Board_attachment_saved (_, result)) ->
       (match result with
@@ -1362,7 +1361,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
   | Account_login_removal _) | Github_msg (Github_login_lines _ | Github_login_finished _
   | Github_token_saved _) | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
-  | Fleet_msg (Fleet_stream_view _ | Fleet_stream_reader_ended _) | Original_msg (Original_task_read_done _
+  | Original_msg (Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _) | Task_msg (Task_dispatch_completed _
   | Task_creation_read_done _) | Keeper_msg (Keeper_queue_action_received _
   | Keeper_execute_streamed _) -> false
@@ -1416,6 +1415,9 @@ let retired_operation_observation state ~authority ~reading message =
     | Context_msg answer ->
         (match Masc_tui_context_results.answer_kind answer with
          | Masc_tui_context_results.Read -> None)
+    | Fleet_msg answer ->
+        (match Masc_tui_fleet_results.answer_kind answer with
+         | Masc_tui_fleet_results.Read -> None)
     | Browser_msg (Browser_lane_scene_loaded (generation, Ok _)) ->
         (match state.browser_lane with
          | Some ({load=Browser_lane_view.Loading (current, operation); _} as view)
@@ -1525,7 +1527,6 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _))
     | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
-    | Fleet_msg (Fleet_stream_view _ | Fleet_stream_reader_ended _)
     | Task_msg (Task_dispatch_completed _) -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
   then None else inspect message
@@ -1542,6 +1543,9 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Context_msg answer ->
       (match Masc_tui_context_results.answer_kind answer with
        | Masc_tui_context_results.Read -> message)
+  | Fleet_msg answer ->
+      (match Masc_tui_fleet_results.answer_kind answer with
+       | Masc_tui_fleet_results.Read -> message)
   | Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation)) ->
       let receipt, observation = project receipt observation in
       Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation))
@@ -1664,5 +1668,5 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Fleet_msg (Fleet_stream_view _
-  | Fleet_stream_reader_ended _) | Task_msg (Task_dispatch_completed _) -> message
+  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
+  | Task_msg (Task_dispatch_completed _) -> message

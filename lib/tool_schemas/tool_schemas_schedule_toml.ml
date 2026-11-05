@@ -15,15 +15,7 @@
     against what the list published before the move and separately checks
     that the later update declaration shares the create field set. *)
 
-let schema_of_name name : Masc_domain.tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-;;
+let schema_of_name = Tool_definition_embedded.schema
 
 let create = schema_of_name "masc_schedule_create"
 let update = schema_of_name "masc_schedule_update"

@@ -43,7 +43,11 @@ Definitions:
   (`system_prompt.bytes`), the messages by role (the sum of `messages[].artifact.bytes`
   per `role`) and `unaccounted`, the rest of the body (image data of requests with
   media, and the JSON around the parts; never below zero). Shares are pooled over
-  all bytes and taken as the median of the per-request shares.
+  all bytes and taken as the median of the per-request shares. A message's
+  `artifact.bytes` is the size of its stored JSON, which can exceed what the request
+  carries: a tool result with typed blocks is stored with a flat `text_content` copy
+  next to the blocks, and the request carries the blocks only. The message shares
+  are upper bounds.
 
 A tool's name here is the name the Keeper sees (`BrowserSession`), which is the
 name in both stores. Its file under `config/tools/` can have another name

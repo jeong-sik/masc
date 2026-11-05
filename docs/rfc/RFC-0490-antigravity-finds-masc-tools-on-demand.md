@@ -55,6 +55,8 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 - appDataDir 안의 다른 파일은 settings 와 관계없이 agy 가 거절한다. 오류는 "Matches hardcoded system protection boundary rule" 이다(측정 6·7·8b). masc 가 넣는 `antigravity-oauth-token` 도 이 폴더에 있다.
 - 10 KB 넘는 지연 결과는 `<appDataDir>/brain/<대화>/.system_generated/steps/<n>/output.txt` 로 빠진다. 이 파일은 allow 없이 읽힌다(측정 8a).
 - `<HOME>/.gemini/config/` 는 그 보호 밖이다. 이 폴더의 `mcp_config.json` 에는 bridge 의 `Authorization: Bearer` 가 있다.
+- 맞는 규칙이 없어도 workspace(cwd 와 `--add-dir` 폴더) 안의 읽기·쓰기는 묻지 않고 허가된다. agy [permissions 문서](https://antigravity.google/docs/permissions?tab=cli)의 "Workspaces are auto-allowed" 와 `read_file` 기본값 "Ask (Auto-allowed in workspace)" 다. 지금 `Native_none` 에서 workspace 읽기를 막는 규칙은 `read_file(*)` 하나다.
+- 지금 `Native_none` 으로 모델 턴을 도는 두 실행은 cwd 가 비밀을 품는다. capability probe 의 cwd 는 `base_path` 다(`keeper_capability_probe.ml:682`). 그 아래 `.masc` 에 다른 Keeper 의 토큰과 `mcp_config.json` bearer 가 있다. readiness 는 cwd 아래에 자기 HOME 을 만든다(`runtime_verification_antigravity.ml:5`).
 
 ### 1.4 허용 밖 읽기는 턴을 끝낸다
 
@@ -78,11 +80,15 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 
 | 자세 | allow | deny |
 | --- | --- | --- |
-| `Native_none` | `mcp(masc/*)`, `read_file(<schema 폴더>)` | `read_file(<설정 폴더>)`, `read_file(<토큰>)`, `write_file(*)`, `command(*)`, `read_url(*)`, `execute_url(*)` |
-| `Native_read` | 위 + `read_file(<workspace>)` | `Native_none` 과 같다 |
+| `Native_none` | `mcp(masc/*)`, `read_file(<schema 폴더>)` | `read_file(<설정 폴더>)`, `read_file(<토큰>)`, `read_file(<workspace 루트마다>)`, `write_file(*)`, `command(*)`, `read_url(*)`, `execute_url(*)` |
+| `Native_read` | `Native_none` 의 allow + `read_file(<workspace>)` | `Native_none` 에서 workspace 루트 deny 를 뺀 것 |
 | `Native_full` | 위 + `write_file(<workspace>)` | `read_file(<설정 폴더>)`, `read_file(<토큰>)`, `read_url(*)`, `execute_url(*)` |
 
 - `read_file(*)` 전체 거부는 뺀다. 남기면 schema 를 읽을 수 없다(1.3).
+- `Native_none` 은 workspace 루트마다 `read_file(<루트>)` 를 거부한다. `read_file(*)` 가 빠지면 workspace 자동 허가가 열리기 때문이다(1.3).
+  - `Native_none` workspace 루트가 HOME 을 품으면 정책을 쓰지 않고 실패한다. 그 deny 가 schema allow 를 이기고, HOME 의 keychain 파일과 다른 계정 파일이 보인다.
+  - 모델 턴을 도는 `Native_none` 실행은 실제 cwd 로 정책을 쓴다. capability probe 와 readiness 는 `prepare_native ~posture:Native_none ~workspace:Private_workspace` 로 HOME 안의 빈 폴더를 받아 거기서 돈다.
+  - 사용량 조회(`-p /usage`)와 모델 목록(`models`)은 일회용 HOME 을 cwd 로 쓰고 기본 줄을 받는다. `models` 결과는 사용량 0 으로 온다(`runtime_antigravity_setup.ml` 의 검사). `/usage` 가 모델 턴을 여는지는 확인 필요다.
 - 설정 폴더 deny 가 없으면 그 폴더를 읽으려는 순간 턴이 끝난다. deny 가 있으면 그 읽기만 거절되고 턴은 이어진다(측정 6, 8b).
 - 토큰은 agy 의 boundary 가 이미 막는다. 그래도 정확한 경로로 거부한다. boundary 는 agy 문서에 없는 동작이고, agy 는 스스로 업데이트한다. 이 deny 를 달아도 agy 로그인은 된다(측정 8b).
 - `settings_json ()` 은 `Native_none` 줄을 쓴다. 사용량 조회·readiness·probe home 도 같은 줄을 받는다. 2.1 뒤에는 그 home 들도 schema 를 읽어야 하니 같은 줄이 맞다.
@@ -142,13 +148,17 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC 와 근거 | 리뷰 |
-| L2 | settings 표(2.2) | 자세별 settings JSON 시험(allow·deny 경로, `read_file(*)` 없음). 일회용 HOME 에서 schema 읽힘·설정 폴더 거절·토큰 경로 거절 실측 |
+| L2 | settings 표(2.2), probe·readiness 의 cwd | 자세별 settings JSON 시험(allow·deny 경로, `read_file(*)` 없음, `Native_none` workspace 루트 deny, HOME 을 품은 루트 거부). 일회용 HOME 에서 schema 읽힘·설정 폴더 거절·토큰 경로 거절·workspace 읽기 거절 실측. 같은 경로를 `..`·symlink·상대 경로로 적은 읽기도 거절되는지 실측 |
 | L2b | agy 자동 업데이트 끄기(2.4) | 환경 시험: home 이 있든 없든 환경에 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 가 한 번만 있다. 일회용 HOME 에서 `updater/` 폴더가 생기지 않는다 |
 | L3 | hook 실행 파일 `masc-antigravity-path-hook`(2.3)과 `hooks.json` 게시 | hook 판정 시험(허용 루트 안·밖, symlink 탈출, 계약 밖 입력, 경로 없는 도구). 서버 옆에 실행 파일이 없으면 home 준비가 실패한다. 일회용 HOME 에서 결정 없는 출력의 모양, 허용 밖 읽기 뒤 턴이 이어지는지, `write_file`·`edit_file` 의 경로 인자 이름 실측 |
 | L4 | eager 제거(2.1), readiness·probe 를 지연 길로 | type-check. readiness 가 `call_mcp_tool` 로 통과 |
 | L5 | 실제 Keeper 턴 확인 | msx-retro-mania antigravity 턴에서 `masc_dos_screen`·`masc_dos_press` 가 bridge 에 도착 |
 
-L2 를 먼저 낸다. L2 만 들어가도 eager 도구는 지금처럼 불린다. L4 가 L2 보다 먼저 들어가면 `Native_none` home 은 schema 를 못 읽는다. L2b 와 L3 는 L4 와 따로 들어가도 된다. #48773 과 #48796 은 이 스택과 관계없이 들어간다.
+L3 를 L2 보다 먼저 병합한다.
+
+- L2 가 `read_file(*)` 를 빼면 `Native_none` 에서 어느 규칙에도 맞지 않는 읽기가 Ask 가 된다. hook 이 없으면 그 읽기는 턴을 끝낸다. 지금은 그 호출만 실패한다.
+- L2 의 deny 는 정규화된 경로 하나씩이다. agy 가 `..`·symlink·상대 경로를 정규화하는지는 문서에 없다. 정규화하지 않으면 schema allow 아래를 거쳐 설정 폴더를 가리키는 경로가 deny 를 비켜 간다. hook 은 realpath 로 비교하니 둘 다 막는다.
+- L2 만 들어가도 eager 도구는 지금처럼 불린다. L4 가 L2 보다 먼저 들어가면 `Native_none` home 은 schema 를 못 읽는다. L2b 는 L4 와 따로 들어가도 된다. #48773 과 #48796 은 이 스택과 관계없이 들어간다.
 
 ## 6. 결정 (2026-11-06)
 

@@ -174,7 +174,7 @@ let admin_assignment state (record : R.t) =
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
-let apply state (record : R.t) =
+let read state (record : R.t) =
   match record.R.kind, state.mode with
   | K.Mode_event, (Authz_mode_state.Not_bootstrapped | Multi_account _ | Off _) ->
     mode_event state record
@@ -209,6 +209,26 @@ let apply state (record : R.t) =
       | K.Migration_diagnostic
       | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
+;;
+
+(* A principal whose revocation the store gave up writes nothing (design 8.3):
+   an Admin whose assignment was being revoked neither invites nor revokes
+   another Admin while the block stands. *)
+let blocked_author state (author : Authz_records.Author.t) =
+  match author with
+  | Authz_records.Author.Authenticated principal ->
+    let subject = Authz_records.Subject.Principal principal in
+    if is_pending state subject then Some subject else None
+  | Authz_records.Author.Local_operator
+  | Authz_records.Author.System_cron
+  | Authz_records.Author.System_maintenance
+  | Authz_records.Author.System_migration -> None
+;;
+
+let apply state (record : R.t) =
+  match blocked_author state record.R.author with
+  | Some subject -> Error (Revocation_pending subject)
+  | None -> read state record
 ;;
 
 let step state record =

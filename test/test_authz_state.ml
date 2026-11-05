@@ -490,6 +490,21 @@ let test_an_admin_revokes_an_admin () =
      | Ok _ -> Alcotest.fail "the last Admin was revoked")
 ;;
 
+(* The revocation of bob was given up, so bob writes nothing while the block
+   stands, and alice is still an Admin. *)
+let test_a_principal_whose_revocation_was_given_up_writes_nothing () =
+  let held =
+    S.hold_revocations
+      (two_admins ())
+      [ Authz_records.Subject.Principal (Authz_types.Principal.Human bob) ]
+  in
+  match S.step held (admin_record ~by:bob ~user_id:user) with
+  | Error (S.Revocation_pending subject) ->
+    Alcotest.(check string) "the author" "principal:human:user-2" (Authz_records.Subject.to_string subject);
+    Alcotest.(check bool) "user is still an Admin" true (People.is_admin held.S.principals user)
+  | other -> Alcotest.failf "bob wrote while blocked: %s" (step_label other)
+;;
+
 let test_an_admin_invites_a_member () =
   let admitted = step_ok (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) in
   let member_invite =
@@ -602,6 +617,8 @@ let () =
         ] )
     ; ( "admin assignments"
       , [ Alcotest.test_case "an Admin revokes an Admin" `Quick test_an_admin_revokes_an_admin
+        ; Alcotest.test_case "a blocked principal writes nothing" `Quick
+            test_a_principal_whose_revocation_was_given_up_writes_nothing
         ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
         ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
         ] )

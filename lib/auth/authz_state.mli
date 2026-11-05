@@ -62,7 +62,8 @@ type refusal =
   | Admission_unreadable of Authz_admission_event.error
   | Admission of Authz_principal_state.refusal
   | Revocation_pending of Authz_records.Subject.t
-      (** The record spends what a revocation that the store gave up was about
+      (** The record spends what a revocation that the store gave up was about,
+          or its author is a principal whose revocation the store gave up
           (design 8.3). *)
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal

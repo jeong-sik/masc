@@ -135,7 +135,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
   let meta = test_meta "poison-intake" in
   let stim = poison_board_signal_stimulus () in
   let first_pass =
-    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result ~base_path:(Sys.getenv "MASC_BASE_PATH")
+    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result
+      ~config:(Workspace.default_config (Sys.getenv "MASC_BASE_PATH"))
       ~meta_after_triage:meta
       stim
   in
@@ -157,7 +158,8 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
      fail "Board source reported another source's read failure");
   let second_pass =
-    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result ~base_path:(Sys.getenv "MASC_BASE_PATH")
+    Keeper_heartbeat_stimulus_intake.pending_board_events_of_stimulus_result
+      ~config:(Workspace.default_config (Sys.getenv "MASC_BASE_PATH"))
       ~meta_after_triage:meta
       stim
   in

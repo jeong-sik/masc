@@ -211,8 +211,10 @@ class BrowserPushTest(unittest.TestCase):
             step("wait", lambda: browser.response_count("reconnect", f"read:{CLIENT_A}:2") >= 1,
                  "observer replacement did not revalidate the visible Browser")
 
-            browser.set_phase("hidden")
+            browser.set_phase("leaving")
             step("keys", "\x1b")
+            step("drain", 0.5)
+            browser.set_phase("hidden")
             browser.events.put(browser_event(revision="2" * 64))
             step("drain", 0.5)
             self.assertEqual(browser.count("hidden", f"read:{CLIENT_A}:2"), 0,

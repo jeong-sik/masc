@@ -47,22 +47,3 @@ let read = function
         | None -> Unreadable_due_date raw
         | Some instant -> Due_date { date; instant }))
 ;;
-
-let instant = function
-  | Due_date { instant; _ } -> Some instant
-  | No_due_date | Unreadable_due_date _ -> None
-;;
-
-let is_overdue ~now = function
-  | Due_date { instant; _ } -> Ptime.is_later now ~than:instant
-  | No_due_date | Unreadable_due_date _ -> false
-;;
-
-let days_left ~now = function
-  | Due_date { date; _ } ->
-    (match Ptime.of_date date, Ptime.of_date (Ptime.to_date now) with
-     | Some due_day, Some today ->
-       Some (fst (Ptime.Span.to_d_ps (Ptime.diff due_day today)))
-     | None, _ | _, None -> None)
-  | No_due_date | Unreadable_due_date _ -> None
-;;

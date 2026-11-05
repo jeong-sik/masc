@@ -1,6 +1,5 @@
 (* Goal_due: the one reading of a Goal's due date. A due date is YYYY-MM-DD
-   for a day that exists, and it falls due at 23:59:59 UTC of that day. Every
-   instant is an argument; nothing here reads a clock. *)
+   for a day that exists, and it falls due at 23:59:59 UTC of that day. *)
 
 open Alcotest
 
@@ -75,64 +74,6 @@ let test_readable_exactly_when_the_day_exists () =
     done
   done
 
-(* Overdue is strictly after 23:59:59 UTC. The due instant itself is not late. *)
-let test_overdue_is_strictly_after_the_due_instant () =
-  let due = due_date "2026-09-23" in
-  check bool "the morning of the day" false
-    (Goal_due.is_overdue ~now:(utc 2026 9 23 0 0 0) due);
-  check bool "23:59:58" false (Goal_due.is_overdue ~now:(utc 2026 9 23 23 59 58) due);
-  check bool "23:59:59 is the due instant" false
-    (Goal_due.is_overdue ~now:(utc 2026 9 23 23 59 59) due);
-  check bool "00:00:00 the next day" true
-    (Goal_due.is_overdue ~now:(utc 2026 9 24 0 0 0) due);
-  check bool "a year later" true (Goal_due.is_overdue ~now:(utc 2027 9 23 12 0 0) due)
-
-let test_a_value_that_is_not_a_due_date_is_never_overdue () =
-  let far_future = utc 9999 12 31 23 59 59 in
-  check bool "no due date" false (Goal_due.is_overdue ~now:far_future Goal_due.No_due_date);
-  List.iter
-    (fun raw ->
-      check bool (raw ^ " is not overdue") false
-        (Goal_due.is_overdue ~now:far_future (due_date raw)))
-    [ ""; "TBD"; "2000-1-1"; " 2000-01-01"; "2000-13-01" ]
-
-(* The day count is by UTC calendar day, so it turns over at 00:00:00Z. *)
-let test_days_left_counts_utc_calendar_days () =
-  let due = due_date "2026-09-23" in
-  let days_left now = Goal_due.days_left ~now due in
-  check (option int) "a week before, at the last second" (Some 7)
-    (days_left (utc 2026 9 16 23 59 59));
-  check (option int) "the day before, at midnight" (Some 1)
-    (days_left (utc 2026 9 22 0 0 0));
-  check (option int) "the day before, at the last second" (Some 1)
-    (days_left (utc 2026 9 22 23 59 59));
-  check (option int) "the due day, at midnight" (Some 0)
-    (days_left (utc 2026 9 23 0 0 0));
-  check (option int) "the due day, at the due instant" (Some 0)
-    (days_left (utc 2026 9 23 23 59 59));
-  check (option int) "the next day, at midnight" (Some (-1))
-    (days_left (utc 2026 9 24 0 0 0));
-  check (option int) "a month after" (Some (-30)) (days_left (utc 2026 10 23 12 0 0))
-
-let test_days_left_crosses_a_year_and_a_leap_day () =
-  check (option int) "31 December to 1 January" (Some 1)
-    (Goal_due.days_left ~now:(utc 2026 12 31 12 0 0) (due_date "2027-01-01"));
-  check (option int) "28 February to 1 March in a leap year" (Some 2)
-    (Goal_due.days_left ~now:(utc 2028 2 28 12 0 0) (due_date "2028-03-01"));
-  check (option int) "28 February to 1 March in a common year" (Some 1)
-    (Goal_due.days_left ~now:(utc 2027 2 28 12 0 0) (due_date "2027-03-01"))
-
-let test_days_left_needs_a_due_date () =
-  let now = utc 2026 9 23 12 0 0 in
-  check (option int) "no due date" None (Goal_due.days_left ~now Goal_due.No_due_date);
-  check (option int) "an unreadable value" None (Goal_due.days_left ~now (due_date "TBD"))
-
-let test_instant_is_the_due_moment_only_for_a_due_date () =
-  check (option ptime) "a due date" (Some (utc 2026 9 23 23 59 59))
-    (Goal_due.instant (due_date "2026-09-23"));
-  check (option ptime) "no due date" None (Goal_due.instant Goal_due.No_due_date);
-  check (option ptime) "an unreadable value" None (Goal_due.instant (due_date "TBD"))
-
 let () =
   run "goal_due"
     [ ( "read"
@@ -145,22 +86,5 @@ let () =
             test_only_the_exact_shape_is_readable
         ; test_case "readable exactly when the day exists" `Quick
             test_readable_exactly_when_the_day_exists
-        ] )
-    ; ( "overdue"
-      , [ test_case "strictly after the due instant" `Quick
-            test_overdue_is_strictly_after_the_due_instant
-        ; test_case "a value that is not a due date is never overdue" `Quick
-            test_a_value_that_is_not_a_due_date_is_never_overdue
-        ] )
-    ; ( "days left"
-      , [ test_case "counts UTC calendar days" `Quick
-            test_days_left_counts_utc_calendar_days
-        ; test_case "crosses a year and a leap day" `Quick
-            test_days_left_crosses_a_year_and_a_leap_day
-        ; test_case "needs a due date" `Quick test_days_left_needs_a_due_date
-        ] )
-    ; ( "instant"
-      , [ test_case "is the due moment only for a due date" `Quick
-            test_instant_is_the_due_moment_only_for_a_due_date
         ] )
     ]

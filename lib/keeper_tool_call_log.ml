@@ -1253,42 +1253,10 @@ let log_call
       else append_or_enqueue entry
 ;;
 
-(* Scan multiplier for callers sharing one fleet read ([read_recent_rows] +
-   [filter_rows_for_keeper]): to end up with [n] rows from one keeper such a
-   read covers [n * read_over_scan_factor] fleet rows. Named (rather than a
-   literal 5) so those callers size their window to the coverage the old
-   per-keeper over-scan had. [read_recent] no longer applies it. *)
-let read_over_scan_factor = 5
-
 let keeper_matches name json =
   match Safe_ops.json_string_opt "keeper" json with
   | Some k -> String.equal k name
   | None -> false
-;;
-
-(* Single-pass ring buffer: keep the last [n] rows satisfying [keep],
-   preserving row order. *)
-let ring_keep_last ~n ~keep rows : Yojson.Safe.t list =
-  if n <= 0
-  then []
-  else (
-    let buf = Array.make n (`Null : Yojson.Safe.t) in
-    let pos = ref 0 in
-    let total = ref 0 in
-    List.iter
-      (fun json ->
-         if keep json
-         then (
-           buf.(!pos mod n) <- json;
-           incr pos;
-           incr total))
-      rows;
-    let count = min !total n in
-    if count = 0
-    then []
-    else (
-      let start = if !total <= n then 0 else !pos mod n in
-      List.init count (fun i -> buf.((start + i) mod n))))
 ;;
 
 (* Why the index cannot be fallen back from, and why its failure is the
@@ -1322,8 +1290,6 @@ let current_frontier ~keeper_name =
     Keeper_tool_call_index.current_frontier ~store ~keeper_name
     |> Result.map_error (fun detail -> Index_unavailable detail)
 
-let read_recent_rows ~n () = index_rows ~n ()
-
 let read_addressed ~base_path ~codebase ?keeper_name ~limit ~offset () =
   try
     let store = Dated_jsonl.open_store
@@ -1336,32 +1302,16 @@ let read_addressed ~base_path ~codebase ?keeper_name ~limit ~offset () =
   | Unix.Unix_error (error, operation, _) ->
     Error (Index_unavailable (operation ^ ": " ^ Unix.error_message error))
 
-let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
-  ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows
-;;
+(* The read index answers a keeper's latest rows exactly (RFC-0437). It
+   advances itself to the ledger's current end before the query, and it holds
+   only where each row lives plus the fields these reads filter on. The ledger
+   stays the authority: the rows returned here are read back out of it.
 
-(* The keeper filter used to be paid for with an over-scan: to end up with
-   [n] rows from one keeper the store was read [n * read_over_scan_factor]
-   rows deep and the rest discarded. It was not only expensive - it was
-   wrong. Asking for 500 of one keeper's calls returned 454 on 2026-08-24 and
-   asking for 5,000 returned 1,409, and a caller could not tell a keeper that
-   made no more calls from a scan that stopped short.
-
-   The read index answers both questions exactly (RFC-0437). It advances
-   itself to the ledger's current end before the query, so there is no
-   staleness to reason about, and it holds only where each row lives plus the
-   two fields these reads filter on. The ledger stays the authority: the rows
-   returned here are read back out of it.
-
-   An index failure is an error, not a reason to scan: a fallback would mean
-   two read paths whose answers can differ with nobody able to say which is
-   right. It is also not an empty answer: until 2026-09 the failure was
-   logged and [[]] returned, which a caller could not tell from a keeper that
-   made no calls, so a dashboard showed "no tool calls" and a composite
-   envelope "no claim" while the index was the thing that was broken (audit
-   F397). The failure now travels to the caller as [Index_unavailable] and
-   every reader states it. An unconfigured store is a different fact and
-   stays [Ok []]: there is no ledger to be unable to read. *)
+   An index failure is an error, not a reason to scan and not an empty
+   answer: a caller could not tell an empty answer from a keeper that made no
+   calls (audit F397). The failure travels to the caller as
+   [Index_unavailable] and every reader states it. An unconfigured store is a
+   different fact and stays [Ok []]: there is no ledger to be unable to read. *)
 let read_recent ?keeper_name ?(n = 100) () = index_rows ?keeper_name ~n ()
 
 

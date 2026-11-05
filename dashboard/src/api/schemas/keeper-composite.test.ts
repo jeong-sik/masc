@@ -302,20 +302,11 @@ describe('parseKeeperCompositeSnapshot', () => {
           degraded_retry_applied: null,
           degraded_retry_deferred: { runtime: 'secondary', reason: 'server_error' },
         },
-        claim_attempt: {
-          present: false,
-          source: 'keeper_task_claim_tool_call',
-          status: 'not_observed',
-          result: null,
-          claimed_task_id: null,
-          claimed_goal_id: null,
-        },
       },
     })
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
-    expect(result.execution?.claim_attempt.present).toBe(false)
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
     expect(result.execution?.runtime_lane_observation).toEqual(observation)
   })

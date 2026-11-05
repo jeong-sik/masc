@@ -44,9 +44,9 @@ let signal_live_sec  = Env_config.Dashboard.signal_live_sec
 let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 
 (* "who did or is doing it", which includes Done — that is
-   [task_performer_of_status], not the ownership helper. This used to be a
-   local re-implementation, which is how the execution payload and the goal
-   tree came to disagree about a completed Task's assignee. *)
+   [task_performer_of_status], not the ownership helper. The goal tree reads
+   the same function, so both views name the same assignee for a completed
+   Task. *)
 let task_assignee (task : Masc_domain.task) =
   Masc_domain.task_performer_of_status task.task_status
 

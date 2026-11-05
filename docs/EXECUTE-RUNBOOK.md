@@ -9,38 +9,23 @@ adjacent structured process routing. Execute is typed-only: callers provide
 exactly one of a non-empty `argv` process vector, run without a shell, or a
 `command` line handed as `-c` text to the shell named in `shell`.
 Pipes, redirections, `;`/`&&` sequencing and `FOO=1` prefixes are `command`
-syntax; there is no object form for them. Raw `cmd` strings and the old
-background task lifecycle are not part of the callable surface.
-
-## Related Documents
-
-- [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
+syntax; there is no object form for them.
 
 ## Scope
 
-- Covers: `Execute`, typed semantic exit, output truncation, Shell IR command
-  gating, and verification contract markers.
+- Covers: `Execute`, output truncation, and Shell IR command gating.
 - `Grep` owns file/content search. Execute owns typed command execution.
 - Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
 - Async boundary: the typed `Execute` callable surface is synchronous. There is
   no background shell lifecycle surface inside `Execute`.
 
-## Current Rollout State
+## Output Limits
 
-| Phase | Feature | Default | Status |
-| --- | --- | --- | --- |
-| P1 | `semantic_exit` typed return code | **on** | flipped |
-| P3 | head+tail truncation | on | delivered |
-| P5 | Shell IR command gate | on | authoritative |
-| P6 | `verifiable_markers` emission | **on** | flipped |
-
-## Flag Matrix
-
-| Variable | Default | Opt-out tokens | What changes |
-| --- | --- | --- | --- |
-| `MASC_BASH_SEMANTIC_EXIT` | on | `0`, `false`, `no`, `off` | drops `return_code_interpretation` JSON field |
-| `MASC_BASH_OUTPUT_CAP` | on | none | head+tail truncation; `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override per-stream caps |
+Host subprocess capture (`Process_eio`) keeps the first 8 MiB and the last 256 KiB
+of each stream (`Common.max_process_capture_head_bytes` and
+`Common.max_process_capture_tail_bytes`) and marks the elided bytes with a
+truncation marker. Both limits are constants; no environment variable changes them.
 
 ## Typed Input
 
@@ -106,10 +91,10 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 
 ## Async Surfaces Outside `Execute`
 
-`Execute` remains synchronous at the callable-surface level. The public schema
-rejects legacy background flags and accepts only typed command fields:
-`argv`, `command`, `shell`, `cwd`, `timeout_sec`, and `intent`. It does not expose
-`job_id`, `request_id`, `poll`, or `cancel` fields.
+`Execute` is synchronous: it returns when the command ends or `timeout_sec` passes.
+The public schema accepts only typed command fields: `argv`, `command`, `shell`,
+`cwd`, `timeout_sec`, and `intent`. It has no `job_id`, `request_id`, `poll`, or
+`cancel` field.
 
 Asynchronous execution is provided by separate typed tool families:
 - **Keeper chat operations**: `masc_keeper_delegate` and `masc_keeper_msg` submit a turn and return an `operation_id` without waiting for it; `masc_keeper_delegate_status`, `masc_keeper_delegate_list` and `masc_keeper_delegate_cancel` read or cancel it.

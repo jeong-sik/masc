@@ -291,7 +291,7 @@ module KeeperMemoryOs = struct
      including source-bound facts. 512 KiB is the next fixed bound above it. *)
   let facts_max_bytes_default = 512 * 1024
   (* Live explicit-write intake peaked at 2,830 entries/day (2026-10-06,
-     docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md). Candidate
+     docs/evidence/2026-10-07-week-audit/C-librarian-memory-skills.md). Candidate
      rows run from sub-KiB claims to a few KiB with provenance, so 16 MiB is
      days of peak intake while judgement is blocked, and it bounds every
      whole-state queue rewrite. *)

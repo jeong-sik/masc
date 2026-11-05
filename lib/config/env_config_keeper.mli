@@ -162,7 +162,7 @@ module KeeperMemoryOs : sig
       Keeper. An append that would exceed it is refused before any write, so
       the queue file cannot grow without bound while judgement is blocked.
       Live explicit-write intake peaked at 2,830 entries/day (2026-10-06,
-      docs/audits/2026-10-07-week-audit/C-librarian-memory-skills.md); the
+      docs/evidence/2026-10-07-week-audit/C-librarian-memory-skills.md); the
       default is 16 MiB. A malformed explicit value raises Config_error. *)
 
   val librarian_config_state : unit -> librarian_config_state

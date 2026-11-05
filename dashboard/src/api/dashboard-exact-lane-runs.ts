@@ -11,8 +11,8 @@ export const EXACT_LANE_IDS = [
 export type ExactLane = typeof EXACT_LANE_IDS[number]
 
 // Retained logical work is independent of the current builtin model routes.
-// Verifier uses Task/Goal registries; Stagehand has no retained source yet.
-export const LANE_RUN_IDENTITIES = [...EXACT_LANE_IDS, 'verifier_exact', 'browser_stagehand_exact'] as const
+// Verifier uses Task/Goal registries.
+export const LANE_RUN_IDENTITIES = [...EXACT_LANE_IDS, 'verifier_exact'] as const
 export type LaneRunIdentity = typeof LANE_RUN_IDENTITIES[number]
 export function isLaneRunIdentity(value: unknown): value is LaneRunIdentity {
   return LANE_RUN_IDENTITIES.some(lane => lane === value)

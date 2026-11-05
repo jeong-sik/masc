@@ -174,42 +174,16 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
               @ Http.Response.scoped_headers ()
               @ public_read_cors_headers req)
          in
-         let response = Httpun.Response.create ~headers `OK in
-         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
-         let closed = ref false in
-         let close_stream () =
-           if not !closed
-           then (
-             closed := true;
-             try Httpun.Body.Writer.close writer with
-             | exn -> (* cancel-guard-ok: httpun's dependency closure is bigstringaf, angstrom, faraday and httpun-types with no eio, so Httpun.Body.Writer.close performs no Eio operation. *)
-               Log.Dashboard.warn
-                 "execute output stream close failed: %s"
-                 (Printexc.to_string exn))
+         let response =
+           Server_sse_response.respond ~clock
+             ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+             inner_reqd (Httpun.Response.create ~headers `OK)
          in
+         let close_stream () = Server_sse_response.close response in
          let write_string data =
-           if !closed || Httpun.Body.Writer.is_closed writer
-           then (close_stream (); false)
-           else (
-             try
-               Httpun.Body.Writer.write_string writer data;
-               (* Flush completes when the HTTP transport accepts the frame,
-                  or reports that it closed first. Awaiting it bounds queued
-                  output for a slow client and observes a disconnected one. *)
-               let flushed, resolve = Eio.Promise.create () in
-               Httpun.Body.Writer.flush writer (fun outcome ->
-                 Eio.Promise.resolve resolve outcome);
-               (match Eio.Promise.await flushed with
-                | `Written -> true
-                | `Closed -> close_stream (); false)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Dashboard.warn
-                 "execute output stream write failed: %s"
-                 (Printexc.to_string exn);
-               close_stream ();
-               false)
+           match Server_sse_response.send response data with
+           | Server_sse_response.Written -> true
+           | Closed | Stalled -> false
          in
          let write_json json =
            write_string (Dashboard_execute_output.sse_frame json)
@@ -239,7 +213,7 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
                     in
                     if wrote_initial then (
                       let rec loop () =
-                        if not !closed
+                        if not (Server_sse_response.is_closed response)
                         then (
                           (* An event taken as the heartbeat came due is that
                              event: it has left the subscriber, and a heartbeat
@@ -3849,7 +3823,7 @@ let add_routes ~sw ~clock router =
 
   (* What one Keeper is waiting on a human for. *)
   |> Server_route.get (Server_route.Tool { tool_name = "masc_ask_status" }) "/api/v1/keepers/asks" (fun state request reqd ->
-         handle_keeper_asks_list state request reqd)
+         handle_keeper_asks_list ~clock state request reqd)
 
   (* Answers a Keeper's question. The operator may be at any surface; the
      log settles concurrent submissions on first write. *)
@@ -3996,7 +3970,7 @@ let add_routes ~sw ~clock router =
        | Keeper_api.Keeper_post_github_login ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state _agent_name req reqd ->
-               Keeper_api.handle_keeper_github_login_post state req reqd)
+               Keeper_api.handle_keeper_github_login_post ~clock state req reqd)
              request reqd
        | Keeper_api.Keeper_post_github_token ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -65,6 +65,9 @@ module Kind : sig
       (** A person joins through an invitation: the invitation is spent, the
           identity is bound, and the principal is made, in one record (design
           5.1-3, plan B3c). The body is that of {!Authz_admission_event}. *)
+    | Admin_assignment
+      (** A change of the Admin assignment of a principal (design 4.1, plan
+          B3c-3). The body is that of {!Authz_admin_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -73,9 +76,10 @@ end
 
 (** Whether [author] may write a record of this kind (design 6.3).
     [Runtime_grant], [Delegate_policy], [Principal],
-    [Internal_service_credential], [Permission_revocation], and [Admission]
-    need an authenticated principal: the person who joins writes their own
-    admission. Each system author writes only its own records.
+    [Internal_service_credential], [Permission_revocation], [Admission], and
+    [Admin_assignment] need an authenticated principal: the person who joins
+    writes their own admission, and an Admin writes the revocation of an Admin
+    assignment. Each system author writes only its own records.
     The local operator writes recovery records, mode events, and invites, and an
     authenticated principal writes invites too: the first Admin is invited by
     the local operator and every later one by an Admin. Which authenticated

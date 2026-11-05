@@ -41,6 +41,7 @@ let writers_of =
     ; Mode_event, [ "local operator" ]
     ; Invite, "local operator" :: authenticated
     ; Admission, authenticated
+    ; Admin_assignment, authenticated
     ]
 ;;
 
@@ -71,6 +72,7 @@ let ordinal = function
   | R.Kind.Mode_event -> 10
   | R.Kind.Invite -> 11
   | R.Kind.Admission -> 12
+  | R.Kind.Admin_assignment -> 13
 ;;
 
 let kinds_are_all_listed () =

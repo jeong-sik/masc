@@ -3670,7 +3670,7 @@ let config_pane_tabs (state : state) =
       , pane ))
     config_panes
 
-let system_subnav_row (state : state) =
+let system_subnav_row ~cells (state : state) =
   let item surface ko en =
     pressable (Press_surface surface) (Masc_tui_types.ui_text state ~ko ~en)
   in
@@ -3680,20 +3680,24 @@ let system_subnav_row (state : state) =
          ~ko:("[언어:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " 전환]")
          ~en:("[Lang:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " toggle]"))
   in
-  "  "
-  ^ Masc_tui_types.ui_text state ~ko:"시스템 메뉴:" ~en:"System views:"
-  ^ " "
-  ^ item Runtime "9:런타임" "9:Runtime"
-  ^ " · "
-  ^ item Resources "s:리소스" "s:Resources"
-  ^ " · "
-  ^ item Tools "t:도구·스킬" "t:Tools&Skills"
-  ^ " · "
-  ^ item Acting "A:활동" "A:Activity"
-  ^ " · "
-  ^ item System_logs "L:로그" "L:Logs"
-  ^ "   "
-  ^ lang_chip
+  let menu =
+    "  "
+    ^ Masc_tui_types.ui_text state ~ko:"시스템 메뉴:" ~en:"System views:"
+    ^ " "
+    ^ item Runtime "9:런타임" "9:Runtime"
+    ^ " · "
+    ^ item Resources "s:리소스" "s:Resources"
+    ^ " · "
+    ^ item Tools "t:도구·스킬" "t:Tools&Skills"
+    ^ " · "
+    ^ item Acting "A:활동" "A:Activity"
+    ^ " · "
+    ^ item System_logs "L:로그" "L:Logs"
+  in
+  (* The language chip is the row's last item. On a row too narrow for it the
+     frame cut it in the middle ("[언어:KO…"), which reads as a broken label;
+     it is left out whole instead. [:language] and a click toggle it as well. *)
+  Message_layout.join_fitting ~sep:"   " ~cells [ menu; lang_chip ]
 
 let config_pane_strip ~cols ~before ~after (state : state) =
   let keys = config_pane_keys state in

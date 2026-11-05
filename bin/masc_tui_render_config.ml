@@ -129,7 +129,7 @@ let render_runtime_params (state : state) =
              (surface.rps_id ^ " · " ^ surface.rps_description))
   in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (system_subnav_row state);
+    (system_subnav_row ~cells:(framed_inner_width cols) state);
   box_divider buf cols;
   (* Editing adds a divider and two form rows.  Spend those rows out of the
      list budget so the footer remains visible instead of falling underneath
@@ -1594,10 +1594,10 @@ let config_identity_rows ~cols (state : state) =
         if room > 0 then lead ^ Message_layout.truncate_middle room reason ^ trail
         else Message_layout.truncate_middle max_cells (lead ^ reason ^ trail)
       in
-      system_subnav_row state :: ("  " ^ notice) :: rows
+      system_subnav_row ~cells:width state :: ("  " ^ notice) :: rows
   | Workspace_identity_unread | Workspace_identity_match
   | Workspace_identity_mismatch _ ->
-      system_subnav_row state :: rows
+      system_subnav_row ~cells:width state :: rows
 
 (* What the runtime.toml body spends above the source: the server identity,
    one row per metadata line, and the rule under them. *)

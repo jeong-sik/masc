@@ -2004,7 +2004,6 @@ let fenced_purge_operation
     ; meta_removed = true
     ; session_removed = true
     ; registry_unregistered = true
-    ; accumulator_dropped = true
     ; completion
     }
   in

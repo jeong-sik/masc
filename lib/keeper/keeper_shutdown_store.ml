@@ -277,7 +277,6 @@ let finalization_evidence_to_json evidence =
     ; "meta_removed", `Bool evidence.meta_removed
     ; "session_removed", `Bool evidence.session_removed
     ; "registry_unregistered", `Bool evidence.registry_unregistered
-    ; "accumulator_dropped", `Bool evidence.accumulator_dropped
     ; "completion", completion_receipt_to_json evidence.completion
     ]
 ;;
@@ -652,7 +651,6 @@ let finalization_evidence_of_json json =
   let* meta_removed = bool "meta_removed" json in
   let* session_removed = bool "session_removed" json in
   let* registry_unregistered = bool "registry_unregistered" json in
-  let* accumulator_dropped = bool "accumulator_dropped" json in
   let* completion_json = assoc "completion" json in
   let* completion = completion_receipt_of_json completion_json in
   Ok
@@ -660,7 +658,6 @@ let finalization_evidence_of_json json =
     ; meta_removed
     ; session_removed
     ; registry_unregistered
-    ; accumulator_dropped
     ; completion
     }
 ;;

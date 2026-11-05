@@ -335,17 +335,17 @@ let test_receipt_carrier_has_independent_held_identity () =
       {origin=System_context;role=System;content=[Text "ordinary world state"];
        name=None;tool_call_id=None;metadata=[]} in
     let module Host = Keeper_official_client_host in
-    let held = Host.start_held_context [ordinary;carried] in
+    let held = Host.start_held_context ~turn_observation:None [ordinary;carried] in
     check int "receipt and ordinary carrier have separate held identities" 2 (List.length held);
     check bool "receipt uses the closed result context identity" true
       (List.exists (fun (item : Keeper_official_client_session_store.held_context) ->
          item.context=Tool_result_receipts) held);
-    let fresh = Host.resume_prompt ~goal:"continue original work" ~held:[] [ordinary;carried] in
+    let fresh = Host.resume_prompt ~turn_observation:None ~goal:"continue original work" ~held:[] [ordinary;carried] in
     List.iter (fun text -> check bool "a replacement session receives original receipt bytes" true
       (String_util.contains_substring fresh.prompt text))
       ["effect-already-completed";"private-completed-result"];
     let changed = {ordinary with content=[Text "revised world state"]} in
-    let resumed = Host.resume_prompt ~goal:"continue original work" ~held [changed;carried] in
+    let resumed = Host.resume_prompt ~turn_observation:None ~goal:"continue original work" ~held [changed;carried] in
     check bool "an independent context update remains deliverable" true
       (String_util.contains_substring resumed.prompt "revised world state");
     check bool "already-held receipt is not duplicated on resume" false

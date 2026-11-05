@@ -2641,34 +2641,34 @@ let test_issued_prefix_delivery_preserves_held_semantics () =
   let rendered assembly = "SYSTEM:\n" ^ Host.encode_history_message (message assembly) ^ "\n\nGOAL" in
   List.iter (fun prefix ->
     let first = issued prefix in
-    let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+    let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
     check string "unattributed prefix is delivered with whole carrier" (rendered first) initial.prompt;
-    let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let repeated = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:first [message first] in
     check string "unchanged whole carrier follows existing held policy" "GOAL" repeated.prompt;
     let changed = issued (Some "changed prefix") in
-    let replacement = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let replacement = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:changed [message changed] in
     check string "changed prefix with unchanged blocks is not lost" (rendered changed) replacement.prompt;
-    let stale = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let stale = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:first [message changed] in
     check string "stale issuer receipt falls back to complete carrier" (rendered changed) stale.prompt)
     [Some "prefix";Some ""];
   let first = issued None in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
   let changed = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"updated recall"] in
   check string "blocks-only change retains typed resend"
     (rendered changed)
-    (Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    (Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
        ~composed_context:changed [message changed]).prompt;
   let duplicate = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"first";Prompt_block_id.Memory_os_recall,"second"] in
-  let held = Host.start_held_context ~composed_context:duplicate [message duplicate] in
+  let held = Host.start_held_context ~turn_observation:None ~composed_context:duplicate [message duplicate] in
   check int "duplicate block identities retain a single whole carrier" 1 (List.length held);
   check string "duplicate identities preserve every source byte"
     (rendered duplicate)
-    (Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
+    (Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
 ;;
 
 (* The two recall blocks resume by their classes: the session holds the body
@@ -2688,15 +2688,15 @@ let test_the_recall_blocks_resume_by_their_resend_classes () =
   in
   let has prompt fragment = String_util.contains_substring prompt fragment in
   let first = issued ~body:"BODY-ONE" ~status:"STATUS-ONE" in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
   check bool "the first delivery carries both" true
     (has initial.prompt "BODY-ONE" && has initial.prompt "STATUS-ONE");
-  let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let repeated = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:first [message first] in
   check bool "the same status line is sent again" true (has repeated.prompt "STATUS-ONE");
   check bool "the same body is not" false (has repeated.prompt "BODY-ONE");
   let next = issued ~body:"BODY-TWO" ~status:"STATUS-ONE" in
-  let replaced = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let replaced = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:next [message next] in
   check bool "a changed body is sent" true (has replaced.prompt "BODY-TWO")
 ;;
@@ -2719,13 +2719,13 @@ let test_a_status_only_turn_between_two_identical_selections_keeps_the_held_body
       ; Prompt_block_id.Recalled_memory_status, "STATUS-ONE"
       ]
   in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:chosen [message chosen] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:chosen [message chosen] in
   let quiet = issued [ Prompt_block_id.Recalled_memory_status, "STATUS-NONE" ] in
-  let between = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let between = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:quiet [message quiet] in
   check bool "the quiet turn sends its status line" true (has between.prompt "STATUS-NONE");
   check bool "and no body" false (has between.prompt "BODY-ONE");
-  let again = Host.resume_prompt ~goal:"GOAL" ~held:between.held_context
+  let again = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:between.held_context
     ~composed_context:chosen [message chosen] in
   check bool "the same status line is sent again" true (has again.prompt "STATUS-ONE");
   check bool "the body the session still holds is not" false (has again.prompt "BODY-ONE")
@@ -2738,7 +2738,7 @@ let test_carried_summaries_name_blocks_and_digests () =
   let message, composed =
     carried_composed ~dynamic_text:"world state one" ~operator_text:"note"
   in
-  let summaries = Host.carried_summaries ~composed_context:composed [ message ] in
+  let summaries = Host.carried_summaries ~turn_observation:None ~composed_context:composed [ message ] in
   check (list string) "one entry per block"
     [ "block:" ^ Prompt_block_id.to_string Prompt_block_id.Dynamic_context
     ; "block:" ^ Prompt_block_id.to_string Prompt_block_id.Operator_note
@@ -2751,13 +2751,13 @@ let test_carried_summaries_name_blocks_and_digests () =
        check int "digest prefix length" 12 (String.length item.sha256_prefix);
        check bool "rendered bytes are counted" true (item.bytes > 0))
     summaries;
-  let again = Host.carried_summaries ~composed_context:composed [ message ] in
+  let again = Host.carried_summaries ~turn_observation:None ~composed_context:composed [ message ] in
   check bool "same input gives the same summaries" true (summaries = again);
   let changed_message, changed_composed =
     carried_composed ~dynamic_text:"world state two" ~operator_text:"note"
   in
   let changed =
-    Host.carried_summaries ~composed_context:changed_composed [ changed_message ]
+    Host.carried_summaries ~turn_observation:None ~composed_context:changed_composed [ changed_message ]
   in
   let sha_of items =
     List.map (fun (item : Host.carried_summary) -> item.sha256_prefix) items
@@ -2775,9 +2775,9 @@ let test_carried_summaries_without_a_witness_name_one_carrier () =
   check (list string) "an unwitnessed carrier is one entry" [ "carrier" ]
     (List.map
        (fun (item : Host.carried_summary) -> item.label)
-       (Host.carried_summaries [ message ]));
+       (Host.carried_summaries ~turn_observation:None [ message ]));
   check int "a conversation without carried contexts has none" 0
-    (List.length (Host.carried_summaries [ Agent_core.Types.user_msg "hi" ]))
+    (List.length (Host.carried_summaries ~turn_observation:None [ Agent_core.Types.user_msg "hi" ]))
 ;;
 
 (* World State sections: a fixture whose standing sections (memory ledger,
@@ -2813,11 +2813,11 @@ let world_state_turn ?partition_known world =
 ;;
 
 let resume ~held (message, assembly) =
-  Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [ message ]
+  Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ~composed_context:assembly [ message ]
 ;;
 
 let start_holding (message, assembly) =
-  Host.start_held_context ~composed_context:assembly [ message ]
+  Host.start_held_context ~turn_observation:None ~composed_context:assembly [ message ]
 ;;
 
 let section_names sources = List.map Layers.source_name sources
@@ -2864,9 +2864,9 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   let first, first_prepared = prepare (Some first_text) in
   check bool "Start actually issues its Goal in the System prompt" true
     (contains first_prepared.system_prompt first_text);
-  let held = Host.start_held_context ~composed_context:first first_prepared.messages in
+  let held = Host.start_held_context ~turn_observation:None ~composed_context:first first_prepared.messages in
   let resume assembly (prepared : Host.prepared_turn) held =
-    Host.resume_prompt ~goal:owner ~held ~composed_context:assembly prepared.messages in
+    Host.resume_prompt ~turn_observation:None ~goal:owner ~held ~composed_context:assembly prepared.messages in
   let same = resume first first_prepared held in
   check string "the first System observation is held without a duplicate Resume" owner same.prompt;
   let second, second_prepared = prepare (Some new_text) in
@@ -2882,7 +2882,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   check string "the updated revision is subsequently held" owner repeated.prompt;
   let absent, absent_prepared = prepare None in
   let added = resume second second_prepared
-      (Host.start_held_context ~composed_context:absent absent_prepared.messages) in
+      (Host.start_held_context ~turn_observation:None ~composed_context:absent absent_prepared.messages) in
   check string "a Goal introduced after Start reaches Resume too" delivery.prompt added.prompt;
   let open Yojson.Safe.Util in
   let binding projected prompt = Keeper_context_submission_link.binding_to_json
@@ -2993,12 +2993,12 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   check_carrier_source "Start" assembly (only_source start);
   let turn_observation = prepared.turn_observation in
   let composed_context = prepared.composed_context in
-  let held = Host.start_held_context ?turn_observation ?composed_context prepared.messages in
+  let held = Host.start_held_context ~turn_observation ?composed_context prepared.messages in
   check bool "the session never holds the authority" false
     (List.exists (fun (held : Keeper_official_client_session_store.held_context) ->
        held.context = Context_block block) held);
   let deliver held =
-    Host.resume_prompt ~goal:"OWNER" ~held ?turn_observation ?composed_context prepared.messages in
+    Host.resume_prompt ~goal:"OWNER" ~held ~turn_observation ?composed_context prepared.messages in
   let first = deliver held in
   let second = deliver first.held_context in
   check bool "authority keeps its Sent_every_resume semantics" true
@@ -3012,7 +3012,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
     (Host.start_prompt next "NEXT" |> Keeper_context_submission_link.text);
   check bool "a turn without an event carries no turn observation" true
     (Option.is_none next.turn_observation);
-  let next_resume = Host.resume_prompt ~goal:"NEXT" ~held:second.held_context
+  let next_resume = Host.resume_prompt ~turn_observation:None ~goal:"NEXT" ~held:second.held_context
       ?composed_context:next.composed_context next.messages in
   check bool "the next turn cannot replay the old approval" false (contains next_resume.prompt text);
   let changed_text = "Rejected task-other verification vrf-new authority operator-second" in
@@ -3023,7 +3023,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   check bool "new correlation keys reach the Start prompt" true (contains changed_start changed_text);
   check bool "old correlation keys are not borrowed" false (contains changed_start text);
   let changed_resume = Host.resume_prompt ~goal:"NEXT" ~held:next_resume.held_context
-      ?turn_observation:changed.turn_observation ?composed_context:changed.composed_context
+      ~turn_observation:changed.turn_observation ?composed_context:changed.composed_context
       changed.messages in
   check bool "new correlation keys reach Resume" true (contains changed_resume.prompt changed_text);
   List.iter (fun (label, issuer) ->
@@ -3034,9 +3034,81 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
       (List.exists (fun message -> contains (Host.encode_history_message message) changed_text)
          unknown.messages);
     check bool (label ^ ": an old event is not borrowed on Resume") false
-      (contains (Host.resume_prompt ~goal:"NEXT" ~held:[] ?composed_context:unknown.composed_context
+      (contains (Host.resume_prompt ~turn_observation:None ~goal:"NEXT" ~held:[] ?composed_context:unknown.composed_context
                    unknown.messages).prompt text))
     ["missing issuer", (fun _ -> None); "stale issuer", (fun _ -> Some assembly)]
+;;
+
+(* The authority leaves the carrier on the carrier's own evidence. A turn
+   whose sent System is not the issued one (no Goal observation, so nothing
+   overrides the configured System) still keeps the authority out of the
+   vendor's persistent System. *)
+let prepare_authority_turn ~system_prompt assembly =
+  let module A = Keeper_context_assembly in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+      Agent_core.Hooks.AdjustParams {current_params with
+        extra_system_context=assembly.A.extra_system_context;
+        system_prompt_override=A.system_prompt_override
+          ~previous:current_params.system_prompt_override assembly}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+  match Host.prepare_turn ~runtime_label:"carrier-authority-fixture"
+      ~composed_context:(Some (fun () -> Some assembly))
+      ~keeper_name:"carrier-authority" ~turn_count:1 ~system_prompt ~tools:[]
+      ~initial_messages:[Agent_core.Types.user_msg "OWNER"] ~model_input_projection:None
+      ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+  | Ok prepared -> prepared
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let authority_text = "Approved task-approved; verification vrf-approved; authority operator-fixture"
+
+let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one () =
+  let partition = Layers.assemble ~content_of:(function
+    | Layers.Completion_authority -> Some authority_text
+    | Layers.Fleet_messages -> Some "FLEET-WORLD"
+    | _ -> None) in
+  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"ISSUED BASE"
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let prepared = prepare_authority_turn ~system_prompt:"SENT BASE" assembly in
+  check string "the sent System is the configured one" "SENT BASE" prepared.system_prompt;
+  check bool "the System evidence does not borrow the issuer" true
+    (Option.is_none prepared.composed_context);
+  check bool "the System-role carrier no longer holds the authority" false
+    (List.exists (fun message -> contains (Host.encode_history_message message) authority_text)
+       prepared.messages);
+  check bool "the rest of the carrier stays" true
+    (List.exists (fun message -> contains (Host.encode_history_message message) "FLEET-WORLD")
+       prepared.messages);
+  check bool "the authority goes out with the Start prompt" true
+    (contains (Host.start_prompt prepared "NEXT" |> Keeper_context_submission_link.text)
+       authority_text)
+;;
+
+(* A carrier whose only block is the authority leaves the messages whole; the
+   carrier presence the turn expects agrees with what it hands the client. *)
+let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
+  let module A = Keeper_context_assembly in
+  let assembly =
+    A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Completion_authority, authority_text]
+    |> A.with_system_observations ~base_text:"BASE" ~observations:[] in
+  check bool "the issuer has a carrier" true (Option.is_some assembly.receipt);
+  let prepared = prepare_authority_turn ~system_prompt:"BASE" assembly in
+  check bool "no System-role carrier is handed to the client" false
+    (List.exists (fun (message : Agent_core.Types.message) ->
+         message.origin = Agent_core.Types.System_context) prepared.messages);
+  let expected = Option.is_some (Host.transmitted_carrier_receipt assembly) in
+  check bool "the turn expects no carrier" false expected;
+  match Keeper_agent_prompt_metrics.provider_content_of_transmitted
+      ~prompt_context_present:expected ~messages:prepared.messages with
+  | Ok _ -> ()
+  | Error failure ->
+    fail ("transmitted input provenance: "
+          ^ Keeper_agent_prompt_metrics.provenance_failure_reason failure)
 ;;
 
 (* One session: the wiki, the memory ledger and the Board posts stay the same
@@ -3440,6 +3512,10 @@ let () =
             test_a_changed_system_goal_reaches_a_held_official_session
         ; test_case "carrier authority is current-turn input on official Start and Resume" `Quick
             test_carrier_authority_is_current_turn_input_on_official_start_and_resume
+        ; test_case "authority leaves the carrier when the sent System is not the issued one" `Quick
+            test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
+        ; test_case "an authority-only carrier is not expected among the messages" `Quick
+            test_an_authority_only_carrier_is_not_expected_among_the_messages
         ; test_case
             "a resume sends only the changed sections"
             `Quick

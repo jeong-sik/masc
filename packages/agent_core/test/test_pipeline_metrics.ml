@@ -220,6 +220,55 @@ let test_stage_route_passes_trace_context_headers () =
      | None -> Alcotest.fail "missing traceparent header")
 ;;
 
+(* The span link a host puts in [options.trace_link] rides on the
+   [agent_turn] span; with no link in the options, that span carries none. *)
+let test_agent_turn_span_carries_options_trace_link () =
+  Eio_main.run
+  @@ fun env ->
+  let agent_turn_span_name =
+    Printf.sprintf "%s/agent_turn" (Otel_tracer.span_kind_to_string Tracing.Agent_run)
+  in
+  let agent_turn_links trace_link =
+    let inst = Otel_tracer.create_instance_eio () in
+    let options =
+      { Agent_types.default_options with
+        transport = Some (mk_mock_transport (ref 0))
+      ; tracer = Otel_tracer.tracer_of_instance inst
+      ; trace_link
+      ; provider_config = Some (Provider_mock.to_provider_config ())
+      }
+    in
+    let agent =
+      Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+        ~net:(Eio.Stdenv.net env)
+        ~config:{ (Types.default_config ~model:"test-model") with name = "trace-link-test" }
+        ~options
+        ()
+    in
+    (match Eio.Switch.run (fun sw -> Agent.run ~sw agent "ping") with
+     | Ok _ -> ()
+     | Error err -> Alcotest.failf "expected Ok: %s" (Error.to_string err));
+    match
+      List.filter
+        (fun (span : Otel_tracer.span) -> String.equal span.name agent_turn_span_name)
+        (Otel_tracer.inst_flush inst)
+    with
+    | [ span ] ->
+      List.map
+        (fun (link : Otel_tracer.otel_link) -> link.trace_id, link.span_id)
+        span.links
+    | spans -> Alcotest.failf "expected one agent_turn span, got %d" (List.length spans)
+  in
+  Alcotest.(check (list (pair string string)))
+    "options link on agent_turn"
+    [ "keeper-trace", "keeper-span" ]
+    (agent_turn_links (Some ("keeper-trace", "keeper-span")));
+  Alcotest.(check (list (pair string string)))
+    "no options link, no span link"
+    []
+    (agent_turn_links None)
+;;
+
 let test_agent_run_rejects_injected_empty_completion () =
   Eio_main.run
   @@ fun env ->
@@ -422,6 +471,10 @@ let () =
             "stage route forwards trace context"
             `Quick
             test_stage_route_passes_trace_context_headers
+        ; Alcotest.test_case
+            "agent_turn span carries the options trace link"
+            `Quick
+            test_agent_turn_span_carries_options_trace_link
         ; Alcotest.test_case
             "Agent.run rejects injected empty completion"
             `Quick

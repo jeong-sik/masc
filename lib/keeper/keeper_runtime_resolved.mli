@@ -97,7 +97,7 @@ val first_event_timeout_sec : unit -> float
     parse; [None] when unset) + {!first_event_failsafe_floor_sec} (floor). *)
 
 (** Non-streaming HTTP body-consumption deadline override.
-    [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is
+    [None] (env unset) leaves [Agent.options.body_timeout_s] unset. [Some s] is
     forwarded through [Runtime_agent_context.body_timeout_s] for AGENT_CORE sync
     completion paths. Streaming paths ignore this knob and rely on
     [stream_idle_timeout_sec] (always set: the operator's value or the floor)

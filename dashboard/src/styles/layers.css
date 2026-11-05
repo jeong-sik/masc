@@ -119,13 +119,6 @@
 }
 .time-stripe:hover .time-label { opacity: 1; }
 
-/* ════════ LYR: PARALLEL ════════
-   SVG streaks showing keeper cursor trails. */
-@keyframes streak-pulse {
-  0%, 100% { opacity: 0.35; }
-  50%      { opacity: 0.75; }
-}
-
 /* ════════ LYR: TOOLS ════════
    Per-block left margin icons with use-frequency bars. */
 .tool-mark {
@@ -151,13 +144,6 @@
   font-size: var(--fs-9);
   color: var(--color-fg-disabled);
   font-family: var(--font-mono);
-}
-
-/* ════════ LYR: APPROVE ════════
-   Big translucent stamp fill over entire block. */
-@keyframes flag-pulse {
-  0%, 100% { background: rgb(var(--err-glow) / .05); }
-  50%      { background: rgb(var(--err-glow) / .10); }
 }
 
 /* ════════ Depth-of-field when hovering a specific block ════════ */

@@ -163,12 +163,6 @@ body[data-mode="split"] .zone-deck { display: none; }
 .code-line.is-diff-add { background: var(--color-diff-add); }
 .code-line.is-diff-del { background: var(--color-diff-del); }
 
-/* —— anchor overlay (block bracket) —— */
-@keyframes drift-pulse {
-  0% { box-shadow: 0 0 0 0 rgb(var(--brass-glow) / .6); }
-  100% { box-shadow: 0 0 0 8px rgb(var(--brass-glow) / 0); }
-}
-
 /* —— syntax highlight —— */
 .tok-key    { color: var(--syn-key); }
 .tok-type   { color: var(--syn-type); }
@@ -295,9 +289,6 @@ body:not(.term-open) .code-term { display: none; }
   color: var(--brass-1); background: var(--color-bg-page);
   box-shadow: inset 0 2px 0 var(--brass-1);
 }
-@keyframes term-pulse {
-  0%,100% { opacity: 1; } 50% { opacity: 0.4; }
-}
 .term-body {
   flex: 1; overflow: auto; padding: 6px 10px;
   font-family: var(--font-mono); font-size: var(--fs-11);
@@ -312,7 +303,6 @@ body:not(.term-open) .code-term { display: none; }
 .term-line.is-warn   { color: var(--warn); }
 .term-line.is-ok     { color: var(--ok); }
 .term-line.is-meta   { color: var(--color-fg-disabled); font-style: italic; }
-@keyframes term-cursor-blink { 50% { opacity: 0; } }
 .term-prompt-prefix {
   color: var(--brass-1); flex-shrink: 0;
 }

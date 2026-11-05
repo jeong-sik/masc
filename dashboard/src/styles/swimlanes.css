@@ -35,10 +35,6 @@
   pointer-events: none;
   z-index: 4;
 }
-@keyframes sl-pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
-}
 
 /* collapsed empty lane — smaller, muted */
 .sl-row-collapsed {

@@ -8,7 +8,6 @@
 
 let json_member = Server_dashboard_http_json_utils.json_member
 let json_string key json = Json_util.get_string json key
-let json_int key json = Json_util.get_int json key
 let json_float key json = Json_util.get_float json key
 let json_bool key json = Json_util.get_bool json key
 
@@ -164,7 +163,10 @@ let row_is_task_claim json =
   | None -> false
 ;;
 
-(* The latest claim, not the first one a scan meets.
+(* The latest claim, not the first one a scan meets: the keeper's most recent
+   [Keeper_tooling.Name.Task_claim] row within the window, by row order.
+   [Ok None] if it did not claim inside the window; [Error] when the window
+   itself could not be read.
 
    [Keeper_tool_call_log.read_recent] and [read_recent_rows] both return rows
    oldest-first (dated_jsonl.mli: "the newest [n] entries in chronological

@@ -315,6 +315,11 @@ val parse_masc_internal_error_json :
 val classify_masc_internal_error_of_string :
   string -> masc_internal_error option
 
+val failure_effect_disposition_of_core :
+  Agent_core.Error.closed_terminal_effect -> Tool_result.failure_effect_disposition
+(** Agent Core's closed terminal effect as the disposition a MASC terminal
+    failure records. *)
+
 val classify_masc_internal_error :
   Agent_core.Error.t -> masc_internal_error option
 

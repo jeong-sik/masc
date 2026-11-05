@@ -1251,18 +1251,17 @@ let classify_masc_internal_error_of_string (raw : string) :
     (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
      with Yojson.Json_error _ -> None)
 
+let failure_effect_disposition_of_core effect_disposition =
+  match Agent_core.Error.terminal_effect_disposition effect_disposition with
+  | Agent_core.Tool_contract.Proven_pre_effect -> Tool_result.Proven_pre_effect
+  | Agent_core.Tool_contract.Proven_post_effect -> Tool_result.Proven_post_effect
+  | Agent_core.Tool_contract.Effect_outcome_unknown -> Tool_result.Effect_outcome_unknown
+;;
+
 let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
   let terminal_effect_failed ~effect_disposition ~detail =
-    let effect_disposition =
-      match Agent_core.Error.terminal_effect_disposition effect_disposition with
-      | Agent_core.Tool_contract.Proven_pre_effect ->
-        Tool_result.Proven_pre_effect
-      | Agent_core.Tool_contract.Proven_post_effect ->
-        Tool_result.Proven_post_effect
-      | Agent_core.Tool_contract.Effect_outcome_unknown ->
-        Tool_result.Effect_outcome_unknown
-    in
+    let effect_disposition = failure_effect_disposition_of_core effect_disposition in
     Some
       (Terminal_effect_failed
          { failure_class = Tool_result.Runtime_failure

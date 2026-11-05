@@ -30,8 +30,9 @@
       moves the head and an intent left behind it could no longer be aborted.
       A reduction that the settlement gives up blocks its subject in the state
       that reads the record ({!Authz_state.hold_revocations}, design 8.3). The
-      block is published once the settlement is written, so a commit that fails
-      after it leaves the block in place. A replay starts each block after the
+      block is published once the end of the log is confirmed, before the abort
+      is written, because a write that fails may still have written the line.
+      A commit that fails after that point leaves the block in place. A replay starts each block after the
       record its intent began at, as the writer did, and a block whose record
       the log no longer holds starts once the log is read.
 
@@ -45,8 +46,11 @@
     after it fails: the record is in the log, and the next {!Authz_state.apply}
     has to run on a state that holds it. The caller gets {!Answer_not_written}.
     The next commit promotes the intent, or, if the failure stopped the store,
-    the next start does. A commit that fails in any other way leaves the
-    snapshot as it was. The snapshot does not say that a file stopped.
+    the next start does. A commit that gives up a reduction and fails after
+    the end of the log was confirmed leaves the snapshot with the block of that
+    reduction and nothing else of the commit. A commit that fails in any other
+    way leaves the snapshot as it was. The snapshot does not say that a file
+    stopped.
 
     {b Probe.} The zone keeps the probe of the high-water mark in step with
     both files without reading the log again: it feeds
@@ -198,7 +202,8 @@ type error =
       (** The probe refused [entry], so it was not written. This means a bug in
           the zone. When [entry] is the settlement, nothing was written. When it
           is the intent, the settlement was. When it is the [Committed], the
-          record is in the log and in the snapshot as well. *)
+          record is in the log and in the snapshot as well. When the settlement
+          gives up a reduction, the snapshot holds its block in every case. *)
   | Abort_not_confirmed of Authz_log.end_error
       (** An earlier writer left an intent to abort, and the end of the log was
           not confirmed. Nothing was written. [End_moved] and

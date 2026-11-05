@@ -230,13 +230,13 @@ let write_entry t store_writer entry ~not_written =
 (* An abort says that the log ends where the intent began. The probe says so
    from what this process saw, and the append that the intent was for failed,
    which is when another process may have held the log, so the file is asked. *)
-let write_settlement t store_writer log_writer settlement =
-  let* () =
-    match settlement with
-    | H.Nothing_to_settle | H.Promote _ -> Ok ()
-    | H.Abort _ ->
-      Result.map_error (fun error -> Abort_not_confirmed error) (L.confirm_end log_writer)
-  in
+let confirm_settlement log_writer = function
+  | H.Nothing_to_settle | H.Promote (_ : S.intent) -> Ok ()
+  | H.Abort (_ : S.intent) ->
+    Result.map_error (fun error -> Abort_not_confirmed error) (L.confirm_end log_writer)
+;;
+
+let write_settlement t store_writer settlement =
   match H.settlement_entry settlement with
   | None -> Ok ()
   | Some entry ->
@@ -282,10 +282,13 @@ let in_zone t draft store_writer log_writer head settlement =
   (* The settlement comes first even for a record with no intent: the append
      moves the head, and an intent left pending behind it could no longer be
      aborted (design 8.2-1 and 8.2-5). *)
-  let* () = write_settlement t store_writer log_writer settlement in
-  (* The store holds the abort now, so the block is published before the
-     append: a commit that fails after this point leaves it in place. *)
+  let* () = confirm_settlement log_writer settlement in
+  (* Once the end is confirmed the intent is given up, whatever the write of
+     the abort does: a write that fails may still have put the line in the
+     store. So the block is published before that write, and a commit that
+     fails from here on leaves it in place. *)
   Atomic.set t.current { published with state = base };
+  let* () = write_settlement t store_writer settlement in
   let record_hash = record.R.hash in
   let* () =
     match high_water with

@@ -8163,6 +8163,8 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
+  | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
+      Masc_tui_types.owe_identity_login_read state keeper
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -9139,6 +9141,25 @@ let harness_on_screen state =
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)
+(* A Keeper's login attempt read runs on every loop: the wait does not sit
+   behind a surface, because the operator who consented may be standing in
+   front of any tab. A Keeper nobody waits on owes nothing; a read in flight
+   is let finish first. *)
+let launch_owed_identity_logins state ~mailbox =
+  if not (server_authority_ready state) then ()
+  else
+    Masc_tui_types.identity_login_pending_keepers state ~now:(Unix.gettimeofday ())
+    |> List.iter (fun keeper_name ->
+         if identity_login_recovery_poll_ready state ~now:(Unix.gettimeofday ()) keeper_name
+            && Masc_tui_owed_read.due ~now:(monotonic_now_s ())
+                 (Masc_tui_types.identity_login_read state keeper_name)
+         then begin
+           Masc_tui_types.update_identity_login_read state keeper_name
+             (fun read -> Masc_tui_owed_read.started read);
+           Masc_tui_identity_requests.launch_view state ~host:server_peer_host
+             ~deliver:(workspace_enqueue state mailbox) keeper_name
+         end)
+
 let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
   else begin
@@ -18134,22 +18155,6 @@ let launch_ask_followup_load state ~mailbox =
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
   launch_ask_followup_load state ~mailbox;
-  (* An operator who consented in a browser is standing in front of a tab
-     that does not know it happened: the callback lands on the server, not
-     here. So while a login this TUI started is still outstanding, the tick
-     asks again, for every Keeper that waits and from any surface: the
-     operator may have left the Identity tab or opened another Keeper. It
-     stops as soon as the answer says attached, or that the provider is gone,
-     so this is not a poll that runs forever -- it runs exactly as long as
-     somebody is waiting for it. Same shape as the chat reload above, and for
-     the same reason: a pane that read once on open showed a fact that had
-     since changed. *)
-  let login_now = Unix.gettimeofday () in
-  Masc_tui_types.identity_login_pending_keepers state ~now:login_now
-  |> List.iter (fun keeper_name ->
-       if identity_login_recovery_poll_ready state ~now:login_now keeper_name then
-         Masc_tui_identity_requests.launch_view state ~host:server_peer_host
-           ~deliver:(workspace_enqueue state mailbox) keeper_name)
   end
 ;;
 
@@ -18937,6 +18942,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        owe_runtime_config_read state;
        owe_harness_read state;
+       Masc_tui_types.owe_every_identity_login_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
        owe_tools_async_task_read state;
@@ -19326,6 +19332,10 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        cold admission has read no Gate yet. The same holds for the questions. *)
     owe_gate_snapshot_read state;
     owe_asks_read state;
+    (* The feed was gone while the authority was withdrawn: every login
+       announcement it would have delivered was lost, so each Keeper a kept
+       expectation names owes its read again. *)
+    Masc_tui_types.owe_every_identity_login_read state;
     owe_async_requests_read state;
     owe_selected_tools_async_detail_read state;
     owe_tools_async_task_read state;
@@ -25317,7 +25327,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | Identity_providers_loaded (request, result, attempts) ->
       Masc_tui_identity_updates.providers_loaded state request
-        ~report:(report_action state "error") ~attempts result
+        ~report:(report_action state "error") ~now:(Unix.gettimeofday ()) ~attempts result
   | Identity_login_started (request, result) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result
@@ -32986,6 +32996,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
+      launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
       launch_owed_asks state ~mailbox:async_messages;

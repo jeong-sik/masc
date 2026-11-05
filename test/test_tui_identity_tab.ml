@@ -137,6 +137,54 @@ let held_expectations state keeper =
   Masc_tui_types.identity_expectations_for_keeper state keeper
   |> List.map (fun expectation -> expectation.Masc_tui_types.ile_provider)
 
+(* What the login attempt read owes after an answer: a passed consent
+   deadline on this clock and a failed catalog both leave a backing-off
+   read; anything else settles the debt. Fixed [now], so the deadline rule
+   is the test's, not the wall clock's. *)
+let login_read_state state keeper =
+  Masc_tui_types.identity_login_read state keeper
+
+let test_login_read_settles_by_outcome () =
+  let state = identity_state () in
+  let base_path = "/w/login-read" and masc_root = "/r" in
+  state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
+  state.server_identity <- Some (workspace_identity ~base_path ~masc_root);
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path ~masc_root;
+  let read_for () =
+    Masc_tui_types.mark_detail_read_started state
+      ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
+  let catalog = Masc_tui_types.identity_expectations_for_keeper state "A"
+    |> List.map (fun held -> declared ~tools:[] held.Masc_tui_types.ile_provider held.Masc_tui_types.ile_provider) in
+  (* The deadline has passed at the fixed now: the server still says
+     waiting, but this clock treats it as a failed read. *)
+  Masc_tui_types.owe_identity_login_read state "A";
+  let waiting = read_for () in
+  Masc_tui_identity_updates.providers_loaded state read waiting ~report:ignore ~now:1000.
+    ~attempts:[]
+    (reading (Ok catalog));
+  let after_deadline = login_read_state state "A" in
+  (match after_deadline with
+   | Masc_tui_owed_read.Waiting _ -> ()
+   | _ -> Alcotest.fail "a passed deadline did not leave a backing-off read");
+  (* A failed catalog read fails the read the same way. *)
+  Masc_tui_types.owe_identity_login_read state "A";
+  let failing = read_for () in
+  Masc_tui_identity_updates.providers_loaded state read failing ~report:ignore ~now:1000.
+    ~attempts:[]
+    (reading (Error "catalog unavailable"));
+  (match login_read_state state "A" with
+   | Masc_tui_owed_read.Waiting _ -> ()
+   | _ -> Alcotest.fail "a failed catalog did not leave a backing-off read");
+  (* A clean answer settles the debt. *)
+  Masc_tui_types.owe_identity_login_read state "A";
+  let clean = read_for () in
+  Masc_tui_identity_updates.providers_loaded state read clean ~report:ignore ~now:1000.
+    ~attempts:[]
+    (reading (Ok catalog));
+  (match login_read_state state "A" with
+   | Masc_tui_owed_read.Settled -> ()
+   | _ -> Alcotest.fail "a clean answer did not settle the read")
+
 let complete_attempt state keeper provider =
   match List.find_opt (fun held -> held.Masc_tui_types.ile_provider=provider)
       (Masc_tui_types.identity_expectations_for_keeper state keeper) with
@@ -144,7 +192,7 @@ let complete_attempt state keeper provider =
   | Some expectation ->
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0.
         ~attempts:[expectation, Ok (Masc_tui_identity_model.Credentials_published (Ok 0))]
         (reading (Ok (Masc_tui_types.identity_expectations_for_keeper state keeper
           |> List.map (fun held -> declared ~tools:[] held.Masc_tui_types.ile_provider held.ile_provider))))
@@ -262,7 +310,7 @@ let test_failed_read_forgets_the_previous_callback () =
   let load result =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0. ~attempts:[]
       result
   in
   load (Ok ([], Some (Masc_tui_identity_model.Callback_url "https://example.org/cb")));
@@ -283,7 +331,7 @@ let test_removed_provider_retires_display_and_late_start () =
     ~keeper_name:"A" ~provider_id:"slack" in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0. ~attempts:[]
     (reading (Ok []));
   apply_login state pending ~now:10. (login_result ());
   check (Alcotest.list Alcotest.string) "removed provider cannot restore its URL" []
@@ -347,7 +395,7 @@ let test_admitted_callback_outlives_consent_deadline () =
   let apply json =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0.
       ~attempts:[expectation, Masc_tui_identity_model.decode_identity_login_status json]
       (reading (Ok [declared "slack" "Slack"])) in
   apply (`Assoc ["kind", `String "callback_admitted"]);
@@ -379,7 +427,7 @@ let assert_an_offscreen_login_failure_is_reported outcome =
   let reported = ref [] in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-  Masc_tui_identity_updates.providers_loaded state read
+  Masc_tui_identity_updates.providers_loaded state read ~now:0.
     ~report:(fun line -> reported := line :: !reported)
     ~attempts:[expectation, Ok outcome]
     (reading (Ok [declared "slack" "Slack"]));
@@ -408,7 +456,7 @@ let test_a_lost_attempt_is_read_against_the_catalog () =
     let apply catalog =
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0.
         ~attempts:[expectation, Ok Masc_tui_identity_model.Attempt_unavailable]
         (reading catalog) in
     state, apply in
@@ -446,7 +494,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
       "tool_discovery", `Assoc ["kind", `String "discovered"; "count", `Int 0]]) in
   let start ns = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:ns in
-  let apply read providers = Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+  let apply read providers = Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0.
     ~attempts:[expectation,completed] (reading providers) in
   let stale = start 1L in
   let current = start 2L in
@@ -467,7 +515,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
   check (Alcotest.list Alcotest.string) "old attempt cannot retire replacement under current read"
     ["slack"] (held_expectations state "A");
   let read = start 5L in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore
+  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0.
     ~attempts:[replacement,Ok Masc_tui_identity_model.Consent_expired]
     (reading (Error "catalog unavailable"));
   check (Alcotest.list Alcotest.string) "immutable consent expiry needs no catalog"
@@ -626,7 +674,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
   in
   check Alcotest.bool "pending recovery read blocks a second read" false
     (Masc_tui_types.identity_login_recovery_poll_ready state ~now:10. "A");
-  Masc_tui_identity_updates.providers_loaded state recovery_read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state recovery_read ~report:ignore ~now:0. ~attempts:[]
     (reading (Ok [ declared "slack" "Slack" ]));
   check (Alcotest.list Alcotest.string)
     "incomplete provider read keeps the browser wait" [ "slack" ]
@@ -638,7 +686,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
     Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
       ~keeper:"A" ~now_ns:2L
   in
-  Masc_tui_identity_updates.providers_loaded state late_callback_read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state late_callback_read ~report:ignore ~now:0. ~attempts:[]
     (reading (Ok [ declared ~tools:[ "postMessage" ] "slack" "Slack" ]));
   check Alcotest.bool "the attached provider is visible" true
     (match state.identity_view with
@@ -1082,7 +1130,7 @@ let test_a_read_keeps_the_servers_callback () =
   let callback =
     Masc_tui_identity_model.Callback_url "http://127.0.0.1:8935/api/v1/keepers/oauth/callback"
   in
-  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0. ~attempts:[]
     (Ok ([ declared "slack" "Slack" ], Some callback));
   check Alcotest.bool "the callback the server named is held" true
     (state.Masc_tui_types.identity_callback = Some callback)
@@ -1304,7 +1352,7 @@ let test_a_reading_keeps_the_cursor_on_its_service () =
   let load providers =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded state read ~report:ignore ~now:0. ~attempts:[]
       (reading (Ok providers))
   in
   load [ declared "airtable" "Airtable"; declared "box" "Box"; declared "canva" "Canva" ];
@@ -1453,6 +1501,7 @@ let () =
         ] );
       ( "pending consent lifecycle",
         [ Alcotest.test_case "completed attempt requires current owned catalog" `Quick test_completed_attempt_requires_current_owned_catalog;
+          Alcotest.test_case "login read settles by outcome" `Quick test_login_read_settles_by_outcome;
           Alcotest.test_case "an offscreen login failure is reported" `Quick test_an_offscreen_login_failure_is_reported;
           Alcotest.test_case "a lost attempt is read against the catalog" `Quick test_a_lost_attempt_is_read_against_the_catalog;
           Alcotest.test_case "admitted callback outlives consent deadline" `Quick test_admitted_callback_outlives_consent_deadline;

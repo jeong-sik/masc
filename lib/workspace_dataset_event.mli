@@ -2,7 +2,9 @@
 
     The event is
     [{"type":"workspace_dataset_changed","dataset":<wire>,"ts_unix":...}] and
-    goes to the observers of [base_path]'s runtime only. It carries no data: a
+    goes to the observers of [base_path]'s runtime only. A dataset that
+    belongs to one subject carries its name beside the dataset name — a
+    Keeper's OAuth login attempts carry ["keeper"]. It carries no data: a
     reader that shows the named dataset reads it again from its own path.
 
     The server announces and the TUI decodes through this one type, so a
@@ -16,12 +18,40 @@ type dataset =
   | Harness_verdicts
       (** The judge verdicts and operator labels [Eval_calibration] records,
           read by [GET /api/v1/dashboard/harness-health]. *)
+  | Keeper_oauth_attempts of { keeper : string }
+      (** The OAuth login attempts {!Keeper_oauth_pending} holds for
+          [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
+          The event names the Keeper only: no provider, attempt id, state,
+          code or consent URL. *)
 
 val event_type : string
 
+(** The kinds a dataset comes in, without its subject. The wire name has one
+    table here ({!Kind.to_wire} / {!Kind.of_wire}), so adding a dataset is a
+    match arm the compiler checks. *)
+
+module Kind : sig
+  type t =
+    | Repositories
+    | Verification_requests
+    | Harness_verdicts
+    | Keeper_oauth_attempts
+
+  val to_wire : t -> string
+
+  val of_wire : string -> t option
+end
+
+val kind : dataset -> Kind.t
+
 val dataset_to_wire : dataset -> string
 
-val dataset_of_wire : string -> dataset option
+val of_fields : (string * Yojson.Safe.t) list -> (dataset, string) result
+(** Reads the whole event field list: the dataset name and, for a dataset
+    that names a subject, the subject it carries. An event whose subject
+    dataset names no subject, or whose dataset this build was not taught, is
+    an [Error] with the reason; the caller reports it on the undecodable
+    path. *)
 
 val announce : base_path:string -> dataset -> unit
 (** Broadcast the event to [base_path]'s runtime observers. A store calls this

@@ -1034,7 +1034,7 @@ let required_frame_label = function
 
 let framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : prepared_turn) =
   if is_resume
-  then Ok (resume_prompt ~goal ~held ?turn_observation:prepared.turn_observation
+  then Ok (resume_prompt ~goal ~held ~turn_observation:prepared.turn_observation
              ?composed_context prepared.messages).prompt
   else
     let* history = render_messages prepared.messages in

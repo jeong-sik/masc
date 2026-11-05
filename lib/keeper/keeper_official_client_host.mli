@@ -277,6 +277,14 @@ val is_carried_on_resume : Agent_core.Types.message -> bool
     prompt file only, which a resume does not read. *)
 
 type composed_context = Keeper_context_assembly.t
+
+val transmitted_carrier_receipt :
+  composed_context -> Keeper_context_assembly.receipt option
+(** [transmitted_carrier_receipt issuer] is the receipt of the carrier
+    {!prepare_turn} leaves in the messages when it finds [issuer]'s carrier
+    there: the carrier without the Completion Authority block, which goes out
+    as current-turn input instead. [None] when that block was the carrier's
+    only block, or [issuer] has no carrier. *)
 (** The immutable renderer-issued assembly behind a turn's context carrier.
     Only exact carrier bytes without an existing prefix and with unique block
     identities permit splitting. Otherwise the whole carrier is retained. *)
@@ -297,7 +305,7 @@ type resume_delivery =
   }
 
 val start_held_context :
-  ?turn_observation:turn_observation ->
+  turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   Keeper_official_client_session_store.held_context list
@@ -320,7 +328,7 @@ type carried_summary =
     its block is sent on every resume. *)
 
 val carried_summaries :
-  ?turn_observation:turn_observation ->
+  turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   carried_summary list
@@ -331,7 +339,7 @@ val carried_summaries :
 val resume_prompt :
   goal:string ->
   held:Keeper_official_client_session_store.held_context list ->
-  ?turn_observation:turn_observation ->
+  turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
   Agent_core.Types.message list ->
   resume_delivery

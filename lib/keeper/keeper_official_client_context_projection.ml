@@ -162,6 +162,16 @@ let carrier_text (message : Agent_core.Types.message) =
       | Tool_result_followup | Agent_instruction), _ -> None
 ;;
 
+(* The receipt of the carrier an official turn hands its client when the
+   issuer's carrier is in the messages: what is left after the authority block
+   leaves it, which is [None] when the authority was the carrier's only
+   block. *)
+let transmitted_carrier_receipt (issuer : Keeper_context_assembly.t) =
+  match Keeper_context_assembly.split_block Prompt_block_id.Completion_authority issuer with
+  | Some (rest, _) -> rest.receipt
+  | None -> issuer.receipt
+;;
+
 (* Split only the carrier the issuer composed, found exactly once. A stale or
    missing issuer keeps the messages and the composition as they are. *)
 let split_turn_observation ~composed_context messages =
@@ -191,10 +201,14 @@ let split_turn_observation ~composed_context messages =
 
 (* A vendor may keep its first System for the whole session, so Start sends
    the issued System as it is: its only observation is the Goal, which keeps
-   its Start/held policy. The composition names the issuer only when its
-   issued System is exactly the System sent; never borrow a receipt from
-   another composition. *)
+   its Start/held policy. The authority leaves the carrier whenever the
+   issuer's carrier is found exactly once; the System plays no part in that,
+   because the authority is not in the System. The composition names the
+   issuer only when its issued System is exactly the System sent; never borrow
+   a receipt from another composition. *)
 let project_start_system ~system_prompt ~composed_context messages =
+  let messages, composed_context, turn_observation =
+    split_turn_observation ~composed_context messages in
   let composed_context =
     match Option.bind composed_context (fun assembly ->
         assembly.Keeper_context_assembly.system_prompt) with
@@ -202,8 +216,6 @@ let project_start_system ~system_prompt ~composed_context messages =
     | Some _ -> None
     | None -> composed_context
   in
-  let messages, composed_context, turn_observation =
-    split_turn_observation ~composed_context messages in
   let start_context =
     match turn_observation with
     | None -> Keeper_context_submission_link.literal ""
@@ -397,7 +409,7 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
   else []
 ;;
 
-let carried_context ?turn_observation ~composed_context messages =
+let carried_context ~turn_observation ~composed_context messages =
   let observations = match Option.bind composed_context (fun assembly ->
       assembly.Keeper_context_assembly.system_prompt) with
     | None -> []
@@ -462,8 +474,8 @@ let carried_label = function
 
 let carried_sha256_prefix_length = 12
 
-let carried_summaries ?turn_observation ?composed_context messages =
-  carried_context ?turn_observation ~composed_context messages
+let carried_summaries ~turn_observation ?composed_context messages =
+  carried_context ~turn_observation ~composed_context messages
   |> List.map (fun item ->
     { label = carried_label item.held.Session_store.context
     ; bytes = String.length (encode_history_message item.message)
@@ -473,8 +485,8 @@ let carried_summaries ?turn_observation ?composed_context messages =
     })
 ;;
 
-let start_held_context ?turn_observation ?composed_context messages =
-  held_of_carried (carried_context ?turn_observation ~composed_context messages)
+let start_held_context ~turn_observation ?composed_context messages =
+  held_of_carried (carried_context ~turn_observation ~composed_context messages)
 ;;
 
 (* Blocks sent together read as one carrier, as they do on a start. *)
@@ -776,8 +788,8 @@ let rec rendered_messages = function
   | sent :: rest -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest
 ;;
 
-let resume_prompt ~goal ~held ?turn_observation ?composed_context messages =
-  let carried = carried_context ?turn_observation ~composed_context messages in
+let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
+  let carried = carried_context ~turn_observation ~composed_context messages in
   let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
   let sent = List.filter_map (fun (_, delivery) -> match delivery with
     | Sent sent -> Some sent

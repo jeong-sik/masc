@@ -23,9 +23,11 @@ import {
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
+  loadSessionTrace,
   scheduleSessionTraceReload,
   traceSlots,
 } from './session-trace-state'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
 
 // Reset trace slots before each test
@@ -1090,5 +1092,84 @@ describe('search filter', () => {
     setTraceStatusFilter('keeper-a', 'success')
     expect(getFilteredEvents('keeper-a')).toHaveLength(1)
     expect(getFilteredEvents('keeper-a')[0]!.id).toBe('1')
+  })
+})
+
+describe('credential change', () => {
+  const adminTimeline = () => ({
+    ...emptyTimeline(),
+    events: [{
+      ts: '2026-04-03T00:00:00Z',
+      type: 'task_completed',
+      detail: { task_id: 'task-1', title: 'read as admin' },
+    }],
+    summary: { ...emptyTimeline().summary, tasks_completed: 1, total_events: 1 },
+  })
+  const pendingTimeline = () => {
+    let resolve!: (value: ReturnType<typeof adminTimeline>) => void
+    dashboardApiMocks.fetchAgentTimeline.mockReturnValueOnce(
+      new Promise(ok => { resolve = ok }),
+    )
+    return (value: ReturnType<typeof adminTimeline>) => resolve(value)
+  }
+
+  beforeEach(() => { setStoredToken('admin-token', { source: 'manual' }) })
+  afterEach(() => {
+    closeSessionTrace('keeper-a')
+    clearStoredToken()
+  })
+
+  it('empties loaded and live events of an open slot and keeps its filter', async () => {
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValueOnce(adminTimeline())
+    await loadSessionTrace('keeper-a', false)
+    appendLiveToolCall('keeper-a', {
+      toolName: 'keeper_fs_read',
+      durationMs: 1,
+      success: true,
+      error: null,
+      tsUnix: 1712400000,
+      toolArgs: '{"file_path":"/tmp/admin.md"}',
+      toolResult: 'admin contents',
+    })
+    setTraceFilter('keeper-a', 'tool_call')
+    expect(getTraceEvents('keeper-a')).toHaveLength(2)
+
+    setStoredToken('worker-token', { source: 'manual' })
+
+    expect(getTraceEvents('keeper-a')).toEqual([])
+    expect(getTraceFilter('keeper-a')).toBe('tool_call')
+  })
+
+  it('does not publish a load that was in flight when the credential changed', async () => {
+    const resolveAdmin = pendingTimeline()
+    const inFlight = loadSessionTrace('keeper-a', false)
+
+    clearStoredToken()
+    resolveAdmin(adminTimeline())
+    await inFlight
+
+    expect(getTraceEvents('keeper-a')).toEqual([])
+  })
+
+  it('does not publish a load from before the slot was closed and opened again', async () => {
+    const resolveFirst = pendingTimeline()
+    const first = loadSessionTrace('keeper-a', false)
+    closeSessionTrace('keeper-a')
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValueOnce(emptyTimeline())
+    await loadSessionTrace('keeper-a', false)
+
+    resolveFirst(adminTimeline())
+    await first
+
+    expect(getTraceEvents('keeper-a')).toEqual([])
+  })
+
+  it('keeps the slot when the same credential is written again', async () => {
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValueOnce(adminTimeline())
+    await loadSessionTrace('keeper-a', false)
+
+    setStoredToken(' admin-token ', { source: 'manual' })
+
+    expect(getTraceEvents('keeper-a')).toHaveLength(1)
   })
 })

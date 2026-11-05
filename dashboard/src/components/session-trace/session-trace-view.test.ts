@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { h } from 'preact'
-import { render, waitFor } from '@testing-library/preact'
+import { act, render, waitFor } from '@testing-library/preact'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import type { AgentTimelineEvent, AgentTimelineResponse } from '../../api/dashboard'
 import { SessionTraceView } from './session-trace-view'
 import { closeSessionTrace, traceSlots } from './session-trace-state'
 import { liveTraceFeeds } from './session-trace-live-store'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 
 const dashboardApiMocks = vi.hoisted(() => ({
   fetchAgentTimeline: vi.fn(),
@@ -90,5 +91,20 @@ describe('SessionTraceView', () => {
     })
     expect(container.textContent).toContain('기록된 활동 없음')
     expect(container.textContent).not.toContain('기동 시 기록 시작')
+  })
+
+  it('loads again under a new credential', async () => {
+    setStoredToken('admin-token', { source: 'manual' })
+    render(h(SessionTraceView, { agentName: 'keeper-a', isKeeper: false }))
+    await waitFor(() => {
+      expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => { setStoredToken('worker-token', { source: 'manual' }) })
+
+    await waitFor(() => {
+      expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(2)
+    })
+    clearStoredToken()
   })
 })

@@ -6658,7 +6658,7 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
       enqueue_async mailbox (Repository_changes_diff_loaded (request, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
-        ~base_ref:tree_diff_base_ref ())
+        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
   end
 
 let diff_text_max_width text =
@@ -7013,7 +7013,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
       enqueue_async mailbox (Git_diff_loaded (path, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-        ~base_ref:tree_diff_base_ref ())
+        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
   end
 
 let launch_harness_load state ~mailbox =
@@ -19406,7 +19406,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
            Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
            selected_file;
          if state.code_diff_open then Option.iter (fun path ->
-           Masc_tui_code_requests.launch_diff_load state ~host ~deliver ~base_ref:tree_diff_base_ref ~path)
+           Masc_tui_code_requests.launch_diff_load state ~host ~deliver
+             ~target:(diff_target_for_refresh state
+                        ~base_ref:tree_diff_base_ref ~path))
            selected_file;
          Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_blame);
@@ -37981,12 +37983,12 @@ Use relative paths for resources already held in the package. -->
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
+                  let target = Diff_worktree { path; base_ref = tree_diff_base_ref } in
                   (match Masc_tui_fetched.current state.code_diff with
-                   | Some (loaded_path, _)
-                     when String.equal loaded_path path -> ()
+                   | Some (loaded, _) when code_diff_target_equal loaded target -> ()
                    | Some _ | None ->
-                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~base_ref:tree_diff_base_ref
-                         ~path)
+                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                         ~target)
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane

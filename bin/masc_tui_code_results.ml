@@ -556,11 +556,11 @@ let take_ready_lsp_locations state ~input_pending =
 
 let apply_diff (state : state) request result =
   let landed =
-    Masc_tui_fetched.is_current ~equal:String.equal state.code_diff request
+    Masc_tui_fetched.is_current ~equal:code_diff_target_equal state.code_diff request
     && Result.is_ok result
   in
   state.code_diff <-
-    Masc_tui_fetched.complete ~equal:String.equal state.code_diff request result;
+    Masc_tui_fetched.complete ~equal:code_diff_target_equal state.code_diff request result;
   if landed then begin
     state.code_diff_scroll <- 0;
     state.code_diff_hscroll <- 0;

@@ -4495,6 +4495,13 @@ let post_keeper_github_token ~(host : string) ~(port : int)
   in
   post_json ~host ~port ~path ~body
 
+(** What [GET /api/v1/git/diff] compares: the working tree against a revision,
+    or what one commit changed. The server refuses both at once, so a request
+    names exactly one. *)
+type git_diff_against =
+  | Working_tree_against of string
+  | Commit_changes of string
+
 (** Fetch what the working tree holds for one file ([GET /api/v1/git/diff]).
 
     The other half of the diff story. A file change says what a keeper tried
@@ -4505,11 +4512,16 @@ let post_keeper_github_token ~(host : string) ~(port : int)
     relative to that playground -- the same address the Changes surface
     already shows. Without a keeper the server reads the project checkout. *)
 let fetch_git_diff ?repo ~(host : string) ~(port : int)
-    ~(keeper : string option) ~(path : string) ~(base_ref : string) () :
+    ~(keeper : string option) ~(path : string) ~(against : git_diff_against) () :
     (Masc.Tui_decode.git_diff, string) result =
   let query =
     [ Some (Printf.sprintf "path=%s" (percent_encode_query_value path))
-    ; Some (Printf.sprintf "base_ref=%s" (percent_encode_query_value base_ref))
+    ; Some
+        (match against with
+         | Working_tree_against base_ref ->
+             Printf.sprintf "base_ref=%s" (percent_encode_query_value base_ref)
+         | Commit_changes commit ->
+             Printf.sprintf "commit=%s" (percent_encode_query_value commit))
     ; Option.map
         (fun name ->
           Printf.sprintf "keeper=%s" (percent_encode_query_value name))

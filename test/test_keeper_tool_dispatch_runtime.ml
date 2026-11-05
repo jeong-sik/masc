@@ -5411,6 +5411,32 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   | Some summary -> summary
                   | None -> Keeper_internal_error.kind_of_masc_internal_error other)
              | None -> fail "Runtime_agent flattened the typed terminal failure");
+            (* The run's error keeps Agent Core's effect disposition and takes
+               the bundle's class and detail, which name the tool's own
+               failure rather than its result text. *)
+            (match
+               Keeper_internal_error.classify_masc_internal_error
+                 (Masc.Keeper_agent_run.terminal_effect_failure_error
+                    runtime_error
+                    (runtime_bundle.terminal_effect_state ()))
+             with
+             | Some
+                 (Keeper_internal_error.Terminal_effect_failed
+                    { failure_class = Tool_result.Runtime_failure
+                    ; effect_disposition = Tool_result.Effect_outcome_unknown
+                    ; detail = Keeper_terminal_effect_detail.Tool_failed { message; _ }
+                    }) ->
+               check bool
+                 "the run error's typed detail retains the exact full chat target"
+                 true
+                 (String_util.contains_substring message chat_path)
+             | Some other ->
+               failf
+                 "the run error became %s instead of the bundle's typed terminal failure"
+                 (match Keeper_internal_error.summary_of_masc_internal_error other with
+                  | Some summary -> summary
+                  | None -> Keeper_internal_error.kind_of_masc_internal_error other)
+             | None -> fail "the run error lost its terminal failure");
             (match runtime_bundle.terminal_effect_state () with
              | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool

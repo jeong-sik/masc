@@ -296,8 +296,19 @@ val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 val core_error_of_masc_internal_error :
   masc_internal_error -> Agent_core.Error.t
 
+val core_error_of_masc_internal_error_with_agent :
+  agent_error:Agent_core.Error.agent_error -> masc_internal_error -> Agent_core.Error.t
+(** The typed MASC error for classification and the original Agent Core error
+    for terminal-reason and event projections that redact its detail. *)
+
+val agent_error_of_carried_terminal_effect_failure :
+  Agent_core.Error.t -> Agent_core.Error.agent_error option
+(** Process-local projection of the original Agent error paired by
+    {!core_error_of_masc_internal_error_with_agent}; every other error is
+    [None]. *)
+
 val carried_masc_internal_error : Agent_core.Error.t -> masc_internal_error option
-(** Process-local downcast of this owner's private carrier only. The message is
+(** Process-local downcast of this owner's private carriers only. The message is
     never parsed; plain [Internal] text and foreign carriers return [None], even
     when their message contains a serialized MASC envelope. Persisted values
     remain the separate {!classify_masc_internal_error} boundary below. *)
@@ -310,6 +321,11 @@ val parse_masc_internal_error_json :
 
 val classify_masc_internal_error_of_string :
   string -> masc_internal_error option
+
+val failure_effect_disposition_of_core :
+  Agent_core.Error.closed_terminal_effect -> Tool_result.failure_effect_disposition
+(** Agent Core's closed terminal effect as the disposition a MASC terminal
+    failure records. *)
 
 val classify_masc_internal_error :
   Agent_core.Error.t -> masc_internal_error option

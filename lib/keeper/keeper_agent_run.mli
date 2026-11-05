@@ -44,6 +44,15 @@ val terminal_effect_boundary_decision
     [Tool_result.tool_failure_class] in the exact structured Keeper error
     envelope. *)
 
+val terminal_effect_failure_error
+  :  Agent_core.Error.t
+  -> Keeper_tools_agent_core.terminal_effect_state
+  -> Agent_core.Error.t
+(** The error a run ends with when Agent Core failed its terminal tool. When
+    the bundle recorded that failure, the error carries the bundle's failure
+    class and detail with Agent Core's effect disposition; any other error, or
+    a bundle that recorded no failure, is returned unchanged. *)
+
 module For_testing : sig
   val finalize_turn_surface :
     response_text:string ->

@@ -16811,29 +16811,31 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
         ((http_asks, http_keeper_roster), http_scoped) =
       Masc_tui_loader.read_pair
         (fun () ->
-           if not needs.needs_quiz_scorecard then None else
-           Option.some @@
-           observe_http_reader ~on_progress Http_refresh_progress.Quiz_rows
-             ~outcome:Http_refresh_progress.of_result (fun () ->
-               Masc_tui_loader.load_quiz_rows ~host ~port))
-        (fun () ->
-           Option.map
-             (fun ao_ticket ->
-                observe_http_reader ~on_progress
-                  Http_refresh_progress.Approvals
-                  ~outcome:(fun observation -> Http_refresh_progress.of_result observation.ao_result)
-                  (fun () ->
-                     let ao_result = match http_server_identity with
-                       | Ok expected_workspace ->
-                           Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port
-                       | Error detail -> Error detail in
-                     let observation = { ao_ticket; ao_result } in
-                     (match on_approvals, http_server_identity with
-                      | Some publish, Ok identity -> publish identity observation
-                      | None, (Ok _ | Error _)
-                      | Some _, Error _ -> ());
-                     observation))
-             approval_ticket)
+           Masc_tui_loader.read_pair
+             (fun () ->
+                if not needs.needs_quiz_scorecard then None else
+                Option.some @@
+                observe_http_reader ~on_progress Http_refresh_progress.Quiz_rows
+                  ~outcome:Http_refresh_progress.of_result (fun () ->
+                    Masc_tui_loader.load_quiz_rows ~host ~port))
+             (fun () ->
+                Option.map
+                  (fun ao_ticket ->
+                     observe_http_reader ~on_progress
+                       Http_refresh_progress.Approvals
+                       ~outcome:(fun observation -> Http_refresh_progress.of_result observation.ao_result)
+                       (fun () ->
+                          let ao_result = match http_server_identity with
+                            | Ok expected_workspace ->
+                                Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port
+                            | Error detail -> Error detail in
+                          let observation = { ao_ticket; ao_result } in
+                          (match on_approvals, http_server_identity with
+                           | Some publish, Ok identity -> publish identity observation
+                           | None, (Ok _ | Error _)
+                           | Some _, Error _ -> ());
+                          observation))
+                  approval_ticket))
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
@@ -19937,10 +19939,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
      bundle's answers, and with no cadence roster read nothing else would
      free the roster's read slot. *)
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
-  (* The briefing and the quiz rows ride the full refresh only; a scoped
-     read has no reader for either, and Home's next cadence pass reads
-     them. *)
-  let needs = { needs with needs_keeper_roster = false; needs_overview_briefing = false;
+  (* The quiz rows ride the full refresh only; a scoped read has no reader
+     for them, and Home's next cadence pass reads them. *)
+  let needs = { needs with needs_keeper_roster = false;
                 needs_quiz_scorecard = false } in
   let authority = state.workspace_authority in
   if Masc_tui_types.surface_needs_any needs then begin

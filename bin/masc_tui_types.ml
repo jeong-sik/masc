@@ -4516,9 +4516,6 @@ type surface_needs = {
   needs_provider_history : bool;
   needs_overview_goals : bool;
   needs_account_emails : bool;
-  (* The Dashboard briefing ([/api/v1/dashboard/briefing], about 120KB) feeds
-     only the Home Health line. *)
-  needs_overview_briefing : bool;
   (* The operator quiz's scorecard and review rows, read through the lane
      add-on inventory endpoint. Feeds only the Home quiz line. *)
   needs_quiz_scorecard : bool;
@@ -4537,7 +4534,6 @@ let nothing =
     needs_provider_history = false;
     needs_overview_goals = false;
     needs_account_emails = false;
-    needs_overview_briefing = false;
     needs_quiz_scorecard = false;
   }
 
@@ -4569,7 +4565,6 @@ and surface_needs_of_surface : surface -> surface_needs = function
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
       { nothing with needs_operator_approvals = true; needs_asks = true
-      ; needs_overview_briefing = true
       ; needs_quiz_scorecard = true
       ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
@@ -4649,8 +4644,6 @@ let surface_needs_delta ~previous ~next =
       next.needs_overview_goals && not previous.needs_overview_goals
   ; needs_account_emails =
       next.needs_account_emails && not previous.needs_account_emails
-  ; needs_overview_briefing =
-      next.needs_overview_briefing && not previous.needs_overview_briefing
   ; needs_quiz_scorecard =
       next.needs_quiz_scorecard && not previous.needs_quiz_scorecard
   }

@@ -193,7 +193,8 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   | Final (Refusal (Exact.Outcome_unknown,record)) ->
     (* Inventory validation reads an interrupted refusal as settled, so the
        next pass moves the original and selects its range again. Wake it:
-       no host event follows this refusal. *)
+       no host event follows this refusal. A cut or raised original stays
+       unfinished and every pass resumes it, so waking it would never end. *)
     let* interrupted=interrupted ~schema record in
     if interrupted then wake ();
     Ok (Pending (Worker_unknown,record))

@@ -17,6 +17,10 @@ type base_path_lock_rejection =
       { path : string
       ; kind : Unix.file_kind
       }
+  | Run_directory_creation_failed of
+      { path : string
+      ; reason : string
+      }
   | Run_directory_untrusted_owner of
       { path : string
       ; effective_uid : int
@@ -102,6 +106,15 @@ val base_path_contention_message :
   base_path:string -> lock_path:string -> base_path_owner -> string
 (** Recovery guidance shared by HTTP and stdio entrypoints. *)
 
+val lease_run_dir :
+  Host_config.base_path_lease_root ->
+  base_path:string ->
+  (string, base_path_lock_rejection) result
+(** The run root to pass as [run_dir] for [base_path]. [Beside_base_path] is
+    [<canonical base_path>/.masc-owner], made with mode [0700] when missing; it
+    sits beside [.masc] so deleting [.masc] state does not drop a live owner's
+    lease. [Lease_dir_override] is returned as given. *)
+
 (** Acquire the process-lifetime owner lease below a current-UID-owned [0700]
     private directory in the explicitly supplied host run root, then establish
     and validate [<base_path>/.masc]. A group- or world-writable [run_dir] is
@@ -118,6 +131,11 @@ val acquire_base_path_lock :
   run_dir:string ->
   string ->
   base_path_acquire_result
+
+val acquire_owner_lease :
+  Host_config.base_path_lease_root -> string -> base_path_acquire_result
+(** [acquire_base_path_lock] under {!lease_run_dir}. A root that cannot be
+    made is [Base_path_rejected]. *)
 
 type base_path_wait_refusal =
   | Another_replacement_waits of

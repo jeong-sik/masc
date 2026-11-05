@@ -35,6 +35,17 @@ type test_mode_kind =
   | Production
 [@@deriving show, eq]
 
+(** Where a BasePath's cross-process ownership lease lives. *)
+type base_path_lease_root =
+  | Beside_base_path
+      (** [<base_path>/.masc-owner]. Every process that names the BasePath
+          finds the same lease, whatever its [TMPDIR]. *)
+  | Lease_dir_override of string
+      (** [MASC_BASE_PATH_LEASE_DIR], for a BasePath on a filesystem whose
+          locks cannot be trusted. Every process of the BasePath must be given
+          the same value. *)
+[@@deriving show, eq]
+
 (** Top-level typed host configuration. *)
 type t =
   { cred_root : string
@@ -69,6 +80,9 @@ type t =
             Ownership establishes its current-UID private lease directory
             below this root and rejects an unprotected group/world-writable
             root; callers do not select a fallback. *)
+  ; base_path_lease_root : base_path_lease_root
+        (** [Lease_dir_override] when [MASC_BASE_PATH_LEASE_DIR] is set,
+            otherwise [Beside_base_path]. *)
   ; policy_dir : string
         (** Directory for runtime policy files.  Default [<tmp>] from
             [host ()]. *)

@@ -648,6 +648,65 @@ let test_base_path_lock_shares_one_lease_across_realpath_spellings () =
               (Server_startup_takeover.base_path_lock_rejection_to_string
                  rejection))))
 
+(* Without MASC_BASE_PATH_LEASE_DIR the lease root comes from the BasePath
+   itself, so every process that names it, under any spelling and any TMPDIR,
+   finds the one lease. *)
+let test_lease_root_beside_base_path_is_shared_by_every_spelling () =
+  if Sys.os_type <> "Unix" then Alcotest.skip ();
+  with_temp_dir "startup-takeover-owner-root" (fun dir ->
+    let real_base = Filename.concat dir "real" in
+    Unix.mkdir real_base 0o755;
+    let alias = Filename.concat dir "alias" in
+    Unix.symlink real_base alias;
+    Fun.protect
+      ~finally:(fun () -> Sys.remove alias)
+      (fun () ->
+        let run_dir_of base_path =
+          match
+            Server_startup_takeover.lease_run_dir Host_config.Beside_base_path
+              ~base_path
+          with
+          | Ok run_dir -> run_dir
+          | Error rejection ->
+            Alcotest.failf
+              "the lease root was refused: %s"
+              (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+        in
+        let run_dir = run_dir_of real_base in
+        Alcotest.(check string)
+          "the lease root sits beside .masc"
+          (Filename.concat (Unix.realpath real_base) ".masc-owner")
+          run_dir;
+        Alcotest.(check int)
+          "the lease root is private to this UID"
+          0o700
+          ((Unix.stat run_dir).st_perm land 0o777);
+        match Server_startup_takeover.acquire_base_path_lock ~run_dir real_base with
+        | Server_startup_takeover.Base_path_acquired lease ->
+          Fun.protect
+            ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+            (fun () ->
+              match
+                Server_startup_takeover.acquire_base_path_lock
+                  ~run_dir:(run_dir_of alias)
+                  alias
+              with
+              | Server_startup_takeover.Base_path_already_owned _ -> ()
+              | Server_startup_takeover.Base_path_acquired second ->
+                Server_startup_takeover.release_base_path_lease second;
+                Alcotest.fail "another spelling acquired a second lease"
+              | Server_startup_takeover.Base_path_rejected rejection ->
+                Alcotest.failf
+                  "another spelling was rejected: %s"
+                  (Server_startup_takeover.base_path_lock_rejection_to_string
+                     rejection))
+        | Server_startup_takeover.Base_path_already_owned _ ->
+          Alcotest.fail "a fresh BasePath was already owned"
+        | Server_startup_takeover.Base_path_rejected rejection ->
+          Alcotest.failf
+            "a valid BasePath was rejected: %s"
+            (Server_startup_takeover.base_path_lock_rejection_to_string rejection)))
+
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
     (fun ~base_path ~run_dir ->
@@ -1551,6 +1610,9 @@ let () =
           Alcotest.test_case
             "one directory shares one lease across realpath spellings" `Quick
             test_base_path_lock_shares_one_lease_across_realpath_spellings;
+          Alcotest.test_case
+            "a lease root beside the BasePath is shared by every spelling" `Quick
+            test_lease_root_beside_base_path_is_shared_by_every_spelling;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
           Alcotest.test_case "linked runtime directory is rejected" `Quick

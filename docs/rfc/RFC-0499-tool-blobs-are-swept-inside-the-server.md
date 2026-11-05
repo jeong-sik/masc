@@ -115,13 +115,21 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 
 ### 3.4 스캔이 못 읽는 참조
 
-1층 PR(#48968)에서 참조를 쓰는 곳을 따라가 봤다. 셋은 스캔이 읽지 않는 곳에 참조를 쓴다(#48971). 11-06 운영 workspace 에서 문자열 개수만 셌다.
+1층 PR(#48968)에서 참조를 쓰는 곳을 따라가 봤다. 다섯 곳은 스캔이 읽지 않는 곳에 참조를 쓴다. 앞의 셋은 #48971 에서, 뒤의 둘은 11-06 두 번째 측정에서 찾았다. 11-06 운영 workspace 에서 문자열 개수만 셌다.
 
 | 쓰는 곳 | 위치 | 참조가 있는 파일 | 스캔이 못 읽는 이유 |
 |---|---|---:|---|
 | Librarian 요청 본문(`keeper_librarian_durable_request.ml`, `keeper_librarian_durable_capture.ml`) | `lane-addons/tool-request-bodies`, `tool-request-owners` | 184, 2 | 스캔은 `lane-addons/broadcasts` 만 읽는다. 본문은 캡처를 `Yojson.Safe.to_string` 으로 바꾼 문자열이라 폴더를 더해도 참조를 못 찾는다 |
 | 완료 검토 journal(`verifier_review_execution.ml`) | `verifier-executions/<digest>/.masc/keepers/…/request-executions` | 18 | 검토 Keeper 의 `base_path` 가 `verifier-executions/<digest>` 다. media 는 workspace 저장소에 있다 |
 | Librarian 작업 맥락(`keeper_librarian_context.ml`) | `<config>/keepers/<k>.working-context.json` | 0 | config 폴더는 범위가 아니다. media 가 있는 채팅 기록을 통째로 쓴다 |
+| Librarian 작업 맥락 색인(`keeper_librarian_context_recall.ml:14`) | `<config>/keepers/<k>.working-context-recall.json` | 43 | config 폴더는 범위가 아니다. 색인이 blob 주소를 구조(`_blob`)로 들고 있고, 그 주소로 blob 을 꺼낸다(`:149`) |
+| Exact 요청·호스트 결과·증거(`lane_addon_store.ml:55`, `:290`) | `lane-addons/exact-requests`, `host-results`, `evidence` | 9, 9, 1 | 스캔은 `lane-addons/broadcasts` 만 읽는다. addon 이 보낸 요청(캡처 포함)과 그 답이 표시를 문자열로 들고 있다 |
+
+뒤의 둘은 이렇게 셌다. 작업 맥락 색인은 `_blob` 객체를 가진 파일 수다. Exact 기록은 `[masc:blob sha256=<64자> bytes=` 모양 표시를 가진 파일 수다. 표시 이름만 적은 설명 글은 세지 않는다.
+
+- 작업 맥락 색인 43개가 blob 29개를 가리킨다. 모두 디스크에 있다. 34개는 범위 안 `keepers/<k>/librarian-recall-current.json` 에도 같은 주소가 있다. 남은 9개는 색인만 붙잡는다. blob 이 없으면 `repair` 가 스냅숏에서 다시 쓴다(`keeper_librarian_context_recall.ml:161`). 그래서 지워도 맥락은 돌아오지만, 그 턴은 다시 쓰는 비용을 낸다.
+- Exact 기록 19개는 같은 sha256 하나를 가리킨다. 그 주소는 범위 안 `tool_calls`(10-27 행)와 `keeper_chat` 에도 있다. 그 행들이 보존 기간을 넘기면 Exact 기록만 남는다. Exact 호스트는 표시를 풀지 않는다(`lane_addon_exact.ml` 에 blob 읽기가 없다).
+- 크기: `exact-requests` 2,194MB, `host-results` 2,595MB, `evidence` 6,382MB(11-06 `du -sm`). 범위에 넣으면 스캔이 16GB 에서 27GB 로 는다.
 
 스캔 폴더 목록은 `vision_artifact_reference.ml` 에도 손으로 베껴져 있고, 13개 중 7개만 있다. 범위를 목록으로 들고 있는 한 새 저장소가 생길 때마다 이렇게 어긋난다.
 
@@ -268,10 +276,26 @@ u <sha256>
   - 그런 기록이 하나라도 남으면 스캔이 기록을 쓰지 못한다. 그래서 이 층 PR 이 세 길 중 하나를 고른다. 지우고 설치한다. 끝난 요청이 settle 되기를 기다린다. 기존 typed decoder 로 캡처를 풀어 목록을 한 번 채운다.
 - 완료 검토 journal: `verifier-executions/*/.masc/keepers/*/request-executions` 를 고정된 깊이로 나열해 범위에 넣는다. 읽지 못한 항목은 스캔 오류다. journal 의 media 가 workspace 저장소에 있다는 것(§3.4)은 이 층 PR 이 코드로 확인한다. review_root 안에 따로 저장소가 있으면 그것은 이 정리의 범위가 아니다. `verifier-executions` 자체가 언제 지워지는지 이 층 PR 이 확인한다. 안 지워지면 그 참조가 blob 을 계속 붙잡는다. 안전한 쪽이지만 PR 에 적는다.
 - Librarian 작업 맥락: config 폴더의 `*.working-context.json` 을 범위에 넣는다. 참조는 같은 모듈의 디코더(`Keeper_chat_operation`)로 꺼낸다.
+- Librarian 작업 맥락 색인: config 폴더의 `*.working-context-recall.json` 을 범위에 넣는다. 참조는 `Keeper_librarian_context_recall` 의 색인 디코더로 꺼낸다. 접미사 규칙에서 `.working-context.json` 과 다른 항목이다.
+- Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
+  - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
+- 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:
+  - `trajectories`: 도구 결과를 500바이트로 자른 사본이다(`trajectory.ml:107`). 잘린 표시가 남고, 표시를 푸는 코드가 없다. 범위에 넣으면 잘린 표시 때문에 스캔이 오류로 끝난다.
+  - `lane-addons/tool-request-owners-settled`: 보관 위치다. 543개 파일에 표시가 있지만 보관 본문을 읽는 코드가 없다(RFC-0498 §3.1).
+  - `.DS_Store`: macOS Finder 가 만든다. 세 곳 모두에 생길 수 있다.
+  - `tool_blobs`, `tool_blob_maintenance`: 이 정리가 다루는 저장소와 그 후보 기록이다.
+- 이름에 붙는 접미사는 원래 이름의 분류를 따른다. `.lock`(`File_lock_eio.lock_file_path`), `.last-good`(`goal_measurement.ml:100` 등), SQLite 의 `-wal`·`-shm` 이다. `antigravity-<owner>.prepare.lock`(`runtime_antigravity_home.ml:581`)처럼 이름 가운데가 바뀌는 것은 규칙 하나로 적는다.
+- 분류는 코드가 만드는 이름을 모두 적는다. 지금 운영에 없는 것도 적는다. 예: `lane-addons/fleet-delivery`(`lane_addon_runtime.ml`), `lane-addons/broadcasts`.
+- 만드는 코드가 없는 운영 잔여 항목은 분류에 넣지 않는다. 그 항목이 남아 있으면 스캔은 오류로 끝나고 아무것도 지우지 않는다. 이 층 PR 의 Upgrade notes 에 목록을 적고, 운영자가 지우거나 `.masc` 밖으로 옮긴 뒤 배포한다. 11-06 목록:
+  - 폴더: `accountability`, `browser-downloads`, `gondolin-work`, `keeper-wake-payload`, `services`, `hardcut-46247-archive-20261027-131821`, `hardcut-46397-archive-20261028-021939`, `hardcut-aside-20261102`
+  - 파일: `autonomy_stats.jsonl`, `board_posts.initialized.jsonl`(와 `.lock`), `verify-after-restart.sh`, `verify-feedback-ratio.py`
+  - `tui-keeper-chat-recovery.json`(와 잠금 둘)은 `scripts/capture-tui-keeper-chat.py` 가 쓴다. 서버 코드는 만들지 않는다. 같은 길로 다룬다.
+  - `lane-addons/quiz-measure` 는 이름을 그대로 쓰는 코드가 없다. 이 층 PR 이 namespace 로 만드는지 확인한다.
 - 끝 조건은 둘이다.
   - 닫힌 분류가 운영 workspace 에서 통과한다.
-  - 새로 넣은 저장소마다 스캔이 참조를 찾은 파일 수를 따로 센 수와 맞춰 본다. 기준은 §3.4 표의 측정이다(Librarian 요청 184·2파일, 검토 journal 18파일, 작업 맥락 0).
-  - 단위는 참조 개수가 아니라 참조를 하나라도 가진 파일 수다. §3.4 의 수가 그 단위로 셌다.
+  - 새로 넣은 저장소마다 스캔이 참조를 찾은 파일 수를, 같은 시각에 따로 센 수와 맞춰 본다. 따로 셀 때는 두 모양(`[masc:blob sha256=<64자> bytes=` 표시와 `_blob` 객체)과 그 escape 된 모양을 모두 센다.
+  - §3.4 의 수는 크기를 보여 줄 뿐 기준값이 아니다. 저장소는 계속 바뀐다. 11-06 에 `tool-request-bodies` 를 다시 세니 모양에 따라 20~157개였고, 첫 측정의 184개는 다시 나오지 않았다.
+  - 단위는 참조 개수가 아니라 참조를 하나라도 가진 파일 수다.
 - `u` 줄(§5.2)은 보조 지표다. 0 이어도 범위가 닫혔다는 증거가 아니다. 스캔이 읽지 않는 곳에만 참조가 있는 blob 은 "참조됨"으로 보인 적이 없어서 `u` 에 나타나지 않는다. 범위를 고친 직후 첫 스캔에서는 처음 보이는 참조 때문에 `u` 가 0 이 아닐 수 있다.
 
 저장소마다 자기 참조를 돌려주는 함수를 등록하는 방식(§6)으로 나중에 바꿀 수 있다. 범위 값이 저장소 목록이라, 그 값을 함수 목록으로 바꾸면 된다.
@@ -291,7 +315,7 @@ u <sha256>
 - 후보가 어떤 수보다 적으면 두 번째 스캔을 건너뛰기. 기준값이 근거 없이 정해진다. 스캔 비용은 1층에서 재고, 비용이 문제면 스캔 자체를 줄이는 방법을 따로 정한다.
 - 지우기와 쓰기를 stdlib `Mutex` 로 줄 세우기. §4.3 에 이유를 적었다.
 - 후보 표본을 `fetch` 해서 확인하기. 후보는 디스크에 있는 blob 이라 `fetch` 는 늘 성공한다. 재려는 위험(지운 뒤 다시 생기는 참조)을 재지 못한다. §5.2 가 그것을 바로 센다.
-- 스캔이 못 읽는 세 곳(§3.4)을 일시 저장으로 보고 범위에서 빼기. Librarian 재시도와 완료 검토 재개가 blob 을 읽는다. 그 저장이 얼마나 오래 사는지 코드가 정하지 않는다.
+- 스캔이 못 읽는 다섯 곳(§3.4)을 일시 저장으로 보고 범위에서 빼기. Librarian 재시도와 완료 검토 재개가 blob 을 읽는다. 그 저장이 얼마나 오래 사는지 코드가 정하지 않는다.
 - 저장소마다 자기 참조를 돌려주는 함수를 등록하고, GC 는 그 합집합만 쓰기. 방향은 맞다. 하지만 지금은 16곳을 모두 바꿔야 해서 2층이 오래 막힌다. 범위층의 닫힌 분류가 "등록하지 않은 저장소"를 실행 시점에 잡는다.
 - 오래된 blob 만 지우기(나이 기준). 나이는 참조 여부를 말하지 않는다. §4.2 의 mtime 조건은 나이가 아니라 "앞 스캔 뒤에 누가 썼다"는 흔적이라, 오래됐다고 지우지 않고 새로 썼으면 남긴다.
 

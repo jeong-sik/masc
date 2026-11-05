@@ -663,31 +663,6 @@ let test_toml_name_override_uses_canonical_identity () =
     (list_field "alerts" keeper |> List.map (string_field "code"))
 ;;
 
-(* The pre-librarian snapshot read failure aborts before the librarian runs
-   and increments the counter under its own site label; the health row must
-   count it or a keeper with a corrupt first snapshot reports failure-free. *)
-let test_counts_snapshot_read_site_failures () =
-  let base = fresh_dir "masc-memory-health-readsite" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  let keeper_id = "readfail-" ^ Filename.basename base in
-  write_keeper_config ~keepers_dir ~keeper_id ();
-  Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
-    ~labels:[ "keeper", keeper_id; "site", "memory_os_current_read" ]
-    ~delta:2.0
-    ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
-  let keeper = keeper_obj keeper_id json in
-  Alcotest.(check int)
-    "read-site failures counted"
-    2
-    (int_field "librarian_failures" keeper);
-  Alcotest.(check (list string))
-    "starvation error raised"
-    [ "librarian_starvation" ]
-    (list_field "alerts" keeper |> List.map (string_field "code"))
-;;
-
 let test_workspace_context_preserves_sources_and_failures () =
   let base = fresh_dir "workspace-memory-context" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
@@ -1477,8 +1452,6 @@ let () =
             test_librarian_failures_with_snapshot_is_warn_alert
         ; Alcotest.test_case "toml name override canonical identity" `Quick
             test_toml_name_override_uses_canonical_identity
-        ; Alcotest.test_case "snapshot read site failures counted" `Quick
-            test_counts_snapshot_read_site_failures
         ; Alcotest.test_case "source-only snapshot counted" `Quick
             test_source_only_snapshot_is_enumerated_and_counted
         ; Alcotest.test_case "corrupt source snapshot visible" `Quick

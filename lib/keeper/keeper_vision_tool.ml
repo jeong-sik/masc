@@ -99,11 +99,13 @@ let first_vision_runtime_id ~now : (string, string) result =
 
 (* Per-keeper content-addressed storage. Workspace callers keep publication,
    read and promotion on the same explicit config-root resolution. *)
+let vision_keepers_dir ?base_path () =
+  match base_path with
+  | None -> Config_dir_resolver.keepers_dir ()
+  | Some base_path -> Config_dir_resolver.keepers_dir_for_base_path ~base_path
+
 let vision_store_dir ?base_path ~keeper_name () =
-  let keepers = match base_path with
-    | None -> Config_dir_resolver.keepers_dir ()
-    | Some base_path -> Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Filename.concat keepers (keeper_name ^ ".vision")
+  Filename.concat (vision_keepers_dir ?base_path ()) (keeper_name ^ ".vision")
 
 let frames_dir ?base_path ~keeper_name () =
   Store.frames_dir ~dir:(vision_store_dir ?base_path ~keeper_name ())

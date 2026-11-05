@@ -279,23 +279,13 @@ let librarian_state_detail = function
   | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Pending | Not_committed -> None
 ;;
 
-(* Labels mirror the counter increments in [Keeper_librarian_runtime] and the
-   pre-librarian snapshot read in [Keeper_agent_run_post_turn_memory]: a keeper
-   whose current-snapshot read keeps failing aborts before the librarian ever
-   runs, so counting only the librarian site would report it as failure-free. *)
-let librarian_failure_sites = [ "memory_os_librarian"; "memory_os_current_read" ]
-
+(* The label the counter increments in [Keeper_librarian_runtime] carry. *)
 let librarian_failures_for_keeper keeper_id =
-  List.fold_left
-    (fun total site ->
-       total
-       + (Otel_metric_store.metric_value_or_zero
-            librarian_failures_metric
-            ~labels:[ "keeper", keeper_id; "site", site ]
-            ()
-          |> int_of_float))
-    0
-    librarian_failure_sites
+  Otel_metric_store.metric_value_or_zero
+    librarian_failures_metric
+    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+    ()
+  |> int_of_float
 ;;
 
 (* A keeper with a config but no current snapshot is the starvation case this

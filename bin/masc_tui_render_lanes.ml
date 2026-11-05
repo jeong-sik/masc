@@ -6,6 +6,7 @@ open Masc_tui_ansi
 open Masc_tui_render_prim
 open Masc_tui_press
 
+module Hint_lines = Masc_tui_hint_lines
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
@@ -158,7 +159,9 @@ let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
        (Terminal_text.single_line purpose))
   @ split_summary_columns ~cols
       ~left_title ~left_rows ~right_title ~right_rows
-  @ wrap_indented_line ~max_cells (Theme.info ()) actions
+  @ List.map
+      (fun line -> Theme.info (), "  " ^ line)
+      (Hint_lines.wrap ~max_cells actions)
 
 let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
     ~dropped_slots () =
@@ -175,8 +178,15 @@ let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
      | dropped ->
        [ Theme.warn (), "탈락 후보: " ^ ordered_slot_list dropped ])
 
+let hint key label = { Hint_lines.key; label }
+
 let exact_lane_overview_actions =
-  "Enter: 실행 기록 · s: 모델 순서 변경 · a: 후보 추가 · Space: 켜기/끄기 · d: 상세(슬롯통계·설정·계약)"
+  [ hint "Enter" "실행 기록"
+  ; hint "s" "모델 순서 변경"
+  ; hint "a" "후보 추가"
+  ; hint "Space" "켜기/끄기"
+  ; hint "d" "상세(슬롯통계·설정·계약)"
+  ]
 
 (* Concise two-column summary for the bottom pane of MASC Features.
    Focuses on the 3 operator questions:
@@ -237,7 +247,7 @@ let toggleable_lane_summary_columns ~state_line ~off_note ~right_title
   , [ Ansi.reset, "구분:   " ^ kind_label
     ; Theme.recede (), "식별자: " ^ row_id
     ]
-  , open_hint ^ " · Space: 켜기/끄기 · d: 전체 상세" )
+  , [ open_hint; hint "Space" "켜기/끄기"; hint "d" "전체 상세" ] )
 
 let inventory_row_summary_lines ~cols ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
@@ -288,12 +298,12 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
       , [ Ansi.reset, "구분:   Browser 레인"
         ; Theme.recede (), "식별자: " ^ row.id
         ]
-      , "Enter: 브라우저 열기 · d: 전체 상세" )
+      , [ hint "Enter" "브라우저 열기"; hint "d" "전체 상세" ] )
     | Machine_state _ ->
       toggleable_lane_summary_columns ~state_line
         ~off_note:"머신 상태와 체크포인트 보존"
         ~right_title:"화면 송출 · 식별자" ~kind_label:"Machines 레인"
-        ~row_id:row.id ~open_hint:"Enter: 화면 보기"
+        ~row_id:row.id ~open_hint:(hint "Enter" "화면 보기")
     | Package_state { declaration; instances } ->
       let decl_rows =
         match declaration with
@@ -352,8 +362,12 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
       , "실행 워커 · 출력 바인딩"
       , worker_rows @ output_or_source_rows
       , if has_outputs then
-          "Enter: 열기 · [ / ]: 출력 선택 · e: 설정 편집 · d: 전체 상세"
-        else "Enter: 열기 · d: 전체 상세" )
+          [ hint "Enter" "열기"
+          ; hint "[ / ]" "출력 선택"
+          ; hint "e" "설정 편집"
+          ; hint "d" "전체 상세"
+          ]
+        else [ hint "Enter" "열기"; hint "d" "전체 상세" ] )
   in
   lane_overview_summary_block ~cols ~label:row.label ~purpose:row.purpose
     ~left_title ~left_rows ~right_title ~right_rows ~actions

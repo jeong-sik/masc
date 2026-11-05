@@ -826,12 +826,12 @@ let test_private_addon_events_are_scoped_to_their_readers () =
   let register session_id auth =
     ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
     match Sse.register ~kind:Sse.Observer ~auth session_id ~last_event_id:0 with
-    | Ok (_, stream, _) -> stream
+    | Ok (client_id, stream, _) -> client_id, stream
     | Error error -> fail (Sse.registration_error_to_string error)
   in
-  let owner_stream = register owner_session owner_auth in
-  let other_stream = register other_session other_auth in
-  let admin_stream = register admin_session admin_auth in
+  let owner_client_id, owner_stream = register owner_session owner_auth in
+  let other_client_id, other_stream = register other_session other_auth in
+  let admin_client_id, admin_stream = register admin_session admin_auth in
   Fun.protect
     ~finally:(fun () ->
       Sse.unsubscribe_external subscription;
@@ -888,22 +888,78 @@ let test_private_addon_events_are_scoped_to_their_readers () =
           [ owner_only; operator_only; shared ]);
       check int "an external subscriber without identity sees shared" 1 !shared_external;
       check int "an external subscriber without identity sees no private event" 0 !private_external;
-      let replay session_id =
+      let replay (session_id, _client_id) =
         (Sse.replay_after_for_session
           ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
           ~session_id ~kind:Sse.Observer 0).deliveries
         |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
       in
       check (list bool) "replay keeps owner-only identity" [ true; false ]
-        (List.map (fun payload -> List.mem payload (replay owner_session)) [ owner_only; operator_only ]);
+        (List.map (fun payload -> List.mem payload (replay (owner_session, owner_client_id)))
+          [ owner_only; operator_only ]);
       check (list bool) "replay hides private events from another Keeper" [ false; false ]
-        (List.map (fun payload -> List.mem payload (replay other_session)) [ owner_only; operator_only ]);
+        (List.map (fun payload -> List.mem payload (replay (other_session, other_client_id)))
+          [ owner_only; operator_only ]);
       check (list bool) "replay retains operator access" [ true; true; true ]
-        (List.map (fun payload -> List.mem payload (replay admin_session))
+        (List.map (fun payload -> List.mem payload (replay (admin_session, admin_client_id)))
           [ owner_only; operator_only; shared ]);
       check (list bool) "replay without a registered identity sees only shared" [ false; true ]
-        (List.map (fun payload -> List.mem payload (replay "private-unregistered"))
+        (List.map (fun payload -> List.mem payload (replay ("private-unregistered", 0)))
           [ owner_only; shared ]))
+
+let test_replay_rejects_replaced_session_identity () =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let owner_auth = Masc_test_deps.make_sse_auth workspace "owner" in
+  Masc_test_deps.ensure_rng_initialized ();
+  let admin_auth =
+    match Auth.create_token workspace ~agent_name:"replacement-admin" ~role:Masc_domain.Admin with
+    | Ok (raw_token, _) -> { Masc.Sse.config = workspace; token = Some raw_token }
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let session_id = "private-replacement-" ^ string_of_int (Random.bits ()) in
+  ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
+  let register auth =
+    match Sse.register ~kind:Sse.Observer ~auth session_id ~last_event_id:0 with
+    | Ok (client_id, _, _) -> client_id
+    | Error error -> fail (Sse.registration_error_to_string error)
+  in
+  let _owner_client_id = register owner_auth in
+  let _replacement_client_id = register admin_auth in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister session_id;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      let owner_only =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "owner-instance"
+          ; "visibility", `Assoc [ "kind", `String "keeper"; "keeper", `String "owner" ] ]
+      in
+      let operator_only =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "operator-instance"
+          ; "visibility", `Assoc [ "kind", `String "operator" ] ]
+      in
+      let shared =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "shared-instance"
+          ; "visibility", `Assoc [ "kind", `String "shared" ] ]
+      in
+      List.iter (Sse.broadcast_to Sse.Observers) [ owner_only; operator_only; shared ];
+      let replay =
+        (Sse.replay_after_for_session
+          ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+          ~session_id ~kind:Sse.Observer 0).deliveries
+        |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
+      in
+      check (list bool) "a replaced session cannot inherit the next credential" [ false; false; true ]
+        (List.map (fun payload -> List.mem payload replay) [ owner_only; operator_only; shared ]))
 
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
@@ -911,6 +967,7 @@ let () = run "Lane action workflow" ["canonical request identity",[
   test_case "machine live announces only changed evidence" `Quick test_machine_live_announces_only_changed_evidence;
   test_case "observation commit announces Lane inventory and its instance" `Quick test_observation_commit_announces_lane_inventory;
   test_case "private Add-on events stay with their readers" `Quick test_private_addon_events_are_scoped_to_their_readers;
+  test_case "replay rejects a replaced session identity" `Quick test_replay_rejects_replaced_session_identity;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;

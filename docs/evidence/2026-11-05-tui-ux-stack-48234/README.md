@@ -1,12 +1,12 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25 and 27 of the stack
-(#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292, #48299, #48306,
-#48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386, #48389, #48392,
-#48401, #48411). Layer 7 is the first version of this document. Layer 12 added
-layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21 added layers 19
-and 20. Layer 26 is an RFC and has no screens. The layer that carries this text
-added layers 22 to 25 and 27.
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27 and 29 of the
+stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292, #48299,
+#48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386, #48389,
+#48392, #48401, #48411, #48424). Layer 7 is the first version of this document.
+Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21
+added layers 19 and 20. Layer 26 is an RFC and has no screens. Layer 28 added
+layers 22 to 25 and 27. The layer that carries this text added layer 29.
 
 ## Source
 
@@ -31,6 +31,7 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 22) | `a6e907b07070ea13dc207c745be240f006bfbe8a` | 41919019723 | `eb92caef0a73d7935b05a0285c4873bb96ad59c437023a8bc45d8b75f990e76d` | `50a2c1484a131bba574f8d11955ebdc78e2f2dfc06f30dbfd5b61103555308ef` |
 | After (layers 1 to 25) | `c514194fc2b378b3569485d5e8a58189b24ca69a` | 41925502321 | `c290ad1f9eb83919fbe77958bd7f614186d64e62123a0a0f948f3de241aa8700` | `bce80de3f7c0a05d0069469e1e13b8241cdaadf1fbee0912409d078ec6925990` |
 | After (layers 1 to 27) | `d738d2334693f14ffa475ca8e5552dbe0425daf4` | 41929495694 | `8f0ca03fe34d837dafb2b17453ecef13dbb39ef3fe8aaa9c33ff7105e0cbe26f` | `76dd1f564067a2533487100dc6e772cc8debd74187b7cabf8b37c11b38e264ba` |
+| After (layers 1 to 29) | `b9161eaa6acd24bae552597a20fadf638eaa0730` | 41934340932 | `b39991f1dad8a7b8913daf0d2ae8c7785a20d0be2c29eae992cd5088a3f89acb` | `c5cf37f66a5896cefba4beb3f712b12d9993d96e778e83b75a8cc247c712331f` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -54,7 +55,8 @@ artifacts were uploaded after that failure.
   Review). Layer 23 used 60x24, 80x24, 120x35 and 200x55 (Features). Layer 24 used
   80x24, 100x30, 120x35 and 140x40 (Runtime). Layer 25 used 60x24, 80x24, 120x35
   and 200x55 with 42 open tasks (Work, Tasks). Layer 27 used 120x35 and 80x24 with
-  the 12-task fixture (Task detail).
+  the 12-task fixture (Task detail). Layer 29 used 60x24, 80x24, 120x35 and 200x55
+  (Artifacts / Resources).
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -624,6 +626,39 @@ In the scrolled capture the history rows and the JSON are still plain.
 ![Scrolled Task detail at 120x35 before](task-detail-scrolled-120-before.png)
 ![Scrolled Task detail at 120x35 after](task-detail-scrolled-120-after.png)
 
+### Layer 29: the Resources list draws one row per resource (#48424)
+
+System, Artifacts / Resources (`:`, then `go Artifacts / Resources` and Enter),
+131 MCP resources and no report. Before is the layers 1 to 27 build: no commit
+from the main commit above to that build touches the list. After is the layers
+1 to 29 build. The counts are the `[MCP]` rows on the first screen. The screen
+with the cursor 40 rows down shows the same number.
+
+```
+size    before (cards)   after (rows)   columns drawn
+60x24    5 of 131        14 of 131      TYPE, NAME
+80x24    5 of 131        14 of 131      TYPE, NAME, DETAIL
+120x35   9 of 131        25 of 131      TYPE, NAME, DETAIL, META
+200x55  16 of 131        45 of 131      TYPE, NAME, DETAIL, META
+```
+
+Before, each resource was a card of three rows (name, description, media type)
+and most of the width on the second and third row was empty. After, each
+resource is one row under a header row. `META` is the first column to go when
+the pane narrows. `DETAIL` goes when it would get fewer than 20 cells. The
+table spreads over 120 cells at most, so at 200x55 the extra width goes to
+`DETAIL`. With the cursor 40 rows down the header row stays at the top and the
+cursor row keeps the columns of the other rows. The reading that Enter opens is
+unchanged: its captures at 60x24, 80x24, 120x35 and 200x55 match line by line
+once the clock is masked.
+
+![Resources at 80x24 before](resources-80-before.png)
+![Resources at 80x24 after](resources-80-after.png)
+![Resources at 120x35 before](resources-120-before.png)
+![Resources at 120x35 after](resources-120-after.png)
+![Resources at 60x24 after](resources-60-after.png)
+![Resources at 80x24 after, cursor 40 rows down](resources-80-scrolled-after.png)
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -669,5 +704,12 @@ In the scrolled capture the history rows and the JSON are still plain.
   palette query, and in the Tools view of a Task from an async request: the Work
   list shows open Tasks only, the capture terminal does not answer the palette
   query, and the fixture has no async request source.
+- Layer 29 with a published report, with a Side_by_side layout and at widths
+  below 60 cells: the fixture publishes no report, so the `CHECK` and `DAY`
+  columns and the report name, author, time and size were not drawn, and the
+  capture driver only opens the full-width list.
+- Layer 29 with a terminal that answers the palette query: the capture terminal
+  does not, so the receded colour of `TYPE`, `DETAIL`, `META` and the header row
+  was not drawn. The name is bold and the cursor row is reversed.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

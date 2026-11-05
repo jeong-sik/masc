@@ -637,18 +637,12 @@ let normalized_path_segments path =
   else normalized |> String.split_on_char '/' |> List.filter (fun segment -> segment <> "")
 ;;
 
-let rec segment_prefix ~prefix path =
-  match prefix, path with
-  | [], _ -> true
-  | _ :: _, [] -> false
-  | p :: ps, x :: xs -> String.equal p x && segment_prefix ~prefix:ps xs
-;;
-
 let same_or_descendant_normalized_path path expected =
   match normalized_path_opt path, normalized_path_opt expected with
   | Some path, Some expected ->
-    segment_prefix
-      ~prefix:(normalized_path_segments expected)
+    List_util.is_prefix
+      ~equal:String.equal
+      (normalized_path_segments expected)
       (normalized_path_segments path)
   | _ -> false
 ;;

@@ -149,21 +149,12 @@ let absolute_path_components path =
     collect path []
 ;;
 
-let rec drop_component_prefix prefix components =
-  match prefix, components with
-  | [], suffix -> Some suffix
-  | expected :: prefix_rest, actual :: components_rest
-    when String.equal expected actual ->
-    drop_component_prefix prefix_rest components_rest
-  | _ -> None
-;;
-
 let relative_components_under
       ~(root : absolute_path_components)
       ~(target : absolute_path_components)
   =
   if String.equal root.anchor target.anchor
-  then drop_component_prefix root.components target.components
+  then List_util.strip_prefix ~equal:String.equal root.components target.components
   else None
 ;;
 

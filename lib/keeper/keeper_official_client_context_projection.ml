@@ -522,16 +522,12 @@ let held_row_digests ~held section =
    goes out whole. *)
 let held_run ~held_digests rows =
   let digests = List.map (fun row -> row.row_held.Session_store.sha256) rows in
-  let rec starts prefix list =
-    match prefix, list with
-    | [], _ -> true
-    | digest :: prefix, next :: list -> String.equal digest next && starts prefix list
-    | _ :: _, [] -> false
-  in
   let rec longest = function
     | [] -> 0
     | _ :: shorter as suffix ->
-      if starts suffix digests then List.length suffix else longest shorter
+      if List_util.is_prefix ~equal:String.equal suffix digests
+      then List.length suffix
+      else longest shorter
   in
   longest held_digests
 ;;

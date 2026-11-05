@@ -42,15 +42,6 @@ let path_segments ~normalize path =
   |> String.split_on_char '/'
   |> List.filter (fun segment -> not (String.equal segment ""))
 
-let strip_segment_prefix ~prefix segments =
-  let rec loop prefix segments =
-    match prefix, segments with
-    | [], rest -> Some rest
-    | p :: ps, s :: ss when String.equal p s -> loop ps ss
-    | _ -> None
-  in
-  loop prefix segments
-
 let relative_path_of_segments = function
   | [] -> "."
   | segments -> String.concat "/" segments
@@ -70,7 +61,7 @@ let location_json
   let playground_segments = path_segments ~normalize playground in
   let cwd_segments = path_segments ~normalize cwd in
   let scope, relative_segments, repo_name, repo_root =
-    match strip_segment_prefix ~prefix:playground_segments cwd_segments with
+    match List_util.strip_prefix ~equal:String.equal playground_segments cwd_segments with
     | None -> Outside_playground, [], None, None
     | Some [] -> Playground_root, [], None, None
     | Some (repos_segment :: repo_name :: rest)

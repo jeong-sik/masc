@@ -2,10 +2,6 @@
 
     Includes {!Keeper_alerting_path} for the objective filesystem boundary.
 
-    The alert fanout layer (board/Slack/Slack-DM/GitHub senders,
-    retry+dedup machinery) was removed here — see the .ml header
-    comment and masc issue #54.
-
     @since v2.200.0 *)
 
 open Keeper_types

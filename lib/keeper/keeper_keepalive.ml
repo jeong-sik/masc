@@ -1276,8 +1276,6 @@ let rec start_keepalive
         wake_queued_owner_operations
           ~base_path:ctx.config.base_path
           live_meta.name;
-        (* Telemetry feedback refresh loop removed in #6814:
-         behavioral_stats no longer consumed by build_prompt. *)
         let current_failure_reason () =
           match Keeper_registry.get ~base_path:ctx.config.base_path live_meta.name with
           | Some current

@@ -1160,10 +1160,8 @@ let run_keepalive_unified_turn
         then (
           (* fd/disk pressure is pre-checked
              by [classify_turn_intake_admission] in [run_heartbeat_loop] BEFORE
-             stimulus intake, so this branch is reached only when a turn is
-             admitted. The four prior inline pressure gates here were removed: they
-             ran AFTER intake had already consumed the stimulus, forcing a
-             consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+             stimulus intake, so a stimulus is never consumed and requeued under
+             pressure, and this branch is reached only when a turn is admitted. *)
           (* Captured before dispatch: a source withdrawn after intake leaves
              [source_batch] there, and its turn-entry reaction still gets its
              closing half below. *)

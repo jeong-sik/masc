@@ -57,10 +57,3 @@ val keeper_decisions_json :
   ?limit:int ->
   unit ->
   Yojson.Safe.t
-
-val keeper_decisions_log_json :
-  config:Workspace.config ->
-  keepers:Keeper_meta_contract.keeper_meta list ->
-  ?limit:int ->
-  unit ->
-  Yojson.Safe.t

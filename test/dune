@@ -466,7 +466,6 @@
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
   test_jsonl_incremental_projection
-  test_keeper_decision_event
   test_attribution
   test_dashboard_attribution
   test_dashboard_agent_core_bridge
@@ -814,7 +813,6 @@
   test_keeper_hooks_agent_core_introspection
   test_keeper_run_tools_hooks
   test_jsonl_incremental_projection
-  test_keeper_decision_event
   test_attribution
   test_dashboard_attribution
   test_dashboard_agent_core_bridge

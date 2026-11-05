@@ -1,27 +1,24 @@
-import { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
+import { isKnownConnectorId, type KnownConnectorId } from '../config/connector-ids'
 
 export { KNOWN_CONNECTOR_IDS, type KnownConnectorId } from '../config/connector-ids'
 
-// Every registered connector runs in the MASC server.
-export const IN_PROCESS_CONNECTOR_IDS = KNOWN_CONNECTOR_IDS
-export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
-
-export function isInProcessConnector(connectorId: string): boolean {
-  return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
-}
-
-// What an operator has to put in place for an in-process connector to start.
+// What an operator has to put in place for a connector's gateway to start.
 // For Slack this is the app-level token (Socket Mode credential): absent, the
-// in-process gateway does not start. The bot token (SLACK_BOT_TOKEN) is a
+// gateway does not start. The bot token (SLACK_BOT_TOKEN) is a
 // second, outbound-only credential surfaced by the config form / setup guide.
 // iMessage has no credential at all — macOS authorizes the process itself —
 // so what it needs is a permission grant, which is why this is not named
 // after an env var.
-export const IN_PROCESS_CONNECTOR_ACTIVATION: Record<InProcessConnectorId, string> = {
+const CONNECTOR_ACTIVATION: Record<KnownConnectorId, string> = {
   discord: 'DISCORD_BOT_TOKEN 환경변수',
   imessage: 'Messages.app 전체 디스크 접근 권한',
   slack: 'SLACK_APP_TOKEN 환경변수',
   telegram: 'TELEGRAM_BOT_TOKEN 환경변수',
+}
+
+// null for an id the dashboard does not know.
+export function connectorActivation(connectorId: string): string | null {
+  return isKnownConnectorId(connectorId) ? CONNECTOR_ACTIVATION[connectorId] : null
 }
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {

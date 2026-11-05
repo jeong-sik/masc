@@ -38,7 +38,7 @@ vi.mock('../copilot-dock', () => ({ toggleCopilotDock: m.toggleCopilotDock }))
 vi.mock('../../lib/global-shortcut-manager', () => ({
   globalShortcutManager: { register: () => () => {} },
 }))
-vi.mock('../connector-status', () => ({
+vi.mock('../connector-constants', () => ({
   KNOWN_CONNECTOR_IDS: ['discord', 'slack'],
   CONNECTOR_DISPLAY_NAMES: { discord: 'Discord', slack: 'Slack' },
 }))

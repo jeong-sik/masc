@@ -90,7 +90,7 @@ imports rail; rail does NOT import overview-strip. Cycles avoided.
 ## Adding a connector — checklist
 
 1. Add the id to `KNOWN_CONNECTOR_IDS` (`dashboard/src/config/connector-ids.ts`).
-2. Add a row to `CONNECTOR_DISPLAY_NAMES`, `IN_PROCESS_CONNECTOR_ACTIVATION`,
+2. Add a row to `CONNECTOR_DISPLAY_NAMES`, `CONNECTOR_ACTIVATION`,
    `CONNECTOR_ACCENT_RGB` and `CHANNEL_ICONS` (`connector-constants.ts`).
 3. Add `IN_PROCESS_CONFIG_GUIDES[<id>]` and a `FIELD_HINTS` row for each of its
    env vars (`connector-config-form.ts`).

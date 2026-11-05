@@ -24,7 +24,7 @@ import {
   KNOWN_CONNECTOR_IDS,
   channelIcon,
   type KnownConnectorId,
-} from './connector-status'
+} from './connector-constants'
 import { openConnectorConfig } from './connector-config-form'
 import { KeeperBadge } from './keeper-badge'
 import { Tk } from './tk'

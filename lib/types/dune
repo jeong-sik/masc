@@ -24,7 +24,6 @@
   types_auth
   masc_domain
   goal_store_unavailable
-  severity
   keeper_decision_outcome)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags

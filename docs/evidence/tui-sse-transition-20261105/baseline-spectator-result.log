@@ -1,0 +1,20 @@
+F
+======================================================================
+FAIL: test_visible_machine_reads_and_controlled_ticker (__main__.SpectatorPushTest.test_visible_machine_reads_and_controlled_ticker)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_spectator_push.py", line 105, in test_visible_machine_reads_and_controlled_ticker
+    owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_chat_owed_history.py", line 254, in run_chat
+    scenario(server, step)
+    ~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_spectator_push.py", line 83, in scenario
+    self.assertEqual(spectator.response_count("open", "live:msx_capture"), 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 4 != 1
+
+----------------------------------------------------------------------
+Ran 1 test in 5.706s
+
+FAILED (failures=1)

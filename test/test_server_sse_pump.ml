@@ -59,7 +59,8 @@ let ending_t =
          (match ending with
           | Pump.Client_gone -> "Client_gone"
           | Pump.Fell_behind -> "Fell_behind"
-          | Pump.Stalled -> "Stalled"))
+          | Pump.Stalled -> "Stalled"
+          | Pump.Finished -> "Finished"))
     ( = )
 ;;
 
@@ -92,22 +93,35 @@ let new_hub () =
    receives every frame [send] is given, and [send] answers [Written] until
    [stop_after] frames were sent, then [refusal]. With a [gate], [send] does not
    return until the gate opens, from the [gate_from]th frame on, which is a
-   client that stopped reading. [live] counts the subscriptions the pump holds. *)
+   client that stopped reading. The harness subscribes the hub to the queue as
+   a route does: before [run], with the removal on the stream's switch. [live]
+   counts the subscriptions it holds. [step] and [idle] default to the fleet
+   stream's. *)
 type served =
   { frames : string Eio.Stream.t
   ; ending : Pump.ending Eio.Promise.t
   }
 
-let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1) hub =
+let fleet_step event = Pump.Send (Server_routes_http_routes_fleet_stream.frame event)
+let always_keepalive () = Pump.Keepalive
+
+(* Subscribes [hub] to a new queue the way a route does and runs [pump] on it;
+   the subscription is removed when this returns, raises or is cancelled. *)
+let with_subscribed_queue ~live hub pump =
+  Eio.Switch.run (fun stream_sw ->
+    let queue = Pump.Queue.create ~max_queued_events:queue_bound in
+    incr live;
+    let unsubscribe = Hub.subscribe hub ~on_event:(Pump.Queue.push queue) in
+    Eio.Switch.on_release stream_sw (fun () ->
+      decr live;
+      unsubscribe ());
+    pump queue)
+;;
+
+let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1)
+    ?(step = fleet_step) ?(idle = always_keepalive) hub =
   let frames = Eio.Stream.create max_int in
   let ending, resolve_ending = Eio.Promise.create () in
-  let subscribe ~on_event =
-    incr live;
-    let unsubscribe = Hub.subscribe hub ~on_event in
-    fun () ->
-      decr live;
-      unsubscribe ()
-  in
   let sent = ref 0 in
   let send frame =
     Eio.Stream.add frames frame;
@@ -118,13 +132,8 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Promise.resolve
       resolve_ending
-      (Pump.run
-         ~subscribe
-         ~frame:Server_routes_http_routes_fleet_stream.frame
-         ~clock
-         ~ping_interval_s
-         ~max_queued_events:queue_bound
-         ~send));
+      (with_subscribed_queue ~live hub (fun queue ->
+         Pump.run ~queue ~step ~idle ~clock ~ping_interval_s ~send)));
   { frames; ending }
 ;;
 
@@ -393,6 +402,135 @@ let test_a_pile_up_behind_a_stalled_send_ends_as_stalled () =
       check int "the subscription is removed" 0 !live))
 ;;
 
+let revision_is n event = F.Revision.to_int (F.revision_of_event event) = n
+
+let test_a_skipped_event_writes_nothing () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
+    Eio.Switch.run (fun sw ->
+      let step event = if revision_is 2 event then Pump.Skip else fleet_step event in
+      let served = serve ~sw ~clock ~live ~stop_after:2 ~step hub in
+      Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
+      Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
+      check (list frame_t) "the Snapshot, then the change after the skipped one"
+        [ Some "1", snapshot ~revision:1 ~measured_at:10.0 (fleet ~running:1 ())
+        ; Some "3", changed ~revision:3 ~measured_at:30.0 (fleet ~running:3 ())
+        ]
+        (take_frames served 2);
+      check ending_t "the client left" Pump.Client_gone (Eio.Promise.await served.ending)))
+;;
+
+let test_a_last_frame_ends_the_stream_once_written () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ~running:1 ());
+    Eio.Switch.run (fun sw ->
+      let step event =
+        if revision_is 2 event
+        then Pump.Send_last (Server_routes_http_routes_fleet_stream.frame event)
+        else fleet_step event
+      in
+      let served = serve ~sw ~clock ~live ~step hub in
+      Hub.observe hub ~measured_at:20.0 (fleet ~running:2 ());
+      Hub.observe hub ~measured_at:30.0 (fleet ~running:3 ());
+      check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
+      check int "the Snapshot and the last frame, nothing after" 2 (Eio.Stream.length served.frames);
+      check int "the subscription is removed" 0 !live))
+;;
+
+let test_a_quiet_interval_writes_nothing_and_asks_again () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ());
+    Eio.Switch.run (fun sw ->
+      let asked = ref 0 in
+      let idle () =
+        incr asked;
+        if !asked = 1 then Pump.Quiet else Pump.Keepalive
+      in
+      let served = serve ~sw ~clock ~live ~stop_after:2 ~idle hub in
+      ignore (take_frames served 1 : _ list);
+      advance clock;
+      let rec until_asked turns_left =
+        if !asked = 0 && turns_left > 0
+        then (
+          Eio.Fiber.yield ();
+          until_asked (turns_left - 1))
+      in
+      until_asked max_turns_to_next_timer;
+      check int "asked once" 1 !asked;
+      check int "a quiet interval writes nothing" 0 (Eio.Stream.length served.frames);
+      advance clock;
+      check string "the next interval writes the keepalive" Pump.keepalive_frame
+        (Eio.Stream.take served.frames);
+      check ending_t "the client left" Pump.Client_gone (Eio.Promise.await served.ending)))
+;;
+
+let test_an_idle_finish_ends_the_stream_without_a_frame () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ());
+    Eio.Switch.run (fun sw ->
+      let served = serve ~sw ~clock ~live ~idle:(fun () -> Pump.Finish) hub in
+      ignore (take_frames served 1 : _ list);
+      advance clock;
+      check ending_t "finished" Pump.Finished (Eio.Promise.await served.ending);
+      check int "nothing written after the Snapshot" 0 (Eio.Stream.length served.frames);
+      check int "the subscription is removed" 0 !live))
+;;
+
+let producer_domains = 4
+
+(* Producers on several domains lose and double no event while the queue has
+   room, and past the bound they only mark the client behind; a push that
+   waited would hang here, as nothing takes. The moment two producers race for
+   the last slot is too short to force: the slot reservation in [Queue.push]
+   covers it. *)
+let test_producers_on_several_domains_lose_no_event () =
+  Eio_main.run (fun env ->
+    let domain_mgr = Eio.Stdenv.domain_mgr env in
+    let clock = Eio.Stdenv.clock env in
+    let push_from_every_domain queue ~each =
+      Eio.Fiber.List.iter
+        (fun domain ->
+           Eio.Domain_manager.run domain_mgr (fun () ->
+             for index = 1 to each do
+               Pump.Queue.push queue ((domain * each) + index)
+             done))
+        (List.init producer_domains Fun.id)
+    in
+    let fits = Pump.Queue.create ~max_queued_events:(producer_domains * 16) in
+    push_from_every_domain fits ~each:16;
+    let taken = ref [] in
+    let ending =
+      Pump.run ~queue:fits
+        ~step:(fun n ->
+          taken := n :: !taken;
+          if List.length !taken = producer_domains * 16 then Pump.Send_last "" else Pump.Send "")
+        ~idle:(fun () -> Pump.Finish)
+        ~clock ~ping_interval_s
+        ~send:(fun _ -> Sse.Written)
+    in
+    check ending_t "every event that fit was served" Pump.Finished ending;
+    check (list int) "none lost or doubled"
+      (List.init (producer_domains * 16) (fun n -> n + 1))
+      (List.sort compare !taken);
+    let overflow = Pump.Queue.create ~max_queued_events:16 in
+    push_from_every_domain overflow ~each:16;
+    check ending_t "past the bound the client is behind" Pump.Fell_behind
+      (Pump.run ~queue:overflow ~step:(fun _ -> Pump.Send "") ~idle:(fun () -> Pump.Finish)
+         ~clock ~ping_interval_s ~send:(fun _ -> Sse.Written)))
+;;
+
 let test_cancelling_a_connection_removes_its_subscription () =
   Eio_mock.Backend.run (fun () ->
     let clock = Eio_mock.Clock.make () in
@@ -417,21 +555,10 @@ let test_a_send_that_raises_removes_the_subscription_and_propagates () =
     let hub = new_hub () in
     let live = ref 0 in
     Hub.observe hub ~measured_at:10.0 (fleet ());
-    let subscribe ~on_event =
-      incr live;
-      let unsubscribe = Hub.subscribe hub ~on_event in
-      fun () ->
-        decr live;
-        unsubscribe ()
-    in
     (match
-       Pump.run
-         ~subscribe
-         ~frame:Server_routes_http_routes_fleet_stream.frame
-         ~clock
-         ~ping_interval_s
-         ~max_queued_events:queue_bound
-         ~send:(fun _ -> failwith "socket write failed")
+       with_subscribed_queue ~live hub (fun queue ->
+         Pump.run ~queue ~step:fleet_step ~idle:always_keepalive ~clock ~ping_interval_s
+           ~send:(fun _ -> failwith "socket write failed"))
      with
      | (_ : Pump.ending) -> fail "the failure should propagate"
      | exception Failure message -> check string "the failure" "socket write failed" message);
@@ -472,6 +599,19 @@ let () =
             test_a_keepalive_answered_stalled_ends_the_pump
         ; test_case "a pile-up behind a stalled send ends as stalled" `Quick
             test_a_pile_up_behind_a_stalled_send_ends_as_stalled
+        ] )
+    ; ( "steps"
+      , [ test_case "a skipped event writes nothing" `Quick test_a_skipped_event_writes_nothing
+        ; test_case "a last frame ends the stream once written" `Quick
+            test_a_last_frame_ends_the_stream_once_written
+        ; test_case "a quiet interval writes nothing and asks again" `Quick
+            test_a_quiet_interval_writes_nothing_and_asks_again
+        ; test_case "an idle finish ends the stream without a frame" `Quick
+            test_an_idle_finish_ends_the_stream_without_a_frame
+        ] )
+    ; ( "queue"
+      , [ test_case "producers on several domains lose no event" `Quick
+            test_producers_on_several_domains_lose_no_event
         ] )
     ; ( "cleanup"
       , [ test_case "cancelling a connection removes its subscription" `Quick

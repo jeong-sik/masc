@@ -1270,8 +1270,8 @@ let golden_events : E.keeper_chat_event list =
 (* The exact fold the live Dashboard adapter performs
    (server_routes_http_keeper_stream.ml:2646-2668): project with a per-event
    injected timestamp, serialize projected events with Ag_ui.event_to_sse —
-   the same serializer keeper_stream_send_event uses at :1017-1018 — and skip
-   None projections. *)
+   the same serializer the Keeper chat stream writes its frames with — and
+   skip None projections. *)
 let projected_sse_bytes timed_events =
   let _, rev_bytes =
     List.fold_left

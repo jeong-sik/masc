@@ -560,7 +560,7 @@ let test_capability_table_sharing_is_listed () =
     ; [ "list_tabs"; "read_dialog" ] (* ego list_tabs rows carry the dialog and no windowId *)
     ; [ "middle_click"; "right_click" ] (* click_at with a button *)
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
-    ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
+    ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand and on an ego connection *)
     ; [ "click"; "frame_interaction" ] (* click with framePath *)
     ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
     ; [ "click"; "click_snapshot_target"; "frame_interaction" ] (* click with target on an ego connection, inside frames too *)

@@ -220,9 +220,13 @@ let support backend operation = match backend with
     | Html5_drop -> (match backend with
       | Owned_chromium -> conditional ~action:"drag_to" Interact
           [observed;target;"Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."]
+      | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Drag_and_drop
+          (conditional ~action:"drag_to" Interact
+            [observed;ego_agent_pages;
+             "Only selector-to-selector drag_to without via and with durationMs=0, using native dragAndDrop. Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."])
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> Unsupported
           "Native pointer drag exists, but the tested Firefox HTML5 DataTransfer/drop scenario fails; no synthetic fallback."
-      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
+      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Right_click | Middle_click -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> conditional ~action:"click_at" Interact
           [observed;geometry;

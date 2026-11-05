@@ -21,8 +21,8 @@ an agent through a public tool.
   fresh scene → click → inspect application state. WebExtension does not serve
   trusted hover; its DOM click does not provide native pointerdown menus.
 - Pointer dragging and HTML5 DataTransfer/drop acceptance are different. Chrome
-  has a passing native HTML5 fixture; application acceptance still requires a
-  fresh read. Firefox's tested HTML5 case fails despite pointer drag working.
+  and ego each have a passing native HTML5 fixture; application acceptance still
+  requires a fresh read. Firefox's tested HTML5 case fails despite pointer drag working.
 - Fill replaces an input/textarea value and emits input/change; it does not mean
   trusted typing or submission. Owned Gecko alone exposes BrowserAct's limited
   native-select, frame, dialog, sandbox upload and download operations. Native

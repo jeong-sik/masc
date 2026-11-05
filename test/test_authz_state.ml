@@ -501,7 +501,14 @@ let test_a_principal_whose_revocation_was_given_up_writes_nothing () =
   match S.step held (admin_record ~by:bob ~user_id:user) with
   | Error (S.Revocation_pending subject) ->
     Alcotest.(check string) "the author" "principal:human:user-2" (Authz_records.Subject.to_string subject);
-    Alcotest.(check bool) "user is still an Admin" true (People.is_admin held.S.principals user)
+    Alcotest.(check bool) "user is still an Admin" true (People.is_admin held.S.principals user);
+    (match S.step held (admin_record ~by:user ~user_id:user) with
+     | Error refusal ->
+       Alcotest.(check string)
+         "bob does not count as the Admin that remains"
+         "user-1 is the last Admin, so the assignment stays"
+         (S.refusal_to_string refusal)
+     | Ok _ -> Alcotest.fail "the last Admin who can write was revoked")
   | other -> Alcotest.failf "bob wrote while blocked: %s" (step_label other)
 ;;
 

@@ -124,14 +124,14 @@ let author_is_an_admin t (author : Author.t) =
   | Author.System_migration -> false
 ;;
 
-let revoke_admin t ~author (Authz_admin_event.Revoked { user_id; cause = _ }) =
+let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _ }) =
   if not (author_is_an_admin t author)
   then Error (Revoker_is_not_an_admin author)
   else if not (is_admin t user_id)
   then Error (Not_an_admin user_id)
   else (
     let admins = User_id.Set.remove user_id t.admins in
-    if User_id.Set.is_empty admins
-    then Error (Last_admin user_id)
-    else Ok { t with admins })
+    if User_id.Set.exists (fun id -> not (held id)) admins
+    then Ok { t with admins }
+    else Error (Last_admin user_id))
 ;;

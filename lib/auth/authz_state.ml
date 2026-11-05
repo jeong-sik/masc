@@ -157,7 +157,10 @@ let admin_assignment state (record : R.t) =
   match Authz_admin_event.of_body record.R.body with
   | Error error -> Error (Admin_assignment_unreadable error)
   | Ok (Authz_admin_event.Revoked { user_id; cause = _ } as event) ->
-    (match Authz_principal_state.revoke_admin state.principals ~author:record.R.author event with
+    let held id =
+      is_pending state (Authz_records.Subject.Principal (Authz_types.Principal.Human id))
+    in
+    (match Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held event with
      | Error refusal -> Error (Admin_assignment refusal)
      | Ok principals ->
        Ok

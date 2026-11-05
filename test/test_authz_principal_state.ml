@@ -188,8 +188,10 @@ let two_admins () =
   principals
 ;;
 
-let revoke ?(cause = R.Operational) t ~by user_id =
-  P.revoke_admin t ~author:(as_person by) (R.Revoked { user_id; cause })
+let nobody_held (_ : User_id.t) = false
+
+let revoke ?(cause = R.Operational) ?(held = nobody_held) t ~by user_id =
+  P.revoke_admin t ~author:(as_person by) ~held (R.Revoked { user_id; cause })
 ;;
 
 let check_revocation_refused label expected result =
@@ -226,6 +228,19 @@ let an_admin_revokes_their_own_while_another_remains () =
     Alcotest.(check bool) "bob still is" true (P.is_admin after bob)
 ;;
 
+(* bob is held: the store gave up a revocation of bob, so bob writes nothing,
+   and alice is the last Admin who can. *)
+let a_held_admin_is_not_the_one_that_remains () =
+  let held id = User_id.equal id bob in
+  check_revocation_refused
+    "alice revokes her own"
+    "alice is the last Admin, so the assignment stays"
+    (revoke ~held (two_admins ()) ~by:alice alice);
+  match revoke ~held (two_admins ()) ~by:alice bob with
+  | Error refusal -> Alcotest.failf "the held Admin was kept: %s" (P.revocation_refusal_to_string refusal)
+  | Ok after -> Alcotest.(check bool) "bob is no longer an Admin" false (P.is_admin after bob)
+;;
+
 let who_may_revoke () =
   let t = two_admins () in
   List.iter
@@ -233,7 +248,7 @@ let who_may_revoke () =
       check_revocation_refused
         label
         expected
-        (P.revoke_admin t ~author (R.Revoked { user_id = bob; cause = R.Operational })))
+        (P.revoke_admin t ~author ~held:nobody_held (R.Revoked { user_id = bob; cause = R.Operational })))
     [ ( "the local operator"
       , Author.Local_operator
       , "the local operator is not an Admin, and only an Admin revokes an Admin assignment" )
@@ -263,6 +278,7 @@ let () =
     ; ( "admin assignment"
       , [ Alcotest.test_case "revokes another" `Quick an_admin_revokes_another
         ; Alcotest.test_case "revokes their own" `Quick an_admin_revokes_their_own_while_another_remains
+        ; Alcotest.test_case "a held Admin does not remain" `Quick a_held_admin_is_not_the_one_that_remains
         ; Alcotest.test_case "who may revoke" `Quick who_may_revoke
         ] )
     ]

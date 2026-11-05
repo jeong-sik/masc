@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>html5 drop fixture</title>
+<div id="src" draggable="true" style="width:140px;height:60px;background:#cde;margin:40px">drag me</div>
+<div id="dst" style="width:240px;height:140px;margin:40px;border:2px dashed #333">drop here</div>
+<pre id="log"></pre>
+<script>
+const log=[];const L=m=>{log.push(m);document.getElementById('log').textContent=log.join('\n')};
+const src=document.getElementById('src'),dst=document.getElementById('dst');
+src.addEventListener('pointerdown',e=>L('pointerdown trusted='+e.isTrusted));
+src.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain','card-1');L('dragstart trusted='+e.isTrusted)});
+dst.addEventListener('dragenter',e=>{e.preventDefault();L('dragenter')});
+dst.addEventListener('dragover',e=>{e.preventDefault();if(!window.sawOver){window.sawOver=1;L('dragover')}});
+dst.addEventListener('drop',e=>{e.preventDefault();window.dropped=e.dataTransfer.getData('text/plain');L('drop data='+window.dropped+' trusted='+e.isTrusted)});
+src.addEventListener('dragend',e=>{window.ended=e.dataTransfer.dropEffect;L('dragend dropEffect='+e.dataTransfer.dropEffect)});
+document.addEventListener('pointerup',e=>L('pointerup'));
+</script>

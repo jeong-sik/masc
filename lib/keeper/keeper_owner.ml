@@ -1154,8 +1154,7 @@ let recover_operation_availability t =
           way. A row with a durable continuation goes back to the queue and
           resumes; the rest fail as [Store_unavailable], which names what took
           the result away without claiming completion or that no external
-          effect happened. Waiting for a restart instead refused every later
-          request to this keeper until someone restarted it. *)
+          effect happened. *)
        (match
           run_operation_store ~label:"settle Keeper chat operations after store recovery"
             (fun () ->

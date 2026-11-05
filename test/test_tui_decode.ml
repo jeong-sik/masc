@@ -2728,6 +2728,32 @@ let test_tool_http_error_preserves_nested_refusal () =
       ("HTTP 400: " ^ detail) message
   | Ok _ -> Alcotest.fail "a refused Goal retry cannot be a successful response"
 
+(* The voice config route answers the tool layer's refusal as the whole body,
+   with the config path beside the sentence. Counted with the envelope the body
+   is past the raw-body head limit, so the pane used to show the JSON cut
+   inside the sentence. *)
+let test_tool_http_error_as_whole_body_shows_its_sentence () =
+  let detail = "voice config missing: no [voice] section in " ^ String.make 300 'p' in
+  let body = Yojson.Safe.to_string (`Assoc ["status", `String "error";
+    "message", `String detail; "config_path", `String "/base/.masc/config/voice.json"]) in
+  match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:500 ~body with
+  | Error message -> Alcotest.(check string) "the sentence, whole" ("HTTP 500: " ^ detail) message
+  | Ok _ -> Alcotest.fail "HTTP 500 cannot be a successful response"
+
+(* Only the error envelope's message is the server's sentence. A body that
+   says another status, or an error status with no readable message, stays raw. *)
+let test_tool_http_error_envelope_needs_status_error_and_a_message () =
+  let decode body =
+    match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:502 ~body with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "HTTP failure cannot succeed" in
+  List.iter (fun fields ->
+    let body = Yojson.Safe.to_string (`Assoc fields) in
+    Alcotest.(check string) "stays the raw body" ("HTTP 502: " ^ body) (decode body))
+    [ ["status", `String "ok"; "message", `String "fine"]
+    ; ["status", `String "error"; "message", `String "   "]
+    ; ["status", `String "error"; "code", `Int 7] ]
+
 (* Raw bodies are bounded; their metadata does not claim a JSON parse result. *)
 let test_decode_json_response_body_bounded_body_names_its_size () =
   let body = String.make 900 'x' in
@@ -14761,6 +14787,10 @@ let () =
           test_decode_json_response_body_rejects_error_status;
         Alcotest.test_case "tool HTTP refusal preserves the reason" `Quick
           test_tool_http_error_preserves_nested_refusal;
+        Alcotest.test_case "tool refusal as the whole body shows its sentence" `Quick
+          test_tool_http_error_as_whole_body_shows_its_sentence;
+        Alcotest.test_case "tool refusal needs status error and a message" `Quick
+          test_tool_http_error_envelope_needs_status_error_and_a_message;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
         Alcotest.test_case "HTTP fallback and terminal controls" `Quick

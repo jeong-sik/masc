@@ -10,12 +10,7 @@ let to_json = function
   | Empty_history -> `Assoc [ "kind", `String "empty_history" ]
 ;;
 
-let valid_digest digest =
-  String.length digest = 64
-  && String.for_all
-       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
-       digest
-;;
+let valid_digest = String_util.is_lowercase_sha256_hex
 
 let of_json = function
   | `Assoc fields ->

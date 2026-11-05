@@ -18,8 +18,7 @@ let valid_operation_id value =
   | Ok canonical -> String.equal value canonical
   | Error _ -> false
 
-let valid_sha256 value =
-  String.length value = 64 && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) value
+let valid_sha256 = String_util.is_lowercase_sha256_hex
 
 let initial ~id ~shared =
   if not (Published_artifact.valid_id id) then Error (Invalid "invalid artifact id")

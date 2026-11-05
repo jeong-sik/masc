@@ -116,10 +116,8 @@ have no declaration behind them.
 The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
 PR is an answer.
 
-The former `pr/*` status-label projection was retired with automatic PR
-workflows. GitHub's native mergeability, review decision, and unresolved-thread
-views are the source of truth instead of a second state machine maintained by
-scheduled reconciliation.
+GitHub's native mergeability, review decision, and unresolved-thread views are
+the source of truth for PR status.
 
 ### PR rules
 

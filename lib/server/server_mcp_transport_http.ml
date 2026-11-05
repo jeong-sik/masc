@@ -142,48 +142,56 @@ let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version =
       @ mcp_headers session_id protocol_version
       @ deps.cors_headers origin)
 
-let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version
+(* A tools/call POST stream stays out of the SSE registry. Only its handler
+   and keepalive fiber write it, both on the connection's domain, so it uses
+   the response directly. *)
+let send_post_sse ~session_id response frame =
+  match Server_sse_response.send response frame with
+  | Written ->
+    Sse.touch session_id;
+    true
+  | Closed | Stalled -> false
+
+let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version ~clock
     reqd =
   let headers =
     stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version
   in
-  let response = Httpun.Response.create ~headers `OK in
-  let writer = Httpun.Reqd.respond_with_streaming reqd response in
-  let info = make_inline_sse_conn ~session_id writer in
-  if not (send_raw info (sse_prime_event ())) then
-    Log.Server.debug "SSE prime send failed for session %s" info.session_id;
-  info
+  let response =
+    Server_sse_response.respond ~clock ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+      (Httpun.Response.create ~headers `OK)
+  in
+  if not (send_post_sse ~session_id response (sse_prime_event ())) then
+    Log.Server.debug "SSE prime send failed for session %s" session_id;
+  response
 
-let spawn_post_sse_keepalive ~sw ~clock info =
+let spawn_post_sse_keepalive ~sw ~clock ~session_id response =
   Eio.Fiber.fork ~sw (fun () ->
       let rec loop () =
-        if not (Atomic.get info.stop) then (
-          (try
-             Eio.Time.sleep clock post_sse_keepalive_interval_s
-           with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Log.Server.warn "SSE keepalive sleep failed for session %s: %s"
-                    info.session_id (Printexc.to_string exn));
-          if Atomic.get info.closed then
-            close_sse_conn info
-          else if not (Atomic.get info.stop) then
-            if not (send_raw info ": keepalive\n\n") then
-              Log.Server.debug "SSE keepalive send failed for session %s"
-                info.session_id;
+        if not (Server_sse_response.is_closed response) then (
+          Eio.Time.sleep clock post_sse_keepalive_interval_s;
+          if not (Server_sse_response.is_closed response)
+             && not (send_post_sse ~session_id response ": keepalive\n\n")
+          then
+            Log.Server.debug "SSE keepalive send failed for session %s"
+              session_id;
           loop ())
       in
       try loop ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> close_sse_conn info)
+      | exn ->
+        Log.Server.warn "SSE keepalive failed for session %s: %s" session_id
+          (Printexc.to_string exn);
+        Server_sse_response.close response)
 
-let stream_post_sse_finish info = close_sse_conn info
+let stream_post_sse_finish response = Server_sse_response.close response
 
-let stream_post_sse_json info (json : Yojson.Safe.t) =
-  if not (send_raw info
+let stream_post_sse_json ~session_id response (json : Yojson.Safe.t) =
+  if not (send_post_sse ~session_id response
             (Sse.format_event ~event_type:"message" (Yojson.Safe.to_string json)))
   then
-    Log.Server.debug "SSE json send failed for session %s" info.session_id
+    Log.Server.debug "SSE json send failed for session %s" session_id
 
 (* subscriptions/listen (2026-07-28) replaces the GET endpoint: one long-lived
    POST whose response body is the notification stream. Unlike the tools/call
@@ -529,16 +537,17 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 accept_mode
                             in
                             let response_id = body_jsonrpc_id body_str in
-                            let inline_sse : sse_conn_info option ref = ref None in
+                            let inline_sse : Server_sse_response.t option ref = ref None in
                             try
                               if wants_streaming_post then (
-                                let info =
+                                let response =
                                   stream_post_sse_start ~deps ~origin ~session_id
                                     ~protocol_version:response_protocol_version
-                                    reqd
+                                    ~clock reqd
                                 in
-                                inline_sse := Some info;
-                                spawn_post_sse_keepalive ~sw ~clock info);
+                                inline_sse := Some response;
+                                spawn_post_sse_keepalive ~sw ~clock ~session_id
+                                  response);
                               let response_json =
                                 Auth_oauth.with_expected_resource expected_resource
                                   (fun () ->
@@ -588,10 +597,11 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                   ~clock ~body_str reqd
                               else if wants_streaming_post then
                                 match !inline_sse with
-                                | Some info ->
+                                | Some response ->
                                     if response_json <> `Null then
-                                      stream_post_sse_json info response_json;
-                                    stream_post_sse_finish info
+                                      stream_post_sse_json ~session_id response
+                                        response_json;
+                                    stream_post_sse_finish response
                                 | None -> ()
                               else match
                                 Server_mcp_transport_http_headers
@@ -702,12 +712,12 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                             | Eio.Cancel.Cancelled _ as e -> raise e
                             | exn ->
                                 (match !inline_sse with
-                                | Some info ->
-                                    stream_post_sse_json info
+                                | Some response ->
+                                    stream_post_sse_json ~session_id response
                                       (error_body ~code:Mcp_error_code.Internal_error ?id:response_id
                                          ("Internal error: "
                                         ^ Printexc.to_string exn));
-                                    stream_post_sse_finish info
+                                    stream_post_sse_finish response
                                 | None ->
                                     let protocol_version =
                                       get_protocol_version_for_session ~session_id
@@ -961,17 +971,30 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               end else if sse_kind = Sse.Observer && not (deps.is_ready ()) then begin
                 Sse.unregister_if_current session_id client_id;
                 respond_not_ready ~deps request reqd
-              end else
-              let writer = Httpun.Reqd.respond_with_streaming reqd response in
-              let mutex = Eio.Mutex.create () in
+              end else (
           (match evicted with
           | Some evicted_sid ->
-              (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
-                 close frame + Evict/Close event pair. *)
+              (* RFC-0099 PR-3: cap-exceeded eviction publishes the typed
+                 Evict/Close event pair. *)
               stop_sse_session_evict evicted_sid
                 ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
-          let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
+          match (match attested_runtime with
+             | Some result -> result
+             | None -> deps.get_runtime_result ()) with
+          | Error msg ->
+              (* No supervisor could own the response, so the stream ends at
+                 once with the status it always had (RFC-0493 §3.2). *)
+              Log.Server.debug "SSE runtime unavailable for session %s: %s"
+                session_id msg;
+              Sse.unregister_if_current session_id client_id;
+              Httpun.Reqd.respond_with_string reqd response ""
+          | Ok runtime ->
+          let response =
+            Server_sse_response.respond ~clock:runtime.clock
+              ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd response
+          in
+          let info = make_sse_conn ~session_id ~client_id ~response () in
           register_sse_conn ~session_id ~info;
           Atomic.set owned_info (Some info);
           if Atomic.get disconnected then stop_sse_conn_if_current info;
@@ -996,10 +1019,6 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             | None -> []
           in
           let replay_handoff = Sse.create_replay_handoff replayed in
-          (match (match attested_runtime with
-             | Some result -> result
-             | None -> deps.get_runtime_result ()) with
-          | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
               Option.iter (fun (_, scope) ->
@@ -1010,7 +1029,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                    | `Replaced -> stop_sse_conn_if_current info
                    | `Stopped -> ());
                   `Stop_daemon)) observer_scope;
-              run_sse_pumps ~sw ~stop_promise:info.stop_promise
+              run_sse_pumps ~sw info
                 ~drain:(fun () ->
                   let rec drain () =
                     let delivery = Sse.take_delivery event_stream in
@@ -1063,17 +1082,11 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                      if is_cancelled exn then ()
                      else
                        Log.Server.error "ping loop error: %s"
-                         (Printexc.to_string exn))
-          | Error msg ->
-              Log.Server.debug "SSE runtime unavailable for session %s: %s"
-                session_id msg;
-              (match observer_scope with
-               | Some _ -> stop_sse_conn_if_current info
-               | None -> ()));
+                         (Printexc.to_string exn));
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
               Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))))))
+              session_id client_count Sse.max_clients)))))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

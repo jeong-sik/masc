@@ -87,18 +87,28 @@ let handle_ag_ui_events ~deps request reqd =
                       (sse_stream_headers ~deps session_id protocol_version origin)
                   in
                   let response = Httpun.Response.create ~headers `OK in
-                  let writer = Httpun.Reqd.respond_with_streaming reqd response in
-                  let mutex = Eio.Mutex.create () in
-                  let info_ref : sse_conn_info option ref = ref None in
                   (match evicted with
                   | Some evicted_sid ->
-                      (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
-                         close frame + Evict/Close event pair. *)
+                      (* RFC-0099 PR-3: cap-exceeded eviction publishes the
+                         typed Evict/Close event pair. *)
                       stop_sse_session_evict evicted_sid
                         ~reason:Session_lifecycle_event.Cap_exceeded
                   | None -> ());
-                  let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
-                  info_ref := Some info;
+                  (match deps.get_runtime_result () with
+                  | Error msg ->
+                      (* No supervisor could own the response, so the stream
+                         ends at once (RFC-0493 §3.2). *)
+                      Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
+                        session_id msg;
+                      Sse.unregister_if_current session_id client_id;
+                      Httpun.Reqd.respond_with_string reqd response ""
+                  | Ok runtime ->
+                  let response =
+                    Server_sse_response.respond ~clock:runtime.clock
+                      ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+                      reqd response
+                  in
+                  let info = make_sse_conn ~session_id ~client_id ~response () in
                   register_sse_conn ~session_id ~info;
                   let prime =
                     Ag_ui.(
@@ -126,11 +136,9 @@ let handle_ag_ui_events ~deps request reqd =
                     | None -> []
                   in
                   let replay_handoff = Sse.create_replay_handoff replayed in
-                  (match deps.get_runtime_result () with
-                  | Ok runtime ->
                       let sw = runtime.sw in
                       let clock = runtime.clock in
-                      run_sse_pumps ~sw ~stop_promise:info.stop_promise
+                      run_sse_pumps ~sw info
                         ~drain:(fun () ->
                           let rec drain () =
                             let delivery = Sse.take_delivery event_stream in
@@ -177,10 +185,7 @@ let handle_ag_ui_events ~deps request reqd =
                           try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
                             | exn ->
                                 Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
-                                stop_sse_session_preserve_guard info.session_id)
-                  | Error msg ->
-                      Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
-                        session_id msg))))
+                                stop_sse_session_preserve_guard info.session_id)))))
 
 let handle_presence_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in
@@ -229,16 +234,29 @@ let handle_presence_events ~deps request reqd =
                 presence_stream_headers ~deps raw_session_id protocol_version origin
               in
               let response = Httpun.Response.create ~headers `OK in
-              let writer = Httpun.Reqd.respond_with_streaming reqd response in
-              let mutex = Eio.Mutex.create () in
           (match evicted with
           | Some evicted_sid ->
-              (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
-                 close frame + Evict/Close event pair. *)
+              (* RFC-0099 PR-3: cap-exceeded eviction publishes the typed
+                 Evict/Close event pair. *)
               stop_sse_session_evict evicted_sid
                 ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
-          let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
+          match deps.get_runtime_result () with
+          | Error msg ->
+              (* No supervisor could own the response, so the stream ends at
+                 once (RFC-0493 §3.2). *)
+              Log.Server.debug
+                "presence SSE runtime unavailable for session %s: %s"
+                session_id msg;
+              Sse.unregister_if_current session_id client_id;
+              Httpun.Reqd.respond_with_string reqd response ""
+          | Ok runtime ->
+          let response =
+            Server_sse_response.respond ~clock:runtime.clock
+              ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+              reqd response
+          in
+          let info = make_sse_conn ~session_id ~client_id ~response () in
           register_sse_conn ~session_id ~info;
           if
             not
@@ -248,11 +266,9 @@ let handle_presence_events ~deps request reqd =
           then
             Log.Server.debug "presence prime send failed for session %s"
               info.session_id;
-          match deps.get_runtime_result () with
-          | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
-              run_sse_pumps ~sw ~stop_promise:info.stop_promise
+              run_sse_pumps ~sw info
                 ~drain:(fun () ->
                   let rec drain () =
                     let delivery = Sse.take_delivery event_stream in
@@ -309,8 +325,4 @@ let handle_presence_events ~deps request reqd =
                   | exn ->
                       Log.Server.error
                         "presence ping loop exited for session %s: %s"
-                        info.session_id (Printexc.to_string exn))
-          | Error msg ->
-              Log.Server.debug
-                "presence SSE runtime unavailable for session %s: %s"
-                session_id msg))
+                        info.session_id (Printexc.to_string exn))))

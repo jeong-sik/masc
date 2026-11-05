@@ -3,8 +3,9 @@
 
     Per-session SSE connection registry with rate-limit guard.
     All access to global registries is internally protected by
-    atomic CAS loops; per-connection writes are protected by
-    each {!sse_conn_info}'s mutex.
+    atomic CAS loops.  A connection's response belongs to the domain
+    that runs the connection: only {!send_raw} and the {!run_sse_pumps}
+    supervisor touch it, both on that domain (RFC-0493 §3.2).
 
     Open'd by sibling modules (`server_mcp_transport_http`,
     `server_mcp_transport_http_agui`) — all top-level bindings
@@ -15,8 +16,7 @@
 type sse_conn_info = {
   session_id : string;
   client_id : int;
-  writer : Httpun.Body.Writer.t;
-  mutex : Eio.Mutex.t;
+  response : Server_sse_response.t;
   stop : bool Atomic.t;
   closed : bool Atomic.t;
   stop_promise : unit Eio.Promise.t;
@@ -24,14 +24,12 @@ type sse_conn_info = {
 }
 (** Concrete record because callers
     ({!Server_mcp_transport_http}, AG-UI bridge) construct it
-    via {!make_sse_conn} for the SSE handler.  [client_id = -1]
-    indicates an inline response (see {!make_inline_sse_conn}).
+    via {!make_sse_conn} for the SSE handler.
 
     [closed] and [stop] are [Atomic.t] because the close paths run
-    on different domains once serving moves off the main domain
-    (a client disconnect on the serving domain vs keeper-driven
-    eviction / shutdown on the main domain) — they are not confined
-    to one fiber under [mutex].  [closed] is the single-close guard:
+    on different domains: the Sse overflow hook, the maintenance
+    fiber and shutdown close from outside the connection's domain.
+    [closed] is the single-close guard:
     {!close_sse_conn} flips it false->true with [compare_and_set] so
     exactly one caller runs the close body.
 
@@ -82,14 +80,11 @@ val register_sse_conn :
 val close_sse_conn : sse_conn_info -> unit
 (** [close_sse_conn info] sets [info.closed = true] / [info.stop = true]
     (via the single-close [compare_and_set] claim), resolves the one-shot
-    stop promise exactly once, closes the writer, and unregisters the SSE
-    client.  Idempotent — safe to call multiple times.
+    stop promise exactly once, and unregisters the SSE client.
+    Idempotent — safe to call multiple times, from any domain.
 
-    The writer is closed under [info.mutex] so it never runs concurrently
-    with a [send_raw] / evict write on another domain; consequently this
-    must be called from within an Eio scheduler context (every production
-    close path is).  Errors during writer close log at {!Log.Misc.debug}
-    but do not propagate. *)
+    It does not close [info.response].  The {!run_sse_pumps} supervisor
+    closes it on the connection's domain once the stop promise resolves. *)
 
 val __test_claim_close : sse_conn_info -> bool
 (** Test-only seam: the close-claim used by {!close_sse_conn}.  Returns [true]
@@ -109,26 +104,13 @@ val stop_sse_conn_if_current : sse_conn_info -> unit
 val stop_sse_session_evict :
   string -> reason:Session_lifecycle_event.evict_reason -> unit
 (** [stop_sse_session_evict session_id ~reason] is
-    {!stop_sse_session} *plus* (a) a best-effort SSE
-    [event: evicted] close frame written to the client before the
-    writer closes, and (b) a typed
+    {!stop_sse_session} plus a typed
     {!Session_lifecycle_event.Evict}/{!Session_lifecycle_event.Close}
-    pair published on the bus topic.
+    pair published on the bus topic (RFC-0099 PR-3).
 
-    Frame format: [event: evicted\\ndata: {"type":"evicted","reason":<reason>}\\n\\n]
-    where [reason] is {!Session_lifecycle_event.evict_reason_to_string}.
-    Operators and SDK clients key off the literal [event: evicted]
-    line — RFC-0099 §3.
-
-    Frame write is best-effort: a failure (writer already closed,
-    network gone) logs at debug and continues to the close + publish
-    path. Eviction does not abort on observability failure.
-
-    PR-3 (RFC-0099) introduces this variant; cap-exceeded /
-    backpressure / idle-timeout sites that previously called
-    {!stop_sse_session} silently should migrate to this when the
-    eviction is a *server-policy decision* (not a client
-    disconnect). *)
+    No [event: evicted] frame reaches the client: [Sse.register] runs
+    the evicted client's [on_disconnect] first, which already stopped
+    its connection (#48870). *)
 
 val stop_sse_session_preserve_guard : string -> unit
 (** [stop_sse_session_preserve_guard session_id] removes the
@@ -157,55 +139,47 @@ val close_all_sse_connections : unit -> unit
 (** {1 SSE I/O} *)
 
 val send_raw : sse_conn_info -> string -> bool
-(** [send_raw info data] writes [data] to the SSE writer under
-    the per-connection mutex, flushes, and touches the SSE
-    timestamp via {!Sse.touch}.  Returns [false] when the
-    connection is closed/stopped, the writer is closed, OR an
-    exception occurred during write (in which case the
-    connection is closed via {!close_sse_conn}).
+(** [send_raw info data] sends [data] with {!Server_sse_response.send},
+    which returns once the frame reached the socket, the response
+    closed, or the stall bound passed.  On [Written] it touches the SSE
+    timestamp via {!Sse.touch} and returns [true].  Otherwise it closes
+    the connection via {!close_sse_conn} and returns [false].  A
+    stopped connection returns [false] without writing.
 
-    [Eio.Cancel.Cancelled] re-raises verbatim — fiber
-    cancellation does not silently mark the connection as
-    failed.  Returns [true] on successful flush. *)
+    Call it only on the connection's domain.  A waiting send can be
+    cancelled; the cancellation propagates. *)
 
 val make_sse_conn :
   session_id:string ->
   client_id:int ->
-  writer:Httpun.Body.Writer.t ->
-  mutex:Eio.Mutex.t ->
+  response:Server_sse_response.t ->
   unit ->
   sse_conn_info
-(** [make_sse_conn ~session_id ~client_id ~writer ~mutex ()] builds an
+(** [make_sse_conn ~session_id ~client_id ~response ()] builds an
     [sse_conn_info] with [stop] and [closed] both [Atomic.make false], and a fresh
     [stop_promise]/[resolve_stop] pair.  All SSE handlers construct connections
     through this so the stop promise is never omitted. *)
 
 val run_sse_pumps :
   sw:Eio.Switch.t ->
-  stop_promise:unit Eio.Promise.t ->
+  sse_conn_info ->
   drain:(unit -> unit) ->
   ping:(unit -> unit) ->
   unit
-(** [run_sse_pumps ~sw ~stop_promise ~drain ~ping] forks the [drain] and [ping]
+(** [run_sse_pumps ~sw info ~drain ~ping] forks the [drain] and [ping]
     pumps under a switch scoped to the connection rather than directly on the
     server-lifetime [sw].  A supervisor forked on [sw] opens a child switch,
-    runs both pumps as daemons, and blocks on [stop_promise]; resolving that
-    promise (callers pass [info.stop_promise], which {!close_sse_conn} resolves)
-    releases the child switch and cancels both pumps — including a drain fiber
-    blocked in [Eio.Stream.take] that the [info.stop] flag alone cannot
-    interrupt (#21548). *)
+    runs both pumps as daemons, and blocks on [info.stop_promise]; resolving
+    that promise ({!close_sse_conn} does) releases the child switch and
+    cancels both pumps — including a drain fiber blocked in
+    [Eio.Stream.take] or in a waiting send (#21548).
 
-val make_inline_sse_conn :
-  session_id:string -> Httpun.Body.Writer.t -> sse_conn_info
-(** [make_inline_sse_conn ~session_id writer] constructs an
-    [sse_conn_info] for an inline (non-registered) response.
-    Sets [client_id = -1] marker so {!send_raw}'s
-    [Sse.unregister_if_current] is a no-op for these
-    connections.
-
-    Used for one-shot SSE responses that bypass the per-session
-    registry (e.g. SSE error envelopes that do not warrant a
-    persistent slot). *)
+    When both pumps have ended, the switch's release hook removes [info]
+    from the registry with {!stop_sse_conn_if_current} and closes
+    [info.response].  It runs on the domain that called [run_sse_pumps],
+    so call it from the connection's domain.  The hook also runs when
+    [sw] is cancelled, so every response handed to [run_sse_pumps] is
+    closed. *)
 
 (** {1 Connect-rate guard} *)
 

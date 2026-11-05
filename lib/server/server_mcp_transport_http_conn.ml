@@ -1,16 +1,16 @@
 (** Server_mcp_transport_http_conn — SSE connection lifecycle management.
 
-    All access to global registries is protected by [sse_registry_mutex].
-    Individual connection writes are protected by per-connection [info.mutex]. *)
+    The registries are [Atomic.t] maps updated by compare-and-set. A
+    connection's response is written and closed only on the domain that runs
+    the connection (RFC-0493 §3.2). *)
 
 type sse_conn_info = {
   session_id : string;
   client_id : int;
-  writer : Httpun.Body.Writer.t;
-  mutex : Eio.Mutex.t;
-  (* [stop] and [closed] are touched from more than one domain once serving
-     runs off the main domain (a disconnect close racing keeper-driven eviction
-     / shutdown), so they are [Atomic.t], not a plain [ref] / [mutable].
+  response : Server_sse_response.t;
+  (* [stop] and [closed] are touched from more than one domain: a close can
+     come from the Sse overflow hook, the maintenance fiber or shutdown, so
+     they are [Atomic.t], not a plain [ref] / [mutable].
      [closed] is the single-close guard: [claim_close] flips it false->true with
      [compare_and_set] so exactly one caller resolves the one-shot stop promise.
 
@@ -33,13 +33,12 @@ type sse_conn_info = {
 
 (* Smart constructor: every [sse_conn_info] must carry a fresh stop promise,
    so callers go through this instead of a record literal. *)
-let make_sse_conn ~session_id ~client_id ~writer ~mutex () =
+let make_sse_conn ~session_id ~client_id ~response () =
   let stop_promise, resolve_stop = Eio.Promise.create () in
   {
     session_id;
     client_id;
-    writer;
-    mutex;
+    response;
     stop = Atomic.make false;
     closed = Atomic.make false;
     stop_promise;
@@ -110,28 +109,15 @@ let claim_close info = Atomic.compare_and_set info.closed false true
 
 let __test_claim_close = claim_close
 
+(* Any domain may close: this leaves [info.response] alone. The
+   [run_sse_pumps] supervisor runs on the connection's domain and closes the
+   response there once the stop promise resolves. *)
 let close_sse_conn info =
   if claim_close info then (
     Atomic.set info.stop true;
-    (* Release the per-connection pump switch (run_sse_pumps). [claim_close]
-       admits exactly one caller, so the promise is resolved exactly once. *)
+    (* [claim_close] admits exactly one caller, so the promise is resolved
+       exactly once. *)
     Eio.Promise.resolve info.resolve_stop ();
-    (* Close the writer under [info.mutex] so it cannot run concurrently with a
-       [send_raw] / evict write on another domain — httpun's writer is not
-       domain-safe, and every write path already serializes on [info.mutex].
-       Mirrors [close_stream] in server_activity_http.ml.  [close_sse_conn] is
-       never called while [info.mutex] is held (every call site is outside the
-       mutex or in an exception handler after [use_rw] has returned), so this is
-       deadlock-free even though [Eio.Mutex] is not reentrant.  Requires an Eio
-       context, which every production close path already runs within. *)
-    (try
-       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-           Httpun.Body.Writer.close info.writer)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Misc.debug "close_sse_conn: %s"
-         (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
 (* A workspace lifetime can end after the same MCP session has already opened
@@ -169,46 +155,11 @@ let stop_sse_session session_id =
 let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
 
-(* RFC-0099 PR-3: evicting variant. Writes an SSE [event: evicted]
-   close frame to the client (best-effort) BEFORE the writer is
-   closed, then publishes a typed Evict + Close event pair on the
-   bus topic. Frame write failure is logged-and-swallowed; the
-   eviction proceeds regardless. *)
+(* RFC-0099 PR-3: the session is stopped as [stop_sse_session] does, and a
+   typed Evict + Close event pair goes out on the bus topic. *)
 let stop_sse_session_evict session_id
     ~(reason : Session_lifecycle_event.evict_reason) =
-  let info_opt = ref None in
-  Atomic_util.update sse_conn_by_session (fun map ->
-    match SMap.find_opt session_id map with
-    | None -> map
-    | Some info ->
-        info_opt := Some info;
-        SMap.remove session_id map);
-  Atomic_util.update sse_connect_guard_by_session (fun map ->
-    SMap.remove session_id map);
-  (match !info_opt with
-   | None -> ()
-   | Some info ->
-       let frame_data =
-         `Assoc
-           [ ("type", `String "evicted");
-             ( "reason",
-               `String
-                 (Session_lifecycle_event.evict_reason_to_string reason) );
-           ]
-         |> Yojson.Safe.to_string
-       in
-       let frame = Sse.format_event ~event_type:"evicted" frame_data in
-       (try
-          Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-            if (not (Atomic.get info.closed)) && not (Atomic.get info.stop) then
-              Httpun.Body.Writer.write_string info.writer frame)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Misc.debug
-              "stop_sse_session_evict: frame write failed for %s: %s"
-              session_id (Printexc.to_string exn));
-       close_sse_conn info);
+  stop_sse_session session_id;
   Session_lifecycle_event.publish
     (Session_lifecycle_event.Evict
        { transport = Session_lifecycle_event.SSE; session_id; reason });
@@ -250,24 +201,15 @@ let close_all_sse_connections () =
     (List.length infos)
 
 let send_raw info data =
-  if Atomic.get info.closed || Atomic.get info.stop || Httpun.Body.Writer.is_closed info.writer then (
-    close_sse_conn info;
-    false)
+  if Atomic.get info.closed || Atomic.get info.stop then false
   else
-    try
-      Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-          Httpun.Body.Writer.write_string info.writer data;
-          Httpun.Body.Writer.flush info.writer (fun _ -> ()));
+    match Server_sse_response.send info.response data with
+    | Written ->
       Sse.touch info.session_id;
       true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn ->
+    | Closed | Stalled ->
       close_sse_conn info;
       false
-
-let make_inline_sse_conn ~session_id writer =
-  make_sse_conn ~session_id ~client_id:(-1) ~writer ~mutex:(Eio.Mutex.create ()) ()
 
 (* Run the SSE drain + ping pumps for a connection under a switch scoped to
    that connection's lifetime, rather than directly on the server-lifetime
@@ -275,26 +217,28 @@ let make_inline_sse_conn ~session_id writer =
    on [info.stop_promise]. [close_sse_conn] resolves that promise (the single
    chokepoint for every stop path: disconnect, eviction, server shutdown),
    which returns the supervisor, releases [conn_sw], and cancels both pumps —
-   including a drain fiber blocked in [Eio.Stream.take] that the [info.stop]
-   flag could not interrupt. Previously both pumps were forked directly on the
+   including a drain fiber blocked in [Eio.Stream.take] or in a send that
+   waits for the socket. Previously both pumps were forked directly on the
    server switch and a stopped session's drain fiber parked forever (#21548).
 
-   [fork_daemon] means the daemons are cancelled (not awaited) when the
-   supervisor's [conn_sw] body returns, so a blocked pump never wedges the
-   supervisor. If [info] is already closed (connection torn down before the
-   pumps started), the promise is already resolved and the supervisor returns
-   immediately. *)
-let run_sse_pumps ~sw ~(stop_promise : unit Eio.Promise.t)
-    ~(drain : unit -> unit) ~(ping : unit -> unit) =
+   The release hook is the one place the response is closed. It runs after
+   both pumps have ended, on the connection's domain, and also when [sw] is
+   cancelled before anyone closed [info]. If [info] is already closed
+   (connection torn down before the pumps started), the promise is already
+   resolved and the supervisor returns immediately. *)
+let run_sse_pumps ~sw info ~(drain : unit -> unit) ~(ping : unit -> unit) =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run (fun conn_sw ->
+      Eio.Switch.on_release conn_sw (fun () ->
+        stop_sse_conn_if_current info;
+        Server_sse_response.close info.response);
       Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
         drain ();
         `Stop_daemon);
       Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
         ping ();
         `Stop_daemon);
-      Eio.Promise.await stop_promise))
+      Eio.Promise.await info.stop_promise))
 
 let prune_connect_times ~now times =
   let window_s = sse_connect_window_s () in

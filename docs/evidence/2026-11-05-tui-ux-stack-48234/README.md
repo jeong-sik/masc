@@ -1,14 +1,15 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31, 33 to 36
-and 38 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
-#48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386,
-#48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493, #48516, #48534). Layer 7
-is the first version of this document. Layer 12 added layers 6 and 8 to 11.
-Layer 18 added layers 13 to 17. Layer 21 added layers 19 and 20. Layer 26 is an
-RFC and has no screens. Layer 28 added layers 22 to 25 and 27. Layer 30 added
-layer 29. Layer 32 added layer 31. Layer 37 added layers 33 to 36. The layer that carries
-this text added layer 38.
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31, 33 to 36,
+38 and 40 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289,
+#48292, #48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370,
+#48386, #48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493,
+#48516, #48534, #48552). Layer 7 is the first version of this document. Layer 12
+added layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21 added
+layers 19 and 20. Layer 26 is an RFC and has no screens. Layer 28 added layers
+22 to 25 and 27. Layer 30 added layer 29. Layer 32 added layer 31. Layer 37
+added layers 33 to 36. Layer 39 added layer 38. The layer that carries this text
+added layer 40.
 
 ## Source
 
@@ -40,6 +41,7 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 35) | `c177173775d9245db26beb4db4c94d208d4da1d5` | 41953166859 | `0b57468d24bfcb32b90d289a45bbdc5570904faa6a12f30d18c4d0cf7c0775bd` | `714dc40b8e2185fd882f5e4569a6b07bfa7fab65bc67989cdace7f089a12aebe` |
 | After (layers 1 to 36) | `ee537e002edec7d33e812dc73fab59a9637f87ef` | 41960815641 | `118f0ae57bb201f6060a86a9ee23b5962b9c66c54376b74b4116d353b8b7911f` | `6bfc13656a2a33b7f5021f80f8422e3d904145077ee14c714d0066b1b39785a6` |
 | After (layers 1 to 38) | `92b883871eb84114b1512b94131a46a859b2060b` | 41968335391 | `b9c634c2ac26ba44986a74f1179a1851a3ae2adbbe47afbb4e67c9048f4f69cb` | `4ccfb7b664574d37bfac961638f3fbe0e1d5fb91df2e836b8927f16c578414f8` |
+| After (layers 1 to 40) | `4422e1e6c381551917958d31f45c4ff90b8af586` | 41973601229 | `26bba8cdd50174de96ea2f9add34755ef2812aff6d0080d0d57f37cbb737007e` | `b40ee783292ecd9a579943422823eb26c534fe4f3612b7460962f7071c895b80` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -1161,6 +1163,169 @@ open, and no escape other than the five palette colours and the reset was
 found. No row held a C0 control, DEL, a C1 control or a bidirectional control.
 Rows with U+2028 remained.
 
+### Layer 40: a blank line inside a Task history note stays, and a number JSON cannot write is drawn (#48552)
+
+A history entry of a Task shows its note. Layer 38 and the builds before it got
+two things wrong, and layer 40 fixes both.
+
+A note went to the text block one line at a time. The block drops a blank line
+at either end of the text it is given, so each blank line of a note stood at the
+end of its own one-line text and was dropped: the paragraphs of a note ran
+together. Layer 40 hands over the whole note as one text. A blank line between
+two lines of a note stays, and only the blank lines before the first line and
+after the last line go.
+
+`Masc_tui_tool_detail.document` raised on a JSON note that holds `NaN`,
+`Infinity`, `-Infinity` or a number too large for a float (`1E400`). Yojson reads
+these and its writer cannot write them. The Task history and the Keeper chat
+tool call preview both call that function. Layer 40 draws each of them as the
+word `NaN`, `Infinity` or `-Infinity`, in the number's colour.
+
+Before is the layers 1 to 38 build. After is the layers 1 to 40 build. Layer 39
+changes no code.
+
+The claimed Task (`task-004`) was claimed through `masc_transition` with a note
+of two paragraphs: `Taking this one.`, a blank line, and `The second source is
+slow, so the figures come last.` The activity log records the call as a
+`tool.called` event, so the history note is a JSON object. Its
+`tool_args_preview` holds that string under `"notes"`. The Task detail was
+captured at 120x35 and 80x24, at the top and scrolled to the history (4
+captures).
+
+With times, `.jsonl` offsets and durations masked, the text of the two builds
+differs in these rows only:
+
+- The row count in the footer of the detail (`[lines a-b/N]`) went from 60 to 61
+  in all four captures.
+- At 120x35, scrolled to the history: one blank row between the two paragraphs
+  inside `"notes": |`. The rows under it moved down by one, so the row for
+  `"task_id": "task-004"` is below the pane after the change.
+- At 80x24, at the top: the read state text (`· refreshing` in the title row and
+  `Refreshing Keeper list: reading metadata` in the footer) on the After build
+  only, which is a refresh in flight.
+
+The 80x24 history capture ends at line 30 of the detail, above the note, so only
+its footer count changed there. With digits masked, colour codes differ in 2 rows
+of the 80x24 capture at the top (the two read state rows) and in 3 rows of the
+120x35 history capture (the rows the blank row moved down).
+
+```
+claimed (task-004), 120x35, scrolled to the history
+
+  before  "notes": |
+            Taking this one.
+            The second source is slow, so the figures come last.
+          },
+          "task_id": "task-004"
+
+  after   "notes": |
+            Taking this one.
+
+            The second source is slow, so the figures come last.
+          },
+```
+
+![The claimed Task history at 120x35 before](task-note-blank-120-before.png)
+*Before: the two paragraphs of the claim note sit on consecutive rows.*
+
+![The claimed Task history at 120x35 after](task-note-blank-120-after.png)
+*After: a blank row separates the paragraphs. The footer counts 61 lines, and `"task_id": "task-004"` is below the pane.*
+
+The fixture has no note with a carriage return and none with `NaN` or `Infinity`.
+The rows below come from calling `Masc_tui_task_document.history` of the layer 38
+source and of the layer 40 source at 60 columns, with colours off. Both ran in
+the bytecode build described further down.
+
+```
+note    "Checked the build.\n\nThe type check passes; the tests are still
+         running.\n\nNext: wait for CI."
+before  3 rows, one paragraph under the other
+after   5 rows, a blank row between the paragraphs
+
+note    {"summary": "Checked the build.\n\nThe type check passes.", "count": 3}
+before  "summary": | and the two lines one under the other
+after   "summary": | and the two lines with a blank row between them
+
+note    {"ratio": NaN, "limit": Infinity, "values": [1, -Infinity, 1E400]}
+before  raises Yojson__Common.Json_error("NaN value not allowed in standard JSON")
+after   "ratio": NaN, "limit": Infinity, "values": [ 1, -Infinity, Infinity ],
+        one member to a row
+```
+
+`1E400` is read as infinity by Yojson, so it is drawn as `Infinity`.
+
+A random comparison of the History rows made 6000 notes and drew each at 12, 30
+and 100 columns with the layer 38 code and with the layer 40 code (18000 pairs).
+A note is a JSON document (with strings that hold a document and strings with
+line breaks) or prose. Its text comes from English letters, separators, Hangul,
+Chinese characters, emoji, marks, zero width characters, line breaks, tabs,
+carriage returns, ESC with and without a colour code, BEL, DEL, NUL, bytes that
+are not UTF-8 and a right-to-left override. The generator makes no number that
+JSON cannot write, because the layer 38 code raises on one.
+
+- 17988 pairs have the same rows apart from blank rows. 14553 of them are
+  identical and 3435 have blank rows more in the After build.
+- No pair has fewer blank rows in the After build. Over the 18000 pairs it has
+  5667 more.
+- 12 pairs (4 notes at 3 widths) differ in a carriage return too. Each of the
+  four notes has a line that ends in two carriage returns before its line break.
+  The layer 38 code took one off in `Masc_tui_text_block.lines` and another in
+  `rows_of_line`. The layer 40 code takes one off, so the second is drawn as
+  `\x0D`, which is how the module's own comment says a carriage return that does
+  not end a line is drawn.
+- No pair differs in any other way.
+
+The random comparison of layer 38 was run again on the layer 40 source with the
+same seeds: 24000 JSON values, of which 12092 are documents (6573 with a string
+that holds a document). Their 94774 lines, wrapped at 11 widths between 1 and 47
+cells, give 5128386 rows. In every row the visible text matched the plain wrap of
+the same line with its colour codes removed. No row ended with a colour left
+open, and no escape other than the five palette colours and the reset was found.
+No row held a C0 control, DEL, a C1 control or a bidirectional control. Rows with
+a line or paragraph separator remain (67886, and 80654 in the one-colour path
+over the same notes), as in layer 38. The generator makes no number that JSON
+cannot write.
+
+`test/test_tui_text_block.ml` has 12 cases, `test/test_tui_tool_detail.ml` has 10
+and `test/test_tui_task_document_style.ml` has 8. The first two ran in a bytecode
+build outside the repository with small stand-ins for the heavy modules, and all
+passed. The third needs the `masc` library. It ran in a build made of the real
+text of the History part of `masc_tui_task_document.ml` with stand-ins for the
+modules that part reads, and all 8 cases passed. That build has no Body, so the
+two cases that read Body rows passed without a row to check. The `type-check`
+check passed on the head of the layer 40 pull request.
+
+Nineteen copies of the text block and tool detail modules, each with one fault
+put in on purpose, were each failed by at least one case of the first two files.
+Three copies of the History part were each failed by a case of the third file:
+
+```
+styled-sanitises            passes a styled row through the sanitiser          3 cases fail
+styled-plain-wrap           wraps a styled row with the plain wrap             1
+styled-no-indent            drops the indent of a styled row                   3
+document-always-some        makes a number, string, bool or null a document    1
+document-skips-unfold       does not open a string that holds a document       3
+document-unfolds-one-level  opens a string document one level only            1
+document-objects-only       counts an object as a document and an array not    4
+document-raises-on-prose    raises when the note is not JSON                   2
+document-no-reset           leaves a coloured token without the reset          2
+document-ignores-palette    draws a document with no palette                   4
+non-finite-raises           raises on NaN and Infinity                         1
+non-finite-nan-as-infinity  draws NaN as Infinity                              1
+non-finite-sign-lost        draws -Infinity as Infinity                        1
+number-in-literal-role      paints a number as true, false and null are        2
+key-in-string-role          paints a key as a string is                        3
+block-painted-as-string     paints the lines of a | block as a string is       1
+key-unsanitised             writes a key without making it terminal safe       2
+string-unsanitised          writes a string without making it terminal safe    2
+block-unsanitised           writes a | block line without making it safe       1
+
+History part:
+note-per-line               hands a note over one line at a time               1
+any-json-is-a-document      draws any JSON value as a document                 5
+non-finite-raises           raises on NaN and Infinity                         1
+```
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -1258,5 +1423,17 @@ Rows with U+2028 remained.
   same history rows: the fixture has no async request source.
 - Layer 38 with colours off and on a terminal with another palette: the colours
   are fixed SGR codes, and the capture terminal drew them with its own palette.
+- Layer 40 on screens other than the claimed Task detail: only the four
+  captures of the claimed Task were taken for this layer, so the Dashboard and
+  the first screens of the other destinations were not compared again.
+- Layer 40 with a note that holds `NaN`, `Infinity` or a carriage return, and
+  with a tool call preview in the Keeper chat that holds `NaN` or `Infinity`:
+  the fixture has no such note and no such preview, so those were drawn only by
+  the module calls and the tests.
+- Layer 40 at 80x24 with the note on screen: the capture at that size stops
+  above the note.
+- Layer 40 with a note of many paragraphs or a very deep object: only a note of
+  two paragraphs was captured. The text of a deeply nested note grows with the
+  square of its depth (#48554), which this layer does not change.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

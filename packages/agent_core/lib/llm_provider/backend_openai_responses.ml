@@ -13,11 +13,6 @@ let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
 open Result.Syntax
 
-let json_assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-;;
-
 let opt_bind opt f =
   match opt with
   | Some value -> f value
@@ -582,7 +577,7 @@ let output_text_of_content = function
 ;;
 
 let content_blocks_of_output_message item =
-  match json_assoc_opt "content" item with
+  match Json_util.assoc_member_opt "content" item with
   | Some (`List content) ->
     content |> List.filter_map output_text_of_content |> List.map (fun text -> Text text)
   | Some (`String text) when not (Api_common.string_is_blank text) -> [ Text text ]
@@ -625,7 +620,7 @@ let projection_of_function_call item =
 ;;
 
 let content_blocks_of_output_item ~drop_function_call item =
-  match opt_bind (json_assoc_opt "type" item) json_string_opt with
+  match opt_bind (Json_util.assoc_member_opt "type" item) json_string_opt with
   | Some "message" -> Ok (Output_blocks (content_blocks_of_output_message item))
   | Some "reasoning" ->
     Result.map (fun blocks -> Output_blocks blocks) (content_blocks_of_reasoning_item item)
@@ -676,7 +671,8 @@ let content_and_replay_of_output ~drop_function_call output =
           in
           [], call :: unreadable_rev, tool_calls + 1
       in
-      let* kind = match opt_bind (json_assoc_opt "type" item) json_string_opt with
+      let* kind =
+        match opt_bind (Json_util.assoc_member_opt "type" item) json_string_opt with
         | Some "message" ->
           let fields = match item with `Assoc fields -> fields | _ -> [] in
           Result.map (fun phase -> Some (Response_replay.Message phase))
@@ -694,7 +690,7 @@ let content_and_replay_of_output ~drop_function_call output =
 ;;
 
 let usage_of_response_json json =
-  match json_assoc_opt "usage" json with
+  match Json_util.assoc_member_opt "usage" json with
   | Some (`Assoc fields) ->
     let member_int key = opt_bind (List.assoc_opt key fields) json_int_opt in
     let input_tokens = member_int "input_tokens" |> Option.value ~default:0 in
@@ -719,7 +715,7 @@ let usage_of_response_json json =
 ;;
 
 let telemetry_of_response_json json =
-  match json_assoc_opt "usage" json with
+  match Json_util.assoc_member_opt "usage" json with
   | Some (`Assoc fields) ->
     let reasoning_tokens =
       match List.assoc_opt "output_tokens_details" fields with
@@ -772,17 +768,18 @@ let lifecycle_observation = function
     Ambiguous_envelope
 ;;
 
-let response_status json = opt_bind (json_assoc_opt "status" json) json_string_opt
+let response_status json =
+  opt_bind (Json_util.assoc_member_opt "status" json) json_string_opt
 
 let response_incomplete_reason json =
-  match json_assoc_opt "incomplete_details" json with
-  | Some details -> opt_bind (json_assoc_opt "reason" details) json_string_opt
+  match Json_util.assoc_member_opt "incomplete_details" json with
+  | Some details -> opt_bind (Json_util.assoc_member_opt "reason" details) json_string_opt
   | None -> None
 ;;
 
 let response_failed_message json =
-  match json_assoc_opt "error" json with
-  | Some error -> opt_bind (json_assoc_opt "message" error) json_string_opt
+  match Json_util.assoc_member_opt "error" json with
+  | Some error -> opt_bind (Json_util.assoc_member_opt "message" error) json_string_opt
   | None -> None
 ;;
 
@@ -804,7 +801,7 @@ let parse_response_result json_str =
   try
     let json = Yojson.Safe.from_string json_str in
     let lifecycle = lifecycle_observation json in
-    let parsed = match json_assoc_opt "error" json with
+    let parsed = match Json_util.assoc_member_opt "error" json with
     | Some (`Assoc fields) ->
       let message =
         opt_bind (List.assoc_opt "message" fields) json_string_opt
@@ -814,7 +811,7 @@ let parse_response_result json_str =
     | Some (`String message) -> Error message
     | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
       let output =
-        match json_assoc_opt "output" json with
+        match Json_util.assoc_member_opt "output" json with
         | Some (`List items) -> items
         | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
         | None -> []
@@ -823,7 +820,7 @@ let parse_response_result json_str =
          item; do not expose it as a dangling ToolUse that the pipeline would try to
          execute or repair. Drop such blocks so the stop reason dominates. *)
       let status =
-        opt_bind (json_assoc_opt "status" json) json_string_opt
+        opt_bind (Json_util.assoc_member_opt "status" json) json_string_opt
         |> Option.value ~default:""
       in
       let drop_function_call =
@@ -850,10 +847,13 @@ let parse_response_result json_str =
         || unreadable_tool_uses <> []
       in
       let* stop_reason = stop_reason_of_response_json ~has_tool_calls json in
-      let model = opt_bind (json_assoc_opt "model" json) json_string_opt |> Option.value ~default:"" in
+      let model =
+        opt_bind (Json_util.assoc_member_opt "model" json) json_string_opt
+        |> Option.value ~default:""
+      in
       let response =
         { id =
-            opt_bind (json_assoc_opt "id" json) json_string_opt
+            opt_bind (Json_util.assoc_member_opt "id" json) json_string_opt
             |> Option.value ~default:""
         ; model
         ; unreadable_tool_uses

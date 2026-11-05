@@ -148,6 +148,25 @@ type owner_family =
 - `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 부르는 곳은 `Librarian_admission`(RFC-0500), `Librarian_history`, `Librarian_floor`, `Workspace_curator` 다. 새 호출처나 새 owner 는 이 타입에 항목을 더해야 컴파일된다.
 - 두 review 항목은 settle 하지 않는다. 그래서 보관 위치에 그 owner 의 기록이 없고, 답은 빈 집합이다. 구현 층은 그 기록이 다른 owner 의 요청 ID 를 담지 않는지 확인한다(§7).
 - 각 항목은 살아 있는 기록 하나가 담은 원본 ID 를 모두 답한다. §3.2 의 표보다 넓다. 마저 끝내기가 묻는 ID 만이 아니라, `Lane_addon_request_progress` 의 이벤트 중 요청 ID 를 담는 것(`Preparation_intended`, `Replacement_intended`, `Successor_intended`, `Subdividing`, `Subdivided` 등)과 gate inventory 의 execution ID 를 모두 넣는다. 모든 phase 와 이벤트를 와일드카드 없이 match 한다. 그래서 새 이벤트가 생기면 컴파일러가 이 답을 고치게 한다.
+- 한 항목 안에 기록 종류가 여럿 있다. 11-06 에 Librarian 기록을 아래 종류로 다시 셌다.
+
+  | 종류 | 살아 있음 | 보관 위치 |
+  |---|---:|---:|
+  | admission 실행 | 66 | 0 |
+  | admission gate | 150 | 0 |
+  | admission part | 66 | 0 |
+  | history 실행 | 25 | 5,907개, 2,576MB |
+  | history gate | 0 | 6,053개, 140MB |
+  | floor step·floor step gate | 0 | 0 |
+  | Curator | 9 | 585개, 3,119MB |
+  | 완료 검토·Goal 증명 검토 | 101, 8 | 0 |
+
+  그래서 기록을 항목에 넣는 일은 (package, tool) 이 아니라 기록 종류로 한다. Librarian 기록의 종류는 배포 전 검사가 이미 쓰는 `Keeper_librarian_store_preflight.purpose` 가 정한다. Curator 와 두 review 는 종류가 하나라서 (package, tool) 로 정한다. 종류를 정하지 못한 기록이 하나라도 있으면 pass 는 아무것도 지우지 않는다. 배포 전 검사는 이런 기록을 `Ok ()` 로 넘기지만, 이 pass 는 오류로 본다.
+- 종류마다의 답은 그 종류의 typed decoder 가 기록에서 꺼내는 요청 ID 다. 가리키는 기록이 살아 있는지는 묻지 않는다.
+  - 세 gate 는 부모 실행 ID(`parent_execution_id`, `keeper_librarian_original_gate.ml:69`)와 `predecessor` 다.
+  - history 실행은 `predecessor` 다(`keeper_librarian_durable_request.ml:151`). floor step 과 admission 실행, part 는 구현 층이 각 decoder 에서 같은 방식으로 적는다.
+  - 배포 전 검사의 validator 를 그대로 쓰지 않는 까닭: 그 validator 는 부모가 없으면 오류다. 실행이 먼저 보관되고 gate 가 남은 상태(`settle_orphan_gates` 가 다루는 고아 gate)는 정상인데, validator 로는 그때마다 pass 가 멈춘다. 이 pass 에서는 고아 gate 가 가리키는 실행 ID 가 `N` 에 들어가야 한다. 그래야 `settled` 가 `true` 를 답한다.
+  - `purpose` 는 접두사를 차례로 맞대는 분류다. floor step 의 접두사 `keeper-librarian-floor-step-` 는 floor step gate 접두사의 앞부분이라, gate 를 먼저 맞대야 맞는다. 잘못 분류된 기록은 다른 종류의 decoder 를 만나 오류가 되고, pass 는 아무것도 지우지 않는다. 그래서 잘못 지우지는 않는다. scope 이름을 하나의 typed codec 으로 바꾸는 일은 이 RFC 의 범위가 아니다(§5).
 - 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. scope 는 Keeper 목록이 아니라 `tool-request-owners/` 아래 디렉터리를 훑어 모은다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다.
 - scope 하나, 기록 하나라도 읽지 못하거나 decode 하지 못하면 그 pass 는 아무것도 지우지 않고 끝난다. 어느 항목에도 속하지 않는 scope 가 있어도 같다.
 - §2.2 에서 쓴 "문자열 값 중 ID 모양인 것" 훑기는 쓰지 않는다. 이 측정은 타입 답이 아직 없어서 쓴 근사다. 구현은 위의 타입 답을 쓴다. L1 은 같은 데이터에서 타입 답의 `N` 이 이 측정의 457개를 모두 덮는지 한 번 비교해 PR 에 적는다. 보관 기록 중 `digest request_id` 가 `N` 의 digest 에 없는 것을 지운다. 지울 때는 그 날짜 디렉터리의 본문 파일도 같이 지운다(이미 쌓인 본문).
@@ -190,6 +209,7 @@ type owner_family =
 - content-addressed blob(`evidence/`, `sequences/`)과 Curator 원장 판본 파일: 가리키는 쪽이 여럿이다. 보관 기록이 줄면 가리키는 쪽이 하나 줄 뿐이다.
 - 실행 기록(`exact_lane_run_registry` 의 `completed_retention`): 이미 레인마다 최근 2,000개로 정해져 있다.
 - 살아 있는 scope 옆에 남은 본문(멈춘 retain·settle 이 남긴 것): 이슈 #45320.
+- Librarian scope 이름을 접두사 대신 typed codec 으로 읽는 일. 지금 `purpose` 는 접두사를 순서대로 맞대고, 겹치는 접두사가 있다(§4.2).
 
 ## 6. 구현 순서
 
@@ -237,4 +257,5 @@ type owner_family =
   - P2-1: 증명을 먼저, Exact 기록을 나중에 지운다(§4.4 의 4).
   - P2-2: 대상 여부를 declaration 이름이 아니라 `authorize` 와 같은 함수로 정한다. package 를 모르면 건드리지 않는다(§4.4).
   - P3: `Undecided` 를 못 읽음 규칙에 묶었다. Exact 기록은 파일 이름만 맞댄다. 거절이 다시 쓰는 작은 기록의 반복을 L1 에서 센다(§7).
+- 2026-11-06 둘째 자체 확인: 1층을 짜려고 기록을 종류별로 다시 셌다. `admit_memory` 한 (package, tool) 에 실행·gate·part 세 종류가 있다. 보관 위치의 절반(6,053개)은 history gate 다. 그래서 항목을 기록 종류로 정하고, 답을 종류마다의 decoder 로 꺼내게 §4.2 를 고쳤다. 배포 전 검사의 validator 는 고아 gate 에서 오류가 나서 쓰지 않는다.
 - 2026-11-06 자체 확인: §4.2 의 닫힌 타입이 settle 호출처 셋만 적어서, "어느 항목에도 속하지 않는 scope 면 지우지 않는다" 규칙대로라면 pass 가 매번 멈췄다. 살아 있는 scope 에 admission·두 review owner 가 있기 때문이다. 타입을 살아 있는 owner 다섯 종류로 넓혔다. RFC-0500 1층이 admission 을 넷째 settle 호출처로 더하는 것도 같이 적었다.

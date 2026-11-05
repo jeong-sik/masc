@@ -41,8 +41,7 @@ let transaction t path decide = match t.io with
 let existing_transaction t path decide = match t.io with
   | None -> Fs_compat.update_existing_private_file_durable_locked_result path decide
   | Some io -> Fs_compat.update_existing_private_file_durable_locked_with_io_for_testing ~io path decide
-let valid_digest value = String.length value=64 && String.for_all
-  (function '0'..'9' | 'a'..'f' -> true | _ -> false) value
+let valid_digest = String_util.is_lowercase_sha256_hex
 let validate (p : payload) =
   if String.trim p.caller="" || String.trim p.content="" then Error (Invalid_input "caller and content are required")
   else if not (valid_digest p.artifact_sha256) then Error (Invalid_input "artifact SHA-256 is required")

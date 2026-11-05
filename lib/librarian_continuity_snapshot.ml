@@ -66,10 +66,7 @@ let error_to_string = function
 
 open Result.Syntax
 
-let valid_sha256 text =
-  String.length text = 64
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
-;;
+let valid_sha256 = String_util.is_lowercase_sha256_hex
 
 let validate (snapshot : t) =
   let* () = Keeper_librarian_unread.validate_atom_bounds

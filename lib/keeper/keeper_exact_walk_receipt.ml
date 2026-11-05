@@ -180,7 +180,7 @@ let exhausted_input_refusals receipt =
   | (Not_started _ | Accepted _ | Execution_exhausted _ | Candidates_exhausted _
       | Execution_stopped _ | Semantic_exhausted | Locally_stopped _),([] | _::_) -> None
 
-let valid_digest text = String.length text=64 && String.for_all (function '0'..'9'|'a'..'f' -> true | _ -> false) text
+let valid_digest = String_util.is_lowercase_sha256_hex
 let unique values = List.length values=List.length (List.sort_uniq String.compare values)
 let valid_names values = unique values && List.for_all (fun value -> String.trim value<>"") values
 let check condition detail = if condition then Ok () else Error detail

@@ -516,16 +516,7 @@ type dashboard_asset_resolution =
 
 let executable_provenance_schema = "masc.run-local-executable-identity.v2"
 let dashboard_assets_schema = "masc.run-local-dashboard-assets.v1"
-let sha256_hex_length = Agent_core_sha256.digest_size * 2
-
-let valid_sha256 value =
-  String.length value = sha256_hex_length
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       value
-;;
+let valid_sha256 = String_util.is_lowercase_sha256_hex
 
 let parse_executable_provenance
       ~expected_binary_commit

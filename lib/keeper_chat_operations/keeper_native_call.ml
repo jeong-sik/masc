@@ -25,8 +25,7 @@ let valid_component value = match Uuidm.of_string value with
   | Some uuid -> String.equal (Uuidm.to_string uuid) value
   | None -> false
 
-let valid_digest value = String.length value = 64
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value
+let valid_digest = String_util.is_lowercase_sha256_hex
 
 let create ~call_id ~runtime_id ~operation_digest ~api ~seed_checkpoint ~locator =
   let* () = if valid_component call_id then Ok () else Error "invalid native call directory identity" in

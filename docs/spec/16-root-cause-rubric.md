@@ -15,7 +15,7 @@ Every open issue in `masc` and `agent core` should be classifiable into one or m
 The rubric is applied two ways:
 
 1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches.
-   The vocabulary and label colors live in `.github/issue-taxonomy.json` (the hourly `Issue Taxonomy` reconciliation workflow was retired in `v0.50.0`, `#41275`).
+   The vocabulary and label colors live in `.github/issue-taxonomy.json`.
 2. Benchmark: the external BookShelf benchmark harness seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
 
 ## The 8 Categories
@@ -116,7 +116,7 @@ For a new or existing issue:
 
 1. Read title + body first 800 chars.
 2. For each of the 8 triggers above, check marker match.
-3. Put the matching value in the issue body's `masc-triage` block under `root:` and apply the corresponding `root/*` label from `.github/issue-taxonomy.json` (the automatic hourly `Issue Taxonomy` workflow was retired in `v0.50.0`, `#41275`).
+3. Put the matching value in the issue body's `masc-triage` block under `root:` and apply the corresponding `root/*` label from `.github/issue-taxonomy.json`.
 4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
 
 ## Benchmark Linkage

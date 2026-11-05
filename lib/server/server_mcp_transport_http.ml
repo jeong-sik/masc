@@ -1038,14 +1038,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect)
            with
-           | Error (Sse.Registration_stale _ as reg_err) ->
-               let msg = Sse.registration_error_to_string reg_err in
-               Log.Server.warn "%s" msg;
-               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
-               stop_sse_session session_id;
+               (match reg_err with
+                | Sse.Registration_stale _ -> ()
+                | Sse.Missing_token | Sse.Invalid_token _ | Sse.Token_expired _
+                | Sse.Auth_lookup_error _ | Sse.Unknown_session _ | Sse.Session_expired _
+                | Sse.Session_owner_mismatch _ -> stop_sse_session session_id);
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client, previous, _) when not (scope_is_current ()) ->
               Atomic.set previous_cleanup previous;

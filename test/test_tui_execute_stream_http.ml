@@ -1349,6 +1349,7 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
     Alcotest.(check int) "the Play observer opens" 200 (Play_fixture.await clock first.response);
     let acquired, mark_acquired = Eio.Promise.create () in
     let release, release_lock = Eio.Promise.create () in
+    let closing_info = ref None in
     let cancelled = ref false in
     let finished, mark_finished = Eio.Promise.create () in
     Server_mcp_transport_http.For_testing.with_disconnect_hook
@@ -1356,6 +1357,7 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
         match info with
         | None -> Alcotest.fail "the published connection is missing"
         | Some info ->
+          closing_info := Some info;
           Eio.Fiber.fork ~sw (fun () ->
             Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
               Eio.Promise.resolve mark_acquired ();
@@ -1372,6 +1374,9 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
           | Eio.Cancel.Cancelled _ -> ());
           Eio.Promise.resolve mark_finished ());
         Play_fixture.await clock acquired;
+        (match !closing_info with
+         | Some info -> Play_fixture.await_condition clock (fun () -> Atomic.get info.stop)
+         | None -> Alcotest.fail "the disconnect fixture lost its connection");
         Eio.Promise.resolve release_lock ();
         Play_fixture.await clock finished);
     Alcotest.(check bool) "the transport preserves the original cancellation" true !cancelled;

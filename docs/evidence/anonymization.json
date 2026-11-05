@@ -6,8 +6,6 @@
   "files": [
     "CHANGELOG.md",
     "docs/TUI-GUIDE.md",
-    "docs/audits/20260907-six-hour-runtime/health-0440.json",
-    "docs/audits/20260907-six-hour-runtime/shell-light-probe.json",
     "docs/audits/keeper-fleet-waiting-audit-20260902.md",
     "docs/design/2026-08-27-external-service-effects-bypass-the-gate.html",
     "docs/design/keeper-feature-state-matrix-2026-08-13.html",

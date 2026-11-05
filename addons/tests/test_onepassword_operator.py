@@ -34,7 +34,7 @@ class OperatorTests(unittest.TestCase):
         self.connector = Connector(Configuration("client", "SECRET_MARKER", "https://masc.example/addons/oauth/callback"),
                                    PrivateStore(self.root / "private", provision=True), transport=self.transport)
         self.worker = server.Worker(self.root / "config.json")
-        self.loader = patch.object(server, "load_settings", return_value=server.Settings(self.connector, "fixture", None))
+        self.loader = patch.object(server, "load_settings", return_value=server.Settings(self.connector, "fixture"))
         self.loader.start()
         self.addCleanup(self.loader.stop)
 
@@ -63,7 +63,7 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(state, begun["callback"]["state"])
         completed = self.call("complete", self.callback_arguments(begun))
         self.assertEqual(completed["actions"], [])
-        self.assertEqual(self.worker.status(), {"phase": "connected", "connected": True, "browser_login_available": False})
+        self.assertEqual(self.worker.status(), {"phase": "connected", "connected": True})
         self.assertEqual(len(self.calls), 1)
         public = json.dumps(self.worker.observe({"binding": {"sources": []}, "sources": []}))
         for secret in [state, "ACCESS_MARKER", "REFRESH_MARKER", "SECRET_MARKER", "INTEGRATION_MARKER", "CODE_MARKER"]:
@@ -470,8 +470,7 @@ class InstallationTests(unittest.TestCase):
         return path
 
     def test_first_operator_view_provisions_private_store_and_offers_connect(self):
-        self.assertEqual(self.worker.status(), {"phase": "unavailable", "connected": False,
-                                               "browser_login_available": False})
+        self.assertEqual(self.worker.status(), {"phase": "unavailable", "connected": False})
         self.assertFalse(self.store.exists())
         with self.assertRaises(FileNotFoundError):
             server.load_settings(self.configuration)
@@ -482,8 +481,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.store.stat().st_mode), 0o700)
         self.assertFalse((self.store / "connection.json").exists())
         self.assertFalse((self.store / "connection.reference.json").exists())
-        self.assertEqual(self.worker.status(), {"phase": "disconnected", "connected": False,
-                                               "browser_login_available": False})
+        self.assertEqual(self.worker.status(), {"phase": "disconnected", "connected": False})
         begun = self.worker.operator({"action": "connect", "arguments": {}})
         self.assertEqual(parse_qs(urlsplit(begun["open_url"]).query)["state"],
                          [begun["callback"]["state"]])
@@ -495,9 +493,9 @@ class InstallationTests(unittest.TestCase):
             with store.locked(), ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(self.worker.status)
                 self.assertEqual(future.result(timeout=2), {
-                    "phase": "unavailable", "connected": False, "browser_login_available": False})
+                    "phase": "unavailable", "connected": False})
                 view = pool.submit(self.worker.operator_view, settings.connector).result(timeout=2)
-                self.assertIn("Pending login controls remain available", view["message"])
+                self.assertEqual(view["message"], "Account state is busy or unavailable.")
 
     def test_invalid_private_file_permissions_never_provision_store(self):
         for path in [self.configuration, self.secret]:

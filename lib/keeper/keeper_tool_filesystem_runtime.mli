@@ -65,25 +65,11 @@ val handle_prepared_read_file_with_outcome :
     so a preceding Edit is observed. No endpoint/Docker fallback is attempted
     after accepting a preparation. *)
 
-val read_complete_sandbox_bytes :
-  ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
-  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
-  path:string -> ?cwd:string -> unit -> (string, string) result
-(** Complete raw read for a verifier without a turn runtime. Uses the existing
-    resolver/containment and exact endpoint or Docker capture, never host fallback. *)
-
 val read_owned_bytes :
   ownership_root:string -> path:string -> ?cwd:string -> max_bytes:int -> unit ->
   (string, string) result
 (** Binary prefix through the same owned Read resolver and regular-file
     containment. The caller supplies a bounded byte limit. *)
-
-val read_complete_owned_bytes :
-  ownership_root:string -> path:string -> ?cwd:string -> unit ->
-  (string, string) result
-(** Complete immutable read through the same owned resolver and descriptor
-    containment. Used when a binary parser needs the whole source. *)
 
 val handle_owned_read_file_with_outcome :
   ownership_root:string ->

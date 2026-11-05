@@ -246,22 +246,6 @@ let read_authority_for_call ~config ~(meta : keeper_meta) read_authority =
   | None, Remote_ssh -> Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta ()
 ;;
 
-let read_complete_sandbox_bytes ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
-  let* read_authority = read_authority_for_call ~config ~meta read_authority in
-  let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* read_target =
-    resolve_read_file_target ~read_authority ~config ~meta ~args ~raw_path:path ()
-    |> Result.map_error (function Read_path_error refusal -> refusal.Keeper_alerting_path.message)
-  in
-  let* () =
-    check_read_file_target ~config ~meta read_target
-    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
-  in
-  Keeper_sandbox_read_backend.read_complete_file ?read_authority ?turn_sandbox_factory ~config ~meta
-    ~host_path:(read_file_target_path read_target)
-    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
-;;
-
 let read_sandbox_raw_prefix ?read_authority ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
   let* read_authority =
@@ -697,17 +681,6 @@ let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Error "owned file is missing"
   | Ok (Some prefix) -> Ok prefix.content
-;;
-
-let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
-  let* target =
-    resolve_owned_read_target ~ownership_root ~path ~cwd
-    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
-  in
-  match Fs_compat.load_owned_regular_file ~ownership_root target with
-  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
-  | Ok None -> Error "owned file is missing"
-  | Ok (Some bytes) -> Ok bytes
 ;;
 
 (* A path that crosses the ownership boundary or names no regular file is the

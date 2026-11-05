@@ -2338,37 +2338,3 @@ let handle_masc_keeper_with_outcome
       ()
   |> dispatch_option_to_execution ~name
 ;;
-
-let handle_masc_keeper
-      ~(publication_recovery_provider :
-          Keeper_publication_recovery_availability.provider)
-      ?sw
-      ?clock
-      ?proc_mgr
-      ?net
-      ?mcp_session_id
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~config
-      ~meta
-      ~name
-      ~args
-      ()
-  =
-  (handle_masc_keeper_with_outcome
-     ~publication_recovery_provider
-     ?sw
-     ?clock
-     ?proc_mgr
-     ?net
-     ?mcp_session_id
-     ?continuation_channel
-     ?gate_context
-     ?gate_grant
-     ~config
-     ~meta
-     ~name
-     ~args
-     ()).raw_output
-;;

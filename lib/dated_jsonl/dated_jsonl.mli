@@ -1,8 +1,8 @@
 (** Date-split JSONL storage.
 
     Organises JSONL records into [base_dir/YYYY-MM/DD.jsonl] files.
-    Stores rooted at the same [base_dir] share one {!Eio.Mutex.t} for
-    concurrent-safe appends. *)
+    Stores rooted at the same [base_dir] share one {!Cross_context_mutex.t} for
+    concurrent-safe appends from fibers and OS threads. *)
 
 type t
 (** Opaque handle.  Holds [base_dir] and the append mutex. *)
@@ -64,7 +64,7 @@ module Layout = Dated_jsonl_layout
 (** Shared calendar and numeric rotation ordering for read continuations. *)
 
 val open_store :
-  ?mutex:Eio.Mutex.t ->
+  ?cross_context_mutex:Cross_context_mutex.t ->
   ?max_bytes:int ->
   Store.location ->
   t
@@ -87,7 +87,11 @@ val prepare_for_directory_removal : t -> unit
 
 val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
-    Creates directories as needed.  Thread-safe via internal mutex. *)
+    Creates directories as needed. Thread-safe via the store's
+    {!Cross_context_mutex}, which serializes Eio fibers and raw OS threads
+    alike: a [Thread.create] worker appends the audit log through this path,
+    and an [Eio.Mutex] there would suspend it through an effect it has no
+    handler for, killing the thread before the row lands. *)
 
 exception Append_guard_skipped
 (** The append guard returned without allowing a commit-aware append. *)
@@ -500,10 +504,10 @@ val map_tail_rows : string -> max_lines:int -> f:(tail_row -> 'a) -> 'a list
     the calling fiber. *)
 
 module For_testing : sig
-  val mutex : t -> Eio.Mutex.t
+  val cross_context_mutex : t -> Cross_context_mutex.t
   (** Expose the internal mutex so tests can verify sharing. *)
 
-  val mutex_for_base_dir : string -> Eio.Mutex.t
+  val cross_context_mutex_for_base_dir : string -> Cross_context_mutex.t
   (** Lookup or insert the registry entry for [base_dir].
       Equivalent to the default-mutex path of {!open_store}. *)
 

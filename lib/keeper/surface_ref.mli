@@ -10,7 +10,7 @@
     [source] strings.
 
     Values are pure immutable data — no mutable fields, no hidden
-    state; [equal]/[compare] are structural.  Construction is direct
+    state; [equal] is structural.  Construction is direct
     (the variants are the API); the only derivations live here:
     {!lane_label} (the legacy on-disk label) and the total JSON codec. *)
 
@@ -46,7 +46,6 @@ type t =
   | Gate of { label : string; address : (string * string) list }
 
 val equal : t -> t -> bool
-val compare : t -> t -> int
 
 val lane_label : t -> string
 (** The legacy [source] label this surface writes on a lane row:

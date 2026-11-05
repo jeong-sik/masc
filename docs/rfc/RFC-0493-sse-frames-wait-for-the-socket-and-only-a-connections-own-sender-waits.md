@@ -52,7 +52,9 @@ H2 응답은 이미 flush 를 기다리므로 이 RFC 범위 밖이다. `server_
 - `Httpun.Body.Writer.write_string` 은 body 의 Faraday 버퍼에 바이트를 복사하고 바로 돌아온다.
 - `Httpun.Body.Writer.flush t k` 는 쓰기 루프가 그때까지 쓴 바이트를 소켓에 넘긴 뒤 `` k `Written `` 를 부른다. 연결이 먼저 닫히면 `` k `Closed `` 를 부른다(`httpun/body.ml:171-178`, `httpun/serialize.ml:160-167`). 콜백은 `writev` 결과를 보고하는 `Faraday.shift` 에서 불린다(`faraday.ml:418`).
 - Faraday 는 빈 자리가 모자라면 지금 버퍼를 보낼 목록에 넘기고 새 버퍼를 만든다(`faraday.ml:231-237`). 목록 길이에는 상한이 없다. 그래서 flush 를 기다리지 않는 쓰기는 클라이언트가 읽지 않는 동안 계속 성공하고, 쓴 바이트는 모두 메모리에 남는다.
-- 클라이언트가 소켓을 닫으면 gluten-eio 읽기 루프가 EOF 를 보고 `report_exn` 을 부른다(`gluten_eio.ml:133-145`). httpun 은 스트리밍 중인 응답 body 를 비우지 않고 닫는다(`httpun/reqd.ml:231-234`). 그래서 아직 body 버퍼에 있던 frame 의 flush 콜백은 불리지 않는다. 연결 writer 로 이미 넘어간 frame 만 `` `Closed `` 를 받는다.
+- 클라이언트가 떠난 것은 그 연결에 쓰기가 실패할 때 드러난다. eio_posix 는 `EPIPE`·`ECONNRESET` 을 `Connection_reset` 예외로 올린다(`eio_posix/err.ml:24`). gluten-eio `writev` 는 `End_of_file` 만 `` `Closed `` 로 바꾸고, 다른 예외는 `report_exn` 으로 보낸다(`gluten_eio.ml:47`, `:169-170`). 읽기 루프가 EOF 를 볼 때도 같은 `report_exn` 을 부른다(`gluten_eio.ml:133-145`).
+- httpun 은 스트리밍 중인 응답의 body 를 `force_close` 로 닫고 비우지 않는다(`httpun/reqd.ml:228-230`). 그래서 기다리던 flush 콜백은 불리지 않는다. 그 뒤로 `Body.Writer.is_closed` 는 `true` 다.
+- `Body.Writer.close` 도 body 를 비우지 않는다(`httpun/body.ml:189-193`). 서버가 응답을 닫아도 기다리던 flush 콜백은 불리지 않는다.
 - gluten-eio 는 연결마다 읽기 루프와 쓰기 루프를 `Fiber.both` 로 따로 돌린다(`gluten_eio.ml:90-171`). 처리 함수는 읽기 루프 안에서 불린다. 처리 함수가 flush 를 기다리는 동안에도 쓰기 루프는 돈다. 그래서 처리 함수 안에서 기다려도 서로 막히지 않는다.
 - `Eio.Mutex.use_rw ~protect:true` 는 임계 구역을 `Cancel.protect` 로 감싼다(`eio_mutex.mli:24-30`). 그 안에서 기다리는 fiber 는 취소되지 않는다.
 
@@ -118,10 +120,13 @@ val close : t -> unit
 val is_closed : t -> bool
 ```
 
-- `send` 는 mutex 안에서 frame 전체를 쓰고 flush 콜백을 건다. 기다리는 것은 mutex 밖에서 한다. 그래서 `close` 는 다른 fiber 의 flush 를 기다리지 않고, 기다리는 fiber 는 취소할 수 있다.
+- `send` 는 frame 전체를 쓰고 flush 콜백을 건다. 그 사이에 멈추는 곳이 없어서, 같은 domain 의 다른 fiber 가 보낸 frame 이 끼어들지 않는다.
+- 응답은 연결을 돌리는 domain 에서만 쓴다. httpun writer 는 domain 사이에서 안전하지 않고, 연결의 쓰기 루프는 이 모듈의 lock 없이 writer 를 쓴다. 그래서 mutex 를 두지 않는다.
+- `send` 는 flush 콜백, 응답의 닫힘, 시간 끝 가운데 먼저 오는 것을 기다린다. httpun 의 `close` 는 기다리는 flush 에 답하지 않으므로(§1.2), 이 모듈의 `close` 가 기다리는 `send` 를 모두 `Closed` 로 깨운다. 기다리는 fiber 는 취소할 수 있다.
 - `send` 는 `Watched_work.run` 으로 시간을 잰다. frame 이 닿는 것과 시간이 끝나는 것이 같은 scheduler 차례에 겹치면 닿은 쪽(`Written`)이 이긴다.
-- `Stalled` 를 돌려주기 전에 응답을 닫는다. 그 뒤의 `send` 는 쓰지 않고 `Closed` 를 돌려준다.
-- frame 이 아직 body 버퍼에 있을 때 클라이언트가 떠나면 flush 콜백이 오지 않는다(§1.2). 그 frame 은 `Stalled` 로 끝난다. 어느 쪽이든 보내는 fiber 는 멈추고 응답은 닫힌다.
+- `Written` 이 아닌 결과를 돌려주기 전에 응답을 닫는다. 그 뒤의 `send` 는 쓰지 않고 `Closed` 를 돌려주고, `is_closed` 는 `true` 다.
+- 클라이언트가 떠난 뒤 기다리던 frame 은 flush 콜백을 받지 못하고 `Stalled` 로 끝난다(§1.2). 그 뒤의 `send` 는 `is_closed` 를 보고 바로 `Closed` 를 돌려주고, 같은 응답에서 기다리던 다른 `send` 도 깨운다.
+- `Stalled` 는 요청 경로와 함께 경고 로그 한 줄을 남긴다. 스트림마다 따로 남기지 않는다. 배포 뒤 측정(§6)은 이 줄을 센다.
 - 보내는 fiber 는 자기 frame 이 닿을 때까지 다음 frame 을 쓰지 않는다. 그래서 읽지 않는 클라이언트 하나에 서버가 쥐는 바이트는 보내는 fiber 마다 frame 하나다.
 - `stalled_after_s` 값은 `Server_mcp_transport_http_headers.sse_stalled_after_s` 하나다. ping 간격 `sse_ping_interval_s` 와 같은 곳에 둔다. `observer_idle_timeout_ms` 도 이 값에서 얻는다.
 - `?flush_headers_immediately` 는 fleet route 를 옮기는 3층에서, `finish` 는 MCP eviction 을 옮기는 5층에서 더한다. 2층에서 옮기는 다섯 곳은 둘 다 쓰지 않는다.
@@ -177,6 +182,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 - **바이트 상한을 두고 넘으면 닫는다.** `Faraday.pending_bytes` 를 보고 끊는 방법이다. 쌓이는 양에 상한은 생기지만 쌓이는 것은 그대로다. producer 가 느린 클라이언트를 모르는 것도 그대로다. 받지 않는다.
 - **producer 가 직접 flush 를 기다린다.** Keeper chat 에서 느린 TUI 하나가 Keeper 턴을 멈춘다. `subscriptions/listen` 에서는 느린 구독 하나가 뒤의 구독을 모두 멈춘다(§2.2). 받지 않는다.
 - **송신 fiber 의 queue 에 상한을 두지 않는다.** 쌓이는 곳이 Faraday 에서 queue 로 옮겨질 뿐이다. 받지 않는다.
+- **기다리는 동안 `is_closed` 를 주기적으로 읽는다.** 클라이언트가 떠난 것을 90초보다 빨리 알 수 있다. 하지만 httpun 이 닫힘을 알리지 않는 것을 폴링으로 메우는 일이다. 받지 않는다. 근본 해결은 httpun 이 실패한 연결의 스트리밍 body 를 비워서 기다리는 flush 에 `` `Closed `` 로 답하는 것이다(§1.2). httpun 을 고치는 일은 이 저장소 밖이라 이 RFC 에서 하지 않는다.
 - **route 마다 기다림을 각자 쓴다.** 지금 세 벌이 이미 서로 다르고, 그중 하나는 끝나지 않는다(§2.3). 받지 않는다.
 
 ## 5. 영향
@@ -189,7 +195,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 
 ## 6. 검증
 
-- `Server_sse_response` 시험은 loopback 소켓으로 한다. 클라이언트가 읽지 않으면 `send` 가 돌아오지 않는다. 그동안 서버가 쥔 바이트가 frame 하나보다 많지 않다. `stalled_after_s` 가 지나면 `Stalled` 다. 클라이언트가 소켓을 닫으면 `Closed` 거나, frame 이 아직 body 에 있었으면 `Stalled` 다. 어느 쪽이든 응답은 닫힌다. 닿는 것과 시간이 겹치면 `Written` 이다.
+- `Server_sse_response` 시험은 loopback 소켓으로 한다. 클라이언트가 읽지 않으면 `send` 가 돌아오지 않는다. 그동안 서버가 쥔 바이트가 frame 하나보다 많지 않다. `stalled_after_s` 가 지나면 `Stalled` 다. 클라이언트가 떠나면 기다리던 frame 은 `Stalled` 이고 응답은 닫힌다. `close` 는 기다리는 `send` 를 모두 `Closed` 로 끝낸다. 닿는 것과 시간이 겹칠 때 `Written` 인 것은 `Watched_work` 시험(`test/test_watched_work.ml`)이 본다.
 - 지금 코드에 같은 시험을 돌리면, 읽지 않는 클라이언트에게 `send_raw` 가 계속 `true` 를 돌려주고 쥔 바이트가 frame 수에 비례해서 늘어야 한다. 이 시험이 지금 코드에서 실패하는 것을 PR 본문에 적는다.
 - `Server_sse_pump` 시험은 지금 `test/test_fleet_stream_pump.ml` 의 경우를 이벤트 타입만 바꿔서 지킨다.
 - Keeper chat 시험: 느린 송신 중에 producer 가 `publish` 를 부르면 바로 돌아온다. queue 가 차면 스트림이 닫힌다. acceptance, replay, live 순서가 지금과 같다.

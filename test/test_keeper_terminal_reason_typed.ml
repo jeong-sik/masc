@@ -1937,8 +1937,6 @@ max-concurrent = 1
     Masc.Keeper_registry.Provider_runtime_error
       { code = "api_error_invalid_request"
       ; detail = "stale quota from a previous runtime"
-      ; provider_id = Some "kimi_code"
-      ; http_status = None
       ; runtime_id = Some "kimi_code.kimi-for-coding"
       ; agent_core_timeout = None
       ; fenced_empty_turn_runtime = None

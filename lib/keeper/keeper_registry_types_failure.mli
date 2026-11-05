@@ -9,7 +9,6 @@ type failure_reason =
     Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
   | Provider_runtime_error of { code : string; detail : string;
-      provider_id : string option; http_status : int option;
       runtime_id : string option;
       agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option;
       reason : Keeper_meta_contract.runtime_exhaustion_reason option;

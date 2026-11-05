@@ -382,8 +382,6 @@ let test_exhaustion_reaches_the_runtime_exhausted_class () =
     Keeper_registry.Provider_runtime_error
       { code = "dns_failure"
       ; detail = "no such host"
-      ; provider_id = None
-      ; http_status = None
       ; runtime_id = Some "r1"
       ; agent_core_timeout = None
       ; reason = Some Keeper_meta_contract.Dns_failure
@@ -406,8 +404,6 @@ let test_provider_error_without_reason_stays_provider_error () =
     Keeper_registry.Provider_runtime_error
       { code = "api_error_500"
       ; detail = "boom"
-      ; provider_id = None
-      ; http_status = Some 500
       ; runtime_id = None
       ; agent_core_timeout = None
       ; reason = None

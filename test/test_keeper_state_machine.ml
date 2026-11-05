@@ -211,7 +211,7 @@ let test_apply_drain_fiber_death () =
     apply_ok
       ~current_phase:SM.Draining
       ~conditions:draining_conds
-      ~event:(SM.Fiber_terminated { outcome = "exception during drain"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "exception during drain" })
   in
   check phase_t "Draining + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -225,7 +225,7 @@ let test_apply_drain_complete_then_fiber_exit () =
     apply_ok
       ~current_phase:SM.Draining
       ~conditions:drain_done_conds
-      ~event:(SM.Fiber_terminated { outcome = "clean exit"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "clean exit" })
   in
   check phase_t "drain complete + fiber exit -> Stopped" SM.Stopped tr.new_phase
 ;;
@@ -237,7 +237,7 @@ let test_apply_failing_to_crashed () =
     apply_ok
       ~current_phase:SM.Failing
       ~conditions:failing_conds
-      ~event:(SM.Fiber_terminated { outcome = "fatal"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "fatal" })
   in
   check phase_t "Failing + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -259,7 +259,7 @@ let test_apply_fiber_terminated_crash () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:running_conditions
-      ~event:(SM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "exception" })
   in
   (* fiber_alive=false + backoff not elapsed = Crashed *)
   check phase_t "-> Crashed" SM.Crashed tr.new_phase;
@@ -313,7 +313,7 @@ let test_apply_restarting_to_crashed () =
     apply_ok
       ~current_phase:SM.Restarting
       ~conditions:restarting_conds
-      ~event:(SM.Fiber_terminated { outcome = "restart failed"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "restart failed" })
   in
   check phase_t "Restarting + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -577,7 +577,7 @@ let test_chain_crash_recovery () =
       ~init_conditions:running_conditions
       [ SM.Heartbeat_failed { consecutive = 3 }, SM.Failing
       ; SM.Heartbeat_failed { consecutive = 5 }, SM.Failing
-      ; SM.Fiber_terminated { outcome = "hb threshold exceeded"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "hb threshold exceeded" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
@@ -714,7 +714,7 @@ let test_chain_restart_inherits_paused () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Operator_pause, SM.Paused
-      ; SM.Fiber_terminated { outcome = "OOM while paused"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "OOM while paused" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Paused
       ]
@@ -738,7 +738,7 @@ let test_chain_restart_clears_stop () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Stop_requested, SM.Draining
-      ; SM.Fiber_terminated { outcome = "crash during drain"; provider_id = None; http_status = None }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "crash during drain" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; (* Fiber starts: stop_requested is reset → Running, not Draining *)
         SM.Fiber_started, SM.Running
@@ -774,15 +774,15 @@ let test_chain_triple_restart_survives () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ (* Crash 1 *)
-        SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 1" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Crash 2 *)
-        SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 2" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 2 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Crash 3 *)
-        SM.Fiber_terminated { outcome = "crash 3"; provider_id = None; http_status = None }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 3" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 3 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Finally stabilizes *)
@@ -852,7 +852,7 @@ let test_chain_condition_snapshot_audit () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:tr1.updated_conditions
-      ~event:(SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "crash" })
   in
   check phase_t "step 2" SM.Crashed tr2.new_phase;
   check bool "fiber dead" false tr2.updated_conditions.fiber_alive;
@@ -1000,7 +1000,7 @@ let test_invariant_no_cross_life_hb_leakage () =
     apply_ok
       ~current_phase:SM.Failing
       ~conditions:life1_conds
-      ~event:(SM.Fiber_terminated { outcome = "too many hb failures"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "too many hb failures" })
   in
   check
     bool
@@ -1038,7 +1038,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
+      [ SM.Fiber_terminated { outcome = "crash 1" }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ]
@@ -1050,7 +1050,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:post_restart
-      ~event:(SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None })
+      ~event:(SM.Fiber_terminated { outcome = "crash 2" })
   in
   check phase_t "second crash -> Crashed (not Restarting)" SM.Crashed tr.new_phase;
   check bool "restart_requested still false" false tr.updated_conditions.restart_requested
@@ -1068,7 +1068,7 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Operator_pause
     ; SM.Operator_resume
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
-      SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+      SM.Fiber_terminated { outcome = "test" }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ; SM.Drain_complete
     ; SM.Context_measured
@@ -1136,7 +1136,7 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Stop_requested
     ; SM.Drain_complete
     ; SM.Fiber_started
-    ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+    ; SM.Fiber_terminated { outcome = "test" }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ]
   in
@@ -1306,7 +1306,7 @@ let test_setclear_coverage () =
     ; "Stop_requested", SM.Stop_requested
     ; "Drain_complete", SM.Drain_complete
     ; "Fiber_started", SM.Fiber_started
-    ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+    ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test" }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
     ; ( "Operator_clear_requested"
       , SM.Operator_clear_requested { preserve_system = true; reason = "test" } )
@@ -1449,7 +1449,7 @@ let all_representative_events : SM.event list =
   ; SM.Stop_requested
   ; SM.Drain_complete
   ; SM.Fiber_started
-  ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
+  ; SM.Fiber_terminated { outcome = "test" }
   ; SM.Supervisor_restart_attempt { attempt = 1 }
   ; SM.Operator_clear_requested { preserve_system = true; reason = "test" }
   ]

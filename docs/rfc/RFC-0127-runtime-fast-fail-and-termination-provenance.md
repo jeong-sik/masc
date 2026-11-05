@@ -3,7 +3,7 @@ rfc: "0127"
 title: "Runtime Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance"
 status: Active
 created: 2026-05-17
-updated: 2026-05-18
+updated: 2026-11-05
 author: vincent
 supersedes: []
 superseded_by: null
@@ -12,22 +12,18 @@ related: ["0009", "0022", "0024", "0027", "0038", "0041", "0058", "0088", "0126"
 
 ## Status
 
-- **PR-1 (Gap B carrier)** merged 2026-05-18 (#16189): typed
-  `provider_id : string option` + `http_status : int option` on
-  `Keeper_state_machine.Fiber_terminated` and
-  `Keeper_registry.Provider_runtime_error`, plus display surfaces
-  (`event_to_string`, JSON serializer, `failure_reason_to_string`) and
-  carrier-preservation tests.
+- **Gap B (termination provenance)**: the registry failure reason names
+  the candidate whose error ended the turn. `Provider_runtime_error.runtime_id`
+  comes from the runtime walk's `terminal_error_origin` (#48355), and `code`
+  keeps the HTTP status of a server error (`api_error_server:<status>`). The
+  status surface reads `Provider runtime error from <runtime_id> (<code>):
+  <detail>`. `Fiber_terminated` carries only `outcome`; the cause stays on
+  the registry failure reason.
 - **Gap A (probe loop)** implementation overlap with RFC-0126 PR-2
   (#16024 `feat(rfc-0126): PR-2 — provider health probe loop`). The
   `lib/runtime/provider_health.ml` module and `keeper_turn_driver.ml`
   wiring (`filter_provider_health_fail_open`,
-  `record_provider_health_error`) ship via RFC-0126; RFC-0127's PR-2
-  scope reduces to **threading the captured `provider_id` and
-  `http_status` from the runtime attempt path into the now-typed
-  `Fiber_terminated` carrier** so the supervisor log gap from §1.1
-  ("zero hint that the upstream root was a 502 from one specific
-  provider") closes end-to-end.
+  `record_provider_health_error`) ship via RFC-0126.
 - **PR-3 (integration test + dashboard panel)** unchanged from §3.4.
 
 # RFC-0127: Runtime Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance
@@ -135,9 +131,8 @@ In-scope:
   runtime.toml comment): an Eio fiber per `[providers.X.healthcheck enabled=true]`
   block, plus an in-band attempt-result feed; a per-provider health state used
   by the runtime to *skip* unhealthy candidates in the per-turn lineup.
-- **(B)** Thread `provider_id : string option` and `http_status : int option`
-  through `Fiber_terminated` → `failure_reason` → registry log. Add matching
-  labels to the related legacy metrics backend counters.
+- **(B)** Name the runtime whose error ended the turn, with its HTTP status,
+  on the registry failure reason that the status surface reads.
 - A small umbrella of tests at each boundary and one end-to-end integration
   test.
 
@@ -160,82 +155,28 @@ Out-of-scope:
 | **PR-3** | End-to-end integration test + dashboard panel. | Low |
 
 PR-1 ships first because it is purely additive and lets us *observe* whatever
-PR-2 changes. PR-2 reuses PR-1's structured error when feeding `record_attempt_result`.
+PR-2 changes.
 
-### 3.2 PR-1 — Provenance threading
+### 3.2 PR-1 — Provenance
 
-Five edit sites:
+The runtime walk returns the lane's error together with the candidate that
+produced it (`Keeper_turn_driver.lane_terminal_error`). The turn failure path
+turns that into `terminal_error_origin = Terminal_error_from { runtime_id;
+attempt }` and passes it to `registry_failure_reason_of_terminal_reason`,
+which writes the id into `Provider_runtime_error.runtime_id` for a provider
+error and for an exhausted attempt chain. `code` is the terminal wire
+(`Keeper_turn_terminal_code.to_wire`), which keeps the status of a server
+error (`api_error_server:502`).
 
-**(1) `lib/keeper_state/keeper_state_machine.ml`** — widen `Fiber_terminated`:
+`keeper_status_bridge_blocker.ml` prints
+`Provider runtime error from <runtime_id> (<code>): <detail>`, so a 502 that
+ends a turn names the runtime that returned it.
 
-```ocaml
-(* before *)
-| Fiber_terminated of { outcome : string }
-
-(* after *)
-| Fiber_terminated of {
-    outcome     : string;
-    provider_id : string option;
-    http_status : int option;
-  }
-```
-
-All existing constructors receive `~provider_id:None ~http_status:None`. The
-OCaml compiler enforces exhaustive update at every call site.
-
-**(2) `lib/keeper/keeper_registry_types.ml`** — widen `Provider_runtime_error`:
-
-```ocaml
-| Provider_runtime_error of {
-    code        : string;
-    detail      : string;
-    provider_id : string option;   (* NEW *)
-    http_status : int option;      (* NEW *)
-  }
-```
-
-**(3) `lib/keeper/keeper_turn_runtime_budget.ml` (~line 650)** —
-where the runtime result is converted to a failure reason, *before* the
-existing string-squash, extract the structured fields:
-
-```ocaml
-let provider_id, http_status =
-  match last_provider_error with
-  | Some (Provider_error.ServerError { code; _ }) -> Some provider, Some code
-  | _ -> None, None
-in
-set_failure_reason
-  (Provider_runtime_error
-     { code = resilience_code; detail = short_resilience_detail detail;
-       provider_id; http_status })
-```
-
-**(4) `lib/keeper/keeper_registry.ml:1792`** — log format:
-
-```ocaml
-let fmt_event = function
-  | Fiber_terminated { outcome; provider_id = None; http_status = None } ->
-      Printf.sprintf "fiber_terminated(%s)" outcome
-  | Fiber_terminated { outcome; provider_id; http_status } ->
-      let prov = Option.fold ~none:"" ~some:(Printf.sprintf " provider=%s") provider_id in
-      let http = Option.fold ~none:"" ~some:(Printf.sprintf " http=%d") http_status in
-      Printf.sprintf "fiber_terminated(%s%s%s)" outcome prov http
-```
-
-Result: a 502 from RunPod surfaces as
-`fiber_terminated(fiber_unresolved provider=runpod_mtp http=502)`.
-
-**(5) `lib/keeper/keeper_metrics.ml`** — verify
-`metric_keeper_turn_error_after_tools` (or equivalent) accepts `provider_id`
-and `http_status` labels with the same string form as
-`masc_llm_provider_http_status_total`.
-
-**Test:** `test/test_keeper_registry_provenance.ml` — Synthetic
-`Provider_error.ServerError { code = 502; transient = true }` through the
-conversion path; assert (a) the resulting `Fiber_terminated` has
-`provider_id = Some "runpod_mtp"` and `http_status = Some 502`, and (b)
-`fmt_event` produces a string containing both `provider=runpod_mtp` and
-`http=502`.
+**Test:** `test/test_keeper_status_bridge.ml`
+(`test_a_provider_error_names_the_runtime_that_returned_it`) builds the
+record through `registry_failure_reason_of_terminal_reason` with a
+`Terminal_error_from` origin and checks that the record and the summary name
+that runtime.
 
 ### 3.3 PR-2 — Provider health probe loop
 
@@ -298,10 +239,10 @@ Wire-in:
 
 - `test/test_runtime_fast_fail_e2e.ml`: stub two providers (one returning 502,
   one returning 200), run a keeper turn, assert (a) the turn dispatches to
-  the 200 provider, (b) the system log contains
-  `fiber_terminated(... provider=<502-provider-id> http=502)` for any
-  *discarded* first attempt, and (c) within `unhealthy_threshold` cycles the
-  502 provider is filtered out entirely.
+  the 200 provider, (b) a turn that ends on the 502 records that runtime in
+  `Provider_runtime_error.runtime_id` with `code = api_error_server:502`, and
+  (c) within `unhealthy_threshold` cycles the 502 provider is filtered out
+  entirely.
 - Dashboard: add a `provider_health_state{provider=...}` gauge (1=Healthy,
   0=Unhealthy) and a `provider_unhealthy_seconds_total` counter. Reuse the
   existing `provider` label used by `masc_llm_provider_http_status_total`.
@@ -310,7 +251,6 @@ Wire-in:
 
 | Risk | Mitigation |
 |---|---|
-| `Fiber_terminated` variant widening runtimes to many caller sites. | OCaml exhaustive-match compile guarantees no missed updates. Default `~provider_id:None ~http_status:None` for non-runtime paths preserves all current behaviour. |
 | Probe fiber leaks across pod restart / supervisor crash. | `Eio.Switch.on_release` cleanup. Dedicated test in PR-2: tear down switch, assert fiber stopped. |
 | Probe loop floods upstream during outage. | Minimum `probe_interval_seconds = 60` enforced at config-parse time (validated, with rejection of `<60`). Document in runtime.toml schema comments. |
 | Filter empties candidate list, causing dead-runtime. | Empty-after-filter is the explicit *fall-through* case — original list is returned. Dashboard surfaces "all-unhealthy" state via the gauge so the operator sees the degraded condition. |

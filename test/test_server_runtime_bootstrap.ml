@@ -1313,11 +1313,7 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
       ~base_path:config.Workspace.base_path
       meta.name
       (Keeper_state_machine.Fiber_terminated
-         {
-           outcome = "stale_turn_timeout(idle_turn(2268s))";
-           provider_id = None;
-           http_status = None;
-         })
+         { outcome = "stale_turn_timeout(idle_turn(2268s))" })
   with
   | Ok _ -> ()
   | Error err ->
@@ -1339,8 +1335,6 @@ let mark_keeper_dead_with_registry_cause config
               Printf.sprintf
                 "provider cancelled with sk-testsecret at %s/private/provider.json"
                 base_path;
-            provider_id = Some "runpod";
-            http_status = Some 500;
             runtime_id = Some "runtime-a";
             agent_core_timeout = None;
             fenced_empty_turn_runtime = None;

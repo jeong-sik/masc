@@ -1190,7 +1190,7 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
        ~base_path:config.base_path
        crashed_name
        (KSM.Fiber_terminated
-          { outcome = "fixture crash"; provider_id = None; http_status = None })
+          { outcome = "fixture crash" })
    with
    | Ok transition ->
      check
@@ -2449,7 +2449,7 @@ let test_running_librarian_does_not_defer_restart () =
           Reg.dispatch_event_exact
             initial
             (KSM.Fiber_terminated
-               { outcome = "fixture crash"; provider_id = None; http_status = None })
+               { outcome = "fixture crash" })
         with
         | Ok _ -> ()
         | Error error -> fail (KSM.transition_error_to_string error));
@@ -2506,7 +2506,7 @@ let crashed_restart_fixture ~base_path name meta =
      Reg.dispatch_event_exact
        initial
        (KSM.Fiber_terminated
-          { outcome = "fixture crash"; provider_id = None; http_status = None })
+          { outcome = "fixture crash" })
    with
    | Ok _ -> ()
    | Error error -> fail (KSM.transition_error_to_string error));

@@ -78,7 +78,7 @@ let all_events : SM.event list =
   ; SM.Drain_complete
   ; SM.Fiber_started
   ; SM.Fiber_terminated
-      { outcome = "ok"; provider_id = None; http_status = None }
+      { outcome = "ok" }
   ; SM.Supervisor_restart_attempt { attempt = 1 }
   ; SM.Operator_clear_requested { preserve_system = true; reason = "probe" }
   ]

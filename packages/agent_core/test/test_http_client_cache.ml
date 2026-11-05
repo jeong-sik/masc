@@ -555,6 +555,30 @@ let test_reuse_verdict_cases () =
   Alcotest.check verdict "the request closes" (Close Not_persistent)
     (decide ~request:[ "connection", "close" ] ~response:framed `Drained);
   Alcotest.check verdict "no framing" (Close Not_persistent) (decide ~response:[] `Drained);
+  let decide_drained ?(version = `HTTP_1_1) ?(status = `OK) headers =
+    Reuse_verdict.decide
+      ~request_headers:(Http.Header.init ())
+      ~response:(Http.Response.make ~version ~status ~headers:(Http.Header.of_list headers) ())
+      ~body:`Drained
+  in
+  Alcotest.check verdict "an interim 1xx answer" (Close Not_persistent)
+    (decide_drained ~status:(`Code 103) []);
+  Alcotest.check verdict "an interim 1xx answer with a length" (Close Not_persistent)
+    (decide_drained ~status:(`Code 103) [ "content-length", "0" ]);
+  Alcotest.check verdict "HTTP/1.0 with keep-alive" Park
+    (decide_drained ~version:`HTTP_1_0 (("connection", "keep-alive") :: framed));
+  Alcotest.check verdict "HTTP/1.0 without keep-alive" (Close Not_persistent)
+    (decide_drained ~version:`HTTP_1_0 framed);
+  Alcotest.check verdict "101 Switching Protocols" (Close Not_persistent)
+    (decide_drained ~status:`Switching_protocols framed);
+  Alcotest.check verdict "an upgrade header" (Close Not_persistent)
+    (decide_drained (("upgrade", "websocket") :: framed));
+  Alcotest.check verdict "204 needs no framing" Park (decide_drained ~status:`No_content []);
+  Alcotest.check verdict "304 needs no framing" Park (decide_drained ~status:`Not_modified []);
+  Alcotest.check verdict "close on an earlier connection line" (Close Not_persistent)
+    (decide_drained (("connection", "close") :: ("connection", "keep-alive") :: framed));
+  Alcotest.check verdict "close in any case" (Close Not_persistent)
+    (decide_drained (("connection", "Close") :: framed));
   List.iter
     (fun response ->
        Alcotest.check verdict "a failed read" (Close Request_failed) (decide ~response `Failed);
@@ -566,19 +590,20 @@ let test_reuse_verdict_cases () =
 ;;
 
 (* A server that answers every request on a connection with [response] and
-   counts the connections it accepted. *)
-let start_raw_server ~sw ~net response =
+   counts the connections it accepted. With [close_after_first] it closes each
+   connection after its first answer. *)
+let start_raw_server ?(close_after_first = false) ~sw ~net response =
   let port = fresh_port () in
   let accepted = ref 0 in
   let handler flow _addr =
     incr accepted;
     let reader = Eio.Buf_read.of_flow flow ~max_size:8192 in
-    try
-      while true do
-        drain_request_headers reader;
-        Eio.Flow.copy_string response flow
-      done
-    with
+    let rec serve () =
+      drain_request_headers reader;
+      Eio.Flow.copy_string response flow;
+      if close_after_first then Eio.Flow.shutdown flow `All else serve ()
+    in
+    try serve () with
     | End_of_file | Eio.Io _ | Unix.Unix_error _ -> ()
   in
   let socket =
@@ -641,6 +666,104 @@ let test_get_sync_reuses_a_persistent_response () =
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
+;;
+
+let with_cache_switch f =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    f ~sw ~env ~cache:(Http_client.create_cache ~sw ());
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let failed_request_timeout_s = 0.2
+
+(* The body never ends, so the request fails at its deadline. A failed
+   request's connection is closed even though it came from the cache. *)
+let test_get_sync_closes_a_failed_request () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let url, _ =
+    start_raw_server ~sw ~net:env#net "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nok"
+  in
+  (match
+     Http_client.get_sync ~cache ~clock:env#clock ~timeout_s:failed_request_timeout_s ~sw
+       ~net:env#net ~url ~headers:[] ()
+   with
+   | Error (Http_client.TimeoutError _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a body that never ends should time out");
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "nothing parked" 0 stats.total_idle;
+  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed
+;;
+
+(* The server closes the connection after answering, while the cache holds
+   it. Reusing it ends in a network error, not an exception (RFC-0492 §3.3). *)
+let test_get_sync_on_a_connection_the_peer_closed () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let url, _ =
+    start_raw_server ~close_after_first:true ~sw ~net:env#net
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+  in
+  get_ok ~sw ~net:env#net ~cache url;
+  Alcotest.(check int) "the answered connection is parked" 1
+    (Http_client.cache_stats cache).total_idle;
+  (match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
+   | Error (Http_client.NetworkError _) -> ()
+   | Ok _ -> Alcotest.fail "a closed connection answered"
+   | Error _ -> Alcotest.fail "expected a network error"
+   | exception exn -> Alcotest.failf "the peer's close escaped as %s" (Printexc.to_string exn));
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "the parked connection was reused" 1 stats.reuse_count_total;
+  Alcotest.(check int) "nothing parked" 0 stats.total_idle;
+  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed
+;;
+
+(* The peer closes before the five bytes its header promised. cohttp ends the
+   body at the close without an error, so the request answers with what
+   arrived (#48910). The transport ended, so the connection is not parked. *)
+let test_get_sync_does_not_park_a_body_the_peer_cut_short () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let url, _ =
+    start_raw_server ~close_after_first:true ~sw ~net:env#net
+      "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nok"
+  in
+  (match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "cohttp answers a body cut short");
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "nothing parked" 0 stats.total_idle;
+  Alcotest.(check int) "closed as transport ended" 1 stats.closed_total.transport_ended
+;;
+
+(* cohttp returns the first status line and does not skip an interim answer
+   (#48910), so the final answer is still on the connection. Parking it would
+   hand that answer to the next request. *)
+let test_get_sync_does_not_park_an_interim_answer () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let url, accepted =
+    start_raw_server ~sw ~net:env#net
+      "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n\
+       HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+  in
+  let request () =
+    match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
+    | Ok _ -> ()
+    | Error _ -> Alcotest.fail "the interim answer is read as a response"
+  in
+  request ();
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "nothing parked" 0 stats.total_idle;
+  Alcotest.(check int) "closed as not persistent" 1 stats.closed_total.not_persistent;
+  request ();
+  Alcotest.(check int) "the second request opened its own connection" 2 !accepted
 ;;
 
 let test_stream_connection_close_does_not_park () =
@@ -836,6 +959,7 @@ let exercise_raw_one_dispatch_cache
 
 let exercise_raw_stream_cache
       ?http_version
+      ?status
       ?response_headers
       ?encode_body
       ?keep_connection
@@ -844,6 +968,7 @@ let exercise_raw_stream_cache
   =
   with_raw_one_dispatch_server
     ?http_version
+    ?status
     ?response_headers
     ?encode_body
     ?keep_connection
@@ -975,6 +1100,41 @@ let expect_raw_ok label = function
     Alcotest.(check int) (label ^ " status") 200 response.Http_client.status;
     Alcotest.(check string) (label ^ " body") "ok" response.body
   | Error _ -> Alcotest.fail (label ^ " expected raw 200 response")
+;;
+
+(* The peer closes before the five bytes its header promised; cohttp answers
+   with what arrived (#48910). Neither connection is parked. *)
+let test_one_dispatch_body_cut_short_is_not_parked () =
+  let (first, second, stats), _posts =
+    exercise_raw_one_dispatch_cache
+      ~response_headers:(fun _ -> [ "Content-Length: 5" ])
+      ~keep_connection:false
+      ()
+  in
+  (match first, second with
+   | Ok _, Ok _ -> ()
+   | (Ok _ | Error _), _ -> Alcotest.fail "cohttp answers a body cut short");
+  Alcotest.(check int) "nothing parked" 0 stats.Http_client.total_idle;
+  Alcotest.(check int) "each request opened a connection" 2 stats.create_count_total;
+  Alcotest.(check int) "both closed as transport ended" 2 stats.closed_total.transport_ended
+;;
+
+(* A refusal read to its end on a persistent connection is parked like an
+   answer (RFC-0492 §3.2), and the second refusal reuses it. *)
+let test_stream_refusal_read_to_its_end_is_parked () =
+  let (first, second, stats), posts =
+    exercise_raw_stream_cache ~status:"429 Too Many Requests" ~keep_connection:true ()
+  in
+  let expect_refusal label = function
+    | Error (Http_client.HttpError { code = 429; _ }) -> ()
+    | Ok _ | Error _ -> Alcotest.fail (label ^ " expected the 429 refusal")
+  in
+  expect_refusal "first" first;
+  expect_refusal "second" second;
+  Alcotest.(check int) "refusal POSTs" 2 posts;
+  Alcotest.(check int) "one connection opened" 1 stats.Http_client.create_count_total;
+  Alcotest.(check int) "reused once" 1 stats.reuse_count_total;
+  Alcotest.(check int) "parked after the second refusal" 1 stats.total_idle
 ;;
 
 let test_one_dispatch_stale_cache_has_no_hidden_retry () =
@@ -1403,6 +1563,18 @@ let () =
       , [ Alcotest.test_case "every body state and persistence" `Quick test_reuse_verdict_cases
         ; Alcotest.test_case "get_sync does not park a closing response" `Quick
             test_get_sync_does_not_park_a_closing_response
+        ; Alcotest.test_case "get_sync closes a failed request" `Quick
+            test_get_sync_closes_a_failed_request
+        ; Alcotest.test_case "get_sync on a connection the peer closed" `Quick
+            test_get_sync_on_a_connection_the_peer_closed
+        ; Alcotest.test_case "get_sync does not park a body cut short" `Quick
+            test_get_sync_does_not_park_a_body_the_peer_cut_short
+        ; Alcotest.test_case "get_sync does not park an interim answer" `Quick
+            test_get_sync_does_not_park_an_interim_answer
+        ; Alcotest.test_case "one dispatch does not park a body cut short" `Quick
+            test_one_dispatch_body_cut_short_is_not_parked
+        ; Alcotest.test_case "a stream refusal read to its end is parked" `Quick
+            test_stream_refusal_read_to_its_end_is_parked
         ; Alcotest.test_case "get_sync reuses a persistent response" `Quick
             test_get_sync_reuses_a_persistent_response
         ] )

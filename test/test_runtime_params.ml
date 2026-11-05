@@ -591,6 +591,35 @@ let () =
     | None -> Alcotest.fail "keeper keepalive param not found"
   in
 
+  (* The Params screen draws a param's description and type from its meta, and
+     the web panel refuses to edit a param whose type it cannot read. The three
+     keeper build cleanup params were listed on a surface with no meta, so the
+     first detail of System > Params had an empty description and a placeholder
+     type. *)
+  let test_surface_params_declare_their_contract () =
+    Runtime_settings.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let meta_of key =
+      List.find_map
+        (fun (k, _, _, _, meta) -> if String.equal k key then Some meta else None)
+        entries
+    in
+    List.iter
+      (fun (surface : Runtime_settings.surface) ->
+        List.iter
+          (fun key ->
+            match meta_of key with
+            | None -> Alcotest.fail (key ^ " is listed by " ^ surface.id ^ " but not registered")
+            | Some None -> Alcotest.fail (key ^ " declares no meta")
+            | Some (Some meta) ->
+                Alcotest.(check bool) (key ^ " has a description") true
+                  (String.trim meta.Runtime_params.description <> "");
+                Alcotest.(check bool) (key ^ " has a value type") true
+                  (String.trim meta.Runtime_params.value_type <> ""))
+          surface.param_keys)
+      Runtime_settings.surfaces
+  in
+
   let test_keeper_param_override_persist_restore () =
     let tmp_dir = Filename.temp_dir "masc_keeper_restore_" "" in
     let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
@@ -855,6 +884,8 @@ let () =
             test_keeper_params_meta_shape;
           Alcotest.test_case "connector trigger params declare choices" `Quick
             test_connector_trigger_params_declare_their_choices;
+          Alcotest.test_case "surface params declare their contract" `Quick
+            test_surface_params_declare_their_contract;
           Alcotest.test_case "keeper param override persist/restore" `Quick
             test_keeper_param_override_persist_restore;
           Alcotest.test_case "keeper_diagnostics surface" `Quick

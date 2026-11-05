@@ -7585,6 +7585,38 @@ let decode_git_worktrees json =
   let* gws_truncated = required_bool_field json "truncated" in
   Ok { gws_root; gws_worktrees; gws_truncated }
 
+type workspace_search_match = {
+  wsm_path : string;
+  wsm_line : int;
+  wsm_text : string;
+}
+
+type workspace_search = {
+  wss_root : string;
+  wss_query : string;
+  wss_ignore_case : bool;
+  wss_matches : workspace_search_match list;
+  wss_truncated : bool;
+}
+
+let decode_workspace_search_match json =
+  let* wsm_path = required_string_field json "path" in
+  let* wsm_line = required_int_field json "line" in
+  let* wsm_text = required_string_field json "text" in
+  if String.equal wsm_path "" then Error "search match path must be nonempty"
+  else if wsm_line < 1 then
+    Error (Printf.sprintf "search match line must be at least 1 (received %d)" wsm_line)
+  else Ok { wsm_path; wsm_line; wsm_text }
+
+let decode_workspace_search json =
+  let* wss_root = required_string_field json "root" in
+  let* wss_query = required_string_field json "query" in
+  let* wss_ignore_case = required_bool_field json "ignore_case" in
+  let* matches = required_list_field json "matches" in
+  let* wss_matches = decode_list "matches" decode_workspace_search_match matches in
+  let* wss_truncated = required_bool_field json "truncated" in
+  Ok { wss_root; wss_query; wss_ignore_case; wss_matches; wss_truncated }
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 
 let decode_workspace_file json =

@@ -2473,6 +2473,25 @@ val decode_git_worktrees : Yojson.Safe.t -> (git_worktrees, string) result
     else is an [Error _]. A worktree that is not bare must have a [head]. An
     empty name is an [Error _]. *)
 
+type workspace_search_match = {
+  wsm_path : string;  (** Relative to the workspace base, as the file reader takes it. *)
+  wsm_line : int;  (** 1-based. *)
+  wsm_text : string;  (** The matching line, at most 300 bytes of UTF-8. *)
+}
+
+type workspace_search = {
+  wss_root : string;
+  wss_query : string;
+  wss_ignore_case : bool;
+  wss_matches : workspace_search_match list;  (** Server order. *)
+  wss_truncated : bool;  (** The server says more matches may exist. *)
+}
+
+val decode_workspace_search :
+  Yojson.Safe.t -> (workspace_search, string) result
+(** Strict response of [/api/v1/workspace/search]. A match with an empty path or
+    a line below 1 is an [Error _]; exact path strings are kept for selection. *)
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 (** Exact source bytes and their server revision are admitted together. *)
 val decode_workspace_file : Yojson.Safe.t -> (workspace_file_source, string) result

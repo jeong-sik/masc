@@ -632,16 +632,6 @@
 /* Failure attribution on a failed registry card: machine code chip + human
    detail. Only rendered for `failed` runs (fusion-runs-panel FusionRunStatusCard). */
 
-@keyframes fus-runs-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
 @media (max-width: 720px) {
   .v2-fusion-surface .fus-runs-meta {
     align-items: flex-start;

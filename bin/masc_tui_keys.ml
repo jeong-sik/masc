@@ -1335,6 +1335,9 @@ let footer_hints_approvals mode =
         [ hint approval_move; hint approval_decide; hint approval_workspace
         ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
         ; hint listing_refresh; hint listing_next
+          (* The way out: the two keys a cut row keeps
+             ([Masc_tui_footer.never_dropped_keys]). *)
+        ; hint approval_back; hint listing_quit
         ]
   | Approval_writing ->
       row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]

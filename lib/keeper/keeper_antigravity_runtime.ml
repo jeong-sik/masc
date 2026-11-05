@@ -727,7 +727,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         ~keeper_name
         "%s resume carried contexts: %s"
         runtime_label
-        (Host.carried_summaries ?turn_observation:prepared.turn_observation
+        (Host.carried_summaries ~turn_observation:prepared.turn_observation
            ?composed_context prepared.messages
          |> List.map (fun (item : Host.carried_summary) ->
            Printf.sprintf

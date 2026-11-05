@@ -103,7 +103,7 @@ class PlayRoomPushTest(unittest.TestCase):
             room = cast(PlayRoomServer, server)
             room.set_phase("prime")
             room.events.put(room_event("dos"))
-            step("wait", lambda: room.count("prime", "observer-event-written") == 1,
+            step("wait", lambda: room.count("prime", "observer-play-event:none:none") == 1,
                  "the initial event did not establish an Observer cursor")
             step("drain", 0.2)
 

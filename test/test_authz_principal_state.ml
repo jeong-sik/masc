@@ -87,10 +87,9 @@ let an_admission_makes_an_admin () =
     (Option.map User_id.to_string (P.find_identity principals (google "111")));
   Alcotest.(check bool) "an Admin" true (P.is_admin principals alice);
   (match P.find_membership principals alice with
-   | Some { P.workspace_id; account_home_namespace; status = P.Active } ->
+   | Some { P.workspace_id; account_home_namespace } ->
      Alcotest.(check string) "the workspace" "workspace-1" (Workspace_id.to_string workspace_id);
      Alcotest.(check string) "the namespace" "ns-alice" (Account_home_namespace.to_string account_home_namespace)
-   | Some { P.status = P.Disabled; _ } -> Alcotest.fail "the membership is disabled"
    | None -> Alcotest.fail "no membership was made");
   Alcotest.(check (option string))
     "the namespace names the member"
@@ -298,6 +297,18 @@ let a_held_admin_is_not_the_one_that_remains () =
     "alice disables herself"
     "alice is the last Admin that acts, so it stays"
     (event ~held (two_admins ()) ~by:alice (Pe.Disabled { user_id = alice }));
+  check_event_refused
+    "alice deletes herself"
+    "alice is the last Admin that acts, so it stays"
+    (event ~held (two_admins ()) ~by:alice (Pe.Deleted { user_id = alice; identity = google "111" }));
+  check_event_refused
+    "bob writes"
+    "the principal human:bob is not an Admin, and only an Admin disables, enables, or deletes a principal"
+    (event ~held (two_admins ()) ~by:bob (Pe.Disabled { user_id = alice }));
+  check_revocation_refused
+    "bob revokes"
+    "the principal human:bob is not an Admin, and only an Admin revokes an Admin assignment"
+    (revoke ~held (two_admins ()) ~by:bob alice);
   check_revocation_refused
     "alice revokes her own"
     "alice is the last Admin, so the assignment stays"

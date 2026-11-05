@@ -39,7 +39,6 @@ type principal = private
 type membership = private
   { workspace_id : Authz_types.Workspace_id.t
   ; account_home_namespace : Authz_types.Account_home_namespace.t
-  ; status : status
   }
 
 type t
@@ -112,7 +111,8 @@ val admit
 
 type revocation_refusal =
   | Revoker_is_not_an_admin of Authz_records.Author.t
-      (** Only a human principal with an Admin assignment in force revokes one. *)
+      (** Only an Admin that acts revokes one: a human principal with an
+          Admin assignment in force, active, and not held. *)
   | Not_an_admin of Authz_types.User_id.t
       (** The principal has no Admin assignment in force. *)
   | Last_admin of Authz_types.User_id.t
@@ -136,6 +136,7 @@ val revoke_admin
 
 type principal_refusal =
   | Writer_is_not_an_admin of Authz_records.Author.t
+      (** The author is not an Admin that acts (see {!Revoker_is_not_an_admin}). *)
   | No_principal of Authz_types.User_id.t
       (** Never admitted, or deleted. *)
   | Already_disabled of Authz_types.User_id.t

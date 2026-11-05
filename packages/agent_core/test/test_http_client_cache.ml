@@ -736,7 +736,9 @@ let test_get_sync_closes_a_failed_request () =
    | Ok _ | Error _ -> Alcotest.fail "a body that never ends should time out");
   let stats = Http_client.cache_stats cache in
   Alcotest.(check int) "nothing parked" 0 stats.total_idle;
-  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed
+  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed;
+  Alcotest.(check int) "a new connection's failure is not counted as reused" 0
+    stats.closed_after_reuse.request_failed
 ;;
 
 (* The server closes the connection after answering, while the cache holds
@@ -759,7 +761,9 @@ let test_get_sync_on_a_connection_the_peer_closed () =
   let stats = Http_client.cache_stats cache in
   Alcotest.(check int) "the parked connection was reused" 1 stats.reuse_count_total;
   Alcotest.(check int) "nothing parked" 0 stats.total_idle;
-  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed
+  Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed;
+  Alcotest.(check int) "and counted as a reused connection's failure" 1
+    stats.closed_after_reuse.request_failed
 ;;
 
 (* The peer closes before the five bytes its header promised. cohttp ends the

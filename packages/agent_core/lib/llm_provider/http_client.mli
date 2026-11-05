@@ -401,13 +401,16 @@ type cache_close_counts =
   ; transport_ended : int
   }
 
-(** Statistics snapshot for observability. *)
+(** Statistics snapshot for observability. [closed_after_reuse] counts the
+    part of [closed_total] whose connection had been parked before, so a
+    reused connection's failures can be told from a new one's. *)
 type cache_stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
   ; closed_total : cache_close_counts
+  ; closed_after_reuse : cache_close_counts
   }
 
 (** Create a connection cache.

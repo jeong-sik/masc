@@ -770,6 +770,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   | Error detail, _ | _, Error detail ->
       respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
         ~request_authority request reqd ~session_id ~protocol_version detail
+  | Ok (Some _), Ok _ when Result.is_error (deps.get_runtime_result ()) ->
+      respond_not_ready ~deps request reqd
   | Ok machine, Ok browser ->
   let observer_scope =
     match sse_kind with

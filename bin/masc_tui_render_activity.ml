@@ -144,14 +144,12 @@ let activity_tabs ~on_logs : (string * bool * surface) list =
    tab's count. It stays after the strip rather than moving before it, so the
    tabs do not shift sideways when the count grows a digit.
 
-   [tail] is what the row draws last, and it is laid out by [detail_heading]
-   like the other title rows: the badge stays whole, the reading is cut at its
-   end, and the strip draws in what the reading leaves. It is whole or it is
-   not drawn: this row was joined by hand, so at eighty columns the reading and
-   the clock pushed the badge past the edge and the frame cut it to
-   "HTTP [c…", and a strip squeezed below the width that holds its current tab
-   drew that tab cut as well: "▸Even…". A strip that draws nothing takes its
-   separator with it. *)
+   [reading] is the pieces the row says after the strip, each with its own
+   leading gap. [tail] is what the row draws last, and it is laid out by
+   [detail_heading] like the other title rows: the badge stays whole, the
+   reading's pieces are left out whole from the end, and the strip draws in
+   what they leave. The strip is whole or it is not drawn, and a strip that
+   draws nothing takes its separator with it. *)
 let activity_heading ~cols ~on_logs ~reading ~tail =
   let tabs = activity_tabs ~on_logs in
   let title = screen_title " MASC Activity" in
@@ -177,7 +175,7 @@ let activity_heading ~cols ~on_logs ~reading ~tail =
                      tabs
                  ^ dot)
          })
-    ~id:"" ~after:("  " ^ reading) ~tail
+    ~id:"" ~after:reading ~tail
 
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -204,7 +202,7 @@ let render_system_logs (state : state) =
      verbose is the floor being DEBUG. The header spent thirteen cells saying
      that a second time, on a row that drops the tab strip at a hundred
      columns and the connection badge below eighty. *)
-  let filter_note =
+  let filter_pieces =
     let level =
       match (system_logs_page state).lp_min_level with
       | None -> "  level\xe2\x89\xa5DEBUG"
@@ -214,11 +212,11 @@ let render_system_logs (state : state) =
     in
     let category =
       match (system_logs_page state).lp_category with
-      | None -> ""
+      | None -> []
       | Some category ->
-          "  category:" ^ Terminal_text.single_line category
+          [ "  category:" ^ Terminal_text.single_line category ]
     in
-    level ^ category
+    level :: category
   in
   (* What the reader set, on a read that brought back nothing. [l] and [v]
      write the floor and refetch; with the fetch failing the rows are the only
@@ -227,10 +225,10 @@ let render_system_logs (state : state) =
      the note's other job -- saying why a short page is short -- needs a page,
      so at the default this stays off the row rather than spending its width
      on the surface that has least to spare. *)
-  let set_filter_note =
+  let set_filter_pieces =
     match (system_logs_page state).lp_min_level, (system_logs_page state).lp_category with
-    | None, None -> ""
-    | _ -> filter_note
+    | None, None -> []
+    | _ -> filter_pieces
   in
   let header =
     match (system_logs_page state).lp_snapshot with
@@ -241,16 +239,18 @@ let render_system_logs (state : state) =
           | Some _ -> ""
         in
         activity_heading ~cols ~on_logs:true
-          ~reading:(reading_note ^ set_filter_note)
+          ~reading:(("  " ^ reading_note) :: set_filter_pieces)
           ~tail:(timestamp ^ "  " ^ system_logs_status state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         activity_heading ~cols ~on_logs:true
           ~reading:
-            (Printf.sprintf "(%d of %d)%s%s" total_entries snapshot.sys_total
-               (match snapshot.sys_latest_seq with None -> "" | Some seq -> Printf.sprintf "  seq %d" seq)
-               filter_note)
+            (Printf.sprintf "  (%d of %d)" total_entries snapshot.sys_total
+             :: (match snapshot.sys_latest_seq with
+                 | None -> []
+                 | Some seq -> [ Printf.sprintf "  seq %d" seq ])
+             @ filter_pieces)
           ~tail:(timestamp ^ "  " ^ system_logs_status state)
   in
   box_top buf cols;
@@ -376,7 +376,7 @@ let render_keeper_calls (state : state) =
   in
   let heading ~after =
     detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
-      ~after ~tail:(timestamp ^ "  " ^ connection_badge state)
+      ~after:[ after ] ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
     match state.keeper_calls with
@@ -807,8 +807,9 @@ let render_acting (state : state) =
   let header =
     activity_heading ~cols ~on_logs:false
       ~reading:
-        (Masc_tui_types.activity_title_reading ~observer:state.observer
-           ~shown ~held)
+        [ "  "
+          ^ Masc_tui_types.activity_title_reading ~observer:state.observer
+              ~shown ~held ]
       ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   box_top buf cols;

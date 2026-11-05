@@ -509,7 +509,7 @@ let render_runtime_detail (state : state) target =
   box_line buf cols
     (detail_heading ~cols
        ~lead:(Lead_text (screen_title (if state.ui_language = Lang_ko then " MASC 시스템 / 런타임 상세" else runtime_detail_title) ^ "  "))
-       ~id:target_label ~after:"" ~tail:(connection_badge state));
+       ~id:target_label ~after:[] ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in

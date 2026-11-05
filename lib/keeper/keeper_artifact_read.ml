@@ -63,6 +63,16 @@ type invalid_request =
   | Sha256_malformed of Tool_output.invalid_sha256
   | Offset_invalid of invalid_integer_field
   | Max_bytes_invalid of invalid_integer_field
+  | Contains_not_a_string of { kind : string }
+  | Contains_empty
+  | Contains_too_long of
+      { bytes : int
+      ; maximum : int
+      }
+  | Ignore_case_not_a_boolean of { kind : string }
+  | Max_matches_invalid of invalid_integer_field
+  | Search_field_without_contains of { field : string }
+  | Max_bytes_with_contains
 
 let invalid_integer_field_to_string ~field = function
   | Not_an_integer { kind } ->
@@ -95,6 +105,20 @@ let invalid_request_to_string = function
   | Offset_invalid detail -> invalid_integer_field_to_string ~field:"offset" detail
   | Max_bytes_invalid detail ->
     invalid_integer_field_to_string ~field:"max_bytes" detail
+  | Contains_not_a_string { kind } ->
+    Printf.sprintf "contains must be a string, got %s" kind
+  | Contains_empty -> "contains must not be empty"
+  | Contains_too_long { bytes; maximum } ->
+    Printf.sprintf "contains is %d bytes, over the maximum %d" bytes maximum
+  | Ignore_case_not_a_boolean { kind } ->
+    Printf.sprintf "ignore_case must be a boolean, got %s" kind
+  | Max_matches_invalid detail ->
+    invalid_integer_field_to_string ~field:"max_matches" detail
+  | Search_field_without_contains { field } ->
+    Printf.sprintf "%s only applies together with contains" field
+  | Max_bytes_with_contains ->
+    "max_bytes sets the page size and cannot be combined with contains; a search \
+     returns at most max_matches lines"
 ;;
 
 let sha256_of_fields fields =
@@ -176,20 +200,7 @@ let storage_failure message =
           ]))
 ;;
 
-let valid_utf8_prefix_length source =
-  let source_length = String.length source in
-  let rec loop index =
-    if index = source_length
-    then index
-    else
-      let decoded = String.get_utf_8_uchar source index in
-      let decoded_length = Uchar.utf_decode_length decoded in
-      if decoded_length > 0 && Uchar.utf_decode_is_valid decoded
-      then loop (index + decoded_length)
-      else index
-  in
-  loop 0
-;;
+let valid_utf8_prefix_length = Keeper_artifact_search.valid_utf8_prefix_length
 
 let page_of_slice (request : request) ~total_bytes requested_bytes =
   if request.offset > total_bytes
@@ -290,25 +301,209 @@ let page ?envelope (request : request) bytes =
   page_of_slice_within_output_budget ?envelope request ~total_bytes requested_bytes
 ;;
 
+(* A search reads the same artifact a page does, but asks where a text occurs
+   instead of for its bytes. It is declared after [page] so the record fields
+   it shares with [request] and [page] do not change how their code reads. *)
+type search =
+  { sha256 : string
+  ; offset : int
+  ; needle : string
+  ; ignore_case : bool
+  ; max_matches : int
+  }
+
+type operation =
+  | Read_page of request
+  | Search_text of search
+
+let needle_of_json = function
+  | `String "" -> Error Contains_empty
+  | `String needle ->
+    let bytes = String.length needle in
+    if bytes > Keeper_artifact_search.maximum_needle_bytes
+    then
+      Error
+        (Contains_too_long { bytes; maximum = Keeper_artifact_search.maximum_needle_bytes })
+    else Ok needle
+  | other -> Error (Contains_not_a_string { kind = Json_util.kind_name other })
+;;
+
+let ignore_case_of_fields fields =
+  match List.assoc_opt "ignore_case" fields with
+  | None -> Ok false
+  | Some (`Bool value) -> Ok value
+  | Some other -> Error (Ignore_case_not_a_boolean { kind = Json_util.kind_name other })
+;;
+
+let search_of_fields fields ~contains =
+  let open Result.Syntax in
+  let* () = if List.mem_assoc "max_bytes" fields then Error Max_bytes_with_contains else Ok () in
+  let* sha256 = sha256_of_fields fields in
+  let* offset =
+    bounded_integer_of_fields
+      fields
+      ~field:"offset"
+      ~default:minimum_offset
+      ~minimum:minimum_offset
+      ~maximum:max_int
+    |> Result.map_error (fun detail -> Offset_invalid detail)
+  in
+  let* needle = needle_of_json contains in
+  let* ignore_case = ignore_case_of_fields fields in
+  let* max_matches =
+    bounded_integer_of_fields
+      fields
+      ~field:"max_matches"
+      ~default:Keeper_artifact_search.default_max_matches
+      ~minimum:Keeper_artifact_search.minimum_max_matches
+      ~maximum:Keeper_artifact_search.maximum_max_matches
+    |> Result.map_error (fun detail -> Max_matches_invalid detail)
+  in
+  Ok (Search_text { sha256; offset; needle; ignore_case; max_matches })
+;;
+
+(* [contains] makes the request a search. Its companions without it, and
+   [max_bytes] with it, are refused by name: a field that is accepted and then
+   has no effect would read as an answer to a question it did not ask. *)
+let operation_of_json json =
+  let page_request () = Result.map (fun request -> Read_page request) (request_of_json json) in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "contains" fields with
+     | Some contains -> search_of_fields fields ~contains
+     | None ->
+       (match
+          List.find_opt (fun field -> List.mem_assoc field fields) [ "ignore_case"; "max_matches" ]
+        with
+        | Some field -> Error (Search_field_without_contains { field })
+        | None -> page_request ()))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> page_request ()
+;;
+
+(* One line per hit: the byte offset of the line, a tab, the line. The offset
+   goes straight into a page read to see what surrounds the hit. A line that
+   was cut says how much was cut. *)
+let search_hit_line (hit : Keeper_artifact_search.hit) =
+  let cut = hit.line_bytes - String.length hit.text in
+  if cut > 0
+  then Printf.sprintf "%d\t%s …(+%d bytes)" hit.offset hit.text cut
+  else Printf.sprintf "%d\t%s" hit.offset hit.text
+;;
+
+(* Same fields as a page, so a result that goes through the declared output
+   schema reads like one. [match_count] and [skipped_lines] are the additions. *)
+let search_to_json
+      (search : search)
+      ~total_bytes
+      ~skipped_lines
+      ~next_offset
+      (hits : Keeper_artifact_search.hit list)
+  =
+  `Assoc
+    ([ "ok", `Bool true
+     ; "sha256", `String search.sha256
+     ; "offset", `Int search.offset
+     ; "next_offset", `Int next_offset
+     ; "total_bytes", `Int total_bytes
+     ; "eof", `Bool (next_offset >= total_bytes)
+     ; "encoding", `String "utf-8"
+     ; "content", `String (String.concat "\n" (List.map search_hit_line hits))
+     ; "match_count", `Int (List.length hits)
+     ]
+     @ (if skipped_lines > 0 then [ "skipped_lines", `Int skipped_lines ] else []))
+;;
+
+(* The result must stay under the wire ceiling or it would itself spill into a
+   file the Keeper cannot open. When the hits do not fit, the last ones are
+   dropped and [next_offset] moves back to the first dropped line, so the next
+   call finds it again and nothing is skipped. *)
+let search_page (search : search) (outcome : Keeper_artifact_search.outcome) =
+  let render kept_count =
+    let kept = List.filteri (fun index _ -> index < kept_count) outcome.hits in
+    let next_offset =
+      match List.nth_opt outcome.hits kept_count with
+      | Some (dropped : Keeper_artifact_search.hit) -> dropped.offset
+      | None -> outcome.next_offset
+    in
+    search_to_json
+      search
+      ~total_bytes:outcome.total_bytes
+      ~skipped_lines:outcome.skipped_lines
+      ~next_offset
+      kept
+  in
+  let fits json =
+    String.length (Yojson.Safe.to_string json) <= Common.max_tool_result_wire_bytes
+  in
+  let rec fit kept_count =
+    let json = render kept_count in
+    if fits json
+    then Ok json
+    else if kept_count = 0
+    then Error "search result metadata exceeds the model-output budget"
+    else fit (kept_count - 1)
+  in
+  fit (List.length outcome.hits)
+;;
+
+type artifact_read_error =
+  | Artifact_missing
+  | Storage_failed of Tool_blob_store.fetch_error
+
+let read_page ~base_path (request : request) =
+  let store = Tool_blob_store.create ~base_path in
+  match
+    Tool_blob_store.fetch_range
+      store
+      ~sha256:request.sha256
+      ~offset:request.offset
+      ~max_bytes:request.max_bytes
+  with
+  | Error error -> storage_failure (Tool_blob_store.fetch_error_to_string error), None
+  | Ok None -> invalid_input "artifact does not exist", None
+  | Ok (Some { content; total_bytes }) ->
+    (match page_of_slice_within_output_budget request ~total_bytes content with
+     | Error message -> invalid_input message, None
+     | Ok page -> Keeper_tool_execution.success_data (page_to_json page), Some page)
+;;
+
+let search_artifact ~base_path (search : search) =
+  let store = Tool_blob_store.create ~base_path in
+  let read ~offset ~max_bytes =
+    match Tool_blob_store.fetch_range store ~sha256:search.sha256 ~offset ~max_bytes with
+    | Ok (Some { content; total_bytes }) -> Ok (content, total_bytes)
+    | Ok None -> Error Artifact_missing
+    | Error error -> Error (Storage_failed error)
+  in
+  let spec : Keeper_artifact_search.spec =
+    { needle = search.needle
+    ; ignore_case = search.ignore_case
+    ; max_matches = search.max_matches
+    ; start = search.offset
+    }
+  in
+  match Keeper_artifact_search.scan ~read spec with
+  | Error (Keeper_artifact_search.Read_failed Artifact_missing) ->
+    invalid_input "artifact does not exist"
+  | Error (Keeper_artifact_search.Read_failed (Storage_failed error)) ->
+    storage_failure (Tool_blob_store.fetch_error_to_string error)
+  | Error (Keeper_artifact_search.Offset_past_end { offset; total_bytes }) ->
+    invalid_input
+      (Printf.sprintf "offset %d exceeds artifact size %d" offset total_bytes)
+  | Error (Keeper_artifact_search.Short_read { offset; total_bytes }) ->
+    storage_failure
+      (Printf.sprintf "artifact ended early: no bytes at offset %d of %d" offset total_bytes)
+  | Ok outcome ->
+    (match search_page search outcome with
+     | Ok json -> Keeper_tool_execution.success_data json
+     | Error message -> invalid_input message)
+;;
+
 let handle_with_page ~base_path ~args =
-  match request_of_json args with
+  match operation_of_json args with
   | Error invalid -> invalid_input (invalid_request_to_string invalid), None
-  | Ok request ->
-    let store = Tool_blob_store.create ~base_path in
-    (match
-       Tool_blob_store.fetch_range
-         store
-         ~sha256:request.sha256
-         ~offset:request.offset
-         ~max_bytes:request.max_bytes
-     with
-     | Error error ->
-       storage_failure (Tool_blob_store.fetch_error_to_string error), None
-     | Ok None -> invalid_input "artifact does not exist", None
-     | Ok (Some { content; total_bytes }) ->
-       (match page_of_slice_within_output_budget request ~total_bytes content with
-        | Error message -> invalid_input message, None
-        | Ok page -> Keeper_tool_execution.success_data (page_to_json page), Some page))
+  | Ok (Read_page request) -> read_page ~base_path request
+  | Ok (Search_text search) -> search_artifact ~base_path search, None
 ;;
 
 let handle ~base_path ~args = fst (handle_with_page ~base_path ~args)
@@ -316,6 +511,8 @@ let handle ~base_path ~args = fst (handle_with_page ~base_path ~args)
 
 module For_testing = struct
   let request_of_json = request_of_json
+  let operation_of_json = operation_of_json
   let page request bytes = page request bytes
   let page_to_json = page_to_json
+  let search_page = search_page
 end

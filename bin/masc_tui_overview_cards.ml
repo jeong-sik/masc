@@ -8,10 +8,29 @@ let min_card_width = 44
 let card_row_gap = 1
 let column_count = 2
 
+(* A row that wraps hangs its later lines in by this much, so a long name that
+   breaks reads as one row and not as the next one. *)
+let hanging_indent = "  "
+
+(* A row is not hung when less than this many cells are left beside the
+   indent: the text would wrap at nearly every word. *)
+let min_hung_text_cells = 8
+
 let row_lines ~cells label =
-  match Layout.wrap_words ~max_cells:(max 1 cells) (Terminal_text.single_line label) with
+  let text = Terminal_text.single_line label in
+  let wrapped width = Layout.wrap_words ~max_cells:(max 1 width) text in
+  match wrapped cells with
   | [] -> [ "" ]
-  | lines -> lines
+  | [ _ ] as line -> line
+  | _ :: _ :: _ as flat ->
+      let text_cells = cells - Layout.display_width hanging_indent in
+      if text_cells < min_hung_text_cells then flat
+      else begin
+        match wrapped text_cells with
+        | first :: (_ :: _ as later) ->
+            first :: List.map (fun line -> hanging_indent ^ line) later
+        | [] | [ _ ] -> flat
+      end
 
 (* A reason the server gives for needing the operator is wrapped like a row and
    drawn in the warning colour on every line it takes. *)

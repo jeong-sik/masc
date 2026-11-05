@@ -45,7 +45,56 @@ let test_a_row_never_loses_its_text () =
                    (Layout.display_width line <= cells))
               lines)
          labels)
+    [ 4; 9; 10; 12; 24; 40; 80 ]
+
+(* A row that takes more than one line reads as one row: its later lines begin
+   two cells in, and a row that fits on a line is as the word wrap gives it. *)
+let test_a_row_that_wraps_hangs_its_later_lines () =
+  List.iter
+    (fun cells ->
+       List.iter
+         (fun label ->
+            match Cards.row_lines ~cells label with
+            | [ only ] ->
+                check (list string) "a row on one line is as it is"
+                  (Layout.wrap_words ~max_cells:cells label) [ only ]
+            | first :: later ->
+                check bool "the first line is not hung" true
+                  (not (String.starts_with ~prefix:" " first));
+                List.iter
+                  (fun line ->
+                     check bool "a later line is hung two cells in" true
+                       (String.starts_with ~prefix:"  " line
+                        && not (String.starts_with ~prefix:"   " line)))
+                  later
+            | [] -> fail "a row has one line at least")
+         labels)
     [ 12; 24; 40; 80 ]
+
+(* Eight cells of text must be left beside the indent: nine cells leave seven,
+   and the row is as the word wrap gives it; ten leave eight, and it hangs. *)
+let test_a_column_too_narrow_for_the_indent_leaves_a_wrapped_row_as_it_is () =
+  List.iter
+    (fun cells ->
+       List.iter
+         (fun label ->
+            check (list string) (Printf.sprintf "as wrapped at %d cells" cells)
+              (Layout.wrap_words ~max_cells:cells label) (Cards.row_lines ~cells label))
+         labels)
+    [ 4; 9 ];
+  let wrapped_at_ten =
+    List.filter_map
+      (fun label ->
+         match Cards.row_lines ~cells:10 label with
+         | _ :: (_ :: _ as later) -> Some later
+         | [] | [ _ ] -> None)
+      labels
+  in
+  check bool "a label wraps at ten cells" true (wrapped_at_ten <> []);
+  List.iter
+    (List.iter (fun line ->
+         check bool "hung at ten cells" true (String.starts_with ~prefix:"  " line)))
+    wrapped_at_ten
 
 let test_a_blank_row_is_still_one_line () =
   check int "an empty row keeps its place" 1 (List.length (Cards.row_lines ~cells:20 ""))
@@ -347,6 +396,10 @@ let () =
   run "tui overview cards"
     [ ( "rows"
       , [ test_case "a row never loses its text" `Quick test_a_row_never_loses_its_text
+        ; test_case "a row that wraps hangs its later lines" `Quick
+            test_a_row_that_wraps_hangs_its_later_lines
+        ; test_case "a column too narrow for the indent leaves a row as it is" `Quick
+            test_a_column_too_narrow_for_the_indent_leaves_a_wrapped_row_as_it_is
         ; test_case "a blank row is still one line" `Quick
             test_a_blank_row_is_still_one_line
         ] )

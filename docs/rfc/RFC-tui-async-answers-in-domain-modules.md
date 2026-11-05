@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: []
+implementation_prs: ["#48685"]
 ---
 
 # RFC: TUI 비동기 답은 그 답의 묶음 모듈이 받아서 반영한다
@@ -27,7 +27,8 @@ TUI 가 서버에서 받은 답(`async_msg`)은 `bin/masc_tui.ml` 의
 
 1. 자기 답 타입 `msg`
 2. 답을 상태에 반영하는 함수 `apply`. IO 는 하지 않고, 남은 할 일을 값으로 돌려준다.
-3. 프로토콜이 답마다 묻는 분류 함수(읽기 답인가, 입력을 기다려야 하는가 등)
+3. 프로토콜과 루프가 답을 어떻게 다룰지 정하는 kind(`answer_kind`). 읽기 답인가, 입력을
+   기다려야 하는가 같은 질문은 답마다가 아니라 kind 로 정한다.
 
 답을 보내는 코드는 자기 묶음 답만 받는 `deliver` 를 받는다. `masc_tui.ml` 은 묶음마다
 한 갈래로 넘기고, 돌려받은 할 일을 실행한다.
@@ -149,29 +150,45 @@ Code 를 감싸는 곳은 32곳이다.
 
 ### 3.1 묶음 모듈이 갖는 것
 
-Code 를 예로 들면 `Masc_tui_code_results` 가 아래를 갖는다.
+Code 를 예로 들면 `Masc_tui_code_results` 가 아래를 갖는다(L1, #48685).
 
 ```ocaml
 type msg =
   | Code_catalog_loaded of …
-  | …                                (* 지금 Masc_tui_async_protocol.code_msg *)
+  | …                                (* 전에 Masc_tui_async_protocol.code_msg *)
+
+type answer_kind = Read | Save       (* 읽기 10개, 초안 저장 1개 *)
 
 type answer_followup =
   | No_answer_followup
   | Reload_saved_file of string      (* Code_draft_saved 뒤 저장한 파일 다시 읽기 *)
 
+val answer_kind : msg -> answer_kind
 val apply : Masc_tui_types.state -> msg -> answer_followup
-val is_read : msg -> bool
 ```
 
 - `msg` 는 프로토콜에서 이 모듈로 옮긴다. 프로토콜은 `| Code_msg of
   Masc_tui_code_results.msg` 로 가리킨다.
 - `apply` 의 본문은 지금 `apply_async_message_body` 의 Code 갈래 본문이다. 터미널·네트워크
   IO 는 하지 않는다. 할 일이 남으면 `answer_followup` 값으로 돌려준다.
-- 분류 함수는 지금 프로토콜 함수가 묶음 생성자 안을 열어 따지는 부분이다. 프로토콜 함수는
-  `| Code_msg msg -> Masc_tui_code_results.is_read msg` 처럼 넘기기만 한다. 묶음마다
-  필요한 분류 함수는 1.4 처럼 프로토콜이 그 묶음을 따지는 곳에서 정해진다.
-- 할 일 타입은 묶음마다 닫힌 variant 다. 문자열이나 콜백으로 열어 두지 않는다.
+- 프로토콜과 루프는 Code 답에 넷을 묻는다. 읽기인가, 입력을 기다리는가, 작업 영수증을
+  싣는가, 작업 공간이 바뀌면 치울 것이 있는가. 묶음 모듈은 답마다 kind 를 정하고, 묻는 쪽은
+  kind 를 빠짐없이 match 한다.
+
+  ```ocaml
+  | Code_msg answer ->
+      (match Masc_tui_code_results.answer_kind answer with
+       | Masc_tui_code_results.Read -> true
+       | Masc_tui_code_results.Save -> false)
+  ```
+
+  답마다 bool 함수를 두면 Code 에서는 같은 11줄 나열이 네 벌 생긴다. `Code_msg _` 로 줄이면
+  새 답이 생겨도 컴파일러가 알려 주지 않는다. 다른 처리가 필요한 답이 생기면 kind 를 더한다.
+  그러면 그 kind 를 따지는 곳이 모두 컴파일 오류로 알려 준다.
+- 답에 실린 작업 영수증과 관찰을 고쳐 쓰는 일(`project_workspace_operation_reply`)처럼 답의
+  내용이 필요한 질문은 kind 로 답할 수 없다. 그런 질문은 그 묶음 모듈의 함수로 둔다. Code
+  답에는 이런 질문이 없다.
+- 할 일 타입과 kind 는 묶음마다 닫힌 variant 다. 문자열이나 콜백으로 열어 두지 않는다.
 
 ### 3.2 답을 보내는 쪽
 
@@ -187,11 +204,18 @@ val launch_file_load : … -> deliver:(Masc_tui_code_results.msg -> unit) -> …
 `masc_tui.ml` 은 감싸는 함수를 한 번 만든다.
 
 ```ocaml
-let deliver_code state mailbox msg = workspace_enqueue state mailbox (Code_msg msg)
+let deliver_code state =
+  let enqueue = workspace_enqueue state in    (* 요청을 보내는 순간 권한을 잡는다 *)
+  fun mailbox answer -> enqueue mailbox (Code_msg answer)
 ```
 
+`workspace_enqueue state` 는 부분 적용하는 순간 작업 공간 권한을 잡는다. 감싸는 함수도 같은
+때 잡아야 한다. `let deliver_code state mailbox msg = workspace_enqueue state mailbox
+(Code_msg msg)` 로 쓰면 답이 도착할 때 잡는다. 그러면 옛 작업 공간의 늦은 답이 새 작업 공간
+것으로 들어온다.
+
 Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 모듈은 다른 묶음의
-답을 보지 않는다.
+답을 보지 않는다. 초안 저장처럼 작업 공간 도장 없이 보내는 답은 그 자리에서 직접 감싼다.
 
 ### 3.3 `masc_tui.ml` 에 남는 것
 
@@ -199,10 +223,10 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
   끝내고, 그다음 입력이 밀려 있는지 본다.
 
   ```ocaml
-  | Code_msg msg -> (
-      match Masc_tui_code_results.apply state msg with
-      | No_answer_followup -> ()
-      | Reload_saved_file path ->
+  | Code_msg answer -> (
+      match Code_results.apply state answer with
+      | Code_results.No_answer_followup -> ()
+      | Code_results.Reload_saved_file path ->
           if not (input_pending ()) then
             Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
               ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path)
@@ -233,7 +257,7 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 | 층 | 하는 일 | 끝난 기준 |
 |---|---|---|
-| L1 | Code 시범. `code_msg`·`apply`·분류 함수를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
+| L1(#48685) | Code 시범. `code_msg`·`apply`·`answer_kind` 를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, Code 생성자를 나열하던 분류 자리 5 → 0, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
 | L2~ | 나머지 얇은 묶음 16개를 서너 개씩 | L1 과 같은 기준 |
 | Ls | 1.3 의 공용 함수 13개를 `masc_tui.ml` 아래 라이브러리로 내리거나 할 일 값으로 바꾼다 | 두꺼운 묶음이 그 함수를 모듈 이름 없이 부르지 않는다 |
 | Lt | 두꺼운 묶음(Runtime, Lane, Voice, Board, Observer 등) | L1 과 같은 기준 |
@@ -241,8 +265,9 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 ## 5. 검증
 
-- **컴파일러**: `apply` 와 분류 함수는 자기 `msg` 를 와일드카드 없이 빠짐없이 match 한다.
-  새 답을 더하면 두 곳이 컴파일 오류로 알려 준다.
+- **컴파일러**: `apply` 와 `answer_kind` 는 자기 `msg` 를 와일드카드 없이 빠짐없이 match
+  한다. 새 답을 더하면 두 곳이 컴파일 오류로 알려 준다. kind 를 더하면 그 kind 를 따지는
+  곳이 모두 알려 준다.
 - **시험**: 묶음마다 모든 생성자를 나열해 `apply`·분류 함수를 부르는 시험을 둔다.
   `test/test_tui_code_msg.ml` 이 이미 `code_msg` 를 생성자마다 나열한다.
 - **파싱 검사(층마다)**: `apply_async_message_body` 에 그 묶음 갈래가 하나만 있는지, 그 묶음
@@ -253,16 +278,19 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 
 - `apply_async_message_body` 는 열린 PR 이 자주 건드린다. 층마다 묶음 하나만 옮겨서 충돌
   범위를 줄인다.
-- 프로토콜이 묶음 모듈을 보게 된다. 묶음 모듈의 의존이 무거우면 타입만 담은 작은 모듈
-  (예: `masc_tui_code_msg`)로 나눌 수 있다. L1 에서 정한다.
+- 프로토콜이 묶음 모듈을 보게 된다. Code 는 반영 모듈에 둔다(L1). `masc_tui_code_results`
+  가 받는 라이브러리 8개는 프로토콜이 이미 받는다. 그래서 프로토콜의 의존은 이 라이브러리
+  하나만 는다. 다른 묶음도 같은 방법으로 잰다. 묶음 모듈이 프로토콜이 받지 않는 라이브러리를
+  받으면 그때 타입만 담은 모듈을 검토한다.
+- `dune-project` 가 `(implicit_transitive_deps false)` 다. 묶음 타입의 생성자를 쓰는 stanza 는
+  그 묶음 라이브러리를 직접 적어야 한다. L1 은 시험 stanza 에 더했다.
 - 옮기는 동안 두 모양이 섞인다. 층마다 묶음 하나를 끝까지 옮겨서, 반쯤 옮긴 묶음은 남기지
   않는다.
 
 ## 7. 열린 질문
 
 1. `approval_cursor`·`approval_flow` 의 주인은 Gate, Approvals, Keeper 중 누구인가.
-2. `msg` 를 반영 모듈에 둘까, 타입만 담은 모듈에 둘까.
-3. 답이 하나뿐인 묶음 중 주인이 분명한 답은 그 주인 묶음으로 옮길까.
+2. 답이 하나뿐인 묶음 중 주인이 분명한 답은 그 주인 묶음으로 옮길까.
 
 ## 부록 A. 세는 방법
 

@@ -10,25 +10,9 @@ let generate_session_id () =
 let get_hostname () =
   try Some (Unix.gethostname ()) with Unix.Unix_error _ -> None
 
-let get_tty () =
-  try
-    match Sys.getenv_opt "TTY" with
-    | Some tty -> Some tty
-    | None ->
-        try
-          if Unix.isatty Unix.stdin then
-            let output =
-              Process_eio.run_argv [ "tty" ]
-            in
-            let trimmed = String.trim output in
-            if String.length trimmed > 0 then Some trimmed else None
-          else None
-        with Unix.Unix_error _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e ->
-    Log.Misc.error "get_tty failed: %s" (Printexc.to_string e);
-    None
+(* The [TTY] the environment names. A child run through [Process_eio] reads
+   an empty stdin (#46850), so [tty] run there answers "not a tty". *)
+let get_tty () = Sys.getenv_opt "TTY"
 
 let resolve_agent_name config agent_name =
   let exact_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in

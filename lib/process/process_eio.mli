@@ -292,7 +292,9 @@ type output_destination =
           the output is not bounded by any capture cap. *)
 
 type input_origin =
-  | Inherited  (** the child keeps this process's stdin *)
+  | Inherited
+      (** the pipe from the stage before; a lone process, or the first stage,
+          reads an input already at its end and never this process's stdin *)
   | From_string of string  (** feed the child a string this process holds *)
   | Read_from of { path : string }  (** the child reads the file itself *)
 

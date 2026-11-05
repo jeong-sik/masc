@@ -12,12 +12,17 @@ with the terminal as its stdin; the child's shell must reach end of input.
 The manager case also verifies that foreground Ctrl+C can still stop the
 fixture and its child. A background server's explicit /dev/tty access is a
 separate RFC-0470 supervisor problem.
+
+The pipe cases start the fixture with a pipe holding one line as its stdin.
+A runner child given no input must reach end of input and never read that
+line, which was written for the fixture (#46850).
 """
 import argparse
 import os
 import pty
 import select
 import signal
+import subprocess
 import sys
 import time
 import unittest
@@ -114,6 +119,27 @@ class TerminalStdin(unittest.TestCase):
         self.assertNotIn(FIXTURE_STILL_RUNNING, output, output)
         self.assertIsNotNone(status, output)
         self.assertTrue('signaled' in output or os.WIFSIGNALED(status), output)
+
+
+class PipeStdin(unittest.TestCase):
+    def check_mode(self, mode):
+        result = subprocess.run(
+            [args.binary, mode] + READER,
+            input=b'written-for-the-fixture\n',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=DEADLINE_SECONDS,
+            check=False,
+        )
+        output = result.stdout.decode('utf-8', 'replace')
+        self.assertIn('exited 0 end-of-input', output,
+                      '{} runner: the child read the fixture\'s stdin:\n{}'.format(mode, output))
+
+    def test_the_eio_runner_gives_its_child_an_empty_input(self):
+        self.check_mode('eio')
+
+    def test_the_unix_fallback_gives_its_child_an_empty_input(self):
+        self.check_mode('unix')
 
 
 if __name__ == '__main__':

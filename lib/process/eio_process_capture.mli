@@ -37,10 +37,17 @@ val drain_to_eof :
     invoking callbacks before adding each chunk to the preview. Mark capture
     complete only at EOF, then close the reader. *)
 
+val child_input :
+  sw:Eio.Switch.t -> Eio.Flow.source_ty Eio.Resource.t option ->
+  Eio.Flow.source_ty Eio.Resource.t
+(** The flow a child reads as stdin: the given source, or with none an input
+    already at its end. Eio's own default is this process's stdin, so a pipe
+    or file the server holds there would reach every child it runs (#46850). *)
+
 val spawn_and_drain_stdout :
   ?phase_ref:Timeout_origin.t ref -> sw:Eio.Switch.t ->
   Eio_unix.Process.mgr_ty Eio.Resource.t -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  ?env:string array -> ?stdin_source:_ Eio.Flow.source ->
+  ?env:string array -> ?stdin_source:Eio.Flow.source_ty Eio.Resource.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t -> string list ->
   Exec_buffer.t -> Unix.process_status
 
@@ -48,7 +55,7 @@ val spawn_and_drain_both :
   ?phase_ref:Timeout_origin.t ref -> ?output_capture:Process_output_capture.t ->
   sw:Eio.Switch.t -> Eio_unix.Process.mgr_ty Eio.Resource.t ->
   cwd:Eio.Fs.dir_ty Eio.Path.t -> ?env:string array ->
-  ?stdin_source:_ Eio.Flow.source -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?stdin_source:Eio.Flow.source_ty Eio.Resource.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string list -> ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) -> Exec_buffer.t -> Exec_buffer.t ->
   Unix.process_status

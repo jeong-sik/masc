@@ -386,20 +386,16 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          else
            Unix.stderr
        in
-       let stdin_r_opt, stdin_w_opt =
-         match stdin_content with
-         | None -> (None, None)
-         | Some _ ->
-             let r, w = Unix.pipe ~cloexec:true () in
-             (Some r, Some w)
-       in
-       stdin_r_ref := stdin_r_opt;
-       stdin_w_ref := stdin_w_opt;
-       let stdin_fd =
-         match !stdin_r_ref with
-         | Some fd -> fd
-         | None -> Unix.stdin
-       in
+       let stdin_fd, stdin_w = Unix.pipe ~cloexec:true () in
+       stdin_r_ref := Some stdin_fd;
+       stdin_w_ref := Some stdin_w;
+       (* A child given no input reads end of input at once, so it never
+          holds this process's own stdin (#46850). *)
+       (match stdin_content with
+        | None ->
+          close_quietly stdin_w;
+          stdin_w_ref := None
+        | Some _ -> ());
        let () =
          try
            let cwd = fallback_cwd cwd in
@@ -686,8 +682,9 @@ type input_origin =
   | Read_from of { path : string }
 
 (* [Inherited] / [Captured] mean the stage takes the pipeline's own plumbing:
-   the pipe from the stage before it, the pipe to the stage after it, the
-   stderr this runtime collects. A file replaces that plumbing for one stream,
+   the pipe from the stage before it (for the first stage, an input already
+   at its end), the pipe to the stage after it, the stderr this runtime
+   collects. A file replaces that plumbing for one stream,
    which is how a shell reads `a > f | b` -- b's stdin is still the link, and
    it simply reaches EOF with nothing in it. *)
 type pipeline_stage = {
@@ -1107,7 +1104,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
                Eio.Process.spawn ~sw
                  (Posix_spawn_process_mgr.foreground_mgr ~clock:clk
                     ~grace_seconds:child_exit_grace_seconds) ~cwd:effective_cwd ?env
-                 ?stdin:stdin_source
+                 ~stdin:(Eio_process_capture.child_input ~sw stdin_source)
                  ~stdout:out.child_flow
                  ~stderr:err.child_flow
                  argv
@@ -1536,7 +1533,7 @@ let run_argv_pipeline_with_status_split ?timeout_sec
                               ~grace_seconds:child_exit_grace_seconds)
                            ~cwd:(effective_cwd default_cwd stage.cwd)
                            ?env:stage.env
-                           ?stdin
+                           ~stdin:(Eio_process_capture.child_input ~sw stdin)
                            ~stdout
                            ~stderr
                            stage.argv

@@ -1,8 +1,9 @@
 (* Runs argv as a child of one of masc's spawn paths and prints how the child
    ended. [mgr] uses the server's Posix_spawn_process_mgr and hands the child
    this fixture's terminal stdin. [eio] initialises the Eio process layer;
-   [unix] takes the runner's Unix fallback. The PTY test checks stdin
-   redirection and that a foreground manager remains interruptible. *)
+   [unix] takes the runner's Unix fallback. The test checks that a child
+   reads neither a terminal nor a pipe this fixture holds as stdin, and that
+   a foreground manager remains interruptible. *)
 
 (* Every case rests on this line: the fixture itself has a controlling
    terminal. Without one no child could open it either, and a pass would

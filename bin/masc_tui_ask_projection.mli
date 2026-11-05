@@ -139,6 +139,14 @@ val should_ring_for_new_ask :
     the operator is not already watching the asks surface. The watching flag is
     the caller's to compute from the surface (and later window focus). *)
 
+val arrival_notification : Masc.Tui_decode_asks.ask_key list -> string
+(** The text of the desktop banner a new question rings, without the terminal
+    framing: ["<asker> is waiting on a decision"] for one question and
+    ["<n> questions are waiting on a decision"] otherwise. The asker's name is
+    external text, so it goes through
+    {!Masc.Tui_terminal_text.sanitize_terminal_text}: a name holding BEL or ESC
+    cannot end the OSC 9 sequence the caller writes this into. *)
+
 val toggle_choice :
   draft ->
   question:Masc.Tui_decode_asks.ask_question ->

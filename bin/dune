@@ -1174,6 +1174,12 @@
  (libraries masc_tui_terminal_palette))
 
 (library
+ (name masc_tui_nav_trace)
+ (wrapped false)
+ (modules masc_tui_nav_trace)
+ (libraries masc_tui_frame_presenter yojson))
+
+(library
  (name masc_tui_terminal_profile)
  (wrapped false)
  (modules masc_tui_terminal_profile))

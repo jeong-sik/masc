@@ -79,12 +79,8 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         count_total =
           meta.runtime.proactive_rt.count_total
           + (if is_scheduled_autonomous_cycle then 1 else 0);
-        (* Always update last_ts on scheduled_autonomous attempts,
-           including transient errors. Without this, transient errors
-           (e.g. llama-server down) leave last_ts stale, causing
-           cooldown_elapsed=false permanently → scheduled turns never
-           resume. last_ts tracks attempts, not successes.
-           Root cause of keeper zombie state: #5594. *)
+        (* A failed scheduled autonomous attempt is still that cycle's
+           attempt, counted by the same rule as [count_total]. *)
         last_ts =
           if is_scheduled_autonomous_cycle then now_ts
           else meta.runtime.proactive_rt.last_ts;

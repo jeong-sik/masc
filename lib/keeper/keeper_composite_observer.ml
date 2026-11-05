@@ -417,7 +417,7 @@ let observe
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
     idle_seconds =
-      (let last = entry.meta.runtime.proactive_rt.last_ts in
+      (let last = entry.meta.runtime.usage.last_turn_ts in
        if last <= 0.0 then 0
        else int_of_float (max 0.0 (Time_compat.now () -. last)));
     last_turn_ts = entry.meta.runtime.usage.last_turn_ts;

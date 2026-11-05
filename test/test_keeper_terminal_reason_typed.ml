@@ -1619,6 +1619,53 @@ max-concurrent = 1
     (String.equal
        updated.runtime.proactive_rt.last_reason
        "unified:reactive_success");
+  (* A board-reactive turn with a visible reply is a turn, not a scheduled
+     autonomous cycle: the turn clock moves, the cycle clock and count stay. *)
+  let cycle_ts = 5.0 in
+  let prior_with_cycle =
+    { meta with
+      runtime =
+        { meta.runtime with
+          proactive_rt = { meta.runtime.proactive_rt with last_ts = cycle_ts }
+        ; usage = { meta.runtime.usage with last_turn_ts = cycle_ts }
+        }
+    }
+  in
+  let reacted =
+    reactive_success
+      ~prior:prior_with_cycle
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"before the reactive turn"
+      ()
+  in
+  check
+    "a reactive turn leaves the scheduled cycle time"
+    (Float.equal reacted.runtime.proactive_rt.last_ts cycle_ts);
+  check
+    "a reactive turn leaves the scheduled cycle count"
+    (reacted.runtime.proactive_rt.count_total
+     = prior_with_cycle.runtime.proactive_rt.count_total);
+  check
+    "a reactive turn moves the turn time"
+    (reacted.runtime.usage.last_turn_ts > cycle_ts);
+  (* Idle counts from the last turn of any channel, so a keeper that only
+     answers wakes is not reported idle since its last scheduled cycle. *)
+  let wall_now = Unix.gettimeofday () in
+  let answering_meta =
+    { meta with
+      created_at = "2020-01-01T00:00:00Z"
+    ; runtime =
+        { meta.runtime with
+          proactive_rt =
+            { meta.runtime.proactive_rt with last_ts = wall_now -. 10_000.0 }
+        ; usage = { meta.runtime.usage with last_turn_ts = wall_now -. 10.0 }
+        }
+    }
+  in
+  check
+    "idle counts from the last turn"
+    (Masc.Keeper_world_observation_inputs.compute_idle_seconds ~meta:answering_meta
+     < 1_000);
   let error_like_reason = "unified:error:display text is not state" in
   let updated =
     reactive_success

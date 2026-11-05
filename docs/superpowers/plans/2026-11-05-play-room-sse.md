@@ -82,7 +82,10 @@
 **Files:**
 - Create: `lib/server/server_play_room_events.ml`, `lib/server/server_play_room_events.mli`
 - Modify: `lib/server/server_mcp_transport_http.ml`, `lib/server/server_routes_http_routes_play_room.ml`
+- Modify: `lib/sse.ml`, `lib/sse.mli`, preserving `Sse.register` while returning the exact client through `register_with_client`
+- Modify: `lib/play/play_room.ml`, `lib/play/play_room.mli` with a typed Join/Leave client projection
 - Create: `test/test_server_play_room_events.ml`, `test/stanzas/test_server_play_room_events.inc`
+- Modify: `test/test_tui_execute_stream_http.ml` for the real Observer handoff contract
 - Modify: `test/dune` only if the generated stanza include is not automatic
 
 **Interfaces:**
@@ -90,7 +93,8 @@
 - `room_scope` contains only `play_client` and `machine`, using the existing identifier and machine decoders.
 - Produces: `connect`, `renew`, `disconnect`, each taking `~base_path ~agent_name ~role ~scope ~sse_client_id` and returning `(unit, Play_room.error) result`.
 - Produces: `perform_http ~base_path ~agent_name ~role ~action`, allowing Join only without an active lease and Leave only without an active lease; Read/Say call `Play_room.perform_with_change` without membership upsert.
-- Transport passes `agent_name` and `role` from the exact register-returned client and its `client_id`, not the current session.
+- `Sse.register_with_client` returns the exact committed `Sse.client`; transport passes its `agent_name`, `role`, `event_stream`, and `id`, not a current-session lookup.
+- `Play_room.presence` exposes only the typed Join/Leave operation and client identity needed by the HTTP lease guard.
 
 - [ ] **Step 1: Write failing tests**
   - `connect` creates membership and a `play_room` event; renew updates seen_at but emits nothing; disconnect removes membership.
@@ -116,7 +120,7 @@
   - Expect all selected suites to pass; no extra Machine step, public SSE regression, or Leave/Join gap in the handoff contract.
 
 - [ ] **Step 5: Commit**
-  - `git add lib/server/server_play_room_events.ml lib/server/server_play_room_events.mli lib/server/server_mcp_transport_http.ml lib/server/server_routes_http_routes_play_room.ml test/test_server_play_room_events.ml test/stanzas/test_server_play_room_events.inc test/dune`
+  - `git add lib/server/server_play_room_events.ml lib/server/server_play_room_events.mli lib/server/server_mcp_transport_http.ml lib/server/server_routes_http_routes_play_room.ml lib/sse.ml lib/sse.mli lib/play/play_room.ml lib/play/play_room.mli test/test_server_play_room_events.ml test/stanzas/test_server_play_room_events.inc test/test_tui_execute_stream_http.ml test/dune`
   - `git -c core.hooksPath=/dev/null commit -m "feat(sse): bind play presence to observers"`
 
 ### Task 3: Stop successful polling and retain exact revalidation

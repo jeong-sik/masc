@@ -237,6 +237,13 @@ type observer_recovery_origin =
   | Observer_existing_workspace of Masc.Tui_decode.server_identity
   | Observer_initial_workspace of local_workspace_paths
 
+(* A timer's tick. Each carries the workspace authority it was set under;
+   the observer and contact ticks also the owner token that set them. *)
+type retry_tick =
+  | Observer_retry of workspace_authority * unit ref
+  | Contact_retry of workspace_authority * unit ref
+  | Fleet_stream_retry of workspace_authority
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -802,7 +809,7 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
-  | Observer_retry_due of workspace_authority * unit ref
+  | Retry_due of retry_tick
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
@@ -1061,7 +1068,7 @@ let rec workspace_message_is_read = function
   | Identity_providers_loaded _
   | Observer_session_ready _ | Observer_opened _
   | Observer_received _
-  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
+  | Observer_closed _ | Retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _
   | Fleet_stream_reader_ended _
   | Keeper_chat_dispatch_started _
@@ -1236,7 +1243,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _ | Account_login_event _ | Account_login_json _
   | Account_login_removal _ | Github_login_lines _ | Github_login_finished _
-  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
+  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
   | Task_creation_read_done _ | Keeper_queue_action_received _
@@ -1397,7 +1404,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
-    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
+    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _
     | Fleet_stream_view _ | Fleet_stream_reader_ended _
     | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
@@ -1535,5 +1542,5 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _
+  | Observer_received (_, _) | Observer_closed _ | Retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _
   | Fleet_stream_reader_ended _ | Task_dispatch_completed _ -> message

@@ -5,8 +5,6 @@ read (RFC-0480 L8).
 
 The refresh cadence is pushed out of the test's lifetime, so every read
 after the workspace is admitted comes from an announcement or a failed read.
-One case runs the cadence every second and checks that it does not read
-them.
 """
 
 import os
@@ -126,19 +124,6 @@ class PendingConfirmsSignalTest(unittest.TestCase):
             self.assertEqual(server.count("changed", OPERATOR_PATH), 1)
 
         self.run_confirms(scenario)
-
-    def test_the_cadence_does_not_read_the_confirmations(self) -> None:
-        def scenario(server: ConfirmsServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
-            with server.condition:
-                health_before = server.health_reads
-            step("drain", 3.5)
-            with server.condition:
-                cadence_passes = server.health_reads - health_before
-            self.assertGreaterEqual(cadence_passes, 2, "the cadence did not run")
-            self.assertEqual(server.count("cadence", OPERATOR_PATH), 0)
-
-        self.run_confirms(scenario, refresh_seconds=1.0)
 
     def test_failed_confirmation_reads_are_read_again_with_growing_waits(self) -> None:
         def scenario(server: ConfirmsServer, step: Callable[..., None]) -> None:

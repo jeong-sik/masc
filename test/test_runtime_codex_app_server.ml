@@ -9143,7 +9143,7 @@ let captured_extra_context_blocks (blocks : Keeper_prompt_capture.block list) =
     | Keeper_instructions | Active_goals | Completion_authority -> None
     | Dynamic_context | Constitution_amendments | Temporal_summary | Memory_os_recall
     | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note
-    | Skill_compositions ->
+    | Skill_compositions | Arrived_stimuli ->
       Some (block.id, block.text)) blocks
 ;;
 

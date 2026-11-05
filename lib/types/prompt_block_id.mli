@@ -36,7 +36,14 @@
     only through [current_task.skills] / [held_task.skills], which render only
     when a task names one, and 0 of 292 recorded tasks ever did (RFC-0411 §1.5).
     Measured 2026-09, Skills were opened 250 times across 108,185 tool calls,
-    and the busiest runtime opened none in 24,041 calls. *)
+    and the busiest runtime opened none in 24,041 calls.
+
+    [Arrived_stimuli] lists the queue rows that reached a Keeper's queue after
+    the running turn began. The queue is read between turns, so a row that
+    arrives during a turn waited for the turn to end; this block shows it on
+    the next provider round that follows tool results, once, and the row stays
+    queued (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). It is
+    produced only on those rounds of an Agent Core turn. *)
 
 type t =
   | Keeper_instructions
@@ -51,6 +58,7 @@ type t =
   | Recalled_memory_status
   | Operator_note
   | Skill_compositions
+  | Arrived_stimuli
 
 val equal : t -> t -> bool
 val to_string : t -> string
@@ -113,6 +121,11 @@ val injected_on_post_tool_round : t -> bool
     [Recalled_memory] and [Recalled_memory_status] are first-round blocks as
     well: the judgment is made once, before the turn's first request.
 
+    [Arrived_stimuli] answers [true] and is produced only on a round that
+    follows tool results: it holds what arrived after the turn began, which no
+    earlier round could carry. It is not re-broadcast state, because a row is
+    listed on the first round after it arrives and never again in that turn.
+
     [Temporal_summary] is one of those first-round blocks for the same
     reason, so the clock a Keeper reads is the one rendered for its turn's
     first provider request: a round that follows tool results carries no
@@ -136,6 +149,9 @@ val resent_when_held : t -> bool
     layer's [Sent_every_resume] semantics even when the session saw identical
     bytes. [Constitution_amendments] answers [false]: the same bytes name the
     same articles the session already holds.
+
+    [Arrived_stimuli] answers [false]: an official-client resume never carries
+    it, so the answer only completes the match.
 
     [Recalled_memory_status] answers [true]: each turn's line names its own
     turn, so an unchanged copy is still a new line, and the session reads the

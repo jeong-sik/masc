@@ -80,7 +80,7 @@ let selected_block_text assembly ~omitted_sections ~omitted_rows (id, text) =
   | Prompt_block_id.(
       Dynamic_context | Active_goals | Completion_authority | Constitution_amendments | Keeper_instructions
       | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-      | Recalled_memory_status | Operator_note | Skill_compositions) -> Some text
+      | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> Some text
 
 let source assembly selected_blocks ~omitted_sections ~omitted_rows
     (message : Agent_core.Types.message) =

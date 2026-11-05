@@ -97,14 +97,13 @@ import math
 import pathlib
 import re
 import sys
-from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
 from itertools import pairwise
-from typing import cast
+from typing import Protocol, cast
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 LANE_TIME_SCRIPT = REPO_ROOT / "docs" / "evidence" / "lane-time-2026-11" / "measure_lane_time.py"
@@ -166,39 +165,25 @@ class ExecuteCall:
 
 
 Interval = tuple[float, float]
-TurnReader = Callable[[pathlib.Path, float, float], dict[str, list[Interval]]]
+
+
+class TurnTime(Protocol):
+    """The turn time of one Keeper, as `TurnClock` of measure_lane_time.py spells it."""
+
+    @property
+    def seconds(self) -> float: ...
+
+    def overlap(self, start: float, end: float) -> float:
+        """The seconds of [start, end] that lie in the turn time."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
-class TurnClock:
-    """The turn intervals of one Keeper, merged into sorted spans that neither overlap nor touch."""
+class LaneTime:
+    """What this script takes from measure_lane_time.py: the reading of turn intervals and the clock made of them."""
 
-    spans: tuple[Interval, ...]
-    starts: tuple[float, ...]
-
-    @staticmethod
-    def of(intervals: Iterable[Interval]) -> TurnClock:
-        merged: list[Interval] = []
-        for start, end in sorted(intervals):
-            if merged and start <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-            else:
-                merged.append((start, end))
-        return TurnClock(tuple(merged), tuple(start for start, _ in merged))
-
-    @property
-    def seconds(self) -> float:
-        return sum(end - start for start, end in self.spans)
-
-    def overlap(self, start: float, end: float) -> float:
-        """The seconds of [start, end] that lie in a span."""
-        total = 0.0
-        index = bisect_right(self.starts, end) - 1
-        while index >= 0 and self.spans[index][1] > start:
-            span_start, span_end = self.spans[index]
-            total += min(end, span_end) - max(start, span_start)
-            index -= 1
-        return total
+    read_runs: Callable[[pathlib.Path, float, float], dict[str, list[Interval]]]
+    clock_of: Callable[[Iterable[Interval]], TurnTime]
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,8 +344,8 @@ def read_ledger(base: pathlib.Path, first: date, last: date, since: float, until
     return ledger
 
 
-def lane_time_reader() -> TurnReader:
-    """`read_runs` of measure_lane_time.py: the one place that says what a turn interval is."""
+def load_lane_time() -> LaneTime:
+    """measure_lane_time.py: the one place that says what a turn interval is and how a call is clipped to it."""
     spec = importlib.util.spec_from_file_location(LANE_TIME_MODULE, LANE_TIME_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"{LANE_TIME_SCRIPT} is not a Python file")
@@ -371,7 +356,10 @@ def lane_time_reader() -> TurnReader:
     sys.dont_write_bytecode = True  # the import leaves no __pycache__ next to the other script
     try:
         spec.loader.exec_module(module)
-        return cast(TurnReader, module.read_runs)
+        return LaneTime(
+            cast(Callable[[pathlib.Path, float, float], dict[str, list[Interval]]], module.read_runs),
+            cast(Callable[[Iterable[Interval]], TurnTime], module.TurnClock.of),
+        )
     except BaseException:
         del sys.modules[LANE_TIME_MODULE]
         raise
@@ -618,7 +606,7 @@ def keepers_in_both(calls: list[ExecuteCall], wakes: list[ScheduleWake]) -> list
     return [{"keeper": keeper, "blocked_hours": hours(blocked[keeper]), "self_wakes_naming_a_run": woken[keeper]} for keeper in both]
 
 
-def seconds_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnClock]) -> float:
+def seconds_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnTime]) -> float:
     inside = 0.0
     for call in calls:
         clock = turns.get(call.keeper)
@@ -627,7 +615,7 @@ def seconds_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnClock
     return inside
 
 
-def summarize_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnClock], turn_seconds: float) -> dict[str, object]:
+def summarize_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnTime], turn_seconds: float) -> dict[str, object]:
     total = sum(call.seconds for call in calls)
     inside = seconds_inside_turns(calls, turns)
     return {
@@ -639,7 +627,7 @@ def summarize_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnClo
     }
 
 
-def summarize_turn_time(calls: list[ExecuteCall], turns: Mapping[str, TurnClock]) -> dict[str, object]:
+def summarize_turn_time(calls: list[ExecuteCall], turns: Mapping[str, TurnTime]) -> dict[str, object]:
     turn_seconds = sum(clock.seconds for clock in turns.values())
     long_calls = [call for call in calls if call.seconds >= LONG_CALL_SECONDS]
     without_files = [call for call in calls if call.keeper not in turns]
@@ -662,7 +650,7 @@ def summarize_turn_time(calls: list[ExecuteCall], turns: Mapping[str, TurnClock]
     }
 
 
-def summarize(ledger: Ledger, turns: Mapping[str, TurnClock]) -> dict[str, object]:
+def summarize(ledger: Ledger, turns: Mapping[str, TurnTime]) -> dict[str, object]:
     return {
         "rows_in_window": ledger.rows_in_window,
         "skipped_lines": ledger.skipped_lines,
@@ -712,10 +700,10 @@ def main() -> int:
     if ledger.files_read == 0:
         parser.error(f"no ledger file for {args.from_date.isoformat()}..{args.to_date.isoformat()} under {base}")
     try:
-        read_turns = lane_time_reader()
+        lane_time = load_lane_time()
     except (ImportError, OSError, SyntaxError, AttributeError) as error:
         parser.error(f"cannot load the turn reader from {LANE_TIME_SCRIPT}: {error}")
-    turns = {keeper: TurnClock.of(intervals) for keeper, intervals in read_turns(base, since, until).items()}
+    turns = {keeper: lane_time.clock_of(intervals) for keeper, intervals in lane_time.read_runs(base, since, until).items()}
     summary = {
         "window": {
             "from": args.from_date.isoformat(),

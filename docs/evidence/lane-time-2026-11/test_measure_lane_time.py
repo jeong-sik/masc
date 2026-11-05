@@ -5,6 +5,8 @@ Run: python3 -m unittest discover -s docs/evidence/lane-time-2026-11
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import pathlib
 import sqlite3
@@ -12,6 +14,8 @@ import sys
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
+from typing import cast
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -35,6 +39,252 @@ class IntervalTest(unittest.TestCase):
 
     def test_overlap_of_disjoint_intervals_is_zero(self) -> None:
         self.assertEqual(lane.overlap_seconds(30, 40, [(0, 10)]), 0.0)
+
+
+def block(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return cast("dict[str, object]", value)
+
+
+def clocks_of(*spans: tuple[float, float], keeper: str = "k") -> dict[str, lane.TurnClock]:
+    return {keeper: lane.TurnClock.of(spans)}
+
+
+class TurnClockTest(unittest.TestCase):
+    SPANS = ((10.0, 20.0), (30.0, 40.0), (50.0, 60.0))
+
+    def test_overlapping_and_touching_intervals_are_merged(self) -> None:
+        clock = lane.TurnClock.of([(10, 20), (15, 30), (30, 40), (50, 60)])
+        self.assertEqual(clock.spans, ((10, 40), (50, 60)))
+        self.assertEqual(clock.starts, (10, 50))
+        self.assertEqual(clock.seconds, 40)
+
+    def test_an_interval_inside_another_is_absorbed(self) -> None:
+        self.assertEqual(lane.TurnClock.of([(10, 50), (20, 30)]).spans, ((10, 50),))
+
+    def test_intervals_are_sorted_and_may_come_in_any_order(self) -> None:
+        clock = lane.TurnClock.of([(50, 60), (10, 20), (30, 40)])
+        self.assertEqual(clock.spans, self.SPANS)
+        self.assertEqual(clock.starts, (10, 30, 50))
+        self.assertEqual(clock.seconds, 30)
+
+    def test_no_intervals_hold_no_time(self) -> None:
+        clock = lane.TurnClock.of([])
+        self.assertEqual((clock.spans, clock.starts, clock.seconds, clock.overlap(0, 100)), ((), (), 0, 0))
+
+    def test_the_overlap_of_a_call_with_the_spans(self) -> None:
+        clock = lane.TurnClock.of(self.SPANS)
+        cases = [
+            (12, 18, 6),  # inside one span
+            (0, 5, 0),  # before all spans
+            (65, 70, 0),  # after all spans
+            (5, 15, 5),  # starts before a span
+            (15, 25, 5),  # ends after a span
+            (15, 35, 10),  # reaches over the gap between two spans
+            (0, 100, 30),  # holds every span
+            (20, 30, 0),  # exactly the gap
+            (40, 50, 0),  # exactly the next gap
+            (35, 55, 10),  # the second and the third span
+            (10, 10, 0),  # no length, on the edge of a span
+            (12, 12, 0),  # no length, inside a span
+            (10, 20, 10),  # exactly one span
+        ]
+        for start, end, expected in cases:
+            with self.subTest(start=start, end=end):
+                self.assertEqual(clock.overlap(start, end), expected)
+
+    def test_a_call_that_ends_where_a_span_starts_has_no_overlap_with_it(self) -> None:
+        clock = lane.TurnClock.of(self.SPANS)
+        self.assertEqual(clock.overlap(25, 30), 0)
+        self.assertEqual(clock.overlap(60, 70), 0)
+
+    def test_the_seconds_of_a_clock_equal_the_union_of_its_intervals(self) -> None:
+        intervals: list[lane.Interval] = [(0, 10), (5, 15), (20, 25), (25, 30)]
+        self.assertEqual(lane.TurnClock.of(intervals).seconds, lane.union_seconds(intervals))
+
+
+class InsideTurnsTest(unittest.TestCase):
+    def test_a_call_counts_only_the_seconds_inside_the_turn_time(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 10), call(20, 30)], clocks_of((5, 25)))
+        self.assertEqual(summary["tool_time_s"], 10.0)
+        self.assertEqual(summary["execute_time_s"], 10.0)
+
+    def test_only_execute_counts_as_execute_time(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 10), call(10, 30, tool="Read")], clocks_of((0, 100)))
+        self.assertEqual((summary["tool_time_s"], summary["execute_time_s"]), (30.0, 10.0))
+
+    def test_a_gap_counts_only_the_seconds_inside_the_turn_time(self) -> None:
+        # The gap is 2..10 and the turn time 1..6: 4 of its 8 seconds are inside.
+        summary = lane.summarize_inside_turns([call(0, 2), call(10, 12)], clocks_of((1, 6)))
+        self.assertEqual(summary["between_calls_s"], 4.0)
+
+    def test_a_gap_that_reaches_over_two_spans_counts_both_parts(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 2), call(30, 31)], clocks_of((1, 5), (20, 40)))
+        self.assertEqual(summary["between_calls_s"], 3.0 + 10.0)
+
+    def test_a_keeper_without_a_clock_has_nothing_inside(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 10), call(20, 30)], {})
+        self.assertEqual((summary["tool_time_s"], summary["between_calls_s"], summary["other_turn_time_s"]), (0.0, 0.0, 0.0))
+        self.assertEqual(set(block(summary["percent_of_turn_time"]).values()), {None})
+
+    def test_each_keeper_is_measured_against_its_own_clock(self) -> None:
+        calls = [lane.Call("a", "a/t#1", "Execute", 0, 10, False, False), lane.Call("b", "b/t#1", "Execute", 0, 10, False, False)]
+        clocks = {"a": lane.TurnClock.of([(0, 4)]), "b": lane.TurnClock.of([(6, 20)])}
+        self.assertEqual(lane.summarize_inside_turns(calls, clocks)["tool_time_s"], 4.0 + 4.0)
+
+    def test_overlapping_calls_add_no_gap(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 5), call(3, 8)], clocks_of((0, 10)))
+        self.assertEqual(summary["between_calls_s"], 0.0)
+
+    def test_other_turn_time_is_what_the_inside_tools_and_gaps_leave(self) -> None:
+        full = lane.summarize_inside_turns([call(0, 2), call(5, 6)], clocks_of((0, 20)))
+        self.assertEqual(full["other_turn_time_s"], 20.0 - 3.0 - 3.0)
+        # The turn time ends at 5.5: the first call and the gap are inside, half of the second call is.
+        cut = lane.summarize_inside_turns([call(0, 2), call(5, 6)], clocks_of((0, 5.5)))
+        self.assertEqual(cut["other_turn_time_s"], 5.5 - 2.5 - 3.0)
+
+    def test_a_reread_counts_the_inside_gap_and_the_inside_call(self) -> None:
+        # The gap is 1..4 and the reread call 4..6; the turn time is 0.5..5: 3 s of the gap and 1 s of the call.
+        summary = lane.summarize_inside_turns([call(0, 1), call(4, 6, reread=True)], clocks_of((0.5, 5)))
+        self.assertEqual(summary["rereads_after_first_call_turn_time_s"], 4.0)
+
+    def test_long_execute_and_polling_count_only_inside_seconds(self) -> None:
+        calls = [call(0, 100, polling=True), call(200, 210, polling=True), call(300, 400, tool="Read")]
+        summary = lane.summarize_inside_turns(calls, clocks_of((50, 350)))
+        # Tools: 50 + 10 + 50. Execute: 50 + 10. Only the first call is long, and it is polling.
+        self.assertEqual(summary["tool_time_s"], 110.0)
+        self.assertEqual(summary["execute_time_s"], 60.0)
+        self.assertEqual((summary["long_execute_time_s"], summary["polling_time_s"]), (50.0, 50.0))
+
+    def test_a_call_is_long_by_its_whole_length_and_not_by_its_inside_part(self) -> None:
+        summary = lane.summarize_inside_turns([call(0, 100)], clocks_of((90, 200)))
+        self.assertEqual(summary["long_execute_time_s"], 10.0)
+
+    def test_polling_by_keeper_counts_the_inside_seconds_against_the_keepers_own_turn_time(self) -> None:
+        def poll(keeper: str, start: float, end: float) -> lane.Call:
+            return lane.Call(keeper, f"{keeper}/t#1", "Execute", start, end, False, True)
+
+        calls = [
+            poll("a", 0, 100),  # 50 s inside
+            poll("b", 0, 100),  # 100 s inside
+            poll("b", 200, 230),  # not long, so not polling
+            poll("c", 0, 100),  # Keeper c has no clock
+            poll("d", 0, 100),  # outside the turn time of d
+        ]
+        clocks = {"a": lane.TurnClock.of([(50, 150)]), "b": lane.TurnClock.of([(0, 300)]), "d": lane.TurnClock.of([(500, 600)])}
+        listed = block(lane.summarize_inside_turns(calls, clocks)["polling_by_keeper"])
+        self.assertEqual(list(listed), ["b", "a"])  # largest first; c and d have no inside polling
+        self.assertEqual(listed["b"], {"polling_s": 100.0, "turn_time_s": 300.0})
+        self.assertEqual(listed["a"], {"polling_s": 50.0, "turn_time_s": 100.0})
+
+    def test_the_shares_are_of_the_turn_time_and_rounded_to_one_decimal(self) -> None:
+        shares = block(lane.summarize_inside_turns([call(0, 10)], clocks_of((0, 30)))["percent_of_turn_time"])
+        self.assertEqual((shares["tool"], shares["execute"], shares["between_calls"], shares["other"]), (33.3, 33.3, 0.0, 66.7))
+        self.assertEqual((shares["long_execute"], shares["polling"], shares["rereads_after_first_call"]), (0.0, 0.0, 0.0))
+
+    def test_the_turn_time_is_the_sum_of_the_keepers_merged_intervals(self) -> None:
+        # Keeper a holds 150 s and b 100 s: 250 s, not 350 s.
+        clocks = {"a": lane.TurnClock.of([(0, 100), (50, 150)]), "b": lane.TurnClock.of([(0, 100)])}
+        shares = block(lane.summarize_inside_turns([call(0, 25)], clocks)["percent_of_turn_time"])
+        self.assertEqual(shares["tool"], 0.0)  # the call belongs to Keeper k, which has no clock
+        calls = [lane.Call("a", "a/t#1", "Execute", 0, 25, False, False)]
+        self.assertEqual(block(lane.summarize_inside_turns(calls, clocks)["percent_of_turn_time"])["tool"], 10.0)
+
+    def test_with_every_call_inside_the_totals_equal_those_of_summarize_calls(self) -> None:
+        calls = [call(0, 2), call(5, 9, reread=True), call(20, 30, tool="Read"), call(0, 1, turn="k/t#2")]
+        full = lane.summarize_calls(calls, {"k": 100.0})
+        inside = lane.summarize_inside_turns(calls, clocks_of((0, 100)))
+        self.assertEqual(inside["tool_time_s"], full["tool_time_s"])
+        self.assertEqual(inside["execute_time_s"], full["execute_time_s"])
+        self.assertEqual(inside["between_calls_s"], block(full["between_calls"])["sum_s"])
+        self.assertEqual(inside["other_turn_time_s"], full["other_turn_time_s"])
+        self.assertEqual(inside["rereads_after_first_call_turn_time_s"], block(full["rereads_after_first_call"])["turn_time_s"])
+
+
+def call_of_turn(turn: str, turn_kind: str, start: float, end: float, *, tool: str = "Execute") -> lane.Call:
+    return lane.Call("k", turn, tool, start, end, False, False, 0, "unknown", turn_kind)
+
+
+class UntracedTest(unittest.TestCase):
+    def test_calls_of_turns_without_a_trace_file_are_counted_by_turn_kind(self) -> None:
+        calls = [
+            call_of_turn("k/trace-1-00000#1", "autonomous", 0, 10),  # has a trace file
+            call_of_turn("k/trace-1-00000#2", "direct", 0, 20),
+            call_of_turn("k/trace-1-00000#2", "direct", 30, 35, tool="Read"),
+            call_of_turn("k/trace-1-00000#3", "autonomous", 0, 40),
+        ]
+        summary = lane.summarize_untraced(calls, frozenset({"k/trace-1-00000#1"}), {})
+        self.assertEqual((summary["calls"], summary["turns"], summary["tool_time_s"], summary["execute_time_s"]), (3, 2, 65.0, 60.0))
+        self.assertEqual(summary["turns_in_window"], 3)
+        kinds = block(summary["by_turn_kind"])
+        self.assertEqual(list(kinds), ["autonomous", "direct"])
+        self.assertEqual(
+            block(kinds["direct"]), {"calls": 2, "turns": 1, "tool_time_s": 25.0, "execute_time_s": 20.0, "turns_of_this_kind": 1}
+        )
+        # The autonomous turn that has a trace file counts in `turns_of_this_kind`, not in `turns`.
+        self.assertEqual(
+            block(kinds["autonomous"]), {"calls": 1, "turns": 1, "tool_time_s": 40.0, "execute_time_s": 40.0, "turns_of_this_kind": 2}
+        )
+
+    def test_when_every_turn_has_a_trace_file_nothing_is_untraced(self) -> None:
+        summary = lane.summarize_untraced([call_of_turn("k/trace-1-00000#1", "autonomous", 0, 10)], frozenset({"k/trace-1-00000#1"}), {})
+        self.assertEqual((summary["calls"], summary["turns"], summary["tool_time_s"], summary["by_turn_kind"]), (0, 0, 0.0, {}))
+        self.assertEqual((summary["turns_in_window"], summary["tool_time_inside_turns_s"]), (1, 0.0))
+
+    def test_the_file_of_another_keeper_does_not_trace_the_call(self) -> None:
+        summary = lane.summarize_untraced([call_of_turn("k/trace-1-00000#1", "direct", 0, 10)], frozenset({"other/trace-1-00000#1"}), {})
+        self.assertEqual(summary["calls"], 1)
+
+    def test_the_seconds_of_untraced_calls_that_the_keepers_turn_time_covers_are_listed(self) -> None:
+        calls = [call_of_turn("k/trace-1-00000#2", "direct", 0, 20), call_of_turn("k/trace-1-00000#3", "direct", 30, 35, tool="Read")]
+        clocks = clocks_of((10, 32))
+        self.assertEqual(lane.summarize_untraced(calls, frozenset(), clocks)["tool_time_inside_turns_s"], 10.0 + 2.0)
+        # A call whose turn has a trace file is not counted, and a Keeper without a clock has no inside seconds.
+        traced = frozenset({"k/trace-1-00000#2", "k/trace-1-00000#3"})
+        self.assertEqual(lane.summarize_untraced(calls, traced, clocks)["tool_time_inside_turns_s"], 0.0)
+        self.assertEqual(lane.summarize_untraced(calls, frozenset(), {})["tool_time_inside_turns_s"], 0.0)
+
+
+class TraceKeysTest(unittest.TestCase):
+    @staticmethod
+    def write(base: pathlib.Path, keeper: str, name: str) -> None:
+        directory = base / ".masc" / "keeper_turn_events" / keeper
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / name).write_text("{}\n", encoding="utf-8")
+
+    def test_the_file_name_gives_the_trace_id_and_the_turn_id(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            self.write(base, "k", "trace-1792566606674-00000-2476-8d86742357ba00d5.jsonl")
+            self.write(base, "k", "trace-1792566606674-00000-12-0123456789abcdef.jsonl")
+            self.write(base, "other", "trace-1792566606674-00000-2476-8d86742357ba00d5.jsonl")
+            self.write(base, "k", "notes.jsonl")
+            self.write(base, "k", "trace-1792566606674-00000-7-nothex.jsonl")
+            self.write(base, "k", "trace-1792566606674-00000-8-abc.txt")
+            (base / ".masc" / "keeper_turn_events" / "stray.jsonl").write_text("{}\n", encoding="utf-8")
+            keys = lane.read_trace_keys(base)
+        self.assertEqual(
+            keys,
+            frozenset({"k/trace-1792566606674-00000#2476", "k/trace-1792566606674-00000#12", "other/trace-1792566606674-00000#2476"}),
+        )
+
+    def test_a_ledger_row_and_the_file_of_its_turn_spell_the_same_key(self) -> None:
+        row = {"record_kind": "tool_call", "ts": 1000.0, "duration_ms": 1000, "keeper": "k", "tool": "Execute",
+               "trace_id": "trace-100-00001", "keeper_turn_id": 5}
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            day_dir = base / ".masc" / "tool_calls" / "2026-11"
+            day_dir.mkdir(parents=True)
+            (day_dir / "01.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+            self.write(base, "k", "trace-100-00001-5-abcdef0123456789.jsonl")
+            calls = lane.read_calls(base, date(2026, 11, 1), date(2026, 11, 1), until=5000.0)
+            keys = lane.read_trace_keys(base)
+        self.assertEqual([c.turn for c in calls], ["k/trace-100-00001#5"])
+        self.assertIn(calls[0].turn, keys)
+
+    def test_no_directory_gives_no_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            self.assertEqual(lane.read_trace_keys(pathlib.Path(raw)), frozenset())
 
 
 class CallSummaryTest(unittest.TestCase):
@@ -179,7 +429,7 @@ class StoreReadingTest(unittest.TestCase):
         rows = [
             {"record_kind": "tool_call", "ts": 1000.0, "duration_ms": 2000, "keeper": "k", "tool": "keeper_artifact_read",
              "trace_id": "t", "keeper_turn_id": 1, "input_fingerprint": "i", "output_fingerprint": "o",
-             "batch_size": 2, "execution_mode": "concurrent"},
+             "batch_size": 2, "execution_mode": "concurrent", "turn_kind": "direct"},
             {"record_kind": "tool_call", "ts": 1010.0, "duration_ms": 1000, "keeper": "k", "tool": "keeper_artifact_read",
              "trace_id": "t", "keeper_turn_id": 1, "input_fingerprint": "i", "output_fingerprint": "o"},
             {"record_kind": "tool_call", "ts": 1100.0, "duration_ms": 90000, "keeper": "k", "tool": "Execute",
@@ -198,6 +448,7 @@ class StoreReadingTest(unittest.TestCase):
         self.assertEqual([c.polling for c in calls], [False, False, True])
         self.assertEqual(calls[0].start, 998.0)
         self.assertEqual([(c.batch_size, c.mode) for c in calls], [(2, "concurrent"), (0, "unknown"), (1, "serial")])
+        self.assertEqual([c.turn_kind for c in calls], ["direct", "unknown", "unknown"])
 
     def test_operations_are_classified_by_sender_keeper_and_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -409,6 +660,67 @@ class WakeSummaryTest(unittest.TestCase):
         self.assertEqual(len(top), lane.TOP_WAKE_KEEPERS)
         self.assertEqual(top[0], {"keeper": "big", "n": 2, "sum_s": 12_000.0})
         self.assertEqual([item["sum_s"] for item in top], sorted((item["sum_s"] for item in top), reverse=True))
+
+
+def ledger_row(ts: float, seconds: int, tool: str, turn_id: int, turn_kind: str) -> dict[str, object]:
+    return {"record_kind": "tool_call", "ts": ts, "duration_ms": seconds * 1000, "keeper": "k", "tool": tool,
+            "trace_id": "trace-100-00001", "keeper_turn_id": turn_id, "turn_kind": turn_kind}
+
+
+def run_main(rows: list[dict[str, object]], run: tuple[float, float]) -> dict[str, object]:
+    """Run the script on a ledger of `rows` and one trace file (turn 1 of Keeper k) that spans `run`."""
+    with tempfile.TemporaryDirectory() as raw:
+        base = pathlib.Path(raw)
+        day_dir = base / ".masc" / "tool_calls" / "1970-01"
+        day_dir.mkdir(parents=True)
+        (day_dir / "01.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        trace_dir = base / ".masc" / "keeper_turn_events" / "k"
+        trace_dir.mkdir(parents=True)
+        (trace_dir / "trace-100-00001-1-abcdef0123456789.jsonl").write_text(
+            json.dumps({"ts": run[0]}) + "\n" + json.dumps({"ts": run[1]}) + "\n", encoding="utf-8"
+        )
+        argv = ["measure_lane_time.py", "--base-path", str(base), "--from-date", "1970-01-01", "--to-date", "1970-01-01",
+                "--until", "1970-01-01T01:00:00Z"]
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+            assert lane.main() == 0
+    return block(json.loads(out.getvalue())["turn_time"])
+
+
+class MainTest(unittest.TestCase):
+    def test_the_summary_carries_the_inside_and_untraced_blocks(self) -> None:
+        turn_time = run_main(
+            [
+                ledger_row(1010.0, 10, "Execute", 1, "autonomous"),  # 1000..1010, inside the run
+                ledger_row(1040.0, 10, "Read", 1, "autonomous"),  # 1030..1040, after the run ended at 1030
+                ledger_row(1060.0, 20, "Execute", 2, "direct"),  # 1040..1060, a turn with no trace file
+            ],
+            (1000.0, 1030.0),
+        )
+        self.assertEqual(turn_time["turn_time_s"], 30.0)
+        self.assertEqual(turn_time["tool_time_s"], 40.0)
+        inside = block(turn_time["inside_turns"])
+        # Inside the 30 s of the run: the first call (10 s) and the 20 s gap before the second call. The rest is outside.
+        self.assertEqual((inside["tool_time_s"], inside["execute_time_s"], inside["between_calls_s"], inside["other_turn_time_s"]), (10.0, 10.0, 20.0, 0.0))
+        self.assertEqual(block(inside["percent_of_turn_time"])["tool"], 33.3)
+        untraced = block(turn_time["calls_without_trace_file"])
+        self.assertEqual((untraced["calls"], untraced["turns"], untraced["turns_in_window"]), (1, 1, 2))
+        self.assertEqual(untraced["tool_time_inside_turns_s"], 0.0)  # the direct turn runs after the run has ended
+        self.assertEqual(
+            block(untraced["by_turn_kind"]),
+            {"direct": {"calls": 1, "turns": 1, "tool_time_s": 20.0, "execute_time_s": 20.0, "turns_of_this_kind": 1}},
+        )
+
+    def test_the_untraced_block_counts_the_seconds_that_the_keepers_run_covers(self) -> None:
+        turn_time = run_main(
+            [
+                ledger_row(1010.0, 10, "Execute", 1, "autonomous"),
+                ledger_row(1040.0, 20, "Execute", 2, "direct"),  # 1020..1040, 10 s of it inside the run 1000..1030
+            ],
+            (1000.0, 1030.0),
+        )
+        untraced = block(turn_time["calls_without_trace_file"])
+        self.assertEqual((untraced["calls"], untraced["tool_time_s"], untraced["tool_time_inside_turns_s"]), (1, 20.0, 10.0))
 
 
 if __name__ == "__main__":

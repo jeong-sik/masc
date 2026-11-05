@@ -18,6 +18,17 @@ Definitions:
 - run interval: [first event ts, last event ts] of one trace file. Turn time of
   a Keeper is the union of its run intervals, so overlapping runs count once.
 - tool time: the sum of `duration_ms` over all calls.
+- inside seconds: the part of a call or of a gap that lies in the turn time of
+  the call's Keeper. The ledger and the trace files are written by different
+  code, so a call can lie outside every run interval of its Keeper: its turn
+  wrote no trace file (`direct` turns, which serve chat and delegated
+  operations, mostly write none), or the call began before the file's first
+  event or ended after its last. Shares of turn time use inside seconds only.
+  The sums in `tool_time_s` and `between_calls` keep every call.
+- trace file: `keeper_turn_events/<keeper>/trace-<id>-<run>-<turn>-<hash>.jsonl`.
+  A call has one when a file of its Keeper is named for its `trace_id` and
+  `keeper_turn_id`. Only the file names are read, so a file pruned after the
+  window makes its calls look untraced.
 - between-calls time: inside one turn (`trace_id`, `keeper_turn_id`), calls sorted
   by start (`ts` minus duration). The gap before every call after the first is
   its start minus the previous call's end. Overlapping calls count as 0.
@@ -68,7 +79,9 @@ import re
 import sqlite3
 import statistics
 import sys
+from bisect import bisect_right
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -83,6 +96,7 @@ EXECUTE_TOOL = "Execute"
 LONG_EXECUTE_SEC = 60.0
 REREAD_WINDOW_SEC = 3600.0
 TRACE_TAIL_BYTES = 65536
+TRACE_FILE_NAME = re.compile(r"^(trace-\d+-\d+)-(\d+)-[0-9a-f]+\.jsonl$")
 SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
@@ -111,6 +125,7 @@ class Call:
     polling: bool
     batch_size: int = 0
     mode: str = "unknown"
+    turn_kind: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +228,7 @@ def read_calls(base: pathlib.Path, first: date, last: date, until: float) -> lis
                             polling,
                             batch_size if isinstance(batch_size, int) and batch_size >= 1 else 0,
                             text_of(row.get("execution_mode")) or "unknown",
+                            text_of(row.get("turn_kind")) or "unknown",
                         )
                     )
         day += timedelta(days=1)
@@ -238,6 +254,38 @@ def overlap_seconds(start: float, end: float, intervals: list[Interval]) -> floa
     """Time of [start, end] covered by the union of `intervals`."""
     clipped = [(max(a, start), min(b, end)) for a, b in intervals if b > start and a < end]
     return union_seconds(clipped)
+
+
+@dataclass(frozen=True, slots=True)
+class TurnClock:
+    """The run intervals of one Keeper, merged into sorted spans that neither overlap nor touch."""
+
+    spans: tuple[Interval, ...]
+    starts: tuple[float, ...]
+
+    @staticmethod
+    def of(intervals: Iterable[Interval]) -> TurnClock:
+        merged: list[Interval] = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return TurnClock(tuple(merged), tuple(start for start, _ in merged))
+
+    @property
+    def seconds(self) -> float:
+        return sum(end - start for start, end in self.spans)
+
+    def overlap(self, start: float, end: float) -> float:
+        """The seconds of [start, end] that lie in a span."""
+        total = 0.0
+        index = bisect_right(self.starts, end) - 1
+        while index >= 0 and self.spans[index][1] > start:
+            span_start, span_end = self.spans[index]
+            total += min(end, span_end) - max(start, span_start)
+            index -= 1
+        return total
 
 
 def first_event_ts(path: pathlib.Path) -> float | None:
@@ -281,6 +329,22 @@ def read_runs(base: pathlib.Path, since: float, until: float) -> dict[str, list[
                 continue
             runs[keeper_dir.name].append((max(start, since), min(end, until)))
     return runs
+
+
+def read_trace_keys(base: pathlib.Path) -> frozenset[str]:
+    """`<keeper>/<trace id>#<turn id>` of every trace file, spelled like `Call.turn`."""
+    keys: set[str] = set()
+    root = base / ".masc" / "keeper_turn_events"
+    if not root.is_dir():
+        return frozenset()
+    for keeper_dir in root.iterdir():
+        if not keeper_dir.is_dir():
+            continue
+        for path in keeper_dir.glob("*.jsonl"):
+            named = TRACE_FILE_NAME.match(path.name)
+            if named is not None:
+                keys.add(f"{keeper_dir.name}/{named.group(1)}#{named.group(2)}")
+    return frozenset(keys)
 
 
 def read_operations(base: pathlib.Path, since: float, until: float) -> list[Operation]:
@@ -440,6 +504,94 @@ def ranked_transitions(
     }
 
 
+def percent(part: float, whole: float) -> float | None:
+    return round(part / whole * 100, 1) if whole > 0 else None
+
+
+def seconds_inside(clocks: Mapping[str, TurnClock], keeper: str, start: float, end: float) -> float:
+    """The seconds of start..end that lie in the turn time of the Keeper; a Keeper without a clock has none."""
+    clock = clocks.get(keeper)
+    return clock.overlap(start, end) if clock is not None and end > start else 0.0
+
+
+def summarize_inside_turns(calls: list[Call], clocks: Mapping[str, TurnClock]) -> dict[str, object]:
+    """The tool, gap, reread, long and polling seconds that lie in the Keeper's turn time, and their share of it."""
+    turn_s = sum(clock.seconds for clock in clocks.values())
+    tool_s = execute_s = long_s = polling_s = gap_s = reread_s = 0.0
+    polling_by_keeper: dict[str, float] = defaultdict(float)
+    by_turn: dict[str, list[Call]] = defaultdict(list)
+    for call in calls:
+        by_turn[call.turn].append(call)
+        seconds = seconds_inside(clocks, call.keeper, call.start, call.end)
+        tool_s += seconds
+        if call.tool == EXECUTE_TOOL:
+            execute_s += seconds
+            if call.end - call.start >= LONG_EXECUTE_SEC:
+                long_s += seconds
+                if call.polling:
+                    polling_s += seconds
+                    if seconds > 0.0:
+                        polling_by_keeper[call.keeper] += seconds
+    for turn_calls in by_turn.values():
+        turn_calls.sort(key=lambda call: (call.start, call.end))
+        for previous, current in zip(turn_calls, turn_calls[1:]):
+            gap = seconds_inside(clocks, current.keeper, previous.end, current.start)
+            gap_s += gap
+            if current.reread:
+                reread_s += gap + seconds_inside(clocks, current.keeper, current.start, current.end)
+    other_s = turn_s - tool_s - gap_s
+    return {
+        "tool_time_s": round(tool_s, 1),
+        "execute_time_s": round(execute_s, 1),
+        "between_calls_s": round(gap_s, 1),
+        "other_turn_time_s": round(other_s, 1),
+        "rereads_after_first_call_turn_time_s": round(reread_s, 1),
+        "long_execute_time_s": round(long_s, 1),
+        "polling_time_s": round(polling_s, 1),
+        "polling_by_keeper": {
+            keeper: {"polling_s": round(seconds, 1), "turn_time_s": round(clocks[keeper].seconds, 1)}
+            for keeper, seconds in sorted(polling_by_keeper.items(), key=lambda item: -item[1])
+        },
+        "percent_of_turn_time": {
+            "tool": percent(tool_s, turn_s),
+            "execute": percent(execute_s, turn_s),
+            "between_calls": percent(gap_s, turn_s),
+            "other": percent(other_s, turn_s),
+            "rereads_after_first_call": percent(reread_s, turn_s),
+            "long_execute": percent(long_s, turn_s),
+            "polling": percent(polling_s, turn_s),
+        },
+    }
+
+
+def summarize_untraced(calls: list[Call], trace_keys: frozenset[str], clocks: Mapping[str, TurnClock]) -> dict[str, object]:
+    """The calls of turns that have no trace file, and how many of their seconds the Keepers' turn time covers."""
+    untraced = [call for call in calls if call.turn not in trace_keys]
+    by_kind: dict[str, list[Call]] = defaultdict(list)
+    for call in untraced:
+        by_kind[call.turn_kind].append(call)
+    turns_of_kind: dict[str, set[str]] = defaultdict(set)
+    for call in calls:
+        turns_of_kind[call.turn_kind].add(call.turn)
+
+    def block(members: list[Call]) -> dict[str, object]:
+        return {
+            "calls": len(members),
+            "turns": len({call.turn for call in members}),
+            "tool_time_s": round(sum(call.end - call.start for call in members), 1),
+            "execute_time_s": round(sum(call.end - call.start for call in members if call.tool == EXECUTE_TOOL), 1),
+        }
+
+    return {
+        **block(untraced),
+        "tool_time_inside_turns_s": round(sum(seconds_inside(clocks, call.keeper, call.start, call.end) for call in untraced), 1),
+        "turns_in_window": len({call.turn for call in calls}),
+        "by_turn_kind": {
+            kind: {**block(members), "turns_of_this_kind": len(turns_of_kind[kind])} for kind, members in sorted(by_kind.items())
+        },
+    }
+
+
 def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict[str, object]:
     by_turn: dict[str, list[Call]] = defaultdict(list)
     for call in calls:
@@ -466,9 +618,6 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
     busy_s = sum(busy_by_keeper.values())
     long_execute = [call for call in calls if call.tool == EXECUTE_TOOL and call.end - call.start >= LONG_EXECUTE_SEC]
     polling = [call for call in long_execute if call.polling]
-    polling_s: dict[str, float] = defaultdict(float)
-    for call in polling:
-        polling_s[call.keeper] += call.end - call.start
     return {
         "turns": len(by_turn),
         "calls": len(calls),
@@ -495,14 +644,7 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
             "calls": len(long_execute),
             "time_s": round(sum(call.end - call.start for call in long_execute), 1),
             "polling_calls": len(polling),
-            "polling_time_s": round(sum(polling_s.values()), 1),
-            "polling_by_keeper": {
-                keeper: {
-                    "polling_s": round(seconds, 1),
-                    "turn_time_s": round(busy_by_keeper.get(keeper, 0.0), 1),
-                }
-                for keeper, seconds in sorted(polling_s.items(), key=lambda item: -item[1])
-            },
+            "polling_time_s": round(sum(call.end - call.start for call in polling), 1),
         },
     }
 
@@ -672,7 +814,8 @@ def main() -> int:
     since = datetime(args.from_date.year, args.from_date.month, args.from_date.day, tzinfo=timezone.utc).timestamp()
     calls = read_calls(base, args.from_date, args.to_date, args.until)
     runs = read_runs(base, since, args.until)
-    busy_by_keeper = {keeper: union_seconds(intervals) for keeper, intervals in runs.items()}
+    clocks = {keeper: TurnClock.of(intervals) for keeper, intervals in runs.items()}
+    busy_by_keeper = {keeper: clock.seconds for keeper, clock in clocks.items()}
     long_execute: dict[str, list[Interval]] = defaultdict(list)
     execute_calls: dict[str, list[Interval]] = defaultdict(list)
     for call in calls:
@@ -690,7 +833,11 @@ def main() -> int:
             "hours": round((args.until - since) / SECONDS_PER_HOUR, 2),
             "keepers_with_turn_traces": len(runs),
         },
-        "turn_time": summarize_calls(calls, busy_by_keeper),
+        "turn_time": {
+            **summarize_calls(calls, busy_by_keeper),
+            "inside_turns": summarize_inside_turns(calls, clocks),
+            "calls_without_trace_file": summarize_untraced(calls, read_trace_keys(base), clocks),
+        },
         "chat_operations": summarize_operations(operations, long_execute, runs),
         "cancelled_turns": summarize_cancelled_turns(operations, execute_calls),
         "schedule_wakes": summarize_wakes(

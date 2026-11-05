@@ -24,6 +24,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import measure_execute_waits as waits  # noqa: E402
 
+CLOCK_OF = waits.load_lane_time().clock_of
+
 NOON = 1793534400.0  # 2026-11-01T12:00:00Z
 SINCE = 1793491200.0  # 2026-11-01T00:00:00Z
 MIDNIGHT = 1793577600.0  # 2026-11-02T00:00:00Z
@@ -998,57 +1000,8 @@ class ReadLedgerTest(unittest.TestCase):
             self.assertEqual(self.read(base).schedule_creates, 1)
 
 
-class TurnClockTest(unittest.TestCase):
-    SPANS = ((10.0, 20.0), (30.0, 40.0), (50.0, 60.0))
-
-    def test_overlapping_and_touching_intervals_are_merged(self) -> None:
-        clock = waits.TurnClock.of([(10, 20), (15, 30), (30, 40), (50, 60)])
-        self.assertEqual(clock.spans, ((10, 40), (50, 60)))
-        self.assertEqual(clock.starts, (10, 50))
-        self.assertEqual(clock.seconds, 40)
-
-    def test_an_interval_inside_another_is_absorbed(self) -> None:
-        self.assertEqual(waits.TurnClock.of([(10, 50), (20, 30)]).spans, ((10, 50),))
-
-    def test_intervals_are_sorted_and_may_come_in_any_order(self) -> None:
-        clock = waits.TurnClock.of([(50, 60), (10, 20), (30, 40)])
-        self.assertEqual(clock.spans, self.SPANS)
-        self.assertEqual(clock.starts, (10, 30, 50))
-        self.assertEqual(clock.seconds, 30)
-
-    def test_no_intervals_hold_no_time(self) -> None:
-        clock = waits.TurnClock.of([])
-        self.assertEqual((clock.spans, clock.starts, clock.seconds, clock.overlap(0, 100)), ((), (), 0, 0))
-
-    def test_the_overlap_of_a_call_with_the_spans(self) -> None:
-        clock = waits.TurnClock.of(self.SPANS)
-        cases = [
-            (12, 18, 6),  # inside one span
-            (0, 5, 0),  # before all spans
-            (65, 70, 0),  # after all spans
-            (5, 15, 5),  # starts before a span
-            (15, 25, 5),  # ends after a span
-            (15, 35, 10),  # reaches over the gap between two spans
-            (0, 100, 30),  # holds every span
-            (20, 30, 0),  # exactly the gap
-            (40, 50, 0),  # exactly the next gap
-            (35, 55, 10),  # the second and the third span
-            (10, 10, 0),  # no length, on the edge of a span
-            (12, 12, 0),  # no length, inside a span
-            (10, 20, 10),  # exactly one span
-        ]
-        for start, end, expected in cases:
-            with self.subTest(start=start, end=end):
-                self.assertEqual(clock.overlap(start, end), expected)
-
-    def test_a_call_that_ends_where_a_span_starts_has_no_overlap_with_it(self) -> None:
-        clock = waits.TurnClock.of(self.SPANS)
-        self.assertEqual(clock.overlap(25, 30), 0)
-        self.assertEqual(clock.overlap(60, 70), 0)
-
-
 class SummarizeTurnTimeTest(unittest.TestCase):
-    TURNS = {"a": waits.TurnClock.of([(NOON, NOON + 3600)]), "b": waits.TurnClock.of([(NOON, NOON + 1800)])}
+    TURNS = {"a": CLOCK_OF([(NOON, NOON + 3600)]), "b": CLOCK_OF([(NOON, NOON + 1800)])}
 
     def test_each_group_splits_into_the_hours_inside_and_outside_the_turn_intervals(self) -> None:
         calls = [
@@ -1126,7 +1079,7 @@ class SummarizeTurnTimeTest(unittest.TestCase):
         self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 0, "calls": 0, "hours": 0.0})
 
     def test_the_turn_time_is_the_sum_of_the_keepers_merged_intervals(self) -> None:
-        turns = {"a": waits.TurnClock.of([(0, 100), (50, 150)]), "b": waits.TurnClock.of([(0, 100)])}
+        turns = {"a": CLOCK_OF([(0, 100), (50, 150)]), "b": CLOCK_OF([(0, 100)])}
         # Keeper a holds 150 s, b 100 s: 250 s, not 350 s.
         summary = waits.summarize_turn_time([call("a", 25, end=100.0)], turns)
         self.assertEqual(object_of(summary["execute"])["inside_percent_of_turn_time"], 10.0)

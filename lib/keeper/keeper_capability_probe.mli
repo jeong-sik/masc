@@ -122,6 +122,11 @@ type invocation =
 
 val invocation_to_string : invocation -> string
 
+val arguments_problem_json : Llm_provider.Tool_call_input.parse_error -> Yojson.Safe.t
+(** [{"kind":"invalid_json","message":...}] or [{"kind":"not_object"}], for
+    callers that render [Tool_arguments_unreadable] without linking the
+    provider library themselves. *)
+
 val detail_of_http_error : Llm_provider.Http_client.http_error -> string
 (** Render a provider error for [Provider_rejected.detail]. Exhaustive over
     the closed error type; an [Unknown_provider_failure] keeps its raw

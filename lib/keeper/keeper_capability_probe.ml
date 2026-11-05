@@ -149,6 +149,12 @@ let detail_of_http_error (err : Llm_provider.Http_client.http_error) : string =
     Printf.sprintf "provider failure: %s" message
 ;;
 
+let arguments_problem_json = function
+  | Llm_provider.Tool_call_input.Invalid_json message ->
+    `Assoc [ "kind", `String "invalid_json"; "message", `String message ]
+  | Llm_provider.Tool_call_input.Not_object -> `Assoc [ "kind", `String "not_object" ]
+;;
+
 let invocation_to_string = function
   | Tool_invoked { tool; elapsed_s } ->
     Printf.sprintf "invoked %s in %.1fs" tool elapsed_s

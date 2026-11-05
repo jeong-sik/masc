@@ -176,7 +176,7 @@ status: reference
 : TUI 최상단 대시보드(Overview) 탭에서 제공되는 운영자 중심의 의사결정·대화 진입 화면.
   전체 통계와 차트 나열 위주의 집계형 구성을 대체하여, 사람 운영자의 직접 판단과 처리가 필요한
   개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
-  간결한 작업 흐름 요약(Dashboard Goals 등)을 제공한다(#39817·#40137·#40152).
+  간결한 작업 흐름 요약을 제공한다(#39817·#40137·#40152).
   - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
     `home_request` 닫힌 합타입 5개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
     `Home_question`·`Home_goal_confirmation`)로 식별한다. 탐색 액션 대상
@@ -547,7 +547,7 @@ status: reference
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 
 **Dashboard Goals**
-: TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
+: Goal 트리(`/api/v1/dashboard/goals`)가 Goal의 기록된 측정값과 연결된 Task 완료 수를 따로 싣는다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
   Task 개수나 제목을 Goal의 실제 값으로 환산하지 않는다. 각 Goal의 자세한 근거는
   Work에서 연다.
@@ -2886,8 +2886,7 @@ status: reference
   `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
   도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
-  `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
-  `Dashboard Goals`를 따른다.
+  `admits_self_directed_progress`가 이 경계를 정의한다.
   → [Goal_phase](../../lib/goal/goal_phase.mli) · [Goal_store](../../lib/goal/goal_store.mli)
 
 **Goal Creation Input Check (목표 생성 입력 검증)**

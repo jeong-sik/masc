@@ -1299,9 +1299,10 @@ let load_account_emails ~(host : string) ~(port : int) :
 
 let memo_overview_goals = json_memo ()
 
-(* The Overview's GOALS section. A phase this build does not know refuses the
-   whole reading: a goal dropped from the list, or drawn under a phase it is
-   not in, would answer "is work moving a goal" about a different fleet. *)
+(* The goal tree Work reads for exact measurement. A phase this build does not
+   know refuses the whole reading: a goal dropped from the list, or shown under
+   a phase it is not in, would answer "is work moving a goal" about a different
+   fleet. *)
 let load_overview_goals ~(host : string) ~(port : int) :
     (Tui_decode.overview_goal list, string) result =
   match Masc_tui_http.fetch_dashboard_goals ~host ~port with

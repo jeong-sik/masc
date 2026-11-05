@@ -416,12 +416,25 @@ val resume_direct_runtime_retry :
     consuming continuation into Running. An interrupted resumed execution needs
     reconciliation; it is never blindly replayed from a stale checkpoint. *)
 
-(** Settle every [Running] operation as [Failed Interrupted_by_restart] and
-    return those operations as they were read, so the caller can leave an
-    operator-visible failure row for each: without one, a request the
-    restart cut off vanished from the transcript with no answer
-    (msx-retro-mania, three requests on 2026-09-14). *)
-val settle_running_after_restart : t -> now:float -> (Operation.t list, error) result
+(** What left [Running] rows without a live executor. *)
+type running_settlement =
+  | After_process_restart
+      (** Boot: no executor survives a restart. Rows fail as
+          [Interrupted_by_restart]. *)
+  | After_store_recovery
+      (** The store was reopened by the same process after an outage, with no
+          chat child in flight. The child's terminal commit was lost to the
+          outage, so rows fail as [Store_unavailable]. *)
+
+(** Settle every [Running] operation that has no executor. A row with a durable
+    continuation (checkpoint, runtime retry, Gate, active native call) goes
+    back to [Queued]; every other row fails with the kind [cause] names. Returns
+    the failed operations as they were read, so the caller can leave an
+    operator-visible failure row for each: without one, a request cut off this
+    way vanished from the transcript with no answer (msx-retro-mania, three
+    requests on 2026-09-14). *)
+val settle_running_without_executor :
+  t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
 val error_to_string : error -> string
 
 module For_testing : sig

@@ -3227,7 +3227,27 @@ let reconcile_semantic_running store ~now =
       | Semantic.Recovering _ | Semantic.Settled _) -> Ok count) (Ok 0) executions
 ;;
 
-let settle_running_after_restart store ~now =
+type running_settlement =
+  | After_process_restart
+  | After_store_recovery
+
+(* What a settled row says happened. Both causes end the same way -- no live
+   executor will commit this row -- and differ only in what took it away. *)
+let running_settlement_failure = function
+  | After_process_restart ->
+    Operation.Interrupted_by_restart, "process restarted before terminal operation commit"
+  | After_store_recovery ->
+    ( Operation.Store_unavailable
+    , "the operation store became unavailable before terminal operation commit" )
+;;
+
+let running_settlement_unacknowledged_detail = function
+  | After_process_restart -> "process restarted before Owner receipt acknowledgement"
+  | After_store_recovery ->
+    "the operation store became unavailable before Owner receipt acknowledgement"
+;;
+
+let settle_running_without_executor store ~cause ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
@@ -3260,7 +3280,9 @@ let settle_running_after_restart store ~now =
           | None -> Error (Integrity_error "native terminal lost its execution")
           | Some expected ->
             let* next = semantic_transition ~now
-              (Semantic.Settle (Semantic.Failed "process restarted before Owner receipt acknowledgement")) expected in
+              (Semantic.Settle
+                 (Semantic.Failed (running_settlement_unacknowledged_detail cause)))
+              expected in
             update_semantic store ~expected next in
         Ok (operation :: interrupted)
       | None | Some Keeper_native_call.No_native_call ->
@@ -3277,16 +3299,20 @@ let settle_running_after_restart store ~now =
     let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"
-      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = 'process restarted before terminal operation commit' WHERE state = 'running'"
+      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running'"
       (fun stmt ->
-         let* () = bind_float store.db stmt ~operation:"bind restart settlement time" 1 now in
+         let failure_kind, failure_detail = running_settlement_failure cause in
+         let* () = bind_float store.db stmt ~operation:"bind settlement time" 1 now in
          let* () =
            bind_text
              store.db
              stmt
-             ~operation:"bind restart failure kind"
+             ~operation:"bind settlement failure kind"
              2
-             (Operation.failure_kind_to_string Operation.Interrupted_by_restart)
+             (Operation.failure_kind_to_string failure_kind)
+         in
+         let* () =
+           bind_text store.db stmt ~operation:"bind settlement failure detail" 3 failure_detail
          in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
          Ok (Sqlite3.changes store.db)) in

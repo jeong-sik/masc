@@ -825,7 +825,7 @@ let test_operation_settlement_retries_and_replays_past_a_live_cursor () =
     ignore (store_ok (Store.submit store ~now:1. ~operation_id:id
       ~source:(`Assoc ["kind",`String "dashboard"]) ~input:(`Assoc ["message",`String "work"])));
     ignore (store_ok (Store.claim_next store ~now:2.));
-    ignore (store_ok (Store.settle_running_after_restart store ~now:3.));
+    ignore (store_ok (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:3.));
     let operation = Option.get (store_ok (Store.get store id)) in
     let settlement : Journal.operation_settlement = {operation_id=id;completed_at=3.} in
     let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id () in

@@ -463,7 +463,7 @@ let test_a_settled_native_receipt_does_not_block_selection () =
   List.iter (fun (recovery, conflicting_seed) -> with_input_result ~pending:true
     ~before_close:(fun ~base_path ~store ~snapshot ->
       native_input_fixture ~terminal:(Some recovery) ~conflicting_seed ~base_path ~store ~snapshot;
-      ignore (Store.settle_running_after_restart store ~now:4. |> store_ok))
+      ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> store_ok))
     (fun ~base_path ~run_dir ~path:_ ~session_dir:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~bundle:_ result ->
       let receipt = adopt run_dir (ok result) |> ok |> adopted in
       ignore (Journal.load_input_adoption ~base_path ~adoption_id:(Journal.input_adoption_id receipt) |> ok)))

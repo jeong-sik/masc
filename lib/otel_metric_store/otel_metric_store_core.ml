@@ -77,16 +77,13 @@ end
 let metrics_mutex = Stdlib.Mutex.create ()
 ;;
 
-(* #10682: capture the caller stack for rare EDEADLK re-entry failures so the
-   next diagnostic render can name the offending metric path. *)
-let last_deadlock_backtrace : string option Atomic.t = Atomic.make None
-
+(* #10682: rare EDEADLK re-entry failures log the caller stack, so the log can
+   name the offending metric path. *)
 let with_lock f =
   (try Stdlib.Mutex.lock metrics_mutex with
    | Sys_error msg as exn ->
      let trace = Printexc.raw_backtrace_to_string (Printexc.get_callstack 64) in
      let dump = Printf.sprintf "Otel_metric_store.with_lock: %s\nCaller stack:\n%s" msg trace in
-     Atomic.set last_deadlock_backtrace (Some dump);
      Log.Metrics.error "Otel_metric_store mutex deadlock: %s" dump;
      raise exn);
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f

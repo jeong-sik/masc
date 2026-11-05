@@ -17,7 +17,7 @@ let hints = "zz:probe  Esc:close"
 
 let fresh () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935
-    ~refresh_interval:2.0 ()
+ ()
 
 let row_text index = Printf.sprintf "row-%03d" index
 

@@ -3,7 +3,7 @@
 Board write while the Board is on screen, and again after a failed read
 (RFC-0480 L4).
 
-The refresh cadence is pushed out of the test's lifetime, so every list read
+The TUI reads nothing on a clock, so every list read
 after the Board opens comes from an announcement or a failed read.
 """
 

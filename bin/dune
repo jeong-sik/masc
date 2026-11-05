@@ -1757,7 +1757,7 @@
  (modules masc_tui_credential)
  (libraries masc.masc_types yojson))
 
-; Carved out so a test can read it. surface_needs decides what a refresh tick
+; Carved out so a test can read it. surface_needs decides what a refresh
 ; fetches for the surface on screen, and the chat pane having no field there
 ; is why it read its history once and never again.
 (library

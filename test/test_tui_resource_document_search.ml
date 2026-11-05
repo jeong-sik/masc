@@ -10,7 +10,7 @@ let parts = [{Masc_tui_mcp.rc_uri=Some "masc://report";
   rc_mime_type=Some "text/markdown";
   rc_kind=Masc_tui_mcp.Resource_text "# Original\r\n한글\tneedle **text**\n"}]
 let state () =
-  let s=Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+  let s=Types.create_state ~workspace:"test" ~port:0 () in
   s.resource_focus <- Types.Right_pane;
   s.resources_list <- Some [Catalog.Mcp {Masc_tui_mcp.uri="masc://report";
     name="report";title=None;description=None;mime_type=Some "text/markdown";size=None}]; s

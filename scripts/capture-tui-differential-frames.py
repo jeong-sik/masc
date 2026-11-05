@@ -297,6 +297,7 @@ def measured_ttyd_session(
     base: Path,
     api_port: int,
     executable: Path,
+    extra_args: tuple[str, ...],
     source_dir: Path,
     metadata: dict[str, object],
 ) -> Iterator[tuple[Page, subprocess.Popen[bytes], list[ObservedFrame]]]:
@@ -338,8 +339,7 @@ def measured_ttyd_session(
         "differential-frame-evidence",
         "--port",
         str(api_port),
-        "--refresh",
-        "60",
+        *extra_args,
     ]
     log = tempfile.TemporaryFile()
     started = time.monotonic()
@@ -554,6 +554,7 @@ def measure_binary(
     *,
     label: str,
     executable: Path,
+    extra_args: tuple[str, ...],
     output: Path,
     include_forced_redraw: bool,
     api_port: int,
@@ -581,6 +582,7 @@ def measure_binary(
             base=base,
             api_port=api_port,
             executable=executable,
+            extra_args=extra_args,
             source_dir=WORKTREE,
             metadata=session_metadata,
         ) as (page, process, frames):
@@ -716,7 +718,13 @@ def main() -> int:
     parser.add_argument("--baseline-commit", required=True)
     parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--target-pr", required=True, type=int)
+    # A baseline built before the TUI stopped reading on a clock reads every
+    # two seconds unless told otherwise, which the measurement windows would
+    # record as HTTP activity. Pass that binary's own flags here, for example
+    # --baseline-arg=--refresh --baseline-arg=60. The candidate gets none.
+    parser.add_argument("--baseline-arg", action="append", default=[])
     args = parser.parse_args()
+    baseline_args: tuple[str, ...] = tuple(cast(list[str], args.baseline_arg))
     output = Path(tempfile.mkdtemp(prefix="masc-tui-differential-frame-capture-"))
     script_hash = digest_file(Path(__file__).resolve())
     support_hash = digest_file(SUPPORT_PATH)
@@ -772,6 +780,7 @@ def main() -> int:
             "driver_script_sha256": script_hash,
             "support_script_sha256": support_hash,
             "baseline_commit": args.baseline_commit,
+            "baseline_args": list(baseline_args),
             "candidate_commit": args.candidate_commit,
             "ttyd_version": support.run_text(str(support.TTYD), "--version"),
             "playwright_version": support.package_version("playwright"),
@@ -800,6 +809,7 @@ def main() -> int:
                                 browser,
                                 label="baseline",
                                 executable=baseline_executable,
+                                extra_args=baseline_args,
                                 output=output,
                                 include_forced_redraw=False,
                                 api_port=api_port,
@@ -812,6 +822,7 @@ def main() -> int:
                                 browser,
                                 label="candidate",
                                 executable=candidate_executable,
+                                extra_args=(),
                                 output=output,
                                 include_forced_redraw=True,
                                 api_port=api_port,

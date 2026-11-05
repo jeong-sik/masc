@@ -18,7 +18,7 @@ module Tui_types = Masc_tui_types
 module Decode = Masc_tui_types.Tui_decode
 
 let state () =
-  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  Tui_types.create_state ~workspace:"test" ~port:8935 ()
 ;;
 
 let pending ?(waiting_s = Some 90.) ?(phase = Decode.Gate_judging) ~keeper ~tool

@@ -2,7 +2,7 @@
 """The open Board post reads again when the server announces a Board write
 that names it or names no post, and again after a failed read (RFC-0480 L4).
 
-The refresh cadence is pushed out of the test's lifetime, so every post read
+The TUI reads nothing on a clock, so every post read
 after the post opens comes from an announcement or a failed read.
 """
 

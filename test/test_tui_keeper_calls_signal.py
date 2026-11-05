@@ -3,7 +3,7 @@
 server announces a tool call of that Keeper, and again after a failed read
 (RFC-0480 L3).
 
-The refresh cadence is pushed out of the test's lifetime, so every calls read
+The TUI reads nothing on a clock, so every calls read
 after the surface opens comes from an announcement or a failed read.
 """
 

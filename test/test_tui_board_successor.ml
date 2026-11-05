@@ -11,7 +11,7 @@ let post ?successor id =
       bpc_successor_id=successor;bpc_summary=None}; bp_attachments=[] }
 
 let state posts =
-  let state = create_state ~workspace:"board-successor-test" ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"board-successor-test" ~port:8935 () in
   state.view <- Board;
   state.board_mode <- Board_read "A";
   ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok posts});

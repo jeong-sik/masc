@@ -48,7 +48,7 @@ let () =
 
 let () =
   let open Masc_tui_types in
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   state.view <- Keepers Keeper_message;
   state.search <- Some "retained search";
   state.composer_focused <- true;

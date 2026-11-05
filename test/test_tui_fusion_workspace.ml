@@ -121,7 +121,7 @@ let test_bound_transport_and_delayed_delivery () =
     let list expected = bound expected (fun () -> Loader.load_fusion_runs ~host ~port) in
     let detail expected = bound expected (fun () -> Loader.load_fusion_detail ~host ~port ~run_id:"a") in
     let board expected = bound expected (fun () -> Loader.load_fusion_historical_detail ~host ~port ~reference) in
-    let state = Types.create_state ~workspace:base_a ~port ~refresh_interval:2. () in
+    let state = Types.create_state ~workspace:base_a ~port () in
     state.view <- Types.Fusion;
     state.server_identity <- Some expected;
     state.workspace_identity <- Types.Workspace_identity_match;

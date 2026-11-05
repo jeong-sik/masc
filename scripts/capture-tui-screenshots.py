@@ -284,7 +284,7 @@ def ttyd_session(
         str(TTYD), "-p", str(web_port), "-i", "127.0.0.1", "-W",
         "-t", "rendererType=dom", "-t", "fontSize=14", "-t", "fontFamily=Menlo",
         "-T", "xterm-256color", str(EXECUTABLE), "--base-path", str(base),
-        "--workspace", workspace, "--port", str(api_port), "--refresh", "60",
+        "--workspace", workspace, "--port", str(api_port),
     ]
     launch_log = tempfile.TemporaryFile(mode="w+b")
     process = subprocess.Popen(

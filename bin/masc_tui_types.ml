@@ -11182,7 +11182,6 @@ type state = {
   mutable detail_scroll: int;
   workspace: string;
   port: int;
-  refresh_interval: float;
 }
 
 let clear_goal_action_error state ~goal_id =
@@ -19247,7 +19246,6 @@ let create_state
     ~workspace
     ?(local_base_path = "")
     ~port
-    ~refresh_interval
     ()
   =
   {
@@ -20229,7 +20227,6 @@ let create_state
   detail_scroll = 0;
   workspace;
   port;
-  refresh_interval;
 }
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
@@ -24565,8 +24562,8 @@ let keeper_message_pending_status_rows items =
    returns successfully -- the effect is what is outstanding, not the call. The
    pane had no way to say so.
 
-   Read from [gate_pending], which rides every tick from every surface for the
-   strip's badge, so this is as current in the chat pane as it is on Approvals.
+   Read from [gate_pending], which every surface keeps for the strip's badge,
+   so this is as current in the chat pane as it is on Approvals.
    A projection of rows already loaded: no new field, no new request. *)
 let keeper_effects_at_the_gate (state : state) ~keeper_name =
   List.filter

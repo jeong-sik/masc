@@ -224,7 +224,6 @@ join over MCP (`/mcp/play`) or plain HTTP with the token after `#`. The TUI can 
 |--------|---------|--------|
 | `--base-path` (`--base`) | `MASC_BASE_PATH`, then cwd | Directory holding `.masc` |
 | `--port` | `8935` | MASC server port on `127.0.0.1` |
-| `--refresh` | `2` | Seconds between refreshes |
 | `--workspace` | derived from base path | Workspace label in the header |
 
 ## What the server changes
@@ -2334,8 +2333,8 @@ the terminal summary use the TUI Markdown renderer; typed failures stay plain
 so their exact reason text is not reinterpreted. The panel header summarizes
 answered/failed counts and tokens; it does not calculate a majority, minimum
 answer count, timeout verdict, cost verdict, or any other local conclusion.
-The open list and exact detail refresh on the existing two-second dashboard
-cadence; `PgUp`/`PgDn` scroll a page at a time.
+The open list and exact detail read again when the server announces
+`fusion_run_status`; `PgUp`/`PgDn` scroll a page at a time.
 
 `TOOL EXECUTIONS` is an execution ledger, not a copy of the `web_tools`
 configuration flag. `called` and `succeeded`/`failed` rows come from the exact
@@ -2728,10 +2727,11 @@ probe failure, and missing authentication remain distinct typed states.
 The freshness badge is the server's closed value: `fresh`, `recent`, `stale`
 (`served_stale` on the wire), or `warming` (`warming_up`). `r` sends
 `force=1`, but the route remains non-blocking: a stale or warming response
-means background work was scheduled and a later poll carries the new value.
-Only one joined load may be in flight, so a slow authenticated request cannot
-stack every two-second refresh tick. A manual refresh pressed during a periodic
-read is coalesced into one force request when that read settles. If only the
+means background work was scheduled, and the read after the server's
+`runtime_probe` announcement carries the new value. Only one joined load may be
+in flight, so a slow authenticated request cannot stack reads. A manual refresh
+pressed during another read is coalesced into one force request when that read
+settles. If only the
 probe read fails, resolved lanes still render: a last-good probe is retained,
 or cold candidates are `unobserved`. If the resolved identity read fails, the
 last joined rows stay visible under the error.

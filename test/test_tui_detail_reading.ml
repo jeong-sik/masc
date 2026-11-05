@@ -3,7 +3,7 @@ open Masc_tui_types
 module Reading = Masc_tui_detail_reading
 
 let state () =
-  create_state ~workspace:"detail-reading-test" ~port:8935 ~refresh_interval:2. ()
+  create_state ~workspace:"detail-reading-test" ~port:8935 ()
 
 let reading () = Reading.create ~title:"selected object" []
 

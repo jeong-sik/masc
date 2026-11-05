@@ -3,7 +3,7 @@
 read again when the server announces a record in that journal, and again
 after a failed read (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every read
+The TUI reads nothing on a clock, so every read
 after the chat opens comes from an announcement or a failed read.
 """
 
@@ -55,9 +55,6 @@ class JournalsHandler(owed.ChatHandler):
     def do_GET(self) -> None:
         server = cast(JournalsServer, self.server)
         request = urllib.parse.urlsplit(self.path)
-        if request.path == "/health":
-            with server.condition:
-                server.health_reads += 1
         if request.path in (NATIVE_HINTS, CHILD_HINTS):
             phase = server.record(request.path)
             fail = False
@@ -84,7 +81,6 @@ class JournalsServer(owed.ChatServer):
         self.RequestHandlerClass = JournalsHandler
         self.native_times: list[float] = []
         self.native_failures_left = 0
-        self.health_reads = 0
 
 
 def appended(kind: str, keeper: str = "analyst") -> dict[str, object]:
@@ -101,7 +97,6 @@ class ChatJournalsSignalTest(unittest.TestCase):
     def run_journals(
         self,
         scenario: Callable[[JournalsServer, Callable[..., None]], None],
-        refresh_seconds: float = 1000.0,
     ) -> None:
         owed.ChatServer = JournalsServer
         owed.ChatOwedHistoryTest.binary = self.binary
@@ -120,7 +115,7 @@ class ChatJournalsSignalTest(unittest.TestCase):
             scenario(journals, step)
 
         owed.ChatOwedHistoryTest.run_chat(
-            cast(owed.ChatOwedHistoryTest, self), chat_open, refresh_seconds
+            cast(owed.ChatOwedHistoryTest, self), chat_open
         )
 
     def test_a_journal_record_reads_that_journal(self) -> None:

@@ -9,7 +9,7 @@
 open Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 
-let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+let state () = create_state ~workspace:"test" ~port:8935 ()
 
 let change path : Tui_decode.repository_change =
   { rc_path = path; rc_staged = false; rc_unstaged = true;

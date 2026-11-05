@@ -53,7 +53,7 @@ let with_answer f =
     | Ok Missing_log | Error _ -> fail "canonical answer did not persist" in
   ignore (Wake.deliver ~base_path:base ~keeper_name:keeper ~ask_id:ask.ask_id
     |> Result.map_error Wake.error_to_string |> require);
-  let state=Ui.create_state ~workspace:"followup-resource" ~local_base_path:base ~port:0 ~refresh_interval:2. () in
+  let state=Ui.create_state ~workspace:"followup-resource" ~local_base_path:base ~port:0 () in
   state.server_identity <- Some (identity base);state.workspace_identity <- Ui.Workspace_identity_match;
   state.view <- Ui.Approvals;
   let submission : Ui.ask_submission = {as_request=ref ();as_started_ns=0L;

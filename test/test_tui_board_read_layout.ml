@@ -105,7 +105,7 @@ let test_failed_render_and_single_document () =
    the operator's earlier choice cannot keep it true after the terminal narrows
    (#39014). Nothing here pins how the screen looks. *)
 let test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let split_cols = Masc_tui_roster_pane.threshold_cols in
   state.board_focus <- Right_pane;
   Alcotest.(check bool) "the split closes the cycle at the list" true
@@ -121,7 +121,7 @@ let test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides () =
     (board_focus_on_leaving_acting_pane state ~cols:split_cols = Right_pane)
 
 let test_focus_follows_the_layout () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   let split_cols = Masc_tui_roster_pane.threshold_cols in
   let focus ~cols = board_read_focus state ~cols in
   state.board_focus <- Left_pane;

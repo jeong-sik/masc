@@ -162,10 +162,8 @@ let is_running (row : Tui_decode.keeper_turn_row) =
    draw how long they have been blank, and those seconds are honest only because
    something redraws them. A turn, a live transcript and a lane each do that
    already; a detail read that the operator is watching does not move any mark,
-   so without this the counter was computed once on the keypress that opened the
-   tab and then not again until the refresh cadence came round -- with
-   --refresh 10, a six-second read drew "(loading…)" and then the answer, and
-   the elapsed notice never appeared at all. *)
+   so without this the counter is computed once on the keypress that opens the
+   tab and never again, and the elapsed notice never appears. *)
 let anything_running ~turns ~live_transcript ~lanes ~awaiting_detail_read =
   awaiting_detail_read
   || List.exists is_running turns

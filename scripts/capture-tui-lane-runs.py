@@ -234,8 +234,6 @@ def ttyd_session(
         workspace,
         "--port",
         str(api_port),
-        "--refresh",
-        "60",
     ]
     # Keep output writable throughout startup and capture; no reader owns a pipe.
     with tempfile.TemporaryFile() as log:

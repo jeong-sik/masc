@@ -24,7 +24,7 @@ let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
   }
 
 let a_state () =
-  Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  Masc_tui_types.create_state ~workspace:"test" ~port:8935 ()
 
 let captured (render : (string -> unit) -> unit) =
   let buf = Buffer.create 4096 in

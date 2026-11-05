@@ -106,7 +106,7 @@ existing input-reader startup intervals begin later and do not include it.
 The client directory is local evidence. In the TUI Logs surface, `o` selects
 Server or This TUI. Each source retains its own filters, list/detail position,
 snapshot and error. This TUI reads the current process's memory ring on selection
-and the existing refresh cadence, including while server identity is unavailable;
+and on the local clock, including while server identity is unavailable;
 it does not scan previous sessions' files. The server dashboard does not read the
 client directory automatically. Source integration is not visible UI or server
 export proof. Logging levels can omit rows, a crash can interrupt a write, and normal

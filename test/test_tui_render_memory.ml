@@ -6,7 +6,7 @@ module Layout = Masc_tui_message_layout
 module Render_memory = Masc_tui_render_memory
 
 let make_state () =
-  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  Types.create_state ~workspace:"" ~port:0 ()
 ;;
 
 (* The browser open on the snapshot's keeper, with its facts answered the way

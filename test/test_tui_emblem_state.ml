@@ -4,7 +4,7 @@ open Alcotest
 module Types = Masc_tui_types
 
 let fresh () =
-  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Types.create_state ~workspace:"test" ~port:8935 () in
   state.Types.connection_status <- Types.Connecting;
   state
 

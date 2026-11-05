@@ -39,7 +39,7 @@ let test_notification_only_triggers_journal_read () =
    | [{Observer.decoded=Event (Keeper_turn_stream_frame {keeper="alpha"; turn_ref=observed; seq=2; at=12.}); _}] ->
        check bool "exact autonomous turn observed" true (observed = turn_ref)
    | _ -> fail "autonomous journal growth was not decoded");
-  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Types.create_state ~workspace:"test" ~port:8935 () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   let line seq ts event : Journal.journaled_event = {seq; ts; event} in
   let lines = [line 0 10. (E.Run_started {run_id="autonomous-run"; thread_id="keeper:alpha"});
@@ -80,7 +80,7 @@ let test_cold_open_discovery () =
        ~unavailable:[] [source, 10.; source, 12.]))
 
 let test_autonomous_checkpoint_closes_its_source () =
-  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Types.create_state ~workspace:"test" ~port:8935 () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
   Types.turn_log_add ~now:11. log ~seq:(Some 1)
@@ -101,7 +101,7 @@ let test_autonomous_checkpoint_closes_its_source () =
    | _ -> fail "ended autonomous checkpoint requested another journal read")
 
 let test_history_closes_only_matching_autonomous_progress () =
-  let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Types.create_state ~workspace:"test" ~port:8935 () in
   let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
   Types.turn_log_add ~now:10. log ~seq:(Some 0) Masc_tui_keeper_chat_live.Run_started;
   Types.hold_settled_log state log;

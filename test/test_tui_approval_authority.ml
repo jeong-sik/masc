@@ -270,7 +270,7 @@ let test_authority_change_is_typed () =
     (Authority.authority_changed ~presented:(Some operator_a) ~candidate:None)
 
 let confirmed_approval_state () =
-  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"test" ~port:0 () in
   let module Decode = Tui_decode in
   state.server_identity <- Some
     { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;

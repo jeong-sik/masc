@@ -8,7 +8,7 @@ module Chat = Masc_tui_keeper_chat_projection
 module Queue = Masc_tui_keeper_chat_queue
 
 let state () =
-  let state = Tui.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Tui.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_tool_visibility <- Tui.Tools_full;
   state

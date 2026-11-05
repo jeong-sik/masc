@@ -2,7 +2,7 @@
 """The logs view follows a Keeper's Execute output over the stream the
 Terminal tab follows (RFC-0480 L6).
 
-The refresh cadence is pushed out of the test's lifetime, so what the logs
+The TUI reads nothing on a clock, so what the logs
 view asks the server for is what opening it asks for.
 """
 

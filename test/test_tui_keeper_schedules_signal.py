@@ -3,7 +3,7 @@
 server announces that the schedules changed, and again after a failed read
 (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every read
+The TUI reads nothing on a clock, so every read
 after the chat opens comes from an announcement or a failed read.
 Opening the chat reads them once, again after the pane was closed, and again
 after that read failed.
@@ -28,9 +28,6 @@ class KeeperSchedulesHandler(owed.ChatHandler):
     def do_GET(self) -> None:
         server = cast(KeeperSchedulesServer, self.server)
         request = urllib.parse.urlsplit(self.path)
-        if request.path == "/health":
-            with server.condition:
-                server.health_reads += 1
         if request.path == SCHEDULES_PATH:
             target = urllib.parse.parse_qs(request.query).get("payload_target")
             keeper_read = target == [KEEPER_TARGET]
@@ -72,7 +69,6 @@ class KeeperSchedulesServer(owed.ChatServer):
         self.RequestHandlerClass = KeeperSchedulesHandler
         self.read_times: list[float] = []
         self.failures_left = 0
-        self.health_reads = 0
 
 
 def schedule_store_invalidated() -> dict[str, object]:
@@ -89,7 +85,6 @@ class KeeperSchedulesSignalTest(unittest.TestCase):
     def run_keeper_schedules(
         self,
         scenario: Callable[[KeeperSchedulesServer, Callable[..., None]], None],
-        refresh_seconds: float = 1000.0,
         before_open: Callable[[KeeperSchedulesServer], None] = lambda _: None,
     ) -> None:
         owed.ChatServer = KeeperSchedulesServer
@@ -109,7 +104,7 @@ class KeeperSchedulesSignalTest(unittest.TestCase):
             scenario(schedules, step)
 
         owed.ChatOwedHistoryTest.run_chat(
-            cast(owed.ChatOwedHistoryTest, self), chat_open, refresh_seconds
+            cast(owed.ChatOwedHistoryTest, self), chat_open
         )
 
     def test_a_schedule_change_reads_the_keepers_schedules(self) -> None:

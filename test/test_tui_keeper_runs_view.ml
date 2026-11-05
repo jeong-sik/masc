@@ -7,7 +7,7 @@ module Types = Masc_tui_types
 module Fetched = Masc_tui_fetched
 
 let fresh () =
-  Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  Types.create_state ~workspace:"test" ~port:8935 ()
 
 let snapshot : Masc.Tui_decode_fusion.fusion_snapshot =
   { fus_generated_at = "2026-09-13T00:00:00Z"

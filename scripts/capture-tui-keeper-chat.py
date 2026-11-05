@@ -993,7 +993,7 @@ def ttyd_session(
         str(TTYD), "-p", str(web_port), "-i", "127.0.0.1", "-W",
         "-t", "rendererType=dom", "-t", "fontSize=14", "-t", "fontFamily=Menlo",
         "-T", "xterm-256color", str(executable), "--base-path", str(base),
-        "--workspace", "keeper-chat-v3", "--port", str(api_port), "--refresh", "60",
+        "--workspace", "keeper-chat-v3", "--port", str(api_port),
     ]
     # fmt: on
     started = time.monotonic()

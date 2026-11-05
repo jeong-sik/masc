@@ -89,7 +89,7 @@ let expect_original verification_id evidence = match evidence with
     | [] | _ :: _ -> fail "original filed evidence membership changed")
   | Access_unavailable _ -> fail "original filed evidence did not remain usable"
 let state base =
-  let state = create_state ~workspace:"evidence-resource" ~local_base_path:base ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"evidence-resource" ~local_base_path:base ~port:8935 () in
   state.server_identity <- Some (identity base);
   state
 

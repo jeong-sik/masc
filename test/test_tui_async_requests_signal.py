@@ -3,7 +3,7 @@
 server announces a change to them, and again after a failed read
 (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every read
+The TUI reads nothing on a clock, so every read
 after the list opens comes from an announcement or a failed read.
 """
 

@@ -20,7 +20,7 @@ environment = {key:value for key,value in os.environ.items()
                if not key.startswith('MASC_') and key not in ('NO_COLOR', 'TMUX', 'LINES', 'COLUMNS')}
 environment.update(MASC_BASE_PATH=base, MASC_HOST='127.0.0.1', MASC_TUI_SYNC='off',
                    TERM='xterm-256color', MASC_TOKEN=Path(token_file).read_text().strip())
-process = subprocess.Popen([executable, '--base-path', base, '--port', port, '--refresh', '5'],
+process = subprocess.Popen([executable, '--base-path', base, '--port', port],
     stdin=slave, stdout=slave, stderr=slave, env=environment, start_new_session=True)
 wire = bytearray()
 

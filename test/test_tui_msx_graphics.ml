@@ -182,7 +182,7 @@ let test_failed_write_and_layout () =
 
 let test_surface_lifecycle () =
   with_protocol Graphics.Kitty_protocol (fun () ->
-    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    let state = Types.create_state ~workspace:"test" ~port:8935 () in
     ignore (drawn ());
     let buf = Buffer.create 1024 in
     Msx.render_menu ~write:(Buffer.add_string buf) state;
@@ -267,7 +267,7 @@ let test_unicode_title_fits_cells () =
 
 let test_failed_menu_output_cannot_authorize_a_choice () =
   List.iter (fun mode ->
-    let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+    let state = Types.create_state ~workspace:"test" ~port:8935 () in
     state.msx_carts <- Masc_tui_types.Carts ["game.rom"; "disk.dsk"];
     Msx.open_menu ~write:ignore ~mode state;
     (try Msx.render_menu ~write:(fun _ -> raise Exit) state with Exit -> ());

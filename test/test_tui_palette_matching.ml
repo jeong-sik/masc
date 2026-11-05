@@ -85,7 +85,7 @@ let test_the_matcher_owns_the_needle_case () =
 
 let test_the_palette_lists_tasks_and_posts () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   state.tasks <-
     [ { id = "task-532"
@@ -222,7 +222,7 @@ let check_names = Alcotest.(check (list string))
    no task or post rides along however its title spells. *)
 let test_a_choice_lists_the_names_and_nothing_else () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   state.code_file <-
     landed ~path:"lib/a.ml" [ [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ];
@@ -251,7 +251,7 @@ let test_a_choice_lists_the_names_and_nothing_else () =
 ;;
 
 let test_typed_code_questions_offer_only_executable_candidates () =
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   state.palette_query <- "def";
   check_names "a reserved Code command offers no unrelated destination" []
     (List.map fst (palette_matches state));
@@ -280,7 +280,7 @@ let test_typed_code_questions_offer_only_executable_candidates () =
 
 let test_the_cursor_lines_names_are_the_candidates () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   state.code_file <-
     landed ~path:"lib/a.ml"
@@ -322,7 +322,7 @@ let test_the_cursor_lines_names_are_the_candidates () =
 
 let test_a_label_starting_with_the_query_leads () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   (* Two posts mention "def" inside a word; the cursor line names one thing. *)
   let post id title =
@@ -380,7 +380,7 @@ let test_a_label_starting_with_the_query_leads () =
    of the half that holds the rulings found nothing that goes there. *)
 let test_the_palette_goes_to_both_halves_of_task_review () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   let goes_to label surface =
     state.palette_query <- label;
@@ -396,7 +396,7 @@ let test_the_palette_goes_to_both_halves_of_task_review () =
 ;;
 
 let test_goal_and_candle_queries_select_their_destinations () =
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   List.iter (fun query ->
     state.palette_query <- query;
     match palette_matches state with
@@ -413,7 +413,7 @@ let test_goal_and_candle_queries_select_their_destinations () =
 
 let test_msx_is_reached_by_its_name () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   state.palette_query <- "msx";
   check_bool "typing msx offers the MSX screen" true
@@ -428,7 +428,7 @@ let test_msx_is_reached_by_its_name () =
 
 let test_dos_is_reached_by_its_name () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   state.palette_query <- "dos";
   (match palette_matches state with
@@ -440,7 +440,7 @@ let test_dos_is_reached_by_its_name () =
    other names still find it, from the one row. *)
 let test_metrics_is_one_row_that_answers_its_other_names () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   Alcotest.(check (list string)) "one row goes to Usage" [ "go Usage" ]
     (List.filter_map
@@ -480,7 +480,7 @@ let _every_surface_is_decided : surface -> unit = function
 
 let test_every_surface_and_config_pane_has_a_row () =
   let state =
-    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"test" ~port:8935 ()
   in
   let entries = palette_entries state in
   List.iteri
@@ -520,7 +520,7 @@ let test_every_surface_and_config_pane_has_a_row () =
 
 let test_addons_do_not_require_a_keeper () =
   let state =
-    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"empty" ~port:8935 ()
   in
   Alcotest.(check int) "no Keeper needs to be created" 0
     (List.length state.keepers);
@@ -538,7 +538,7 @@ let test_addons_do_not_require_a_keeper () =
    found by its declaration id; a Keeper's question adds none. *)
 let test_an_installation_that_asked_has_one_results_row () =
   let state =
-    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+    create_state ~workspace:"empty" ~port:8935 ()
   in
   let module Asks = Masc.Tui_decode_asks in
   let ask asker id : Asks.ask_row =
@@ -567,7 +567,7 @@ let test_an_installation_that_asked_has_one_results_row () =
 ;;
 
 let test_retained_history_is_available_without_current_configuration () =
-  let state=create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state=create_state ~workspace:"test" ~port:8935 () in
   (* No current configuration/installation reading supplies these targets. *)
   check_bool "no current model rows" true (Option.is_none state.standalone_lanes);
   check_bool "no current inventory" true (Option.is_none state.lane_inventory);
@@ -580,7 +580,7 @@ let test_retained_history_is_available_without_current_configuration () =
 ;;
 
 let test_korean_aliases_and_ui_language_entries () =
-  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = create_state ~workspace:"test" ~port:8935 () in
   state.palette_query <- "모델";
   check_bool "Korean model query reaches Config_models" true
     (List.exists (fun (_, action) -> action = Palette_config Config_models)

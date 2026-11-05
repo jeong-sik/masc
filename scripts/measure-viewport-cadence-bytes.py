@@ -38,6 +38,7 @@ from typing import Any, Iterator
 
 CONSTANT_SAMPLES = 5
 EXPECTED_POLLS = CONSTANT_SAMPLES + 4  # manual warmup, settle, constant, control, boundary
+# The TUI's own two-second clock, which reads the browser lane frame.
 CADENCE_SEC = 2
 SESSION_SEC = 15.0
 SESSIONS = 3
@@ -250,8 +251,8 @@ def tui_pty(executable: Path, base: Path, api_port: int) -> Iterator[tuple[int, 
            "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     try:
         proc = subprocess.Popen([str(executable), "--base-path", str(base), "--workspace",
-                                 "viewport-bytes", "--port", str(api_port), "--refresh",
-                                 str(CADENCE_SEC)], stdin=slave, stdout=slave, stderr=slave,
+                                 "viewport-bytes", "--port", str(api_port)],
+                                stdin=slave, stdout=slave, stderr=slave,
                                 env=env, cwd=str(base), start_new_session=True)
     except BaseException:
         os.close(master)

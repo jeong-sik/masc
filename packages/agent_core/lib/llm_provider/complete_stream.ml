@@ -198,17 +198,17 @@ let%test "clean stream finalizes Ok: Gemini finishReason" =
   let acc = Complete_stream_acc.create_stream_acc () in
   let st = Streaming.create_openai_stream_state ~provider:"gemini" ~model:"m" () in
   (match
-     Streaming.parse_gemini_sse_chunk
+     Gemini_wire.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}|}
    with
-   | Streaming.Gemini_chunk chunk ->
+   | Gemini_wire.Gemini_chunk chunk ->
      (match Streaming.gemini_chunk_to_events st chunk with
       | Ok (events, _telemetry) -> accumulate_events acc events
       | Error _ -> ())
-   | Streaming.Gemini_provider_error _ -> ()
-   | Streaming.Gemini_unsupported_part _ -> ()
-   | Streaming.Gemini_unsupported_response _ -> ()
-   | Streaming.Gemini_parse_failed _ -> ());
+   | Gemini_wire.Gemini_provider_error _ -> ()
+   | Gemini_wire.Gemini_unsupported_part _ -> ()
+   | Gemini_wire.Gemini_unsupported_response _ -> ()
+   | Gemini_wire.Gemini_parse_failed _ -> ());
   match Complete_stream_acc.finalize_stream_acc acc with
   | Ok _ -> true
   | Error _ -> false
@@ -1029,39 +1029,40 @@ let complete_stream_http
                                  (get_state ())
                                  parsed
                              | Provider_http_codec.Gemini_generate_content ->
-                               (match Streaming.parse_gemini_sse_chunk data with
-                                | Streaming.Gemini_chunk chunk ->
+                               (match Gemini_wire.parse_gemini_sse_chunk data with
+                                | Gemini_wire.Gemini_chunk chunk ->
                                   (match
                                      Streaming.gemini_chunk_to_events (get_state ()) chunk
                                    with
                                    | Ok events -> events
                                    | Error { reason } ->
                                      [ Types.SSEParseFailed { raw = data; reason } ], None)
-                                | Streaming.Gemini_provider_error
+                                | Gemini_wire.Gemini_provider_error
                                     { message; error_type; provider_status; report; raw }
                                   ->
                                   ( [ Types.SSEError
                                         { message; error_type; provider_status; report; raw }
                                     ]
                                   , None )
-                                | Streaming.Gemini_parse_failed { reason; raw } ->
+                                | Gemini_wire.Gemini_parse_failed { reason; raw } ->
                                   [ Types.SSEParseFailed { raw; reason } ], None
-                                | Streaming.Gemini_unsupported_part { part; raw } ->
+                                | Gemini_wire.Gemini_unsupported_part { part; raw } ->
                                   ( [ Types.SSEUnsupportedPart
                                         { provider_kind = Provider_kind.Gemini
                                         ; part =
-                                            Streaming.gemini_unsupported_part_wire_name
+                                            Gemini_wire.gemini_unsupported_part_wire_name
                                               part
                                         ; raw
                                         }
                                     ]
                                   , None )
-                                | Streaming.Gemini_unsupported_response { response; raw }
+                                | Gemini_wire.Gemini_unsupported_response
+                                    { response; raw }
                                   ->
                                   ( [ Types.SSEUnsupportedResponse
                                         { provider_kind = Provider_kind.Gemini
                                         ; response =
-                                            Streaming
+                                            Gemini_wire
                                             .gemini_unsupported_response_wire_name
                                               response
                                         ; raw

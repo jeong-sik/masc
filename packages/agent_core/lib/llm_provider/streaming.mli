@@ -196,84 +196,22 @@ val responses_sse_to_events
   -> string
   -> sse_event list * Telemetry_event.t option
 
-(** {1 Gemini SSE}
-
-    Gemini [streamGenerateContent?alt=sse] emits SSE chunks with
-    [{candidates: [{content: {parts: [...]}}]}] structure per chunk.
-    We reuse {!openai_stream_state} for block tracking since the
-    state management pattern is identical. *)
-
-type gemini_terminal_reason =
-  | Gemini_candidate_finish_reason of string
-  | Gemini_prompt_block_reason of string
-
-type gemini_chunk =
-  { gem_model : string option
-  ; gem_parts : Yojson.Safe.t list
-  ; gem_finish_reason : gemini_terminal_reason option
-  ; gem_usage : api_usage option
-  }
-
-type gemini_unsupported_part =
-  | Gemini_executable_code
-  | Gemini_code_execution_result
-  | Gemini_tool_call
-  | Gemini_tool_response
-  | Gemini_function_response
-  | Gemini_file_data
-  | Gemini_audio_transcription
-  | Gemini_streaming_function_call_arguments
-  | Gemini_streaming_function_call_continuation
-
-type gemini_unsupported_response = Gemini_multiple_candidates of { count : int }
-
-type gemini_sse_parse_result =
-  | Gemini_chunk of gemini_chunk
-  | Gemini_provider_error of
-      { message : string
-      ; error_type : string option
-      ; provider_status : Types.provider_status option
-      ; report : Types.provider_report
-      ; raw : string
-      }
-  | Gemini_unsupported_part of
-      { part : gemini_unsupported_part
-      ; raw : string
-      }
-  | Gemini_unsupported_response of
-      { response : gemini_unsupported_response
-      ; raw : string
-      }
-  | Gemini_parse_failed of
-      { reason : string
-      ; raw : string
-      }
-
-(** Parse one Gemini SSE data payload without collapsing malformed JSON or
-    malformed candidate/part shapes into an absent chunk. A top-level [error]
-    object is read first, as {!Openai_error_envelope.of_error_value} reads it
-    (Gemini's [code]/[message] envelope is that same shape), and returned as
-    [Gemini_provider_error] so a declared 429/5xx reaches retry classification
-    instead of surfacing as a malformed payload. Official Part kinds
-    that AGENT_CORE does not project are returned as [Gemini_unsupported_part], not
-    relabelled as malformed bytes. Official response shapes that AGENT_CORE does not
-    project are returned as [Gemini_unsupported_response]. Callers must surface
-    either capability fact with the raw payload. *)
-val parse_gemini_sse_chunk : string -> gemini_sse_parse_result
-
 (** Read a response body that carried no SSE [data:] payload at all as a
     provider error event when it is a JSON error envelope, [None] otherwise.
     [raw] is the evidence the event carries; [body] is what gets parsed. *)
 val sse_error_event_of_bodiless_body : raw:string -> string -> Types.sse_event option
 
-val gemini_unsupported_part_wire_name : gemini_unsupported_part -> string
-val gemini_unsupported_response_wire_name : gemini_unsupported_response -> string
+(** {1 Gemini SSE}
+
+    {!Gemini_wire} reads one Gemini payload into a chunk. This turns the
+    chunk into stream events, reusing {!openai_stream_state} for block
+    tracking since the state management pattern is identical. *)
 
 type gemini_chunk_to_events_error = { reason : string }
 
 val gemini_chunk_to_events
   :  openai_stream_state
-  -> gemini_chunk
+  -> Gemini_wire.gemini_chunk
   -> (sse_event list * Telemetry_event.t option, gemini_chunk_to_events_error) result
 
 (** {1 Ollama NDJSON Streaming}

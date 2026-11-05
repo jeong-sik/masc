@@ -1,6 +1,7 @@
 open Alcotest
 open Llm_provider.Types
 module S = Llm_provider.Streaming
+module GW = Llm_provider.Gemini_wire
 module RD = Llm_provider.Reasoning_dialect
 
 let usage ?(input_tokens = 1) ?(output_tokens = 2) () =
@@ -85,12 +86,12 @@ let require_ollama_chunk label = function
 ;;
 
 let parse_gemini_chunk data =
-  match S.parse_gemini_sse_chunk data with
-  | S.Gemini_chunk chunk -> Some chunk
-  | S.Gemini_provider_error _ -> None
-  | S.Gemini_unsupported_part _ -> None
-  | S.Gemini_unsupported_response _ -> None
-  | S.Gemini_parse_failed _ -> None
+  match GW.parse_gemini_sse_chunk data with
+  | GW.Gemini_chunk chunk -> Some chunk
+  | GW.Gemini_provider_error _ -> None
+  | GW.Gemini_unsupported_part _ -> None
+  | GW.Gemini_unsupported_response _ -> None
+  | GW.Gemini_parse_failed _ -> None
 ;;
 
 let require_gemini_events label state chunk =
@@ -641,32 +642,34 @@ let test_openai_event_edge_branches () =
 
 let test_gemini_parse_edge_shapes () =
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"text":"no model"}]}}]}|}
    with
-   | S.Gemini_chunk chunk ->
+   | GW.Gemini_chunk chunk ->
      check (option string) "absent modelVersion" None chunk.gem_model
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "absent optional modelVersion was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "absent modelVersion is not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "absent modelVersion is not a Part kind"
-   | S.Gemini_unsupported_response _ -> fail "absent modelVersion is not a response kind");
+   | GW.Gemini_provider_error _ -> fail "absent modelVersion is not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "absent modelVersion is not a Part kind"
+   | GW.Gemini_unsupported_response _ ->
+     fail "absent modelVersion is not a response kind");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"modelVersion":"","candidates":[{"content":{"parts":[{"text":"empty model"}]}}]}|}
    with
-   | S.Gemini_chunk chunk ->
+   | GW.Gemini_chunk chunk ->
      check (option string) "empty modelVersion remains distinct" (Some "") chunk.gem_model
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "empty modelVersion was rejected instead of preserved: %s" reason
-   | S.Gemini_provider_error _ -> fail "empty modelVersion is not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "empty modelVersion is not a Part kind"
-   | S.Gemini_unsupported_response _ -> fail "empty modelVersion is not a response kind");
+   | GW.Gemini_provider_error _ -> fail "empty modelVersion is not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "empty modelVersion is not a Part kind"
+   | GW.Gemini_unsupported_response _ ->
+     fail "empty modelVersion is not a response kind");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"modelVersion":"gemini-wire-model","candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}]}|}
    with
-   | S.Gemini_chunk chunk ->
+   | GW.Gemini_chunk chunk ->
      let events, _ =
        require_gemini_events
          "response model propagation"
@@ -683,25 +686,26 @@ let test_gemini_parse_edge_shapes () =
           "gemini-wire-model"
           response.model
       | Error _ -> fail "terminal Gemini chunk did not finalize")
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "model propagation fixture was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "model propagation has no provider error"
-   | S.Gemini_unsupported_part _ -> fail "model propagation has no unsupported Part"
-   | S.Gemini_unsupported_response _ ->
+   | GW.Gemini_provider_error _ -> fail "model propagation has no provider error"
+   | GW.Gemini_unsupported_part _ -> fail "model propagation has no unsupported Part"
+   | GW.Gemini_unsupported_response _ ->
      fail "model propagation has no unsupported response");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":""}]}|}
    with
-   | S.Gemini_chunk chunk ->
+   | GW.Gemini_chunk chunk ->
      (match chunk.gem_finish_reason with
       | None -> ()
       | Some _ -> fail "empty finishReason became a terminal reason")
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "empty finishReason was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "empty finishReason is not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "empty finishReason is not a Part kind"
-   | S.Gemini_unsupported_response _ -> fail "empty finishReason is not a response kind");
+   | GW.Gemini_provider_error _ -> fail "empty finishReason is not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "empty finishReason is not a Part kind"
+   | GW.Gemini_unsupported_response _ ->
+     fail "empty finishReason is not a response kind");
   (match
      parse_gemini_chunk {|{"modelVersion":"gem","candidates":[],"usageMetadata":null}|}
    with
@@ -714,51 +718,51 @@ let test_gemini_parse_edge_shapes () =
    | None -> ()
    | Some _ -> fail "non-list candidates should be rejected by missing content");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"text":"a"}]}},{"content":{"parts":[{"text":"b"}]}}]}|}
    with
-   | S.Gemini_unsupported_response { response; raw } ->
+   | GW.Gemini_unsupported_response { response; raw } ->
      (match response with
-      | S.Gemini_multiple_candidates { count } ->
+      | GW.Gemini_multiple_candidates { count } ->
         check int "multiple candidates count" 2 count;
         check
           string
           "multiple candidates wire field"
           "candidates"
-          (S.gemini_unsupported_response_wire_name response);
+          (GW.gemini_unsupported_response_wire_name response);
         check bool "multiple candidates raw preserved" true (String.length raw > 0))
-   | S.Gemini_chunk _ -> fail "multiple Gemini candidates must not be dropped"
-   | S.Gemini_provider_error _ -> fail "multiple candidates are not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "multiple candidates are not a Part kind"
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_chunk _ -> fail "multiple Gemini candidates must not be dropped"
+   | GW.Gemini_provider_error _ -> fail "multiple candidates are not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "multiple candidates are not a Part kind"
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "multiple candidates were collapsed into malformed: %s" reason);
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"modelVersion":"gem","candidates":[{"content":{"parts":{"bad":true}}}],"usageMetadata":null}|}
    with
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      check
        string
        "non-list parts reason"
        "gemini.candidates[0].content.parts:not_array(got object)"
        reason
-   | S.Gemini_chunk _ -> fail "non-list parts must be rejected"
-   | S.Gemini_provider_error _ -> fail "non-list parts are not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "non-list parts are not a Part kind"
-   | S.Gemini_unsupported_response _ -> fail "non-list parts are not a response kind");
-  match S.parse_gemini_sse_chunk "{not-json" with
-  | S.Gemini_parse_failed { raw; reason } ->
+   | GW.Gemini_chunk _ -> fail "non-list parts must be rejected"
+   | GW.Gemini_provider_error _ -> fail "non-list parts are not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "non-list parts are not a Part kind"
+   | GW.Gemini_unsupported_response _ -> fail "non-list parts are not a response kind");
+  match GW.parse_gemini_sse_chunk "{not-json" with
+  | GW.Gemini_parse_failed { raw; reason } ->
     check string "invalid gemini raw" "{not-json" raw;
     check bool "invalid gemini reason" true (String.length reason > 0)
-  | S.Gemini_chunk _ -> fail "invalid gemini json should be rejected"
-  | S.Gemini_provider_error _ -> fail "invalid JSON is not a provider error"
-  | S.Gemini_unsupported_part _ -> fail "invalid JSON is not a Part kind"
-  | S.Gemini_unsupported_response _ -> fail "invalid JSON is not a response kind"
+  | GW.Gemini_chunk _ -> fail "invalid gemini json should be rejected"
+  | GW.Gemini_provider_error _ -> fail "invalid JSON is not a provider error"
+  | GW.Gemini_unsupported_part _ -> fail "invalid JSON is not a Part kind"
+  | GW.Gemini_unsupported_response _ -> fail "invalid JSON is not a response kind"
 ;;
 
 let check_gemini_refusal label expected_reason payload =
-  match S.parse_gemini_sse_chunk payload with
-  | S.Gemini_chunk chunk ->
+  match GW.parse_gemini_sse_chunk payload with
+  | GW.Gemini_chunk chunk ->
     check
       bool
       (label ^ ": terminal reason preserved")
@@ -771,51 +775,51 @@ let check_gemini_refusal label expected_reason payload =
        ; MessageStop
        ] -> ()
      | _ -> failf "%s: expected a typed refusal" label)
-  | S.Gemini_parse_failed { reason; _ } ->
+  | GW.Gemini_parse_failed { reason; _ } ->
     failf "%s: valid policy block was rejected: %s" label reason
-  | S.Gemini_provider_error _ ->
+  | GW.Gemini_provider_error _ ->
     failf "%s: policy block is not a provider error" label
-  | S.Gemini_unsupported_part _ ->
+  | GW.Gemini_unsupported_part _ ->
     failf "%s: policy block is not an unsupported Part" label
-  | S.Gemini_unsupported_response _ ->
+  | GW.Gemini_unsupported_response _ ->
     failf "%s: policy block is not an unsupported response" label
 ;;
 
 let test_gemini_policy_blocks_are_not_wire_failures () =
   check_gemini_refusal
     "prompt policy block"
-    (Some (S.Gemini_prompt_block_reason "OTHER"))
+    (Some (GW.Gemini_prompt_block_reason "OTHER"))
     {|{"modelVersion":"gem","promptFeedback":{"blockReason":"OTHER"},"candidates":[]}|};
   check_gemini_refusal
     "safety prompt policy block"
-    (Some (S.Gemini_prompt_block_reason "SAFETY"))
+    (Some (GW.Gemini_prompt_block_reason "SAFETY"))
     {|{"modelVersion":"gem","promptFeedback":{"blockReason":"SAFETY"},"candidates":[]}|};
   check_gemini_refusal
     "omitted empty candidates policy block"
-    (Some (S.Gemini_prompt_block_reason "SAFETY"))
+    (Some (GW.Gemini_prompt_block_reason "SAFETY"))
     {|{"modelVersion":"gem","promptFeedback":{"blockReason":"SAFETY"}}|};
   check_gemini_refusal
     "candidate policy block"
-    (Some (S.Gemini_candidate_finish_reason "PROHIBITED_CONTENT"))
+    (Some (GW.Gemini_candidate_finish_reason "PROHIBITED_CONTENT"))
     {|{"modelVersion":"gem","candidates":[{"finishReason":"PROHIBITED_CONTENT"}]}|}
 ;;
 
 let test_gemini_supported_metadata_and_function_call_shapes () =
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"text":"ok","partMetadata":{},"mediaResolution":{},"videoMetadata":{}}]}}]}|}
    with
-   | S.Gemini_chunk _ -> ()
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_chunk _ -> ()
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "official Part metadata was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "Part metadata is not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "Part metadata is not a payload kind"
-   | S.Gemini_unsupported_response _ -> fail "Part metadata is not a response kind");
+   | GW.Gemini_provider_error _ -> fail "Part metadata is not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "Part metadata is not a payload kind"
+   | GW.Gemini_unsupported_response _ -> fail "Part metadata is not a response kind");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup"}}]}}]}|}
    with
-   | S.Gemini_chunk chunk ->
+   | GW.Gemini_chunk chunk ->
      let events, _ =
        require_gemini_events
          "argument-free function call"
@@ -831,139 +835,141 @@ let test_gemini_supported_metadata_and_function_call_shapes () =
             | ContentBlockDelta { delta = InputJsonSnapshot "{}"; _ } -> true
             | _ -> false)
           events)
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "optional functionCall.args was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "argument-free function call is not a provider error"
-   | S.Gemini_unsupported_part _ -> fail "argument-free function call is supported"
-   | S.Gemini_unsupported_response _ ->
+   | GW.Gemini_provider_error _ ->
+     fail "argument-free function call is not a provider error"
+   | GW.Gemini_unsupported_part _ -> fail "argument-free function call is supported"
+   | GW.Gemini_unsupported_response _ ->
      fail "argument-free function call is not a response");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{},"willContinue":false}}]}}]}|}
    with
-   | S.Gemini_chunk _ -> ()
-   | S.Gemini_parse_failed { reason; _ } ->
+   | GW.Gemini_chunk _ -> ()
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "terminal willContinue=false was rejected: %s" reason
-   | S.Gemini_provider_error _ -> fail "terminal willContinue=false is not a provider error"
-   | S.Gemini_unsupported_part _ ->
+   | GW.Gemini_provider_error _ ->
+     fail "terminal willContinue=false is not a provider error"
+   | GW.Gemini_unsupported_part _ ->
      fail "terminal willContinue=false is not incremental arguments"
-   | S.Gemini_unsupported_response _ ->
+   | GW.Gemini_unsupported_response _ ->
      fail "terminal willContinue=false is not a response kind");
   (match
-     S.parse_gemini_sse_chunk
+     GW.parse_gemini_sse_chunk
        {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","willContinue":true}}]}}]}|}
    with
-   | S.Gemini_unsupported_part { part; _ } ->
+   | GW.Gemini_unsupported_part { part; _ } ->
      check
        string
        "streaming continuation remains explicit"
        "functionCall.willContinue"
-       (S.gemini_unsupported_part_wire_name part)
-   | S.Gemini_chunk _ -> fail "streaming continuation must not be dropped"
-   | S.Gemini_parse_failed { reason; _ } ->
+       (GW.gemini_unsupported_part_wire_name part)
+   | GW.Gemini_chunk _ -> fail "streaming continuation must not be dropped"
+   | GW.Gemini_parse_failed { reason; _ } ->
      failf "official streaming continuation was called malformed: %s" reason
-   | S.Gemini_provider_error _ -> fail "streaming continuation is not a provider error"
-   | S.Gemini_unsupported_response _ ->
+   | GW.Gemini_provider_error _ -> fail "streaming continuation is not a provider error"
+   | GW.Gemini_unsupported_response _ ->
      fail "streaming continuation is not a response kind");
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","partialArgs":[],"willContinue":true}}]}}]}|}
   with
-  | S.Gemini_unsupported_part { part; _ } ->
+  | GW.Gemini_unsupported_part { part; _ } ->
     check
       string
       "streaming function args remain explicit"
       "functionCall.partialArgs"
-      (S.gemini_unsupported_part_wire_name part)
-  | S.Gemini_chunk _ -> fail "streaming function args must not be dropped"
-  | S.Gemini_parse_failed { reason; _ } ->
+      (GW.gemini_unsupported_part_wire_name part)
+  | GW.Gemini_chunk _ -> fail "streaming function args must not be dropped"
+  | GW.Gemini_parse_failed { reason; _ } ->
     failf "official streaming function args were called malformed: %s" reason
-  | S.Gemini_provider_error _ -> fail "streaming function args are not a provider error"
-  | S.Gemini_unsupported_response _ ->
+  | GW.Gemini_provider_error _ -> fail "streaming function args are not a provider error"
+  | GW.Gemini_unsupported_response _ ->
     fail "streaming function args are not a response kind"
 ;;
 
 let test_gemini_part_shape_failure_is_explicit () =
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"unknownPart":{}}]}}]}|}
   with
-  | S.Gemini_parse_failed { raw; reason } ->
+  | GW.Gemini_parse_failed { raw; reason } ->
     check bool "unknown part raw preserved" true (String.length raw > 0);
     check
       string
       "unknown part reason"
       "gemini.candidates[0].content.parts[0].unknownPart:unsupported_field"
       reason
-  | S.Gemini_chunk _ -> fail "unknown Gemini part must not be accepted"
-  | S.Gemini_unsupported_part _ ->
+  | GW.Gemini_chunk _ -> fail "unknown Gemini part must not be accepted"
+  | GW.Gemini_unsupported_part _ ->
     fail "unknown fields must remain malformed, not official unsupported Parts"
-  | S.Gemini_provider_error _ -> fail "unknown fields are not a provider error"
-  | S.Gemini_unsupported_response _ -> fail "unknown fields are not a response kind"
+  | GW.Gemini_provider_error _ -> fail "unknown fields are not a provider error"
+  | GW.Gemini_unsupported_response _ -> fail "unknown fields are not a response kind"
 ;;
 
 let test_gemini_official_unsupported_part_is_not_malformed () =
   let raw =
     {|{"candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON","code":"print(1)"}}]}}]}|}
   in
-  (match S.parse_gemini_sse_chunk raw with
-   | S.Gemini_unsupported_part { part; raw = observed_raw } ->
+  (match GW.parse_gemini_sse_chunk raw with
+   | GW.Gemini_unsupported_part { part; raw = observed_raw } ->
      check
        string
        "typed unsupported Part"
        "executableCode"
-       (S.gemini_unsupported_part_wire_name part);
+       (GW.gemini_unsupported_part_wire_name part);
      check string "unsupported Part raw preserved" raw observed_raw
-   | S.Gemini_parse_failed _ -> fail "official unsupported Part must not be malformed"
-   | S.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
-   | S.Gemini_provider_error _ -> fail "unsupported Part is not a provider error"
-   | S.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
+   | GW.Gemini_parse_failed _ -> fail "official unsupported Part must not be malformed"
+   | GW.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
+   | GW.Gemini_provider_error _ -> fail "unsupported Part is not a provider error"
+   | GW.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"functionResponse":{"name":"lookup","response":{}}}]}}]}|}
   with
-  | S.Gemini_unsupported_part { part; _ } ->
+  | GW.Gemini_unsupported_part { part; _ } ->
     check
       string
       "typed function response Part"
       "functionResponse"
-      (S.gemini_unsupported_part_wire_name part)
-  | S.Gemini_parse_failed _ -> fail "official functionResponse must not be malformed"
-  | S.Gemini_chunk _ -> fail "unsupported functionResponse must not be dropped"
-  | S.Gemini_provider_error _ -> fail "functionResponse is not a provider error"
-  | S.Gemini_unsupported_response _ -> fail "functionResponse is not a response kind"
+      (GW.gemini_unsupported_part_wire_name part)
+  | GW.Gemini_parse_failed _ -> fail "official functionResponse must not be malformed"
+  | GW.Gemini_chunk _ -> fail "unsupported functionResponse must not be dropped"
+  | GW.Gemini_provider_error _ -> fail "functionResponse is not a provider error"
+  | GW.Gemini_unsupported_response _ -> fail "functionResponse is not a response kind"
 ;;
 
 let test_gemini_unsupported_part_shape_is_explicit () =
   let result_raw =
     {|{"candidates":[{"content":{"parts":[{"codeExecutionResult":{"outcome":"OUTCOME_OK","output":"1"}}]}}]}|}
   in
-  (match S.parse_gemini_sse_chunk result_raw with
-   | S.Gemini_unsupported_part { part; raw } ->
+  (match GW.parse_gemini_sse_chunk result_raw with
+   | GW.Gemini_unsupported_part { part; raw } ->
      check
        string
        "typed code execution result Part"
        "codeExecutionResult"
-       (S.gemini_unsupported_part_wire_name part);
+       (GW.gemini_unsupported_part_wire_name part);
      check string "code execution result raw preserved" result_raw raw
-   | S.Gemini_parse_failed _ -> fail "official code execution result must be typed"
-   | S.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
-   | S.Gemini_provider_error _ -> fail "code execution result is not a provider error"
-   | S.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
+   | GW.Gemini_parse_failed _ -> fail "official code execution result must be typed"
+   | GW.Gemini_chunk _ -> fail "unsupported Part must not be silently accepted"
+   | GW.Gemini_provider_error _ -> fail "code execution result is not a provider error"
+   | GW.Gemini_unsupported_response _ -> fail "unsupported Part is not a response kind");
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON"}}]}}]}|}
   with
-  | S.Gemini_parse_failed { reason; _ } ->
+  | GW.Gemini_parse_failed { reason; _ } ->
     check
       string
       "malformed executable code reason"
       "gemini.candidates[0].content.parts[0].executableCode.code:missing"
       reason
-  | S.Gemini_unsupported_part _ -> fail "malformed executableCode must remain malformed"
-  | S.Gemini_chunk _ -> fail "malformed executableCode must not be accepted"
-  | S.Gemini_provider_error _ -> fail "malformed executableCode is not a provider error"
-  | S.Gemini_unsupported_response _ ->
+  | GW.Gemini_unsupported_part _ -> fail "malformed executableCode must remain malformed"
+  | GW.Gemini_chunk _ -> fail "malformed executableCode must not be accepted"
+  | GW.Gemini_provider_error _ -> fail "malformed executableCode is not a provider error"
+  | GW.Gemini_unsupported_response _ ->
     fail "malformed executableCode is not a response kind"
 ;;
 
@@ -971,68 +977,68 @@ let test_gemini_builtin_tool_parts_are_typed () =
   let tool_call_raw =
     {|{"candidates":[{"content":{"parts":[{"thoughtSignature":"sig","toolCall":{"toolType":"GOOGLE_SEARCH_WEB","args":{"queries":["seoul"]},"id":"call-1"}}]}}]}|}
   in
-  (match S.parse_gemini_sse_chunk tool_call_raw with
-   | S.Gemini_unsupported_part { part; raw } ->
-     check string "typed toolCall" "toolCall" (S.gemini_unsupported_part_wire_name part);
+  (match GW.parse_gemini_sse_chunk tool_call_raw with
+   | GW.Gemini_unsupported_part { part; raw } ->
+     check string "typed toolCall" "toolCall" (GW.gemini_unsupported_part_wire_name part);
      check string "toolCall raw preserved" tool_call_raw raw
-   | S.Gemini_parse_failed _ -> fail "official toolCall must be typed"
-   | S.Gemini_chunk _ -> fail "unsupported toolCall must not be silently accepted"
-   | S.Gemini_provider_error _ -> fail "toolCall is not a provider error"
-   | S.Gemini_unsupported_response _ -> fail "toolCall is not a response kind");
+   | GW.Gemini_parse_failed _ -> fail "official toolCall must be typed"
+   | GW.Gemini_chunk _ -> fail "unsupported toolCall must not be silently accepted"
+   | GW.Gemini_provider_error _ -> fail "toolCall is not a provider error"
+   | GW.Gemini_unsupported_response _ -> fail "toolCall is not a response kind");
   let tool_response_raw =
     {|{"candidates":[{"content":{"parts":[{"thoughtSignature":"sig","toolResponse":{"toolType":"GOOGLE_SEARCH_WEB","response":{"search_suggestions":"x"},"id":"call-1"}}]}}]}|}
   in
-  (match S.parse_gemini_sse_chunk tool_response_raw with
-   | S.Gemini_unsupported_part { part; raw } ->
+  (match GW.parse_gemini_sse_chunk tool_response_raw with
+   | GW.Gemini_unsupported_part { part; raw } ->
      check
        string
        "typed toolResponse"
        "toolResponse"
-       (S.gemini_unsupported_part_wire_name part);
+       (GW.gemini_unsupported_part_wire_name part);
      check string "toolResponse raw preserved" tool_response_raw raw
-   | S.Gemini_parse_failed _ -> fail "official toolResponse must be typed"
-   | S.Gemini_chunk _ -> fail "unsupported toolResponse must not be silently accepted"
-   | S.Gemini_provider_error _ -> fail "toolResponse is not a provider error"
-   | S.Gemini_unsupported_response _ -> fail "toolResponse is not a response kind");
+   | GW.Gemini_parse_failed _ -> fail "official toolResponse must be typed"
+   | GW.Gemini_chunk _ -> fail "unsupported toolResponse must not be silently accepted"
+   | GW.Gemini_provider_error _ -> fail "toolResponse is not a provider error"
+   | GW.Gemini_unsupported_response _ -> fail "toolResponse is not a response kind");
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"toolCall":{"toolType":"GOOGLE_SEARCH_WEB"}}]}}]}|}
   with
-  | S.Gemini_parse_failed { reason; _ } ->
+  | GW.Gemini_parse_failed { reason; _ } ->
     check
       string
       "malformed toolCall reason"
       "gemini.candidates[0].content.parts[0].toolCall.id:missing"
       reason
-  | S.Gemini_unsupported_part _ -> fail "malformed toolCall must remain malformed"
-  | S.Gemini_chunk _ -> fail "malformed toolCall must not be accepted"
-  | S.Gemini_provider_error _ -> fail "malformed toolCall is not a provider error"
-  | S.Gemini_unsupported_response _ -> fail "malformed toolCall is not a response kind"
+  | GW.Gemini_unsupported_part _ -> fail "malformed toolCall must remain malformed"
+  | GW.Gemini_chunk _ -> fail "malformed toolCall must not be accepted"
+  | GW.Gemini_provider_error _ -> fail "malformed toolCall is not a provider error"
+  | GW.Gemini_unsupported_response _ -> fail "malformed toolCall is not a response kind"
 ;;
 
 let test_gemini_malformed_part_precedes_unsupported_part () =
   match
-    S.parse_gemini_sse_chunk
+    GW.parse_gemini_sse_chunk
       {|{"candidates":[{"content":{"parts":[{"executableCode":{"language":"PYTHON","code":"print(1)"}},{"unknownPart":{}}]}}]}|}
   with
-  | S.Gemini_parse_failed { reason; _ } ->
+  | GW.Gemini_parse_failed { reason; _ } ->
     check
       string
       "malformed sibling reason"
       "gemini.candidates[0].content.parts[1].unknownPart:unsupported_field"
       reason
-  | S.Gemini_unsupported_part _ ->
+  | GW.Gemini_unsupported_part _ ->
     fail "malformed sibling must not be hidden by unsupported Part"
-  | S.Gemini_chunk _ -> fail "malformed sibling must not be accepted"
-  | S.Gemini_provider_error _ -> fail "malformed sibling is not a provider error"
-  | S.Gemini_unsupported_response _ -> fail "malformed sibling is not a response kind"
+  | GW.Gemini_chunk _ -> fail "malformed sibling must not be accepted"
+  | GW.Gemini_provider_error _ -> fail "malformed sibling is not a provider error"
+  | GW.Gemini_unsupported_response _ -> fail "malformed sibling is not a response kind"
 ;;
 
-let gemini_chunk ?(parts = []) ?finish_reason ?usage () : S.gemini_chunk =
+let gemini_chunk ?(parts = []) ?finish_reason ?usage () : GW.gemini_chunk =
   { gem_model = Some "gemini-test"
   ; gem_parts = parts
   ; gem_finish_reason =
-      Option.map (fun reason -> S.Gemini_candidate_finish_reason reason) finish_reason
+      Option.map (fun reason -> GW.Gemini_candidate_finish_reason reason) finish_reason
   ; gem_usage = usage
   }
 ;;

@@ -11,12 +11,12 @@ let check label cond =
 ;;
 
 let parse_gemini_chunk data =
-  match Streaming.parse_gemini_sse_chunk data with
-  | Streaming.Gemini_chunk chunk -> Some chunk
-  | Streaming.Gemini_provider_error _ -> None
-  | Streaming.Gemini_unsupported_part _ -> None
-  | Streaming.Gemini_unsupported_response _ -> None
-  | Streaming.Gemini_parse_failed _ -> None
+  match Gemini_wire.parse_gemini_sse_chunk data with
+  | Gemini_wire.Gemini_chunk chunk -> Some chunk
+  | Gemini_wire.Gemini_provider_error _ -> None
+  | Gemini_wire.Gemini_unsupported_part _ -> None
+  | Gemini_wire.Gemini_unsupported_response _ -> None
+  | Gemini_wire.Gemini_parse_failed _ -> None
 ;;
 
 let gemini_events state chunk =
@@ -117,7 +117,8 @@ let test_sse_function_call () =
     check "has parts" (List.length chunk.gem_parts > 0);
     check
       "finish reason STOP"
-      (chunk.gem_finish_reason = Some (Streaming.Gemini_candidate_finish_reason "STOP"));
+      (chunk.gem_finish_reason
+       = Some (Gemini_wire.Gemini_candidate_finish_reason "STOP"));
     let state = Streaming.create_openai_stream_state () in
     let events, _tel = gemini_events state chunk in
     let has_tool_start =
@@ -224,10 +225,10 @@ let test_tool_use_id_roundtrip () =
 let test_error_envelope_classification () =
   Printf.printf "=== error envelope classification ===\n";
   (match
-     Streaming.parse_gemini_sse_chunk
+     Gemini_wire.parse_gemini_sse_chunk
        {|{"error":{"code":429,"message":"slow down","status":"RESOURCE_EXHAUSTED"}}|}
    with
-   | Streaming.Gemini_provider_error { message; provider_status; report; raw; _ } ->
+   | Gemini_wire.Gemini_provider_error { message; provider_status; report; raw; _ } ->
      check "in-stream 429 message preserved" (String.equal message "slow down");
      check
        "in-stream 429 declares its status"
@@ -236,35 +237,40 @@ let test_error_envelope_classification () =
         | Some _ | None -> false);
      check "in-stream 429 report is stated" (report = Types.Provider_stated);
      check "in-stream 429 raw preserved" (string_has raw "RESOURCE_EXHAUSTED")
-   | Streaming.Gemini_chunk _ -> check "in-stream 429 is not content" false
-   | Streaming.Gemini_unsupported_part _ -> check "in-stream 429 is not a Part kind" false
-   | Streaming.Gemini_unsupported_response _ ->
+   | Gemini_wire.Gemini_chunk _ -> check "in-stream 429 is not content" false
+   | Gemini_wire.Gemini_unsupported_part _ ->
+     check "in-stream 429 is not a Part kind" false
+   | Gemini_wire.Gemini_unsupported_response _ ->
      check "in-stream 429 is not a response kind" false
-   | Streaming.Gemini_parse_failed { reason; _ } ->
+   | Gemini_wire.Gemini_parse_failed { reason; _ } ->
      Printf.printf "  FAIL: in-stream 429 collapsed into malformed: %s\n" reason;
      exit 1);
   (match
-     Streaming.parse_gemini_sse_chunk
+     Gemini_wire.parse_gemini_sse_chunk
        {|{"error":{"code":400,"message":"bad key","status":"INVALID_ARGUMENT"}}|}
    with
-   | Streaming.Gemini_provider_error { message; provider_status; report; _ } ->
+   | Gemini_wire.Gemini_provider_error { message; provider_status; report; _ } ->
      check "in-stream 400 message preserved" (String.equal message "bad key");
      check "in-stream 400 declares no status" (provider_status = None);
      check "in-stream 400 report is stated" (report = Types.Provider_stated)
-   | Streaming.Gemini_chunk _ -> check "in-stream 400 is not content" false
-   | Streaming.Gemini_unsupported_part _ -> check "in-stream 400 is not a Part kind" false
-   | Streaming.Gemini_unsupported_response _ ->
+   | Gemini_wire.Gemini_chunk _ -> check "in-stream 400 is not content" false
+   | Gemini_wire.Gemini_unsupported_part _ ->
+     check "in-stream 400 is not a Part kind" false
+   | Gemini_wire.Gemini_unsupported_response _ ->
      check "in-stream 400 is not a response kind" false
-   | Streaming.Gemini_parse_failed { reason; _ } ->
+   | Gemini_wire.Gemini_parse_failed { reason; _ } ->
      Printf.printf "  FAIL: in-stream 400 collapsed into malformed: %s\n" reason;
      exit 1);
-  (match Streaming.parse_gemini_sse_chunk {|{"error":{"code":"RATE_LIMITED","message":"m"}}|} with
-   | Streaming.Gemini_provider_error { provider_status; _ } ->
+  (match
+     Gemini_wire.parse_gemini_sse_chunk
+       {|{"error":{"code":"RATE_LIMITED","message":"m"}}|}
+   with
+   | Gemini_wire.Gemini_provider_error { provider_status; _ } ->
      check "string code declares no status" (provider_status = None)
-   | Streaming.Gemini_chunk _
-   | Streaming.Gemini_unsupported_part _
-   | Streaming.Gemini_unsupported_response _
-   | Streaming.Gemini_parse_failed _ ->
+   | Gemini_wire.Gemini_chunk _
+   | Gemini_wire.Gemini_unsupported_part _
+   | Gemini_wire.Gemini_unsupported_response _
+   | Gemini_wire.Gemini_parse_failed _ ->
      check "string code is still a provider error" false);
   (* A 200 body with no SSE framing at all: the envelope, not an incomplete
      stream. *)

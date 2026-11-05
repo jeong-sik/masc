@@ -522,6 +522,7 @@ let test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries () =
 (* #27868: exercise wire parser -> canonical response -> structured outcome,
    rather than constructing the terminal stop reason in the fixture. *)
 module Wire_stream = Llm_provider.Streaming
+module Wire_gemini = Llm_provider.Gemini_wire
 module Wire_acc = Llm_provider.Complete_stream_acc
 
 let finalized_wire_response acc =
@@ -640,7 +641,7 @@ let test_gemini_wire_states_reach_structured () =
     project (Llm_provider.Backend_gemini.parse_response wire);
     let state = Wire_stream.create_openai_stream_state () in
     let acc = Wire_acc.create_stream_acc () in
-    let chunk = match Wire_stream.parse_gemini_sse_chunk (Yojson.Safe.to_string wire) with
+    let chunk = match Wire_gemini.parse_gemini_sse_chunk (Yojson.Safe.to_string wire) with
       | Gemini_chunk chunk -> chunk
       | Gemini_provider_error _ | Gemini_unsupported_part _ | Gemini_unsupported_response _
       | Gemini_parse_failed _ ->

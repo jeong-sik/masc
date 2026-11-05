@@ -6776,6 +6776,35 @@ let open_repository_change_in_code state ~mailbox ~scope
   Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox);
   Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) ~path:change.rc_path
 
+(* One step back on the Code surface, for Esc and for Left. Both take the step
+   [Masc_tui_keys.code_back_step] names; when none is left, [leave] runs. Esc
+   passes the way out to the ring parent and Left passes nothing, so Left
+   stays on the surface. *)
+let step_code_back state ~mailbox ~leave =
+  let reload () =
+    state.code_cursor <- 0;
+    state.code_listing <- Masc_tui_fetched.clear state.code_listing;
+    Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
+      ~deliver:(workspace_enqueue state mailbox)
+  in
+  match Masc_tui_keys.code_back_step state with
+  | Close_code_notes -> state.code_notes_open <- false
+  | Close_code_diff -> close_code_diff state
+  | Close_code_history -> state.code_history_open <- false
+  | Return_to_code_tree -> state.code_focus_file <- Left_pane
+  | Climb_code_directory ->
+      (* Up one directory; "." from Filename.dirname means the root, which
+         this surface spells "". *)
+      let parent = Filename.dirname state.code_dir in
+      state.code_dir <- (if String.equal parent "." then "" else parent);
+      reload ()
+  | Climb_to_code_project ->
+      (* Above a keeper's or a repository's root sits the project tree the
+         surface started on. *)
+      set_code_scope state Code_scope_project;
+      reload ()
+  | Leave_code_for_workspace -> leave ()
+
 (* Where the change is on this machine.
 
    All three shapes resolve inside the keeper's own bundle, because that is
@@ -39559,34 +39588,11 @@ Use relative paths for resources already held in the package. -->
                    && state.theme_before_preview <> None ->
                 cancel_theme_preview state
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then close_code_diff state
-                else if state.code_history_open then
-                  state.code_history_open <- false
-                else if state.code_focus_file = Right_pane then
-                  state.code_focus_file <- Left_pane
-                else if not (String.equal state.code_dir "") then begin
-                  (* Up one directory; "." from Filename.dirname means the
-                     root, which this surface spells "". *)
-                  let parent = Filename.dirname state.code_dir in
-                  state.code_dir <-
-                    (if String.equal parent "." then "" else parent);
-                  state.code_cursor <- 0;
-                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-                end
-                else if state.code_scope <> Code_scope_project then begin
-                  (* Above a keeper's or a repository's root sits the
-                     project tree the surface started on. *)
-                  set_code_scope state Code_scope_project;
-                  state.code_cursor <- 0;
-                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-                end
-                else
-                  (* Off-ring child: the way out of the project root is the
-                     ring parent, loaded, same as Connectors and Lanes. *)
-                  goto_surface state ~mailbox:async_messages Repositories
+                step_code_back state ~mailbox:async_messages
+                  ~leave:(fun () ->
+                    (* Off-ring child: the way out of the project root is the
+                       ring parent, loaded, same as Connectors and Lanes. *)
+                    goto_surface state ~mailbox:async_messages Repositories)
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
                 transition_keeper_view state (Keepers Keeper_list);
@@ -39783,26 +39789,8 @@ Use relative paths for resources already held in the package. -->
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then close_code_diff state
-                else if state.code_history_open then
-                  state.code_history_open <- false
-                else if state.code_focus_file = Right_pane then
-                  state.code_focus_file <- Left_pane
-                else if not (String.equal state.code_dir "") then begin
-                  let parent = Filename.dirname state.code_dir in
-                  state.code_dir <-
-                    (if String.equal parent "." then "" else parent);
-                  state.code_cursor <- 0;
-                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-                end
-                else if state.code_scope <> Code_scope_project then begin
-                  set_code_scope state Code_scope_project;
-                  state.code_cursor <- 0;
-                  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
-                end
+                step_code_back state ~mailbox:async_messages
+                  ~leave:(fun () -> ())
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
                 transition_keeper_view state (Keepers Keeper_list);

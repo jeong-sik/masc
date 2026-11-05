@@ -10,6 +10,7 @@ type error =
   | Invalid_answered_record of string
   | Delivery_evidence_unavailable of Keeper_reaction_ledger.strict_delivery_evidence_error
   | Queue_storage_failed of string
+  | Owner_unavailable of string
 
 val error_to_string : error -> string
 
@@ -116,6 +117,7 @@ type report =
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
+  ; owners_absent : string list
   ; failures : failure list
   }
 
@@ -129,7 +131,13 @@ val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
     [evidence_window_reads] counts those capture calls, including failures, not
     physical file reads or successful deliveries. Only unresolved sources reach
     enqueue; the queue owner's fresh evidence and lifecycle checks are retained.
-    No timer, history cap, second answer store or outbox. *)
+    No timer, history cap, second answer store or outbox.
+
+    Answers reach only a Keeper whose meta file is stored. A Keeper with no meta
+    file is gone: its name lands in [owners_absent], nothing is enqueued for it
+    and its log is left as it is. An unreadable meta file is an
+    [Owner_unavailable] failure. [pulse] reads the owner the same way and logs
+    the absent names once per pass. *)
 
 type t
 val create :

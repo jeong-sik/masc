@@ -76,7 +76,7 @@ it does not prove a sustained latency distribution.
 For MSX, median time through headers was 5.46ms and JSON decode was 0.36ms.
 For Dashboard bootstrap, the respective medians were 13.77ms and 9.22ms.
 Stage medians need not sum to the median total. None of these surfaces met
-0.1ms. The removed `/api/v1/dashboard` endpoint returned 410 and is excluded.
+0.1ms.
 
 A subsequent run of the extended shared probe required `/loaded=true` for
 MSX and also measured an authenticated MCP ping session. Both health reads

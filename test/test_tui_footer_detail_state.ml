@@ -83,6 +83,20 @@ let search_keys name surface =
     Keys.footer_hints ~detail_open:true surface,
     [ "/"; "n / N" ] )
 
+(* Left closes an open detail and does nothing on a list (the [Some "left"]
+   arm of masc_tui.ml), so with no detail open the way back is Esc alone. The
+   two rows are one fact read in two states: the list footer names Esc and not
+   Left / Esc, the detail footer the reverse. *)
+let back_keys name ~list ~detail =
+  [ (name ^ " Left / Esc", detail, list, [ "Left / Esc" ])
+  ; (name ^ " Esc", list, detail, [ "Esc" ])
+  ]
+
+let back_keys_of_surface name surface =
+  back_keys name
+    ~list:(Keys.footer_hints ~detail_open:false surface)
+    ~detail:(Keys.footer_hints ~detail_open:true surface)
+
 let scoped_keys =
   [ ( "Planning",
       Keys.footer_hints_planning_goal_list,
@@ -96,6 +110,14 @@ let scoped_keys =
   ; search_keys "Harness" Masc_tui_types.Harness
   ; search_keys "System_logs" Masc_tui_types.System_logs
   ]
+  @ back_keys "Planning"
+      ~list:Keys.footer_hints_planning_goal_list
+      ~detail:Keys.footer_hints_planning_goal_detail
+  @ back_keys_of_surface "Board" Masc_tui_types.Board
+  @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules
+  @ back_keys_of_surface "Verification" Masc_tui_types.Verification
+  @ back_keys_of_surface "Harness" Masc_tui_types.Harness
+  @ back_keys_of_surface "System_logs" Masc_tui_types.System_logs
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter

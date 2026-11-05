@@ -16,6 +16,11 @@ val day_number_of_day_file_name : string -> string
 val year_and_month_of_directory_name : string -> (int * int) option
 (** [None] for malformed names or months outside 1 through 12. *)
 
+val compare_month_entries : string -> string -> int
+(** Oldest month first. An entry that is not a month directory sorts before
+    every month directory, and two such entries compare by name, the way
+    {!compare_day_files} places names outside the segment grammar. *)
+
 val month_directory_name_is_valid : string -> bool
 val day_file_name_is_valid : year:int -> month:int -> string -> bool
 val entry_is_foreign_to_layout : string -> bool

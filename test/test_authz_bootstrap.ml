@@ -6,6 +6,7 @@
    install record of the operator. *)
 
 module B = Authz_bootstrap
+module Z = Authz_zone
 module S = Authz_external_store
 module L = Authz_log
 module I = Authz_install_record
@@ -254,7 +255,34 @@ let store_append_error_name : S.append_error -> string = function
   | S.Write_failed _ -> "Write_failed"
 ;;
 
+let end_error_name : L.end_error -> string = function
+  | L.End_writer_expired -> "End_writer_expired"
+  | L.End_stopped _ -> "End_stopped"
+  | L.End_locked _ -> "End_locked"
+  | L.End_moved _ -> "End_moved"
+  | L.End_not_one_file _ -> "End_not_one_file"
+  | L.End_unread _ -> "End_unread"
+;;
+
 (* Named here so that a new constructor fails to compile until it is placed. *)
+let zone_error_name : Z.error -> string = function
+  | Z.Store_stopped _ -> "Store_stopped"
+  | Z.Log_stopped _ -> "Log_stopped"
+  | Z.Uncertain _ -> "Uncertain"
+  | Z.Store_holds_no_answer -> "Store_holds_no_answer"
+  | Z.Store_holds_an_answer -> "Store_holds_an_answer"
+  | Z.Log_holds_records { next_seq } -> Printf.sprintf "Log_holds_records %d" next_seq
+  | Z.Record_not_built _ -> "Record_not_built"
+  | Z.Refused _ -> "Refused"
+  | Z.Store_entry_refused _ -> "Store_entry_refused"
+  | Z.Abort_not_confirmed error -> "Abort_not_confirmed " ^ end_error_name error
+  | Z.Settlement_not_written error -> "Settlement_not_written " ^ store_append_error_name error
+  | Z.Intent_not_written error -> "Intent_not_written " ^ store_append_error_name error
+  | Z.Record_not_appended error -> "Record_not_appended " ^ log_append_error_name error
+  | Z.Answer_not_written { error; record_hash = _ } ->
+    "Answer_not_written " ^ store_append_error_name error
+;;
+
 let error_name : B.error -> string = function
   | B.External_store_path_invalid { problem; _ } ->
     "External_store_path_invalid " ^ problem_name problem
@@ -270,14 +298,8 @@ let error_name : B.error -> string = function
   | B.Not_a_fresh_installation _ -> "Not_a_fresh_installation"
   | B.Install_record_not_written _ -> "Install_record_not_written"
   | B.External_store_not_created _ -> "External_store_not_created"
-  | B.Store_stopped _ -> "Store_stopped"
-  | B.Log_stopped _ -> "Log_stopped"
-  | B.Dead_intent_not_closed error -> "Dead_intent_not_closed " ^ store_append_error_name error
-  | B.Intent_not_written error -> "Intent_not_written " ^ store_append_error_name error
-  | B.Record_not_appended error -> "Record_not_appended " ^ log_append_error_name error
-  | B.Answer_not_written { error; _ } -> "Answer_not_written " ^ store_append_error_name error
+  | B.Zone_failed error -> "Zone_failed " ^ zone_error_name error
   | B.Mode_event_not_built _ -> "Mode_event_not_built"
-  | B.Record_not_built _ -> "Record_not_built"
 ;;
 
 let completed_exn = function
@@ -785,14 +807,8 @@ let not_a_fresh_installation : B.error -> (string * H.t) option = function
   | B.External_store_not_opened _
   | B.Install_record_not_written _
   | B.External_store_not_created _
-  | B.Store_stopped _
-  | B.Log_stopped _
-  | B.Dead_intent_not_closed _
-  | B.Intent_not_written _
-  | B.Record_not_appended _
-  | B.Answer_not_written _
-  | B.Mode_event_not_built _
-  | B.Record_not_built _ -> None
+  | B.Zone_failed _
+  | B.Mode_event_not_built _ -> None
 ;;
 
 let only_lost_commit : H.t -> R.Hash.t option = function
@@ -1075,7 +1091,7 @@ let a_log_that_moved_fails_after_the_intent () =
   with_dirs (fun dirs ->
     let prepared = prepare_exn (request dirs) in
     write_private (log_file dirs) (R.to_line dead_record ^ "\n");
-    refused "the write" "Record_not_appended Diverged" (B.write prepared);
+    refused "the write" "Zone_failed Record_not_appended Diverged" (B.write prepared);
     Alcotest.(check string)
       "the store holds the intent and no answer"
       (store_text [ S.Intent_pending (intent_with (first_record at_ms).R.hash) ])
@@ -1100,7 +1116,7 @@ let a_store_that_moved_fails_before_the_record () =
     write_private dirs.store "";
     let prepared = prepare_exn (request dirs) in
     append_to_file dirs.store (S.to_line (S.Intent_pending dead_intent) ^ "\n");
-    refused "the write" "Intent_not_written Diverged" (B.write prepared);
+    refused "the write" "Zone_failed Intent_not_written Diverged" (B.write prepared);
     Alcotest.(check string) "the log is not written" "absent" (describe (log_file dirs));
     Alcotest.(check string)
       "the store holds the line of the other writer only"
@@ -1114,6 +1130,31 @@ let a_store_that_moved_fails_before_the_record () =
       completed)
 ;;
 
+(* An earlier bootstrap left its intent, and its record reaches the log after
+   the checks. The log no longer ends where the intent began, so the intent is
+   not given up and nothing is written. The boot that reads the files promotes
+   it. *)
+let a_log_that_moved_keeps_the_dead_intent () =
+  with_dirs (fun dirs ->
+    write_record dirs ~base_path:dirs.base ~external_store:dirs.store;
+    write_private dirs.store (store_text [ S.Intent_pending dead_intent ]);
+    let prepared = prepare_exn (request dirs) in
+    write_private (log_file dirs) (R.to_line dead_record ^ "\n");
+    refused "the write" "Zone_failed Abort_not_confirmed End_moved" (B.write prepared);
+    Alcotest.(check string)
+      "the store holds the intent only"
+      (store_text [ S.Intent_pending dead_intent ])
+      (read_file dirs.store);
+    Alcotest.(check string)
+      "the log holds the record of the intent"
+      (R.to_line dead_record ^ "\n")
+      (read_file (log_file dirs));
+    Alcotest.(check string)
+      "the boot promotes the intent"
+      "matches"
+      (value_name (H.judge (probe_of dirs))))
+;;
+
 (* Another writer gives up the pending intent after the checks. Nothing else is
    written, and a call after it goes on from the store as it is. *)
 let a_store_that_moved_fails_before_the_dead_intent_is_given_up () =
@@ -1122,7 +1163,7 @@ let a_store_that_moved_fails_before_the_dead_intent_is_given_up () =
     write_private dirs.store (store_text [ S.Intent_pending dead_intent ]);
     let prepared = prepare_exn (request dirs) in
     append_to_file dirs.store (aborted_line dead_intent ^ "\n");
-    refused "the write" "Dead_intent_not_closed Diverged" (B.write prepared);
+    refused "the write" "Zone_failed Settlement_not_written Diverged" (B.write prepared);
     Alcotest.(check string) "the log is not written" "absent" (describe (log_file dirs));
     Alcotest.(check string)
       "the store holds the lines of the other writer only"
@@ -1248,7 +1289,8 @@ let texts_name_what_they_are_about () =
           { expected = Some (store_path "/p/before"); found = Some (store_path "/p/after") }
       , "/p/after" )
     ; B.External_store_not_created { path = "/p/store"; detail = "detail" }, "/p/store"
-    ; B.Answer_not_written { record_hash = hash; error = S.Writer_expired }, R.Hash.to_hex hash
+    ; ( B.Zone_failed (Z.Answer_not_written { record_hash = hash; error = S.Writer_expired })
+      , R.Hash.to_hex hash )
     ]
 ;;
 
@@ -1303,6 +1345,10 @@ let () =
             "a store that moved fails before the dead intent is given up"
             `Quick
             a_store_that_moved_fails_before_the_dead_intent_is_given_up
+        ; Alcotest.test_case
+            "a log that moved keeps the dead intent"
+            `Quick
+            a_log_that_moved_keeps_the_dead_intent
         ; Alcotest.test_case
             "an install record that changed is not replaced"
             `Quick

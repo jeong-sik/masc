@@ -98,6 +98,12 @@ type committed =
   ; settled : H.settlement
   }
 
+type installed =
+  { snapshot : snapshot
+  ; record_hash : R.Hash.t
+  ; aborted : S.intent option
+  }
+
 type error =
   | Store_stopped of S.stop
   | Log_stopped of L.stop
@@ -106,6 +112,8 @@ type error =
       ; rest : H.reason list
       }
   | Store_holds_no_answer
+  | Store_holds_an_answer
+  | Log_holds_records of { next_seq : int }
   | Record_not_built of R.make_error
   | Refused of Authz_state.refusal
   | Store_entry_refused of
@@ -136,6 +144,12 @@ let error_to_string = function
     ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
   | Store_holds_no_answer ->
     "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+  | Store_holds_an_answer ->
+    "the external store holds an answer, and the authorization log is to be installed"
+  | Log_holds_records { next_seq } ->
+    Printf.sprintf
+      "the authorization log is to be installed and holds records: the next one is %d"
+      next_seq
   | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
     Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
   | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
@@ -190,51 +204,106 @@ let write_settlement t store_writer log_writer settlement =
     write_entry t store_writer entry ~not_written:(fun error -> Settlement_not_written error)
 ;;
 
-(* Only the zone writes through [t.log], so [head] is the head of the published
-   snapshot. *)
-let in_zone t draft store_writer log_writer head =
-  let published = Atomic.get t.current in
-  match H.settle_on_entry t.probe with
+(* What the entry of a zone lets through: the settlement of what an earlier
+   writer left, which the commit writes before its intent. A commit adds to an
+   installed log, so the store must hold an answer. An install writes the first
+   record, so the store must hold none. *)
+let entered_to_add = function
   | Error (first, rest) -> Error (Uncertain { first; rest })
-  | Ok H.Nothing_answered -> Error Store_holds_no_answer
-  | Ok (H.Answered settled) ->
-    let* record =
-      Result.map_error
-        (fun error -> Record_not_built error)
-        (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
-    in
-    let* { Authz_state.state; high_water = change } =
-      Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
-    in
-    let* () = write_settlement t store_writer log_writer settled in
-    let record_hash = record.R.hash in
-    let intent =
-      { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }
-    in
-    let* () =
-      write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
-        Intent_not_written error)
-    in
-    let* head =
-      Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
-    in
-    t.probe <- H.Probe.add t.probe record;
-    let snapshot = { state; head } in
-    Atomic.set t.current snapshot;
-    let* () =
-      write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
-        Answer_not_written { record_hash; error })
-    in
-    Ok { snapshot; record_hash; settled }
+  | Ok (H.Nothing_answered { abort = (_ : S.intent option) }) -> Error Store_holds_no_answer
+  | Ok (H.Answered settled) -> Ok settled
 ;;
 
-let commit t draft =
-  let in_store_zone store_writer (_ : S.State.t) =
-    match L.with_writer t.log (in_zone t draft store_writer) with
+let entered_to_install = function
+  | Error (first, rest) -> Error (Uncertain { first; rest })
+  | Ok (H.Answered (_ : H.settlement)) -> Error Store_holds_an_answer
+  | Ok (H.Nothing_answered { abort }) -> Ok abort
+;;
+
+let abort_settlement = function
+  | None -> H.Nothing_to_settle
+  | Some intent -> H.Abort intent
+;;
+
+(* Only the zone writes through [t.log], so [head] is the head of the published
+   snapshot. *)
+let in_zone ~entered ~settlement t draft store_writer log_writer head =
+  let published = Atomic.get t.current in
+  let* entry = entered (H.settle_on_entry t.probe) in
+  let* record =
+    Result.map_error
+      (fun error -> Record_not_built error)
+      (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
+  in
+  let* { Authz_state.state; high_water = change } =
+    Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
+  in
+  let* () = write_settlement t store_writer log_writer (settlement entry) in
+  let record_hash = record.R.hash in
+  let intent =
+    { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }
+  in
+  let* () =
+    write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
+      Intent_not_written error)
+  in
+  let* head =
+    Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
+  in
+  t.probe <- H.Probe.add t.probe record;
+  let snapshot = { state; head } in
+  Atomic.set t.current snapshot;
+  let* () =
+    write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
+      Answer_not_written { record_hash; error })
+  in
+  Ok (entry, snapshot, record_hash)
+;;
+
+(* The zone of the store, and inside it the zone of the log. *)
+let in_both_zones ~store ~log f =
+  let in_store_zone store_writer store_state =
+    match L.with_writer log (f store_writer store_state) with
     | Ok result -> result
     | Error stop -> Error (Log_stopped stop)
   in
-  match S.with_writer t.store in_store_zone with
+  match S.with_writer store in_store_zone with
   | Ok result -> result
   | Error stop -> Error (Store_stopped stop)
+;;
+
+let commit t draft =
+  in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
+    let* settled, snapshot, record_hash =
+      in_zone ~entered:entered_to_add ~settlement:Fun.id t draft store_writer log_writer head
+    in
+    Ok { snapshot; record_hash; settled })
+;;
+
+(* The handles are the caller's, and the log they show holds no record, so the
+   replay of the log is the empty one, over the store as its handle has it. The
+   zone lives for this one call. *)
+let install ~log ~store draft =
+  in_both_zones ~store ~log (fun store_writer store_state log_writer head ->
+    if Int.equal (R.next_seq head) (R.next_seq R.genesis)
+    then (
+      let t =
+        { log
+        ; store
+        ; current = Atomic.make { state = Authz_state.empty; head }
+        ; probe = H.Probe.create store_state
+        }
+      in
+      let* aborted, snapshot, record_hash =
+        in_zone
+          ~entered:entered_to_install
+          ~settlement:abort_settlement
+          t
+          draft
+          store_writer
+          log_writer
+          head
+      in
+      Ok { snapshot; record_hash; aborted })
+    else Error (Log_holds_records { next_seq = R.next_seq head }))
 ;;

@@ -113,7 +113,7 @@ let check_commit (probe : Probe.t) =
 ;;
 
 type agreement =
-  | Nothing_answered
+  | Nothing_answered of { abort : Store.intent option }
   | Answered of settlement
 
 let settle_on_entry (probe : Probe.t) =
@@ -127,7 +127,8 @@ let settle_on_entry (probe : Probe.t) =
        bootstrap that did not happen (design 5.1, 없음). A promoted intent is a
        [Committed] that the store has not written yet. *)
     (match Store.State.last_committed probe.Probe.state, settlement with
-     | None, (Nothing_to_settle | Abort _) -> Ok Nothing_answered
+     | None, Nothing_to_settle -> Ok (Nothing_answered { abort = None })
+     | None, Abort intent -> Ok (Nothing_answered { abort = Some intent })
      | None, Promote _ | Some _, (Nothing_to_settle | Promote _ | Abort _) ->
        Ok (Answered settlement))
 ;;
@@ -135,7 +136,7 @@ let settle_on_entry (probe : Probe.t) =
 let judge (probe : Probe.t) =
   match settle_on_entry probe with
   | Error (first, rest) -> Mismatch (first, rest)
-  | Ok Nothing_answered -> Absent
+  | Ok (Nothing_answered { abort = (_ : Store.intent option) }) -> Absent
   | Ok (Answered (_ : settlement)) -> Matches
 ;;
 

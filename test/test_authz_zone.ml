@@ -323,6 +323,8 @@ let error_name : Z.error -> string = function
   | Z.Log_stopped _ -> "Log_stopped"
   | Z.Uncertain { first; rest } -> "Uncertain " ^ reasons_name first rest
   | Z.Store_holds_no_answer -> "Store_holds_no_answer"
+  | Z.Store_holds_an_answer -> "Store_holds_an_answer"
+  | Z.Log_holds_records { next_seq } -> Printf.sprintf "Log_holds_records %d" next_seq
   | Z.Abort_not_confirmed error -> "Abort_not_confirmed " ^ end_error_name error
   | Z.Store_entry_refused _ -> "Store_entry_refused"
   | Z.Settlement_not_written error -> "Settlement_not_written " ^ store_append_error_name error
@@ -508,8 +510,8 @@ let refused_records_write_nothing () =
     ignore (check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash : opened))
 ;;
 
-(* A zone over a log without a bootstrap would take a [Fresh_bootstrap] and
-   create a store that no install record names. *)
+(* The first record of a log goes through [Z.install], once the install record
+   names the store. A zone opened from paths does not open a log without it. *)
 let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
     let check_refused label =
@@ -902,6 +904,144 @@ let disagreements_refuse_every_commit () =
     ]
 ;;
 
+(* ---- install ---- *)
+
+let lines entries = String.concat "" (List.map (fun entry -> S.to_line entry ^ "\n") entries)
+
+let install_ok opened draft =
+  match Z.install ~log:opened.log ~store:opened.store draft with
+  | Ok installed -> installed
+  | Error error -> Alcotest.failf "install refused: %s" (Z.error_to_string error)
+;;
+
+let check_install_error label expected opened draft =
+  match Z.install ~log:opened.log ~store:opened.store draft with
+  | Ok (_ : Z.installed) -> Alcotest.failf "%s: the install succeeded" label
+  | Error error -> Alcotest.(check string) label expected (error_name error)
+;;
+
+let bootstrap_draft = mode_draft ~at_ms M.Fresh_bootstrap
+
+(* An earlier install that wrote its intent and stopped before its record. *)
+let dead_draft = mode_draft ~at_ms:(at_ms - 1) M.Fresh_bootstrap
+let dead_intent = intent_of ~head:R.genesis dead_draft S.Change.Fresh_bootstrap
+
+(* Over an empty log and an empty store: the intent, the record and the answer,
+   and a log that a zone then opens. *)
+let an_install_writes_the_first_record () =
+  with_dirs (fun dirs ->
+    let installed = install_ok (open_files dirs) bootstrap_draft in
+    let record = record_at ~head:R.genesis bootstrap_draft in
+    Alcotest.(check string)
+      "the hash of the record"
+      (R.Hash.to_hex record.R.hash)
+      (R.Hash.to_hex installed.Z.record_hash);
+    Alcotest.(check (option string))
+      "nothing was given up"
+      None
+      (Option.map intent_name installed.Z.aborted);
+    check_snapshot "the answer" ~mode:on ~head:record.R.hash installed.Z.snapshot;
+    Alcotest.(check string)
+      "the store"
+      (lines
+         [ S.Intent_pending (intent_of ~head:R.genesis bootstrap_draft S.Change.Fresh_bootstrap)
+         ; S.Committed { record_hash = record.R.hash }
+         ])
+      (read_file dirs.store_file);
+    Alcotest.(check string) "the log" (R.to_line record ^ "\n") (read_file (log_file dirs));
+    let opened = check_restart "a restart" dirs ~mode:on ~head:record.R.hash in
+    check_store "a restart" opened ~pending:None ~last_committed:record.R.hash ~aborted:[];
+    let next = commit_ok (open_zone dirs) (mode_draft ~at_ms:(at_ms + 1) M.Off) in
+    check_snapshot "a commit after it" ~mode:off ~head:next.Z.record_hash next.Z.snapshot)
+;;
+
+(* The intent of an earlier install, whose record the log never got, is given
+   up before the intent of this one. *)
+let an_install_gives_up_an_intent_that_the_log_never_got () =
+  with_dirs (fun dirs ->
+    write_store_outside (open_files dirs) [ S.Intent_pending dead_intent ];
+    let installed = install_ok (open_files dirs) bootstrap_draft in
+    let record = record_at ~head:R.genesis bootstrap_draft in
+    Alcotest.(check (option string))
+      "the intent that was given up"
+      (Some (intent_name dead_intent))
+      (Option.map intent_name installed.Z.aborted);
+    Alcotest.(check string)
+      "the store"
+      (lines
+         [ S.Intent_pending dead_intent
+         ; S.Aborted_intent dead_intent
+         ; S.Intent_pending (intent_of ~head:R.genesis bootstrap_draft S.Change.Fresh_bootstrap)
+         ; S.Committed { record_hash = record.R.hash }
+         ])
+      (read_file dirs.store_file);
+    let opened = check_restart "a restart" dirs ~mode:on ~head:record.R.hash in
+    check_store
+      "a restart"
+      opened
+      ~pending:None
+      ~last_committed:record.R.hash
+      ~aborted:[ dead_intent ])
+;;
+
+(* The record of an earlier install reached the log after these handles were
+   opened. The log no longer ends where its intent began, so the intent is not
+   given up, the log stops, and a restart promotes the intent. *)
+let an_install_keeps_an_intent_whose_record_came_late () =
+  with_dirs (fun dirs ->
+    write_store_outside (open_files dirs) [ S.Intent_pending dead_intent ];
+    let opened = open_files dirs in
+    append_log_outside (open_files dirs) [ record_at ~head:R.genesis dead_draft ];
+    let before = files dirs in
+    check_install_error "the install" "Abort_not_confirmed End_moved" opened bootstrap_draft;
+    check_files "both files are as they were" before dirs;
+    check_install_error "the next install" "Log_stopped" opened bootstrap_draft;
+    check_judgment "what the files say" dirs "Matches")
+;;
+
+let an_install_refuses_what_it_cannot_install () =
+  with_dirs (fun dirs ->
+    let opened = open_files dirs in
+    List.iter
+      (fun (label, draft, expected) ->
+        check_install_error label expected opened draft;
+        Alcotest.(check bool) (label ^ ": no store") false (Sys.file_exists dirs.store_file);
+        Alcotest.(check bool) (label ^ ": no log") false (Sys.file_exists (log_file dirs)))
+      [ "an off", mode_draft M.Off, "Refused Mode"
+      ; "a reactivation", mode_draft M.Reactivate, "Refused Mode"
+      ; ( "a bootstrap from a user"
+        , { bootstrap_draft with Z.author = user }
+        , "Record_not_built" )
+      ; ( "a grant"
+        , { Z.at_ms; author = user; kind = R.Kind.Runtime_grant; body = grant_body }
+        , "Refused Before_bootstrap" )
+      ];
+    ignore (install_ok opened bootstrap_draft : Z.installed))
+;;
+
+(* A log with records, and a store that holds an answer over a log without it:
+   neither is a log to install. *)
+let an_install_refuses_an_installed_log_or_store () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let before = files dirs in
+    check_install_error
+      "a log with a record"
+      "Log_holds_records 2"
+      (open_files dirs)
+      bootstrap_draft;
+    check_files "a log with a record: both files are as they were" before dirs;
+    Sys.remove (log_file dirs);
+    let store_before = read_file dirs.store_file in
+    check_install_error
+      "a store with an answer"
+      "Uncertain Commit_not_in_log"
+      (open_files dirs)
+      bootstrap_draft;
+    Alcotest.(check string) "the store is as it was" store_before (read_file dirs.store_file);
+    Alcotest.(check bool) "no log" false (Sys.file_exists (log_file dirs)))
+;;
+
 let () =
   Alcotest.run
     "authz_zone"
@@ -957,6 +1097,28 @@ let () =
             "another handle on the store stops the store"
             `Quick
             another_handle_on_the_store_stops_the_store
+        ] )
+    ; ( "install"
+      , [ Alcotest.test_case
+            "an install writes the first record"
+            `Quick
+            an_install_writes_the_first_record
+        ; Alcotest.test_case
+            "an install gives up an intent that the log never got"
+            `Quick
+            an_install_gives_up_an_intent_that_the_log_never_got
+        ; Alcotest.test_case
+            "an install keeps an intent whose record came late"
+            `Quick
+            an_install_keeps_an_intent_whose_record_came_late
+        ; Alcotest.test_case
+            "an install refuses what it cannot install"
+            `Quick
+            an_install_refuses_what_it_cannot_install
+        ; Alcotest.test_case
+            "an install refuses an installed log or store"
+            `Quick
+            an_install_refuses_an_installed_log_or_store
         ] )
     ; ( "earlier process"
       , [ Alcotest.test_case

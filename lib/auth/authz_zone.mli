@@ -7,8 +7,8 @@
 
     {!open_at_start} opens both files and keeps their handles to itself, so
     nothing else writes through them. One zone covers both files: the zone of
-    the external store, and inside it the zone of the log, the order of
-    {!Authz_bootstrap}. A {!commit} does this in it, in order:
+    the external store, and inside it the zone of the log. A {!commit} does
+    this in it, in order:
     + It judges what an earlier entry left with
       {!Authz_high_water.settle_on_entry}, the judgments a start makes. It does
       this on every entry, because an append that failed leaves the process
@@ -74,6 +74,11 @@
     {!Authz_log.confirm_end} can raise too. It wrote nothing, so the log is not
     stopped, and the exception reaches the caller of {!commit}.
 
+    {b Install.} {!install} writes the first record of a log, the
+    [Fresh_bootstrap] of {!Authz_bootstrap}, with the steps of {!commit}. It
+    enters a zone over handles that the caller opened, for that one call, and
+    wants the store to hold no answer where {!commit} wants one.
+
     Every call runs in an Eio fiber. *)
 
 (** What the replay of the log adds up to for the zone. *)
@@ -102,11 +107,12 @@ type open_error =
   | Store_not_opened of Authz_external_store.violation Authz_external_store.open_error
   | Log_not_opened of Authz_state.refusal Authz_log.open_error
   | Not_bootstrapped of { path : string }
-      (** The log is not there, or holds no [Fresh_bootstrap].
-          {!Authz_bootstrap} writes the first record of a log and the zone does
-          not, so the zone never creates a store that no install record names
-          (design 8.4). A log that is not there is refused before either file
-          is opened, so the refusal leaves nothing on disk. *)
+      (** The log is not there, or holds no [Fresh_bootstrap]. The first record
+          of a log is written by {!install}, which {!Authz_bootstrap} calls once
+          the install record names the store, so a zone opened here never
+          writes to a store that no install record names (design 8.4). A log
+          that is not there is refused before either file is opened, so the
+          refusal leaves nothing on disk. *)
   | Log_not_checked of
       { path : string
       ; detail : string
@@ -139,6 +145,15 @@ type committed =
   ; settled : Authz_high_water.settlement  (** What the zone closed before the record. *)
   }
 
+(** What {!install} wrote. *)
+type installed =
+  { snapshot : snapshot  (** The state with the record. *)
+  ; record_hash : Authz_record.Hash.t
+  ; aborted : Authz_external_store.intent option
+        (** The [Fresh_bootstrap] intent that the log never got, which the zone
+            gave up before the record. *)
+  }
+
 (** Why a commit failed, and what it left in the files. *)
 type error =
   | Store_stopped of Authz_external_store.stop  (** Nothing was written. *)
@@ -150,10 +165,18 @@ type error =
       (** The store and the log do not agree (design 8.2, items 2 to 5). Nothing
           was written. *)
   | Store_holds_no_answer
-      (** The store and the log agree, and the store holds no answer
+      (** {!commit}: the store and the log agree, and the store holds no answer
           ({!Authz_high_water.Nothing_answered}), while the log holds a
           [Fresh_bootstrap]: the store was emptied, or is not the store of this
           log (design 5.1, 8.4). Nothing was written. *)
+  | Store_holds_an_answer
+      (** {!install}: the store holds an answer. Over a log with no record this
+          does not happen, because a [Committed] names a record of the log
+          ({!Authz_high_water.Commit_not_in_log}) and a promoted intent needs
+          its record in the log. Nothing was written. *)
+  | Log_holds_records of { next_seq : int }
+      (** {!install}: the log, as its handle has it, holds records, and
+          [next_seq] is the seq of the next one. Nothing was written. *)
   | Record_not_built of Authz_record.make_error  (** Nothing was written. *)
   | Refused of Authz_state.refusal  (** Nothing was written. *)
   | Store_entry_refused of
@@ -192,3 +215,23 @@ val error_to_string : error -> string
 
 (** Appends one record, as the module text says. *)
 val commit : t -> draft -> (committed, error) result
+
+(** Appends the first record of a log with the steps of {!commit}, for
+    {!Authz_bootstrap}. [log] and [store] are handles that the caller opened
+    and does not write through while the call runs. Two things differ from
+    {!commit}:
+    - The log, as its handle has it, holds no record ({!Log_holds_records}).
+      The replay is the empty one, over the store as its handle has it, so
+      {!Authz_state.apply} takes a [Fresh_bootstrap] and refuses every other
+      record.
+    - The store holds no answer ({!Store_holds_an_answer}). The intent of a
+      [Fresh_bootstrap] that the log never got is aborted, after
+      {!Authz_log.confirm_end}, and {!installed} names it.
+
+    The zone lives for this call, and its snapshot is the one in
+    {!installed}. *)
+val install
+  :  log:Authz_log.t
+  -> store:Authz_external_store.t
+  -> draft
+  -> (installed, error) result

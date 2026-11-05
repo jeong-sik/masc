@@ -182,16 +182,22 @@ let check_probe label expected probe =
     expected.settle
     (settle_name (H.settle probe));
   (* A writer that enters its zone gets the reasons of a mismatch, and
-     otherwise whether the store holds an answer and, when it does, the
-     settlement. *)
+     otherwise whether the store holds an answer, with the settlement. *)
   match H.settle_on_entry probe with
   | Error (first, rest) ->
     Alcotest.(check string)
       (label ^ ": on entry to a zone")
       expected.value
       (value_name (H.Mismatch (first, rest)))
-  | Ok H.Nothing_answered ->
-    Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name H.Absent)
+  | Ok (H.Nothing_answered { abort }) ->
+    Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name H.Absent);
+    Alcotest.(check string)
+      (label ^ ": what closes the intent on entry")
+      expected.settle
+      (settlement_name
+         (match abort with
+          | None -> H.Nothing_to_settle
+          | Some intent -> H.Abort intent))
   | Ok (H.Answered settlement) ->
     Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name H.Matches);
     Alcotest.(check string)

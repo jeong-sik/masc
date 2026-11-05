@@ -1059,6 +1059,10 @@ let test_stream_response_cache_eligibility () =
     0
     fixed_stats.reuse_count_total;
   Alcotest.(check int) "truncated content-length never parks" 0 fixed_stats.total_idle;
+  Alcotest.(check int)
+    "truncated content-length closes as transport ended"
+    2
+    fixed_stats.closed_total.transport_ended;
   let truncated_chunked_headers _ = [ "Transfer-Encoding: chunked" ] in
   let encode_truncated_chunk body = Printf.sprintf "5\r\n%s" body in
   let (chunked_first, chunked_second, chunked_stats), chunked_posts =
@@ -1307,7 +1311,8 @@ let test_one_dispatch_refusal_whose_body_never_arrives_is_still_the_refusal () =
   then Alcotest.failf "returned at %.2fs, before the %.1fs body deadline" elapsed body_timeout_s;
   Alcotest.(check int) "refusal POSTs" 1 posts;
   Alcotest.(check int) "refusal creates once" 1 stats.create_count_total;
-  Alcotest.(check int) "refusal never parks" 0 stats.total_idle
+  Alcotest.(check int) "refusal never parks" 0 stats.total_idle;
+  Alcotest.(check int) "refusal closes as an unread body" 1 stats.closed_total.body_not_drained
 ;;
 
 let test_one_dispatch_body_timeout_covers_response_headers () =

@@ -19,7 +19,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 
 이 폴더의 `result-2026-11-01_11-04.json` 이 위 명령의 결과예요. `result-2026-11-01_11-05.json` 은 `--to-date 2026-11-05 --until 2026-11-05T05:00:00Z` 로 같은 명령을 돌린 결과이고, `docs/evidence/execute-waits-2026-11` 과 같은 창이에요. 시험은 `python3 -m unittest discover -s docs/evidence/lane-time-2026-11` 로 돌려요.
 
-서버는 `config/runtime.toml` 의 `jsonl_retention_days`(30일, 환경 변수 `MASC_JSONL_RETENTION_DAYS` 가 먼저예요)보다 오래된 trace 파일을 지워요(`prune_shared_jsonl_stores`). 지운 뒤에 다시 돌리면 그 파일의 턴이 trace 파일이 없는 턴으로 읽혀서 위 JSON 과 값이 달라져요.
+서버는 수정한 지 `runtime.toml` 의 `[maintenance].jsonl_retention_days`(저장소 기본값은 30일이고 환경 변수 `MASC_JSONL_RETENTION_DAYS` 가 먼저예요)가 넘은 trace 파일을 시작할 때와 24시간마다 지워요(`prune_shared_jsonl_stores`). 2026-11-05 에 가장 오래된 trace 파일의 수정 시각은 10-07 이었어요. 지운 뒤에 다시 돌리면 그 파일의 턴이 trace 파일이 없는 턴으로 읽혀서 위 JSON 과 값이 달라져요. 이 창의 파일은 12-01 쯤부터 지워지기 시작할 수 있어요.
 
 ## 센 방법
 

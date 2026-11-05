@@ -3,7 +3,7 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-09-26
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -131,7 +131,8 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 | suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉬지 않음 | 일반 실패 cadence를 유지한다. 마지막 후보의 quota로 다른 후보까지 쉬지 않는다 |
 | suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다 |
 | suffix 없음, 단일·미해결 배정, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패 응답과 관측된 경로의 release 중 늦은 시각까지 기다린다 |
-| 그 밖 | — | 지금처럼 cadence |
+| suffix 없음, route 가 그 밖 | 새 walk의 머리가 쉬지 않음 | 지금처럼 cadence |
+| suffix 없음, route 가 그 밖 | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다. 실패 응답의 대기는 더하지 않는다 |
 
 suffix가 없으면 이 턴의 후보 순회가 끝났다는 뜻이다. 모든 후보가 같은 이유나
 같은 기한으로 쉬는 것은 아니다. 마지막 Claude 후보가 quota reset을 알려 줬더라도
@@ -139,6 +140,13 @@ suffix가 없으면 이 턴의 후보 순회가 끝났다는 뜻이다. 모든 �
 대기시간으로 적용하지 않는다. 새 walk의 머리가 사용 가능하면 일반 실패 cadence로
 돌아간다. 즉시 같은 입력을 반복하는 deferred continuation을 만들지는 않는다.
 단일 후보와 해소할 수 없는 배정은 실패 응답 자체의 대기 근거를 유지한다.
+
+턴의 route 는 턴이 끝난 이유다. 시도가 provider 에게 들은 말과 다를 수 있다.
+Muse 처럼 효과를 볼 수 없는 lane 은 시도를 fence 로 감싸서, 구독 한도 소진으로 거절된 턴도
+`Exhausted_visible_alive` 로 끝난다. 그 시도는 이미 경로에 reset 시각까지의 쉼을 적었다.
+그래서 route 가 그 밖이어도 새 walk 의 머리가 쉬면 기다린다. 2026-11-05 09:51Z~16:52Z 에
+경로가 하나인 Keeper 하나가 11-09 00:00Z 까지 쉬는 경로로 거절된 턴 457번을 보냈다.
+턴마다 실패한 턴이 남긴 자극이 다음 턴을 곧바로 깨웠다.
 
 heartbeat 와 채팅 lane 은 이 표 하나(`Keeper_turn_driver.next_dispatch_after_failure`)를
 같이 읽는다. 같은 실패에 두 lane 이 다르게 답하지 않는다.

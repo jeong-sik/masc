@@ -240,7 +240,10 @@ val assignment_next_dated_release : now:float -> string -> float option
     a serving head returns [None] (ordinary cadence), while a resting head
     waits for that walk's release. A single or unresolved assignment also
     retains the failed response's own rest. Every other failure without a
-    suffix is [None]: no provider wait. *)
+    suffix reads its fresh walk's rest the same way, without a rest of its
+    own: [None] while the head serves. An effect fence ends a turn as
+    [Exhausted_visible_alive] even when its attempt was refused for a
+    provider-stated quota, and the walk still holds that path's rest. *)
 type wait_basis = Failure_response | Observed_path_rest
 (** Whether a wait has only the failed response as evidence, or a path rest
     observed while choosing the next dispatch. Observed evidence can be

@@ -1,0 +1,24 @@
+# task-3237 필수 증거 (1) — test_play_invite run 목록 (TARGET_SUITES 포함)
+
+## (1-a) 스위트 단독 실행
+
+```
+run 41966075993
+head=7d2b43bf30e4839962dfb38a25a52db3fa8c69ac  conclusion=failure
+   TARGET_SUITES: test_play_invite
+   TARGET_SUITES: test_play_invite
+ [targeted] @@test/runtest-test_play_invite: FAIL exit 1 in 11s
+ [FAIL]  invite  2  valid browser hosts issue credentials.
+ FAIL http://127.0.0.1.: not_ready public_base_url_not_http
+```
+
+## (1-b) 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc 를 head 로 한 run — head_sha 조회
+
+```
+$ gh api "repos/jeong-sik/masc/actions/runs?head_sha=1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc&per_page=100"
+total_count 2
+41567478107 Main minimal build schedule failure 2026-11-03T02:39:35Z
+41565389744 Main minimal build schedule failure 2026-11-03T02:19:29Z
+```
+
+두 run 다 failure 다. 다만 **Main minimal build 는 test_play_invite 를 실행하지 않는다**(로그에 그 이름 0건). 그래서 이 head 에서 그 시험의 녹색/적색을 직접 확인한 것은 아니다.

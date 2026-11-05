@@ -1,0 +1,17 @@
+# task-3237 필수 증거 (3-c) — #47781 의 케이스 유입 의도 대조
+
+```
+$ gh pr view 47781 --json body -q .body | grep -ciE "play_invite|play-invite"
+0
+```
+
+PR 본문에 play_invite 언급 0회. 제목은 "fix(keeper): ride turn-entry admission on the tail carrier" — 프롬프트 캐시 작업이다.
+
+```
+$ git show --stat --format="" 1e5740024c -- lib/play/play_invite.ml test/test_play_invite.ml
+ lib/play/play_invite.ml  | 347 +++++++++++++++++++++++++++++++++++++++++++++++
+ test/test_play_invite.ml | 262 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 609 insertions(+)
+```
+
+즉 PR 본문은 그 파일들을 언급하지 않지만 커밋에는 함께 들어갔다. 두 사실을 함께 둔다.

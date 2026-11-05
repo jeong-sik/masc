@@ -1,0 +1,19 @@
+# task-3237 필수 증거 (2) — 1e5740024c 이후 play_invite.ml 커밋 목록 + 파일 생성 사실
+
+## (2-a) 1e5740024c 이후 lib/play/play_invite.ml 커밋 — 0건
+
+```
+$ git log --oneline 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc..origin/main -- lib/play/play_invite.ml | wc -l
+0
+```
+
+## (2-b) 1e5740024c 가 두 파일을 함께 생성했다
+
+```
+$ git show --numstat --format="" 1e5740024c -- lib/play/play_invite.ml test/test_play_invite.ml
+347	0	lib/play/play_invite.ml
+262	0	test/test_play_invite.ml
+
+$ git log --format="%H %s" --diff-filter=A -- lib/play/play_invite.ml test/test_play_invite.ml
+1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc fix(keeper): ride turn-entry admission on the tail carrier (#47781)
+```

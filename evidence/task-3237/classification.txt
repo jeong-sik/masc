@@ -1,0 +1,69 @@
+# task-3237 원인 분류 등기
+
+검증자 요구 형식에 맞춰 한 줄로 등기한다. 그 아래에 근거를 붙인다.
+
+## 분류 (한 줄)
+
+```
+(b) 시험 케이스 오류 — test/test_play_invite.ml test_valid_hosts_issue_credentials 의 "http://127.0.0.1." 케이스가 제품 판정과 맞지 않는다. 테스트 파일 수정이 필요하나 본 task 는 규명만 하므로 고치지 않았다. 착수는 별도 승인 뒤에 한다.
+```
+
+## 거부 경로 좌표 — 직독한 그대로
+
+- 저장소: `jeong-sik/masc`
+- head: `f1b6c149833cbfe48d94bde0adc568bfda928574` (origin/main, 2026-11-05 조회)
+- 파일:줄: `lib/play/play_invite.ml:177`
+
+```
+$ git show origin/main:lib/play/play_invite.ml | sed -n '175,179p'
+    && (match Uri.host uri with Some host -> host <> "" | None -> false)
+    && (match Uri.port uri with None -> true | Some port -> port >= 1 && port <= 65_535)
+    && String.equal (Uri.path uri) ""          ← :177, 여기서 거부된다
+    && Uri.query uri = []
+    && Option.is_none (Uri.fragment uri)
+```
+
+실패 값: `Uri.of_string "http://127.0.0.1."` → `Uri.host = "127.0.0.1"`, **`Uri.path = "."`**
+→ `String.equal "." ""` 이 거짓 → `is_http_public_base_url` 이 `false` → `Public_base_url_not_http`(`:35`, `:193~194`).
+
+이 판정은 probe run `41967005702`(head `a502529270545112e6b07bce28b01de520a5e15a`, `TARGET_SUITES=test_probe_3237`, conclusion success)의 출력으로 확인했다. 8개 조건 중 7개가 통과하고 `path_empty` 하나만 false 다.
+
+## 왜 (a) 제품 회귀가 아닌가
+
+`lib/play/play_invite.ml`(제품 347줄)과 `test/test_play_invite.ml`(시험 262줄)이 **같은 커밋 `1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc` 에서 함께 생겼고**, 그 이후 제품 파일을 바꾼 커밋이 0건이다.
+
+```
+$ git log --format="%H %s" --diff-filter=A -- lib/play/play_invite.ml
+1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc fix(keeper): ride turn-entry admission on the tail carrier (#47781)
+
+$ git log --oneline 1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc..origin/main -- lib/play/play_invite.ml | wc -l
+0
+```
+
+"제품이 나중에 바뀌어 유효 케이스가 거부되게 됐다"는 성립하지 않는다 — 둘이 같은 커밋에서 태어났으므로 "나중"이 없다. 따라서 (a)가 아니다.
+
+## (b) 를 지지하는 근거와 그 한계
+
+**지지하는 것**
+- 제품과 시험이 같은 커밋에서 태어났고 제품은 그 뒤 안 바뀌었다.
+- 그 케이스의 값은 거부 목록(`refused ...`)이 아니라 **유효 목록**(`test_valid_hosts_issue_credentials`)에 있다. 제품은 그 값을 유효로 본 적이 없다는 것이 probe 로 확인된다.
+
+**한계 (정직하게)**
+- `1e5740024c6cd84b6e75cfe40b21fd91b2fa0cdc` 를 head 로 한 workflow run 은 `Main minimal build` 2건(`41567478107`, `41565389744`)이 있고 **둘 다 failure** 다. 다만 그 workflow 는 `test_play_invite` 스위트를 실행하지 않으므로, **그 head 에서 이 시험의 녹색/적색을 직접 확인한 것은 아니다.**
+- `gh api .../actions/runs?head_sha=...` 로 조회한 범위는 그 head 전체이고 `total_count=2` 였다. 다른 워크플로 run 은 없었다.
+
+## 실패 재현 (현재 main)
+
+```
+run 41966075993 · head 7d2b43bf30e4839962dfb38a25a52db3fa8c69ac
+TARGET_SUITES=test_play_invite · minimal=true · suite_timeout_sec=900 · conclusion=failure
+
+ [FAIL]  invite  2  valid browser hosts issue credentials.
+ FAIL http://127.0.0.1.: not_ready public_base_url_not_http
+ [targeted] @@test/runtest-test_play_invite: FAIL exit 1 in 11s
+```
+
+## 하지 않은 것
+
+- 제품 코드·시험 파일을 고치지 않았다.
+- 시험 수정 착수는 계약 3항대로 별도 승인 뒤에 한다.

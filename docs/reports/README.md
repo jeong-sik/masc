@@ -5,6 +5,7 @@ Generate new reports under `artifacts/`; retain selected reports here. See the
 [storage guide](../guides/WORKSPACE-STORAGE.md).
 
 - [Tools 효율 점검: 낭비 측정, 고친 것, 못 고친 것 · 2026-11-05](2026-11-05-tool-efficiency.md)
+- [TTFT 전용 상한 폐지 · 2026-11-04](2026-11-04-first-event-ttft-budget-collapse.html)
 - [최근 7일 핵심 기능 조사와 매트릭스 · 2026-10-30](2026-10-30-weekly-core-audit.md)
 - [MASC Librarian / Memory OS 적대적 감사 보고서](MASC-LIBRARIAN-MEMORY-OS-ADVERSARIAL-AUDIT-2026-07-30.md)
 - [전체 후속 작업 목록 · 2026-10-21](addon-lane-full-worklist-20261021.md)

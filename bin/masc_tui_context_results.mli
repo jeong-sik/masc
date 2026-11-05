@@ -1,5 +1,7 @@
 (** The Context inspector's async answers and how each changes the pane.
-    These functions perform no terminal or network IO. *)
+    [apply] reads the wall clock to time a reading, and stops a superseded
+    part read through the callback the pane stored for it. These functions
+    perform no terminal or network IO. *)
 
 (** [Masc_tui_async_protocol.async_msg] carries these in [Context_msg]. *)
 type msg =

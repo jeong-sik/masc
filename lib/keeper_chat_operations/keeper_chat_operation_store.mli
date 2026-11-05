@@ -26,6 +26,9 @@ type admission =
 
 type inventory =
   { queued_count : int
+  ; oldest_queued_created_at : float option
+      (** [created_at] of the oldest operation counted in [queued_count];
+          [None] exactly when that count is zero. *)
   ; running_operation_id : Operation.Operation_id.t option
   ; terminal_count : int
   ; interrupted_count : int

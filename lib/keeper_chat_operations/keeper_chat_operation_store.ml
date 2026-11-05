@@ -44,6 +44,7 @@ type admission =
 
 type inventory =
   { queued_count : int
+  ; oldest_queued_created_at : float option
   ; running_operation_id : Id.t option
   ; terminal_count : int
   ; interrupted_count : int
@@ -589,14 +590,32 @@ let optional_text db ~operation sql =
     else Error (Store_unavailable (sqlite_error db operation rc)))
 ;;
 
+let queued_inventory db =
+  let operation = "count queued operations" in
+  with_statement
+    db
+    ~operation
+    "SELECT COUNT(*), MIN(created_at) FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id)"
+    (fun stmt ->
+       let rc = Sqlite3.step stmt in
+       if rc <> Sqlite3.Rc.ROW
+       then Error (Store_unavailable (sqlite_error db operation rc))
+       else
+         let count = Sqlite3.column_int64 stmt 0 in
+         let oldest = float_option stmt 1 in
+         let rc = Sqlite3.step stmt in
+         if rc <> Sqlite3.Rc.DONE
+         then Error (Store_unavailable (sqlite_error db (operation ^ " completion") rc))
+         else
+           match Int64.equal count 0L, oldest with
+           | true, None | false, Some _ -> Ok (count, oldest)
+           | true, Some _ | false, None ->
+             Error (Integrity_error "queued operation count and oldest creation disagree"))
+;;
+
 let inventory store =
   let* () = ensure_open store in
-  let* queued =
-    single_int64
-      store.db
-      ~operation:"count queued operations"
-      "SELECT COUNT(*) FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id)"
-  in
+  let* queued, oldest_queued_created_at = queued_inventory store.db in
   let* running_operation_id =
     optional_text
       store.db
@@ -630,6 +649,7 @@ let inventory store =
   else
     Ok
       { queued_count = Int64.to_int queued
+      ; oldest_queued_created_at
       ; running_operation_id
       ; terminal_count = Int64.to_int terminal
       ; interrupted_count = Int64.to_int interrupted

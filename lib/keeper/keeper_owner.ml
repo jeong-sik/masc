@@ -47,6 +47,7 @@ and runtime_retry_wait = now:float -> observed:Keeper_semantic_execution.runtime
 
 type operation_projection =
   { queued_count : int
+  ; oldest_queued_created_at : float option
   ; has_claimable_queued : bool
   ; next_runtime_retry_wake : float option
   ; running_operation_id : Operation_id.t option
@@ -522,6 +523,7 @@ let operation_projection_equal
       (right : operation_projection)
   =
   Int.equal left.queued_count right.queued_count
+  && Option.equal Float.equal left.oldest_queued_created_at right.oldest_queued_created_at
   && Bool.equal left.has_claimable_queued right.has_claimable_queued
   && Option.equal Float.equal left.next_runtime_retry_wake right.next_runtime_retry_wake
   && Option.equal Operation_id.equal left.running_operation_id right.running_operation_id
@@ -985,6 +987,7 @@ let run_operation_store ~label f =
 
 let operation_projection_of_inventory ~has_claimable_queued ~next_runtime_retry_wake inventory =
   { queued_count = inventory.Chat_operation_store.queued_count
+  ; oldest_queued_created_at = inventory.oldest_queued_created_at
   ; has_claimable_queued
   ; next_runtime_retry_wake
   ; running_operation_id = inventory.running_operation_id

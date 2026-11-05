@@ -49,7 +49,7 @@ let test_same_base_dir_shares_mutex () =
   let a = D.open_store location in
   let b = D.open_store location in
   check bool "same base_dir → physically identical mutex" true
-    (D.For_testing.mutex a == D.For_testing.mutex b)
+    (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex b)
 
 (* --- 2. different base_dir → distinct mutexes ---------- *)
 
@@ -59,20 +59,20 @@ let test_different_base_dir_distinct_mutex () =
   let a = D.open_store dir_a_location in
   let b = D.open_store dir_b_location in
   check bool "distinct base_dir → distinct mutex" false
-    (D.For_testing.mutex a == D.For_testing.mutex b)
+    (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex b)
 
-(* --- 3. explicit ?mutex bypasses the registry --------- *)
+(* --- 3. explicit ?cross_context_mutex bypasses the registry --------- *)
 
 let test_explicit_mutex_overrides_registry () =
   let location = temp_store "djmr_explicit" in
   let dir = D.Store.dir location in
-  let registry_mutex = D.For_testing.mutex_for_base_dir dir in
-  let injected = Eio.Mutex.create () in
-  let store = D.open_store ~mutex:injected location in
+  let registry_mutex = D.For_testing.cross_context_mutex_for_base_dir dir in
+  let injected = Cross_context_mutex.create () in
+  let store = D.open_store ~cross_context_mutex:injected location in
   check bool "explicit mutex used verbatim" true
-    (D.For_testing.mutex store == injected);
+    (D.For_testing.cross_context_mutex store == injected);
   check bool "explicit mutex differs from registry entry" false
-    (D.For_testing.mutex store == registry_mutex)
+    (D.For_testing.cross_context_mutex store == registry_mutex)
 
 (* --- 4. trailing-slash variants share the mutex -------- *)
 
@@ -81,7 +81,7 @@ let test_trailing_slash_normalizes () =
   let dir = D.Store.dir location in
   let a = D.open_store location in
   check bool "trailing slash normalises to same mutex" true
-    (D.For_testing.mutex a == D.For_testing.mutex_for_base_dir (dir ^ "/"))
+    (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex_for_base_dir (dir ^ "/"))
 
 (* --- 5. concurrent appends produce all-parseable lines  *)
 
@@ -123,7 +123,7 @@ let test_concurrent_two_instances_no_corruption () =
   let store_a = D.open_store location in
   let store_b = D.open_store location in
   check bool "registry shares mutex across instances" true
-    (D.For_testing.mutex store_a == D.For_testing.mutex store_b);
+    (D.For_testing.cross_context_mutex store_a == D.For_testing.cross_context_mutex store_b);
   let n = 40 in
   Eio.Fiber.both
     (fun () ->
@@ -169,6 +169,49 @@ let test_append_failure_does_not_poison_registry_mutex () =
   let records = D.read_recent retry_store 1 in
   check int "retry append persisted" 1 (List.length records)
 
+let test_append_from_os_threads_under_contention () =
+  (* The audit log is appended from [Thread.create] workers. A raw OS thread
+     has no Eio effect handler, and [Eio.Mutex.use_ro] with a waiter performs
+     an effect ([Waiters.await]); the thread dies with [Effect.Unhandled]
+     before its row lands (2026-11-04 run 41848559369, 3608~3620). An
+     uncontended [use_ro] performs none, so this test makes the threads
+     contend: several writers share the store's gate at once, as the audit
+     log's writers do through one registry entry per base_dir. *)
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "djmr_os_contention" in
+  let dir = D.Store.dir location in
+  let store = D.open_store location in
+  let errors = ref [] in
+  let per_thread = 20 in
+  let threads =
+    List.init 8 (fun i ->
+      Thread.create
+        (fun () ->
+          for row = 0 to per_thread - 1 do
+            try
+              D.append store
+                (`Assoc [ ("tag", `String (Printf.sprintf "t%d-%d" i row)) ])
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e -> errors := (Printf.sprintf "t%d-%d: %s" i row (Printexc.to_string e)) :: !errors
+          done)
+        ())
+  in
+  List.iter Thread.join threads;
+  check (list string) "no OS thread raised" [] !errors;
+  let lines = read_today_lines dir in
+  check int "every contended append landed" (8 * per_thread) (List.length lines);
+  let parsed =
+    List.fold_left
+      (fun acc line ->
+        match Yojson.Safe.from_string line with
+        | _ -> acc + 1
+        | exception Yojson.Json_error _ -> acc)
+      0 lines
+  in
+  check int "every line parses as JSON" (8 * per_thread) parsed
+
 let () =
   run "dated_jsonl_mutex_registry_10372"
     [
@@ -189,5 +232,10 @@ let () =
             test_concurrent_two_instances_no_corruption;
           test_case "append failure does not poison registry mutex" `Quick
             test_append_failure_does_not_poison_registry_mutex;
+        ] );
+      ( "off-fiber append",
+        [
+          test_case "appends from contending OS threads all land" `Quick
+            test_append_from_os_threads_under_contention;
         ] );
     ]

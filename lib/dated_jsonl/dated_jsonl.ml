@@ -24,7 +24,7 @@ module Layout = Dated_jsonl_layout
 type t = {
   location : Store.location;
   base_dir : string;
-  mutex : Eio.Mutex.t Atomic.t;
+  cross_context_mutex : Cross_context_mutex.t Atomic.t;
   max_bytes : int option;
 }
 
@@ -123,7 +123,7 @@ let read_error_to_string = function
 let default_append_guard f = f ()
 let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
 
-let mutex_registry : (string, Eio.Mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
+let mutex_registry : (string, Cross_context_mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
 let mutex_registry_mu = Stdlib.Mutex.create ()
 
 let strip_trailing_slashes path =
@@ -148,15 +148,15 @@ let mutex_for_base_dir ~base_dir =
     match Hashtbl.find_opt mutex_registry key with
     | Some cell -> cell
     | None ->
-        let mutex = Eio.Mutex.create () in
+        let mutex = Cross_context_mutex.create () in
         let cell = Atomic.make mutex in
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let open_store ?mutex ?max_bytes location =
+let open_store ?cross_context_mutex ?max_bytes location =
   let base_dir = Store.dir location in
-  let mutex =
-    match mutex with
+  let cross_context_mutex =
+    match cross_context_mutex with
     | Some mutex -> Atomic.make mutex
     | None -> mutex_for_base_dir ~base_dir
   in
@@ -168,7 +168,7 @@ let open_store ?mutex ?max_bytes location =
   {
     location;
     base_dir;
-    mutex;
+    cross_context_mutex;
     max_bytes;
   }
 
@@ -813,16 +813,18 @@ let run_post_append_pruning_unlocked t ~(dated : Store.dated_path) =
     ignore (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int)
 
 let append_unlocked ~on_committed t json =
-  let mutex = Atomic.get t.mutex in
-  (* [use_ro] serializes file appends without poisoning the shared mutex on
-     IO failure, so retry paths can keep using the same registry entry.
-     [use_rw] would poison on any exception regardless of [~protect].
-
-     [Fs_compat.append_jsonl] (post-RFC-0108 #15936) already provides
+  (* [Fs_compat.append_jsonl] (post-RFC-0108 #15936) already provides
      per-path cross-domain atomicity via its own Stdlib.Mutex registry
      and fresh-fd-per-call. The PR-5 (#15928) inline [atomic_append_jsonl]
      was a pre-emptive duplicate of that guarantee — removed here. *)
-  Eio.Mutex.use_ro mutex (fun () ->
+  (* [append] reaches here from OS threads too: the audit log is written from
+     [Thread.create] workers, where an [Eio.Mutex] waits through an effect the
+     thread has no handler for. That raises [Stdlib.Effect.Unhandled] inside
+     the thread and kills it before the row lands. [Eio_guard.with_mutex_ro]
+     only serializes a real fiber and raises for the rest, so the
+     cross-context gate is what covers both: a fiber yields cooperatively and
+     a raw thread takes the Stdlib mutex. *)
+  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
     let dated = Store.dated_path_now t.location in
     Jsonl_writer.append_jsonl ~path:dated.path json;
     on_committed ();
@@ -1522,8 +1524,7 @@ let load_count_cache ~path =
 ;;
 
 let append_rotating_unlocked ~on_committed t ~max_current_file_bytes json =
-  let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_ro mutex (fun () ->
+  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
     let dated = Store.dated_path_now t.location in
     let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
     let current_bytes = file_size dated.path in
@@ -1932,8 +1933,7 @@ let read_range_recent ?offset t ~since ~until n =
 (* Keep the existing store mutex on the fiber. Descriptor operations offload
    through Fs_compat, so neither directory reads nor unlinks block the domain. *)
 let prune t ~days =
-  let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_ro mutex (fun () ->
+  Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex) (fun () ->
     prune_unlocked t ~days)
 
 let days_to_keep ~operator_window_days store =
@@ -1955,8 +1955,8 @@ let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
            ~f:(fun location directory ->
              let t = open_store location in
              let removed =
-               Eio.Mutex.use_ro (Atomic.get t.mutex) (fun () ->
-                 prune_bound_directory ~location ~days directory)
+               Cross_context_mutex.with_lock (Atomic.get t.cross_context_mutex)
+                 (fun () -> prune_bound_directory ~location ~days directory)
              in
              if removed > 0 then on_pruned location;
              removed))
@@ -1972,9 +1972,9 @@ let prune_listed_stores root ~operator_window_days =
    module so tests can verify mutex-registry sharing without
    widening the public API surface. *)
 module For_testing = struct
-  let mutex (t : t) = Atomic.get t.mutex
+  let cross_context_mutex (t : t) = Atomic.get t.cross_context_mutex
 
-  let mutex_for_base_dir base_dir =
+  let cross_context_mutex_for_base_dir base_dir =
     let cell = mutex_for_base_dir ~base_dir in
     Atomic.get cell
 

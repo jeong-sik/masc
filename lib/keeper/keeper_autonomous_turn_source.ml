@@ -553,7 +553,7 @@ let read_store config keeper_name =
      append mutex for every syntactically valid name a client guesses. *)
   let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
       ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records in
-  Dated_jsonl.open_store ~mutex:(Eio.Mutex.create ()) location
+  Dated_jsonl.open_store ~cross_context_mutex:(Cross_context_mutex.create ()) location
 ;;
 
 type snapshot = { records : Turn_record.t list; fingerprint : string }

@@ -119,10 +119,8 @@ let of_comment comment =
   | Some inner -> parse_body inner
 ;;
 
-let contains ~sub text =
-  let n = String.length text and m = String.length sub in
-  let rec at i = i + m <= n && (String.equal (String.sub text i m) sub || at (i + 1)) in
-  m > 0 && at 0
+(* An empty marker marks nothing, so it is never found. *)
+let contains ~sub text = (not (String.equal sub "")) && String_util.contains_substring text sub
 ;;
 
 (* What ends a line for some reader a memo lands in. A lone CR ends a [//]

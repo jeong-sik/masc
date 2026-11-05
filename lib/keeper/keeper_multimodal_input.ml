@@ -448,43 +448,21 @@ let declared_media_type (media : user_media_block) (att : Keeper_chat_store.atta
       | mime_type -> Some (normalize_media_type mime_type))
   | mime_type -> Some (normalize_media_type mime_type)
 
-let split_once ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  let rec loop index =
-    if index + needle_len > value_len then
-      None
-    else if String.sub value index needle_len = needle then
-      let before = String.sub value 0 index in
-      let after_index = index + needle_len in
-      let after =
-        String.sub value after_index (value_len - after_index)
-      in
-      Some (before, after)
-    else
-      loop (index + 1)
-  in
-  loop 0
+(* The text before and after the first occurrence of [needle], found at
+   [index] in [value]. *)
+let split_at ~index ~needle value =
+  let after_index = index + String.length needle in
+  String.sub value 0 index, String.sub value after_index (String.length value - after_index)
 
+let split_once ~needle value =
+  Option.map (fun index -> split_at ~index ~needle value) (String_util.find_substring value needle)
+
+(* ASCII lowercasing keeps every byte offset, so the index found in the
+   lowercased copy cuts the original [value]. *)
 let split_once_ci ~needle value =
-  let needle_lower = String.lowercase_ascii needle in
-  let value_lower = String.lowercase_ascii value in
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  let rec loop index =
-    if index + needle_len > value_len then
-      None
-    else if String.sub value_lower index needle_len = needle_lower then
-      let before = String.sub value 0 index in
-      let after_index = index + needle_len in
-      let after =
-        String.sub value after_index (value_len - after_index)
-      in
-      Some (before, after)
-    else
-      loop (index + 1)
-  in
-  loop 0
+  Option.map
+    (fun index -> split_at ~index ~needle value)
+    (String_util.find_substring (String.lowercase_ascii value) (String.lowercase_ascii needle))
 
 let data_url_scheme_prefix = "data:"
 

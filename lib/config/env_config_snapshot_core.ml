@@ -5,15 +5,7 @@ let mask_sensitive _value = "[REDACTED]"
 let is_sensitive_name name =
   let lower = String.lowercase_ascii name in
   List.exists
-    (fun pat ->
-      let rec contains_at i =
-        if i + String.length pat > String.length lower
-        then false
-        else if String.sub lower i (String.length pat) = pat
-        then true
-        else contains_at (i + 1)
-      in
-      contains_at 0)
+    (String_util.contains_substring lower)
     [ "token"; "password"; "secret"; "key"; "credential" ]
 
 type spec =

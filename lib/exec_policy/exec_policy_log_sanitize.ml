@@ -25,21 +25,9 @@ let redact_inline_secret_assignment token =
      is spliced from the token as it came. The copy is rebuilt per marker
      because an earlier marker may already have shortened the token. *)
   let redact_after token marker =
-    let lower = String.lowercase_ascii token in
-    if String_util.contains_substring lower marker
-    then (
-      let marker_len = String.length marker in
-      let rec find i =
-        if i + marker_len > String.length lower
-        then None
-        else if String.sub lower i marker_len = marker
-        then Some i
-        else find (i + 1)
-      in
-      match find 0 with
-      | Some idx -> String.sub token 0 (idx + marker_len) ^ "[REDACTED]"
-      | None -> token)
-    else token
+    match String_util.find_substring (String.lowercase_ascii token) marker with
+    | Some idx -> String.sub token 0 (idx + String.length marker) ^ "[REDACTED]"
+    | None -> token
   in
   List.fold_left redact_after token sensitive_assignment_markers
 ;;

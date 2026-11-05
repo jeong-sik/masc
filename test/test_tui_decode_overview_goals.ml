@@ -1,10 +1,45 @@
 (* Decoding of the goal tree the TUI reads from GET /api/v1/dashboard/goals.
-   A tree the decoder cannot trust is refused: a goal without its children
-   field, a phase no Goal_phase spells, and a measurement recorded against a
-   criterion revision other than the goal's current one. *)
+   A well-formed tree is read flat, a parent before its children. A tree the
+   decoder cannot trust is refused: a goal without its children field, a phase
+   no Goal_phase spells, and a measurement recorded against a criterion
+   revision other than the goal's current one. *)
 
 open Alcotest
 module Tui_decode = Masc.Tui_decode
+
+let test_a_nested_tree_is_read_flat_with_each_goals_tasks () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"tree":[
+          {"id":"goal-a","title":"a","phase":"executing","priority":1,
+           "due_date":"2026-10-07","task_count":2,"task_done_count":1,
+           "stagnation_seconds":3600,
+           "tasks":[{"id":"task-1"},{"id":"task-2"}],
+           "children":[
+             {"id":"goal-b","title":"b","phase":"executing","priority":2,
+              "due_date":null,"task_count":0,"task_done_count":0,
+              "stagnation_seconds":null,"tasks":[],"children":[]}]},
+          {"id":"goal-c","title":"c","phase":"executing","priority":3,
+           "due_date":null,"task_count":0,"task_done_count":0,
+           "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
+  in
+  match Tui_decode.decode_overview_goals json with
+  | Error error ->
+      failf "a well-formed tree did not decode: %s"
+        (Tui_decode.overview_goals_error_to_string error)
+  | Ok goals ->
+      check (list string) "every goal once, a parent before its children"
+        [ "goal-a"; "goal-b"; "goal-c" ]
+        (List.map (fun goal -> goal.Tui_decode.og_id) goals);
+      (match goals with
+       | first :: _ ->
+           check (list string) "the goal's own task ids" [ "task-1"; "task-2" ]
+             first.Tui_decode.og_task_ids;
+           check int "linked tasks" 2 first.Tui_decode.og_task_count;
+           check int "done tasks" 1 first.Tui_decode.og_task_done_count;
+           check (option string) "due date" (Some "2026-10-07")
+             first.Tui_decode.og_due_date
+       | [] -> fail "no goal decoded")
 
 let test_a_goal_without_children_is_refused () =
   let json =
@@ -63,7 +98,9 @@ let test_explicit_measurement_requires_the_current_criterion () =
 let () =
   run "tui_decode_overview_goals"
     [ ( "overview goals decoding"
-      , [ test_case "a goal without children is refused" `Quick
+      , [ test_case "a nested tree is read flat with each goal's tasks" `Quick
+            test_a_nested_tree_is_read_flat_with_each_goals_tasks
+        ; test_case "a goal without children is refused" `Quick
             test_a_goal_without_children_is_refused
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused

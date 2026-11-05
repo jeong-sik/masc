@@ -124,12 +124,12 @@ val decide :
   body:[ `Drained | `Not_drained | `Transport_ended | `Failed ] -> t
 ```
 
-- `Http_client_cache` 의 `return` 은 `release : t -> Key.t -> connection -> Reuse_verdict.t -> unit` 로 바뀐다. `Park` 이면 돌려놓고, `Close _` 면 닫는다. 연결을 끝내는 길은 이 함수 하나다.
+- `Http_client_cache` 의 `return` 은 `release` 로 바뀐다. `Park` 이면 돌려놓고, `Close _` 면 닫는다. 연결을 끝내는 길은 이 함수 하나다. 2층은 `t -> Key.t -> connection -> Reuse_verdict.t -> unit` 이고, 4층에서 `lease -> Reuse_verdict.t -> unit` 가 된다. 같은 lease 를 두 번 끝내면 `Invalid_argument` 다. 두 번 돌려놓으면 소켓 하나를 두 요청이 나눠 쓰기 때문이다(`Eio.Promise.resolve` 와 같은 방식).
 - 세 함수는 각자 응답과 본문 상태를 `decide` 에 넘긴다. `with_client` 는 `f` 가 응답 헤더와 본문 상태를 같이 돌려주게 바뀐다. 그래야 응답을 보지 않고 돌려놓는 일이 없다.
 - `response_connection_is_reusable` 는 `decide` 의 `Not_persistent` 판정이 된다. 규칙은 RFC 9112 §9.3 대로다. 요청이나 응답이 `close` 를 보냈으면 그 연결로 더 보내지 않는다(§9.6).
 - `close_reason` 은 `Http_client_cache.stats` 에 이유별 닫은 수로 남긴다. 저장하지 않는다.
 - 꺼낸 연결은 출처를 같이 든다(4층). `checkout` 은 `lease`(연결과 `Reused | Created`)를 돌려주고, `release` 는 그 `lease` 를 받는다. `stats` 는 다시 쓴 연결의 이유별 닫은 수를 한 벌 더 센다(`closed_after_reuse`). §6 은 다시 쓴 연결의 실패를 이것으로 센다.
-- `http_client` 는 요청의 연결을 닫힌 합타입 하나로 든다. 요청 하나만 쓰는 연결(`One_shot`)과 캐시에서 빌린 연결(`Leased`)이다. 요청 하나만 쓰는 연결을 캐시에 돌려놓거나, 빌린 연결을 캐시 모르게 닫는 코드는 타입이 받지 않는다.
+- `http_client` 는 요청의 연결을 닫힌 합타입 하나로 든다. 요청 하나만 쓰는 연결(`One_shot`)과 캐시에서 빌린 연결(`Leased`)이다. 요청 하나만 쓰는 연결을 캐시에 돌려놓는 코드는 타입이 받지 않는다. 빌린 연결은 `end_connection` 이 `release` 로 끝낸다. 빌린 연결의 소켓을 `Eio.Resource.close` 로 직접 닫는 것은 타입이 막지 못하고, 그러면 이유별 수에서 빠진다.
 
 ### 3.3 다시 쓴 연결이 끊겨도 http_client 는 다시 보내지 않는다
 

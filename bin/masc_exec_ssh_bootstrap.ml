@@ -354,6 +354,51 @@ let confirm_host_key endpoint scan =
   | _ -> Error "ssh-keyscan returned multiple ED25519 fingerprints"
 ;;
 
+type known_host_entry =
+  { hosts : string list
+  ; key_type : string
+  ; key : string
+  }
+
+(* The plain lines of a known_hosts text, read the way sshd(8) lays them out:
+   host patterns, key type, key, optional comment. A blank or comment line, a
+   marker line (@cert-authority, @revoked) and a hashed host (|1|...) give no
+   entry, so they never count as pinning a key. *)
+let known_host_entries text =
+  String.split_on_char '\n' text
+  |> List.filter_map (fun line ->
+    let fields =
+      String.map (function '\t' -> ' ' | c -> c) line
+      |> String.split_on_char ' '
+      |> List.filter (fun field -> not (String.equal field ""))
+    in
+    match fields with
+    | hosts :: key_type :: key :: _ ->
+      (match hosts.[0] with
+       | '#' | '@' | '|' -> None
+       | _ -> Some { hosts = String.split_on_char ',' hosts; key_type; key })
+    | [] | [ _ ] | [ _; _ ] -> None)
+;;
+
+(* HIGH-RISK-UNREVIEWED: host-key trust. The stored file already pins the key
+   the host presents when one of its plain lines names the scanned host with
+   the same key type and key, whatever other keys it pins. Nothing new is
+   trusted and nothing is written: ssh reading this file already accepts that
+   key. *)
+let pins_scanned_key ~scan current =
+  match known_host_entries scan with
+  | [ scanned ] ->
+    List.exists
+      (fun stored ->
+        String.equal stored.key_type scanned.key_type
+        && String.equal stored.key scanned.key
+        && List.exists
+             (fun host -> List.exists (String.equal host) stored.hosts)
+             scanned.hosts)
+      (known_host_entries current)
+  | [] | _ :: _ :: _ -> false
+;;
+
 let install_known_hosts ~replace endpoint path scan =
   let* () = confirm_host_key endpoint scan in
   let* current =
@@ -361,11 +406,11 @@ let install_known_hosts ~replace endpoint path scan =
     else Ok None
   in
   match current with
-  | Some value when String.equal value scan -> Ok ()
+  | Some value when pins_scanned_key ~scan value -> Ok ()
   | Some _ when not replace ->
     Error
       (Printf.sprintf
-         "known_hosts entry differs at %s; verify rotation and rerun with --replace-host-key"
+         "known_hosts at %s does not pin the ED25519 key the host presents; verify rotation and rerun with --replace-host-key"
          path)
   | Some _ | None -> write_atomic ~mode:0o600 path scan
 ;;

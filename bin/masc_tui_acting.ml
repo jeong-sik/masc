@@ -444,7 +444,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Dataset_changed
       Masc.Workspace_dataset_event.(
         Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
-        | Provider_usage | Provider_standing | Keeper_costs)
+        | Provider_usage | Provider_standing | Keeper_costs | Workspace_health)
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -507,6 +507,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> "provider usage"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> "provider standing"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> "keeper costs"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
   | Observer.Dataset_changed
       (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
@@ -690,6 +691,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "the Keeper cost window took or dropped a row" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = "a memory health input was written" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Home Health line moved" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

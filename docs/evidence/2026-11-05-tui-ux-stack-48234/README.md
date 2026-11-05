@@ -1,13 +1,14 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29 and 31 of
-the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31 and 33 to
+36 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
 #48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386,
-#48389, #48392, #48401, #48411, #48424, #48436). Layer 7 is the first version
-of this document. Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13
-to 17. Layer 21 added layers 19 and 20. Layer 26 is an RFC and has no screens.
-Layer 28 added layers 22 to 25 and 27. Layer 30 added layer 29. The layer that
-carries this text added layer 31.
+#48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493, #48516). Layer 7
+is the first version of this document. Layer 12 added layers 6 and 8 to 11.
+Layer 18 added layers 13 to 17. Layer 21 added layers 19 and 20. Layer 26 is an
+RFC and has no screens. Layer 28 added layers 22 to 25 and 27. Layer 30 added
+layer 29. Layer 32 added layer 31. The layer that carries this text added
+layers 33 to 36.
 
 ## Source
 
@@ -34,9 +35,17 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 27) | `d738d2334693f14ffa475ca8e5552dbe0425daf4` | 41929495694 | `8f0ca03fe34d837dafb2b17453ecef13dbb39ef3fe8aaa9c33ff7105e0cbe26f` | `76dd1f564067a2533487100dc6e772cc8debd74187b7cabf8b37c11b38e264ba` |
 | After (layers 1 to 29) | `b9161eaa6acd24bae552597a20fadf638eaa0730` | 41934340932 | `b39991f1dad8a7b8913daf0d2ae8c7785a20d0be2c29eae992cd5088a3f89acb` | `c5cf37f66a5896cefba4beb3f712b12d9993d96e778e83b75a8cc247c712331f` |
 | After (layers 1 to 31) | `8b86dd384c842d8f7f20027ae5ddc39132e26f08` | 41937783831 | `3dee2c63f3fe896f814dd14fa55e0c0e046581f003205141d3344556575a272b` | `6a00ffc156c1e6cb0c26e887636db87a8f6a53c4c43fea32a3ddddb4c38ba358` |
+| After (layers 1 to 33) | `54f7c7d58eb6791e001746a943278981ef77437a` | 41949633565 | `b351a6b3301713cd5fd6f8ceba80b1459829a32f5fc37b7f08f7bdc7c2c8cbe2` | `961027638e120afc3852ddca9e1e944d278f9bf28f94ffd9ecd149739946911b` |
+| After (layers 1 to 34) | `16699347711857a0088028d5bfcdcaa280375834` | 41950346736 | `e833ad2d5c16c116abc3f5e650510929847f5d0ef9f17c19d88728f6b754bcbe` | `cd48bf57b82f994f12e0b8beecc90b290babfce81b633368e6314b76ebd9b0cb` |
+| After (layers 1 to 35) | `c177173775d9245db26beb4db4c94d208d4da1d5` | 41953166859 | `0b57468d24bfcb32b90d289a45bbdc5570904faa6a12f30d18c4d0cf7c0775bd` | `714dc40b8e2185fd882f5e4569a6b07bfa7fab65bc67989cdace7f089a12aebe` |
+| After (layers 1 to 36) | `ee537e002edec7d33e812dc73fab59a9637f87ef` | 41960815641 | `118f0ae57bb201f6060a86a9ee23b5962b9c66c54376b74b4116d353b8b7911f` | `6bfc13656a2a33b7f5021f80f8422e3d904145077ee14c714d0066b1b39785a6` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
+
+Commit `b440fa3ddb9` was added to layer 36 after its After build. It changes a
+doc comment in `masc_tui_message_layout.mli` and `test/test_tui_wrap_words.ml`
+only, so the After binary is the one the layer 36 head would build.
 
 Every proof run ended `cancelled` or `failure`. In each, the
 `test_workspace_file_confidentiality` suite failed one case (`Board startup
@@ -59,7 +68,11 @@ artifacts were uploaded after that failure.
   and 200x55 with 42 open tasks (Work, Tasks). Layer 27 used 120x35 and 80x24 with
   the 12-task fixture (Task detail). Layer 29 used 60x24, 80x24, 120x35 and 200x55
   (Artifacts / Resources). Layer 31 used 60x24, 80x24, 90x28, 100x30 and 120x35
-  (Approvals).
+  (Approvals). Layer 33 used 60x24, 80x24, 100x30 and 120x35 (the `?` sheet) and
+  80x24 and 120x35 (Hangul). Layer 34 used 80x24 and 120x35 (Task detail).
+  Layer 35 used 80x24, 100x30 and 120x35 (Dashboard), 60x24, 80x24 and 120x35
+  (the first screen of 15 palette destinations) and 80x24 and 120x35 (Task
+  detail). Layer 36 repeated those captures at the same sizes.
 - Every process ran under `env -i` with `PATH`, `HOME` (an empty directory),
   `TERM=xterm-256color` and `LANG=en_US.UTF-8`. No credential, Keeper or
   workspace of the operator was read.
@@ -76,6 +89,11 @@ artifacts were uploaded after that failure.
 - The key sequences are in the sections below. Each capture starts a new TUI
   process, waits for `HTTP [connected]`, settles for a few seconds, and then
   sends the keys. The capture driver is not part of the repository.
+- The PNGs of layers 1 to 35 come from `tmux capture-pane -e -p` without `-N`,
+  which drops the blanks at the end of a row. A selection band (reverse video)
+  is therefore drawn only as far as its row's text in those PNGs. A capture of
+  the layer 35 build with `-N` shows the band over all 120 cells of the row on
+  the Features, Memory and Logs screens at 120x35.
 
 ## Observed results
 
@@ -695,6 +713,289 @@ screen is identical once the clock is masked.
 ![Approvals at 90x28 before](approvals-90-before.png)
 ![Approvals at 90x28 after](approvals-90-after.png)
 
+### Layer 33: the `?` sheet filters its keys with `/` (#48456)
+
+The `?` key opens the cheat sheet, which lists every key and slash command in
+one column of 965 lines at 80 columns. Before is the layers 1 to 31 build
+(layer 32 only adds this document). After is the layers 1 to 33 build. The
+keys sent are `?`, then `/`, `approve`, Enter and Esc, and then `/`, `zzz`. A
+second run on the after build types the Hangul `메ㅔ갶ㄷ`, which a Korean
+keyboard layout produces when the keys for `approve` are pressed.
+
+```
+step       title row (80x24)             footer hints (80x24)
+?  before  MASC Cheat Sheet  hints on    j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close
+?  after   MASC Cheat Sheet  hints on    /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close
+/ approve  MASC Cheat Sheet  /approve▌   Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+Enter      MASC Cheat Sheet  /approve    /:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  …?
+Esc        MASC Cheat Sheet  hints on    /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close
+/ zzz      MASC Cheat Sheet  /zzz▌       Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+```
+
+With `/approve` four sections remain, each with only the rows whose key or
+description holds the query: Dashboard (`Enter  open the selected destination;
+never approve`), Slash commands (`/approve`), Chat (`/approve /deny`) and Work /
+Task Review (`a / x`). At 96 columns and wider they sit in two columns, read
+left then right. A query that nothing matches leaves one line, `No key or
+command matches "zzz".` While the query is typed, `h`, `j`, `g` and `?` extend
+it. Enter keeps the query and gives the sheet's own keys back. Esc clears the
+query first, and the cleared sheet is the full sheet again, `/:filter`
+included. At 60 columns the footer drops `g/G:first/last` and `h:hints` before
+`/:filter` and `Esc:close`, and at 100x30 the `ACTION NEEDED` prefix leaves room
+for `Enter:keep` and `Esc:clear` only.
+
+The Hangul run shows the same title row (`/approve▌`) and the same four
+sections as the English run, so the syllables were read back as the Latin keys
+that produced them.
+
+![The cheat sheet at 80x24 before](help-80-before.png)
+*Before: the footer lists scroll, page, first/last and hints, and no key for a filter.*
+
+![The cheat sheet at 80x24 after](help-80-after.png)
+*After: the same sheet with `/:filter` first in the footer.*
+
+![The cheat sheet typing /approve at 120x35](help-120-typing.png)
+*Typing `/approve` at 120x35: four sections remain in two columns, and the title row shows the query with the caret.*
+
+![The cheat sheet keeping /approve at 80x24](help-80-kept.png)
+*After Enter at 80x24: the query stays in the title row without the caret, and the footer offers `/:edit` and `Esc:clear`.*
+
+![The cheat sheet with a query that matches nothing at 80x24](help-80-no-match.png)
+*A query with no match: one line says so and the footer keeps `Enter:keep` and `Esc:clear`.*
+
+![The cheat sheet typing Hangul at 120x35](help-120-hangul.png)
+*Hangul `메ㅔ갶ㄷ` typed at 120x35: the title row and the four sections are the ones the English capture shows for `/approve`.*
+
+### Layer 34: Task detail headings carry no number (#48481)
+
+Work, Tasks (`t` on the Work tab), then Enter on a Task. The Description and
+Handoff & Completion Contract sections appear only when the Task has content for
+them, so the numbers read 1, 2, 4 for a Task without a handoff. Before is the
+layers 1 to 33 build. After is the layers 1 to 34 build.
+
+```
+Task                         before                          after
+task-002 (verification)      1. 2. 3. 4.                     four headings, no number
+task-004 (claimed)           1. 2. 4.   (3 is skipped)       three headings, no number
+```
+
+Each heading row loses its `N. ` prefix and keeps the rest of its text, for
+example `[ 2. 작업 설명 · 대상 파일 (Description & Files) ]` becomes
+`[ 작업 설명 · 대상 파일 (Description & Files) ]`. The sections keep their order
+and their rows. Each side seeded its own fresh workspace, so the times, the
+event log line numbers, the duration values and the order of the Task list on
+the left differ between the sides. With those four masked, 7 of the 8
+captures of the verification and claimed Tasks (120x35 and 80x24, top and
+scrolled) differ only in the heading rows. The eighth (verification, 80x24,
+scrolled) also differs in two rows that read `refreshing`, the read state at the
+moment of the capture. The in-progress captures opened a different Task on each
+side (task-006 and task-007) and are left out of the comparison.
+
+![Task detail of task-004 before](task-claimed-120-before.png)
+*Before: the claimed Task shows headings 1, 2 and 4, with no 3 between them.*
+
+![Task detail of task-004 after](task-claimed-120-after.png)
+*After: the same three headings without numbers; the rows under them are the same.*
+
+![Task detail of task-002 before](task-awaiting-120-before.png)
+*Before: the Task awaiting verification shows headings 1 to 4.*
+
+![Task detail of task-002 after](task-awaiting-120-after.png)
+*After: the four headings without numbers.*
+
+### Layer 35: a word wider than its row breaks after a separator (#48493)
+
+The Dashboard, the screen the TUI opens on. The fixture's server reports three
+reasons for action needed. Each is one word with no space, and the Action
+needed card lists one per row. The card is 54 cells wide at 120x35 and 44 cells
+wide at 100x30. At 80x24 no card is drawn, so that capture is the same on both
+sides. Before is the layers 1 to 34 build. After is the layers 1 to 35 build.
+
+```
+Each pair shows the two rows a reason takes; "/" stands for the row break.
+
+120x35  keeper_identity_drift:configured_keeper_without_runtime_meta
+  before  keeper_identity_drift:configured_keeper_without_runtim / e_meta
+  after   keeper_identity_drift:configured_keeper_without_       / runtime_meta
+100x30  keeper_fleet_safety:no_executable_keeper_fibers
+  before  keeper_fleet_safety:no_executable_keeper_fib / ers
+  after   keeper_fleet_safety:no_executable_keeper_    / fibers
+100x30  keeper_identity_drift:configured_keeper_without_runtime_meta
+  before  keeper_identity_drift:configured_keeper_with / out_runtime_meta
+  after   keeper_identity_drift:configured_keeper_     / without_runtime_meta
+```
+
+Before, the card cut each word at its width, so a reason code ended in the
+middle of `runtime`, `fibers` or `without`. After, a word wider than the row
+breaks after the last `_`, `:`, `/`, `.` or `-` that fits. Every other row of
+the screen is the same on both sides once digits are masked: at 120x35 the
+diff is two rows, at 100x30 four rows, and at 80x24 none.
+
+To see what else the change moves, the first screen of each of the 15 palette
+destinations (Task Review, Task Verdicts, Approvals, Features, Schedules,
+Memory, Fusion, Clients, Tools, Artifacts / Resources, Code, Logs, Activity,
+Runtime and Changes) was captured at 60x24, 80x24 and 120x35 on both builds.
+With digits and hex ids masked, 41 of the 45 captures are the same. The other
+four differ in text that has nothing to do with wrapping: the read state
+shown at the end of the title row and in the footer (`finishing refresh`,
+`Refreshing Keeper list`, in Approvals at 60x24 and 80x24 and in Schedules at
+60x24), and which log lines the Logs screen had received at 120x35.
+
+![The Action needed card at 120x35 before](dashboard-wrap-120-before.png)
+*Before: the second reason breaks inside `runtime`, leaving `e_meta` on the next row.*
+
+![The Action needed card at 120x35 after](dashboard-wrap-120-after.png)
+*After: the same reason breaks after `without_`, and `runtime_meta` is whole on the next row.*
+
+![The Action needed card at 100x30 before](dashboard-wrap-100-before.png)
+*Before: at 44 cells two reasons break inside `fibers` and `without`.*
+
+![The Action needed card at 100x30 after](dashboard-wrap-100-after.png)
+*After: both break after `keeper_`, and the rows read `fibers` and `without_runtime_meta`.*
+
+The rule sits in `wrap_words`, which the screens call to wrap their rows, so
+the Task detail was captured on both builds as well, at 120x35 and 80x24: the
+Task in progress, the claimed Task and the Task awaiting verification, each at
+the top and scrolled to its history. A history entry shows its note as JSON,
+and the note's `tool_args_preview` is one long string. Spaces appear in it only
+inside the free text it quotes. With times, `.jsonl` offsets and durations
+masked, no row differs at the top of any of the three Tasks. Scrolled to the history at 120x35, the rows
+of that string differ in all three Tasks (seven rows in all). At 80x24 the only
+differing rows are the read state text of the awaiting Task (`refreshing` and
+`Refreshing Keeper list`).
+
+```
+120x35, scrolled to the history; "/" stands for the row break.
+
+claimed (task-004)
+  before  "{\"_agent_name\":\"iso-fixture\",\"task_id\":\"task-004\",\"action\":\"clai / m\"}",
+  after   "{\"_agent_name\":\"iso-fixture\",\"task_id\":\"task-004\",\"action\":        / \"claim\"}",
+in progress (task-007)
+  before  "{\"_agent_name\":\"iso-fixture\",\"task_id\":\"task-007\",\"action\":\"star / t\"}",
+  after   "{\"_agent_name\":\"iso-fixture\",\"task_id\":\"task-007\",\"action\":        / \"start\"}",
+awaiting verification (task-002), three rows
+  before  ...\"action\":\"subm / it_for_verification\",\"notes\":\"Example evidence: the sample figures are / collected.\",...
+  after   ...\"action\":       / \"submit_for_verification\",\"notes\":\"Example evidence: the sample figures / are collected.\",...
+```
+
+Before, the name of the action was cut inside the word, as in `clai` and `m`.
+After, the row ends at `\"action\":` and the name starts the next row whole.
+
+![The history of the claimed Task at 120x35 before](task-history-120-before.png)
+*Before: the action name is cut inside `claim`, leaving `m\"}` on the next row.*
+
+![The history of the claimed Task at 120x35 after](task-history-120-after.png)
+*After: the row ends at `\"action\":` and `\"claim\"}` is whole on the next row.*
+
+### Layer 36: coloured names and names with a mark break after a separator too (#48516)
+
+Layer 35 made a plain word wider than its row break after the last `_`, `:`,
+`/`, `.` or `-` that fits. Three kinds of text still went another way. A word
+that carries a style escape was cut at the row's width. A separator followed by
+a combining mark took no break. A word that is not valid UTF-8 could fill a row
+wider than the budget. Layer 36 changes the one function that looks for the
+break, `separator_cut`. It now walks the pieces a row is drawn from (a
+character with its marks, or a whole escape) where it walked the row's bytes.
+`split_word` sends a word that is not valid UTF-8 to the width cut, where layer
+35 sent a word that held an escape.
+
+`wrap_styled_words`, the call that keeps colour across rows, is used by the
+Work, Keepers and Runtime screens. No screen the fixture can draw holds a
+coloured word wider than its row, so the screens of this layer are a control.
+Before is the layers 1 to 35 build. After is the layers 1 to 36 build, and both
+were captured the same way.
+
+- The Dashboard at 80x24, 100x30 and 120x35: no row differs once digits are
+  masked, in the text or in the colour codes.
+- The first screen of each of the 15 palette destinations at 60x24, 80x24 and
+  120x35 (45 captures): two captures differ, and only in the read state text.
+  Schedules at 60x24 ends its title row with `· r…` and its footer with
+  `Refreshing Keeper list: waiting…` on the Before build only. Fusion at 80x24
+  ends them with `· refreshing` and `Refreshing Keeper list: reading metadata`
+  on the After build only.
+- The Task detail at 120x35 and 80x24, for the Task in progress, the claimed
+  Task and the Task awaiting verification, each at the top and scrolled to its
+  history (12 captures): one capture differs, the awaiting Task scrolled at
+  120x35, and only in the read state text (`finishing refresh` and
+  `Refreshing Keeper list: result awaiting state application`).
+
+The rows below come from calling `wrap_styled_words` and `wrap_words` of the
+layer 35 and layer 36 sources directly, which is the call the screens make. The
+first input is the Dashboard reason from layer 35 in yellow. The others are
+made-up names.
+
+```
+Each pair shows the rows a call returns; "/" stands for the row break.
+<33m> is the escape that opens yellow, <2m> opens dim and <0m> closes them.
+
+wrap_styled_words, 54 cells, the layer 35 Dashboard reason in yellow
+  before  <33m>keeper_identity_drift:configured_keeper_without_runtim<0m> / <33m>e_meta<0m>
+  after   <33m>keeper_identity_drift:configured_keeper_without_<0m> / <33m>runtime_meta<0m>
+wrap_styled_words, 30 cells, a path in dim
+  before  <2m>/home/example/workspace/projec<0m> / <2m>t/.worktrees/feature/tui-ux-lo<0m> / <2m>op/bin/masc_tui.ml<0m>
+  after   <2m>/home/example/workspace/<0m> / <2m>project/.worktrees/feature/<0m> / <2m>tui-ux-loop/bin/masc_tui.ml<0m>
+wrap_words, 12 cells, abcdefgh_ + U+0301 (a mark) + ijklmnopqrstuvwxyz
+  before  abcdefgh_U+0301ijk / lmnopqrstuvw / xyz
+  after   abcdefgh_U+0301 / ijklmnopqrst / uvwxyz
+wrap_words, 1 cell, two U+1F1FA (the two letters of a flag) and the byte 0xFF
+  before  both letters in one row (width 2) / 0xFF (width 1)
+  after   one letter per row, then 0xFF (widths 1, 1, 1)
+```
+
+Before, a coloured word was cut at the width, as in `runtim` and `e_meta`.
+After, it breaks after the last separator that fits, and each row opens and
+closes its own colour. The mark stays with the separator it follows. A word
+that is not valid UTF-8 is cut at the width, as it was before layer 35.
+
+`test/test_tui_wrap_words.ml` has 18 cases. Ten copies of
+`masc_tui_message_layout.ml`, each with one fault put in on purpose, were each
+failed by at least one case:
+
+```
+plain-cut        sends every wide word to the width cut                  9 cases fail
+no-half-fill     drops the rule that a row is at least half full         4
+bytes-in-piece   counts a separator's cells as bytes (character pieces)  2
+bytes-in-ascii   counts a separator's cells as bytes (ASCII pieces)      3
+bytes-in-drain   measures the rest of the word in bytes                  3
+first-separator  breaks after the first separator, not the last          7
+raw-bytes        scans the row's bytes, not its pieces                   5
+no-utf8-guard    sends a word that is not UTF-8 to the separator search  1
+mark-parted      cuts between a separator and its mark                   3
+per-row-pass     scans the whole word again for every row                1
+```
+
+A random comparison ran 300000 texts at widths 2 to 41, mixing English
+letters, the five separators, Chinese and Hangul characters, emoji, marks,
+joiners, escapes and spaces. It found no exception, no lost character, no text
+with more over-wide rows than the layers 1 to 34 build gives it, and no
+difference from layer 35 that an escape or a mark does not explain. 151323
+texts differ from layers 1 to 34, and 150137 texts with an escape and 73 texts
+with a mark or joiner differ from layer 35. In the same run, 60000 words that
+are not valid UTF-8 were split exactly as `split_cells` splits them. A second
+run took 200000 such words at widths 1 to 30. Layer 35 left a row wider than
+the budget in 7120 of them, and a row wider than the widest row of layers 1 to
+34 in 1056. The widest row of layer 36 is never wider than that of layers 1 to
+34.
+
+With a style escape only between characters, the visible rows never differed
+from the rows of the same text without escapes (287891 texts). With an escape
+anywhere, including between an emoji and its joiner, 24810 of 287321 texts
+differed, where layers 1 to 34 gave 15481. An escape inside such a cluster cuts
+the cluster in two. Whether a screen puts an escape there was not checked.
+
+Time to wrap one word of the size each row names, median of five runs on one
+macOS machine. Only a word wider than its row reaches this code.
+
+```
+                                   layers 1-34   layer 35   layer 36
+ASCII, with separators                    7 ms      28 ms      54 ms
+ASCII, no separator                       8 ms      46 ms      50 ms
+wide characters, 700k cells             108 ms     148 ms     217 ms
+coloured, 60k escape pairs               57 ms      48 ms     101 ms
+with a mark, 900k bytes                 146 ms     185 ms     262 ms
+not UTF-8, 900k bytes                   137 ms     166 ms     148 ms
+```
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -754,5 +1055,35 @@ screen is identical once the clock is masked.
   without review` in both lanes, and with a rule in the Always-allow row.
 - Layer 31 on a terminal that answers the palette query: the capture terminal
   does not, so the Gate rows are the fallback bright cyan (SGR 96).
+- Layer 33 with a Hangul query that matches a row the sheet writes in Hangul
+  (`Event evidence`, and the Runtime detail rows in the Korean UI): a Hangul
+  key is read back as the Latin keys that produced it, so those rows are found
+  by their English key column only. The query was typed at the top of the
+  sheet, never after scrolling, and not at widths between 96 and 100 cells.
+- Layer 33 with a paste into the filter: the sheet rejects a paste, as it did
+  before, and the capture driver did not paste. On a terminal that answers
+  the palette query the key and heading colours are the palette's own. The
+  capture terminal does not, so those are the fallbacks.
+- Layer 34 with an in-progress Task and with a Task that has no description or
+  files: the two sides opened different in-progress Tasks (task-006 and
+  task-007), so no pair was compared, and every captured Task had a
+  description, so a Task that skips section 2 was not drawn.
+- Layer 35 on screens with a word wider than its row beyond the Dashboard
+  card and the Task history note: the fixture's first screens hold none, so the
+  other 14 destinations and the Dashboard at 80x24 were the same on both
+  sides. Chat bodies, journal
+  rows, file paths in the Task detail and the Keeper roster were not captured
+  with a long name. `wrap_words` has about 100 callers, and the unit tests
+  and a random comparison of 300000 strings stand in for those screens.
+- Layer 36 on a screen with a coloured word wider than its row. These callers
+  pass coloured text to `wrap_styled_words`: the Work Goal actions row, the
+  Keepers Execute terminal and detail fields, and the Runtime Usage rows. The
+  fixture has no running Keeper and no name that wide, so no captured screen
+  holds such a word and none differs between the two builds. The rows above
+  come from calling the module itself. `split_styled_cells` is the same as
+  before and still cuts a word at its width.
+- Layer 36 for a word that is not valid UTF-8 on a screen: no capture holds
+  one, so the module call and the unit tests stand in for it. Whether any
+  caller can receive such a word was not traced.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

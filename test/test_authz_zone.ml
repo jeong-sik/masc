@@ -323,7 +323,6 @@ let error_name : Z.error -> string = function
   | Z.Log_stopped _ -> "Log_stopped"
   | Z.Uncertain { first; rest } -> "Uncertain " ^ reasons_name first rest
   | Z.Store_holds_no_answer -> "Store_holds_no_answer"
-  | Z.Store_holds_an_answer -> "Store_holds_an_answer"
   | Z.Log_holds_records { next_seq } -> Printf.sprintf "Log_holds_records %d" next_seq
   | Z.Abort_not_confirmed error -> "Abort_not_confirmed " ^ end_error_name error
   | Z.Store_entry_refused _ -> "Store_entry_refused"
@@ -999,6 +998,46 @@ let an_install_keeps_an_intent_whose_record_came_late () =
     check_judgment "what the files say" dirs "Matches")
 ;;
 
+(* Another process holds the log while an install would give up the intent of
+   an earlier one. Nothing is written and the log is not stopped, so the next
+   install asks again and gives the intent up. *)
+let an_install_asks_again_after_a_locked_log () =
+  with_dirs (fun dirs ->
+    write_store_outside (open_files dirs) [ S.Intent_pending dead_intent ];
+    let opened = open_files dirs in
+    let store_before = read_file dirs.store_file in
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_install_error
+        "an install while another process holds the log"
+        "Abort_not_confirmed End_locked"
+        opened
+        bootstrap_draft;
+      release ());
+    Alcotest.(check string) "the store is as it was" store_before (read_file dirs.store_file);
+    Alcotest.(check bool) "no log" false (Sys.file_exists (log_file dirs));
+    let installed = install_ok opened bootstrap_draft in
+    Alcotest.(check (option string))
+      "the next install gives the intent up"
+      (Some (intent_name dead_intent))
+      (Option.map intent_name installed.Z.aborted))
+;;
+
+(* An intent that does not follow the genesis hash cannot be the intent of a
+   first record, so it is not given up and nothing is written. *)
+let an_install_refuses_an_intent_away_from_the_start () =
+  with_dirs (fun dirs ->
+    let unplaced =
+      { dead_intent with
+        S.previous_record_hash = (record_at ~head:R.genesis dead_draft).R.hash
+      }
+    in
+    write_store_outside (open_files dirs) [ S.Intent_pending unplaced ];
+    let store_before = read_file dirs.store_file in
+    check_install_error "the install" "Uncertain Intent_unplaced" (open_files dirs) bootstrap_draft;
+    Alcotest.(check string) "the store is as it was" store_before (read_file dirs.store_file);
+    Alcotest.(check bool) "no log" false (Sys.file_exists (log_file dirs)))
+;;
+
 let an_install_refuses_what_it_cannot_install () =
   with_dirs (fun dirs ->
     let opened = open_files dirs in
@@ -1111,6 +1150,14 @@ let () =
             "an install keeps an intent whose record came late"
             `Quick
             an_install_keeps_an_intent_whose_record_came_late
+        ; Alcotest.test_case
+            "an install asks again after a locked log"
+            `Quick
+            an_install_asks_again_after_a_locked_log
+        ; Alcotest.test_case
+            "an install refuses an intent away from the start"
+            `Quick
+            an_install_refuses_an_intent_away_from_the_start
         ; Alcotest.test_case
             "an install refuses what it cannot install"
             `Quick

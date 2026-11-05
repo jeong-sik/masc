@@ -84,12 +84,13 @@
       one that blocks every later creation by the same owner.
     + The record of the bootstrap, with {!Authz_zone.install}: the steps of a
       commit of the zone, over the empty log. The zone judges what an earlier
-      bootstrap left, writes [Aborted_intent] for its intent once
-      {!Authz_log.confirm_end} says that the log still ends where it began, and
-      runs {!Authz_state.apply} on the record. Then it writes the intent of this
-      bootstrap, the record in the log, and the answer
-      ({!Authz_external_store.entry} [Committed]). The log is empty, so an
-      intent that an earlier bootstrap left never got its record.
+      bootstrap left, builds the record and runs {!Authz_state.apply} on it, and
+      writes nothing before both pass. Then it writes [Aborted_intent] for the
+      intent of the earlier bootstrap, once {!Authz_log.confirm_end} says that
+      the log still ends where that intent began, the intent of this bootstrap,
+      the record in the log, and the answer ({!Authz_external_store.entry}
+      [Committed]). The log is empty, so an intent that an earlier bootstrap
+      left never got its record.
 
     {b After a failure.} Each write is one step, and a process that stops between
     two of them leaves a state that a second call goes on from, or that a boot
@@ -119,8 +120,8 @@
     that. The caller runs one bootstrap at a time, where it holds the lease or
     where no server runs. The files can change between {!prepare} and {!write}:
     an install record that changed fails the re-read, a store that appeared fails
-    the exclusive creation, and the zones notice a moved end ([Diverged]) and
-    stop. The module does not choose the workspace id, and it takes the time of
+    the exclusive creation, and the zone notices a moved end and stops the file
+    ([Diverged] on a write, [End_moved] before an abort). The module does not choose the workspace id, and it takes the time of
     the record as an argument. *)
 
 type request =
@@ -207,7 +208,9 @@ type error =
           before. *)
   | Zone_failed of Authz_zone.error
       (** {!Authz_zone.install} wrote the record, or stopped before it. The
-          error of the zone says what it left in the files. *)
+          install record was written before, and so was the store file when the
+          path held none. The error of the zone says what the zone left in the
+          two files. *)
   | Mode_event_not_built of Authz_body.error
       (** This cannot come from a request: the labels and the ids are ASCII. *)
 

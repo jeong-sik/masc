@@ -206,6 +206,30 @@ let check_probe label expected probe =
       (settlement_name settlement)
 ;;
 
+(* A writer that installs a log judges the store over a log with no record. It
+   gets what a writer that enters a zone over that log gets, and never an
+   answer. *)
+let check_over_empty_log label expected state =
+  match H.settle_over_empty_log state with
+  | Error (first, rest) ->
+    Alcotest.(check string)
+      (label ^ ": before the first record")
+      expected.value
+      (value_name (H.Mismatch (first, rest)))
+  | Ok abort ->
+    Alcotest.(check string)
+      (label ^ ": before the first record")
+      expected.value
+      (value_name H.Absent);
+    Alcotest.(check string)
+      (label ^ ": what closes the intent before the first record")
+      expected.settle
+      (settlement_name
+         (match abort with
+          | None -> H.Nothing_to_settle
+          | Some intent -> H.Abort intent))
+;;
+
 (* Each case: what the store holds, what the log holds, the value, and what
    closes the intent. The record numbers are places in the chain, and [r1>r2] is
    an intent that follows record 1 and names record 2. *)
@@ -330,6 +354,12 @@ let cases =
       (booted @ [ intent_after 2 3 ])
       (log 1)
       "mismatch: intent unplaced r2>r3"
+      "stays pending, intent unplaced r2>r3"
+  ; case
+      "an answered event and an intent over an empty log"
+      (answered_to 2 @ [ intent_after 2 3 ])
+      []
+      "mismatch: commit not in log r2; intent unplaced r2>r3"
       "stays pending, intent unplaced r2>r3"
   ; case
       "an answered event and an intent over a log that went back before both"
@@ -668,7 +698,10 @@ let () =
         :: List.map
              (fun c ->
                Alcotest.test_case c.label `Quick (fun () ->
-                 check_probe c.label c (probe_of c.store c.records)))
+                 check_probe c.label c (probe_of c.store c.records);
+                 match c.records with
+                 | [] -> check_over_empty_log c.label c (state_of c.store)
+                 | (_ : R.t) :: _ -> ()))
              cases )
     ; ( "settlement"
       , [ Alcotest.test_case

@@ -154,7 +154,7 @@ type installed =
             gave up before the record. *)
   }
 
-(** Why a commit failed, and what it left in the files. *)
+(** Why a commit or an install failed, and what it left in the files. *)
 type error =
   | Store_stopped of Authz_external_store.stop  (** Nothing was written. *)
   | Log_stopped of Authz_log.stop  (** Nothing was written. *)
@@ -169,11 +169,6 @@ type error =
           ({!Authz_high_water.Nothing_answered}), while the log holds a
           [Fresh_bootstrap]: the store was emptied, or is not the store of this
           log (design 5.1, 8.4). Nothing was written. *)
-  | Store_holds_an_answer
-      (** {!install}: the store holds an answer. Over a log with no record this
-          does not happen, because a [Committed] names a record of the log
-          ({!Authz_high_water.Commit_not_in_log}) and a promoted intent needs
-          its record in the log. Nothing was written. *)
   | Log_holds_records of { next_seq : int }
       (** {!install}: the log, as its handle has it, holds records, and
           [next_seq] is the seq of the next one. Nothing was written. *)
@@ -188,27 +183,26 @@ type error =
           is the intent, the settlement was. When it is the [Committed], the
           record is in the log and in the snapshot as well. *)
   | Abort_not_confirmed of Authz_log.end_error
-      (** An earlier commit left an intent to abort, and the end of the log was
+      (** An earlier writer left an intent to abort, and the end of the log was
           not confirmed. Nothing was written. [End_moved] and
           [End_not_one_file] stop the log, and the next start judges the intent
-          from the file. After [End_locked]
-          or [End_unread] the log is not stopped and the next commit asks
-          again. *)
+          from the file. After [End_locked] or [End_unread] the log is not
+          stopped, and the next commit or install asks again. *)
   | Settlement_not_written of Authz_external_store.append_error
-      (** The commit stopped at the settlement, and nothing of the record was
+      (** The call stopped at the settlement, and nothing of the record was
           written. *)
   | Intent_not_written of Authz_external_store.append_error
-      (** The commit stopped at the intent. A settlement before it is in the
+      (** The call stopped at the intent. A settlement before it is in the
           store, and nothing of the record is in the log. *)
   | Record_not_appended of Authz_log.append_error
       (** The intent is in the store. When the error stopped the log, the next
           start reads whether the record is in it. Otherwise it is not, and the
-          next commit aborts the intent. *)
+          next commit or install aborts the intent. *)
   | Answer_not_written of
       { record_hash : Authz_record.Hash.t
       ; error : Authz_external_store.append_error
       }
-      (** The commit stopped at the [Committed]. The record is in the log and in
+      (** The call stopped at the [Committed]. The record is in the log and in
           the snapshot. *)
 
 val error_to_string : error -> string
@@ -218,15 +212,17 @@ val commit : t -> draft -> (committed, error) result
 
 (** Appends the first record of a log with the steps of {!commit}, for
     {!Authz_bootstrap}. [log] and [store] are handles that the caller opened
-    and does not write through while the call runs. Two things differ from
-    {!commit}:
+    and does not write through while the call runs. The call takes the lock of
+    each handle ({!Authz_external_store.with_writer}, {!Authz_log.with_writer}),
+    which is not reentrant, so it is not made from inside a zone of either
+    handle: it would wait on itself. Two things differ from {!commit}:
     - The log, as its handle has it, holds no record ({!Log_holds_records}).
       The replay is the empty one, over the store as its handle has it, so
       {!Authz_state.apply} takes a [Fresh_bootstrap] and refuses every other
       record.
-    - The store holds no answer ({!Store_holds_an_answer}). The intent of a
-      [Fresh_bootstrap] that the log never got is aborted, after
-      {!Authz_log.confirm_end}, and {!installed} names it.
+    - The store is judged with {!Authz_high_water.settle_over_empty_log}, which
+      holds no answer. The intent of a [Fresh_bootstrap] that the log never got
+      is aborted, after {!Authz_log.confirm_end}, and {!installed} names it.
 
     The zone lives for this call, and its snapshot is the one in
     {!installed}. *)

@@ -182,9 +182,20 @@ type agreement =
 (** Items 2 to 5, as a writer reads them each time it enters its zone (design
     8.2, item 1). When every judgment passes, whether the store holds an answer,
     with the settlement. Otherwise every reason, in the order of {!Mismatch}.
-    A writer that installs a log wants {!Nothing_answered}, and a writer that
-    adds to an installed log wants {!Answered}. *)
+    A writer that adds to an installed log wants {!Answered}. A writer that
+    installs one reads {!settle_over_empty_log}. *)
 val settle_on_entry : Probe.t -> (agreement, reason * reason list) result
+
+(** Items 2 to 5 for a store in the given state over a log with no record, as a
+    writer that installs a log reads them on entry. No record follows the
+    previous hash of an intent there, so nothing is promoted, and a [Committed]
+    names a record that the log does not hold ({!Commit_not_in_log}). [Ok] is
+    the [Fresh_bootstrap] intent that the log never got ({!Abort}), when one is
+    pending. It gives what {!settle_on_entry} gives for {!Probe.create} of the
+    same state, which is never {!Answered}. *)
+val settle_over_empty_log
+  :  Authz_external_store.State.t
+  -> (Authz_external_store.intent option, reason * reason list) result
 
 (** The value for the store the probe was built from, and the log it was fed:
     [Mismatch] with the reasons of {!settle_on_entry} when it is [Error],

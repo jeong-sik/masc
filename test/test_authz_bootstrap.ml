@@ -270,7 +270,6 @@ let zone_error_name : Z.error -> string = function
   | Z.Log_stopped _ -> "Log_stopped"
   | Z.Uncertain _ -> "Uncertain"
   | Z.Store_holds_no_answer -> "Store_holds_no_answer"
-  | Z.Store_holds_an_answer -> "Store_holds_an_answer"
   | Z.Log_holds_records { next_seq } -> Printf.sprintf "Log_holds_records %d" next_seq
   | Z.Record_not_built _ -> "Record_not_built"
   | Z.Refused _ -> "Refused"
@@ -1155,6 +1154,23 @@ let a_log_that_moved_keeps_the_dead_intent () =
       (value_name (H.judge (probe_of dirs))))
 ;;
 
+(* A prepared request is written once. The install record named the store
+   before the checks, so the second write passes the re-read and keeps the
+   store that the checks opened, and the log of the first write holds the
+   record. *)
+let a_prepared_request_writes_once () =
+  with_dirs (fun dirs ->
+    write_record dirs ~base_path:dirs.base ~external_store:dirs.store;
+    write_private dirs.store "";
+    let prepared = prepare_exn (request dirs) in
+    ignore (completed_exn (B.write prepared) : B.completed);
+    let store_before = read_file dirs.store in
+    let log_before = read_file (log_file dirs) in
+    refused "the second write" "Zone_failed Log_holds_records 2" (B.write prepared);
+    Alcotest.(check string) "the store is as it was" store_before (read_file dirs.store);
+    Alcotest.(check string) "the log is as it was" log_before (read_file (log_file dirs)))
+;;
+
 (* Another writer gives up the pending intent after the checks. Nothing else is
    written, and a call after it goes on from the store as it is. *)
 let a_store_that_moved_fails_before_the_dead_intent_is_given_up () =
@@ -1349,6 +1365,7 @@ let () =
             "a log that moved keeps the dead intent"
             `Quick
             a_log_that_moved_keeps_the_dead_intent
+        ; Alcotest.test_case "a prepared request writes once" `Quick a_prepared_request_writes_once
         ; Alcotest.test_case
             "an install record that changed is not replaced"
             `Quick

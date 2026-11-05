@@ -112,7 +112,6 @@ type error =
       ; rest : H.reason list
       }
   | Store_holds_no_answer
-  | Store_holds_an_answer
   | Log_holds_records of { next_seq : int }
   | Record_not_built of R.make_error
   | Refused of Authz_state.refusal
@@ -144,8 +143,6 @@ let error_to_string = function
     ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
   | Store_holds_no_answer ->
     "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
-  | Store_holds_an_answer ->
-    "the external store holds an answer, and the authorization log is to be installed"
   | Log_holds_records { next_seq } ->
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"
@@ -159,11 +156,11 @@ let error_to_string = function
       (entry_label entry)
       (S.violation_to_string violation)
   | Abort_not_confirmed error ->
-    "the intent that an earlier commit left was not aborted, because the end of the log was not \
+    "the intent that an earlier writer left was not aborted, because the end of the log was not \
      confirmed: "
     ^ L.end_error_to_string error
   | Settlement_not_written error ->
-    "the intent that an earlier commit left was not closed: " ^ S.append_error_to_string error
+    "the intent that an earlier writer left was not closed: " ^ S.append_error_to_string error
   | Intent_not_written error -> "the intent was not written: " ^ S.append_error_to_string error
   | Record_not_appended error ->
     "the record was not appended and its intent is in the external store: "
@@ -204,20 +201,15 @@ let write_settlement t store_writer log_writer settlement =
     write_entry t store_writer entry ~not_written:(fun error -> Settlement_not_written error)
 ;;
 
+let uncertain (first, rest) = Uncertain { first; rest }
+
 (* What the entry of a zone lets through: the settlement of what an earlier
-   writer left, which the commit writes before its intent. A commit adds to an
-   installed log, so the store must hold an answer. An install writes the first
-   record, so the store must hold none. *)
+   writer left, which the zone writes before its intent. A commit adds to an
+   installed log, so the store must hold an answer. *)
 let entered_to_add = function
-  | Error (first, rest) -> Error (Uncertain { first; rest })
+  | Error reasons -> Error (uncertain reasons)
   | Ok (H.Nothing_answered { abort = (_ : S.intent option) }) -> Error Store_holds_no_answer
   | Ok (H.Answered settled) -> Ok settled
-;;
-
-let entered_to_install = function
-  | Error (first, rest) -> Error (Uncertain { first; rest })
-  | Ok (H.Answered (_ : H.settlement)) -> Error Store_holds_an_answer
-  | Ok (H.Nothing_answered { abort }) -> Ok abort
 ;;
 
 let abort_settlement = function
@@ -227,9 +219,8 @@ let abort_settlement = function
 
 (* Only the zone writes through [t.log], so [head] is the head of the published
    snapshot. *)
-let in_zone ~entered ~settlement t draft store_writer log_writer head =
+let in_zone t draft store_writer log_writer head settlement =
   let published = Atomic.get t.current in
-  let* entry = entered (H.settle_on_entry t.probe) in
   let* record =
     Result.map_error
       (fun error -> Record_not_built error)
@@ -238,7 +229,7 @@ let in_zone ~entered ~settlement t draft store_writer log_writer head =
   let* { Authz_state.state; high_water = change } =
     Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
   in
-  let* () = write_settlement t store_writer log_writer (settlement entry) in
+  let* () = write_settlement t store_writer log_writer settlement in
   let record_hash = record.R.hash in
   let intent =
     { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }
@@ -257,7 +248,7 @@ let in_zone ~entered ~settlement t draft store_writer log_writer head =
     write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
       Answer_not_written { record_hash; error })
   in
-  Ok (entry, snapshot, record_hash)
+  Ok (snapshot, record_hash)
 ;;
 
 (* The zone of the store, and inside it the zone of the log. *)
@@ -274,9 +265,8 @@ let in_both_zones ~store ~log f =
 
 let commit t draft =
   in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
-    let* settled, snapshot, record_hash =
-      in_zone ~entered:entered_to_add ~settlement:Fun.id t draft store_writer log_writer head
-    in
+    let* settled = entered_to_add (H.settle_on_entry t.probe) in
+    let* snapshot, record_hash = in_zone t draft store_writer log_writer head settled in
     Ok { snapshot; record_hash; settled })
 ;;
 
@@ -287,6 +277,7 @@ let install ~log ~store draft =
   in_both_zones ~store ~log (fun store_writer store_state log_writer head ->
     if Int.equal (R.next_seq head) (R.next_seq R.genesis)
     then (
+      let* aborted = Result.map_error uncertain (H.settle_over_empty_log store_state) in
       let t =
         { log
         ; store
@@ -294,15 +285,8 @@ let install ~log ~store draft =
         ; probe = H.Probe.create store_state
         }
       in
-      let* aborted, snapshot, record_hash =
-        in_zone
-          ~entered:entered_to_install
-          ~settlement:abort_settlement
-          t
-          draft
-          store_writer
-          log_writer
-          head
+      let* snapshot, record_hash =
+        in_zone t draft store_writer log_writer head (abort_settlement aborted)
       in
       Ok { snapshot; record_hash; aborted })
     else Error (Log_holds_records { next_seq = R.next_seq head }))

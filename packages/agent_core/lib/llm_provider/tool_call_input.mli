@@ -14,6 +14,7 @@
 type parse_error =
   | Invalid_json of string
   | Not_object
+[@@deriving show, yojson]
 
 val validate_object
   :  Yojson.Safe.t

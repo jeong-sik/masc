@@ -802,6 +802,7 @@ let parse_response_result json_str =
             opt_bind (json_assoc_opt "id" json) json_string_opt
             |> Option.value ~default:""
         ; model
+        ; unreadable_tool_uses = []
         ; stop_reason
         ; content
         ; usage = usage_of_response_json json

@@ -594,6 +594,7 @@ let completed_turn_response ~latency_ms ~turn_id ~model ~text ~turn_total
   =
   { Agent_core.Types.id = turn_id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text text ]
   ; usage = Option.map api_usage_of_turn_usage turn_total

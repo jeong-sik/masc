@@ -1109,7 +1109,7 @@ let test_the_turn_observation_names_its_keeper_turn () =
   let after_turn = match hooks.Agent_core.Hooks.after_turn with
     | Some hook -> hook | None -> fail "after_turn hook missing" in
   let response : Agent_core.Types.api_response =
-    { id = "resp-observation"; model = "model"; stop_reason = Agent_core.Types.EndTurn
+    { id = "resp-observation"; model = "model"; unreadable_tool_uses = []; stop_reason = Agent_core.Types.EndTurn
     ; content = [ Llm_provider.Types.Text "done" ]; usage = None; telemetry = None } in
   let before = Masc.Sse.current_id () in
   ignore (after_turn (Agent_core.Hooks.AfterTurn { turn = 0; response; tool_source_map = None }));
@@ -1179,7 +1179,7 @@ let test_the_completion_hook_rows_by_attempt () =
     let after_turn = match hooks.Agent_core.Hooks.after_turn with
       | Some hook -> hook | None -> fail "after_turn hook missing" in
     let response : Agent_core.Types.api_response =
-      { id = "resp-ledger"; model = "model"; stop_reason = Agent_core.Types.EndTurn
+      { id = "resp-ledger"; model = "model"; unreadable_tool_uses = []; stop_reason = Agent_core.Types.EndTurn
       ; content = [ Llm_provider.Types.Text "done" ]; usage; telemetry = None } in
     ignore (after_turn (Agent_core.Hooks.AfterTurn { turn = 0; response; tool_source_map = None }));
     Dated_jsonl.read_recent (Cost_ledger.store_of_masc_root masc_root) 10

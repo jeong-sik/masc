@@ -673,6 +673,7 @@ let complete_saved_tool_terminal ~tool_results_saved_in_attempt
           { Agent_core.Types.id = ""
           ; model = checkpoint.model
           ; content = []
+          ; unreadable_tool_uses = []
           ; stop_reason = Agent_core.Types.EndTurn
           ; usage = None
           ; telemetry = None

@@ -1287,6 +1287,7 @@ let fake_transport response : Llm_provider.Llm_transport.t =
 let successful_response model : api_response =
   { id = "response-ok"
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text "ok" ]
   ; usage
@@ -1643,6 +1644,7 @@ let complete_with_captured_diag ~config ~response =
 let response_with_thinking =
   { id = "resp-thinking"
   ; model = "auto"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Thinking { signature = None; content = "reasoning" } ]
   ; usage
@@ -1782,6 +1784,7 @@ let test_annotate_response_cost () =
   let response : api_response =
     { id = "resp-1"
     ; model = "claude-sonnet-5"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "ok" ]
     ; usage =
@@ -1807,6 +1810,7 @@ let test_annotate_response_cost_keeps_missing_scoped_rates () =
   let response : api_response =
     { id = "resp-gpt55"
     ; model = "gpt-5.5"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "ok" ]
     ; usage =
@@ -1853,6 +1857,7 @@ cache_read_multiplier = 1.0
   let response : api_response =
     { id = "provider-priced-response"
     ; model = "shared-priced-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "ok" ]
     ; usage =

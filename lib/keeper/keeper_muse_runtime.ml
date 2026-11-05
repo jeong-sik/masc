@@ -483,6 +483,7 @@ let completed_turn_response ~runtime_id ~configured_model ~latency_ms (turn : Se
   let model = model_label ~runtime_id ~configured_model ran_model in
   { Agent_core.Types.id = turn.turn_id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = (match turn.text with None -> [] | Some text -> [ Text text ])
   ; usage = Option.map api_usage_of_token_usage turn.usage

@@ -45,7 +45,7 @@ let make_response
       ?usage
       ()
   =
-  { Types.id = "resp-complete-ext"; model; stop_reason; content; usage; telemetry = None }
+  { Types.id = "resp-complete-ext"; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry = None }
 ;;
 
 type metric_probe =

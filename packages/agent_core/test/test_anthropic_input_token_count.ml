@@ -128,6 +128,7 @@ let kimi_config ?max_context base_url =
 let response =
   { id = "prepared-response"
   ; model = "input-count-fixture"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text "accepted" ]
   ; usage = None

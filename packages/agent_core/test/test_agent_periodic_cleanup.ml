@@ -9,6 +9,7 @@ open Agent_core
 let response : Types.api_response =
   { id = "periodic-cleanup-response"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text "ok" ]
   ; usage = None

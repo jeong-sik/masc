@@ -718,6 +718,7 @@ let test_per_candidate_image_projection () =
         let requests = ref 0 and read_dispatches = ref 0 in
         let response content stop_reason : Agent_core.Types.api_response =
           {id="projection-fixture";model="image-projection-uncatalogued";
+           unreadable_tool_uses = [];
            stop_reason;content;usage=None;telemetry=None} in
         let complete (request : Llm_provider.Llm_transport.completion_request) =
           incr requests;

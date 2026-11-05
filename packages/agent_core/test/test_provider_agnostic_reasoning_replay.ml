@@ -381,6 +381,7 @@ let test_assistant_message_requires_live_source () =
   let response : api_response =
     { id = "response"
     ; model = "model-a"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Thinking { content = "reasoning"; signature = None } ]
     ; usage = None
@@ -634,6 +635,7 @@ let stamped_assistant ~config ~request_messages ~tools response_content =
   let response =
     { Types.id = "msg_test_round_one"
     ; model = "claude-sonnet-5-5"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = response_content
     ; usage = None
@@ -681,6 +683,7 @@ let admitted_round_one ~stream =
   let response =
     { Types.id = "msg_admitted_round_one"
     ; model = "claude-sonnet-5-5"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content =
         [ Thinking { content = "admitted round reasoning"; signature = Some "sig-admitted" }

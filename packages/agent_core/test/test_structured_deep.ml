@@ -10,7 +10,7 @@ open Types
 (* ── Helpers ────────────────────────────────────────────────── *)
 
 let make_response ?(usage = None) content : Types.api_response =
-  { id = "m"; model = "m"; stop_reason = EndTurn; content; usage; telemetry = None }
+  { id = "m"; model = "m"; unreadable_tool_uses = []; stop_reason = EndTurn; content; usage; telemetry = None }
 ;;
 
 (* ── Schema property ordering: fold_left + List.rev ─────────── *)

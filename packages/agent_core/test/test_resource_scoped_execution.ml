@@ -376,7 +376,7 @@ let test_durable_truth_precedes_current_preparation () =
         | Ok binding -> binding | Error detail -> fail detail in
       let provider = Scope.open_provider_attempt turn ~ordinal:0 binding |> require in
       let response =
-        { id = "scoped-durable-response"; model = "fixture"; stop_reason = StopToolUse
+        { id = "scoped-durable-response"; model = "fixture"; unreadable_tool_uses = []; stop_reason = StopToolUse
         ; content = [ call "durable" ]; usage = None; telemetry = None } in
       Scope.record_provider_response provider response |> require;
       let original = prepared_tool ~name:"durable" (fun ~sw:_ _ ->
@@ -461,7 +461,7 @@ let test_unattempted_sibling_preserves_original_wave () =
       let provider = Scope.open_provider_attempt turn ~ordinal:0 binding |> require in
       let calls = [ call "left"; call "right" ] in
       let response =
-        { id = "unattempted-sibling-response"; model = "fixture"; stop_reason = StopToolUse
+        { id = "unattempted-sibling-response"; model = "fixture"; unreadable_tool_uses = []; stop_reason = StopToolUse
         ; content = calls; usage = None; telemetry = None } in
       Scope.record_provider_response provider response |> require;
       let counts = Hashtbl.create 2 in

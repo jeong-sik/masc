@@ -393,7 +393,7 @@ let missing_admission_map_has_no_occurrence_identity () =
   Runtime_response_identity_scope.with_scope ~actor:(Some "actual-keeper")
     ~runtime_id:"runtime" ~provider_id:(Some "provider") (fun ~hooks ~wrap_tool ->
       let response : Agent_core.Types.api_response =
-        { id="response"; model="reported-model"; stop_reason=StopToolUse; usage=None
+        { id="response"; model="reported-model"; unreadable_tool_uses = []; stop_reason=StopToolUse; usage=None
         ; content=[ToolUse {id="duplicate";name="first";input=`Assoc []};
                    ToolUse {id="duplicate";name="second";input=`Assoc []}]
         ; telemetry=Some (Llm_provider.Types.with_reported_model ~model:"reported-model" None) } in

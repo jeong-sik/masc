@@ -74,6 +74,7 @@ let test_adversarial_no_tool_execution () =
         Ok
           { id = "test"
           ; model = "test"
+          ; unreadable_tool_uses = []
           ; stop_reason = Types.EndTurn
           ; content = [ Llm_provider.Types.Text "ok" ]
           ; usage = None

@@ -839,7 +839,7 @@ let test_inline_carrier_validation_and_synthetic_stream () =
   check_bool "duplicate witness metadata is refused" true
     (Result.is_error (Inline_content_replay.of_metadata ~content
       [Inline_content_replay.metadata witness;Inline_content_replay.metadata witness]));
-  let response = {id="inline-synthetic";model="minimax-m3";stop_reason=EndTurn;content;usage=None;
+  let response = {id="inline-synthetic";model="minimax-m3";unreadable_tool_uses = []; stop_reason=EndTurn;content;usage=None;
     telemetry=Some {default_inference_telemetry with inline_content_replay=Some witness}} in
   let acc = Complete_stream_acc.create_stream_acc () in
   Streaming.emit_synthetic_events response (Complete_stream_acc.accumulate_event acc);

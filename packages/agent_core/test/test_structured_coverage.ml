@@ -14,6 +14,7 @@ let check_bool = Alcotest.(check bool)
 let make_response content : Types.api_response =
   { id = "m"
   ; model = "m"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content
   ; usage = None

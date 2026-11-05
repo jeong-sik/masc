@@ -223,6 +223,7 @@ let messages = [ Types.user_msg "hello" ]
 let mock_transport_response text =
   { Types.id = "transport-response"
   ; model = "transport-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Types.Text text ]
   ; usage = None

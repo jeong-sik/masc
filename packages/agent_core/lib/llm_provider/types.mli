@@ -876,11 +876,54 @@ val with_reported_cache_usage
     [cache_creation_input_tokens] and [cache_read_input_tokens] before
     [api_usage] normalizes absent fields to [0]. *)
 
+(** One piece a stream used to build a tool call's argument text. *)
+type tool_argument_piece =
+  | Argument_delta of int  (** bytes appended to the text *)
+  | Argument_snapshot of int  (** bytes of a whole text that replaced it *)
+[@@deriving show, yojson]
+
+(** How a stream assembled a tool call's argument text: its last pieces,
+    oldest first, and how many pieces there were in all. *)
+type tool_argument_assembly =
+  { last_pieces : tool_argument_piece list
+  ; piece_count : int
+  }
+[@@deriving show, yojson]
+
+val tool_argument_assembly_to_string : tool_argument_assembly -> string
+(** [omitted:N,] when pieces were left out, then [delta:B] or [snapshot:B] per
+    retained piece, for example [omitted:92,delta:1,delta:2]. *)
+
+(** A tool call the model sent with an id and a name whose argument text is not
+    one JSON object. There is no input to hand the tool, so the call cannot
+    run. A response carries such calls in [unreadable_tool_uses], never in
+    [content]: [content] holds only blocks a transcript can replay, and a
+    replayed call needs an input object. [arguments] is the argument text as
+    the response delivered it, kept whole for whoever has to judge whether the
+    model or the transport broke it. [arguments_assembly] is how a stream built
+    that text; it is [None] when the text arrived as one value.
+    [tool_use_ordinal] is the call's place among all tool calls of the
+    response, readable or not, from 0 in the order the response sent them. A
+    consumer that counted the tool calls on the wire, such as a keeper's stream
+    projection, matches calls by this place. *)
+type unreadable_tool_use =
+  { tool_use_id : string
+  ; tool_name : string
+  ; tool_use_ordinal : int
+  ; arguments : string
+  ; arguments_problem : Tool_call_input.parse_error
+  ; arguments_assembly : tool_argument_assembly option
+  }
+[@@deriving show, yojson]
+
 type api_response =
   { id : string
   ; model : string
   ; stop_reason : stop_reason
   ; content : content_block list
+  ; unreadable_tool_uses : unreadable_tool_use list
+        (** Tool calls of this response that [content] cannot hold; see
+            [unreadable_tool_use]. Empty when every tool call was read. *)
   ; usage : api_usage option
   ; telemetry : inference_telemetry option
   }

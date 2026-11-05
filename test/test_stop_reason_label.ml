@@ -10,6 +10,7 @@ let response stop_reason : Agent_core.Types.api_response =
   ; model = "model-stop-reason"
   ; content = []
   ; usage = None
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; telemetry = None
   }

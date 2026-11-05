@@ -193,6 +193,7 @@ let parse_response json =
   in
   { id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content
   ; usage

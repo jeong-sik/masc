@@ -19,13 +19,14 @@ let simple_response ?(id = "resp-1") ?(model = "test-model") content =
         (make_config ~model_id:model ()) with
     | Ok source -> source
     | Error detail -> Alcotest.fail detail in
-  { id; model; stop_reason = EndTurn; content; usage = None
+  { id; model; unreadable_tool_uses = []; stop_reason = EndTurn; content; usage = None
   ; telemetry = Some { default_inference_telemetry with reasoning_source = Some source } }
 ;;
 
 let response_with_usage ?(id = "resp-u") ?(model = "test-model") content =
   { id
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content
   ; usage =
@@ -377,6 +378,7 @@ let test_roundtrip_with_usage_cost () =
   let resp =
     { id = "resp-cost"
     ; model = "claude-sonnet-5"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text "hi" ]
     ; usage =

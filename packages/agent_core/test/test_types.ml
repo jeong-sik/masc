@@ -376,6 +376,7 @@ let test_show_api_response () =
   let r : Types.api_response =
     { id = "msg-1"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = [ Llm_provider.Types.Text "hi" ]
     ; usage = None
@@ -879,6 +880,7 @@ let test_text_of_response_and_usage_helpers () =
   let response : Types.api_response =
     { id = "resp"
     ; model = "model"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content =
         [ Llm_provider.Types.Text "hello"
@@ -1035,6 +1037,7 @@ let test_role_system_tool_strings () =
 let response ?(content = []) ?(stop_reason = Types.EndTurn) () : Types.api_response =
   { id = "resp-test"
   ; model = "model-test"
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content
   ; usage = None

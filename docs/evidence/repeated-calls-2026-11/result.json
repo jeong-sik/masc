@@ -1,0 +1,346 @@
+{
+  "window": {
+    "first_run_utc": "2026-10-17",
+    "last_run_utc": "2026-11-05"
+  },
+  "read_at_utc": "2026-11-05T20:15Z",
+  "unreadable_lines": 0,
+  "unreadable_files": 0,
+  "calls": {
+    "runs": 5401,
+    "runs_with_calls": 3819,
+    "rounds": 32322,
+    "calls": 43700,
+    "repeats": 1663,
+    "share_of_calls": 0.0381,
+    "repeats_that_were_errors": 170
+  },
+  "by_tool": [
+    {
+      "tool": "masc_board_list",
+      "calls": 2133,
+      "repeats": 1440,
+      "share_of_calls": 0.6751
+    },
+    {
+      "tool": "Execute",
+      "calls": 22302,
+      "repeats": 82,
+      "share_of_calls": 0.0037
+    },
+    {
+      "tool": "masc_board_post_get",
+      "calls": 2660,
+      "repeats": 39,
+      "share_of_calls": 0.0147
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "calls": 679,
+      "repeats": 28,
+      "share_of_calls": 0.0412
+    },
+    {
+      "tool": "masc_board_comment",
+      "calls": 1912,
+      "repeats": 27,
+      "share_of_calls": 0.0141
+    },
+    {
+      "tool": "Read",
+      "calls": 1568,
+      "repeats": 10,
+      "share_of_calls": 0.0064
+    },
+    {
+      "tool": "keeper_tasks_list",
+      "calls": 967,
+      "repeats": 7,
+      "share_of_calls": 0.0072
+    },
+    {
+      "tool": "Grep",
+      "calls": 285,
+      "repeats": 5,
+      "share_of_calls": 0.0175
+    },
+    {
+      "tool": "github_pull_request_review_write",
+      "calls": 26,
+      "repeats": 5,
+      "share_of_calls": 0.1923
+    },
+    {
+      "tool": "masc_schedule_list",
+      "calls": 165,
+      "repeats": 4,
+      "share_of_calls": 0.0242
+    },
+    {
+      "tool": "BrowserGoto",
+      "calls": 320,
+      "repeats": 3,
+      "share_of_calls": 0.0094
+    },
+    {
+      "tool": "github_search_code",
+      "calls": 22,
+      "repeats": 3,
+      "share_of_calls": 0.1364
+    },
+    {
+      "tool": "github_get_file_contents",
+      "calls": 21,
+      "repeats": 2,
+      "share_of_calls": 0.0952
+    },
+    {
+      "tool": "masc_board_search",
+      "calls": 605,
+      "repeats": 2,
+      "share_of_calls": 0.0033
+    },
+    {
+      "tool": "Edit",
+      "calls": 1011,
+      "repeats": 1,
+      "share_of_calls": 0.001
+    },
+    {
+      "tool": "WebFetch",
+      "calls": 225,
+      "repeats": 1,
+      "share_of_calls": 0.0044
+    },
+    {
+      "tool": "Write",
+      "calls": 1469,
+      "repeats": 1,
+      "share_of_calls": 0.0007
+    },
+    {
+      "tool": "github_issue_read",
+      "calls": 21,
+      "repeats": 1,
+      "share_of_calls": 0.0476
+    },
+    {
+      "tool": "github_pull_request_read",
+      "calls": 176,
+      "repeats": 1,
+      "share_of_calls": 0.0057
+    },
+    {
+      "tool": "masc_dos_screen",
+      "calls": 419,
+      "repeats": 1,
+      "share_of_calls": 0.0024
+    }
+  ],
+  "streaks": {
+    "count": 128,
+    "length": {
+      "p50": 4.0,
+      "p90": 16.0,
+      "p99": 61.0,
+      "max": 895.0
+    },
+    "by_length": {
+      "2-9": {
+        "streaks": 106,
+        "repeats": 307
+      },
+      "10-99": {
+        "streaks": 21,
+        "repeats": 462
+      },
+      "100+": {
+        "streaks": 1,
+        "repeats": 894
+      }
+    },
+    "wall_hours": 6.34
+  },
+  "by_profile": [
+    {
+      "profile": "glm-5.3-flash",
+      "calls": 11937,
+      "repeats": 1456,
+      "share_of_calls": 0.122
+    },
+    {
+      "profile": "you-never-change",
+      "calls": 1097,
+      "repeats": 52,
+      "share_of_calls": 0.0474
+    },
+    {
+      "profile": "glm-5-3",
+      "calls": 3099,
+      "repeats": 29,
+      "share_of_calls": 0.0094
+    },
+    {
+      "profile": "glossary-maniac",
+      "calls": 309,
+      "repeats": 27,
+      "share_of_calls": 0.0874
+    },
+    {
+      "profile": "kidsnote-job-manager",
+      "calls": 55,
+      "repeats": 27,
+      "share_of_calls": 0.4909
+    },
+    {
+      "profile": "kidsnote-qa-hub-manager",
+      "calls": 77,
+      "repeats": 15,
+      "share_of_calls": 0.1948
+    },
+    {
+      "profile": "goo-yang-bong",
+      "calls": 118,
+      "repeats": 12,
+      "share_of_calls": 0.1017
+    },
+    {
+      "profile": "polisher",
+      "calls": 978,
+      "repeats": 12,
+      "share_of_calls": 0.0123
+    },
+    {
+      "profile": "rondo",
+      "calls": 145,
+      "repeats": 7,
+      "share_of_calls": 0.0483
+    },
+    {
+      "profile": "build-maniac",
+      "calls": 251,
+      "repeats": 6,
+      "share_of_calls": 0.0239
+    },
+    {
+      "profile": "masc-productor-owner",
+      "calls": 129,
+      "repeats": 6,
+      "share_of_calls": 0.0465
+    },
+    {
+      "profile": "gayo-yoga-leader",
+      "calls": 377,
+      "repeats": 5,
+      "share_of_calls": 0.0133
+    },
+    {
+      "profile": "music-sensei",
+      "calls": 53,
+      "repeats": 4,
+      "share_of_calls": 0.0755
+    },
+    {
+      "profile": "opencode-go-deepseek-flash",
+      "calls": 12092,
+      "repeats": 3,
+      "share_of_calls": 0.0002
+    },
+    {
+      "profile": "sangsu",
+      "calls": 183,
+      "repeats": 2,
+      "share_of_calls": 0.0109
+    }
+  ],
+  "runs_with_the_most_repeats": [
+    {
+      "keeper": "music-sensei",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-05",
+      "rounds": 903,
+      "hours": 3.63,
+      "calls": 904,
+      "repeats": 897,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": "Rate limited: Usage limit reached for 5 "
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 508,
+      "hours": 1.03,
+      "calls": 507,
+      "repeats": 427,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": null
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 151,
+      "hours": 0.96,
+      "calls": 150,
+      "repeats": 104,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": "Provider 'glm-coding' timeout phase=firs"
+    },
+    {
+      "keeper": "kidsnote-job-manager",
+      "profile": "kidsnote-job-manager",
+      "day": "2026-10-26",
+      "rounds": 0,
+      "hours": 0.06,
+      "calls": 33,
+      "repeats": 27,
+      "top_repeated_tool": "keeper_artifact_read",
+      "ended_by": null
+    },
+    {
+      "keeper": "kidsnote-job-manager",
+      "profile": "glm-5-3",
+      "day": "2026-10-26",
+      "rounds": 29,
+      "hours": 0.62,
+      "calls": 28,
+      "repeats": 23,
+      "top_repeated_tool": "masc_board_comment",
+      "ended_by": null
+    },
+    {
+      "keeper": "glossary-maniac",
+      "profile": "glossary-maniac",
+      "day": "2026-10-23",
+      "rounds": 1,
+      "hours": 0.39,
+      "calls": 30,
+      "repeats": 18,
+      "top_repeated_tool": "Execute",
+      "ended_by": null
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 30,
+      "hours": 0.81,
+      "calls": 36,
+      "repeats": 12,
+      "top_repeated_tool": "masc_board_post_get",
+      "ended_by": null
+    },
+    {
+      "keeper": "kidsnote-qa-hub-manager",
+      "profile": "kidsnote-qa-hub-manager",
+      "day": "2026-10-30",
+      "rounds": 0,
+      "hours": 0.1,
+      "calls": 12,
+      "repeats": 9,
+      "top_repeated_tool": "Execute",
+      "ended_by": null
+    }
+  ]
+}

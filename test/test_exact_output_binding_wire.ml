@@ -36,7 +36,7 @@ let require_ok label = function
    leaves the process, so the value only has to be positive and finite. *)
 let exact_body_timeout_s = 180.0
 
-let runtime_toml ?(provider_headers = []) ~protocol ~endpoint ~stance ~lane_slot =
+let runtime_toml ~provider_headers ~protocol ~endpoint ~stance ~lane_slot =
   let provider_headers =
     match provider_headers with
     | [] -> ""
@@ -105,7 +105,7 @@ thinking-control-format = "none"|}
 
 type publication = Boot_config | Explicit_file | Captured_observation
 
-let with_runtime ?(publication = Boot_config) f =
+let with_runtime ?(publication = Boot_config) ?(provider_headers = []) f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -124,18 +124,18 @@ let with_runtime ?(publication = Boot_config) f =
       Fs_compat.remove_tree root)
     (fun () ->
        (Llm_provider.Catalog_snapshot.reset ());
-       let load ?provider_headers ~protocol ~endpoint ~stance =
+       let load ~protocol ~endpoint ~stance =
          let path = Filename.concat root
              (match publication with Boot_config -> "runtime.toml"
                | Explicit_file | Captured_observation -> "manual-probe.toml") in
          Fs_compat.save_file path
-           (runtime_toml ?provider_headers ~protocol ~endpoint ~stance
+           (runtime_toml ~provider_headers ~protocol ~endpoint ~stance
               ~lane_slot:"ollama_cloud.deepseek-flash");
          (match publication with
           | Boot_config -> ()
           | Explicit_file | Captured_observation ->
             Fs_compat.save_file (Filename.concat root "runtime.toml")
-              (runtime_toml ?provider_headers ~protocol ~endpoint ~stance
+              (runtime_toml ~provider_headers ~protocol ~endpoint ~stance
                  ~lane_slot:"ambient.missing"));
          let observation = match publication with
            | Boot_config | Explicit_file ->
@@ -353,11 +353,10 @@ let test_observation_survives_source_file_change () =
    request now carries what the binding declares; the plan keeps writing the
    entity headers itself. *)
 let test_declared_provider_headers_reach_the_exact_request () =
-  with_runtime
+  with_runtime ~provider_headers:[ "x-opencode-session", "masc-keeper-fleet" ]
   @@ fun load ->
   let keeper, admitted =
     load
-      ~provider_headers:[ "x-opencode-session", "masc-keeper-fleet" ]
       ~protocol:"openai-compatible-http"
       ~endpoint:"https://ollama.com/v1"
       ~stance:declared_effort

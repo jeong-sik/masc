@@ -160,9 +160,9 @@ let test_login_read_settles_by_outcome () =
   Masc_tui_types.owe_identity_login_read state "A";
   let waiting = read_for () in
   Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.started;
-  let (deadline_expectation, _) =
+  let deadline_expectation =
     match Masc_tui_types.identity_expectations_for_keeper state "A" with
-    | expectation :: _ -> (expectation, ())
+    | expectation :: _ -> expectation
     | [] -> Alcotest.fail "expected a held expectation" in
   Masc_tui_identity_updates.providers_loaded state read waiting ~report:ignore ~now:1000.
     ~attempts:[deadline_expectation, Ok (Masc_tui_identity_model.Consent_waiting 500.)]

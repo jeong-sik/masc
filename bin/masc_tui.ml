@@ -9157,9 +9157,7 @@ let launch_owed_identity_logins state ~mailbox =
          let reading =
            Option.is_some (Masc_tui_types.pending_detail_read state
                              ~tab:Masc_tui_types.Detail_identity ~keeper:keeper_name) in
-         if reading then
-           Masc_tui_types.update_identity_login_read state keeper_name
-             (fun read -> read)
+         if reading then ()
          else begin
            Masc_tui_types.update_identity_login_read state keeper_name
              (fun read -> Masc_tui_owed_read.abandoned read);

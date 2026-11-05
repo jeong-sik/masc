@@ -48,3 +48,51 @@ let redact value =
         ; String.sub value host_offset (String.length value - host_offset)
         ])
 ;;
+
+(* In running text a URL ends at whitespace as well: "git clone https://tok@h x@y"
+   must not read "x@y" as part of the authority. *)
+let text_authority_end text start =
+  let len = String.length text in
+  let rec loop i =
+    if i >= len
+    then len
+    else (
+      match text.[i] with
+      | '/' | '?' | '#' | ' ' | '\t' | '\n' | '\r' -> i
+      | _ -> loop (i + 1))
+  in
+  loop start
+;;
+
+(* The last "@" in [start, stop), searched inside the authority only: a scan
+   that ran back through the whole text would cost a pass per URL. *)
+let last_at text ~start ~stop =
+  let rec loop i =
+    if i < start then None else if text.[i] = '@' then Some i else loop (i - 1)
+  in
+  loop (stop - 1)
+;;
+
+let redact_text text =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  let rec scan pos =
+    match String_util.find_substring ~pos text "://" with
+    | None -> Buffer.add_substring buf text pos (len - pos)
+    | Some separator ->
+      let auth_start = separator + 3 in
+      let auth_end = text_authority_end text auth_start in
+      Buffer.add_substring buf text pos (auth_start - pos);
+      (match last_at text ~start:auth_start ~stop:auth_end with
+       | Some at ->
+         Buffer.add_string buf redaction;
+         Buffer.add_substring buf text at (auth_end - at);
+         scan auth_end
+       | None ->
+         (* Resume right after the "://": a malformed authority such as ":"
+            can be followed by another "://" that starts inside it. *)
+         scan auth_start)
+  in
+  scan 0;
+  Buffer.contents buf
+;;

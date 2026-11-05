@@ -14,3 +14,14 @@ val redact : string -> string
     one [@], the last one separates userinfo from host, so a password with a
     raw [@] is redacted whole. A value without [@] in its authority is
     returned as is, even when its path or query holds [@] or [://]. *)
+
+val redact_text : string -> string
+(** [redact_text text] replaces the userinfo of every [scheme://userinfo@host]
+    in [text] with [[REDACTED]] and returns every other byte unchanged. Use it
+    for text that holds URLs among other words, such as a command line or a log
+    line. {!redact} is for a value that is one URL.
+
+    Each [://] opens an authority. The authority ends at the first [/], [?],
+    [#] or ASCII whitespace, and its last [@] separates userinfo from host. A
+    [://] whose authority has no [@] is left as it is, and so is a bare
+    authority without a scheme ([user:pw@host]). *)

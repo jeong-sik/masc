@@ -29,7 +29,7 @@ This RFC's purpose is **not** to introduce a new pattern. It is to:
 ## 2. Non-goals
 
 - New typed sum types parallel to `Read_drop_reason.t` (RFC-0044) or `Write_failure_reason.t` (RFC-0077). Reuse those.
-- Phase B PR-2 Strict flip for `MASC_AUTH_STRICT`. Owned by the auth-strict track (PR #9786 follow-up). This RFC documents the boundary, not the flip.
+- Turning the auth fallbacks in §3 rows 1-3 into rejections. Multi-account C4 (`Auth_gate.decide`, `docs/superpowers/specs/2026-10-27-multi-account-oidc-runtime-authorization-design.md`) owns that. This RFC documents the boundary, not the rejection.
 - Removing already-grandfathered counters. They stay until each migration RFC owns its cohort.
 - WAL / append-only journal redesign. Out of scope of all three RFCs (0044, 0077, 0088).
 
@@ -37,9 +37,9 @@ This RFC's purpose is **not** to introduce a new pattern. It is to:
 
 | # | Site | Counter / log marker | Category | Owning RFC |
 |---|------|----------------------|----------|------------|
-| 1 | `lib/mcp_server_eio_execute.ml:382-388` | `metric_silent_auth_token_resolve_error` + `[silent:auth_token_resolve_error]` | Auth — Phase B PR-2 flip-switch (dry-run telemetry already paired via Phase A F2 #11257) | **Auth strict track (PR #9786 follow-up)** |
-| 2 | `lib/server/server_auth.ml:298-306` | `metric_silent_dashboard_actor_fallback` (outcome=none) + `[silent:dashboard_actor_fallback]` | Auth — Phase B PR-2 flip-switch | Auth strict track |
-| 3 | `lib/server/server_auth.ml:340-348` | `metric_silent_dashboard_actor_fallback` (outcome=error) + `[silent:dashboard_actor_fallback]` | Auth — Phase B PR-2 flip-switch | Auth strict track |
+| 1 | `lib/mcp_server_eio_execute.ml:382-388` | `metric_silent_auth_token_resolve_error` + `[silent:auth_token_resolve_error]` | Auth — MCP caller keeps its alias after a failed token resolve | **Multi-account C4 (`Auth_gate.decide`)** |
+| 2 | `lib/server/server_auth.ml:298-306` | `metric_silent_dashboard_actor_fallback` (outcome=none) + `[silent:dashboard_actor_fallback]` | Auth — dashboard actor fallback | Multi-account C4 (`Auth_gate.decide`) |
+| 3 | `lib/server/server_auth.ml:340-348` | `metric_silent_dashboard_actor_fallback` (outcome=error) + `[silent:dashboard_actor_fallback]` | Auth — dashboard actor fallback | Multi-account C4 (`Auth_gate.decide`) |
 | 4 | `lib/workspace.ml:101-105` | `metric_workspace_telemetry_drop` + `warn_telemetry_drop` | Workspace — telemetry emission from non-Eio context. Caller is the failing telemetry path itself; no `Result.t` chain to propagate to. | **Unowned — §4 of this RFC or fold into RFC-0044** |
 | 5 | `lib/telemetry_eio.ml:149` | `Safe_ops.report_persistence_read_drop` (typed `Read_drop_reason.t`) | Already-migrated read-side | RFC-0044 (active path) |
 | 6 | `lib/telemetry_eio.ml:166-173` | `Safe_ops.report_persistence_read_drop` (typed) | Already-migrated read-side | RFC-0044 (active path) |
@@ -97,7 +97,7 @@ Implementation note: instead of merging the typed reason *into* RFC-0044's `Read
 
 A PR that adds a new emit site of any of the following without citing an owning RFC and the §3 partition row is rejected:
 
-1. `Otel_metric_store.metric_silent_*` (auth-strict family) → owner = auth-strict track; new emit sites blocked until Phase B PR-2 lands.
+1. `Otel_metric_store.metric_silent_*` (auth fallback family) → owner = multi-account C4; new emit sites blocked until C4 lands.
 2. `Otel_metric_store.metric_persistence_read_drops` → owner = RFC-0044.
 3. `Otel_metric_store.metric_keeper_write_meta_failures` (and adjacent write counters) → owner = RFC-0077.
 4. `Otel_metric_store.metric_workspace_telemetry_drop` → owner = this RFC §4.
@@ -114,7 +114,7 @@ This RFC introduces **zero** behavior change. No code is touched by RFC-0088 mer
 ## 7. Drift guards
 
 - **Inventory pin**: §3 table is the authoritative inventory at 2026-05-15. A new emit site in `git grep "metric_silent_\|metric_workspace_telemetry_drop\|metric_persistence_read_drops"` that is not listed here triggers reviewer action (route to owning RFC or reject).
-- **Phase B linkage**: when Phase B PR-2 lands and `Auth_strict_mode.Strict` becomes default, the 3 auth sites in §3 rows 1-3 become `Error` returns. The `metric_silent_*` family then deletes (counter retires with the silent fallback). This RFC's row 1-3 disposition then transitions from "defer" to "retired".
+- **Multi-account C4 linkage**: when C4 routes these requests through `Auth_gate.decide`, the 3 auth sites in §3 rows 1-3 become `Reject` answers. The `metric_silent_*` family then deletes (counter retires with the silent fallback). This RFC's row 1-3 disposition then transitions from "defer" to "retired".
 
 ## 8. Trade-offs
 
@@ -126,7 +126,7 @@ This RFC introduces **zero** behavior change. No code is touched by RFC-0088 mer
 
 ## 9. Open questions
 
-- **Q1**: Should `Auth_strict_mode` default flip (Phase B PR-2) be referenced as a *blocker* for this RFC's `Implemented` transition, or independent? **Tentative**: independent — the Phase B switch closes auth rows 1-3, but RFC-0088's scope is the partition + Workspace §4, both of which can reach `Implemented` before Strict default.
+- **Q1**: Should multi-account C4 be referenced as a *blocker* for this RFC's `Implemented` transition, or independent? **Tentative**: independent — C4 closes auth rows 1-3, but RFC-0088's scope is the partition + Workspace §4, both of which can reach `Implemented` before C4.
 - **Q2**: Should §4 Option A consume an RFC-0044 amendment or live here? **Tentative**: amendment to RFC-0044 (`Workspace_telemetry_drop_reason.t` lives next to `Read_drop_reason.t`). RFC-0088 stays as the umbrella partition doc.
 - **Q3**: Is there a CI lint that can enforce §5 (new `metric_silent_*` names blocked at PR time)? **Tentative**: yes — analogous to RFC-0078's number-collision workflow. Out of scope for this RFC, candidate follow-up.
 
@@ -135,7 +135,7 @@ This RFC introduces **zero** behavior change. No code is touched by RFC-0088 mer
 - [x] §3 inventory table reviewed and rows confirmed or contested by maintainer. *(Inventory frozen at 2026-05-15; drift guard in §7 covers ongoing reviewer enforcement.)*
 - [x] §4.3 decision A vs B made; **A chosen, implemented via PR #15519** (sibling module under `lib/workspace/`, not an RFC-0044 amendment — see §4.3 implementation note).
 - [x] §5 merge-reject bar referenced in `~/me/scripts/pr-rfc-check.sh` subsystem-keyword map (`metric_silent_`, `metric_workspace_telemetry_drop` → owning RFC). *(see ~/me PR for pr-rfc-check expansion)*
-- [ ] When Phase B PR-2 Strict default lands, rows 1-3 disposition transitions to "retired" in this RFC (one-line update). *(Tracked separately under the auth-strict track; not a blocker for `Active` status — see §9 Q1.)*
+- [ ] When multi-account C4 lands, rows 1-3 disposition transitions to "retired" in this RFC (one-line update). *(Tracked separately under multi-account C4; not a blocker for `Active` status — see §9 Q1.)*
 
 With the first three items closed and the fourth scoped out (`§9 Q1` "independent" verdict), this RFC moves from Draft to **Active** as of 2026-05-17.
 
@@ -146,7 +146,6 @@ With the first three items closed and the fourth scoped out (`§9 Q1` "independe
 - RFC-0062 (Active) — typed `Tool_result.t` blocker class.
 - RFC-0063 (Draft) — telemetry feedback loop & cooperative scheduling safety.
 - RFC-0077 (Draft) — write-side silent failure typed propagation.
-- PR #9786 (Merged 2026-04-27) — boot-time credential token uniqueness audit; in-code comments mark Phase B PR-2 as the Strict flip site.
-- PR #11257 (Merged 2026-04-27) — Phase A F2 MASC_AUTH_STRICT dry-run telemetry (`[would_reject]` pairing).
+- PR #9786 (Merged 2026-04-27) — boot-time credential token uniqueness audit.
 - `instructions/software-development.md §워크어라운드 거부 기준` — telemetry-as-fix reject criteria.
 - Bug-hunter audit 2026-05-15 — source of the 16-site claim that this RFC partitions.

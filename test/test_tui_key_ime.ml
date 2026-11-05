@@ -172,6 +172,32 @@ let test_single_command_does_not_replay_compound_input () =
   List.iter (fun (input, expected) ->
     check (option string) input expected (Masc_tui_key_ime.single_latin_key input)) cases
 
+let test_latin_text_reads_a_typed_word_back () =
+  (* Each Hangul key is what the operator pressed in Korean mode while
+     typing the English word beside it: a composed syllable is the several
+     letters it took. *)
+  let cases =
+    [ "ㅁ", "a"; "메", "ap"; "갶", "rov"; "ㄷ", "e"; "ㅒ", "O"
+    ; "과", "rhk"; "닭", "ekfr"
+    ; "j", "j"; "esc", "esc"; "", ""; "한글", "한글"
+    ; utf8 0x3164, utf8 0x3164 ]
+  in
+  List.iter
+    (fun (input, expected) ->
+      check string (Printf.sprintf "%S" input) expected
+        (Masc_tui_key_ime.latin_text input))
+    cases
+
+let test_latin_text_joins_what_latin_keys_spells () =
+  (* The two readings agree on every key the layout can spell, so a word
+     typed in Korean mode reads back the same by either route. *)
+  let word = [ "ㅁ"; "ㅔ"; "ㅔ"; "ㄱ"; "ㅐ"; "ㅍ"; "ㄷ" ] in
+  check string "a word of single letters" "approve"
+    (String.concat "" (List.map Masc_tui_key_ime.latin_text word));
+  check string "the same word as the syllables a terminal composes"
+    "approve"
+    (String.concat "" (List.map Masc_tui_key_ime.latin_text [ "메"; "ㅔ"; "갶"; "ㄷ" ]))
+
 let () =
   Alcotest.run "test_tui_key_ime"
     [ ( "the two-set layout"
@@ -188,5 +214,10 @@ let () =
             test_keys_the_layout_cannot_spell
         ; test_case "a panel command is never replayed from compound input" `Quick
             test_single_command_does_not_replay_compound_input ] )
+    ; ( "text"
+      , [ test_case "a typed word reads back as its letters" `Quick
+            test_latin_text_reads_a_typed_word_back
+        ; test_case "single letters and composed syllables agree" `Quick
+            test_latin_text_joins_what_latin_keys_spells ] )
     ]
 ;;

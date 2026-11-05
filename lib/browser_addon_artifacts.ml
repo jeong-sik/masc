@@ -12,7 +12,7 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
   match verb with
   | B.Tabs_list|Page_read _|Page_document _|Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
-  | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Ok result
+  | Page_context _|Page_locate _ -> Ok result
   | Page_downloads _ ->
     let* actor=match principal with
       | Lane_addon_call_context.Anonymous -> Error "download finalization requires the original host caller"
@@ -23,13 +23,13 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
        host chose and sent in the arguments. *)
     let* ()=match route with
       | B.Automation_route|Live_route (Some _) -> Ok ()
-      | Stagehand_route|Live_route None -> Error "download artifacts require the owned Gecko or a selected live connection" in
+      | Live_route None -> Error "download artifacts require the owned Gecko or a selected live connection" in
     let* reply=W.reply_of_json value in
 
     let* payload=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc payload))) -> Ok payload
       | Issue_result (Ok (Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _)
-      | Service_refusal _|Receipt|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _ ->
+      | Service_refusal _|Receipt|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _ ->
           Error "download finalization requires an original answered receipt" in
     let* ()=if List.assoc_opt "ok" payload=Some (`Bool true) then Ok ()
       else Error "download receipt was not successful" in

@@ -6,8 +6,13 @@ type activity =
 
 type snapshot
 
+(** [attention] is how many things the server says need the operator, the
+    count the footer's ACTION NEEDED row carries. The title leads with it when
+    it is above zero, so a tab that is not on screen still shows that someone
+    is waiting. *)
 val make
   :  activity:activity
+  -> attention:int
   -> keeper_name:string option
   -> runtime_id:string option
   -> workspace:string

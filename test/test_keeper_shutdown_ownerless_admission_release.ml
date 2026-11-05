@@ -95,7 +95,6 @@ let finalized_after_removal_evidence name =
   ; meta_removed = true
   ; session_removed = true
   ; registry_unregistered = true
-  ; accumulator_dropped = true
   ; completion = Completion_not_requested
   }
 ;;
@@ -112,7 +111,6 @@ let finalized_retained_evidence name =
   ; meta_removed = false
   ; session_removed = false
   ; registry_unregistered = true
-  ; accumulator_dropped = true
   ; completion = Completion_not_requested
   }
 ;;

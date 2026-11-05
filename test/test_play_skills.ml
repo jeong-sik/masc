@@ -176,10 +176,9 @@ let backend ~stops : Lane.For_testing.backend = {
           | Ok image -> Some image | Error detail -> fail detail);
         host = None; resource = Masc.Lane_addon_lifecycle.Container_resource instance_id;
         exported_tools = (fun () -> exported);
-        call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
+        call_exported_tool = (fun ~on_result:_ ~on_dispatch:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
           Error (Lane_addon_call_context.Transport_error "fixture worker runs no tool"));
         operator_schema=(fun () -> None);
-        companion_tools=(fun () -> []);
         observation_effect=(fun _ -> Lane_addon_call_context.May_change);
         call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
         action_schema = (fun () -> None);

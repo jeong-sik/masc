@@ -23,8 +23,7 @@ let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
     (Selection.choose ~required_actions:[Cap.Type_text] ~verb:Lane.Tabs_list ~bound:true
        ~snapshot:{live_activity=Lane.Enabled;live_clients=[];live_space_presence=[];
-         automation={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true};
-         stagehand={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true}}
+         automation={activity=Lane.Enabled;registered=true;session=Lane.Browser_open;locate=true}}
        Selection.Automatic
       = Error Selection.Binding_required)
 
@@ -36,21 +35,20 @@ let client transport : Lane.client_info =
 
 (* What a browser Add-on worker reports in its snapshot and the host chooses
    from (lib/browser_addon_host.ml): a connected extension host and a
-   connected BiDi host beside an owned Chromium and an owned Firefox. Their
-   executors count every command, and choosing must send none. *)
-let with_browsers ?(models=true) ?(sessions=Lane.Browser_open) run = Eio_main.run (fun env ->
+   connected BiDi host beside an owned Firefox. Its executor counts every
+   command, and choosing must send none. *)
+let with_browsers ?(sessions=Lane.Browser_open) run = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
   let dispatched=ref 0 in
   let refused=Lane.Refused "the selection fixture runs no browser command" in
   let extension=client Lane.Web_extension and bidi=client Lane.Webdriver_bidi in
-  let owned=[Lane.Server_stagehand;Lane.Server_automation] in
+  let owned=[Lane.Server_automation] in
   Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
-  Lane.install_stagehand_executor ~models (Some (fun ~actor:_ _ -> incr dispatched;refused));
   Lane.install_automation_executor (Some (fun _ -> incr dispatched;refused));
   List.iter (fun lane -> Lane.install_server_session_observer lane (Some (fun () -> sessions))) owned;
   Fun.protect ~finally:(fun () ->
     Lane.install_activity_observer None;
-    Lane.install_stagehand_executor None;Lane.install_automation_executor None;
+    Lane.install_automation_executor None;
     List.iter (fun lane -> Lane.install_server_session_observer lane None) owned;
     List.iter (fun (info:Lane.client_info) -> ignore (Lane.disconnect_client ~client_id:info.client_id))
       [extension;bidi]) (fun () ->
@@ -86,9 +84,8 @@ let unsupported = function
     | Required_actions_unavailable _) -> false
 
 let test_task_choice () = with_browsers (fun ~extension ~bidi ->
-  check bool "HTML5 drop and tab history choose the owned Chromium over the BiDi login" true
-    (chosen (automatic ["html5_drop";"open_tab";"close_tab";"back";"forward";"reload"])
-     = Some Lane.Stagehand_route);
+  check bool "no browser this fixture connects drops HTML5 data, so none is chosen" true
+    (none_serves (automatic ["html5_drop"]));
   check bool "frames and downloads choose the owned Firefox" true
     (chosen (automatic ["read_frames";"list_downloads"]) = Some Lane.Automation_route);
   check bool "hover and typing choose the BiDi host, not the extension" true
@@ -100,7 +97,7 @@ let test_impossible_and_explicit () = with_browsers (fun ~extension ~bidi:_ ->
   (match automatic ["page_zoom";"type_text"] with
    | Error (Selection.Required_actions_unavailable {required;candidates}) ->
      check bool "the refusal names what was required" true (required = operations ["page_zoom";"type_text"]);
-     check int "it lists every connected and owned browser as a candidate" 4 (List.length candidates)
+     check int "it lists every connected and owned browser as a candidate" 3 (List.length candidates)
    | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
      | Unsupported_required_actions _) -> fail "no browser zooms and types, so none is chosen");
   check bool "an explicit extension host that cannot hover is refused, not replaced" true
@@ -108,7 +105,7 @@ let test_impossible_and_explicit () = with_browsers (fun ~extension ~bidi:_ ->
 
 let test_session_open_choice () = with_browsers ~sessions:Lane.Browser_closed (fun ~extension:_ ~bidi:_ ->
   let opening = Lane.Session_open {headless=Some false} in
-  check bool "a frame task opens the owned Firefox, not the configured Chromium" true
+  check bool "a frame task opens the owned Firefox" true
     (chosen (automatic ~verb:opening ["read_frames"]) = Some Lane.Automation_route);
   check bool "no owned browser zooms, so opening cannot fall to the operator's extension" true
     (none_serves (automatic ~verb:opening ["page_zoom"])))
@@ -163,7 +160,6 @@ let test_button_click_table () =
     check bool (Cap.operation_name operation ^ " on live BiDi") true
       (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
-    check bool (Cap.operation_name operation ^ " on Stagehand") true (reaches Cap.Owned_chromium operation);
     check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
       (reaches (Cap.Connected Lane.Web_extension) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false
@@ -179,7 +175,6 @@ let test_resize_viewport_table () =
   let reaches backend = match Cap.support backend Cap.Resize_viewport with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sets the viewport" true (reaches (Cap.Connected Lane.Webdriver_bidi));
-  check bool "Stagehand sets the viewport" true (reaches Cap.Owned_chromium);
   check bool "the owned Firefox driver sizes its window to the viewport" true (reaches Cap.Owned_gecko);
   check bool "the extension does not" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
@@ -190,7 +185,6 @@ let test_tab_history_and_close_table () =
   List.iter (fun operation ->
     check bool (Cap.operation_name operation ^ " on live BiDi") true (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
-    check bool (Cap.operation_name operation ^ " on Stagehand") true (reaches Cap.Owned_chromium operation);
     check bool (Cap.operation_name operation ^ " on ego") true (reaches (Cap.Connected Lane.Ego_task_space) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
       (reaches (Cap.Connected Lane.Web_extension) operation);
@@ -202,7 +196,6 @@ let test_touch_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sends touch" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   check bool "the owned Firefox sends touch" true (reaches Cap.Owned_gecko);
-  check bool "Stagehand has no touch" false (reaches Cap.Owned_chromium);
   check bool "the extension has no touch" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
 
@@ -214,7 +207,7 @@ let test_select_option_table () =
     check bool (label ^ " selects through BrowserInteract") true
       (invocation backend = Some (Cap.Interact, Some "select_option")))
     ["live BiDi",Cap.Connected Lane.Webdriver_bidi;"the extension",Cap.Connected Lane.Web_extension;
-     "Stagehand",Cap.Owned_chromium;"the owned Firefox",Cap.Owned_gecko];
+     "the owned Firefox",Cap.Owned_gecko];
   check bool "Safari has no select" true (invocation Cap.Safari_unavailable = None)
 
 let test_list_windows_table () =
@@ -223,7 +216,7 @@ let test_list_windows_table () =
   check bool "live BiDi names each tab's window" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
     ["the extension",Cap.Connected Lane.Web_extension;"the owned Firefox",Cap.Owned_gecko;
-     "Stagehand",Cap.Owned_chromium;"Safari",Cap.Safari_unavailable]
+     "Safari",Cap.Safari_unavailable]
 
 (* The catalog claims on an Ego connection only what its peer does
    (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
@@ -236,11 +229,14 @@ let test_ego_table () =
   (match Cap.support backend Cap.Read_dialog with
    | Cap.Conditional {invocation={tool=Read;mode=Some "dialog";action=None};_} -> ()
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego dialog metadata must use its explicit read mode");
+  (match Cap.support backend Cap.Html5_drop with
+   | Cap.Conditional {invocation={tool=Interact;mode=None;action=Some "drag_to"};_} -> ()
+   | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego HTML5 drop must use the selector-to-selector drag_to");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
   check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
-     "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"scroll_page";"scroll_at";
+     "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"html5_drop";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
@@ -267,7 +263,6 @@ let test_loading_recovery_table () =
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Connected Lane.Web_extension, "extension", false;
      Cap.Owned_gecko, "owned Firefox", false;
-     Cap.Owned_chromium, "Stagehand", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_snapshot_table () =
@@ -282,7 +277,6 @@ let test_snapshot_table () =
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Connected Lane.Web_extension, "the extension", false;
      Cap.Owned_gecko, "automation Firefox", false;
-     Cap.Owned_chromium, "Stagehand Chromium", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_native_input_admission_surface () =
@@ -302,7 +296,7 @@ let test_native_input_admission_surface () =
      fail "native-window typing must retain its Page and focus conditions");
   List.iter (fun backend -> check bool "other native backends retain type_text" true
     (match Cap.support backend Cap.Type_text with Cap.Available _|Conditional _->true|Unsupported _->false))
-    [Cap.Connected Lane.Webdriver_bidi;Cap.Owned_gecko;Cap.Owned_chromium];
+    [Cap.Connected Lane.Webdriver_bidi;Cap.Owned_gecko];
   let config=Masc.Workspace.default_config
     (Filename.concat (Filename.get_temp_dir_name ()) "masc-browser-raw-input-no-workspace") in
   let invoke steps=Tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration

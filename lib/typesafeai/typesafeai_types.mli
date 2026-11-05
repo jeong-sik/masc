@@ -7,7 +7,6 @@ type model =
   | Custom of string
 
 val model_to_string : model -> string
-val model_of_string : string -> model
 
 type choice_question =
   { instructions : string

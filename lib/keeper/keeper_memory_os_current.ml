@@ -1091,12 +1091,21 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
    snapshot already reached disk, so append failure warns. Destructive
    removals below use [append_journal_line_strict] and a prepared receipt so
    their originals and reasons survive failed journal finalization.
-   Cancellation is never absorbed. *)
+   Cancellation is never absorbed.
+
+   These lines are the ones a memory health row reader is told about here.
+   A publication's line and a removal receipt's line are written while the
+   publication receipt is still on disk; a row read in that window recovers
+   the publication again. The commit notification that follows them, after
+   the locks unwind, announces those (RFC-0487). A removal line written by the
+   recovery of a publication that never reached its target follows no commit;
+   that recovery announces itself once its locks unwind
+   ([recover_publication_with_sync]). *)
 let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   try
     match append_journal_line_strict ~keepers_dir ~keeper_id json with
-    | Ok () -> ()
+    | Ok () -> Keeper_memory_health_input.written ~keepers_dir ~keeper_id
     | Error detail -> Log.Keeper.warn "%s" detail
   with
   | Eio.Cancel.Cancelled _ as error -> raise error
@@ -1883,7 +1892,14 @@ let recover_publication_with_sync ~sync_parent ~keepers_dir ~keeper_id =
   let* pending = Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
     File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
       recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id)) in
-  match pending with None -> Ok () | Some receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt
+  match pending with
+  | None ->
+    (* The target was never published: the receipt is gone and the
+       retraction plan is reconciled, perhaps with a removal line. No commit
+       notification follows, so the row's readers are told here (RFC-0487). *)
+    Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
+    Ok ()
+  | Some receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt
 
 let recover_publication ~keepers_dir ~keeper_id =
   recover_publication_with_sync ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id

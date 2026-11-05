@@ -1,11 +1,29 @@
 (** Rows for a block of text that was written with line breaks.
 
     Each line is read through [Masc.Tui_terminal_text.sanitize_terminal_text] and wrapped
-    to [max_cells]. A break in the middle keeps the blank row the author
-    wrote; a run of them at either end is dropped, because a leading blank
-    would take the row a caller puts its label on. *)
+    to [max_cells]; {!preformatted_styled_rows} alone skips that reading,
+    because its text carries its own colour. A break in the middle keeps the
+    blank row the author wrote; a run of them at either end is dropped,
+    because a leading blank would take the row a caller puts its label on.
+    The edges are those of the whole text, so lines that belong together go
+    in as one text: handed one at a time, every blank line is an edge and
+    none of them is kept. *)
 
 val rows : max_cells:int -> string -> string list
+
+val preformatted_rows : max_cells:int -> string -> string list
+(** {!rows} for text whose indentation is its structure: pretty-printed JSON,
+    code, an indented list. A line keeps the spaces it opens with, up to half
+    of [max_cells], and the rows it wraps to start at the same indent. {!rows}
+    reads the same text as prose and drops those spaces. *)
+
+val preformatted_styled_rows : max_cells:int -> string -> string list
+(** {!preformatted_rows} for lines that already carry their colour, such as
+    the text of {!Masc_tui_tool_detail.document}. Nothing here makes the text
+    safe: its writer has done that, and the escapes in it are the writer's
+    own. A wrapped row that starts inside a style opens it again and a row
+    that ends inside one closes it, as
+    {!Masc_tui_message_layout.wrap_styled_words} does. *)
 
 val lines : string -> string list
 (** Split at LF, removing a trailing CR only when it belongs to that LF's

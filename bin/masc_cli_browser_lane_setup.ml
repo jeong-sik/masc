@@ -362,7 +362,6 @@ let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
     | Launcher.Describes_another_launcher -> false in
   let table_present : Browser_lane.Backend.t -> bool = function
     | Automation -> Option.is_some configuration.automation
-    | Stagehand -> Option.is_some configuration.stagehand
     | Owned_firefox -> Option.is_some configuration.live_bidi
     | Ego -> Option.is_some configuration.live_ego
     | External_host -> false in
@@ -370,10 +369,10 @@ let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
     | Automation -> List.mem Automation modes
     | Owned_firefox -> List.mem Bidi modes
     | Ego -> List.mem Ego modes
-    | Stagehand | External_host -> false in
+    | External_host -> false in
   let sources = List.filter (fun (backend : Browser_lane.Backend.t) -> match backend with
       | External_host -> installs_host modes || host_installed
-      | Automation | Stagehand | Owned_firefox | Ego -> table_present backend || written_here backend)
+      | Automation | Owned_firefox | Ego -> table_present backend || written_here backend)
       Browser_lane.Backend.all in
   sources, List.filter (fun backend -> written_here backend && not (table_present backend)) sources
 
@@ -520,7 +519,7 @@ let install
          | Automation -> Option.is_some written.automation
          | Owned_firefox -> Option.is_some written.bidi
          | Ego -> Option.is_some written.ego
-         | Stagehand | External_host -> false
+         | External_host -> false
        in
        let addon =
          match addon with

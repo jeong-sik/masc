@@ -30,14 +30,12 @@ let list parse = function
   | _ -> Error "expected array"
 let route_to_json = function
   | B.Automation_route -> `Assoc ["lane",string "automation"]
-  | B.Stagehand_route -> `Assoc ["lane",string "stagehand"]
   | B.Live_route client -> `Assoc ["lane",string "live";"clientId",nullable (fun id -> string (B.client_id_to_string id)) client]
 let route_of_json value =
   let* fields = object_fields ["lane";"clientId"] value in
   let* lane = text_field fields "lane" in
   match lane,fields with
   | "automation",[_] -> Ok B.Automation_route
-  | "stagehand",[_] -> Ok B.Stagehand_route
   | "live",_ ->
       let* _ = exact ["lane";"clientId"] value in
       let* client = required fields "clientId" in
@@ -142,15 +140,9 @@ let verb_of_json ~route value =
         | "frames",None,None,None -> Ok `Frames | "dialog",None,None,None -> Ok `Dialog
         | _ -> Error "invalid context read mode" in
       Ok (B.Page_context {tab_id;frame_path;mode})
-  | "page.instruct" -> let* fields = fields ["tabId";"instruction"] in
-      let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = text_field fields "instruction" in
-      Ok (B.Page_instruct {tab_id;instruction})
   | "page.locate" -> let* fields = fields ["tabId";"instruction"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = optional_field fields "instruction" text in
       Ok (B.Page_locate {tab_id;instruction})
-  | "page.extract" -> let* fields = fields ["tabId";"instruction";"schema"] in
-      let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = text_field fields "instruction" in
-      Ok (B.Page_extract {tab_id;instruction;schema=List.assoc_opt "schema" fields})
   | _ -> Error "unknown browser verb"
 
 type command = Snapshot | Retire
@@ -161,7 +153,6 @@ type command = Snapshot | Retire
   | Download_release of {id:string;actor:string;route:B.route;verb:B.verb}
   | Model_requests | Model_result of Yojson.Safe.t
   | Model_wait of {after:string option}
-  | Extension of Browser_extension_protocol.command
   | Poll of {client:B.client_info;window_sec:float}
   | Deliver of {client_id:B.client_id;id:string;payload:Yojson.Safe.t}
   | Disconnect of B.client_id
@@ -175,17 +166,17 @@ let ends_with_caller = function
      | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _
      | Page_snapshot _ | Page_native_workflow _ | Page_interact _
      | Session_open _ | Session_close | Session_status | Page_goto _
-     | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
-     | Page_locate _ | Page_extract _ -> true)
-  | Issue {route=(B.Automation_route | B.Stagehand_route | B.Live_route None);_}
+     | Page_elements _ | Page_act _ | Page_context _
+     | Page_locate _ -> true)
+  | Issue {route=(B.Automation_route | B.Live_route None);_}
   | Snapshot | Retire | Upload_stage _ | Upload_discard _ | Download_claim _
   | Download_commit _ | Download_release _ | Model_requests | Model_result _
-  | Model_wait _ | Extension _ | Poll _ | Deliver _ | Disconnect _ -> false
+  | Model_wait _ | Poll _ | Deliver _ | Disconnect _ -> false
 let changes_nothing = function
   | Snapshot | Model_requests | Model_wait _ -> true
   | Issue {only_if_idle;_} -> only_if_idle
   | Retire | Upload_stage _ | Upload_discard _ | Download_claim _ | Download_commit _ | Download_release _
-  | Model_result _ | Extension _ | Poll _ | Deliver _ | Disconnect _ -> false
+  | Model_result _ | Poll _ | Deliver _ | Disconnect _ -> false
 let to_json request =
   let fields = match request.command with
     | Snapshot -> ["operation",string "snapshot"]
@@ -202,7 +193,6 @@ let to_json request =
     | Model_requests -> ["operation",string "model_requests"]
     | Model_result arguments -> ["operation",string "model_result";"arguments",arguments]
     | Model_wait {after} -> ["operation",string "model_wait";"after",nullable string after]
-    | Extension command -> ["operation",string "extension";"command",Browser_extension_protocol.to_json command]
     | Poll {client;window_sec} -> ["operation",string "poll";"client",client_to_json client;"window_sec",`Float window_sec]
     | Deliver {client_id;id;payload} -> ["operation",string "deliver";"clientId",string (B.client_id_to_string client_id);"id",string id;"payload",payload]
     | Disconnect client_id -> ["operation",string "disconnect";"clientId",string (B.client_id_to_string client_id)]
@@ -243,11 +233,6 @@ let of_json value =
         let* arguments=required fields "arguments" in Ok (Model_result arguments)
     | "model_wait" -> let* () = exact ["after"] in
         let* raw=required fields "after" in let* after=optional text raw in Ok (Model_wait {after})
-    | "extension" -> let* ()=exact ["command"] in
-        let* value=required fields "command" in
-        let* command=Browser_extension_protocol.of_json value
-          |> Result.map_error (fun () -> "invalid private extension command") in
-        Ok (Extension command)
     | "poll" -> let* () = exact ["client";"window_sec"] in let* raw = required fields "client" in
         let* client = client_of_json raw in
         (* The ego connection polls from inside the worker; no native host speaks for it. *)
@@ -265,7 +250,7 @@ let of_json value =
         let* raw = required fields "timeout_sec" in let* timeout_sec = positive raw in
         let* raw = required fields "only_if_idle" in let* only_if_idle = boolean raw in
         let* () = if only_if_idle then (match verb with B.Page_document _ -> Ok ()
-          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "idle admission supports document reads only") else Ok () in
+          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_locate _ -> Error "idle admission supports document reads only") else Ok () in
         Ok (Issue {route;verb;actor;timeout_sec;only_if_idle})
     | _ -> Error "unknown browser worker operation" in
   Ok {incarnation;command}
@@ -328,7 +313,6 @@ let answer_of_json value =
 
 type disposition = Not_started | Outcome_unknown
 type reply = Snapshot_result of Yojson.Safe.t | Model_reply of Yojson.Safe.t
-  | Extension_reply of Yojson.Safe.t
   | Download_reply of Browser_addon_downloads.claim
   | Poll_result of {command:B.issued option;state_id:string} | Receipt
   | Issue_result of (B.answer, B.selection_error) result
@@ -336,7 +320,6 @@ type reply = Snapshot_result of Yojson.Safe.t | Model_reply of Yojson.Safe.t
 let reply_to_json = function
   | Snapshot_result snapshot -> `Assoc ["reply",string "snapshot";"snapshot",snapshot]
   | Model_reply value -> `Assoc ["reply",string "model";"value",value]
-  | Extension_reply value -> `Assoc ["reply",string "extension";"value",value]
   | Download_reply value -> `Assoc ["reply",string "download";"value",Browser_addon_downloads.claim_to_json value]
   | Poll_result {command;state_id} -> `Assoc ["reply",string "poll";"command",nullable (fun (command:B.issued) ->
       `Assoc ["id",string command.id;"command",command.verb_json]) command;"state_id",string state_id]
@@ -351,7 +334,6 @@ let reply_of_json value =
   match name with
   | "snapshot" -> let* () = reply_keys ["snapshot"] in let* snapshot = required fields "snapshot" in Ok (Snapshot_result snapshot)
   | "model" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in Ok (Model_reply value)
-  | "extension" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in Ok (Extension_reply value)
   | "download" -> let* ()=reply_keys ["value"] in let* value=required fields "value" in
       let* claim=Browser_addon_downloads.claim_of_json value in Ok (Download_reply claim)
   | "poll" -> let* () = reply_keys ["command";"state_id"] in let* raw = required fields "command" in

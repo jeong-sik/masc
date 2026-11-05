@@ -683,6 +683,11 @@ module For_testing = struct
 end
 
 
+(* The cwd of every exec comes from a resolver that already confined it to
+   this keeper's playground: Execute and spawn through
+   [Keeper_tool_execute_path.resolve_tool_execute_cwd_typed], Read through the
+   playground root itself. A path outside it has no container spelling, so the
+   answer is the error, never a directory the caller did not name. *)
 let container_path_of_host (t : t) ~host_path =
   let host_norm = normalize_path host_path in
   if host_norm = t.host_root
@@ -702,91 +707,6 @@ let container_path_of_host (t : t) ~host_path =
          "container_path_of_host: %s is not inside playground %s"
          host_norm
          t.host_root)
-;;
-
-(* Previously listed [<host_root>/repos/*] and swallowed every failure into an
-   empty list, which made "no checkout", "no repos directory" and "could not
-   read" indistinguishable. A cwd that cannot be mapped is silently redirected
-   to the container root, so the reason has to reach the log. *)
-let discovered_checkouts (t : t) =
-  match Keeper_playground_checkouts.discover ~root:t.host_root with
-  | Ok (Keeper_playground_checkouts.Complete checkouts) -> checkouts
-  | Ok (Keeper_playground_checkouts.Partial { found; limit }) ->
-    Log.Keeper.warn
-      "playground checkout scan incomplete keeper=%s root=%s limit=%s"
-      t.meta.name
-      t.host_root
-      (Keeper_playground_checkouts.limit_to_string limit);
-    found
-  | Error error ->
-    Log.Keeper.warn
-      "playground checkout scan failed keeper=%s root=%s error=%s"
-      t.meta.name
-      t.host_root
-      (Keeper_playground_checkouts.scan_error_to_string error);
-    []
-;;
-
-let skip_worktree_prefix = function
-  | ".worktrees" :: _branch :: rest -> rest
-  | "./.worktrees" :: _branch :: rest -> rest
-  | other -> other
-
-type cwd_match =
-  | Matched of Keeper_playground_checkouts.checkout * string
-  | Ambiguous_segment of string * Keeper_playground_checkouts.checkout list
-  | No_match
-
-(* Once the layout is free, two checkouts can share a basename (a keeper
-   holding both [repos/masc] and [.masc/repos/masc]). The previous [List.mem]
-   answered such a case by sort order, i.e. arbitrarily. *)
-let find_checkout_and_suffix ~checkouts ~host_cwd =
-  let rec find = function
-    | [] -> No_match
-    | head :: tail ->
-      (match
-         List.filter
-           (fun (c : Keeper_playground_checkouts.checkout) ->
-              String.equal c.name head)
-           checkouts
-       with
-       | [ checkout ] ->
-         Matched (checkout, String.concat "/" (skip_worktree_prefix tail))
-       | [] -> find tail
-       | many -> Ambiguous_segment (head, many))
-  in
-  find (String.split_on_char '/' host_cwd)
-
-let container_cwd_of_host (t : t) ~host_cwd =
-  match container_path_of_host t ~host_path:host_cwd with
-  | Ok container_cwd -> container_cwd
-  | Error _ ->
-    match Keeper_cwd_response.profile_independent_cwd
-            ~container_root:t.container_root ~host_cwd with
-    | Some cwd -> cwd
-    | None ->
-      let checkouts = discovered_checkouts t in
-      (match find_checkout_and_suffix ~checkouts ~host_cwd with
-       | Matched (checkout, suffix) ->
-         Filename.concat
-           t.container_root
-           (Keeper_playground_checkouts.join checkout ~suffix)
-       | Ambiguous_segment (segment, many) ->
-         (* Falling back to the container root is still the answer — there is
-            no better one — but which of the candidates was meant is now
-            recorded instead of decided by sort order. *)
-         Log.Keeper.warn
-           "playground cwd segment matches multiple checkouts keeper=%s segment=%s \
-            paths=%s"
-           t.meta.name
-           segment
-           (String.concat
-              ","
-              (List.map
-                 (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
-                 many));
-         t.container_root
-       | No_match -> t.container_root)
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -924,16 +844,6 @@ let run_argv_with_status_split
         ~on_stdout_chunk
         ~on_stderr_chunk
         argv)
-;;
-
-let run_argv_with_stdin_and_status ?timeout_sec ~stdin_content argv =
-  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Process_eio.run_argv_with_stdin_and_status
-      ?timeout_sec
-      ~env:(sandbox_environment ())
-      ~cwd:(Config_dir_resolver.current_working_dir ())
-      ~stdin_content
-      argv)
 ;;
 
 (* A failed transport can leave a guest effect running. Do not start another
@@ -3954,34 +3864,33 @@ let prepare_github_identity_secret_files ?timeout_sec t =
 (* The argv [run_exec_with_status_split_once] runs: the turn-scoped
    container, the same uid, the rewritten paths. *)
 let exec_argv ?stdin ?timeout_sec ~validate_cached_container (t : t) ~cwd ~command_argv =
-  match
-    Result.bind (docker_exec_only t) (fun () ->
-      ensure_started ~validate_running:validate_cached_container ?timeout_sec t)
-  with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-    let command_argv =
-      List.map
-        (fun arg ->
-           let rewritten =
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.host_root
-               ~container_root:t.container_root
-               arg
-           in
-           if String.equal t.raw_host_root t.host_root
-           then rewritten
-           else
-             Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-               ~host_root:t.raw_host_root
-               ~container_root:t.container_root
-               rewritten)
-        command_argv
-    in
-    Ok
-      (exec_prefix t ~container_cwd ~stdin:(Option.value stdin ~default:false)
-       @ (container_name :: command_argv))
+  let open Result.Syntax in
+  let* () = docker_exec_only t in
+  let* container_cwd = container_path_of_host t ~host_path:cwd in
+  let* container_name =
+    ensure_started ~validate_running:validate_cached_container ?timeout_sec t
+  in
+  let command_argv =
+    List.map
+      (fun arg ->
+         let rewritten =
+           Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+             ~host_root:t.host_root
+             ~container_root:t.container_root
+             arg
+         in
+         if String.equal t.raw_host_root t.host_root
+         then rewritten
+         else
+           Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+             ~host_root:t.raw_host_root
+             ~container_root:t.container_root
+             rewritten)
+      command_argv
+  in
+  Ok
+    (exec_prefix t ~container_cwd ~stdin:(Option.value stdin ~default:false)
+     @ (container_name :: command_argv))
 ;;
 
 let run_exec_with_status_split_once
@@ -4172,31 +4081,37 @@ let run_exec_pipeline_with_status_once
       ~(cwd : string)
       ~(stages : exec_pipeline_stage list)
   =
-  match
-    Result.bind (docker_exec_only t) (fun () ->
-      ensure_started ~validate_running:validate_cached_container ?timeout_sec t)
-  with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let process_stages =
-      List.map
-        (fun { command_argv; cwd = stage_cwd } ->
-          let cwd = Option.value stage_cwd ~default:cwd in
-          let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-          let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          Process_eio.plumbed_stage
-            ~argv
-            ~env:(Some (sandbox_environment ()))
-            ~cwd:(Some (Config_dir_resolver.current_working_dir ())))
-        stages
-    in
-    (* These stages carry no file redirect, so the runner's redirect error is
-       out of reach here; it is passed on rather than folded into a status. *)
-    run_argv_pipeline_with_status_split
-      ?timeout_sec
-      ?on_stdout_chunk
-      ?on_stderr_chunk
-      process_stages
+  let open Result.Syntax in
+  let* () = docker_exec_only t in
+  let rec project_stages projected = function
+    | [] -> Ok (List.rev projected)
+    | ({ command_argv; cwd = stage_cwd } : exec_pipeline_stage) :: rest ->
+      let* container_cwd =
+        container_path_of_host t ~host_path:(Option.value stage_cwd ~default:cwd)
+      in
+      project_stages ((command_argv, container_cwd) :: projected) rest
+  in
+  let* projected_stages = project_stages [] stages in
+  let* container_name =
+    ensure_started ~validate_running:validate_cached_container ?timeout_sec t
+  in
+  let process_stages =
+    List.map
+      (fun (command_argv, container_cwd) ->
+        let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
+        Process_eio.plumbed_stage
+          ~argv
+          ~env:(Some (sandbox_environment ()))
+          ~cwd:(Some (Config_dir_resolver.current_working_dir ())))
+      projected_stages
+  in
+  (* These stages carry no file redirect, so the runner's redirect error is
+     out of reach here; it is passed on rather than folded into a status. *)
+  run_argv_pipeline_with_status_split
+    ?timeout_sec
+    ?on_stdout_chunk
+    ?on_stderr_chunk
+    process_stages
 ;;
 
 let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
@@ -4264,47 +4179,6 @@ let run_command_with_status
           in
           Ok (st, body)
         | Unix.WSIGNALED _ | Unix.WSTOPPED _ | WEXITED _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
-;;
-
-let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
-  =
-  let cmd =
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:t.host_root
-      ~container_root:t.container_root
-      cmd
-  in
-  let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-  let docker_exec_argv ~container_name =
-    exec_prefix t ~container_cwd ~stdin:true
-    @ [ container_name; "bash"; "-l"; "-s" ]
-  in
-  match Result.bind (docker_exec_only t) (fun () -> ensure_started t ~timeout_sec) with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let argv = docker_exec_argv ~container_name in
-    let st, out =
-      run_argv_with_stdin_and_status
-        ~stdin_content:cmd
-        argv
-    in
-    (match st with
-     | (Unix.WEXITED (126 | 127) as status) ->
-       (match failed_exec_recovery t with
-        | Preserve_failed_exec -> Ok (st, out)
-        | Restart_failed_exec ->
-        set_state t Not_started;
-        (match ensure_started t ~timeout_sec with
-         | Error _ as err -> err
-         | Ok container_name ->
-           let argv = docker_exec_argv ~container_name in
-           Ok
-             (run_argv_with_stdin_and_status
-                ~stdin_content:cmd
-                argv))
-        | Failed_exec_state_probe_error detail ->
-          Error (failed_exec_state_probe_error ~status ~output:out detail))
-     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Ok (st, out))
 ;;
 
 let cleanup (t : t) =

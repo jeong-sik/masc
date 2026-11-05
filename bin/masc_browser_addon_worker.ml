@@ -26,14 +26,14 @@ let () =
   let live_ego = match backend,!live_ego_command,ego_reference with
     | Browser_lane.Backend.Ego,Some command,Some space -> Some {Browser_configuration.command;space}
     | Browser_lane.Backend.Ego,_,_ -> raise (Arg.Bad "the ego source needs --live-ego-command and one Space reference")
-    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),None,None -> None
-    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),_,_ ->
+    | Browser_lane.Backend.(Automation|Owned_firefox|External_host),None,None -> None
+    | Browser_lane.Backend.(Automation|Owned_firefox|External_host),_,_ ->
       raise (Arg.Bad "--live-ego-command and the Space reference belong to the ego source") in
   (* The browsers that read upload copies and write downloads are the owned
      Gecko and ego lite; the other sources get neither broker. *)
   let transfers = match backend with
     | Browser_lane.Backend.(Automation|Ego) -> true
-    | Browser_lane.Backend.(Stagehand|Owned_firefox|External_host) -> false in
+    | Browser_lane.Backend.(Owned_firefox|External_host) -> false in
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
@@ -52,7 +52,7 @@ let () =
         {Masc.Browser_addon_wire.incarnation;command=Retire} with
       | Receipt -> ()
       | Service_refusal {message;_} -> Printf.eprintf "browser cleanup unconfirmed: %s\n%!" message
-      | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
           Printf.eprintf "browser cleanup returned no settlement receipt\n%!");
     if transfers then (
       let downloads=Eio_unix.run_in_systhread (fun () ->
@@ -89,7 +89,6 @@ let () =
     let directory=Filename.dirname socket_path in
     match backend,live_ego with
     | Browser_lane.Backend.Automation,_ -> Masc.Browser_addon_automation.run ~env ~owner ~directory serve
-    | Browser_lane.Backend.Stagehand,_ -> Masc.Browser_addon_stagehand.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Owned_firefox,_ -> Masc.Browser_addon_live_bidi.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Ego,Some configuration ->
       Masc.Browser_addon_live_ego.run ~on_lane_ended:(fun () ->

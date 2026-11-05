@@ -241,6 +241,21 @@ let noncompletion_result_to_json (result : noncompletion_result) =
     ]
 ;;
 
+type denied_actions = Protocol.denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
+type denied_result = Protocol.denied_result =
+  { conversation_id : string
+  ; denied : denied_actions
+  ; response : string
+  ; num_turns : int
+  ; usage : usage
+  }
+
+let denied_action_names (denied : denied_actions) = denied.first :: denied.rest
+
 type error = Protocol.error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -251,6 +266,7 @@ type error = Protocol.error =
   | State_callback_failed of string
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
+  | Actions_denied of denied_result
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -272,6 +288,11 @@ let error_to_string = function
     Printf.sprintf "Antigravity result did not complete (status=%s)%s"
       (noncompletion_status_to_string status)
       (match error with None -> "" | Some detail -> ": " ^ detail)
+  | Actions_denied { denied; response; _ } ->
+    Printf.sprintf
+      "Antigravity print mode refused %s and ended the turn before it finished (partial response: %d bytes)"
+      (String.concat ", " (denied_action_names denied))
+      (String.length response)
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
   | Child_fd_ceiling_exceeded { count = Some count; ceiling } ->
@@ -379,6 +400,7 @@ type wire_event = Protocol.wire_event =
       ; error : string option
       ; num_turns : int
       ; usage : usage
+      ; denied : denied_actions option
       }
 
 and step_state = Protocol.step_state =
@@ -515,6 +537,27 @@ let parse_step_update fields =
   Ok (Step_update { conversation_id; step_index; state; step_type; tool_name; text_delta })
 ;;
 
+(* [denied_actions] is absent when agy refused nothing. An entry that is not
+   an object naming its action is a protocol error, not a refusal to skip. *)
+let parse_denied_actions stage fields =
+  let rec parse_entries = function
+    | [] -> Ok []
+    | entry :: rest ->
+      let* entry_fields = assoc_at stage entry in
+      let* action = required_string stage "action" entry_fields in
+      let* actions = parse_entries rest in
+      Ok (action :: actions)
+  in
+  match List.assoc_opt "denied_actions" fields with
+  | None | Some `Null -> Ok None
+  | Some (`List entries) ->
+    let* actions = parse_entries entries in
+    (match actions with
+     | [] -> Ok None
+     | first :: rest -> Ok (Some ({ first; rest } : denied_actions)))
+  | Some _ -> protocol_error stage "field \"denied_actions\" must be a list"
+;;
+
 let parse_result fields =
   let stage = "result event" in
   let* result_json = required_member stage "result" fields in
@@ -536,7 +579,8 @@ let parse_result fields =
   let* error = optional_string stage "error" result_fields in
   let* num_turns = required_nonnegative_int stage "num_turns" result_fields in
   let* usage = parse_usage stage result_fields in
-  Ok (Result { conversation_id; status; response; error; num_turns; usage })
+  let* denied = parse_denied_actions stage result_fields in
+  Ok (Result { conversation_id; status; response; error; num_turns; usage; denied })
 ;;
 
 let parse_wire_line line =
@@ -1109,13 +1153,19 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
       Agent_core.Response_shape.has_deliverable_content
         (Agent_core.Response_shape.summarize_blocks
            [ Llm_provider.Types.Text terminal.response ]) in
-    (match terminal.status with
-     | Success ->
+    (match terminal.status, terminal.denied with
+     (* A refusal ended the run: the text so far, if any, is not the answer. *)
+     | Success, Some denied ->
+         Error (Actions_denied
+           { conversation_id = terminal.conversation_id; denied
+           ; response = terminal.response; num_turns = terminal.num_turns
+           ; usage = terminal.usage })
+     | Success, None ->
          if deliverable then complete terminal ~trajectory_error:None
          else Error (Turn_failed
            (empty_success_detail ~model:terminal.model
               ~tool_steps:terminal.tool_steps stderr))
-     | Result_error ->
+     | Result_error, (None | Some _) ->
          let detail = match terminal.error with
            | Some detail -> detail
            | None -> "status=ERROR" in
@@ -1123,7 +1173,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
             Prior streamed text cannot rescue an empty terminal response. *)
          if deliverable then complete terminal ~trajectory_error:(Some detail)
          else Error (Turn_failed detail)
-     | Not_completed status ->
+     | Not_completed status, (None | Some _) ->
          Error
            (Result_not_completed
               { status; conversation_id = Some terminal.conversation_id

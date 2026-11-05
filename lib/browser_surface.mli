@@ -1,5 +1,5 @@
 (** Read-only browser page observations from the selected source. *)
-type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
+type source = Browser_lane.Lane_name.t = Live | Automation
 type request = { route : Browser_selection.preference; tab_id : int option }
 val parse_request : Yojson.Safe.t -> (request, string) result
 type dialog_kind = Alert | Confirm | Prompt | Beforeunload

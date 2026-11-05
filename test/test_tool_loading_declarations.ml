@@ -19,17 +19,25 @@ let test_absent_declaration_is_always_loaded () =
     loading
     "a tool with no defer_loading key rides in every request"
     Tool_definition_toml.Always_loaded
-    (Tool_loading_declarations.loading_of_tool "keeper_tool_search")
+    (Tool_loading_declarations.required "keeper_tool_search")
 ;;
 
-(* A name with no file at all: tools built in OCaml rather than declared in
-   TOML cannot opt in, and deferring one would hide a schema nothing serves. *)
-let test_unknown_name_is_always_loaded () =
+(* A name with no file declares nothing, and [required] refuses a missing
+   file instead of answering [Always_loaded]: a descriptor looked up under a
+   name with no file would otherwise drop its [defer_loading] with nothing
+   reporting it. *)
+let test_a_missing_file_is_not_a_declaration () =
   check
-    loading
-    "a name with no tool file rides in every request"
-    Tool_definition_toml.Always_loaded
-    (Tool_loading_declarations.loading_of_tool "no-such-tool-exists")
+    (option loading)
+    "a name with no tool file declares nothing"
+    None
+    (Tool_loading_declarations.declared "no-such-tool-exists");
+  match Tool_loading_declarations.required "no-such-tool-exists" with
+  | exception Failure _ -> ()
+  | answer ->
+    failf
+      "a required tool file that is missing answered %s"
+      (Tool_definition_toml.loading_to_string answer)
 ;;
 
 let test_declaration_round_trips () =
@@ -177,7 +185,7 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
          loading
          (name ^ " rides in every request")
          Tool_definition_toml.Always_loaded
-         (Tool_loading_declarations.loading_of_tool name))
+         (Tool_loading_declarations.required name))
     [ "keeper_tool_search"
     ; "keeper_tools_list"
     ; "keeper_capability_search"
@@ -187,9 +195,8 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
 
 (* The two request controls beside the Skill compositions declare deferral in
    their own files, and the composition surface reads it from there by these
-   names. If either file went missing, [loading_of_tool] would answer
-   Always_loaded and the control would ride in every request with nothing
-   reporting it. *)
+   names. If either file went missing, [Tool_loading_declarations.required]
+   would raise when the surface is built. *)
 let test_the_composition_request_controls_are_deferred () =
   List.iter
     (fun name ->
@@ -197,7 +204,7 @@ let test_the_composition_request_controls_are_deferred () =
          loading
          (name ^ " is held back until named")
          Tool_definition_toml.Deferrable
-         (Tool_loading_declarations.loading_of_tool name))
+         (Tool_loading_declarations.required name))
     [ Keeper_tool_composition_catalog.status_tool_name
     ; Keeper_tool_composition_catalog.cancel_tool_name
     ]
@@ -208,7 +215,7 @@ let () =
     "tool loading declarations"
     [ ( "declaration"
       , [ test_case "absent is always loaded" `Quick test_absent_declaration_is_always_loaded
-        ; test_case "unknown name is always loaded" `Quick test_unknown_name_is_always_loaded
+        ; test_case "a missing file is not a declaration" `Quick test_a_missing_file_is_not_a_declaration
         ; test_case "true round trips" `Quick test_declaration_round_trips
         ; test_case "false is always loaded" `Quick test_false_is_always_loaded
         ; test_case "misplaced is rejected" `Quick

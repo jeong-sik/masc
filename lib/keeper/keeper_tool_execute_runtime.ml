@@ -88,18 +88,10 @@ let elapsed_duration_ms ~start_time ~end_time =
   | FP_normal | FP_subnormal | FP_zero -> int_of_float elapsed_ms
 
 let model_execute_location_fields ~remote_workspace_root ~config ~meta ~args ~cwd =
-  let execution_location =
-    Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd
-  in
-  let response_cwd =
-    match execution_location with
-    | `Assoc fields ->
-      (match List.assoc_opt "cwd" fields with
-       | Some cwd -> cwd
-       | None -> `Null)
-    | _ -> `Null
-  in
-  [ "cwd", response_cwd; "execution_location", execution_location ]
+  [ ( "execution_location"
+    , Keeper_sandbox_repo_path.execution_location_json
+        ~remote_workspace_root ~config ~meta ~args ~cwd )
+  ]
 
 let shim_execution_evidence_json receipts =
   `Assoc

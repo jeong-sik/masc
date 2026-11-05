@@ -80,12 +80,28 @@ val internal_history_file_name : string
 val keeper_history_path : Workspace.config -> string -> string
 val keeper_internal_history_path : Workspace.config -> string -> string
 
-(** Whether [source] denotes the world-state prompt history channel. *)
-val is_prompt_history_source : string -> bool
+(** Where a history message came from. Every persisted message names one,
+    and the history file it goes to follows from it. *)
+type history_source =
+  | Direct_user  (** A request someone sent the keeper. *)
+  | Direct_assistant  (** The keeper's reply to that request. *)
+  | World_state_prompt
+      (** The prompt the runtime builds for an internal turn. It is not
+          written to either history file. *)
+  | Internal_assistant
+      (** The keeper's answer on an internal turn, written to
+          [history.internal.jsonl]. *)
 
-(** Whether [source] denotes a turn-internal (non-user-facing) history
-    channel. *)
-val is_internal_history_source : string -> bool
+(** The word stored under a history line's [source] key. *)
+val history_source_to_string : history_source -> string
+
+(** The source a stored [source] word names, matched exactly. [None] for any
+    other text, including a line that carries no [source]. *)
+val history_source_of_string : string -> history_source option
+
+(** [World_state_prompt] and [Internal_assistant]: turn-internal text, not
+    conversation. *)
+val is_internal_history_source : history_source -> bool
 
 val keeper_decision_log_path : Workspace.config -> string -> string
 val keeper_feedback_log_path : Workspace.config -> string -> string

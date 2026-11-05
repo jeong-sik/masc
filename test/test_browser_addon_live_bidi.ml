@@ -179,7 +179,7 @@ let scenario mode =
               let result=Eio.Time.with_timeout clock 8. (fun () -> Ok (dispatch W.Retire)) in
               (match result with
                | Ok (W.Receipt | W.Service_refusal _) -> ()
-               | Ok (W.Issue_result _ | Snapshot_result _ | Model_reply _ | Extension_reply _ | Download_reply _ | Poll_result _)
+               | Ok (W.Issue_result _ | Snapshot_result _ | Model_reply _ | Download_reply _ | Poll_result _)
                | Error `Timeout -> fail "retirement did not settle its protected release");
               check bool "retirement does not wait for the original 30-second caller" true (Eio.Time.now clock -. started < 8.);
               ignore (Eio.Promise.await input));
@@ -205,7 +205,7 @@ let scenario mode =
                 check bool "the original connection answers the next request" true
                   (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
                    | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-                   | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                   | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                    | Poll_result _|Receipt|Service_refusal _ -> false);
                 check bool "normal retirement joins the original browser" true (dispatch W.Retire=W.Receipt))
               else (
@@ -234,7 +234,7 @@ let scenario mode =
                   actor=Some "keeper/live-fixture";timeout_sec=0.2;only_if_idle=false}) with
                | W.Issue_result (Ok B.Timed_out) -> true
                | Issue_result (Ok (B.Answered _|Lane_absent|Refused _|Rejected_before_effect _))
-               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
             (* An ended loop also answers the queued caller, with a
                client_disconnected refusal, so only ok=true shows the
@@ -243,7 +243,7 @@ let scenario mode =
               (match issue () with
                | W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
             check bool "the first command took the fixture's late branch" true
               (Sys.file_exists (Filename.concat root "late-answered"));
@@ -253,13 +253,13 @@ let scenario mode =
             check bool "actual owned queue answers on its original connection" true
               (match issue () with W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+               | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                | Poll_result _|Receipt|Service_refusal _ -> false);
             if mode="ego-conflict" then (
               check bool "the original connection answers again after Ego conflict" true
                 (match issue () with W.Issue_result (Ok (B.Answered payload)) -> Yojson.Safe.Util.member "ok" payload=`Bool true
                  | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                  | Poll_result _|Receipt|Service_refusal _ -> false);
               let published=ok (Masc.Browser_addon_observation.decode_snapshot (Owner.snapshot owner)) in
               check bool "Ego's exact unavailability is visible" true
@@ -267,7 +267,7 @@ let scenario mode =
                  | [Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=_;observed_at}] -> observed_at > 0.
                  | [] | _::_ -> false);
               let snapshot : Masc.Browser_selection.snapshot = {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;
-                automation=published.automation;stagehand=published.stagehand} in
+                automation=published.automation} in
               check bool "unbound automatic selection chooses the remaining client" true
                 (match Masc.Browser_selection.choose ~verb:B.Tabs_list ~bound:false ~snapshot Automatic with
                  | Ok selected -> selected.route=B.Live_route (Some client.client_id) | Error _ -> false);
@@ -287,12 +287,12 @@ let scenario mode =
               check bool "the same connection answers again" true
                 (match issue () with W.Issue_result (Ok (B.Answered _)) -> true
                  | Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
-                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _
+                 | Issue_result (Error _) | Snapshot_result _|Model_reply _|Download_reply _
                  | Poll_result _|Receipt|Service_refusal _ -> false));
             check bool "retirement joins the original guardian and peer" true (dispatch W.Retire=W.Receipt);
             check bool "the exact original client cannot register again" true
               (match dispatch (W.Poll {client;window_sec=0.}) with W.Service_refusal _ -> true
-               | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+               | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
             check bool "retirement exposes no replacement UUID" true (B.connected_clients ()=[]);
             check bool "repeated retirement observes the same receipt" true (dispatch W.Retire=W.Receipt)) in
         let worker () = if mode="ego-conflict" then
@@ -311,7 +311,7 @@ let scenario mode =
         "space.inspect\n" (read (Filename.concat root "ego-steps"));
       if mode="gate" then check bool "blocked validation retirement remains unknown after original stop" true
         (match !retirement with Some (W.Service_refusal {disposition=W.Outcome_unknown;_}) -> true
-         | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _|Extension_reply _
+         | None | Some (Service_refusal {disposition=Not_started;_}|Snapshot_result _|Model_reply _
              |Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
       check string "operator profile is never cleared" "preserved" (read sentinel);
       let commands=Filename.concat root "commands" in

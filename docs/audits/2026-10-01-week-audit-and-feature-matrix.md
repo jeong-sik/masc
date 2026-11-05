@@ -61,7 +61,7 @@
 | TUI | 일부 | TUI 가 부르는 경로 161개는 모두 서버 route 에 닿고 디코더 15개 중 어긋난 것은 하나다. 운영 세션의 메인 루프가 15.5% 멈춘다. Home 은 부분 읽기 실패를 전체 실패로 읽어 결정 카드를 숨긴다. 푸터와 실제 동작이 어긋난 곳이 남아 있다 | D13a-01 D13a-02 D13b-01~06 |
 | 웹 대시보드 | 일부 | 09-29 의 승인 대기·probe 상태·request_context·delivery kind 문제는 고쳐졌다. 번들이 09-29 11:52 커밋에 멈춰 부팅마다 경고한다 | L2-08 D13a-08 |
 | Keeper 프롬프트·도구 설명 | 일부 | 기본 `keeper.md` 의 도구 이름·인자는 대부분 구현과 맞다. 라이브 Keeper 26명은 override 를 읽고 기본값과 6곳 다르다. 모든 Keeper 가 읽는 줄이 없는 도구를 가리킨다(#40510). 시스템 본문이 한 주에 55% 늘었다 | D15-01 D15-02 D15-03 D15-06 |
-| 설정 (TOML·환경변수) | 일부 | Keeper TOML 키 23개는 모두 읽힌다. 새 `MASC_*` 환경변수는 0개(280개 그대로)이다. runtime.toml 로 줄 수 있다는 Keeper 설정 키 8개는 서버가 뜰 때 계산된 값만 읽는다. `MASC_AUTH_STRICT=strict` 는 거절하지 않고 로그만 남긴다 | W2-02 W2-04 W2-06 W2-07 |
+| 설정 (TOML·환경변수) | 일부 | Keeper TOML 키 23개는 모두 읽힌다. 새 `MASC_*` 환경변수는 0개(280개 그대로)이다. runtime.toml 로 줄 수 있다는 Keeper 설정 키 8개는 서버가 뜰 때 계산된 값만 읽는다. | W2-02 W2-06 W2-07 |
 | 저장 용량·보존 | 일부 | 30일 정리가 tool_calls·costs·audit 등에 걸려 돈다. `.masc` 116GB, worktree 1,041개(10-01 오전), 정리하는 코드가 없는 옛 홈 약 50GB(antigravity 33.2GB, codex 17.2GB)가 쌓여 있다. 파티션 원장은 하루 1.9만 개씩 는다 | L3-01~13 W3-02 |
 | Terminal-Bench 준비 | 일부 | 어댑터는 main 인터페이스와 맞고 v0.48.0 서버가 head 로 렌더한 arm b·e·f·h 설정으로 `keeper_up` 까지 간다. head 로 돌린 기록은 0건이고 GPU 3개와 자원 초과 10개는 이 호스트에서 못 돌린다. 돌리기 전에 서버를 띄워 보는 사전 점검(#40509)과 trial 기록에 설정 출처를 남기는 변경(#40518)을 올렸다 | D14-01~05 |
 
@@ -136,7 +136,6 @@
 ### 5-3. 이름은 있는데 동작이 없다
 
 - W2-02: runtime.toml 로 줄 수 있다고 안내하는 Keeper 설정 키 8개가 서버가 뜰 때 계산된 값만 읽는다. 바꿔도 효과가 없는데 설정 화면은 적용됐다고 한다.
-- W2-04: `MASC_AUTH_STRICT=strict` 는 요청을 거절하지 않고 로그만 남긴다. 2026-04 부터 "다음 단계"로 미뤄 둔 상태다.
 - W1-01: 도구의 `admin_tool` 표시가 Keeper 경로에서는 아무 효과가 없다.
 - D16a-02·D16a-03: `Context_measured` 이벤트를 만드는 곳이 없어 `context_handoff_needed` 는 늘 false 이고, 에이전트 적합도의 handoff 값은 "핸드오프가 없으면 만점"이라 늘 100% 다.
 - D15-02: 모든 Keeper 가 읽는 World State 줄이 없는 도구 `keeper_status` 를 가리킨다(요청의 34.7%). #40510 이 고친다.
@@ -209,7 +208,7 @@
 - **쓰기만 하고 읽지 않는 것.** `ready_confirmation` 행(3,157행, 1.2MB, W3), 라이브 runtime.toml 의 `[health]`·`[tui]` 같은 키 2개(W2-01), `healthcheck.path`(설정 마법사가 모든 HTTP provider 에 적고 로드 때 검사까지 하지만 상태 확인에 쓰는 곳이 없다, W2-09), 읽는 코드가 없거나 읽고 버리는 환경변수 3개(라이브 프로세스는 읽는 곳 없는 `MASC_KEEPER_BOOTSTRAP_ENABLED` 를 쥐고 있다, W2-06).
 - **쓰는 코드가 없는데 읽는 route 만 남은 것.** `mention_inbox`, Keeper response feedback(W3-04).
 - **부르는 곳이 없는 것.** `Candidate_fault.of_transport_error`, `Runtime_muse_msp.turn_interrupt_request`(W3). 측정 콜백 두 개는 lib 의 모든 호출자에서 `fun _ -> Ok ()` 다(X3-08). `?recovery_view` 를 만드는 production 호출이 0곳이라 `Some` 분기가 죽은 코드다(D2-08). 입력을 그대로 돌려주는 stub `resolve_keeper_wake_target`(D5-11, X3-03, #40407).
-- **이름만 있고 동작이 다른 것.** runtime.toml 로 줄 수 있다고 한 Keeper 설정 키 8개는 서버가 뜰 때 계산한 값만 읽는다(W2-02). 설정 화면의 effective_value 는 `Runtime_params` 를 안 봐서 같은 설정 7개가 실제와 다를 수 있다(W2-03). `MASC_AUTH_STRICT=strict` 는 거절하지 않고 로그만 남긴다(W2-04). `Context_measured` 이벤트를 만드는 곳이 없어 `context_handoff_needed` 는 늘 false 다(D16a-02). `admin_tool` 표시가 Keeper 경로에서 효과가 없다(W1-01).
+- **이름만 있고 동작이 다른 것.** runtime.toml 로 줄 수 있다고 한 Keeper 설정 키 8개는 서버가 뜰 때 계산한 값만 읽는다(W2-02). 설정 화면의 effective_value 는 `Runtime_params` 를 안 봐서 같은 설정 7개가 실제와 다를 수 있다(W2-03). `Context_measured` 이벤트를 만드는 곳이 없어 `context_handoff_needed` 는 늘 false 다(D16a-02). `admin_tool` 표시가 Keeper 경로에서 효과가 없다(W1-01).
 - **화면이 못 읽는 것.** TUI `play_invite_refusal` 이 옛 거절 모양을 읽어 항상 None 이다(D13a-01). ask 로그를 못 읽으면 서버가 질문 0개로 답하고 Home 이 "결정 기다리는 것 없음"이라고 그린다(D13a-04). Home 승인 줄이 '아직 안 읽음'·'읽기 실패'·'옛 값'·'사용 불가'를 같은 문구로 그린다(D13b-03). `/login` 모델 선택의 `a:전체` 는 context 를 모르는 모델을 안내 없이 건너뛴다(D13b-08). TUI 에서 MSX 키를 눌러도 서버가 거절한 결과를 버린다(X3-04).
 - **볼 곳이 없는 것.** Candle 상태·원장·지급 대기 목록(D8-11, #40024 열림). `failed_attempt` 마크와 exact lane 쉼(D1-08). 서버가 60초마다 읽는 GitHub PR 목록(W3-03, 서버 PR 조회 API 는 운영자가 남기기로 했다).
 - **도구 지표.** 도구 지표 저장소가 한 도구를 모델 이름과 내부 이름 두 줄로 쪼개고(W1-03), Skill·Composition·`tool_search`·외부 MCP 호출은 기록하지 않아 도구 호출의 4.3%가 빠진다(W1-04).

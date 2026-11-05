@@ -720,9 +720,6 @@ let test_docker_shaped_exec_refuses_a_microvm_keeper () =
   refused "exec_argv"
     (Masc.Keeper_turn_sandbox_runtime.exec_argv
        ~validate_cached_container:false runtime ~cwd:base ~command_argv:[ "true" ]);
-  refused "run_bash_with_status"
-    (Masc.Keeper_turn_sandbox_runtime.run_bash_with_status
-       ~timeout_sec:1.0 runtime ~cwd:base ~cmd:"true" ());
   refused "run_exec_pipeline_with_status"
     (Masc.Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
        ~timeout_sec:1.0 runtime ~cwd:base
@@ -874,26 +871,6 @@ let test_docker_shell_entrypoint_refuses_microvm () =
     Alcotest.(check string) "shared refusal sentence" refusal message
   | Ok _ ->
     Alcotest.fail "docker shell entrypoint executed for a Micro_vm keeper"
-
-let test_docker_bash_entrypoint_refuses_microvm () =
-  let base = temp_dir "microvm_refuse_bash_" in
-  let config = Masc.Workspace.default_config base in
-  let meta = microvm_meta ~name:"vm-refuse-bash" in
-  let response =
-    Masc.Keeper_sandbox_docker.run_docker_bash
-      ~turn_sandbox_runtime:None
-      ~config
-      ~meta
-      ~cwd:(Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
-      ~timeout_sec:5.0
-      ~cmd:"true"
-      ~network_mode:Profile.Network_none
-  in
-  if not (Astring.String.is_infix ~affix:refusal response)
-  then
-    Alcotest.failf
-      "bash entrypoint did not refuse with the shared sentence; got: %s"
-      response
 
 (* Live smoke: starts a real guest through the turn runtime and runs one
    command in it. Opt-in via MASC_MICROVM_LIVE=1 — it needs Apple's
@@ -5847,8 +5824,6 @@ let () =
     ; ( "refusal"
       , [ Alcotest.test_case "docker shell entrypoint refuses" `Quick
             test_docker_shell_entrypoint_refuses_microvm
-        ; Alcotest.test_case "docker bash entrypoint refuses" `Quick
-            test_docker_bash_entrypoint_refuses_microvm
         ] )
     ; ( "turn"
       , [ Alcotest.test_case "factory resolves to a profile-carrying runtime" `Quick

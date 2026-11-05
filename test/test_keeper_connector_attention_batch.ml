@@ -314,7 +314,7 @@ let connector_event_ids_of_queue queue =
        | Q.Completion_authority_rejected _
        | Q.Task_outcome _
        | Q.Task_cancelled _ | Q.Workspace_message _
-       | Q.Delegate_completed _ | Q.Composition_completed _ | Q.Tool_result_ready _ | Q.Owned_job_completed _ | Q.Addon_operation_changed _ -> None)
+       | Q.Delegate_completed _ | Q.Composition_completed _ | Q.Tool_result_ready _ | Q.Owned_job_completed _ -> None)
   |> List.sort String.compare
 ;;
 
@@ -1440,8 +1440,6 @@ let test_checkpoint_preserves_results_and_services_successors () =
                                  cc_terminal=Composition_succeeded}
       ; Q.Owned_job_completed {oj_job_id=Keeper_owned_job_identity.Job_id.fresh ();
                                oj_source=source;oj_channel=channel}
-      ; Q.Addon_operation_changed {ao_origin_id=String.make 64 'a';ao_publication_id=Random_id.uuid_v7 ();
-                                   ao_source=source;ao_channel=channel}
       ; Q.Workspace_message {wmsg_request_id="original-message";wmsg_from="another-keeper"}
       ; Q.Ask_answered {ask_id="original-ask";channel}
       ; Q.Completion_authority_rejected {car_task_id="original-task";car_verification_id="rejected";
@@ -1450,14 +1448,7 @@ let test_checkpoint_preserves_results_and_services_successors () =
       ; Q.Task_outcome {to_task_id="approved-task";to_verification_id="approved";
                         to_producer=keeper_name;to_authority=authority} ] in
     let originals = List.mapi (fun index payload ->
-      let post_id = match payload with
-        | Q.Addon_operation_changed change -> Q.addon_operation_change_post_id change
-        | Q.Bootstrap | Q.Board_signal _ | Q.Board_attention _ | Q.Schedule_due _
-        | Q.Connector_attention _ | Q.Hitl_resolved _ | Q.Fusion_completed _
-        | Q.Delegate_completed _ | Q.Composition_completed _ | Q.Tool_result_ready _
-        | Q.Owned_job_completed _ | Q.Workspace_message _ | Q.Ask_answered _
-        | Q.Completion_authority_rejected _ | Q.Task_cancelled _ | Q.Task_outcome _ ->
-          Printf.sprintf "original-%d" index in
+      let post_id = Printf.sprintf "original-%d" index in
       let source : Q.stimulus = {post_id;urgency=Immediate;arrived_at=1.;payload} in
       Q.stimulus_to_yojson source |> Q.stimulus_of_yojson
       |> require "validate original source coordinates before enqueue") payloads in

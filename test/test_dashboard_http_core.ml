@@ -6438,7 +6438,6 @@ let test_composite_preserves_runtime_attempt_scopes () =
     let execution =
       Server_dashboard_http_composite_claims.composite_execution_receipt_json
         ~config
-        ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
         ~keeper_name
     in
     let open Yojson.Safe.Util in
@@ -7394,8 +7393,7 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, verifier_exact, \
-     browser_stagehand_exact, candle_appraiser)"
+     hitl_auto_judge, board_attention_exact, verifier_exact, candle_appraiser)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));

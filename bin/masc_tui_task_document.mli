@@ -10,6 +10,15 @@ val equal_input : input -> input -> bool
 val part : input -> part
 val columns : input -> int
 val prepare : input -> string list
-(** Wrap and sanitize all content once on the CPU worker. No truncation. *)
+(** Wrap and sanitize all content once on the CPU worker. No truncation. A
+    history note that is a JSON object or array is drawn as the chat draws a
+    served document, in colour; every other note keeps the one colour. A blank
+    line inside a note is a blank row; blank lines at either end of a note are
+    dropped. *)
+val history_heading_rows : width:int -> string list
+(** The History section's heading, wrapped to [width] and drawn in the style
+    of the Body's section headings. The rows carry their own style: a caller
+    must not hand them to a wrapper that sanitises text. *)
 val history_status_lines : width:int -> view:Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view -> in_flight:bool -> continuing:bool -> string list
-(** Current read/pending/failure metadata only; contains no event-body work. *)
+(** Current read/pending/failure metadata only; contains no event-body work.
+    The section heading is {!history_heading_rows}. *)

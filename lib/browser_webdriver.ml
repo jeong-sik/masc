@@ -799,9 +799,6 @@ let rec execute_unlocked t = function
        wrapper: its model wait must not hold the session mutex or the active
        count. Reaching here would mean the dispatch was bypassed. *)
     Error (Protocol "browser locate runs outside the session lock")
-  | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
-    (* [execute] refuses these before browser I/O. *)
-    Error (Protocol Browser_lane.sentence_verbs_refused)
   | Browser_lane.Page_native_workflow _ -> Error (Protocol "native workflows require an ego connection")
   | Browser_lane.Page_snapshot _ -> Error (Protocol Browser_lane.snapshot_refused)
   | Browser_lane.Tabs_list ->
@@ -919,8 +916,8 @@ let execute t verb =
   | Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ | Browser_lane.Page_capture _
   | Browser_lane.Page_scene _ | Browser_lane.Page_snapshot _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _
-  | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
-  | Browser_lane.Page_extract _ | Browser_lane.Page_interact _ | Browser_lane.Page_native_workflow _ ->
+  | Browser_lane.Page_context _
+  | Browser_lane.Page_interact _ | Browser_lane.Page_native_workflow _ ->
   with_session_lock t (fun () ->
     match verb with
     | Browser_lane.Page_native_workflow _ -> Browser_lane.Rejected_before_effect "native workflows require an ego connection"
@@ -930,8 +927,6 @@ let execute t verb =
       Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
     | Browser_lane.Page_interact {action=(Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _);_} ->
       Browser_lane.Rejected_before_effect Browser_lane.snapshot_target_refused
-    | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
-      Browser_lane.Rejected_before_effect Browser_lane.sentence_verbs_refused
     | Browser_lane.Page_snapshot _ -> Browser_lane.Rejected_before_effect Browser_lane.snapshot_refused
     | Browser_lane.Page_act action ->
       (match execute_action t action with
@@ -965,7 +960,7 @@ let execute t verb =
                 | _ -> Browser_lane.Refused message)
            | (Browser_lane.Page_interact _, Some (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
            | (Browser_lane.Page_interact _, None)
-           | ((Browser_lane.Page_native_workflow _ | Browser_lane.Tabs_list | (Browser_lane.Session_close | (Browser_lane.Session_status | (Browser_lane.Page_read _ | (Browser_lane.Page_document _ | (Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ | (Browser_lane.Page_capture _ | (Browser_lane.Page_scene _ | Browser_lane.Page_snapshot _ | (Browser_lane.Session_open _ | (Browser_lane.Page_goto _ | (Browser_lane.Page_elements _ | (Browser_lane.Page_act _ | (Browser_lane.Page_context _ | (Browser_lane.Page_instruct _ | (Browser_lane.Page_locate _ | Browser_lane.Page_extract _))))))))))))))), _) -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
+           | ((Browser_lane.Page_native_workflow _ | Browser_lane.Tabs_list | (Browser_lane.Session_close | (Browser_lane.Session_status | (Browser_lane.Page_read _ | (Browser_lane.Page_document _ | (Browser_lane.Page_downloads _ | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ | (Browser_lane.Page_capture _ | (Browser_lane.Page_scene _ | Browser_lane.Page_snapshot _ | (Browser_lane.Session_open _ | (Browser_lane.Page_goto _ | (Browser_lane.Page_elements _ | (Browser_lane.Page_act _ | (Browser_lane.Page_context _ | ((Browser_lane.Page_locate _))))))))))))))), _) -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data]))
       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
       | Error error -> Browser_lane.Refused (error_message error))
 

@@ -116,7 +116,6 @@ let route_name = function
   | Browser_lane.Live_route (Some id) -> "live:" ^ Browser_lane.client_id_to_string id
   | Browser_lane.Live_route None -> "live:unselected"
   | Browser_lane.Automation_route -> "automation"
-  | Browser_lane.Stagehand_route -> "stagehand"
 (* The host's reader stands in for the browser Add-on worker. It records each
    request so a test can see which route and tab the source asked for. *)
 let browser_reader answer =
@@ -498,12 +497,9 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_web_search)
 
 (* What a built-in lane offers a binding and what [parse] accepts come from one
-   match, so a backend without an idle document observer is refused as a
-   source and lists no source kind. *)
+   match. *)
 let test_built_in_lanes_offer_what_parse_accepts () =
   let offers builtin = List.map Sources.kind_to_string (Sources.offers builtin) in
-  check (Alcotest.list string) "Stagehand offers no source" []
-    (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Stagehand));
   check (Alcotest.list string) "automation offers its document" [ "browser_document" ]
     (offers (Masc.Lane_id.Browser Browser_lane.Lane_name.Automation));
   check (Alcotest.list string) "the live browser offers its document" [ "browser_document" ]
@@ -521,11 +517,6 @@ let test_built_in_lanes_offer_what_parse_accepts () =
     binding [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
       "lane",`String (Browser_lane.Lane_name.to_wire lane);"tab_id",`Int 1;
       "target_id",`String "project";"environment",`String "preview";"request_id",`String "capture"]] in
-  (match Sources.parse (document Browser_lane.Lane_name.Stagehand) with
-   | Ok _ -> fail "a stagehand document source must be refused"
-   | Error error ->
-     check bool "the refusal names the stagehand lane" true
-       (String.equal error "a lane addon cannot observe the stagehand lane: it has no idle document observer"));
   check bool "an automation document source is accepted" true
     (Result.is_ok (Sources.parse (document Browser_lane.Lane_name.Automation)))
 

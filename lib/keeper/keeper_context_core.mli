@@ -73,12 +73,13 @@ val create_session : session_id:string -> base_dir:string -> session_context
 (** {1 JSONL persistence} *)
 
 (** Append [msg] to the keeper's history JSONL, choosing
-    [history.jsonl] / [history.internal.jsonl] from [source]. The line names
-    the turn that wrote it ([turn_ref]). *)
+    [history.jsonl] / [history.internal.jsonl] from [source]
+    ({!Keeper_context_core_history.persist_message}). The line names the turn
+    that wrote it ([turn_ref]). *)
 val persist_message :
   keeper_name:string ->
   turn_ref:Ids.Turn_ref.t ->
-  ?source:string ->
+  source:Keeper_types_support.history_source ->
   session_context ->
   Agent_core.Types.message ->
   unit

@@ -1,9 +1,9 @@
 (** [Workspace.init] writes [state.json] for a fresh workspace.
 
     [Workspace_bootstrap.default_workspace_state] declares that record.
-    [init] carried its own copy of the same twelve fields, so changing a
-    default — [search_strategy_default] is one — did not reach a workspace
-    [init] created. Nothing in the type system connected the two.
+    [init] carried its own copy of the same nine fields, so changing a
+    default did not reach a workspace [init] created. Nothing in the type
+    system connected the two.
 
     This pins what [init] writes against the declared default. A re-inlined
     copy that drifts in any field fails here. A message is filed before

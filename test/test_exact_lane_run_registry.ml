@@ -857,7 +857,7 @@ let test_a_busy_lane_cannot_evict_a_quiet_lanes_history () =
 ;;
 
 (* The lanes this registry records, written out apart from the registry.
-   Verifier reviews have their own stores; Stagehand retains no runs here. *)
+   Verifier reviews have their own stores. *)
 let recorded_lanes = [ R.Librarian; R.Hitl_auto_judge; R.Board_attention; R.Workspace_curator; R.Candle_appraiser ]
 
 let test_exact_history_is_not_pruned_across_lanes () =
@@ -942,19 +942,17 @@ let registration_row lane =
     (Standalone_lane.to_id lane)
 ;;
 
-(* Verifier reviews have their own registries and Stagehand requests have no
-   retained run registry yet. Rows naming either lane are refused on replay. *)
+(* Verifier reviews have their own registries. Rows naming that lane are
+   refused on replay. *)
 let test_the_registry_refuses_unrecorded_lanes () =
   check bool "the Verifier lane has no registry lane" true
     (Option.is_none (R.lane_of_standalone Standalone_lane.Verifier));
-  check bool "the Browser Stagehand lane has no registry lane" true
-    (Option.is_none (R.lane_of_standalone Standalone_lane.Browser_stagehand));
   List.iter
     (fun lane ->
        check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
          (match R.lane_of_standalone lane with
           | Some recorded -> Lane_run_identity.equal (R.run_lane recorded) (Standalone_lane.run_identity lane)
-          | None -> lane = Standalone_lane.Verifier || lane = Standalone_lane.Browser_stagehand))
+          | None -> lane = Standalone_lane.Verifier))
     Standalone_lane.all;
   let read_and_refused lane =
     let path = fresh_log_path "exact-lane-verifier-row-" in
@@ -966,9 +964,7 @@ let test_the_registry_refuses_unrecorded_lanes () =
   check (pair int int) "a Board row is read and kept" (1, 0)
     (read_and_refused Standalone_lane.Board_attention);
   check (pair int int) "a Verifier row is read and refused" (1, 1)
-    (read_and_refused Standalone_lane.Verifier);
-  check (pair int int) "a Stagehand row is read and refused" (1, 1)
-    (read_and_refused Standalone_lane.Browser_stagehand)
+    (read_and_refused Standalone_lane.Verifier)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =

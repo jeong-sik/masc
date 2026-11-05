@@ -171,7 +171,6 @@ let model_observability_json ~current_runtime_id ~runtime_blocker_class
       , `Bool runtime_verified )
     ; ( "runtime_observation_scope"
       , `String (runtime_observation_scope_to_string runtime_observation_scope) )
-    ; "resolved_candidates", `List []
     ; ( "selected_model"
       , Json_util.string_opt_to_json (Option.map fst selected_model) )
     ; "attempt_summary", attempt_summary_json ?selected_model latest_runtime

@@ -187,7 +187,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | No_browser ->
             (match view.source with
              | Live -> "Browser bridge not connected"
-             | Automation | Stagehand -> "Browser session closed • o:open"), Theme.recede ()
+             | Automation -> "Browser session closed • o:open"), Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
              | Some scene ->
@@ -302,8 +302,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> live_connection_row view
-             | Automation -> "  Work browser • b:choose browser • g:URL • o:open / x:close • A:advanced"
-             | Stagehand -> "  Chromium work browser • b:choose browser • g:URL • o:open / x:close • A:advanced");
+             | Automation -> "  Work browser • b:choose browser • g:URL • o:open / x:close • A:advanced");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

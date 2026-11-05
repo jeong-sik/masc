@@ -208,12 +208,15 @@ let terminal_reason_code_of_core_error = function
   | Agent_core.Error.Orchestration _ -> "orchestration_error"
   | Agent_core.Error.Media _ -> "media_error"
   | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err -> (
-    (* Typed carrier first; the string parse survives inside
-       classify_masc_internal_error for pre-carrier producers
-       (RFC-0371 B12). *)
-    match Keeper_internal_error.classify_masc_internal_error err with
-    | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
-    | None -> "internal_error")
+    match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure err with
+    | Some agent_error -> agent_error_terminal_reason_code agent_error
+    | None ->
+      (* Typed carrier first; the string parse survives inside
+         classify_masc_internal_error for pre-carrier producers
+         (RFC-0371 B12). *)
+      (match Keeper_internal_error.classify_masc_internal_error err with
+       | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
+       | None -> "internal_error"))
 ;;
 
 (* RFC-0042 PR-2.5: typed bridge for agent-core errors. The wire format is the

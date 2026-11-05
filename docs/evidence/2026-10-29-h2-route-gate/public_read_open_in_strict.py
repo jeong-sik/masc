@@ -4,7 +4,7 @@
   public_read_open_in_strict.py <run-dir>/strict
 
 `<run-dir>/strict` is the output of scripts/auth-route-baseline/run.sh with
-MASC_HTTP_AUTH_STRICT=true MASC_AUTH_STRICT=strict. A `Public_read` route that answers 401 or 403
+MASC_HTTP_AUTH_STRICT=true. A `Public_read` route that answers 401 or 403
 to a request with no credential is closed under strict auth. The others are open, and
 `Server_auth.is_public_read_path` is what opens them. `/api/v1/published-artifacts/` opens only
 for a well-formed artifact id, which the probe's `/probe-a1` is not, so it shows as closed here.

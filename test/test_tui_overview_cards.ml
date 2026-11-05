@@ -8,6 +8,8 @@ open Alcotest
 module Cards = Masc_tui_overview_cards
 module Layout = Masc_tui_message_layout
 
+let reset = Masc_tui_ansi.Ansi.reset
+
 let strip = Masc_tui_theme.strip_sgr
 
 let without_spaces text =
@@ -43,14 +45,63 @@ let test_a_row_never_loses_its_text () =
                    (Layout.display_width line <= cells))
               lines)
          labels)
+    [ 4; 9; 10; 12; 24; 40; 80 ]
+
+(* A row that takes more than one line reads as one row: its later lines begin
+   two cells in, and a row that fits on a line is as the word wrap gives it. *)
+let test_a_row_that_wraps_hangs_its_later_lines () =
+  List.iter
+    (fun cells ->
+       List.iter
+         (fun label ->
+            match Cards.row_lines ~cells label with
+            | [ only ] ->
+                check (list string) "a row on one line is as it is"
+                  (Layout.wrap_words ~max_cells:cells label) [ only ]
+            | first :: later ->
+                check bool "the first line is not hung" true
+                  (not (String.starts_with ~prefix:" " first));
+                List.iter
+                  (fun line ->
+                     check bool "a later line is hung two cells in" true
+                       (String.starts_with ~prefix:"  " line
+                        && not (String.starts_with ~prefix:"   " line)))
+                  later
+            | [] -> fail "a row has one line at least")
+         labels)
     [ 12; 24; 40; 80 ]
+
+(* Eight cells of text must be left beside the indent: nine cells leave seven,
+   and the row is as the word wrap gives it; ten leave eight, and it hangs. *)
+let test_a_column_too_narrow_for_the_indent_leaves_a_wrapped_row_as_it_is () =
+  List.iter
+    (fun cells ->
+       List.iter
+         (fun label ->
+            check (list string) (Printf.sprintf "as wrapped at %d cells" cells)
+              (Layout.wrap_words ~max_cells:cells label) (Cards.row_lines ~cells label))
+         labels)
+    [ 4; 9 ];
+  let wrapped_at_ten =
+    List.filter_map
+      (fun label ->
+         match Cards.row_lines ~cells:10 label with
+         | _ :: (_ :: _ as later) -> Some later
+         | [] | [ _ ] -> None)
+      labels
+  in
+  check bool "a label wraps at ten cells" true (wrapped_at_ten <> []);
+  List.iter
+    (List.iter (fun line ->
+         check bool "hung at ten cells" true (String.starts_with ~prefix:"  " line)))
+    wrapped_at_ten
 
 let test_a_blank_row_is_still_one_line () =
   check int "an empty row keeps its place" 1 (List.length (Cards.row_lines ~cells:20 ""))
 
 (* The two columns: what to do on the left, readings on the right. *)
 let draw ?(inner = 120) ?(rows = 40) ?(selected = 1) ?(decisions = labels)
-    ?(decisions_whole = true)
+    ?(decisions_whole = true) ?(actions = [])
     ?(continuation = [ 100, "Continue with kidsnote-slack-context-collector · save durability unconfirmed" ]) () =
   Cards.draw ~inner ~rows
     ~is_selected:(fun action -> action = selected)
@@ -58,6 +109,7 @@ let draw ?(inner = 120) ?(rows = 40) ?(selected = 1) ?(decisions = labels)
     ~decisions_whole
     ~continuation
     ~status:(fun ~cells:_ -> [ "Health: ok"; "Work: 3 done" ])
+    ~actions
 
 let rows_exn = function
   | Some rows -> rows
@@ -142,14 +194,212 @@ let test_a_partial_decision_window_draws_no_card () =
   check bool "a partial window falls back to the plain rows" true
     (draw ~rows:200 ~decisions_whole:false () = None)
 
+(* The reasons are an addition to the cards. Where the cards fit without them
+   they are still drawn, and where they do not fit either way the caller draws
+   the plain rows. *)
+let test_the_reasons_never_cost_the_cards () =
+  let reasons =
+    [ "keeper_fleet_safety:no_executable_keeper_fibers"; "a second reason"; "a third reason" ]
+  in
+  let needed = List.length (rows_exn (draw ())) in
+  check bool "exactly enough" true
+    (Option.is_some (draw ~rows:needed ~actions:reasons ()));
+  check bool "one line short" true
+    (draw ~rows:(needed - 1) ~actions:reasons () = None)
+
 let test_an_empty_decision_list_says_so_in_a_card () =
   let rows = rows_exn (draw ~decisions:[] ~continuation:[] ()) in
   check bool "the cards are still drawn" true (rows <> [])
+
+(* The server's reasons for needing the operator. The card and the plain layout
+   draw them through the same function, and the plain layout asks for as many
+   whole reasons as the rows it has left. *)
+let reasons =
+  [ "keeper_fleet_safety:no_executable_keeper_fibers"
+  ; "keeper_identity_drift:configured_keeper_without_runtime_meta"
+  ; "keeper_memory_execution:addon_unattached"
+  ; "운영자가 확인해야 하는 이유 하나"
+  ; "x"
+  ]
+
+let take count list = List.filteri (fun index _ -> index < count) list
+
+let test_a_reason_is_a_row_in_the_warning_colour () =
+  List.iter
+    (fun cells ->
+       List.iter
+         (fun reason ->
+            let lines = Cards.reason_lines ~cells reason in
+            check (list string) "the text of its lines is the row's"
+              (Cards.row_lines ~cells reason) (List.map strip lines);
+            List.iter
+              (fun line ->
+                 check bool "a line opens in the warning colour" true
+                   (String.starts_with ~prefix:(Masc_tui_ansi.Theme.warn ()) line);
+                 check bool "a line closes the colour it opened" true
+                   (String.ends_with ~suffix:reset line))
+              lines)
+         reasons)
+    [ 12; 24; 40; 80 ]
+
+let test_the_title_names_how_many_reasons_there_are () =
+  List.iter
+    (fun count ->
+       check bool (Printf.sprintf "%d is in the title" count) true
+         (contains_flat ~needle:(string_of_int count) (Cards.reasons_title count)))
+    [ 0; 1; 3; 12 ]
+
+let indent = "  "
+
+(* The rows the plain layout is owed for the first [kept] of [given], counted
+   here from the lines of the reasons and not asked of the function under test:
+   a heading, the lines, and a row that says some were left out. *)
+let owed_height ~inner given kept =
+  let cells = inner - Layout.display_width indent in
+  let lines =
+    List.fold_left
+      (fun sum reason -> sum + List.length (Cards.reason_lines ~cells reason))
+      0 (take kept given)
+  in
+  1 + lines + if kept < List.length given then 1 else 0
+
+(* How many reasons the plain layout owes: the most that fit in [rows] together
+   with their note, none when not even the first does. *)
+let owed_count ~inner ~rows given =
+  let fits kept = owed_height ~inner given kept <= rows in
+  List.fold_left
+    (fun best kept -> if fits kept then kept else best)
+    0
+    (List.init (List.length given) (fun index -> index + 1))
+
+(* The rows themselves, built from the same pieces the layout is made of. *)
+let owed_rows ~inner given kept =
+  let cells = inner - Layout.display_width indent in
+  let omitted = List.length given - kept in
+  if kept = 0 then []
+  else begin
+    let lines =
+      List.concat_map
+        (fun reason ->
+           List.map (fun line -> None, indent ^ line) (Cards.reason_lines ~cells reason))
+        (take kept given)
+    in
+    let note =
+      if omitted > 0 then
+        [ Some (Masc_tui_ansi.Theme.recede ()), indent ^ Masc_tui_card.more_text omitted ]
+      else []
+    in
+    ((Some Masc_tui_ansi.Ansi.bold, " " ^ Cards.reasons_title (List.length given)) :: lines)
+    @ note
+  end
+
+let rows_testable = pair (option string) string
+
+let widths = [ 14; 26; 42; 82 ]
+
+let plain ~inner ~rows given = Cards.plain_reasons ~indent ~inner ~rows given
+
+(* The rows are the heading, the lines of the first reasons that fit, and the
+   note, whatever the width and the number of rows. *)
+let test_the_rows_are_the_heading_the_first_reasons_and_the_note () =
+  List.iter
+    (fun inner ->
+       List.iter
+         (fun rows ->
+            let kept = owed_count ~inner ~rows reasons in
+            check (list rows_testable)
+              (Printf.sprintf "rows at %d cells and %d rows" inner rows)
+              (owed_rows ~inner reasons kept) (plain ~inner ~rows reasons))
+         (List.init 25 Fun.id))
+    widths
+
+(* The edge of the rows: the whole list fits in exactly its height, and one row
+   less leaves some out. *)
+let test_the_reasons_fit_exactly_at_their_height () =
+  List.iter
+    (fun inner ->
+       let needed = owed_height ~inner reasons (List.length reasons) in
+       let all = plain ~inner ~rows:needed reasons in
+       check int "as many rows as the height" needed (List.length all);
+       check (list rows_testable) "all shown, no note"
+         (owed_rows ~inner reasons (List.length reasons)) all;
+       let short = plain ~inner ~rows:(needed - 1) reasons in
+       let left_out =
+         List.length reasons - owed_count ~inner ~rows:(needed - 1) reasons
+       in
+       check bool "one row less leaves some out" true (left_out > 0);
+       match List.rev short with
+       | (Some _, note) :: _ ->
+           check bool "the note says how many" true
+             (contains_flat ~needle:(string_of_int left_out) (strip note))
+       | [] | (None, _) :: _ -> fail "the last row is the note")
+    widths
+
+let test_no_reason_draws_no_row () =
+  List.iter
+    (fun rows -> check int "no rows" 0 (List.length (plain ~inner:40 ~rows [])))
+    [ 0; 1; 5; 40 ]
+
+(* The note row is kept back before any reason is taken, so the rows that hold
+   the heading and the first reason alone still draw nothing while others are
+   left out. One row more draws the heading, the first reason and the note. *)
+let test_rows_too_few_for_the_first_reason_and_the_note_draw_nothing () =
+  let inner = 40 in
+  let first_with_note = owed_height ~inner reasons 1 in
+  List.iter
+    (fun rows -> check int "no rows" 0 (List.length (plain ~inner ~rows reasons)))
+    (List.init first_with_note Fun.id);
+  let drawn = plain ~inner ~rows:first_with_note reasons in
+  check int "the first reason and its note" first_with_note (List.length drawn);
+  match drawn, List.rev drawn with
+  | (Some _, heading) :: _, (Some _, note) :: _ ->
+      check bool "the heading counts all the reasons" true
+        (contains_flat ~needle:(string_of_int (List.length reasons)) (strip heading));
+      check bool "the note counts the others" true
+        (contains_flat ~needle:(string_of_int (List.length reasons - 1)) (strip note))
+  | _ -> fail "a styled heading first and a styled note last"
+
+(* Over many lists, widths and row counts: the rows are those owed, in no more
+   rows than were given, and a reason line fits the width. *)
+let words =
+  [| "keeper_fleet_safety:no_executable_keeper_fibers"; "a"; "bb"
+   ; "configured_keeper_without_runtime_meta"; "운영자가"; "확인해야"; "하는"
+   ; "이유"; "x"; "keeper_memory_execution:addon_unattached" |]
+
+let random_reason state =
+  String.concat " "
+    (List.init (1 + Random.State.int state 6)
+       (fun _ -> words.(Random.State.int state (Array.length words))))
+
+let test_the_rows_owed_over_many_lists_widths_and_row_counts () =
+  let state = Random.State.make [| 42 |] in
+  for _ = 1 to 500 do
+    let given = List.init (Random.State.int state 7) (fun _ -> random_reason state) in
+    (* From four cells: the indent takes two and a letter two cells wide does
+       not fit in one. *)
+    let inner = 4 + Random.State.int state 59 in
+    let rows = Random.State.int state 18 in
+    let drawn = plain ~inner ~rows given in
+    let kept = owed_count ~inner ~rows given in
+    check bool "no more rows than it was given" true (List.length drawn <= rows);
+    check (list rows_testable) "the rows owed" (owed_rows ~inner given kept) drawn;
+    List.iter
+      (function
+        | None, text ->
+            check bool "a reason line fits its width" true
+              (Layout.display_width (strip text) <= inner)
+        | Some _, _ -> ())
+      drawn
+  done
 
 let () =
   run "tui overview cards"
     [ ( "rows"
       , [ test_case "a row never loses its text" `Quick test_a_row_never_loses_its_text
+        ; test_case "a row that wraps hangs its later lines" `Quick
+            test_a_row_that_wraps_hangs_its_later_lines
+        ; test_case "a column too narrow for the indent leaves a row as it is" `Quick
+            test_a_column_too_narrow_for_the_indent_leaves_a_wrapped_row_as_it_is
         ; test_case "a blank row is still one line" `Quick
             test_a_blank_row_is_still_one_line
         ] )
@@ -165,7 +415,24 @@ let () =
             test_cards_fall_back_when_they_do_not_fit
         ; test_case "a partial decision window draws no card" `Quick
             test_a_partial_decision_window_draws_no_card
+        ; test_case "the reasons never cost the cards" `Quick
+            test_the_reasons_never_cost_the_cards
         ; test_case "an empty decision list still draws the cards" `Quick
             test_an_empty_decision_list_says_so_in_a_card
+        ] )
+    ; ( "reasons"
+      , [ test_case "a reason is a row in the warning colour" `Quick
+            test_a_reason_is_a_row_in_the_warning_colour
+        ; test_case "the title names how many reasons there are" `Quick
+            test_the_title_names_how_many_reasons_there_are
+        ; test_case "the rows are the heading, the first reasons and the note" `Quick
+            test_the_rows_are_the_heading_the_first_reasons_and_the_note
+        ; test_case "the reasons fit exactly at their height" `Quick
+            test_the_reasons_fit_exactly_at_their_height
+        ; test_case "no reason draws no row" `Quick test_no_reason_draws_no_row
+        ; test_case "rows too few for the first reason and the note draw nothing" `Quick
+            test_rows_too_few_for_the_first_reason_and_the_note_draw_nothing
+        ; test_case "the rows owed over many lists, widths and row counts" `Quick
+            test_the_rows_owed_over_many_lists_widths_and_row_counts
         ] )
     ]

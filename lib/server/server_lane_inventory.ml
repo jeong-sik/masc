@@ -136,9 +136,6 @@ let browser_state publication = function
   | Browser_lane.Lane_name.Automation ->
       Browser_executor (browser_map (fun (p : Browser_addon_observation.published) ->
         p.automation.registered) publication)
-  | Browser_lane.Lane_name.Stagehand ->
-      Browser_executor (browser_map (fun (p : Browser_addon_observation.published) ->
-        p.stagehand.registered) publication)
 
 (* The Lane directory and what it declares, read off the server fiber. *)
 let declarations ~config =
@@ -246,7 +243,7 @@ let state_json = function
 let builtin_category = function
   | Exact (Standalone_lane.Librarian | Hitl_auto_judge | Board_attention | Verifier | Candle_appraiser) ->
       Some Lane_addon_category.Memory_and_judgment
-  | Exact Standalone_lane.Browser_stagehand | Browser _ -> Some Lane_addon_category.Browser
+  | Browser _ -> Some Lane_addon_category.Browser
   | Machine _ -> Some Lane_addon_category.Execution_environment
   | Declaration _ | Manual_instance _ -> None
 let row_to_json row = `Assoc (["id",str row.id;"label",str row.label;"purpose",str row.purpose;

@@ -34,96 +34,74 @@ let goal_receipt_authority_current (state : state) (receipt : goal_action_receip
       Planning_detail.receipt_authority_current ~credential_current ~current_instance
         ~current_confirmation ~receipt:authority
 
-let task_line ~cols ~ordinal ~task_ids ~use_ordinals (task : task) =
-  let status = Masc_domain.task_status_to_string task.status in
-  (* The icon and the status word share one color so the row's state reads at
-     a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
-     never reach this list ([active_tasks_of_domain] filters them); they keep
-     the default so a future caller showing one is visible rather than wrong. *)
-  let status_color =
-    match task.status with
-    | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> (Theme.info ())
-    | Masc_domain.AwaitingVerification _ -> Theme.warn ()
-    | Masc_domain.Todo -> Ansi.dim
-    | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ""
-  in
-  let assignee =
-    match Masc_domain.task_assignee_of_status task.status with
-    | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
-    | None -> ""
-  in
-  let goal_tag =
-    match task.goal_ids with
-    | [] -> ""
-    | goal :: _ ->
-        Printf.sprintf " %s%s%s" (Theme.recede ())
-          (Terminal_text.single_line goal)
-          Ansi.reset
-  in
-  let prefix id =
-    Printf.sprintf "%s%s%s %s[%s]%s " status_color
-      (task_status_icon task.status) Ansi.reset Ansi.dim id Ansi.reset
-  in
-  let suffix status owner =
-    Printf.sprintf " %s(%s%s)%s %s" status_color status owner Ansi.reset
-      (priority_indicator task.priority)
-  in
-  (* Preserve the Task number before spending cells on its owner and title.
-     The canonical prefix may yield on narrow screens, but its digits do not
-     share a truncation budget with unrelated fields. *)
-  let available = max 0 (framed_inner_width cols - 2) in
+(* The spelling a row falls back to when the state's own name does not fit
+   beside the other columns. *)
+let task_status_short (status : Masc_domain.task_status) =
+  match status with
+  | Masc_domain.Todo -> "todo"
+  | Masc_domain.Claimed _ -> "claimed"
+  | Masc_domain.InProgress _ -> "active"
+  | Masc_domain.AwaitingVerification _ -> "verify"
+  | Masc_domain.Done _ -> "done"
+  | Masc_domain.Cancelled _ -> "cancelled"
+
+let task_owner (task : task) =
+  match Masc_domain.task_assignee_of_status task.status with
+  | Some name -> Terminal_text.single_line name
+  | None -> ""
+
+(* The first goal only, the way the one-line row drew it. *)
+let task_first_goal (task : task) =
+  match task.goal_ids with
+  | [] -> ""
+  | goal :: _ -> Terminal_text.single_line goal
+
+(* Preserve the Task number before spending cells on its owner and title. The
+   canonical id may yield to its digits on narrow screens, and to a row
+   coordinate when even those do not fit. A row coordinate stays distinct when
+   an opaque ID cannot fit. The original identifier remains the selection key
+   and is readable in detail. *)
+let task_row_id ~id_width ~ordinal ~task_ids ~use_ordinals (task : task) =
   let id = Terminal_text.single_line task.id in
   let short_id =
     if String.starts_with ~prefix:"task-" id then
       let digits = String.sub id 5 (String.length id - 5) in
       if digits <> "" && String.for_all (fun c -> c >= '0' && c <= '9') digits then digits else id
     else id in
-  let status =
-    let required = Message_layout.display_width (prefix "")
-      + Message_layout.display_width (suffix status "")
-      + Message_layout.display_width id + Message_layout.display_width "Task" in
-    if required <= available then status
-    else match task.status with
-      | Masc_domain.Todo -> "todo"
-      | Masc_domain.Claimed _ -> "claimed"
-      | Masc_domain.InProgress _ -> "active"
-      | Masc_domain.AwaitingVerification _ -> "verify"
-      | Masc_domain.Done _ -> "done"
-      | Masc_domain.Cancelled _ -> "cancelled"
-  in
-  let fixed_chrome = Message_layout.display_width (prefix "")
-    + Message_layout.display_width (suffix status "") in
-  let fields = max 0 (available - fixed_chrome) in
-  let id = if Message_layout.display_width id + Message_layout.display_width "Task" <= fields
-    then id else short_id in
-  (* A row coordinate stays distinct when an opaque ID cannot fit. The
-     original identifier remains the selection key and is readable in detail. *)
-  let id =
-    if use_ordinals || Message_layout.display_width id > fields
-       || (not (String.equal id task.id)
-           && Task_id_set.mem id task_ids)
-    then Printf.sprintf "row %d" ordinal else id
-  in
-  let remainder = max 0 (fields - Message_layout.display_width id) in
-  let title = Terminal_text.single_line task.title in
-  (* A short title needs only its measured cells. Its spare allocation can
-     show the owner instead of padding beside a shortened identity. *)
-  let title_cells = min (remainder / 2) (Message_layout.display_width title) in
-  let assignee =
-    fit_width assignee
-      (min (remainder - title_cells) (Message_layout.display_width assignee))
-  in
-  let prefix = prefix id in
-  let suffix = suffix status assignee in
-  let fixed = Message_layout.display_width prefix + Message_layout.display_width suffix in
-  let goal_tag =
-    if fixed + Message_layout.display_width title
-       + Message_layout.display_width goal_tag <= available
-    then goal_tag else ""
-  in
-  prefix ^ fit_width title
-    (max 0 (available - fixed - Message_layout.display_width goal_tag))
-  ^ suffix ^ goal_tag
+  let id = if Message_layout.display_width id <= id_width then id else short_id in
+  if use_ordinals || Message_layout.display_width id > id_width
+     || (not (String.equal id task.id) && Task_id_set.mem id task_ids)
+  then Printf.sprintf "row %d" ordinal else id
+
+(* One row of the list: the readings of one task on the columns the header
+   names. The mark, the status word and the owner share the state's colour.
+   [task_ids] and [use_ordinals] come from the whole list, because whether a
+   short id is ambiguous depends on the other rows. *)
+let task_line ~layout ~id_width ~ordinal ~task_ids ~use_ordinals (task : task) =
+  Render_schedule.work_task_row
+    ~styles:
+      { Render_schedule.wstyle_state = task_state_style task.status
+      ; wstyle_task = Ansi.dim
+      ; wstyle_goal = Theme.recede ()
+      ; wstyle_urgent = Theme.bad ()
+      }
+    ~layout
+    { Render_schedule.wrow_mark = task_status_icon task.status
+    ; wrow_task = task_row_id ~id_width ~ordinal ~task_ids ~use_ordinals task
+    ; wrow_title = Terminal_text.single_line task.title
+    ; wrow_status_named = Masc_domain.task_status_to_string task.status
+    ; wrow_status_short = task_status_short task.status
+    ; wrow_owner = task_owner task
+    ; wrow_goal = task_first_goal task
+    ; wrow_urgent = Masc_tui_theme.Glyph.priority task.priority
+    }
+
+(* The widest reading of one column over every row of the list, so the columns
+   do not move while the list scrolls. *)
+let widest_task_reading reading tasks =
+  List.fold_left
+    (fun widest task -> max widest (Message_layout.display_width (reading task)))
+    0 tasks
 
 
 (* One task's event history, appended after the detail body so it rides the
@@ -153,12 +131,14 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
       | Not_read | Read _ -> []) in
   (failures |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.Body
+  @ ("" :: Masc_tui_task_document.history_heading_rows ~width)
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
       ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
       ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
         state.task_history_request)
-     |> List.concat_map (fun line -> if line="" then [""] else
-       Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line))
+     |> List.concat_map
+          (Masc_tui_text_block.preformatted_rows
+             ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.History
 
 let task_detail_height ~rows ~count =
@@ -269,6 +249,23 @@ let render_work_tasks (state : state) =
     Overview_tasks.work_selected_index state.tasks
       ~selected:(Overview_tasks.selection state.task_focus)
   in
+  let widths =
+    Render_schedule.work_task_widths
+      ~widest_id:
+        (widest_task_reading (fun (task : task) -> Terminal_text.single_line task.id) rows)
+      ~widest_status_named:
+        (widest_task_reading
+           (fun (task : task) -> Masc_domain.task_status_to_string task.status) rows)
+      ~widest_status_short:
+        (widest_task_reading (fun (task : task) -> task_status_short task.status) rows)
+      ~widest_owner:(widest_task_reading task_owner rows)
+      ~widest_goal:(widest_task_reading task_first_goal rows)
+  in
+  let layout =
+    Render_schedule.work_task_layout
+      ~inner_width:(max 1 (framed_inner_width cols - 2)) ~widths
+  in
+  let id_width = Render_schedule.work_task_id_width widths in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"work-tasks"
     ~title:(screen_title " MASC Work / Tasks")
@@ -307,9 +304,15 @@ let render_work_tasks (state : state) =
        | [] -> ()
        | reasons -> c.push ("  Coverage: " ^ String.concat " · " reasons));
       c.push_divider ();
+      (* The names sit above the rows, so a row is read by its column and not by
+         its neighbours. An empty list has no rows to name. *)
+      if rows <> [] then
+        c.push_styled ~style:(Theme.recede ())
+          ("  " ^ Render_schedule.work_task_header_row ~layout);
       let header_rows =
         3 + (if Option.is_some pending_note then 1 else 0)
         + (if reasons = [] then 0 else 1)
+        + (if rows = [] then 0 else 1)
       in
       let count = List.length rows in
       let room = work_tasks_room ~budget ~header_rows ~count in
@@ -322,13 +325,17 @@ let render_work_tasks (state : state) =
             if room <= 0 then 0
             else max 0 (index - room + 1)
       in
-      (* [task_line] is the one row a task draws: its status icon and word in
-         one colour, id, title, assignee, priority and Goal, each through the
-         terminal sanitiser. *)
+      (* [task_line] is the one row a task draws: its status icon, id, title,
+         status word, owner, Goal and top-priority mark, each through the
+         terminal sanitiser and each on the column the header names. *)
       List.iteri
         (fun index (task : Tui_decode.task) ->
            if index >= first && index < first + room then
-             let line = "  " ^ task_line ~cols ~ordinal:(index + 1) ~task_ids ~use_ordinals task in
+             let line =
+               "  "
+               ^ task_line ~layout ~id_width ~ordinal:(index + 1) ~task_ids
+                   ~use_ordinals task
+             in
              if Some index = selected then
                c.push_selected (Masc_tui_theme.strip_sgr line)
              else c.push line)
@@ -379,6 +386,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
+  | Planning_detail.Heading -> Theme.info () ^ Ansi.bold
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -1088,8 +1096,10 @@ let planning_proof_rows ~width lines =
 
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let width = max 1 (framed_inner_width cols - 2) in
-  let field ?(tone = Planning_detail.Note) label text =
-    let prefix = "  " ^ label ^ ": " in
+  (* A field is a fact the operator reads, so it takes the plain foreground.
+     Provenance rows (Created, Link) pass [Quiet] to recede. *)
+  let field ?(tone = Planning_detail.Plain) ?(separator = ": ") label text =
+    let prefix = "  " ^ label ^ separator in
     let cells = Message_layout.display_width prefix in
     let project text = { Planning_detail.tone; text } in
     if cells < framed_inner_width cols then
@@ -1105,7 +1115,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let _, next_text = planning_next_step goal in
   let section title =
     Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
-    |> List.map (fun line -> { Planning_detail.tone = Note; text = "  " ^ line })
+    |> List.map (fun line -> { Planning_detail.tone = Heading; text = "  " ^ line })
   in
   let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
   let metadata =
@@ -1153,9 +1163,12 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
                | Goal_links_read _ -> "(none)") in
         field ~tone:Planning_detail.Quiet "Open tasks" note
     | tasks -> field "Open tasks" (string_of_int (List.length tasks))
+        (* One row per task, led by its id. Its [Link.reference] is that id
+           under a fixed prefix, and only the board scans text for links, so
+           a row of its own would repeat the id. *)
         @ List.concat_map (fun (task : Tui_decode.task) ->
-            field "Task" task.id @ field "Title" task.title
-            @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Task task.id)) tasks
+            field ~separator:"  " task.id
+              (Masc_domain.task_status_to_string task.status ^ " · " ^ task.title)) tasks
   in
   let confirmation_rows =
     (match confirmation with

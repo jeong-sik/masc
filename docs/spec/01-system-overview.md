@@ -63,7 +63,7 @@ MASC가 명시적으로 **하지 않는 것**:
 ```
 
 - **Trust model**: localhost 전제. 인증이 활성화된 환경에서는 `.masc/auth/` 자격증명과 역할별 권한(`Worker`/`Admin`/`Player`)을 검사한다.
-- **Persistence**: runtime workspace collaboration state는 `<base-path>/.masc/` 단일 루트(`Common.masc_dirname`) 아래 JSONL/JSON 파일시스템을 source of truth로 사용한다 (구 `.masc/clusters/<name>/` 및 `MASC_CLUSTER_NAME` 다중 클러스터 디렉터리는 폐지됨, #43188).
+- **Persistence**: runtime workspace collaboration state는 `<base-path>/.masc/` 단일 루트(`Common.masc_dirname`) 아래 JSONL/JSON 파일시스템을 source of truth로 사용한다.
 - **Remote access**: Cloudflare Tunnel을 통해 원격 브라우저에서 dashboard 접근 가능. Origin은 HTTP/1.1, Cloudflare가 브라우저에 HTTP/2를 제공.
 - **단일 인스턴스**: MASC 서버는 한 workspace base path에 대해 단일 인스턴스로 실행. 수평 확장 미지원.
 

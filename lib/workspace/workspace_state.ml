@@ -71,18 +71,6 @@ let recover_workspace_state config json =
       String_util.option_trim (Safe_ops.json_string_opt "paused_by" json);
     paused_at =
       String_util.option_trim (Safe_ops.json_string_opt "paused_at" json);
-    search_strategy_default =
-      (match
-         String_util.option_trim
-           (Safe_ops.json_string_opt "search_strategy_default" json)
-       with
-       | Some value -> Some value
-       | None -> defaults.search_strategy_default);
-    speculation_enabled =
-      Safe_ops.json_bool ~default:defaults.speculation_enabled
-        "speculation_enabled" json;
-    speculation_budget =
-      Safe_ops.json_int_opt "speculation_budget" json;
   }
 
 (* ============================================ *)

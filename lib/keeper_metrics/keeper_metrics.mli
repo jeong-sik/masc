@@ -30,8 +30,6 @@ type t =
   | TurnHolderBookkeepingFailures
   | OperatorCompact
   | OperatorClear
-  | ToolEmissionRegistrySize
-  | ToolEmissionPushes
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
@@ -156,7 +154,6 @@ type t =
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
-  | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressStreak
   | UsageTrust

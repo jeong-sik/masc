@@ -107,8 +107,7 @@ val publish_exact_output_registry_from_file : config_path:string -> unit
 (** Publish the exact-output lanes [config_path] declares and the catalog its
     loaded runtimes give them, through the same publication boot uses. The
     file is the authority even when its name is not [runtime.toml] and the
-    ambient configuration root names another file. For a standalone tool that
-    loads one explicit configuration, such as [bin/stagehand_model_probe.ml].
+    ambient configuration root names another file.
     Raises [Env_config_core.Config_error] when a mandatory lane is unusable
     or the registry refuses the declarations. *)
 

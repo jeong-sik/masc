@@ -83,11 +83,10 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') |> get);
       observe=(fun ~binding ~sources -> Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error);
       exported_tools=(fun () -> Protocol.exported_tools protocol);
-      call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+      call_exported_tool=(fun ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
         Protocol.call_exported_tool ~on_result ~on_dispatch ?authorize ~principal protocol ~name ~arguments
           |> Result.map_error invocation_error);
       operator_schema=(fun () -> None);
-      companion_tools=(fun () -> []);
       observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> Protocol.action_schema protocol);
@@ -226,9 +225,9 @@ let official_empty_turn config ~turn ~time =
 let official_turn config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config) in
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session
     (message "Original official-client question");
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant" session
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original official-client answer"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file" ~outcome:Tool_result.Ok;
   official_empty_turn config ~turn ~time

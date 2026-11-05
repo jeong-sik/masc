@@ -117,13 +117,11 @@ let observe_external_subscriber_fanout_duration seconds =
     (max 0.0 seconds)
 ;;
 
-(* P2 silent-failure fix (transport scan):
-   The AGENT_CORE relay drop-marker is the operator-visible signal that an
+(* The AGENT_CORE relay drop-marker is the operator-visible signal that an
    AGENT_CORE event was dropped after exhausting retries.  If the drop marker
-   broadcast itself fails, operators get no
-   indication a drop happened.  Distinct from inc_broadcast_failure
-   so the recovery-path failure rate is isolated from normal broadcast
-   failures. *)
+   broadcast itself fails, operators get no indication a drop happened.
+   Distinct from inc_broadcast_failure so the recovery-path failure rate is
+   isolated from normal broadcast failures. *)
 let inc_relay_drop_marker_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drop_marker_failures ()
 ;;

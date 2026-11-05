@@ -660,7 +660,7 @@
 - The TUI Board list reads again when a newer refresh drops the answer of the read made on entering the Board, and keeps its owed read when one `/health` probe fails, as Planning does (#48081).
 - The TUI wraps the Context partial-read failure notice to the window width instead of overflowing (#47931) (#48085).
 - A Librarian claim with no cited items fails absorption instead of being absorbed (#47933) (#48086).
-- An account/read refusal reverts a settled Codex session instead of leaving it settled (#48016) (#48112).
+- An account/read refusal keeps a settled Codex session's prior settlement (#48016) (#48112).
 - An ego step whose bound Space did not open (`taskSpace` itself threw) now
   reads ego's task space list once: a Space ego no longer lists is answered
   as missing and leaves automatic selection, and every such answer is a
@@ -674,12 +674,12 @@
   attaches again instead of being refused as a second live connection, which
   stopped the worker host. Retirement still settles the lost connection and
   keeps its files (#48132).
-- After a refresh that shortens the Proof list, Enter opens the row shown on the screen instead of a stale row (originally #47956, fragment missing) (#48139).
+- After a refresh that shortens the Proof list, Enter opens the row shown on the screen instead of opening nothing (originally #47956, fragment missing) (#48139).
 - An account/read refusal no longer overwrites a healthy Codex session resume (#47921) (#48140).
 - A client context token total that overflows integer range shows as unknown instead of a negative active-context number (originally #47877, fragment missing) (#48143).
 - A TUI preference that leaves runtime.toml as it is (a second visit to the same chat, a help hint already retired) no longer commits, audits or announces `runtime_config_changed`; `POST /api/v1/tui/preferences` answers `state: "unchanged"`, and `Runtime.edit_config_text_if_changed` compares under the config write lock (#48146).
 - 임베디드 모델 카탈로그에 같은 `opencode_go` provider 행과 `deepseek-v4.1-flash` 행이 두 벌 있어 카탈로그 로드가 `Invalid_default_catalog` 로 실패하던 문제를 고쳤어요. 중복을 지우고 `default_model` 만 남겼습니다. (#48151)
-- TUI chart tick labels at min_int print the exact integer instead of a wrong compact rung (originally #47858, fragment missing) (#48161).
+- TUI gauge value labels at min_int print the exact integer instead of a wrong compact rung (originally #47858, fragment missing) (#48161).
 - A `take_over` that reclaims a user-owned ego Space or reopens a missing one
   now answers with `ok: true`, so the browser tool reports it as a success
   instead of a runtime failure with an unknown effect (#48165).

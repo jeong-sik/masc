@@ -71,9 +71,9 @@ user 측은 완전히 같은 문자열이다. 대화에서 한 사람이 같은 
 
 ### 2.3 사고와 대화의 구분은 이미 있다
 
-`Keeper_types_support.is_internal_history_source` 는 `world_state_prompt` 와
-`internal_assistant` 를 internal 로 분류하고, `classify_history_entry` 는 전자를
-`Drop_line`, 후자를 `Move_internal` 로 보낸다. 같은 trace 의 세션 디렉터리 실측:
+`Keeper_types_support.is_internal_history_source` 는 `World_state_prompt` 와
+`Internal_assistant` 를 internal 로 분류하고, `history_path_for_source` 는 전자를
+어느 파일에도 쓰지 않고 후자를 `history.internal.jsonl` 로 보낸다. 같은 trace 의 세션 디렉터리 실측:
 
 | 파일 | 줄 | `무응답` 포함 |
 |---|---|---|

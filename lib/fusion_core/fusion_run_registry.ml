@@ -380,18 +380,13 @@ let run_to_yojson run =
   `Assoc (base @ outcome_fields)
 ;;
 
-type global_install_error = Already_installed
-
 module Global = Run_registry_core.Global (struct
     type nonrec t = t
 
     let initial = create ()
   end)
 
-let global = Global.current
+type global_install_error = Global.install_error = Already_installed
 
-let install_global registry =
-  match Global.install registry with
-  | Ok () -> Ok ()
-  | Error Global.Already_installed -> Error Already_installed
-;;
+let global = Global.current
+let install_global = Global.install

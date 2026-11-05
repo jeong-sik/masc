@@ -44,6 +44,15 @@ val terminal_effect_boundary_decision
     [Tool_result.tool_failure_class] in the exact structured Keeper error
     envelope. *)
 
+val terminal_effect_failure_error
+  :  Agent_core.Error.t
+  -> Keeper_tools_agent_core.terminal_effect_state
+  -> Agent_core.Error.t
+(** The error a run ends with when Agent Core failed its terminal tool. When
+    the bundle recorded that failure, the error carries the bundle's failure
+    class and detail with Agent Core's effect disposition; any other error, or
+    a bundle that recorded no failure, is returned unchanged. *)
+
 module For_testing : sig
   val finalize_turn_surface :
     response_text:string ->
@@ -146,8 +155,10 @@ end
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
-    @param history_user_source Source label for user messages in history
-    @param history_assistant_source Source label for assistant messages in history
+    @param history_user_source Source of the user message in history;
+           [Direct_user] when omitted
+    @param history_assistant_source Source of the reply in history;
+           [Direct_assistant] when omitted
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence
     @param on_event Optional event callback
@@ -189,9 +200,9 @@ val run_turn
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?answered_ask_inputs:Keeper_unified_prompt.answered_ask_turn_input list
-  -> ?history_user_source:string
+  -> ?history_user_source:Keeper_types_support.history_source
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
-  -> ?history_assistant_source:string
+  -> ?history_assistant_source:Keeper_types_support.history_source
   -> ?temperature:float
   -> ?on_event:(Agent_core.Types.sse_event -> unit)
   -> ?on_tool_stream_observation:

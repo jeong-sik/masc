@@ -358,9 +358,6 @@ module For_testing_microvm : sig
   (** Exercise the boot provisioning path without exposing its private record. *)
 end
 
-val container_cwd_of_host :
-  t -> host_cwd:string -> string
-
 val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->
@@ -445,14 +442,6 @@ val run_exec_pipeline_with_status :
 (** Execute [stages] as a streaming argv pipeline inside the turn-scoped
     container. Each stage is a separate [docker exec -i] process and adjacent
     stages are connected by host-side process pipes. *)
-
-val run_bash_with_status :
-  timeout_sec:float ->
-  t ->
-  cwd:string ->
-  cmd:string ->
-  unit ->
-  (Unix.process_status * string, string) result
 
 val teardown_keeper_sandbox_by_name :
   ?timeout_sec:float ->

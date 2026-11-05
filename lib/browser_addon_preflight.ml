@@ -68,7 +68,7 @@ let doubled_sources ~base_path =
       (fun (declaration : Lane_addon_config.declaration) ->
         match declaration.enabled, Lane_addon_config.browser_source declaration with
         | true, Some Browser_lane.Backend.Ego -> None
-        | true, Some (Automation|Stagehand|Owned_firefox|External_host as backend) -> Some (declaration.id, backend)
+        | true, Some (Automation|Owned_firefox|External_host as backend) -> Some (declaration.id, backend)
         | false, (Some _ | None) | true, None -> None)
       snapshot.Lane_addon_config.declarations
   in

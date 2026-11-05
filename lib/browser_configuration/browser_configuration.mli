@@ -6,12 +6,6 @@
     launch. An explicit binary is never replaced by an implicitly discovered
     Firefox executable.
 
-    [stagehand] ([\[browser.stagehand\]], RFC-browser-lane-stagehand §3.6):
-    [chrome] is the Chromium-family executable, [extension] the unpacked
-    Stagehand extension directory, and [profile] an operator-owned profile
-    directory kept between sessions; without it each session starts from an
-    empty profile the Add-on owns.
-
     [live_bidi] ([\[browser.live.bidi\]], RFC-browser-keeper-firefox §3.1):
     the Keeper Firefox the browser Add-on starts with its own BiDi peer. [firefox]
     is the Firefox executable, [profile] the operator-owned profile it opens,
@@ -27,8 +21,6 @@
 
 type automation = { driver : string; binary : string option }
 [@@deriving show, eq]
-type stagehand = { chrome : string; extension : string; profile : string option }
-[@@deriving show, eq]
 type live_bidi = { firefox : string; profile : string; port : int }
 [@@deriving show, eq]
 type ego_space = Named_space of string | Existing_space of int
@@ -40,7 +32,6 @@ type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
   automation : automation option;
-  stagehand : stagehand option;
   live_bidi : live_bidi option;
   live_ego : live_ego option;
 }
@@ -72,7 +63,6 @@ val of_text : string -> (t, string) result
     parses to. External hosts need none. *)
 type _ source =
   | Automation : automation source
-  | Stagehand : stagehand source
   | Live_bidi : live_bidi source
   | Live_ego : live_ego source
 

@@ -279,19 +279,6 @@ configured LLM with provenance.
 | `masc_board_curation_submit` | AI curation snapshot 제출: summary/order/highlights/tag suggestions/answer matches/provenance 기록. 게시글/댓글/투표는 수정하지 않음 |
 | `masc_board_delete` | 게시물 삭제 (연관 댓글/투표 포함) |
 
-### 10.2 Vote 도구 (Tool_vote)
-
-Workspace 기반 투표 시스템 (Board 투표와 별개).
-
-| 도구명 | 역할 |
-|-------|------|
-| `masc_vote_create` | 투표 생성 (topic, options, required_votes) |
-| `masc_vote_cast` | 투표 참여 |
-| `masc_vote_status` | 투표 현황 조회 |
-| `masc_votes` | 전체 투표 목록 |
-
-agent core `Tool.t` 인터페이스도 `Tool_bridge.agent_core_tool_of_masc`로 제공.
-
 ---
 
 ## 11. SubBoard (하위 게시판)
@@ -412,7 +399,7 @@ Filesystem/JSONL maintenance는 compaction 과 replay 안정화를 다룬다. �
 ## 14. 의존 관계
 
 ```
-Tool_board, Tool_vote
+Tool_board
          |
     Board_dispatch (JSONL store, SSE emit)
          |

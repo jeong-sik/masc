@@ -227,7 +227,8 @@ val append_error_to_string : append_error -> string
     write fails -- or an error and nothing written. A record {!record_of_json}
     would reject is not written. A store that ends mid-line holds the remains
     of an append a crash cut short; the append cuts them back to the last
-    complete line before it writes. *)
+    complete line before it writes. An append that succeeded is told to
+    {!Keeper_memory_health_input}. *)
 val append
   :  keepers_dir:string
   -> keeper_id:string

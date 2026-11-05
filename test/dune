@@ -761,7 +761,6 @@
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
-  test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_bulk
@@ -1107,7 +1106,6 @@
   test_subset_rewrite
   test_keeper_classifier_helper
   test_turn_id_propagation
-  test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_event_queue_bulk
@@ -1847,7 +1845,6 @@
   test_dashboard_tool_failure_parity
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -1997,7 +1994,6 @@
   test_dashboard_tool_failure_parity
   test_dashboard_briefing_sections
   test_dashboard_cache
-  test_dashboard_composite_claim_window
   test_eval_feed
   test_dashboard_verification
   test_tool_quality_classify
@@ -3042,7 +3038,9 @@
 (include stanzas/test_tui_chat_skill_signal.inc)
 (include stanzas/test_tui_pending_confirms_signal.inc)
 (include stanzas/test_tui_workspace_dataset_signal.inc)
+(include stanzas/test_tui_memory_health_signal.inc)
 (include stanzas/test_tui_transport_signal.inc)
+(include stanzas/test_tui_usage_pushed_reads.inc)
 (include stanzas/test_tui_schedules_signal.inc)
 (include stanzas/test_tui_keeper_schedules_signal.inc)
 (include stanzas/test_tui_chat_journals_signal.inc)
@@ -3087,10 +3085,6 @@
 (include stanzas/test_http_pages_asset_read.inc)
 
 (include stanzas/test_bind_required_guard_counter.inc)
-
-(include stanzas/test_k2_pipeline_e2e.inc)
-
-(include stanzas/test_k3_tool_pipeline_e2e.inc)
 
 (include stanzas/test_keepers_runtime_dir_ssot.inc)
 
@@ -3260,8 +3254,6 @@
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
-(include stanzas/test_keeper_tool_emission_hook.inc)
-
 (include stanzas/test_keeper_tool_matrix.inc)
 
 (include stanzas/test_keeper_task_outcomes.inc)
@@ -3303,6 +3295,7 @@
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
+(include stanzas/test_memory_health_input_announce.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
 (include stanzas/test_keeper_metrics_appended_announce.inc)
@@ -3899,6 +3892,11 @@
  (name test_tui_task_detail)
  (modules test_tui_task_detail)
  (libraries alcotest masc_tui_task_selection masc.masc_types))
+
+(test
+ (name test_tui_task_document_style)
+ (modules test_tui_task_document_style)
+ (libraries alcotest masc masc.masc_types masc_tui_ansi masc_tui_task_document))
 
 (test
  (name test_tui_overview_tasks)
@@ -4907,7 +4905,7 @@
 (test
  (name test_tui_overview_cards)
  (modules test_tui_overview_cards)
- (libraries alcotest astring masc_tui_overview_cards masc_tui_card masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest astring masc_tui_ansi masc_tui_overview_cards masc_tui_card masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_card)
@@ -4963,7 +4961,8 @@
 (test
  (name test_tui_text_block)
  (modules test_tui_text_block)
- (libraries alcotest astring masc_tui_text_block))
+ ; masc_tui_message_layout so a wrapped row's width is asked in display cells.
+ (libraries alcotest astring masc_tui_ansi masc_tui_message_layout masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)
@@ -5103,8 +5102,14 @@
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
+(include stanzas/test_tui_wrap_words.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_tab_strip.inc)
+(include stanzas/test_tui_detail_heading.inc)
+(include stanzas/test_tui_footer_notice_forms.inc)
+(include stanzas/test_tui_ask_arrival_notification.inc)
+(include stanzas/test_tui_nav_trace.inc)
+(include stanzas/test_tui_nav_trace_log.inc)
 
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
@@ -5136,6 +5141,7 @@
 (include stanzas/test_tui_file_icon.inc)
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
+(include stanzas/test_tui_help_filter.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -5722,22 +5728,13 @@
  (modules test_browser_bidi_downloads_reply_window)
  (libraries masc alcotest eio eio.mock))
 (include stanzas/test_browser_webdriver.inc)
-(include stanzas/test_browser_cdp.inc)
-(include stanzas/test_browser_stagehand_session.inc)
 (include stanzas/test_browser_selection.inc)
 (include stanzas/test_browser_task_capabilities.inc)
-(include stanzas/test_browser_stagehand_model.inc)
-(include stanzas/test_browser_addon_chrome_profile.inc)
-(include stanzas/test_browser_stagehand_executor.inc)
+(include stanzas/test_browser_addon_decoders.inc)
 (include stanzas/test_browser_keyboard.inc)
 (include stanzas/test_browser_console.inc)
 (include stanzas/test_browser_network.inc)
 (include stanzas/test_browser_cookies.inc)
-(include stanzas/test_browser_stagehand_backend.inc)
-(include stanzas/test_browser_extension_companion.inc)
-(include stanzas/test_lane_addon_companion_broker.inc)
-(include stanzas/test_lane_addon_companion_allocation.inc)
-(include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -6190,7 +6187,6 @@
 (test
  (name test_lane_addon_worker_protocol)
  (modules test_lane_addon_worker_protocol)
- (deps (source_tree ../addons/onepassword) ../addons/protocol.py)
  (libraries masc masc.agent_core masc.lane_addon_call_context masc.fs_compat mcp_protocol alcotest eio eio_main yojson))
 
 (test
@@ -6239,21 +6235,6 @@
  (deps (source_tree ../addons/browser/automation)
        (source_tree %{workspace_root}/config/prompts))
  (action (run %{test} %{dep:../addons/browser/automation/lane.toml})))
-
-(test
- (name test_browser_addon_stagehand_model)
- (modules test_browser_addon_stagehand_model)
- (libraries masc_test_deps masc.server exact_output_fixture masc.browser_lane mirage-crypto-rng.unix)
- (deps (source_tree ../addons/browser/stagehand) fixtures/stagehand/llm-generate-params.json)
- (action (run %{test} %{dep:../addons/browser/stagehand/lane.toml} %{dep:fixtures/stagehand/llm-generate-params.json})))
-
-(test
- (name test_browser_addon_stagehand)
- (modules test_browser_addon_stagehand)
- (libraries masc_test_deps masc.browser_lane masc.browser_configuration masc.native_addon_lease
-  masc.browser_process_owner masc_process)
- (deps ../bin/masc_native_addon_launcher.exe ../bin/masc_browser_process_owner.exe)
- (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe} %{dep:../bin/masc_browser_process_owner.exe})))
 
 (test
  (name test_lane_addon_worker)
@@ -7054,6 +7035,11 @@
  (libraries alcotest masc.markup_document masc_tui_artifact_html))
 
 (test
+ (name test_tui_http_error)
+ (modules test_tui_http_error)
+ (libraries alcotest masc_tui_http_error))
+
+(test
  (name test_tui_pele_protocol)
  (modules test_tui_pele_protocol)
  (libraries alcotest masc_tui_pele unix yojson))
@@ -7212,9 +7198,7 @@
 
 (include stanzas/test_runtime_model_label_binding.inc)
 
-(include stanzas/test_lane_addon_companion_origin.inc)
 
-(include stanzas/test_lane_addon_companion_publication.inc)
 
 (include stanzas/test_keeper_direct_goal_provider_wire.inc)
 

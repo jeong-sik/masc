@@ -438,12 +438,12 @@ let render_repository_changes (state : state) =
       let title =
         detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
           ~id:scope_name
-          ~after:(Printf.sprintf " (%d)%s%s" (List.length changes)
+          ~after:[ Printf.sprintf " (%d)%s%s" (List.length changes)
             (match state.repository_changes with
              | Some snapshot ->
                  " · " ^ repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
              | None -> "")
-            (if Option.is_some state.repository_changes_error then " · read failed" else ""))
+            (if Option.is_some state.repository_changes_error then " · read failed" else "") ]
           ~tail:(connection_badge state)
       in
       let recorded_changes = current_keeper_chat_file_changes state in
@@ -620,7 +620,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
-      ~after:(Printf.sprintf "  -%d +%d" removed added)
+      ~after:[ Printf.sprintf "  -%d +%d" removed added ]
       ~tail:(connection_badge state)
   in
   box_top buf cols;
@@ -719,7 +719,7 @@ let render_changes_list (state : state) =
   let heading ~after =
     detail_heading ~cols
       ~lead:(Lead_text (screen_title " MASC Changes" ^ " "))
-      ~id:whose ~after
+      ~id:whose ~after:[ after ]
       ~tail:(timestamp ^ "  " ^ connection_badge state)
   in
   let header =
@@ -890,7 +890,7 @@ let render_changes_list (state : state) =
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Changes));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 

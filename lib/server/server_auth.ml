@@ -1054,16 +1054,6 @@ let is_public_read_path path =
   || String.equal path "/api/v1/msx/carts"
   || String.starts_with ~prefix:"/static/" path
   || String.starts_with ~prefix:"/graphiql/" path
-  (* Tier F2 dashboard reads — multimodal artifact gallery + detail
-     panel. The Bonsai dashboard was their only in-tree consumer; since
-     its removal nothing in the tree issues these requests, but the
-     routes stay public-read: they are wrapped in [with_public_read] in
-     [server_routes_http_routes_multimodal], and this whitelist entry is
-     what makes that wrapper actually public when
-     [http_auth_strict_enabled] is on. *)
-  || String.starts_with ~prefix:"/api/v1/multimodal/list" path
-  || String.starts_with ~prefix:"/api/v1/multimodal/get/" path
-  || String.starts_with ~prefix:"/api/v1/multimodal/provenance/" path
   (* Voice TTS audio clips: unguessable token filenames act as the
      capability, and the browser <audio> element cannot send a bearer
      token in its request headers. *)

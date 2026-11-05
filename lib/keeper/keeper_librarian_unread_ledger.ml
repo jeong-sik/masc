@@ -41,4 +41,5 @@ let archive ~keepers_dir ~keeper_id added =
     let* () = Fs_compat.save_file_atomic_strict file
       (Yojson.Safe.to_string (`Assoc ["schema_version", `Int 1;
         "unread_messages", H.list_to_json merged])) in
+    Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
     Ok merged)

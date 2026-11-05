@@ -275,11 +275,15 @@ val keeper_model_names : t -> string list
 (** Add-on exports are deferrable through the turn's retained export authority.
     Static descriptors read [defer_loading] from the tool file named for their
     internal name, whatever name the model knows them by. Runtimes with a fixed
-    tool set still receive the complete schema surface. *)
+    tool set still receive the complete schema surface.
+
+    @raise Failure when a static descriptor's tool file is missing
+    ({!Tool_loading_declarations.required}). *)
 val declared_loading : t -> Tool_definition_toml.loading
 
 (** [declared_loading] of the descriptor the model knows as [name]; a name no
-    descriptor offers is looked up as its own tool file. *)
+    descriptor offers is looked up as its own tool file, and with none it is
+    [Always_loaded]. *)
 val declared_loading_of_model_name : string -> Tool_definition_toml.loading
 
 (** Every name owned by a descriptor, including transport-alias names. This is

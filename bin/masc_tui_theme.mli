@@ -393,13 +393,8 @@ module Glyph : sig
       the implementation says why. *)
 
   val priority : int -> string
-  (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
-
-  val braille_spinner : int -> string
-  (** 8-step live braille spinner: ⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷ *)
-
-  val equalizer_level : int -> string
-  (** 8-level audio equalizer bars:   ▂ ▃ ▄ ▅ ▆ ▇ █ *)
+  (** ["!"] when the priority number is 1 or lower, the top priority, and an
+      empty string for the rest. *)
 end
 
 val set_lift_enabled : bool -> unit

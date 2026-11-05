@@ -275,3 +275,41 @@ val status_snapshot_at :
     command can land between them; either failing is an [Error _]. Every route
     that answers a Git changes request reads through this, so none of them can
     answer without the branch. *)
+
+type grep_match = {
+  gm_path : string;  (** Relative to the repository root. *)
+  gm_line : int;  (** 1-based. *)
+  gm_text : string;  (** The matching source line, raw bytes. *)
+}
+
+type grep_result = {
+  gr_matches : grep_match list;
+  gr_truncated : bool;
+      (** More matches may exist: rows passed [max_matches], or a file reached
+          the per-file cap of 20 rows, where git stops reading it. *)
+}
+
+val grep_result_of_z_output :
+  max_matches:int -> string -> (grep_result, string) result
+(** Pure reader for [git grep -n -z] output ([path NUL line NUL text LF] per
+    row; a path may contain a newline). Keeps the first [max_matches] rows. A malformed row, including the
+    truncation marker the process capture inserts into oversized output, is an
+    [Error _]; it is never skipped. *)
+
+val grep_at :
+  ?timeout_sec:float ->
+  local_path:string ->
+  pathspec:string ->
+  pattern:string ->
+  ignore_case:bool ->
+  max_matches:int ->
+  unit ->
+  (grep_result, string) result
+(** [grep_at ~local_path ~pathspec ~pattern ~ignore_case ~max_matches ()] is a
+    read-only fixed-string search over tracked and non-ignored untracked text
+    files under [pathspec] (a literal path relative to [local_path]; [""] is the
+    whole repository). [pattern] is never a regular expression and never an
+    option. No match is [Ok {gr_matches = []; _}]; Git failing or timing out is an
+    [Error _]. At most 20 matches per file are read. The caller remains
+    responsible for proving that [local_path] is the requested scope's
+    repository root and for dropping paths the operator may not read. *)

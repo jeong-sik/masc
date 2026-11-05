@@ -154,8 +154,6 @@ type operator_settlement =
       row's [source_post_id], and the typed repair [stage] the operator
       settled. *)
 
-val operator_settlement_kind_to_string : operator_settlement_kind -> string
-
 type approved_resolution_delivery =
   { request : approved_resolution_request
   ; state : approved_resolution_state

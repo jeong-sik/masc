@@ -1,0 +1,570 @@
+{
+  "cancelled_turns": {
+    "cancelled_during_execute": 3,
+    "cancelled_during_long_execute": 0,
+    "execute_time_lost_s": 37.1,
+    "long_execute_time_lost_s": 0.0,
+    "turn_cancelled_operations": 110
+  },
+  "chat_operations": {
+    "by_origin": {
+      "channel:": {
+        "failure_kinds": {
+          "Turn_cancelled": 29,
+          "Turn_exception": 38
+        },
+        "operations": 216,
+        "run": {
+          "mean_s": 243.3,
+          "n": 216,
+          "p50_s": 51.0,
+          "p90_s": 766.1,
+          "sum_s": 52546.1
+        },
+        "states": {
+          "failed": 67,
+          "succeeded": 149
+        },
+        "wait": {
+          "mean_s": 219.5,
+          "n": 216,
+          "p50_s": 0.0,
+          "p90_s": 634.0,
+          "sum_s": 47417.7
+        }
+      },
+      "channel:agent": {
+        "failure_kinds": {
+          "Interrupted_by_restart": 1,
+          "Turn_cancelled": 41,
+          "Turn_exception": 53
+        },
+        "operations": 685,
+        "run": {
+          "mean_s": 321.5,
+          "n": 684,
+          "p50_s": 116.8,
+          "p90_s": 722.2,
+          "sum_s": 219921.8
+        },
+        "states": {
+          "cancelled": 1,
+          "failed": 95,
+          "succeeded": 589
+        },
+        "wait": {
+          "mean_s": 358.3,
+          "n": 684,
+          "p50_s": 4.7,
+          "p90_s": 799.4,
+          "sum_s": 245070.0
+        }
+      },
+      "delegate": {
+        "failure_kinds": {
+          "Turn_cancelled": 40,
+          "Turn_exception": 35
+        },
+        "operations": 478,
+        "run": {
+          "mean_s": 324.9,
+          "n": 475,
+          "p50_s": 113.6,
+          "p90_s": 901.6,
+          "sum_s": 154318.7
+        },
+        "states": {
+          "cancelled": 3,
+          "failed": 75,
+          "succeeded": 400
+        },
+        "wait": {
+          "mean_s": 231.0,
+          "n": 475,
+          "p50_s": 0.0,
+          "p90_s": 586.4,
+          "sum_s": 109737.0
+        }
+      }
+    },
+    "created_during_long_execute": {
+      "mean_s": 356.0,
+      "n": 27,
+      "p50_s": 236.3,
+      "p90_s": 968.6,
+      "sum_s": 9613.1
+    },
+    "operations": 1379,
+    "started": 1375,
+    "total_wait_s": 402224.8,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 98260.5,
+    "wait_overlapping_long_execute_s": 13005.4
+  },
+  "provider_admission": {
+    "by_class_s": {
+      "background": 155508.7,
+      "priority": 453546.1,
+      "standard": 1198711.5
+    },
+    "by_provider_model_s": {
+      "glm-coding/glm-5.3": 381810.9,
+      "glm-coding/glm-5.3-flash": 1312835.5,
+      "ollama_cloud/deepseek-v4.1-flash": 12480.4,
+      "opencode_go/deepseek-v4.1-flash": 87575.7,
+      "opencode_go/glm-5.3-flash": 3428.5,
+      "opencode_go/mimo-v2.6-flash": 1605.9,
+      "opencode_go/qwen3.8-flash": 6231.5,
+      "openrouter/nvidia/nemotron-3.5-super-vl:free": 1103.4
+    },
+    "clock_hours_over_5_wait_hours": 36,
+    "clock_hours_with_events": 96,
+    "events": 30045,
+    "median_wait_hours_per_clock_hour": 3.14,
+    "wait": {
+      "mean_s": 60.2,
+      "n": 30045,
+      "p50_s": 20.5,
+      "p90_s": 174.1,
+      "sum_s": 1807766.3
+    }
+  },
+  "schedule_wakes": {
+    "cancelled_in_queue": 1726,
+    "created_during_long_execute": {
+      "mean_s": 1426.2,
+      "n": 61,
+      "p50_s": 673.5,
+      "p90_s": 3581.8,
+      "sum_s": 86997.0
+    },
+    "latency": {
+      "mean_s": 497.8,
+      "n": 3562,
+      "p50_s": 3.7,
+      "p90_s": 494.9,
+      "sum_s": 1773180.0
+    },
+    "no_turn_started": 19,
+    "stimuli": 5307,
+    "total_wait_s": 1773180.0,
+    "turn_started": 3562,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 982198.3,
+    "wait_overlapping_long_execute_s": 77832.6,
+    "waited_at_least_30_min": {
+      "n": 186,
+      "sum_s": 1479877.4,
+      "top_keepers": [
+        {
+          "keeper": "e-masc-the-leader",
+          "n": 26,
+          "sum_s": 438574.9
+        },
+        {
+          "keeper": "sangsu",
+          "n": 27,
+          "sum_s": 352819.1
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "n": 35,
+          "sum_s": 156825.1
+        },
+        {
+          "keeper": "wkbl-front",
+          "n": 24,
+          "sum_s": 134263.6
+        },
+        {
+          "keeper": "code-reviewer",
+          "n": 10,
+          "sum_s": 78846.2
+        }
+      ]
+    }
+  },
+  "turn_time": {
+    "between_calls": {
+      "mean_s": 13.7,
+      "n": 147766,
+      "overlapping_pairs": 3274,
+      "p50_s": 2.2,
+      "p90_s": 23.8,
+      "sum_s": 2031217.3
+    },
+    "calls": 158978,
+    "calls_by_batch_size": {
+      "1": 155938,
+      "10": 10,
+      "2": 1726,
+      "3": 492,
+      "4": 156,
+      "5": 70,
+      "6": 24,
+      "7": 546,
+      "8": 16
+    },
+    "calls_per_turn": {
+      "max": 1388,
+      "mean": 14.2,
+      "n": 11212,
+      "p50": 5,
+      "p90": 30,
+      "p99": 150
+    },
+    "calls_without_trace_file": {
+      "by_turn_kind": {
+        "autonomous": {
+          "calls": 1564,
+          "execute_time_s": 15323.4,
+          "tool_time_s": 15339.3
+        },
+        "direct": {
+          "calls": 23672,
+          "execute_time_s": 73678.5,
+          "tool_time_s": 76195.9
+        }
+      },
+      "calls": 25236,
+      "execute_time_s": 89001.9,
+      "keepers_with_a_trace_file": {
+        "by_turn_kind": {
+          "direct": {
+            "calls": 23579,
+            "execute_time_s": 73302.6,
+            "tool_time_s": 75806.6
+          }
+        },
+        "calls": 23579,
+        "execute_time_s": 73302.6,
+        "tool_time_s": 75806.6
+      },
+      "keepers_without_any_trace_file": {
+        "by_turn_kind": {
+          "autonomous": {
+            "calls": 1564,
+            "execute_time_s": 15323.4,
+            "tool_time_s": 15339.3
+          },
+          "direct": {
+            "calls": 93,
+            "execute_time_s": 375.8,
+            "tool_time_s": 389.3
+          }
+        },
+        "calls": 1657,
+        "execute_time_s": 15699.3,
+        "keepers": [
+          "native-image-goal-20261101-0340",
+          "ocaml-refactor-woman"
+        ],
+        "tool_time_s": 15728.6
+      },
+      "tool_time_inside_turns_s": 0.0,
+      "tool_time_s": 91535.2,
+      "turns": 1233,
+      "turns_by_kind_set": {
+        "autonomous": {
+          "turns": 10002,
+          "without_trace_file": 98
+        },
+        "autonomous+direct": {
+          "turns": 67,
+          "without_trace_file": 0
+        },
+        "direct": {
+          "turns": 1143,
+          "without_trace_file": 1135
+        }
+      },
+      "turns_in_window": 11212
+    },
+    "execute_time_s": 421722.4,
+    "execution_modes": {
+      "concurrent": {
+        "calls": 62277,
+        "time_s": 8319.4
+      },
+      "serial": {
+        "calls": 96701,
+        "time_s": 437863.0
+      }
+    },
+    "inside_turns": {
+      "between_calls_s": 1625902.4,
+      "execute_time_s": 327532.9,
+      "long_execute_time_s": 170078.0,
+      "other_turn_time_s": 876803.1,
+      "percent_of_turn_time": {
+        "between_calls": 57.0,
+        "execute": 11.5,
+        "long_execute": 6.0,
+        "other": 30.7,
+        "polling": 4.5,
+        "rereads_after_first_call": 2.9,
+        "tool": 12.2
+      },
+      "polling_by_keeper": {
+        "code-reviewer": {
+          "polling_s": 418.6,
+          "turn_time_s": 159286.0
+        },
+        "code-reviewer-brother": {
+          "polling_s": 200.5,
+          "turn_time_s": 41688.4
+        },
+        "code-reviewer-father": {
+          "polling_s": 236.2,
+          "turn_time_s": 112336.9
+        },
+        "code-reviewer-mother": {
+          "polling_s": 228.8,
+          "turn_time_s": 46348.9
+        },
+        "code-reviewer-uncle": {
+          "polling_s": 163.4,
+          "turn_time_s": 66999.8
+        },
+        "context-reviewer": {
+          "polling_s": 875.0,
+          "turn_time_s": 151151.6
+        },
+        "e-masc-the-leader": {
+          "polling_s": 1013.6,
+          "turn_time_s": 135167.1
+        },
+        "github-pr-checker": {
+          "polling_s": 11004.9,
+          "turn_time_s": 74260.6
+        },
+        "goo-yang-bong": {
+          "polling_s": 11534.4,
+          "turn_time_s": 228430.5
+        },
+        "masc-productor-owner": {
+          "polling_s": 26255.2,
+          "turn_time_s": 256859.5
+        },
+        "ocaml-agent-ic": {
+          "polling_s": 1723.3,
+          "turn_time_s": 150140.7
+        },
+        "pr-updater": {
+          "polling_s": 5132.8,
+          "turn_time_s": 140744.0
+        },
+        "sangsu": {
+          "polling_s": 12377.0,
+          "turn_time_s": 148328.7
+        },
+        "wkbl-data": {
+          "polling_s": 33809.6,
+          "turn_time_s": 199690.8
+        },
+        "wkbl-front": {
+          "polling_s": 19025.2,
+          "turn_time_s": 152417.4
+        },
+        "wkbl-growth": {
+          "polling_s": 3990.7,
+          "turn_time_s": 63962.8
+        },
+        "wkbl-web-leader": {
+          "polling_s": 846.4,
+          "turn_time_s": 108747.8
+        }
+      },
+      "polling_time_s": 128835.5,
+      "rereads_after_first_call_turn_time_s": 81785.3,
+      "tool_time_s": 349102.4
+    },
+    "long_execute": {
+      "calls": 729,
+      "polling_calls": 445,
+      "polling_time_s": 143328.9,
+      "time_s": 203466.7
+    },
+    "rereads_after_first_call": {
+      "calls": 33559,
+      "turn_time_s": 87216.4
+    },
+    "tool_time_s": 446182.3,
+    "tool_transitions": {
+      "cross_tool": {
+        "gap_s": 1001017.7,
+        "pairs": 51639,
+        "top_by_gap": [
+          {
+            "from": "Execute",
+            "gap_s": 59384.9,
+            "mean_gap_s": 25.8,
+            "pairs": 2298,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 54485.9,
+            "mean_gap_s": 22.8,
+            "pairs": 2385,
+            "to": "Write"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 44376.7,
+            "mean_gap_s": 20.5,
+            "pairs": 2165,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_dos_screen",
+            "gap_s": 39945.2,
+            "mean_gap_s": 28.9,
+            "pairs": 1380,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "Write",
+            "gap_s": 38517.9,
+            "mean_gap_s": 16.0,
+            "pairs": 2409,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 37596.4,
+            "mean_gap_s": 25.9,
+            "pairs": 1452,
+            "to": "masc_dos_screen"
+          },
+          {
+            "from": "Read",
+            "gap_s": 34344.3,
+            "mean_gap_s": 22.5,
+            "pairs": 1528,
+            "to": "Execute"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 31516.7,
+            "mean_gap_s": 18.2,
+            "pairs": 1731,
+            "to": "Read"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 29791.5,
+            "mean_gap_s": 44.7,
+            "pairs": 666,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 25998.1,
+            "mean_gap_s": 32.8,
+            "pairs": 793,
+            "to": "masc_board_post_get"
+          }
+        ]
+      },
+      "same_tool": {
+        "gap_s": 1030199.6,
+        "pairs": 96127,
+        "top_by_gap": [
+          {
+            "from": "Execute",
+            "gap_s": 820361.4,
+            "mean_gap_s": 14.3,
+            "pairs": 57252,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 41228.5,
+            "mean_gap_s": 32.6,
+            "pairs": 1263,
+            "to": "masc_board_post_get"
+          },
+          {
+            "from": "Read",
+            "gap_s": 34437.8,
+            "mean_gap_s": 26.1,
+            "pairs": 1320,
+            "to": "Read"
+          },
+          {
+            "from": "keeper_artifact_read",
+            "gap_s": 17536.8,
+            "mean_gap_s": 1.5,
+            "pairs": 11681,
+            "to": "keeper_artifact_read"
+          },
+          {
+            "from": "keeper_memory_search",
+            "gap_s": 16440.3,
+            "mean_gap_s": 93.4,
+            "pairs": 176,
+            "to": "keeper_memory_search"
+          },
+          {
+            "from": "BrowserRead",
+            "gap_s": 11950.2,
+            "mean_gap_s": 23.9,
+            "pairs": 501,
+            "to": "BrowserRead"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 10644.5,
+            "mean_gap_s": 26.7,
+            "pairs": 399,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "masc_board_comment",
+            "gap_s": 9820.6,
+            "mean_gap_s": 13.1,
+            "pairs": 750,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "keeper_memory_write",
+            "gap_s": 8404.1,
+            "mean_gap_s": 16.9,
+            "pairs": 496,
+            "to": "keeper_memory_write"
+          },
+          {
+            "from": "masc_board_list",
+            "gap_s": 6148.6,
+            "mean_gap_s": 8.8,
+            "pairs": 700,
+            "to": "masc_board_list"
+          }
+        ]
+      }
+    },
+    "traced_calls_outside_turns": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 1168,
+          "execute_time_outside_turns_s": 5187.6,
+          "tool_time_outside_turns_s": 5544.7
+        }
+      },
+      "calls": 1168,
+      "calls_partly_inside_turn_time": 0,
+      "execute_time_outside_turns_s": 5187.6,
+      "tool_time_outside_turns_s": 5544.7,
+      "turns": 71,
+      "turns_that_also_have_autonomous_calls": 63
+    },
+    "turn_time_s": 2851807.9,
+    "turns": 11212
+  },
+  "window": {
+    "from": "2026-11-01",
+    "hours": 101.0,
+    "keepers_with_turn_traces": 28,
+    "to": "2026-11-05",
+    "until": "2026-11-05T05:00:00+00:00"
+  }
+}

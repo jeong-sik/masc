@@ -4,7 +4,6 @@ type t =
   | Board_attention
   | Workspace_curator
   | Verifier
-  | Browser_stagehand
   | Candle_appraiser
 [@@deriving enumerate]
 
@@ -14,7 +13,6 @@ let to_id = function
   | Board_attention -> "board_attention_exact"
   | Workspace_curator -> "workspace_curator_exact"
   | Verifier -> "verifier_exact"
-  | Browser_stagehand -> "browser_stagehand_exact"
   | Candle_appraiser -> "candle_appraiser"
 ;;
 
@@ -27,6 +25,5 @@ let label = function
   | Board_attention -> "Board Attention"
   | Workspace_curator -> "Workspace Curator"
   | Verifier -> "Verifier"
-  | Browser_stagehand -> "Browser Stagehand"
   | Candle_appraiser -> "Candle Appraiser"
 ;;

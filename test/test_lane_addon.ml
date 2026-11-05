@@ -57,8 +57,8 @@ let fake_output : Types.output = {
 }
 
 (* What the fake worker declares on its private effect port, as the DOS worker
-   declares masc_dos_screen and masc_dos_step. [hinted_read] is shaped like
-   onepassword_status: MCP readOnlyHint true and no declaration. *)
+   declares masc_dos_screen and masc_dos_step. [hinted_read] has an MCP
+   readOnlyHint true and no declaration. *)
 let declared_read = "fixture_read"
 let declared_write = "fixture_write"
 let hinted_read = "fixture_hinted"
@@ -114,7 +114,7 @@ let make_backend ?observe_step () =
               await_change=None}
           else None);
         exported_tools = (fun () -> exported_tools);
-        call_exported_tool = (fun ~companion:_ ~on_result:_ ~on_dispatch ~authorize ~principal ~name:_ ~arguments ->
+        call_exported_tool = (fun ~on_result:_ ~on_dispatch ~authorize ~principal ~name:_ ~arguments ->
           state.principals := principal :: !(state.principals);
           state.export_arguments := arguments :: !(state.export_arguments);
           let invoke admission =
@@ -139,7 +139,6 @@ let make_backend ?observe_step () =
               Error (Lane_addon_call_context.Transport_error "release fixture unavailable"))
               ~snapshot:(fun () -> on_dispatch (); Ok !(state.controller)) ~invoke);
         operator_schema=(fun () -> None);
-      companion_tools=(fun () -> []);
         observation_effect=(fun name -> match List.assoc_opt name declared_effects with
           | Some declared -> declared
           | None -> Lane_addon_call_context.May_change);
@@ -432,14 +431,12 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let read ?(unready=[]) services route = T.document_route_services ~services ~unready ~backend:(fun (_,backend,_) -> backend)
       ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
   let automation=service "automation" B.Backend.Automation []
-  and stagehand=service "stagehand" B.Backend.Stagehand []
   and ego_worker=service "ego" B.Backend.Ego [ego]
   and second_worker=service "second ego" B.Backend.Ego [second]
   and native=service "native" B.Backend.External_host [extension] in
-  let all=[automation;stagehand;ego_worker;second_worker;native] in
+  let all=[automation;ego_worker;second_worker;native] in
   let route client=B.Live_route (Some client.B.client_id) in
   check bool "automation reads on its own service" true (read all B.Automation_route=Ok ["automation"]);
-  check bool "Stagehand reads on its own service" true (read all B.Stagehand_route=Ok ["stagehand"]);
   check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
   check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
   check bool "another live source remains exact" true (read all (route extension)=Ok ["native"]);
@@ -460,7 +457,7 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   check bool "an unreadable owned backend cannot block an exact Ego read" true
     (read [ego_worker;hidden B.Backend.Automation] (route ego)=Ok ["ego"]);
   check bool "an unready owned backend cannot block an exact Ego read" true
-    (read ~unready:[B.Backend.Stagehand] [ego_worker] (route ego)=Ok ["ego"]);
+    (read ~unready:[B.Backend.Automation] [ego_worker] (route ego)=Ok ["ego"]);
   check bool "an exact extension read remains usable with an unknown live controller" true
     (read [native;hidden B.Backend.Ego] (route extension)=Ok ["native"]);
   check bool "owned reads remain independent of unknown live controllers" true
@@ -1996,7 +1993,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
       | Runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message) -> message)));
   check bool "model arguments cannot replace operator authority" true
     (List.hd !(state.principals) = Lane_addon_call_context.Operator);
-  let keeper_call () = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
+  let keeper_call () = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
       ~export:handle ~arguments:(`Assoc []) in
   check bool "Keeper adapter calls a visible live installation" true
     (match (keeper_call ()).disposition with Tool_result.Completed () -> true | _ -> false);
@@ -2069,7 +2066,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check bool "raw host catalog entry remains available" true
     (List.exists (fun (schema : Masc_domain.tool_schema) -> schema.name = reserved_name)
        Config.raw_all_tool_schemas);
-  let unaffected_call = Keeper_lane_addon_runtime.call ~continuation:None ~config ~keeper_name:"fixture-keeper"
+  let unaffected_call = Keeper_lane_addon_runtime.call ~config ~keeper_name:"fixture-keeper"
     ~export:(List.hd isolated.exports) ~arguments:(`Assoc []) in
   check bool "unrelated Keeper export remains callable during collisions" true
     (match unaffected_call.disposition with Tool_result.Completed () -> true | _ -> false);
@@ -2136,8 +2133,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   let held ~release_controller:_ ~snapshot:_ ~invoke =
     Eio.Promise.resolve entered (); Eio.Promise.await never; invoke None in
   Eio.Fiber.first
-    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
-      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
       ~config ~access ~reserved:[] ~export:unsent_handle ~arguments:(`Assoc [])))
     (fun () -> Eio.Promise.await mediating);
   check bool "a call cancelled before it wrote reached nothing in the worker" false
@@ -2161,8 +2157,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   let after_snapshot ~release_controller:_ ~snapshot ~invoke =
     ignore (snapshot ()); Eio.Promise.resolve mark_snapshotted (); Eio.Promise.await never; invoke None in
   Eio.Fiber.first
-    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
-      ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some after_snapshot) ~principal:None
+    (fun () -> ignore (Runtime.call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some after_snapshot) ~principal:None
       ~config ~access ~reserved:[] ~export:snapped_handle ~arguments:(`Assoc [])))
     (fun () -> Eio.Promise.await snapshotted);
   await_phase clock config snapped "detached";
@@ -2182,8 +2177,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
       Eio.Promise.resolve mark_cleanup_started ();
       Eio.Promise.await cleanup_allowed)) (fun () -> invoke None) in
-  let remote_call () = Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
-    ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
+  let remote_call () = Runtime.call_exported_tool_with_authority ~on_complete:(fun () -> Atomic.set owner_complete true) ~on_result:(fun _ -> ())
     ~authorize:(Some authorize) ~principal:None ~config ~access ~reserved:[]
     ~export:remote_handle ~arguments:(`Assoc []) in
   let _, () = Eio.Fiber.pair
@@ -2277,7 +2271,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
   await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
   let call name arguments =
     let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
-    Machine_addon_host.call ~continuation:None ~principal:(Lane_addon_call_context.Host_actor "fixture")
+    Machine_addon_host.call ~principal:(Lane_addon_call_context.Host_actor "fixture")
       ~config ~access ~reserved:[] ~export ~arguments in
   List.iter (fun name -> check bool "enabled machine can execute" true (Result.is_ok (call name (`Assoc []))))
     ["masc_msx_step";"masc_dos_step"];
@@ -2331,7 +2325,7 @@ let test_machine_export_host_admission () = with_fixture (fun env _sw config dir
     await clock (fun () -> List.length (exports ()) = 2);
     let call ~principal name arguments =
       let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
-      Machine_addon_host.call ~continuation:None ~principal ~config ~access ~reserved:[] ~export ~arguments in
+      Machine_addon_host.call ~principal ~config ~access ~reserved:[] ~export ~arguments in
     let principal = Lane_addon_call_context.Authenticated_agent "fixture-operator" in
     let denied = call ~principal "masc_dos_pass" (`Assoc ["to", `String "not-invited"]) in
     check bool "unknown recipient is a typed pre-effect host refusal" true
@@ -2435,7 +2429,7 @@ let with_holdable_observation f =
 (* Only the worker's declaration on its private effect port covers its
    observation. A declared read never marks the last observation refreshing,
    and a successful one takes no new observation. An error from that read, a
-   tool hinted read-only over MCP but undeclared (as onepassword_status is),
+   tool hinted read-only over MCP but undeclared,
    and an explicit may_change each still take one. The wakes are counted while
    the observer is held inside an earlier observation, so each one stays
    visible as the pending observation or a coalesced wake. *)
@@ -2562,8 +2556,7 @@ let test_a_consumer_refused_during_a_call_captures_again () =
     invoke None in
   Eio.Fiber.first
     (fun () ->
-      ignore (Runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None
-        ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
+      ignore (Runtime.call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:(Some held) ~principal:None
         ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export:write ~arguments:(`Assoc []));
       fail "a blocked call unexpectedly returned")
     (fun () ->

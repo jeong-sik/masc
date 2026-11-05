@@ -935,6 +935,46 @@ let test_worktrees_decoder_refuses_bad_rows () =
   rejected "worktrees that are not a list"
     (`Assoc [ "root", `String ""; "worktrees", `Null; "truncated", `Bool false ])
 
+let search_json ?(matches = []) ?(truncated = false) () =
+  `Assoc
+    [ "root", `String "repos/example"; "query", `String "needle"
+    ; "ignore_case", `Bool true; "matches", `List matches; "truncated", `Bool truncated ]
+
+let search_match path line text =
+  `Assoc [ "path", `String path; "line", `Int line; "text", `String text ]
+
+let test_search_decoder_keeps_identity_order_and_rejects_bad_rows () =
+  let path = "repos/example/새 파일\n이름.ml" in
+  (match Decode.decode_workspace_search
+      (search_json ~truncated:true
+         ~matches:[ search_match path 7 "let needle = 1"; search_match "a.ml" 1 "" ] ()) with
+   | Error detail -> Alcotest.fail detail
+   | Ok found ->
+       Alcotest.(check string) "root" "repos/example" found.wss_root;
+       Alcotest.(check string) "query" "needle" found.wss_query;
+       Alcotest.(check bool) "ignore_case" true found.wss_ignore_case;
+       Alcotest.(check bool) "truncated" true found.wss_truncated;
+       Alcotest.(check (list string)) "exact paths in server order" [ path; "a.ml" ]
+         (List.map (fun (m : Decode.workspace_search_match) -> m.wsm_path) found.wss_matches);
+       Alcotest.(check (list int)) "lines" [ 7; 1 ]
+         (List.map (fun (m : Decode.workspace_search_match) -> m.wsm_line) found.wss_matches));
+  let rejected label json =
+    match Decode.decode_workspace_search json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " became a usable search")
+  in
+  rejected "an empty path" (search_json ~matches:[ search_match "" 1 "x" ] ());
+  rejected "line zero" (search_json ~matches:[ search_match "a.ml" 0 "x" ] ());
+  rejected "a negative line" (search_json ~matches:[ search_match "a.ml" (-3) "x" ] ());
+  rejected "a missing text"
+    (search_json ~matches:[ `Assoc [ "path", `String "a.ml"; "line", `Int 1 ] ] ());
+  rejected "a missing truncated flag"
+    (`Assoc [ "root", `String ""; "query", `String "q"; "ignore_case", `Bool false
+            ; "matches", `List [] ]);
+  rejected "matches that are not a list"
+    (`Assoc [ "root", `String ""; "query", `String "q"; "ignore_case", `Bool false
+            ; "matches", `Null; "truncated", `Bool false ])
+
 let test_finder_ready_content_cannot_borrow_reconfirmed_authority () =
   let state, _ = finder_fixture () in
   let request = finder_select state "lib/new.ml" in
@@ -2094,6 +2134,8 @@ let () =
             test_worktree_palette_lists_the_landed_answer_and_filters_by_typing
         ; Alcotest.test_case "worktree list needs the palette and directory it was asked in" `Quick
             test_worktree_list_needs_the_palette_and_directory_it_was_asked_in
+        ; Alcotest.test_case "search decoder keeps identity and order and refuses bad rows" `Quick
+            test_search_decoder_keeps_identity_order_and_rejects_bad_rows
         ; Alcotest.test_case "received success yields to queued input" `Quick
             test_finder_success_yields_to_pending_input
         ; Alcotest.test_case "ready content cannot borrow reconfirmed read authority" `Quick

@@ -254,8 +254,8 @@ export function LaneAddonOperator({ instance, authority }: {
     ${view && html`<div class="space-y-2"><p>${view.message}</p>
       ${view.open_url !== undefined && html`<p>${view.callback !== undefined
         ? 'Complete the connection in the window that opened. If it did not open, cancel this attempt and allow popups before trying again.'
-        : 'Continue in the requested app. If it did not open, allow popups and use the open action again. Confirm that you opened the app only after it appears.'}</p>`}
-      ${view.actions.map(action => html`<form key=${`${action.id}:${action.arguments.operation_id ?? ''}`} class="space-y-2" onSubmit=${(event: Event) => {
+        : 'Continue in the window that opened. If it did not open, allow popups and use the open action again.'}</p>`}
+      ${view.actions.map(action => html`<form key=${action.id} class="space-y-2" onSubmit=${(event: Event) => {
         event.preventDefault()
         const values: Record<string, string> = {}
         for (const field of action.fields) values[field.name] = inputs[`${action.id}:${field.name}`] ?? ''

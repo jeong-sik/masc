@@ -1,0 +1,17 @@
+{
+  "ego_lite_guide": "v2.2.0 (macos)",
+  "task_space": 10,
+  "call": "page.dragAndDrop(\"#src\", \"#dst\", { label: \"drag card to zone\" })",
+  "receipt": {},
+  "error": null,
+  "page_log": [
+    "pointerdown trusted=true",
+    "dragstart trusted=true",
+    "dragenter",
+    "dragover",
+    "drop data=card-1 trusted=true",
+    "dragend dropEffect=copy"
+  ],
+  "dropped": "card-1",
+  "drop_effect": "copy"
+}

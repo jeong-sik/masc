@@ -4,7 +4,7 @@
     {!Lane_run_identity.t} vocabulary; route removal cannot erase that history.
 
     [Runtime.exact_lane] is this type. [Exact_lane_run_registry.lane] is its
-    own type without [Verifier] or [Browser_stagehand], and
+    own type without [Verifier], and
     [run_identity] matches every current route explicitly, so adding one must
     state its original observation identity. *)
 
@@ -14,7 +14,6 @@ type t =
   | Hitl_auto_judge
   | Board_attention
   | Verifier
-  | Browser_stagehand
   | Candle_appraiser
 [@@deriving enumerate]
 

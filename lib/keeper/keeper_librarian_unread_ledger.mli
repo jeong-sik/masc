@@ -5,4 +5,5 @@ val read : keepers_dir:string -> keeper_id:string -> (Keeper_librarian_unread.t 
 (** Absence is an initial empty ledger. Existing malformed/unreadable bytes fail. *)
 val archive : keepers_dir:string -> keeper_id:string -> Keeper_librarian_unread.t list ->
   (Keeper_librarian_unread.t list, string) result
-(** Atomic, fsynced cumulative union. A merge conflict preserves the old file. *)
+(** Atomic, fsynced cumulative union. A merge conflict preserves the old file.
+    A write that changed the file is told to {!Keeper_memory_health_input}. *)

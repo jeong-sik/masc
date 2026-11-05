@@ -11,9 +11,11 @@
     to keep a roster in sync, and a tool that changes its mind changes one
     line in its own file.
 
-    Absence means {!Tool_definition_toml.Always_loaded}. A tool says nothing
-    and rides in every request, which is what all of them did before this
-    module existed.
+    A file without the key means {!Tool_definition_toml.Always_loaded}: the
+    tool says nothing and rides in every request, which is what all of them
+    did before this module existed. A missing file is not that answer. Every
+    built-in tool has its file, so {!required} raises for one without it;
+    only a caller that may hold a name with no file at all asks {!declared}.
 
     A file that does not parse raises on first ask rather than answering
     [Always_loaded]: a misplaced declaration and no declaration are the same
@@ -46,15 +48,21 @@
     schema bytes at all, because the model calls the one composition rather
     than the tools inside it. *)
 
-(** [loading_of_tool name] is what [config/tools/<name>.toml] declares.
+(** [declared name] is what [config/tools/<name>.toml] declares, or [None]
+    when there is no such file. *)
+val declared : string -> Tool_definition_toml.loading option
 
-    [Always_loaded] for a name with no such file: tools built in OCaml rather
-    than declared in TOML cannot opt into deferral, and answering [Deferrable]
-    for a name this module cannot see would defer a schema nothing can serve. *)
-val loading_of_tool : string -> Tool_definition_toml.loading
+(** [required name] is what [config/tools/<name>.toml] declares, for a name
+    that must have that file: a tool descriptor's internal name, or a tool the
+    composition surface builds from its own file.
+
+    @raise Failure naming the file when it is missing. Answering
+    [Always_loaded] there would let a descriptor looked up under a name with
+    no file drop its [defer_loading] with nothing reporting it. *)
+val required : string -> Tool_definition_toml.loading
 
 (** [loading_of_declaration ~path ~name ~contents] is what one tool file
-    declares, and what {!loading_of_tool} reads every file through.
+    declares, and what {!declared} reads every file through.
 
     @raise Failure if [contents] does not parse. A file that cannot be read is
     not a file that declares nothing: the two are the same answer at every call

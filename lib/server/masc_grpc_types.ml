@@ -157,12 +157,9 @@ module HeartbeatAck = struct
     ]
 
   (* The wire carries one oneof arm per directive, so a value that names no
-     arm cannot be built. This used to be "pause" | "wakeup" |
-     "claim:<task_id>": a prefix split on ':' and matched by name, which is
-     how "resume" sat in the proto comment for months while every client that
-     sent it got a decode failure instead of the documented behaviour
-     (#29396 A6). [`not_set] is the one shape protobuf still admits — a
-     Directive message with no field set — and it is a decode error. *)
+     arm cannot be built (#29396 A6). [`not_set] is the one shape protobuf
+     still admits — a Directive message with no field set — and it is a decode
+     error. *)
   let directive_of_wire : directive_wire -> _ = function
     | `Pause _ -> Ok Keeper_directive.Pause
     | `Wakeup _ -> Ok Keeper_directive.Wakeup

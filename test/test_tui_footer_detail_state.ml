@@ -19,6 +19,7 @@ let detail_surfaces =
   ; ("Schedules", Masc_tui_types.Schedules)
   ; ("Verification", Masc_tui_types.Verification)
   ; ("Harness", Masc_tui_types.Harness)
+  ; ("Changes", Masc_tui_types.Changes)
   ]
 
 let contains haystack needle =
@@ -64,6 +65,98 @@ let test_each_list_footer_names_no_key_it_refuses () =
         keys)
     list_footer_refusals
 
+(* The footers above are read by substring, which cannot tell a one-letter key
+   from the end of another: "c:" is inside "Esc:". An item is "key:label" and
+   items are joined by two spaces, so a key names an item only right after a
+   separator. *)
+let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
+
+(* A key and the two footers of its surface: the one drawn where the key
+   answers and the one drawn where the dispatcher refuses it.
+   [t], [p], [/] and [n / N] act on the Work list; in a Goal detail [p] is
+   Pause and the other three have no list to act on. [c] replies to the post
+   that is open, so the Board list has nothing to reply to. [/] and [n / N]
+   search the list's rows, and an open Verification, Harness or System_logs
+   detail has none. *)
+let search_keys name surface =
+  ( name,
+    Keys.footer_hints ~detail_open:false surface,
+    Keys.footer_hints ~detail_open:true surface,
+    [ "/"; "n / N" ] )
+
+(* Left closes an open detail and does nothing on a list (the [Some "left"]
+   arm of masc_tui.ml), so with no detail open the way back is Esc alone. The
+   two rows are one fact read in two states: the list footer names Esc and not
+   Left / Esc, the detail footer the reverse. *)
+let back_keys name ~list ~detail =
+  [ (name ^ " Left / Esc", detail, list, [ "Left / Esc" ])
+  ; (name ^ " Esc", list, detail, [ "Esc" ])
+  ]
+
+let back_keys_of_surface name surface =
+  back_keys name
+    ~list:(Keys.footer_hints ~detail_open:false surface)
+    ~detail:(Keys.footer_hints ~detail_open:true surface)
+
+let scoped_keys =
+  [ ( "Planning",
+      Keys.footer_hints_planning_goal_list,
+      Keys.footer_hints_planning_goal_detail,
+      [ "t"; "p"; "/"; "n / N" ] )
+  ; ( "Board",
+      Keys.footer_hints ~detail_open:true Masc_tui_types.Board,
+      Keys.footer_hints ~detail_open:false Masc_tui_types.Board,
+      [ "c" ] )
+  ; search_keys "Verification" Masc_tui_types.Verification
+  ; search_keys "Harness" Masc_tui_types.Harness
+  ; search_keys "System_logs" Masc_tui_types.System_logs
+  ]
+  @ back_keys "Planning"
+      ~list:Keys.footer_hints_planning_goal_list
+      ~detail:Keys.footer_hints_planning_goal_detail
+  @ back_keys_of_surface "Board" Masc_tui_types.Board
+  @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules
+  @ back_keys_of_surface "Verification" Masc_tui_types.Verification
+  @ back_keys_of_surface "Harness" Masc_tui_types.Harness
+  @ back_keys_of_surface "System_logs" Masc_tui_types.System_logs
+  @ back_keys_of_surface "Changes" Masc_tui_types.Changes
+  (* Runtime draws its two states from two builders, not from one table read
+     twice: the readings' footer and the detail's own. *)
+  @ back_keys "Runtime"
+      ~list:(Keys.footer_hints_runtime ~mode:Masc_tui_types.Runtime_lanes)
+      ~detail:(Keys.footer_hints_runtime_detail ~ko:false ~routes:false ())
+
+let test_a_scoped_key_is_named_only_where_it_answers () =
+  List.iter
+    (fun (name, answering, refusing, keys) ->
+      List.iter
+        (fun key ->
+          check bool (name ^ " names " ^ key ^ " where it answers") true
+            (names_item answering key);
+          check bool (name ^ " does not name " ^ key ^ " where it is refused")
+            false (names_item refusing key))
+        keys)
+    scoped_keys
+
+(* The draft keys act on an open file only: the dispatcher needs the file pane
+   focused with no diff, history or notes drawn over it. The tree and diff
+   footers used to name them anyway. *)
+let draft_keys = [ "e"; "S"; "V"; "X"; "A (draft)" ]
+
+let test_code_draft_keys_are_named_only_on_the_file_pane () =
+  let file = Keys.footer_hints_code ~pane:Keys.Code_file in
+  List.iter
+    (fun key ->
+      check bool ("the file pane names " ^ key) true (names_item file key);
+      List.iter
+        (fun (pane_name, pane) ->
+          check bool
+            (pane_name ^ " pane does not name " ^ key)
+            false
+            (names_item (Keys.footer_hints_code ~pane) key))
+        [ ("tree", Keys.Code_tree); ("diff", Keys.Code_diff) ])
+    draft_keys
+
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -83,6 +176,10 @@ let () =
             test_each_surface_scopes_a_key
         ; test_case "each list footer names no key it refuses" `Quick
             test_each_list_footer_names_no_key_it_refuses
+        ; test_case "a scoped key is named only where it answers" `Quick
+            test_a_scoped_key_is_named_only_where_it_answers
+        ; test_case "code draft keys are named only on the file pane" `Quick
+            test_code_draft_keys_are_named_only_on_the_file_pane
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

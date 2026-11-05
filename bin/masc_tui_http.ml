@@ -1534,6 +1534,23 @@ let fetch_git_worktrees ?keeper ?repo ~expected_workspace ~host ~port ~path () =
   in
   Result.bind reading Masc.Tui_decode.decode_git_worktrees
 
+(* [ignore_case] travels as [0]/[1]: the route refuses any other spelling. *)
+let fetch_workspace_search ?keeper ?repo ~expected_workspace ~host ~port ~path ~query
+    ~ignore_case () =
+  let route =
+    "/api/v1/workspace/search?path=" ^ percent_encode_query_value path
+    ^ "&q=" ^ percent_encode_query_value query
+    ^ "&ignore_case=" ^ (if ignore_case then "1" else "0")
+    ^ keeper_query_suffix keeper ^ repo_query_suffix repo
+  in
+  let reading =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+      ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+        get_json ~host ~port ~path:route)
+    |> Result.map_error (fun detail -> "content search: " ^ detail)
+  in
+  Result.bind reading Masc.Tui_decode.decode_workspace_search
+
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
 let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) ~(limit : int) () :
@@ -3898,6 +3915,13 @@ let fetch_repository_changes ~(host : string) ~(port : int)
 let fetch_keeper_memory_health ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/keeper-memory-health"
+
+(** Fetch one Keeper's row of the memory health ([?keeper=], RFC-0487). A
+    Keeper the fleet does not list answers [keeper: null]. *)
+let fetch_keeper_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/dashboard/keeper-memory-health?keeper=" ^ percent_encode_query_value keeper)
 
 (** Fetch what one keeper remembers, fact by fact
     ([GET /api/v1/keepers/:name/memory-facts]): the ordinary and

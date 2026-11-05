@@ -7,34 +7,179 @@ open Masc_tui_render_prim
 module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
-let format_badge = function
-  | Catalog.Mcp _ -> Theme.recede () ^ "[MCP]" ^ Ansi.reset
+let type_text = function
+  | Catalog.Mcp _ -> "[MCP]"
   | Report report ->
-      let colour, name = match report.revision.format with
-        | Masc.Published_artifact.Markdown -> Theme.category Theme.Slot_1, "MD"
-        | Html -> Theme.category Theme.Slot_2, "HTML" in
-      colour ^ Printf.sprintf "[%s v%d]" name report.revision.revision ^ Ansi.reset
+      let name = match report.revision.format with
+        | Masc.Published_artifact.Markdown -> "MD"
+        | Html -> "HTML" in
+      Printf.sprintf "[%s v%d]" name report.revision.revision
 
-let check_badge status =
-  let colour = match status with
-    | Masc_tui_artifact_checks.Known
-        (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
-    | Known None
-    | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
-    | Unknown _ -> Theme.muted () in
-  colour ^ Masc_tui_artifact_checks.label status ^ Ansi.reset
+let type_style = function
+  | Catalog.Mcp _ -> Theme.recede ()
+  | Report report ->
+      (match report.revision.format with
+       | Masc.Published_artifact.Markdown -> Theme.category Theme.Slot_1
+       | Html -> Theme.category Theme.Slot_2)
 
-let entry_rows = 3
+let check_style status =
+  match status with
+  | Masc_tui_artifact_checks.Known
+      (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
+  | Known None
+  | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
+  | Unknown _ -> Theme.muted ()
+
+(* A report's display name already spells its format, title and revision, and
+   the type column says the format and revision, so the row names it by title. *)
+let name_text = function
+  | Catalog.Report report -> report.revision.title
+  | Mcp _ as resource -> Catalog.display_name resource
+
+(* What a resource says about itself, and how it was made. An MCP resource has
+   a description, or its address when it has none, and a media type. A report
+   has its summary, and its author, creation time and size. *)
+let detail_text = function
+  | Catalog.Report report -> report.revision.summary
+  | Mcp _ as resource ->
+      let metadata = Catalog.metadata resource in
+      Option.value metadata.description ~default:metadata.uri
+
+let meta_text = function
+  | Catalog.Report report ->
+      Printf.sprintf "%s · %s · %d bytes" report.revision.author
+        report.revision.created_at report.revision.body.bytes
+  | Mcp _ as resource ->
+      Option.value (Catalog.metadata resource).mime_type ~default:"type unknown"
+
+(* One resource is one row: its type, its name, then, for a published report,
+   the revision check and the "today" marker, then what it says about itself
+   and how it was made. *)
+type list_column = Col_type | Col_name | Col_check | Col_day | Col_detail | Col_meta
+
+(* The widest a name keeps. A longer one folds in the middle. *)
+let name_cap_cells = 36
+
+(* The narrowest the description is worth drawing. Below it the row stops at
+   the columns that identify the resource and the name takes the room. *)
+let detail_floor_cells = 20
+
+(* The narrowest a name is drawn when the row has no room for anything after it. *)
+let name_floor_cells = 16
+
+(* The widest the media type or the author reading grows. A longer reading
+   folds at its end. *)
+let meta_cap_cells = 44
+
+(* The widest the rows spread. Past this the cells of one row sit too far apart
+   to read across, so a wider pane leaves the rest of its width empty. *)
+let table_cap_cells = 120
+
+(* The widest check reading, the one that says nothing is known. Held as a
+   constant of the column rather than measured over the visible rows, so the
+   columns after it do not move when the window scrolls past a different one. *)
+let check_cells =
+  Masc_tui_message_layout.display_width
+    (Masc_tui_artifact_checks.label (Masc_tui_artifact_checks.Unknown ""))
+
+let day_marker = "today"
+
+let single_line_cells text =
+  Masc_tui_message_layout.display_width (Terminal_text.single_line text)
+
+(* The width a column needs for [texts], never less than its own name: the
+   column names are drawn over the same cells. *)
+let widest_cells ~name texts =
+  List.fold_left (fun widest text -> max widest (single_line_cells text))
+    (String.length name) texts
+
+type list_layout =
+  { layout : list_column Masc_tui_table.layout
+  ; flex : list_column  (** The column that takes what the others leave. *)
+  ; width : list_column -> int }
+
+(* The columns a list of resources draws at this width. With room for the
+   description after the identifying columns the row is type, name, the check
+   and marker of a report, the description and the media or author reading; the
+   description takes what the rest leave, and the media or author reading goes
+   when the row is too wide. Without room for the description the row stops at
+   the identifying columns and the marker, and the name takes the room. The
+   check and the marker exist only when some resource is a report or was made
+   today. *)
+let list_layout resources ~today ~inner_width =
+  let has_report = List.exists (function Catalog.Report _ -> true | Mcp _ -> false) resources in
+  let has_today = List.exists (Catalog.on_day today) resources in
+  let inner_width = min inner_width table_cap_cells in
+  let type_cells = widest_cells ~name:"TYPE" (List.map type_text resources) in
+  let name_cells = min name_cap_cells
+    (widest_cells ~name:"NAME" (List.map name_text resources)) in
+  let meta_cells = min meta_cap_cells (widest_cells ~name:"META" (List.map meta_text resources)) in
+  let check_cells = max check_cells (String.length "CHECK") in
+  let day_cells = max (String.length day_marker) (String.length "DAY") in
+  let identifying = [Col_type; Col_name] @ (if has_report then [Col_check] else []) in
+  let marker = if has_today then [Col_day] else [] in
+  let describing_needs =
+    type_cells + name_cells + (if has_report then check_cells else 0)
+    + (if has_today then day_cells else 0) + detail_floor_cells
+    + Masc_tui_table.cell_gap * (List.length identifying + List.length marker) in
+  if inner_width >= describing_needs then
+    let width = function
+      | Col_type -> type_cells
+      | Col_name -> name_cells
+      | Col_check -> check_cells
+      | Col_day -> day_cells
+      | Col_detail -> detail_floor_cells
+      | Col_meta -> meta_cells in
+    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_detail
+        ~drop_order:[Col_meta] (identifying @ marker @ [Col_detail; Col_meta])
+    ; flex = Col_detail
+    ; width }
+  else
+    let width = function
+      | Col_type -> type_cells
+      | Col_name -> name_floor_cells
+      | Col_check -> check_cells
+      | Col_day -> day_cells
+      | Col_detail | Col_meta -> 0 in
+    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_name
+        ~drop_order:[Col_day] (identifying @ marker)
+    ; flex = Col_name
+    ; width }
+
+(* One row on the layout: [reading] gives a column's text and style for one
+   resource, and [None] draws the column names. *)
+let list_cells ({ layout; flex; width } : list_layout) reading =
+  List.map (fun column ->
+    let header, fold = match column with
+      | Col_type -> "TYPE", Masc_tui_table.Fold_tail
+      | Col_name -> "NAME", Masc_tui_table.Fold_middle
+      | Col_check -> "CHECK", Masc_tui_table.Fold_tail
+      | Col_day -> "DAY", Masc_tui_table.Fold_tail
+      | Col_detail -> "DETAIL", Masc_tui_table.Fold_tail
+      | Col_meta -> "META", Masc_tui_table.Fold_tail in
+    let value, style = match reading with
+      | None -> "", ""
+      | Some read -> read column in
+    let cell_width = if column = flex then layout.flex_width else width column in
+    Masc_tui_table.cell ~header ~fold ~style ~width:cell_width
+      (Terminal_text.single_line value)) layout.shown
+
+let selected_marker = " \xe2\x96\xb8 "
+let unselected_marker = "   "
+let marker_cells = String.length unselected_marker
+
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
 
-let list_viewport state ~rows =
+(* Rows left for resources: the pane's content rows less the save prompt, the
+   line that says which day and how many are unchecked, the column names, and
+   the status line when there is one. *)
+let list_rows state ~rows =
   let status = Option.is_some (resource_inventory_status state)
     || Option.is_some (resources_empty_note (visible_resources state)) in
-  let budget = max 0 (pane_surface_content_height ~rows - save_prompt_height state - 1
-    - (if status then 1 else 0)) in
-  budget, max 1 (budget / entry_rows)
+  max 0 (pane_surface_content_height ~rows - save_prompt_height state - 2
+    - (if status then 1 else 0))
 
-let list_page_size state ~rows = snd (list_viewport state ~rows)
+let list_page_size state ~rows = max 1 (list_rows state ~rows)
 
 let document_viewport state ~rows ~cols =
   let pane_cols = if resource_split state ~cols then cols - keeper_roster_pane_cols else cols in
@@ -117,33 +262,40 @@ let render_resources (state : state) =
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
       ^ " · today unchecked: " ^ unchecked ^ Ansi.reset
       ^ Theme.recede () ^ query ^ Ansi.reset);
-    let list_rows_budget, visible = list_viewport state ~rows in
-    let first = max 0 (cursor - visible + 1) in
-    for i = 0 to list_rows_budget - 1 do
-      let index = first + i / entry_rows in
-      match List.nth_opt rows_list index with
+    let budget = list_rows state ~rows in
+    let first = max 0 (cursor - max 1 budget + 1) in
+    let table = list_layout rows_list ~today
+      ~inner_width:(max 1 (framed_inner_width pane_cols - marker_cells)) in
+    (* The column names take a row even with nothing to name, so the rows that
+       follow start in the same place for an empty list as for a full one. *)
+    if total = 0 then framed_empty pane_buf pane_cols
+    else
+      framed_line pane_buf pane_cols
+        (Theme.recede () ^ unselected_marker
+         ^ Masc_tui_table.header_row (list_cells table None) ^ Ansi.reset);
+    for i = 0 to budget - 1 do
+      match List.nth_opt rows_list (first + i) with
       | Some resource ->
-          let selected = index = cursor in
-          let metadata = Catalog.metadata resource in
-          let line = match i mod entry_rows with
-            | 0 -> (if selected then " ▸ " else "   ") ^ format_badge resource ^ " "
-              ^ Ansi.bold ^ Terminal_text.single_line (Catalog.display_name resource) ^ Ansi.reset
-              ^ (match resource with Catalog.Mcp _ -> ""
-                | Report report -> " · " ^ check_badge (resource_check_status state report))
-              ^ (if Catalog.on_day today resource then Theme.recede () ^ " · today" ^ Ansi.reset else "")
-            | 1 -> "   " ^ Theme.recede () ^ Terminal_text.single_line (match resource with
-                | Catalog.Report report -> report.revision.summary
-                | Mcp _ -> Option.value metadata.description ~default:metadata.uri) ^ Ansi.reset
-            | _ -> "   " ^ (match resource with
-                | Catalog.Report report -> Terminal_text.single_line report.revision.author
-                  ^ Theme.recede () ^ Terminal_text.single_line
-                    (Printf.sprintf " · %s · %d bytes" report.revision.created_at report.revision.body.bytes)
-                  ^ Ansi.reset
-                | Mcp _ -> Theme.recede () ^ "MCP · "
-                  ^ Terminal_text.single_line (Option.value metadata.mime_type ~default:"type unknown")
-                  ^ Ansi.reset) in
-          (* Keep the selected card's foreground paired with its adaptive
-             ground. Content colours are for the neighbouring cards; inner
+          let selected = first + i = cursor in
+          let check = match resource with
+            | Catalog.Report report -> Some (resource_check_status state report)
+            | Mcp _ -> None in
+          let read = function
+            | Col_type -> type_text resource, type_style resource
+            | Col_name -> name_text resource, Ansi.bold
+            | Col_check ->
+                (match check with
+                 | Some status -> Masc_tui_artifact_checks.label status, check_style status
+                 | None -> "", "")
+            | Col_day ->
+                (if Catalog.on_day today resource then day_marker else ""), Theme.recede ()
+            | Col_detail -> detail_text resource, Theme.recede ()
+            | Col_meta -> meta_text resource, Theme.recede () in
+          let line =
+            (if selected then selected_marker else unselected_marker)
+            ^ Masc_tui_table.row (list_cells table (Some read)) in
+          (* Keep the selected row's foreground paired with its adaptive
+             ground. Content colours are for the neighbouring rows; inner
              resets must not punch holes in the selected band. *)
           if selected then
             styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())

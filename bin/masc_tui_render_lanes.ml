@@ -743,12 +743,16 @@ let render_lanes_overview (state : state) =
     | None -> "  All features"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
-        let standings = Masc_tui_lane_standing.counts
+        let standings = Masc_tui_lane_standing.count_items
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
                snapshot.Masc.Tui_decode_lane_inventory.rows) in
-        Printf.sprintf "  All features · observed %02d:%02d:%02d%s"
-          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
-          (if standings = "" then "" else " · " ^ standings) in
+        (* A count that does not fit is left out whole: "4 not …" read as
+           a number with its word cut off. *)
+        Message_layout.join_fitting ~sep:" · " ~cells:inner
+          ("  All features"
+           :: Printf.sprintf "observed %02d:%02d:%02d"
+                observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+           :: standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     (Masc_tui_types.lane_inventory_notice_lines ~cols state);
@@ -772,13 +776,28 @@ let render_lanes_overview (state : state) =
     ^ Terminal_text.single_line (match state.lane_inventory with
       | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
       | None -> Masc_tui_lane_inventory.row_summary row) in
-  let status_width = List.fold_left (fun width row -> max width
-      (Message_layout.display_width (summary row))) (String.length "STATE") inventory
-    |> min (max 1 (inner / 2)) in
+  let widest_summary = List.fold_left (fun width row -> max width
+      (Message_layout.display_width (summary row))) (String.length "STATE") inventory in
+  let widest_label = List.fold_left
+      (fun width (row : Masc.Tui_decode_lane_inventory.row) -> max width
+        (Message_layout.display_width (Terminal_text.single_line row.label)))
+      (String.length "FEATURE") inventory in
   let mark_width = 2 in
-  let label_width = max 1 (inner - mark_width - status_width - 2) in
+  let column_gap = 2 in
+  (* Both columns take what their widest reading needs when the two fit
+     together, so a name and its state sit on the same stretch of the row. A
+     row that does not fit gives the state at most half the width and the names
+     the rest. *)
+  let status_width, label_width =
+    if mark_width + widest_label + column_gap + widest_summary <= inner then
+      (widest_summary, widest_label)
+    else
+      let status = min widest_summary (max 1 (inner / 2)) in
+      (status, max 1 (inner - mark_width - status - column_gap))
+  in
+  let gap = String.make column_gap ' ' in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ "  " ^ fit_width "STATE" status_width);
+    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ gap ^ fit_width "STATE" status_width);
   let window = Rows.of_list ~first:scroll ~height entries in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
@@ -803,14 +822,14 @@ let render_lanes_overview (state : state) =
         (* The selection band takes no colour of its own, so the selected row
            keeps the mark and drops the styles. *)
         if selected_position = Some index then
-          box_line_selected buf cols (marked (mark ^ label ^ "  " ^ state_text))
+          box_line_selected buf cols (marked (mark ^ label ^ gap ^ state_text))
         else
           let row_style = if Masc_tui_lane_standing.recedes standing then Theme.recede () else "" in
           let state_style = match standing with
             | Masc_tui_lane_standing.Failing -> Masc_tui_lane_standing.colour standing
             | Masc_tui_lane_standing.(Ready | Waiting | Changing | Off | Not_set_up | Unobserved) -> row_style in
           box_line buf cols (marked (Masc_tui_lane_standing.colour standing ^ mark ^ Ansi.reset
-            ^ row_style ^ label ^ "  " ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
+            ^ row_style ^ label ^ gap ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
   done;
   (match Masc_tui_scroll.position_row ~scroll ~height (List.length entries) with
    | None -> ()
@@ -1023,13 +1042,16 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
         | Some _ -> " · ] older"
         | None -> if Option.is_some state.lane_runs then " · end" else "" in
     count ^ continuation in
+  (* Laid out like the other title rows that name one thing before the badge.
+     The label was padded to twenty cells here, so at eighty columns the
+     padding pushed the badge past the edge and the frame cut it to
+     "HTTP [co…". *)
   let header =
-    Printf.sprintf "%s · %s (%s)  %s"
-      (screen_title " MASC Features")
-      (fit_width
-         (Terminal_text.single_line (observed_lane_label lane))
-         20)
-      coverage (connection_badge state)
+    detail_heading ~cols
+      ~lead:(Lead_text (screen_title " MASC Features" ^ " \xc2\xb7 "))
+      ~id:(observed_lane_label lane)
+      ~after:[ Printf.sprintf " (%s)" coverage ]
+      ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1041,8 +1063,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Lane_run_identity.Hitl_auto_judge
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
-    | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Browser_stagehand -> "ACTOR"
+    | Lane_run_identity.Candle_appraiser -> "ACTOR"
   in
   (* The slot takes what the drawn columns leave. *)
   let run_layout =
@@ -1930,7 +1951,7 @@ let render_lane_run_detail (state : state) ~run_id =
               (if measurement then measurement_detail_title
                else lane_run_detail_title)
            ^ "  "))
-      ~id:run_id ~after:"" ~tail:(connection_badge state)
+      ~id:run_id ~after:[] ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

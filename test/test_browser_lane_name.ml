@@ -6,21 +6,20 @@ let lane = testable (fun fmt lane -> Format.pp_print_string fmt (Lane_name.to_wi
 let test_round_trip () =
   List.iter (fun name -> check (option lane) (Lane_name.to_wire name) (Some name)
     (Lane_name.of_wire (Lane_name.to_wire name))) Lane_name.all;
-  check string "error text lists every lane" "live or automation or stagehand" Lane_name.expected
+  check string "error text lists every lane" "live or automation" Lane_name.expected
 
 let test_rejects_non_names () =
   List.iter (fun raw -> check (option lane) (Printf.sprintf "%S" raw) None (Lane_name.of_wire raw))
     [ ""; "Live"; " live"; "automation "; "chromium" ]
 
 (* The server lanes: live is refused with whose browser it is, a non-name
-   with the names that serve, and the two server lanes are read. *)
+   with the names that serve, and the server lane is read. *)
 let test_server_lane () =
   let server = function
     | Ok lane -> Lane_name.to_wire (Browser_lane.server_lane_name lane)
     | Error detail -> "refused: " ^ detail
   in
   check string "automation" "automation" (server (Browser_lane.parse_server_lane "automation"));
-  check string "stagehand" "stagehand" (server (Browser_lane.parse_server_lane "stagehand"));
   check string "live names its owner" ("refused: the live browser belongs to the operator; " ^ Browser_lane.server_lane_refused)
     (server (Browser_lane.parse_server_lane "live"));
   check string "a non-name lists the server lanes" ("refused: " ^ Browser_lane.server_lane_refused)
@@ -69,7 +68,7 @@ let test_tool_enums () =
     tool_verbs;
   let act = Tool_schemas_misc_toml.browser_act in
   (* Opening a tab is the one action every lane can take: automation serves
-     every action, live and stagehand each serve tab creation. The lanes the
+     every action, and live serves tab creation. The lanes the
      schema offers follow the backends, so a lane that gains tab creation shows
      up here until the schema lists it. *)
   let open_tab = Browser_lane.(Page_act (Action.Open_tab "https://example.org/")) in

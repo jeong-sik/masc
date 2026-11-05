@@ -24,12 +24,11 @@ type stimulus_kind =
   | Task_cancelled
       (** Another Keeper cancelled a Task this Keeper authored. *)
   | Workspace_message
+      (** A committed workspace message named this Keeper. *)
   | Delegate_completed
   | Composition_completed
   | Owned_job_completed
   | Tool_result_ready
-  | Addon_operation_changed
-      (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =
   | Turn_started

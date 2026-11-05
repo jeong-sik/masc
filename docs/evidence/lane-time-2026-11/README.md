@@ -6,7 +6,7 @@
 | 저장소 | 쓰는 곳 |
 |---|---|
 | `tool_calls/YYYY-MM/DD[.NNN].jsonl` | 도구 호출. `ts` 는 호출이 끝난 시각이에요 |
-| `keeper_turn_events/<keeper>/*.jsonl` | 턴 한 번이 파일 하나. 첫 줄과 마지막 줄의 `ts` 가 턴의 시작과 끝이에요 |
+| `keeper_turn_events/<keeper>/*.jsonl` | trace 파일. `autonomous` 턴이 한 번 돌 때마다 하나이고, `direct` 턴은 없어요. 첫 줄과 마지막 줄의 `ts` 가 턴의 시작과 끝이에요 |
 | `keepers/<keeper>/chat-operations.sqlite3` | 위임·채팅 작업. Keeper 하나가 한 번에 하나만 돌려요 |
 | `agent-core-events/YYYY-MM/DD.jsonl` | 이벤트 중 `provider_admission:waited` 만 읽어요. 모델 요청이 계정의 허용 수가 모두 찬 상태를 만나 줄을 선 경우예요 |
 
@@ -17,13 +17,20 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
     --from-date 2026-11-01 --to-date 2026-11-04 --until 2026-11-04T19:10:00Z --json-out after.json
 ```
 
-이 폴더의 `result-2026-11-01_11-04.json` 이 위 명령의 결과예요. 시험은 `python3 -m unittest discover -s docs/evidence/lane-time-2026-11` 로 돌려요.
+이 폴더의 `result-2026-11-01_11-04.json` 이 위 명령의 결과예요. `result-2026-11-01_11-05.json` 은 `--to-date 2026-11-05 --until 2026-11-05T05:00:00Z` 로 같은 명령을 돌린 결과이고, `docs/evidence/execute-waits-2026-11` 과 같은 창이에요. 시험은 `python3 -m unittest discover -s docs/evidence/lane-time-2026-11` 로 돌려요.
+
+서버는 수정한 지 `runtime.toml` 의 `[maintenance].jsonl_retention_days`(저장소 기본값은 30일이고 환경 변수 `MASC_JSONL_RETENTION_DAYS` 가 먼저예요)가 넘은 trace 파일을 시작할 때와 24시간마다 지워요(`prune_shared_jsonl_stores`). 2026-11-05 에 가장 오래된 trace 파일의 수정 시각은 10-07 이었어요. 지운 뒤에 다시 돌리면 그 파일의 턴이 trace 파일이 없는 턴으로 읽혀서 위 JSON 과 값이 달라져요. 이 창의 파일은 12-01 쯤부터 지워지기 시작할 수 있어요.
 
 ## 센 방법
 
 - 턴 시간: Keeper 별로 턴 구간을 합쳐서 겹친 시간을 한 번만 세요. 그 합이 "턴이 도는 시간"이에요.
-- 도구 시간: 모든 호출의 `duration_ms` 합이에요.
+- 도구 시간(원장 전체): 모든 호출의 `duration_ms` 합이에요.
 - 호출 사이 시간: 한 턴(`trace_id`, `keeper_turn_id`) 안에서 첫 호출 뒤의 호출마다 "앞 호출이 끝난 뒤 이 호출이 시작되기까지"를 더해요. 호출 시작은 `ts` 에서 `duration_ms` 를 뺀 값이에요. 겹치는 호출은 0으로 잡아요.
+- 턴 안의 시간: 호출 구간과 호출 사이 구간 중에서 그 Keeper 의 턴 구간과 겹친 초만 세요. 턴 시간에 대한 몫은 모두 이 값으로 구해요. 원장 전체를 그대로 턴 시간으로 나누면 턴 구간 밖의 시간이 섞여서 몫이 부풀어요.
+- 나머지: 턴 시간에서 턴 안의 도구 시간과 턴 안의 호출 사이 시간을 뺀 값이에요.
+- trace 파일이 없는 턴: 호출의 `trace_id`, `keeper_turn_id` 와 맞는 trace 파일이 없는 턴이에요. 파일 이름이 `<trace_id>-<keeper_turn_id>-<해시>.jsonl` 형식이라서 이름만 보고 맞춰요(`keeper_turn_id` 는 코드의 `Turn_ref.absolute_turn` 이에요). 이런 턴의 호출이 Keeper 의 턴 구간에 얼마나 드는지는 `turn_time.calls_without_trace_file.tool_time_inside_turns_s` 에 적어요. trace 파일이 하나도 없는 Keeper 는 턴 구간이 없어서 안의 시간이 정의상 0이에요. 그런 Keeper 의 호출은 `keepers_without_any_trace_file` 에 따로 적어요. 측정 시점의 코드에서 trace 파일을 여는 곳은 `Keeper_autonomous_stream.create`(`lib/keeper/keeper_autonomous_stream.ml`) 하나예요. `masc_keeper_msg` 에 답하는 `direct` 턴(`Keeper_turn.run_direct_turn_with_fsm`)은 파일을 쓰지 않아요.
+- trace 파일이 있는 턴인데 구간 밖에 놓인 호출: 호출의 턴에 trace 파일이 있고, 호출 시간 중 계산 오차(1e-6초)를 넘는 부분이 그 Keeper 의 턴 구간 밖에 있는 호출이에요. `turn_time.traced_calls_outside_turns` 가 호출 수, 턴 수, 구간 밖 도구 시간을 `turn_kind` 별로 적어요. `calls_partly_inside_turn_time` 은 그중 구간 안의 초도 있는 호출 수이고, `turns_that_also_have_autonomous_calls` 는 그 턴 중 `autonomous` 호출도 같이 가진 턴 수예요.
+- 호출 종류 묶음: 한 턴 키의 호출이 가진 `turn_kind` 값을 `+` 로 이은 이름이에요(`direct`, `autonomous`, `autonomous+direct`). 원장은 `turn_kind` 를 호출마다 적어서 한 턴 키가 두 종류를 다 가질 수 있어요. `turn_time.calls_without_trace_file.turns_by_kind_set` 이 창 안의 모든 턴을 묶음 하나에 한 번씩 세고, 묶음마다 trace 파일이 없는 턴 수를 적어요.
 - 같은 결과 재조회: 같은 Keeper 가 같은 도구에 같은 입력(`input_fingerprint`)을 보내 1시간 안에 같은 결과(`output_fingerprint`)를 받은 호출이에요. `scripts/measure-tool-efficiency.py` 와 같은 규칙인데, 이 스크립트는 자정을 넘어서도 1시간을 이어서 세요.
 - 긴 Execute: 60초 이상 걸린 Execute 예요. 명령에 `sleep`, `for ... in`, `while`, `until` 이 있으면 폴링으로 세요. 명령 문장은 이 판정에만 써요.
 - 큐 대기: 작업의 `started_at` 에서 `created_at` 을 뺀 값이에요. 작업의 `source.sender_keeper` 가 있으면 위임이에요.
@@ -36,20 +43,32 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 
 ## 결과(11-01 ~ 11-04T19:10Z, 91.17시간)
 
-| 구간 | 시간 | 몫 |
-|---|---:|---:|
-| 턴이 도는 시간(턴 trace 가 있는 Keeper 28명) | 709.8시간 | 100% |
-| 도구가 실행된 시간 | 101.3시간 | 14.3% |
-| 호출 사이 시간(134,311개 호출, 평균 13.7초, 중앙값 1.1초, p90 21.9초) | 510.1시간 | 71.9% |
-| 나머지(첫 호출 전, 호출 없는 턴, 턴 끝) | 98.4시간 | 13.9% |
+| 구간 | 원장 전체 | 턴 안 | 턴 시간 대비 |
+|---|---:|---:|---:|
+| 턴이 도는 시간(trace 파일이 있는 Keeper 28명) | | 709.8시간 | 100% |
+| 도구가 실행된 시간 | 101.3시간 | 79.4시간 | 11.2% |
+| 호출 사이 시간(134,311개 호출, 평균 13.7초, 중앙값 1.1초, p90 21.9초) | 510.1시간 | 404.3시간 | 57.0% |
+| 나머지(첫 호출 전, 호출 없는 턴, 턴 끝) | | 226.1시간 | 31.9% |
 
-- 같은 결과 재조회 32,545개(첫 호출 뒤의 호출만)가 쓴 턴 시간은 20.8시간(2.9%)이에요. 이 호출들은 앞 호출 바로 뒤에 이어져서 호출 사이 시간이 짧아요.
+- 원장 전체와 턴 안의 차이는 도구 시간 21.9시간, 호출 사이 시간 105.8시간이에요.
+- 도구 시간 21.9시간은 세 덩어리예요. 값은 JSON 의 `turn_time` 아래에 있어요.
+
+| 덩어리 | 호출 | 도구 시간 | 턴 안 | 값이 있는 곳 |
+|---|---:|---:|---|---|
+| trace 파일이 없는 턴. 그 Keeper 에는 trace 파일이 있어요 | 21,458개, 모두 `direct` | 16.0시간 | 0초(잰 값) | `calls_without_trace_file.keepers_with_a_trace_file` |
+| trace 파일이 하나도 없는 Keeper 2명의 호출 | 1,657개 | 4.4시간 | 0초(턴 구간이 없어서 0) | `calls_without_trace_file.keepers_without_any_trace_file` |
+| trace 파일이 있는 턴인데 호출이 턴 구간 밖에 통째로 놓임 | 1,097개, 모두 `direct` | 1.5시간 | 0초(잰 값) | `traced_calls_outside_turns` |
+
+- 둘째 덩어리의 Keeper 는 `ocaml-refactor-woman` 과 `native-image-goal-20261101-0340` 이에요.
+- 셋째 덩어리의 호출은 trace 파일이 있는 턴의 키(`trace_id`, `keeper_turn_id`)를 달고 있어요. 그런 턴 68개 중 62개는 `autonomous` 호출도 같이 가져요. 턴 구간 안에 든 초가 있는 호출은 없어요(`calls_partly_inside_turn_time` 이 0).
+- 호출이 있는 턴 9,872개를 호출 종류로 나누면 `direct` 만 가진 턴이 1,009개, `autonomous` 만 가진 턴이 8,797개, 둘 다 가진 턴이 66개예요(`turns_by_kind_set`). trace 파일이 없는 턴은 `direct` 만 가진 턴 1,003개(99.4%), `autonomous` 만 가진 턴 98개(1.1%), 둘 다 가진 턴 0개예요. 98개는 모두 둘째 덩어리의 Keeper 의 턴이에요(trace 파일이 없는 `autonomous` 호출 1,564개가 전부 둘째 덩어리에 있어요). 그래서 이 표의 턴 시간에는 `direct` 턴이 거의 들어 있지 않아요.
+- 같은 결과 재조회 32,545개(첫 호출 뒤의 호출만)가 쓴 시간은 원장 전체로 20.8시간이고, 턴 안에서는 19.3시간(2.7%)이에요. 이 호출들은 앞 호출 바로 뒤에 이어져서 호출 사이 시간이 짧아요.
 - 한 턴(9,872개)의 호출 수는 평균 14.6, 중앙값 5, p90 31, p99 152, 최대 1,388이에요.
 - 한 응답에 호출 하나만 담은 경우가 141,419호출(98.1%)이고, 둘 이상 담은 호출은 2,764호출(1.9%)이에요. 크기별로 2가 1,500, 3이 453, 4가 152, 5가 70, 6이 24, 7이 539, 8이 16, 10이 10호출이에요.
 - 실행 방식은 serial 85,098호출(99.2시간)과 concurrent 59,085호출(2.2시간)이에요. 호출이 대부분 응답당 하나라서 concurrent 로 분류돼도 겹쳐 도는 호출은 드물어요(호출 사이 시간이 겹친 쌍 3,174개).
-- 60초 이상 Execute 562호출이 42.0시간(5.9%)이고, 그중 폴링 331호출이 29.3시간(4.1%)이에요.
+- 60초 이상 Execute 562호출은 원장 전체로 42.0시간이고, 턴 안에서는 36.2시간(5.1%)이에요. 그중 폴링 331호출은 원장 전체로 29.3시간이고, 턴 안에서는 28.1시간(4.0%)이에요.
 
-호출 사이 시간 510.1시간을 도구 쌍으로 나누면(`turn_time.tool_transitions`):
+원장 전체의 호출 사이 시간 510.1시간을 도구 쌍으로 나누면(`turn_time.tool_transitions`):
 
 | 쌍 | 쌍 수 | 사이 시간 | 몫 |
 |---|---:|---:|---:|
@@ -59,15 +78,15 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | 그중 `Execute` → `masc_board_comment` | 1,883 | 14.1시간(평균 26.9초) | 2.8% |
 | 그중 `masc_dos_screen` ↔ `masc_dos_press` | 2,459 | 19.4시간 | 3.8% |
 
-폴링을 많이 한 Keeper:
+폴링을 많이 한 Keeper(턴 안의 시간만 세요, `turn_time.inside_turns.polling_by_keeper`):
 
 | Keeper | 폴링 | 턴 시간 | 몫 |
 |---|---:|---:|---:|
-| `wkbl-data` | 8.5시간 | 53.0시간 | 16.0% |
+| `wkbl-data` | 8.3시간 | 53.0시간 | 15.7% |
 | `masc-productor-owner` | 7.3시간 | 66.5시간 | 11.0% |
 | `wkbl-front` | 5.0시간 | 41.5시간 | 12.0% |
 | `goo-yang-bong` | 3.2시간 | 59.0시간 | 5.4% |
-| `github-pr-checker` | 3.0시간 | 11.1시간 | 26.6% |
+| `github-pr-checker` | 2.5시간 | 11.1시간 | 22.4% |
 
 제공자 승인 대기(줄을 선 요청만 기록돼요):
 
@@ -93,8 +112,8 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 | | 값 |
 |---|---:|
 | 턴이 시작된 것 | 3,241건 |
-| 큐에서 취소된 것 | 1,566건 |
-| 턴이 시작되지 않은 것 | 16건 |
+| 큐에서 취소된 것 | 1,567건 |
+| 턴이 시작되지 않은 것 | 15건 |
 | 큐에 들어와서 턴이 시작되기까지 | 중앙값 3.6초, p90 494.3초, 합계 458.6시간 |
 | 그 기다림 중 같은 Keeper 가 60초 이상 Execute 를 돌던 시간과 겹친 것 | 17.6시간(3.8%) |
 | 그 기다림 중 같은 Keeper 의 턴이 돌던 시간과 겹친 것 | 249.0시간(54.3%) |
@@ -110,8 +129,10 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
 
 - `ts` 가 끝난 시각이라는 것은 11-03 하루에서 확인했어요. 같은 턴에서 뒤 호출이 30초 이상 걸린 연이은 호출 270쌍 모두, 두 `ts` 의 차이가 뒤 호출의 길이 이상이었어요.
 - 턴 길이는 trace 파일의 첫 줄과 마지막 줄 시각으로 어림한 값이에요. 마지막 줄이 턴이 끝난 뒤에 늦게 써졌다면 턴이 길게 잡혀요. 이 경우가 있는지는 확인하지 못했어요.
-- "호출 사이 시간"에는 모델 추론과 제공자 쪽 대기가 함께 들어 있어서 둘을 가르지 못했어요. 승인 대기 합계(479.6시간)가 호출 사이 시간(510.1시간)과 비슷한 크기라서 대부분이 승인 줄일 것으로 보지만, 같은 요청끼리 짝지어 확인하지는 않았어요.
-- 작업 DB 만 있고 턴 trace 가 없는 Keeper 의 작업은 "같은 Keeper 의 턴과 겹친 시간"이 0으로 잡혀요.
+- `direct` 호출이 `autonomous` 턴과 같은 키(`trace_id`, `keeper_turn_id`)를 달게 되는 경로는 코드로 따라가지 못했어요. 원장의 `turn_kind` 와 trace 파일 이름만으로 센 결과예요.
+- 표의 몫은 trace 파일이 있는 턴의 시간이 기준이에요. trace 파일이 없는 `direct` 턴의 호출과 호출 사이 시간은 표에 들어 있지 않아요. 이 시간을 턴 시간에 더하면 몫이 얼마나 달라지는지는 이 스크립트로 재지 않았어요.
+- "호출 사이 시간"에는 모델 추론과 제공자 쪽 대기가 함께 들어 있어서 둘을 가르지 못했어요. 승인 대기 합계(479.6시간)가 호출 사이 시간(턴 안 404.3시간, 원장 전체 510.1시간)과 비슷한 크기라서 큰 몫이 승인 줄일 것으로 보지만, 같은 요청끼리 짝지어 확인하지는 않았어요. 승인 대기 이벤트는 턴 구간 안인지 가리지 않고 세서 두 값을 정확히 견주지는 못해요.
+- 작업 DB 만 있고 trace 파일이 없는 Keeper 의 작업은 "같은 Keeper 의 턴과 겹친 시간"이 0으로 잡혀요.
 - reaction 원장의 `stimulus` 가 이 기간 모두 `schedule_due` 라서 Board 멘션으로 깨운 턴의 대기는 못 쟀어요.
 - 일정 깨움이 30분 넘게 기다린 이유는 가리지 못했어요. 같은 Keeper 가 그 사이 다른 턴을 돌았거나, 그 이벤트를 나중에 골랐을 수 있어요.
 - 작업 DB 의 보존 기간은 확인하지 못했어요. 날짜가 지난 뒤에 다시 돌리면 같은 값이 안 나올 수 있어요.

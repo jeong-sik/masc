@@ -37,6 +37,6 @@ val recedes : t -> bool
 (** Whether the whole row is drawn behind the others: switched off, never
     set up, or not observed. *)
 
-val counts : t list -> string
-(** ["3 ready · 1 failing · 2 off"]: each standing present, with its count,
-    in {!all} order. [""] for an empty list. *)
+val count_items : t list -> string list
+(** [["3 ready"; "1 failing"; "2 off"]]: each standing present, with its
+    count, in {!all} order. [[]] for an empty list. *)

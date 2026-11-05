@@ -8,7 +8,6 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_tool_shared_runtime
 
 let process_status_is_success = function
   | Unix.WEXITED 0 -> true
@@ -368,18 +367,13 @@ let docker_run_argv
   @ [ image; "bash"; "-l"; "-s" ]
 ;;
 
-let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
-  Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
-  error_json message
-;;
-
 let sandbox_error ~(config : Workspace.config) ~(meta : keeper_meta) ?details message =
   Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
   Error message
 ;;
 
-(** Shared by [run_docker_bash] and [run_docker_shell_command_with_status_internal]:
-    parse cmd and validate its paths. Returns [Ok cwd] when every objective
+(** Used by [run_docker_shell_command_with_status_internal]: parse cmd and
+    validate its paths. Returns [Ok cwd] when every objective
     containment check passes.
 
     [validate_command_paths] toggles the host-side path validation gate
@@ -659,145 +653,4 @@ let run_docker_shell_command_with_status =
 
 let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
-;;
-
-
-let docker_bash_response ~ok ~network_label ~status ~output ~cwd_response
-  =
-  Yojson.Safe.to_string
-    (`Assoc
-	       ([ "ok", `Bool ok
-	         ; "via", `String "docker"
-	         ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-	         ; "sandbox_profile", `String "docker"
-	         ; "network_mode", `String network_label
-	         ; "status", Keeper_alerting_path.process_status_to_json status
-	         ]
-         @ [ "output", `String output ]))
-
-(** Convert a [docker_shell_result] into the JSON response string
-    shared by container-backed bash paths. *)
-let docker_result_to_bash_response ~config ~meta result =
-  let cwd_response =
-    Keeper_cwd_response.of_sandbox
-      ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
-      ~host_cwd:result.cwd
-      ~container_cwd_for_docker:
-        (docker_private_workspace_cwd ~config ~meta result.cwd)
-  in
-  docker_bash_response
-    ~ok:(process_status_is_success result.status)
-    ~network_label:result.network_label
-    ~status:result.status
-    ~output:result.output
-    ~cwd_response
-;;
-
-(** Shared container-backed bash execution:
-    [run_docker_shell_command_with_status] → response JSON.
-    Used by [run_docker_bash]. *)
-let run_docker_bash_via_container
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(cwd : string)
-      ~(timeout_sec : float)
-      ~(cmd : string)
-      ~(network_mode : network_mode)
-  =
-  match
-    run_docker_shell_command_with_status
-      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
-  with
-  | Error message -> error_json message
-  | Ok result ->
-    docker_result_to_bash_response ~config ~meta result
-;;
-
-let run_docker_bash
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(cwd : string)
-      ~(timeout_sec : float)
-      ~(cmd : string)
-      ~(network_mode : network_mode)
-  =
-  (* The turn's runtime already holds the image its turn resolved; asking the
-     catalog again could name a build the runtime is not running. *)
-  let image =
-    match turn_sandbox_runtime with
-    | Some runtime -> Keeper_turn_sandbox_runtime.image runtime
-    | None -> resolve_sandbox_image ~config meta
-  in
-  let sandbox_error_json = sandbox_error_json ~config ~meta in
-  if meta.sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
-  then
-    sandbox_error_json
-      (Keeper_types_profile_sandbox.backend_unimplemented_message
-         Keeper_types_profile_sandbox.Micro_vm)
-  else (
-  match image with
-  | Error error ->
-    sandbox_error_json (Keeper_turn_sandbox_runtime.image_unresolved_message error)
-  | Ok image -> (
-    match turn_sandbox_runtime, network_mode with
-    | Some runtime, Network_none ->
-      (match validate_docker_dispatch_context ~config ~meta ~cwd ~cmd () with
-       | Error message -> sandbox_error_json message
-       | Ok cwd ->
-         (match
-            Keeper_turn_sandbox_runtime.run_bash_with_status
-              runtime
-              ~timeout_sec
-              ~cwd
-              ~cmd
-              ()
-          with
-          | Error message -> sandbox_error_json message
-          | Ok (st, out) ->
-            let ok = process_status_is_success st in
-            if not ok
-            then
-              Keeper_sandbox_exec_failure.record_docker_failure
-                ~config
-                ~meta
-                ~image
-                ~container_kind:"turn"
-                ~network_label:(network_mode_to_string network_mode)
-                ~status:st
-                ~output:out
-            else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-            let cwd_response =
-              Keeper_cwd_response.of_sandbox
-                ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
-                ~host_cwd:cwd
-                ~container_cwd_for_docker:
-                  (Keeper_turn_sandbox_runtime.container_cwd_of_host
-                     runtime
-                     ~host_cwd:cwd)
-            in
-	     docker_bash_response
-		       ~ok
-	      ~network_label:(network_mode_to_string network_mode)
-              ~status:st
-              ~output:out
-              ~cwd_response
-              ))
-    | ( None
-      , ( Keeper_types_profile_sandbox.Network_none
-        | Keeper_types_profile_sandbox.Network_inherit
-        | Keeper_types_profile_sandbox.Network_policy ) )
-    | ( Some _
-      , ( Keeper_types_profile_sandbox.Network_inherit
-        | Keeper_types_profile_sandbox.Network_policy ) ) ->
-      (match turn_sandbox_runtime with
-       | Some _ ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string DockerRuntimeDiscarded)
-           ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
-           ()
-       | None -> ());
-	     run_docker_bash_via_container
-	       ~config ~meta ~cwd ~timeout_sec ~cmd
-	      ~network_mode))
 ;;

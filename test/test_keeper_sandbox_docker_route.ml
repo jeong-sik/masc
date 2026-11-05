@@ -1946,6 +1946,33 @@ let test_exec_argv_is_the_container_argv () =
           | _ -> false))
 ;;
 
+(* A cwd outside the playground has no container spelling. The runtime
+   answers with an error before any container starts; it does not run the
+   command somewhere the caller did not name. *)
+let test_exec_argv_refuses_a_cwd_outside_the_playground () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let runtime =
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "alpine:test") ()
+  in
+  (match
+     Keeper_turn_sandbox_runtime.exec_argv
+       ~validate_cached_container:false
+       runtime
+       ~cwd:config.Workspace.base_path
+       ~command_argv:[ "true" ]
+   with
+   | Error _ -> ()
+   | Ok argv ->
+     Alcotest.failf
+       "a cwd outside the playground got a container argv: %s"
+       (String.concat " " argv));
+  match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+  | Keeper_turn_sandbox_runtime.Not_started -> ()
+  | Keeper_turn_sandbox_runtime.Running { container_name } ->
+    Alcotest.failf "container %s started for a cwd it cannot enter" container_name
+;;
+
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -3145,6 +3172,10 @@ let () =
             "exec_argv is the container argv"
             `Quick
             test_exec_argv_is_the_container_argv;
+          Alcotest.test_case
+            "exec_argv refuses a cwd outside the playground"
+            `Quick
+            test_exec_argv_refuses_a_cwd_outside_the_playground;
           Alcotest.test_case
             "container removal reclaims anonymous volumes"
             `Quick

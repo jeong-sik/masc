@@ -30,7 +30,7 @@ type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of 
 val selection_snapshot : t -> (Browser_addon_observation.published * Browser_selection.snapshot, snapshot_failure) result
 (** Every service's [Snapshot] reply, asked side by side, merged as the host
     chooses from it: nonconflicting live clients of every live service,
-    and automation and Stagehand as their own
+    and automation as its own
     service answered. A
     service that did not answer is left out of this choice only; no answer
     at all is the failure. A worker answers only while it serves, so a live

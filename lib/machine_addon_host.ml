@@ -96,7 +96,7 @@ let require_activity machine =
       else Error (Lane_addon_call_context.Host_refusal (Activity_disabled
         ("machines." ^ Machine_lane.to_wire machine ^ " is off; enable it before new machine work")))
 
-let call ~continuation ~principal ~config ~access ~reserved ~(export : Lane_addon_tool_export.t) ~arguments =
+let call ~principal ~config ~access ~reserved ~(export : Lane_addon_tool_export.t) ~arguments =
   let name = export.tool.name in
   let operation = Tool_schemas_misc.misc_operation_of_tool_name name in
   let authorize = match operation with
@@ -116,12 +116,7 @@ let call ~continuation ~principal ~config ~access ~reserved ~(export : Lane_addo
   let events = event_batch ~principal ~name in
   let on_result result = Option.iter (fun batch -> Machine_addon_events.record batch result) events in
   let on_complete () = Option.iter Machine_addon_events.ready events in
-  let companion_publish=match continuation,Fs_compat.get_fs_opt () with
-    | Some (Ok _),Some fs -> Some (fun ~origin ~output_schema ~event ->
-        Keeper_addon_publication.deliver ~fs ~config ~origin ~output_schema ~event
-        |> Result.map_error (fun _ -> ()))
-    | (Some (Ok _)|Some (Error _)|None),(Some _|None) -> None in
-  let result = Lane_addon_runtime.call_exported_tool_with_authority ~companion_publish ~continuation ~on_complete ~on_result ~authorize
+  let result = Lane_addon_runtime.call_exported_tool_with_authority ~on_complete ~on_result ~authorize
     ~principal:(Some principal) ~config ~access ~reserved ~export ~arguments in
   Machine_addon_events.drain ();
   result
@@ -142,7 +137,7 @@ let call_shared ~principal ~config ~name ~arguments =
           (match Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready) with
            | Some reason -> reason
            | None -> "No attached shared Add-on provides " ^ name))
-      | Some export -> call ~continuation:None ~principal ~config ~access ~reserved ~export ~arguments
+      | Some export -> call ~principal ~config ~access ~reserved ~export ~arguments
 
 let shared_skill_owner ~config ~name =
   let snapshot = Lane_addon_runtime.tool_execution_snapshot ~config
@@ -168,7 +163,7 @@ let release_shared_controller ~events ~config ~holder ~by ~reason =
            | None -> Ok None)
       | Some export ->
           let authorize ~release_controller ~snapshot:_ ~invoke:_ = release_controller ~holder ~reason in
-          Lane_addon_runtime.call_exported_tool_with_authority ~companion_publish:None ~continuation:None ~on_complete:(fun () -> ())
+          Lane_addon_runtime.call_exported_tool_with_authority ~on_complete:(fun () -> ())
             ~on_result:(Machine_addon_events.record events)
             ~authorize:(Some authorize)
             ~principal:(Some (Lane_addon_call_context.Host_actor by))

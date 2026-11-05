@@ -129,7 +129,7 @@
     }
   },
   "schedule_wakes": {
-    "cancelled_in_queue": 1566,
+    "cancelled_in_queue": 1567,
     "created_during_long_execute": {
       "mean_s": 1571.6,
       "n": 50,
@@ -144,7 +144,7 @@
       "p90_s": 494.3,
       "sum_s": 1651075.8
     },
-    "no_turn_started": 16,
+    "no_turn_started": 15,
     "stimuli": 4823,
     "total_wait_s": 1651075.8,
     "turn_started": 3241,
@@ -211,6 +211,73 @@
       "p90": 31,
       "p99": 152
     },
+    "calls_without_trace_file": {
+      "by_turn_kind": {
+        "autonomous": {
+          "calls": 1564,
+          "execute_time_s": 15323.4,
+          "tool_time_s": 15339.3
+        },
+        "direct": {
+          "calls": 21551,
+          "execute_time_s": 55913.5,
+          "tool_time_s": 58130.8
+        }
+      },
+      "calls": 23115,
+      "execute_time_s": 71236.9,
+      "keepers_with_a_trace_file": {
+        "by_turn_kind": {
+          "direct": {
+            "calls": 21458,
+            "execute_time_s": 55537.6,
+            "tool_time_s": 57741.5
+          }
+        },
+        "calls": 21458,
+        "execute_time_s": 55537.6,
+        "tool_time_s": 57741.5
+      },
+      "keepers_without_any_trace_file": {
+        "by_turn_kind": {
+          "autonomous": {
+            "calls": 1564,
+            "execute_time_s": 15323.4,
+            "tool_time_s": 15339.3
+          },
+          "direct": {
+            "calls": 93,
+            "execute_time_s": 375.8,
+            "tool_time_s": 389.3
+          }
+        },
+        "calls": 1657,
+        "execute_time_s": 15699.3,
+        "keepers": [
+          "native-image-goal-20261101-0340",
+          "ocaml-refactor-woman"
+        ],
+        "tool_time_s": 15728.6
+      },
+      "tool_time_inside_turns_s": 0.0,
+      "tool_time_s": 73470.1,
+      "turns": 1101,
+      "turns_by_kind_set": {
+        "autonomous": {
+          "turns": 8797,
+          "without_trace_file": 98
+        },
+        "autonomous+direct": {
+          "turns": 66,
+          "without_trace_file": 0
+        },
+        "direct": {
+          "turns": 1009,
+          "without_trace_file": 1003
+        }
+      },
+      "turns_in_window": 9872
+    },
     "execute_time_s": 343286.2,
     "execution_modes": {
       "concurrent": {
@@ -222,31 +289,35 @@
         "time_s": 357113.2
       }
     },
-    "long_execute": {
-      "calls": 562,
+    "inside_turns": {
+      "between_calls_s": 1455434.8,
+      "execute_time_s": 266997.4,
+      "long_execute_time_s": 130287.5,
+      "other_turn_time_s": 813935.1,
+      "percent_of_turn_time": {
+        "between_calls": 57.0,
+        "execute": 10.4,
+        "long_execute": 5.1,
+        "other": 31.9,
+        "polling": 4.0,
+        "rereads_after_first_call": 2.7,
+        "tool": 11.2
+      },
       "polling_by_keeper": {
-        "build-maniac": {
-          "polling_s": 151.2,
-          "turn_time_s": 10555.7
-        },
         "code-reviewer": {
           "polling_s": 418.6,
           "turn_time_s": 134589.3
         },
         "code-reviewer-father": {
-          "polling_s": 880.6,
+          "polling_s": 64.3,
           "turn_time_s": 109851.2
         },
         "code-reviewer-mother": {
           "polling_s": 143.4,
           "turn_time_s": 45404.5
         },
-        "code-reviewer-sister": {
-          "polling_s": 145.7,
-          "turn_time_s": 33608.6
-        },
         "code-reviewer-uncle": {
-          "polling_s": 173.4,
+          "polling_s": 75.9,
           "turn_time_s": 65968.4
         },
         "context-reviewer": {
@@ -254,11 +325,11 @@
           "turn_time_s": 119207.5
         },
         "e-masc-the-leader": {
-          "polling_s": 940.0,
+          "polling_s": 798.0,
           "turn_time_s": 122063.9
         },
         "github-pr-checker": {
-          "polling_s": 10681.2,
+          "polling_s": 9001.1,
           "turn_time_s": 40113.8
         },
         "goo-yang-bong": {
@@ -273,12 +344,8 @@
           "polling_s": 1022.7,
           "turn_time_s": 129416.3
         },
-        "ocaml-refactor-woman": {
-          "polling_s": 319.2,
-          "turn_time_s": 0.0
-        },
         "pr-updater": {
-          "polling_s": 654.6,
+          "polling_s": 354.5,
           "turn_time_s": 124717.8
         },
         "sangsu": {
@@ -286,7 +353,7 @@
           "turn_time_s": 115614.1
         },
         "wkbl-data": {
-          "polling_s": 30638.1,
+          "polling_s": 30028.3,
           "turn_time_s": 190956.9
         },
         "wkbl-front": {
@@ -302,11 +369,16 @@
           "turn_time_s": 101263.2
         }
       },
+      "polling_time_s": 101307.5,
+      "rereads_after_first_call_turn_time_s": 69346.3,
+      "tool_time_s": 285974.8
+    },
+    "long_execute": {
+      "calls": 562,
       "polling_calls": 331,
       "polling_time_s": 105569.2,
       "time_s": 151343.5
     },
-    "other_turn_time_s": 354301.4,
     "rereads_after_first_call": {
       "calls": 32545,
       "turn_time_s": 74735.4
@@ -465,6 +537,21 @@
           }
         ]
       }
+    },
+    "traced_calls_outside_turns": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 1097,
+          "execute_time_outside_turns_s": 5051.9,
+          "tool_time_outside_turns_s": 5408.8
+        }
+      },
+      "calls": 1097,
+      "calls_partly_inside_turn_time": 0,
+      "execute_time_outside_turns_s": 5051.9,
+      "tool_time_outside_turns_s": 5408.8,
+      "turns": 68,
+      "turns_that_also_have_autonomous_calls": 62
     },
     "turn_time_s": 2555344.8,
     "turns": 9872

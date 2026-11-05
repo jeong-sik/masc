@@ -42,7 +42,6 @@ type exact_lane = Standalone_lane.t =
   | Hitl_auto_judge
   | Board_attention
   | Verifier
-  | Browser_stagehand
   | Candle_appraiser
 
 (* One [runtime.exact_output_lanes.<lane>].<key> reference, named the way
@@ -2287,8 +2286,7 @@ let report_exact_output_registry registry =
   warn_rejected_exact_output_slots registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
-  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority";
-  warn_optional_exact_output_lane registry ~lane:Browser_stagehand ~feature:"the Stagehand browser lane"
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
 ;;
 
 (* How a config commit meets the exact-output registry. *)
@@ -3228,7 +3226,7 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | Verifier, Ok () -> slots, cli_slots
       | Verifier, Error _ ->
         judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-      | (Librarian | Hitl_auto_judge | Board_attention | Browser_stagehand | Candle_appraiser), _ ->
+      | (Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser), _ ->
         slots, cli_slots
     in
     let next =
@@ -3244,11 +3242,11 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
             in
             Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
         next
-        (* The browser-specific Stagehand model and Candle appraisal are
-           explicitly configured, not enabled by provisioning a general-purpose runtime. *)
+        (* Candle appraisal is explicitly configured, not enabled by
+           provisioning a general-purpose runtime. *)
         (List.filter
            (function
-             | Browser_stagehand | Candle_appraiser -> false
+             | Candle_appraiser -> false
              | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
            Standalone_lane.all)
     in
@@ -3679,7 +3677,6 @@ let requirement_of_exact_lane
   | Librarian
   | Hitl_auto_judge
   | Board_attention
-  | Browser_stagehand
   | Candle_appraiser ->
     { window = Unbounded_or_unknown
     ; overflow = Truncation_acceptable

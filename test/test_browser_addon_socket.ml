@@ -127,7 +127,7 @@ let foreign_source_resources () =
       Unix.unlink path;
       released (cleanup ~admission ~directory);
       check "the allocation of its own source's resources is released" false (Sys.file_exists root)))
-    [Socket.Automation owned_gecko,"stagehand.json";
+    [Socket.Automation owned_gecko,"live-bidi.json";
      Socket.Ego,"automation.json";
      Socket.External_host,"live-bidi.json"]
 let acquisition_state directory =
@@ -281,7 +281,7 @@ let mentions text part =
    there cannot hold the allocation. *)
 let a_failure_after_the_move_names_the_kept_folder () =
   with_left_file ~extra:(fun ~directory:_ ~root ~downloads:_ ->
-      Out_channel.with_open_bin (Filename.concat root "stagehand.json") (fun out -> output_string out "foreign"))
+      Out_channel.with_open_bin (Filename.concat root "foreign.json") (fun out -> output_string out "foreign"))
     (fun admission directory root _left ->
       let into=Filename.concat (kept_root directory) (Lease.instance_id admission) in
       let moved=Filename.concat (Filename.concat into "downloads") "left" in
@@ -292,7 +292,7 @@ let a_failure_after_the_move_names_the_kept_folder () =
       check "the file had already moved" true (Sys.file_exists moved);
       Unix.link moved (Filename.concat (Filename.concat into "downloads") "again");
       Unix.symlink moved (Filename.concat into "link");
-      Unix.unlink (Filename.concat root "stagehand.json");
+      Unix.unlink (Filename.concat root "foreign.json");
       released (cleanup ~admission ~directory);
       check "the allocation is gone" false (Sys.file_exists root);
       check "the moved file stays" true (Sys.file_exists moved))
@@ -345,7 +345,7 @@ let operator_retains_unconfirmed_allocation () =
   with_claim ~source:(fun _ -> Socket.Automation owned_gecko)
     (fun admission directory root ->
       ignore (ok (Socket.acquire ~admission ~directory));
-      let file=Filename.concat root "stagehand.json" in
+      let file=Filename.concat root "foreign.json" in
       Out_channel.with_open_bin file (fun out -> output_string out "preserve");
       refused "a launchable reservation cannot be retained" (Socket.retain ~admission ~directory);
       check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
@@ -377,26 +377,39 @@ let retain_reports_a_released_allocation () =
       released (cleanup ~admission ~directory);
       check "a released allocation is reported released" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_released);
       check "a released allocation stays released" true (acquisition_state directory = "released"))
-(* The Chrome child claim shares the host-recorded descriptor the Chrome
-   controller writes; a different shape would make the claim foreign, and the
-   last step below would then fail. *)
-let retain_requires_a_settled_child_without_signalling () =
-  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
-    ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
+(* The Firefox profile a live BiDi child claim pins: beside the slot, so the
+   slot holds only its claim. *)
+let firefox_profile directory = directory ^ "-firefox-profile"
+let firefox directory =
+  let profile = firefox_profile directory in
+  (try Unix.mkdir profile 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
+  ok (Masc.Browser_addon_live_bidi.configuration
+    ~browser:{Browser_configuration.firefox="/fixture/firefox";profile;port=9222}
     ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot")) in
-  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
+    ~claim_directory:(Filename.concat directory "firefox-slot"))
+let with_firefox_claim work =
+  let profile = ref None in
+  Fun.protect ~finally:(fun () -> Option.iter (fun path -> if Sys.file_exists path then remove path) !profile)
+    (fun () -> with_claim
+      ~source:(fun directory -> profile := Some (firefox_profile directory); Socket.Owned_firefox (firefox directory))
+      (fun admission directory root -> work (firefox directory) admission directory root))
+(* The descriptor the Firefox controller records on its child claim; a
+   different shape would make the claim foreign. *)
+let firefox_child_context c ~incarnation ~root =
+  match Masc.Browser_addon_live_bidi.configuration_to_json c with
+  | `Assoc fields -> `Assoc ["kind",`String "browser_addon_live_bidi";"incarnation",`String incarnation;
+      "directory",`String root;"profile",List.assoc "profile" fields;"root",List.assoc "root" fields]
+  | _ -> Alcotest.fail "expected a Firefox configuration object"
+let retain_requires_a_settled_child_without_signalling () =
+  with_firefox_claim (fun c admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = stagehand directory in
-    let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
-      | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
-    Unix.mkdir (Filename.concat directory "chrome-slot") 0o700;
-    let child = lease (Lease.prepare ~directories:[Filename.concat directory "chrome-slot"]
+    let slot = Filename.concat directory "firefox-slot" in
+    Unix.mkdir slot 0o700;
+    let child = lease (Lease.prepare ~directories:[slot]
       ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (`Assoc ["kind",`String "browser_addon_chrome";
-        "incarnation",`String (Lease.instance_id admission);"directory",`String root;"profile",profile]))) in
+      ~cleanup_context:(Some (firefox_child_context c ~incarnation:(Lease.instance_id admission) ~root))) in
     lease (Lease.retire admission);
-    refused "an unsettled Chrome child refuses the retain" (Socket.retain ~admission ~directory);
+    refused "an unsettled Firefox child refuses the retain" (Socket.retain ~admission ~directory);
     check "the refused retain did not retire the child" true (lease (Lease.status child) = Lease.Awaiting_exec);
     check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired");
     lease (Lease.retire child);
@@ -421,24 +434,16 @@ let retain_reports_where_a_record_write_failed () =
   let outcome, state = attempt (failing Fs_compat.Before_rename) in
   refused "a write that failed before its rename is refused" outcome;
   check "the record is unchanged after a write that failed before its rename" true (state = "acquired")
-(* A Chrome child claim recorded for another allocation is never read as this
+(* A Firefox child claim recorded for another allocation is never read as this
    allocation's settlement. *)
 let retain_refuses_a_foreign_child () =
-  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
-    ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
-    ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot")) in
-  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
+  with_firefox_claim (fun c admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = stagehand directory in
-    let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
-      | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
-    let slot = Filename.concat directory "chrome-slot" in
+    let slot = Filename.concat directory "firefox-slot" in
     Unix.mkdir slot 0o700;
     let child = lease (Lease.prepare ~directories:[slot]
       ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (`Assoc ["kind",`String "browser_addon_chrome";
-        "incarnation",`String "another-allocation";"directory",`String root;"profile",profile]))) in
+      ~cleanup_context:(Some (firefox_child_context c ~incarnation:"another-allocation" ~root))) in
     lease (Lease.retire child);
     lease (Lease.retire admission);
     refused "a child claim of another allocation refuses the retain" (Socket.retain ~admission ~directory);
@@ -447,27 +452,19 @@ let retain_refuses_a_foreign_child () =
    pass. Retain refuses it without fencing; once a cleanup pass settled the
    child, the retain succeeds. *)
 let retain_waits_for_an_unpublished_child_to_be_fenced () =
-  let stagehand directory = ok (Masc.Browser_addon_stagehand.configuration
-    ~browser:{Browser_configuration.chrome="/fixture/chrome";extension="/fixture/extension";profile=None}
-    ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "chrome-slot")) in
-  with_claim ~source:(fun directory -> Socket.Stagehand (stagehand directory)) (fun admission directory root ->
+  with_firefox_claim (fun c admission directory root ->
     ignore (ok (Socket.acquire ~admission ~directory));
-    let c = stagehand directory in
-    let profile = match Masc.Browser_addon_stagehand.configuration_to_json c with
-      | `Assoc fields -> List.assoc "profile" fields | _ -> Alcotest.fail "expected a Chrome configuration object" in
-    let slot = Filename.concat directory "chrome-slot" in
+    let slot = Filename.concat directory "firefox-slot" in
     Unix.mkdir slot 0o700;
     ignore (lease (Lease.prepare ~directories:[slot]
       ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (`Assoc ["kind",`String "browser_addon_chrome";
-        "incarnation",`String (Lease.instance_id admission);"directory",`String root;"profile",profile]))));
+      ~cleanup_context:(Some (firefox_child_context c ~incarnation:(Lease.instance_id admission) ~root))));
     (* The reservation exists but its intent was never published. *)
     Out_channel.with_open_bin (Filename.concat slot "intent.json") (fun _ -> ());
     lease (Lease.retire admission);
     refused "an unpublished child reservation refuses the retain" (Socket.retain ~admission ~directory);
     check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired");
-    ok (Masc.Browser_addon_stagehand.settle c ~incarnation:(Lease.instance_id admission) ~directory:root);
+    ok (Masc.Browser_addon_live_bidi.settle c ~incarnation:(Lease.instance_id admission) ~directory:root);
     check "the operator retains the allocation once the child is fenced" true
       (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
 (* A reservation keeps its producer's backend payloads. Settlement must not
@@ -591,7 +588,7 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;
-  Alcotest.test_case "retain requires a settled Chrome child and signals nothing" `Quick retain_requires_a_settled_child_without_signalling;
+  Alcotest.test_case "retain requires a settled Firefox child and signals nothing" `Quick retain_requires_a_settled_child_without_signalling;
   Alcotest.test_case "retain reports where a record write failed" `Quick retain_reports_where_a_record_write_failed;
   Alcotest.test_case "retain refuses a child claim of another allocation" `Quick retain_refuses_a_foreign_child;
   Alcotest.test_case "retain waits until an unpublished child is fenced" `Quick retain_waits_for_an_unpublished_child_to_be_fenced;

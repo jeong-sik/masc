@@ -82,9 +82,6 @@ let test_default_workspace_state_constants () =
       assert (st.pause_reason = None);
       assert (st.paused_by = None);
       assert (st.paused_at = None);
-      assert (st.search_strategy_default = Some "best_first_v1");
-      assert (st.speculation_enabled = false);
-      assert (st.speculation_budget = None);
       (* started_at is non-empty (now_iso ()). *)
       assert (st.started_at <> ""))
 

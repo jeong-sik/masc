@@ -293,6 +293,49 @@ let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
 
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
+(* A terminal tool that fails inside the provider loop ends the run with Agent
+   Core's error, whose detail is the tool result's text and whose class is
+   none of MASC's. The bundle recorded the same failure typed, so the run's
+   error takes its class and detail. A terminal tool is the only call of its
+   provider turn and its failure ends the run, so the two describe the same
+   call. The effect disposition stays Agent Core's, from the tool's declared
+   contract: this changes what the failure says, not whether its effect may
+   run again. The original Agent error travels with that typed value so the
+   terminal reason and redacted event projection keep their existing contract. *)
+let terminal_effect_failure_error error terminal_effect_state =
+  match error with
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolEffectFailed { effect_disposition; _ } as agent_error) ->
+    (match terminal_effect_state with
+     | Keeper_tools_agent_core.Terminal_effect_failed
+         { failure_class; detail; effect_disposition = _ } ->
+       let masc_error =
+         Keeper_internal_error.Terminal_effect_failed
+           { failure_class
+           ; effect_disposition =
+               Keeper_internal_error.failure_effect_disposition_of_core
+                 effect_disposition
+           ; detail
+           }
+       in
+       Keeper_internal_error.core_error_of_masc_internal_error_with_agent
+         ~agent_error masc_error
+     | Keeper_tools_agent_core.Terminal_effect_open
+     | Keeper_tools_agent_core.Deferred_tool_result
+     | Keeper_tools_agent_core.External_effect_deferred
+     | Keeper_tools_agent_core.Terminal_effect_completed _ -> error)
+  | Agent_core.Error.Agent
+      ( Agent_core.Error.UnrecognizedStopReason _
+      | Agent_core.Error.ToolRoundLimitExceeded _
+      | Agent_core.Error.HookExecutionFailed _
+      | Agent_core.Error.TerminalToolDurabilityFailed _
+      | Agent_core.Error.InputRequired _ )
+  | Agent_core.Error.Internal_carried _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> error
+;;
+
 let tool_boundary_state ~repetition_execution state =
   match terminal_effect_boundary_decision state with
   | Error _ as error -> error
@@ -413,9 +456,9 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(answered_ask_inputs = [])
-      ?(history_user_source = "direct_user")
+      ?(history_user_source = Keeper_types_support.Direct_user)
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
-      ?(history_assistant_source = "direct_assistant")
+      ?(history_assistant_source = Keeper_types_support.Direct_assistant)
       ?temperature
       ?on_event
       ?on_tool_stream_observation
@@ -792,7 +835,7 @@ let run_turn
             | Keeper_world_observation.Ask_answered_row { answer_source_id; _ } -> answer_source_id
             | Board_post_created | Board_post_updated | Board_comment_added _
             | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
-            | Delegate_completed _ | Composition_completed | Owned_job_completed _ | Addon_operation_changed _
+            | Delegate_completed _ | Composition_completed | Owned_job_completed _
             | Schedule_due _ | External_attention _ | Completion_authority_rejected _
             | Task_outcome _ | Task_cancelled _ -> None)
             observation.Keeper_world_observation.pending_board_events)
@@ -1707,7 +1750,7 @@ let run_turn
                        persisted: %s"
                       meta.name
                       detail);
-                 Error e
+                 Error (terminal_effect_failure_error e (s.terminal_effect_state ()))
                | Ok selected_run ->
                  Option.iter
                    (fun callback ->

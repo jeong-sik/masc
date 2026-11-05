@@ -282,8 +282,7 @@ let test_historical_runtime_observation_projections () =
       let project () =
         let trust = K.summary_json ~config ~meta in
         let compact = Server_dashboard_http_composite_claims.composite_execution_receipt_json
-          ~config ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
-          ~keeper_name:meta.name in
+          ~config ~keeper_name:meta.name in
         let open Yojson.Safe.Util in
         let trust_observation = trust |> member "execution" |> member "runtime_lane_observation" in
         let compact_observation = compact |> member "runtime_lane_observation" in

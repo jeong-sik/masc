@@ -68,7 +68,8 @@ type status_item =
   (* The server's rollup says the operator has to act: credit to add, a key to
      change, a Keeper to move to a route with quota left (RFC-0484 §3.3).
      [first] is the first reason, [count] how many there are. Built only from
-     a non-empty list, so the notice always has a reason to show. *)
+     a non-empty list, so the notice always has a reason to show. A row too
+     narrow for the reason keeps the count. *)
   | Operator_action of
       { first : string
       ; count : int
@@ -116,9 +117,15 @@ type retention =
      whether this screen can be trusted at all. *)
   | Operator_notice
 
+(* [shorter] is the same notice in fewer cells, longest first. A notice that
+   leads the row is drawn in the next of them before it is given up; a status
+   fact in the tail has none and goes whole. A notice has none where the
+   shorter text would stop saying what it is about, as an armed action that
+   must keep naming its Keeper. *)
 type projected_status =
   { text : string
   ; retention : retention
+  ; shorter : string list
   }
 
 (* Minute precision past the first minute: the footer refreshes with the
@@ -133,11 +140,12 @@ let status_item_projection = function
     let stage = match phase with
       | Task_not_started -> "not started" | Task_reserved -> "waiting to prepare" | Task_preparing -> "preparing"
       | Task_awaiting_reply -> "awaiting reply" | Task_awaiting_application -> "result awaiting UI" in
-    Some {text=Printf.sprintf "Task for %s: %s" keeper stage;retention=Live_activity}
+    Some {text=Printf.sprintf "Task for %s: %s" keeper stage;retention=Live_activity;shorter=[]}
   | Refresh_interval seconds when Float.is_finite seconds && seconds > 0. ->
     Some
       { text = Printf.sprintf "Refresh: %.0fs" seconds
       ; retention = Refresh_context
+      ; shorter = []
       }
   | Refresh_interval _ -> None
   | Server_build { version; commit } ->
@@ -145,28 +153,31 @@ let status_item_projection = function
     let commit = String.trim commit in
     (match version, short_commit commit with
      | "", "" -> None
-     | version, "" -> Some { text = "v" ^ version; retention = Build_identity }
-     | "", commit -> Some { text = commit; retention = Build_identity }
+     | version, "" -> Some { text = "v" ^ version; retention = Build_identity; shorter = [] }
+     | "", commit -> Some { text = commit; retention = Build_identity; shorter = [] }
      | version, commit ->
        Some
          { text = Printf.sprintf "v%s %s" version commit
          ; retention = Build_identity
+         ; shorter = []
          })
   | Server_base_path "" -> None
   | Server_base_path path ->
-    Some { text = "Base: " ^ path; retention = Workspace_identity }
+    Some { text = "Base: " ^ path; retention = Workspace_identity; shorter = [] }
   | Workspace_mismatch "" -> None
   | Workspace_mismatch local ->
     Some
       { text = "MISMATCH local " ^ local ^ " (r:retry)"
       ; retention = Workspace_conflict
+      ; shorter = []
       }
   | Workspace_unconfirmed ->
-    Some { text = "[workspace unconfirmed]"; retention = Workspace_conflict }
+    Some { text = "[workspace unconfirmed]"; retention = Workspace_conflict; shorter = [] }
   | Server_worktree_binary ->
     Some
       { text = "WORKTREE server (not the root build)"
       ; retention = Worktree_conflict
+      ; shorter = []
       }
   | Tui_build_mismatch { tui; server; older } ->
     let action =
@@ -180,21 +191,26 @@ let status_item_projection = function
           Printf.sprintf "TUI %s \xe2\x89\xa0 server %s (%s)"
             (short_commit tui) (short_commit server) action
       ; retention = Build_conflict
+      ; shorter = []
       }
   | Keeper_action_armed { key; action; keeper } ->
     Some
       { text = Printf.sprintf "press %s again to %s %s" key action keeper
       ; retention = Armed_action
+      ; shorter = []
       }
   | Operator_action { first; count } ->
+    let notice = Printf.sprintf "ACTION NEEDED %d" count in
     Some
-      { text = Printf.sprintf "ACTION NEEDED %d \xc2\xb7 %s" count first
+      { text = Printf.sprintf "%s \xc2\xb7 %s" notice first
       ; retention = Operator_notice
+      ; shorter = [ notice ]
       }
   | Keeper_action_running { gerund; keeper } ->
     Some
       { text = Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper
       ; retention = Armed_action
+      ; shorter = []
       }
   | Keeper_answering { names = []; _ } -> None
   | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
@@ -210,6 +226,7 @@ let status_item_projection = function
       { text =
           Printf.sprintf "\xe2\x97\x8c answering %s%s%s" name elapsed tail
       ; retention = Live_activity
+      ; shorter = []
       }
   | Keeper_answered { name; seconds_ago; more } ->
     let ago = coarse_age (max 0 seconds_ago) in
@@ -218,9 +235,10 @@ let status_item_projection = function
       { text =
           Printf.sprintf "\xe2\x9c\x93 %s answered %s ago%s" name ago tail
       ; retention = Live_activity
+      ; shorter = []
       }
   | Port port when port > 0 ->
-    Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity }
+    Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity; shorter = [] }
   | Port _ -> None
 
 let with_literal_prefix prefix hints =
@@ -428,6 +446,34 @@ let item_key item =
   | None -> None
   | Some i -> Some (String.trim (String.sub plain 0 i))
 
+let en_dash = "\xe2\x80\x93"
+
+(* [1-9] and [1–9] name nine keys. The trace compares one key at a time. *)
+let digit_range atom =
+  let length = String.length atom in
+  let is_digit c = c >= '0' && c <= '9' in
+  if length >= 3
+     && is_digit atom.[0]
+     && is_digit atom.[length - 1]
+     && atom.[0] <= atom.[length - 1]
+     && (let dash = String.sub atom 1 (length - 2) in
+         String.equal dash "-" || String.equal dash en_dash)
+  then
+    List.init
+      (Char.code atom.[length - 1] - Char.code atom.[0] + 1)
+      (fun offset -> String.make 1 (Char.chr (Char.code atom.[0] + offset)))
+  else [ atom ]
+
+(* Every key a hint string names, one atom each: [Right / Enter:open] names
+   Right and Enter, [j/k:move] names j and k, [1-9:jump] names the nine
+   digits. The navigation trace asks this of the hints a screen was drawn
+   with. *)
+let advertised_key_atoms hints =
+  split_on_double_space hints
+  |> List.filter_map item_key
+  |> List.concat_map key_atoms
+  |> List.concat_map digit_range
+
 let item_is_pinned item =
   match item_key item with
   | None -> false
@@ -496,9 +542,12 @@ let last_droppable kept =
     kept
   |> snd
 
-let rec without_lowest_priority = function
-  | [] | [ _ ] -> []
-  | conflict :: rest -> conflict :: without_lowest_priority rest
+(* One step down for a notice: its next shorter text, or nothing once it has
+   none left. *)
+let shortened notice =
+  match notice.shorter with
+  | [] -> None
+  | text :: shorter -> Some { notice with text; shorter }
 
 (* The undroppable keys of a hint row: what the narrowest row this fitter can
    draw still has to carry. *)
@@ -507,16 +556,18 @@ let undroppable_keys hints =
   |> List.filter_map (fun item ->
       if item.pinned then Some item.hint_text else None)
 
-(* Which notice to give up when the set will not fit. The one that cannot be
-   drawn in the narrowest row that could carry it -- itself, the keys that cannot
-   be dropped, and the marker that says the row was cut -- is the one blocking,
-   whatever it ranks. Giving up the lowest-ranked one instead threw away a short,
-   actionable build mismatch to keep a long workspace path that then could not be
-   drawn either, and the row ended with no notice at all.
+(* Which notice takes a step down when the set will not fit: its next shorter
+   text, or its removal once it has none. The one that cannot be drawn in the
+   narrowest row that could carry it -- itself, the keys that cannot be dropped,
+   and the marker that says the row was cut -- is the one blocking, whatever it
+   ranks. Stepping the lowest-ranked one instead threw away a short, actionable
+   build mismatch to keep a long workspace path that then could not be drawn
+   either, and the row ended with no notice at all. With none blocking, the
+   lowest-ranked one steps.
 
    The probe in {!line} cannot reject that long notice up front: a row that drops
    nothing carries no marker, and counting one there rejects a notice that fits a
-   row exactly. So the marker's cells are counted here, where a drop is already
+   row exactly. So the marker's cells are counted here, where a step is already
    known to be needed. *)
 let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conflicts =
   let undroppable = undroppable_keys hints in
@@ -533,10 +584,18 @@ let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conf
         Masc_tui_message_layout.display_width (narrowest conflict) > max_cells)
       conflicts
   in
-  match blocking with
-  | [] -> without_lowest_priority conflicts
-  | first :: _ ->
-    List.filter (fun conflict -> conflict != first) conflicts
+  let stepping =
+    match blocking, List.rev conflicts with
+    | first :: _, _ -> Some first
+    | [], lowest :: _ -> Some lowest
+    | [], [] -> None
+  in
+  List.concat_map
+    (fun conflict ->
+      match stepping with
+      | Some target when target == conflict -> Option.to_list (shortened conflict)
+      | Some _ | None -> [ conflict ])
+    conflicts
 
 (* Keys give way before a notice does, and a notice gives way before the keys
    it crowded out stay gone: every attempt starts from the whole key row again,
@@ -546,10 +605,10 @@ let without_a_blocking_conflict ?literal_prefix ?position ~max_cells ~hints conf
    room for a long notice, dropped the notice too, and left [q:quit  ...?] on a
    row where several controls would have fit once the notice was gone.
 
-   A notice too wide to be drawn beside the keys that cannot be dropped is not
-   drawable at this width at all, and is put aside before priority is read.
-   Otherwise one long path would starve a short, actionable build mismatch that
-   ranks below it and fits on its own. *)
+   A notice too wide to be drawn beside the keys that cannot be dropped is
+   drawn in a shorter text, or put aside when none is short enough, before
+   priority is read. Otherwise one long path would starve a short, actionable
+   build mismatch that ranks below it and fits on its own. *)
 let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
   let keys = Lazy.force hints.items in
   let row conflicts kept =
@@ -573,10 +632,10 @@ let drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints =
   in
   drop_keys keys
 
-(* A notice too wide to be drawn beside the keys that cannot be dropped is not
-   drawable at this width at all, and is put aside before priority is read.
-   Otherwise one long path would starve a short, actionable build mismatch that
-   ranks below it and fits on its own. *)
+(* A notice too wide to be drawn beside the keys that cannot be dropped is
+   drawn in a shorter text, or put aside when none is short enough, before
+   priority is read. Otherwise one long path would starve a short, actionable
+   build mismatch that ranks below it and fits on its own. *)
 let drawable_conflicts ?literal_prefix ~max_cells ~hints = function
   | [] -> []
   | conflicts ->
@@ -584,17 +643,21 @@ let drawable_conflicts ?literal_prefix ~max_cells ~hints = function
     (* No cut marker in the probe. A row that gives nothing up carries none, and
        counting it here rejected a notice that fits a row exactly. Where a key
        does have to go the marker's cells are counted by the fit itself, which
-       then shrinks the conflict set -- the probe only has to stop a notice that
-       can never be drawn from taking the ranking down with it. *)
-    List.filter
-      (fun conflict ->
-        let row =
-          "  "
-          ^ String.concat "  "
-              ((conflict.text :: Option.to_list literal_prefix) @ undroppable)
-        in
-        Masc_tui_message_layout.display_width row <= max_cells)
-      conflicts
+       then steps the conflict set down -- the probe only has to stop a notice
+       that can never be drawn from taking the ranking down with it. *)
+    let drawable conflict =
+      let row =
+        "  "
+        ^ String.concat "  "
+            ((conflict.text :: Option.to_list literal_prefix) @ undroppable)
+      in
+      Masc_tui_message_layout.display_width row <= max_cells
+    in
+    let rec in_the_longest_text_that_fits conflict =
+      if drawable conflict then Some conflict
+      else Option.bind (shortened conflict) in_the_longest_text_that_fits
+    in
+    List.filter_map in_the_longest_text_that_fits conflicts
 
 (* What fits with this conflict set kept whole: the status facts give way in
    [omission_order], then the keys give way as whole items. [None] when even the

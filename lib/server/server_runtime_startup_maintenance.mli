@@ -18,8 +18,10 @@ val prune_shared_jsonl_stores :
     physical runtime-root descriptor owns all traversal and unlink operations;
     configured BasePath aliases are resolved before that binding, while runtime
     root/descendant links are refused or skipped. This is per-pass containment,
-    not boot-pinned root continuity. Returns the
-    number of files removed. Exposed for unit tests. *)
+    not boot-pinned root continuity. Each Keeper whose turn-record day files
+    it removed is told to {!Keeper_memory_health_input}: the Keeper's memory
+    health row reads the newest of them. Returns the number of files removed.
+    Exposed for unit tests. *)
 
 type jsonl_prune_outcome = {
   pruned : int;  (** Files removed. *)

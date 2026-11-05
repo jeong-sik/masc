@@ -24,7 +24,7 @@ Keeper는 MASC의 자율 에이전트 하네스(harness)다. agent core `Agent.r
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
 - **context**: `working_context` (`Agent_core.Checkpoint.t` 래퍼 — 세션 대화, 메시지, 체크포인트 상태를 보관)
-- **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
+- **memory**: Memory OS fact/episode store
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
 Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, agent core `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
@@ -127,9 +127,7 @@ type session_context = {
 
 ### 3.4 Workspace Boundary
 
-Legacy workspace-targeting typed aliases were removed during single-workspace flattening.
-JSON/MCP 경계에는 `mention_targets` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
-`policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
+JSON/MCP 경계에는 `mention_targets` 같은 workspace collaboration 값이 오간다.
 
 ### 3.5 fiber_health
 
@@ -171,7 +169,7 @@ stateDiagram-v2
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
 6. **PostTurnLifecycle / Checkpoint**: `keeper_post_turn.apply_post_turn_lifecycle`이 checkpoint를 보존하고 그 결과를 keeper meta와 대시보드 표면에 반영한다. keeper 자율성은 heartbeat/turn lane이 계속 쥔다
-7. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다 (legacy bank append는 제거됨)
+7. **MemoryWrite**: `keeper_agent_run` tail에서 Memory OS librarian extraction을 memory lane에 제출한다
 
 ### 4.1.1 Post-turn Persistence
 
@@ -200,9 +198,9 @@ stateDiagram-v2
 - 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Turn Action Authority (레거시 Deliberation 제거됨)
+### 4.3 Turn Action Authority
 
-별도 `keeper_deliberation*.ml` 파이프라인과 로컬 트리거 분류기(`DirectMention`, `IdleTimeout` 등 고정 분기)는 제거되었다. 모든 턴은 `keeper_world_observation`이 수집한 typed observation과 큐에 적재된 자극을 바탕으로 configured LLM이 `keeper_unified_turn`에서 직접 다음 행동을 결정한다.
+모든 턴은 `keeper_world_observation`이 수집한 typed observation과 큐에 적재된 자극을 바탕으로 configured LLM이 `keeper_unified_turn`에서 직접 다음 행동을 결정한다.
 
 ---
 
@@ -246,22 +244,14 @@ keeper_memory.ml (facade)
   |-- keeper_memory_recall.ml (history/tail JSONL reading)
 ```
 
-### 6.2 Memory Bank (제거됨)
+### 6.2 Memory Recall
 
-legacy per-keeper memory bank(`.memory.jsonl`, kind/horizon 어휘)는 제거됐다
-(RFC keeper-memory-consolidation Stage 4). durable 기억은 Memory OS fact
-store가 단일 경로다. profile별 kind cap을 정의하던 memory policy 계층도 bank와
-함께 제거됐다.
+durable 기억은 Memory OS fact store가 단일 경로다. 무엇을 회상할지는
+keeper가 `keeper_memory_search` 도구 호출로 스스로 판단한다.
+`keeper_memory_recall.ml`은 그 도구 경로가 공유하는 typed history/tail 읽기를
+맡는다.
 
-### 6.3 Memory Recall (키워드 휴리스틱 제거됨)
-
-키워드 분류기 기반 recall eval(`is_memory_recall_query`,
-`expected_topic_hint`, `evaluate_memory_recall`)은 제거됐다. 무엇을 회상할지는
-keeper가 `keeper_memory_search` 도구 호출로 스스로 판단한다 — substring 매칭이
-판단을 대신하지 않는다. `keeper_memory_recall.ml`에는 그 도구 경로가 공유하는
-typed history/tail 읽기 기반만 남아 있다.
-
-### 6.4 MASC-Owned Memory
+### 6.3 MASC-Owned Memory
 
 `run_turn`은 agent core memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행하고, ordinary-current 사실 철회는 정확한 `memory_id`와 이유를 받는 `keeper_memory_retract` 도구가 담당한다.
 
@@ -439,18 +429,14 @@ Fusion은 exact-output registry가 아니라 preset이 model topology를 직접 
 모든 환경변수는 `MASC_KEEPER_` 접두사를 사용한다. 전체 목록은 `lib/keeper/keeper_config.ml` 참조.
 
 
-**Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_MAX_TOKENS`(1024)
-
-**Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
-
 **Unified Turn**: runtime/provider capabilities determine temperature and output
 token intent. agent core `max_turns = 0` and Keeper `max_idle_turns = 0` are the
 unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
 Keeper work budget.
 
-**Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000)
+**Execution**: `AUTONOMOUS_MAX_TOKENS`(4000)
 
-**Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
+**Other**: `DEBUG`(0), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
 **Evidence 상한** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `evidence_total_bytes_limit` = 51,200바이트 — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한. 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 코드 상수이며 환경변수·TOML 로 바꾸지 않는다.
 
@@ -460,7 +446,7 @@ Keeper work budget.
 
 `<basepath>/.masc/config/keepers/*.toml`로 keeper를 선언적으로 정의. 파일명이 keeper 이름. 지원 타입: string, int, float, bool, string array. 테이블은 dotted key로 평탄화. 예시: `config/keepers/code-reviewer.toml`.
 
-- **Sandbox profile (`sandbox_profile`)**: `docker`, `microvm`, `remote_ssh` 세 가지만 허용한다 (과거 host/unconfined 프로필은 제거됨). `docker`와 `microvm` 프로필은 비어 있지 않은 `sandbox_image` 선언을 필수로 요구하며, microVM DNS 설정은 `[sandbox] microvm_dns` 키로 지정한다.
+- **Sandbox profile (`sandbox_profile`)**: `docker`, `microvm`, `remote_ssh` 세 가지만 허용한다. `docker`와 `microvm` 프로필은 비어 있지 않은 `sandbox_image` 선언을 필수로 요구하며, microVM DNS 설정은 `[sandbox] microvm_dns` 키로 지정한다.
 
 ### 9.3 Keeper Runtime Spec
 
@@ -477,7 +463,7 @@ Canonical file model:
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다 (`paused`는 RFC-0323에 의해 은퇴한 계약).
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다.
 
 ---
 
@@ -546,17 +532,13 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 `keeper_meta` 레코드가 약 100개 필드를 가지며 `meta_to_json`/`meta_of_json`이 각각 ~200줄이다. 필드 군(group)별 sub-record 분할이 필요하다.
 
-### 15.2 keeper_types.ml include chain (해결됨)
+### 15.2 keeper_memory 계층의 include chain
 
-RFC-0205를 통해 `keeper_types.ml`의 레거시 include facade(`Keeper_meta_contract`, `Keeper_types_profile`, `Keeper_meta_json`, `Keeper_meta_store` 등)가 완전히 제거되었으며, 각 소비자는 해당 모듈을 직접 참조하도록 분리 완료되었다.
+`keeper_memory.ml` -> `keeper_memory_recall.ml` 단층 facade가 남아 있다.
 
-### 15.3 keeper_memory 계층의 include chain
+### 15.3 Memory Boundary
 
-`keeper_memory.ml` -> `keeper_memory_recall.ml` 단층 facade만 남았다 (bank/policy 계층은 제거됨).
-
-### 15.4 Memory Boundary
-
-External memory projection은 제거됐다. 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
+경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage이며, memory storage 자체는 Memory OS fact store가 소유한다.
 
 ---
 
@@ -566,7 +548,7 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 |------|------|
 | Keeper Meta Contract | `lib/keeper/keeper_meta_contract.ml` |
 | Keeper Types | `lib/keeper_types/keeper_types.ml` |
-| Context Core | `lib/keeper/keeper_context_core.ml` (구 `keeper_working_context.ml` 흡수) |
+| Context Core | `lib/keeper/keeper_context_core.ml` |
 | Execution Context | `lib/keeper/keeper_context_runtime.ml` |
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |

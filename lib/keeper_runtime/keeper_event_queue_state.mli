@@ -85,7 +85,6 @@ type projected_source_kind = Keeper_event_queue_state_core.projected_source_kind
   | Source_composition_completed
   | Source_owned_job_completed
   | Source_tool_result_ready
-  | Source_addon_operation_changed
 
 val projected_source_kind_to_string : projected_source_kind -> string
 
@@ -427,4 +426,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v21"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v22"] is the only accepted schema. *)

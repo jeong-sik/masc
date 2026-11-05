@@ -229,7 +229,7 @@ type post = {
   created_at: float;
   content_updated_at: float; (* Last title, body or author change. *)
   updated_at: float;   (* Last activity: vote, comment, edit *)
-  expires_at: float;   (* MANDATORY - no eternal posts *)
+  expires_at: float;   (* 0.0 is permanent; the sweeper removes only a positive time already past. *)
   votes_up: int;
   votes_down: int;
   reply_count: int;

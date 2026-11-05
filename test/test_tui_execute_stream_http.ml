@@ -1320,6 +1320,58 @@ let test_readiness_loss_cleans_predecessor_presence env =
         [] (Play_fixture.member_names workspace);
       assert_http_join_available workspace)
 
+let test_ping_scheduler_renews_play_presence env =
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    Server_mcp_transport_http.For_testing.with_ping_interval 0.05 (fun () ->
+      let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+      Alcotest.(check int) "the Play observer opens" 200 (Play_fixture.await clock first.response);
+      let before = match Masc.Play_room.read ~base_path:workspace ~now:(Time_compat.now ()) ~before:None with
+        | Ok { members = [member]; _ } -> member
+        | Ok _ | Error _ -> Alcotest.fail "the initial Play membership is missing"
+      in
+      Play_fixture.await_condition clock (fun () ->
+        match Masc.Play_room.read ~base_path:workspace ~now:(Time_compat.now ()) ~before:None with
+        | Ok { members = [member]; _ } -> member.seen_at > before.seen_at
+        | Ok _ | Error _ -> false);
+      Server_mcp_transport_http.stop_sse_session session_id;
+      Play_fixture.await clock first.ended))
+
+let test_transport_disconnect_finishes_leave_before_cancellation env =
+  let exception Disconnect_fixture in
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+    Alcotest.(check int) "the Play observer opens" 200 (Play_fixture.await clock first.response);
+    let locked, release = Eio.Promise.create () in
+    let cancelled = ref false in
+    let finished, mark_finished = Eio.Promise.create () in
+    Server_mcp_transport_http.For_testing.with_disconnect_hook
+      (fun info ->
+        match info with
+        | None -> Alcotest.fail "the published connection is missing"
+        | Some info ->
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
+              Eio.Promise.resolve locked ();
+              Eio.Promise.await release));
+          Eio.Promise.await locked)
+      (fun () ->
+        Eio.Fiber.fork ~sw (fun () ->
+          (try
+            Eio.Cancel.sub (fun context ->
+              Eio.Cancel.cancel context Disconnect_fixture;
+              Masc.Sse.unregister session_id)
+          with
+          | Eio.Cancel.Cancelled Disconnect_fixture -> cancelled := true
+          | Eio.Cancel.Cancelled _ -> ());
+          Eio.Promise.resolve mark_finished ());
+        Play_fixture.await clock locked;
+        Eio.Promise.resolve release ();
+        Play_fixture.await clock finished);
+    Alcotest.(check bool) "the transport preserves the original cancellation" true !cancelled;
+    Alcotest.(check (list string)) "the transport still completes Play Leave"
+      [] (Play_fixture.member_names workspace);
+    assert_http_join_available workspace)
+
 let test_mcp_future_cursor_resets_before_live_delivery env =
   let module Transport = Server_mcp_transport_http in
   let workspace = Masc_test_deps.setup_test_workspace () in
@@ -1553,6 +1605,8 @@ let () =
         ; case "disconnect before lease installation cleans up" test_disconnect_before_lease_install_cleans_up
         ; case "aborted replacement cleans predecessor presence" test_aborted_replacement_cleans_predecessor_presence
         ; case "readiness loss cleans predecessor presence" test_readiness_loss_cleans_predecessor_presence
+        ; case "ping renews Play presence" test_ping_scheduler_renews_play_presence
+        ; case "transport disconnect finishes Leave before cancellation" test_transport_disconnect_finishes_leave_before_cancellation
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
     ; ( "SSE response"

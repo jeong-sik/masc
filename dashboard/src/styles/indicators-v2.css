@@ -23,8 +23,6 @@
 /* indeterminate bar — a volt segment sweeps the track.
    For known progress keep using ProgressBar (segmented / percentage). */
 
-@keyframes loading-sweep { 0% { left: -40%; } 100% { left: 100%; } }
-
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation-duration: 1.4s; }
 }

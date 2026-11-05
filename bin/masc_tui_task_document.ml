@@ -20,8 +20,14 @@ let section_rows ~width title =
 
 let history_heading_rows ~width = section_rows ~width "상태 전환 이력 (HISTORY)"
 
+(* A note that is JSON is drawn with its keys and values coloured. Any other
+   note is prose and keeps the one colour. *)
+type history_row =
+  | Plain_row of string
+  | Json_row of string
+
 let history_rows = function
-        | [] -> [ "    (no events in the observed prefix)" ]
+        | [] -> [ Plain_row "    (no events in the observed prefix)" ]
         | events ->
             List.concat_map
               (fun (event : Tui_decode.task_history_event) ->
@@ -43,14 +49,19 @@ let history_rows = function
                   | Some origin -> Printf.sprintf " [%s · %s:%d]"
                     (match origin.tho_source with Tui_decode.Task_activity -> "lifecycle" | Tui_decode.Task_audit -> "audit")
                     origin.tho_file origin.tho_offset in
-                Printf.sprintf "    %s  %s%s%s%s"
-                  (Planning_detail.short_ts event.th_ts)
-                  event.th_label transition actor provenance
+                Plain_row
+                  (Printf.sprintf "    %s  %s%s%s%s"
+                     (Planning_detail.short_ts event.th_ts)
+                     event.th_label transition actor provenance)
                 :: (match event.th_note with
                     | Some note ->
                         (* The note is pretty-printed JSON: every line takes
                            the note's indent, not only the first. *)
-                        List.map (fun line -> "      " ^ line)
+                        let json = Masc_tui_json_colour.parses note in
+                        let row line =
+                          if json then Json_row line else Plain_row line
+                        in
+                        List.map (fun line -> row ("      " ^ line))
                           (Masc_tui_text_block.lines note)
                     | None -> []))
               events
@@ -212,9 +223,12 @@ let equal_input a b = match a,b with
   | Body_input _,History_input _ | History_input _,Body_input _ -> false
 let prepare_input = function
   | History_input (cols,events) ->
-      history_rows events |> List.concat_map (fun line ->
-        Masc_tui_text_block.preformatted_rows
-          ~max_cells:(max 1 (framed_inner_width cols)) line)
+      let max_cells = max 1 (framed_inner_width cols) in
+      history_rows events |> List.concat_map (function
+        | Plain_row line -> Masc_tui_text_block.preformatted_rows ~max_cells line
+        | Json_row line ->
+            Masc_tui_text_block.preformatted_styled_rows
+              ~style:Masc_tui_json_colour.colour_line ~max_cells line)
   | Body_input (cols,goals,task) ->
       let field ?(style = "") label text =
         let prefix="  " ^ label ^ ": " in

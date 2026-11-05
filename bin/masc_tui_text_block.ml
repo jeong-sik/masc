@@ -45,7 +45,7 @@ let leading_spaces line =
    what it returns. Prose has no use for them. Pretty-printed JSON, code and
    an indented list are made of them, so [keep_indent] gives them back: the
    line keeps its own indent, and so does every row it wraps to. *)
-let rows_of_line ~keep_indent ~max_cells line =
+let rows_of_line ~wrap ~keep_indent ~max_cells line =
   let line = drop_line_terminator line in
   let opening = if keep_indent then leading_spaces line else 0 in
   (* Half the width is the most an indent can take, so a deeply nested line
@@ -56,7 +56,7 @@ let rows_of_line ~keep_indent ~max_cells line =
     else String.sub line opening (String.length line - opening)
   in
   match
-    Message_layout.wrap_words ~max_cells:(max_cells - indent)
+    wrap ~max_cells:(max_cells - indent)
       (Masc.Tui_terminal_text.sanitize_terminal_text text)
   with
   (* [wrap_words] answers nothing for a line with no words. The break was
@@ -67,12 +67,22 @@ let rows_of_line ~keep_indent ~max_cells line =
       let margin = String.make indent ' ' in
       List.map (fun row -> margin ^ row) wrapped
 
-let rows_with ~keep_indent ~max_cells text =
+let rows_with ~wrap ~keep_indent ~max_cells text =
   String.split_on_char '\n' text
-  |> List.concat_map (rows_of_line ~keep_indent ~max_cells)
+  |> List.concat_map (rows_of_line ~wrap ~keep_indent ~max_cells)
   |> trim_blank_edges
 
-let rows ~max_cells text = rows_with ~keep_indent:false ~max_cells text
+let rows ~max_cells text =
+  rows_with ~wrap:Message_layout.wrap_words ~keep_indent:false ~max_cells text
 
 let preformatted_rows ~max_cells text =
-  rows_with ~keep_indent:true ~max_cells text
+  rows_with ~wrap:Message_layout.wrap_words ~keep_indent:true ~max_cells text
+
+(* [style] runs on a line after the sanitiser, so the escapes it adds are the
+   only ones in the rows. A wrapped row opens the style it continues and
+   closes it, as {!Message_layout.wrap_styled_words} does. *)
+let preformatted_styled_rows ~style ~max_cells text =
+  let wrap ~max_cells line =
+    Message_layout.wrap_styled_words ~max_cells (style line)
+  in
+  rows_with ~wrap ~keep_indent:true ~max_cells text

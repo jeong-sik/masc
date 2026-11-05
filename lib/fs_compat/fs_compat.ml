@@ -1583,8 +1583,7 @@ let load_owned_regular_file_range_with_sha256_blocking
 external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
   = "caml_masc_owned_entry_open"
 
-let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = false)
-    ?excluded_stat root path fn =
+let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?excluded_stat root path fn =
   let ownership_root = root.inventory_path in
   match owned_directory_paths ~ownership_root (Filename.dirname path) with
   | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
@@ -1653,7 +1652,7 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?(may_remove = 
           else
             let result = fn fd stat parent in
             if ancestors_current ()
-               && (may_remove || (current_entry path fd stat && same_file_snapshot stat (Unix.fstat fd)))
+               && current_entry path fd stat && same_file_snapshot stat (Unix.fstat fd)
             then result
             else owned_file_error (Filesystem_identity_changed {path})
         end)
@@ -1751,27 +1750,6 @@ let with_owned_inventory_regular_file ~owner_uid root relative fn =
     if stat.Unix.st_kind <> Unix.S_REG then
       owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
     else Ok (fn ~file ~parent ~stat))
-;;
-
-external unlink_owned_inventory_entry : Unix.file_descr -> Unix.file_descr -> string -> unit
-  = "caml_masc_owned_inventory_unlink_checked"
-
-let remove_owned_inventory_regular_file ~expected root relative =
-  let path = owned_inventory_path root relative in
-  let owner_uid = Unix.geteuid () in
-  with_owned_inventory_entry ~owner_uid ~single_link:true ~may_remove:true root path
-    (fun file stat parent ->
-      if stat.Unix.st_kind <> Unix.S_REG then
-        owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
-      else if not (same_file_snapshot expected stat)
-              || stat.st_uid <> expected.st_uid || stat.st_perm <> expected.st_perm
-              || stat.st_nlink <> expected.st_nlink then
-        owned_file_error (Filesystem_identity_changed {path})
-      else begin
-        unlink_owned_inventory_entry parent file (Filename.basename path);
-        Unix.fsync parent;
-        Ok ()
-      end)
 ;;
 
 type owned_reader = Eio_unix.Fd.t
@@ -2301,51 +2279,6 @@ let read_slice ~path ~from ~len =
    back to a full scan from byte 0; callers detect shrinkage the same way
    via the returned boundary. Blank lines advance the boundary but are not
    folded. *)
-(* [fold_appended_lines] with the byte offset each line starts at, so a
-   caller building an index can record where a row lives and read it back
-   later with [read_slice ~from:offset ~len:(String.length line)]. The loop
-   already tracks the offset one past each newline; the line that follows
-   starts there. *)
-let fold_appended_lines_with_offsets ~path ~from ~init ~f =
-  if not (file_exists path)
-  then init, 0
-  else begin
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let len = in_channel_length ic in
-         let from = if from < 0 || from > len then 0 else from in
-         seek_in ic from;
-         let chunk = Bytes.create 65536 in
-         let line_buf = Buffer.create 256 in
-         let acc = ref init in
-         let boundary = ref from in
-         let pos = ref from in
-         let rec loop () =
-           let n = input ic chunk 0 (Bytes.length chunk) in
-           if n > 0
-           then begin
-             for i = 0 to n - 1 do
-               match Bytes.get chunk i with
-               | '\n' ->
-                 let line = Buffer.contents line_buf in
-                 Buffer.clear line_buf;
-                 let line_start = !boundary in
-                 boundary := !pos + i + 1;
-                 if not (String.equal (String.trim line) "")
-                 then acc := f !acc ~offset:line_start line
-               | c -> Buffer.add_char line_buf c
-             done;
-             pos := !pos + n;
-             loop ()
-           end
-         in
-         loop ();
-         !acc, !boundary)
-  end
-;;
-
 let fold_appended_lines ~path ~from ~init ~f =
   if not (file_exists path)
   then init, 0

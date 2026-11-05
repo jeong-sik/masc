@@ -2009,7 +2009,6 @@ let test_provider_replay_policy_matrix_pinned () =
         ?request_path
         ?enable_thinking
         ?preserve_thinking
-        ?clear_thinking
         ~kind
         ~model_id
         ~base_url
@@ -2019,7 +2018,6 @@ let test_provider_replay_policy_matrix_pinned () =
       ?request_path
       ?enable_thinking
       ?preserve_thinking
-      ?clear_thinking
       ~kind
       ~model_id
       ~base_url
@@ -2088,22 +2086,25 @@ let test_provider_replay_policy_matrix_pinned () =
     (fun model_id ->
        let base_url = "https://api.z.ai" in
        let label suffix = Printf.sprintf "glm/%s %s" model_id suffix in
+       (* RFC-0488 §3.2: an undeclared row keeps every assistant message as
+          sent; only a declared [preserve_thinking = false] clears completed
+          user turns. *)
        check
          (label "default")
-         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
+         Reasoning_replay_contract.All_assistant_messages
          (cfg ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "enable_thinking only")
-         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
+         Reasoning_replay_contract.All_assistant_messages
          (cfg ~enable_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "preserve only")
          Reasoning_replay_contract.All_assistant_messages
          (cfg ~preserve_thinking:true ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
-         (label "clear_thinking=false with default thinking")
-         Reasoning_replay_contract.All_assistant_messages
-         (cfg ~clear_thinking:false ~kind:Provider_config.Glm ~model_id ~base_url ());
+         (label "declared clearing")
+         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
+         (cfg ~preserve_thinking:false ~kind:Provider_config.Glm ~model_id ~base_url ());
        check
          (label "disabled thinking overrides preservation")
          Reasoning_replay_contract.No_replay
@@ -2124,11 +2125,11 @@ let test_provider_replay_policy_matrix_pinned () =
             ~base_url
             ());
        check
-         (label "enable + clear_thinking=false")
-         Reasoning_replay_contract.All_assistant_messages
+         (label "enable + declared clearing")
+         Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn
          (cfg
             ~enable_thinking:true
-            ~clear_thinking:false
+            ~preserve_thinking:false
             ~kind:Provider_config.Glm
             ~model_id
             ~base_url
@@ -2212,6 +2213,7 @@ let test_clear_thinking_gate_is_capability_not_identity () =
       ~base_url:"https://gate.example"
       ~model_capabilities_override:capabilities
       ~enable_thinking:true
+      ~preserve_thinking:false
       ()
   in
   let declared =
@@ -2232,7 +2234,7 @@ let test_clear_thinking_gate_is_capability_not_identity () =
        { (preserved Provider_config.OpenAI_compat declared) with enable_thinking = None }
      = Reasoning_replay_contract.All_assistant_messages);
   check_bool
-    "non-GLM kind declaring the wire keeps the active tool exchange by default"
+    "non-GLM kind declaring the wire keeps the active tool exchange when clearing"
     true
     (resolved_replay_policy (cleared Provider_config.OpenAI_compat declared)
      = Reasoning_replay_contract.Tool_call_assistant_messages_latest_user_turn);
@@ -2310,14 +2312,11 @@ let test_glm_clear_thinking_retains_active_tool_exchange () =
     active config messages;
   check_reasoning "default thinking preserves active tool reasoning"
     active { config with enable_thinking = None } messages;
-  check_reasoning "explicit clear overrides full-history preservation"
-    active { config with preserve_thinking = Some true; clear_thinking = Some true }
-    messages;
   check_reasoning "preserved thinking includes completed user turns"
     ("OLD_REASONING" :: active) { config with preserve_thinking = Some true }
     messages;
-  check_reasoning "explicit retained thinking overrides the preserve flag"
-    ("OLD_REASONING" :: active) { config with clear_thinking = Some false }
+  check_reasoning "undeclared retention keeps completed user turns as sent"
+    ("OLD_REASONING" :: active) { config with preserve_thinking = None }
     messages;
   check_reasoning "disabled thinking does not replay reasoning"
     [] { config with enable_thinking = Some false } messages;

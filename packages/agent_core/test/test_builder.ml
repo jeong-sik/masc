@@ -291,7 +291,6 @@ let exact_provider_config () =
     ~system_prompt:"exact provider prompt"
     ~enable_thinking:true
     ~preserve_thinking:true
-    ~clear_thinking:false
     ~tool_stream:true
     ~tool_choice:Types.Auto
     ~response_format:(Types.JsonSchema (Types.Raw_schema schema))

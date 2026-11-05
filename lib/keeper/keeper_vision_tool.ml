@@ -8,7 +8,7 @@ type complete_fn = Keeper_provider_subcall.complete_fn
    Requesting enable_thinking=false there is fail-closed by the agent_core
    guard (Disable_not_encodable), which broke all image analysis (2026-08).
    So we leave thinking uncontrolled (enable_thinking=None below — the guard
-   admits it) and rely on clear_thinking/preserve_thinking to keep the reply
+   admits it) and rely on preserve_thinking = Some false to keep the reply
    clean; on /v1 the model's reasoning lands in a separate response field and
    never enters the JSON content. The budget must cover the answer PLUS any
    reasoning the model spends first, since that phase can no longer be
@@ -30,7 +30,6 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   ; disable_parallel_tool_use = true
   ; enable_thinking = None
   ; preserve_thinking = Some false
-  ; clear_thinking = Some true
   }
   |> Keeper_structured_output_schema.without_response_format
 

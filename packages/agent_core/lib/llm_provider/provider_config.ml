@@ -70,7 +70,6 @@ type t =
        itself asks for this: there, silence and this declaration produce the
        same request, and the difference between them is whether anybody meant
        it. *)
-  ; clear_thinking : bool option
   ; tool_stream : bool
   ; tool_choice : Types.tool_choice option
   ; disable_parallel_tool_use : bool
@@ -116,7 +115,6 @@ let make
       ?preserve_thinking
       ?reasoning_effort
       ?(reasoning_uncontrolled = false)
-      ?clear_thinking
       ?(tool_stream = false)
       ?tool_choice
       ?(disable_parallel_tool_use = false)
@@ -179,7 +177,6 @@ let make
   ; preserve_thinking
   ; reasoning_effort
   ; reasoning_uncontrolled
-  ; clear_thinking
   ; tool_stream
   ; tool_choice
   ; disable_parallel_tool_use
@@ -397,54 +394,6 @@ type reasoning_effort = Reasoning_effort.t =
   | Ultra
 let reasoning_effort_to_string = Reasoning_effort.to_string
 let reasoning_effort_of_string = Reasoning_effort.of_string
-
-(* Preserved-Thinking gate for the [Thinking_object_clear_thinking] preserve
-   wire (SSOT).
-
-   Rows declaring that wire carry the thinking toggle in a top-level [thinking]
-   object. Preserved Thinking keeps reasoning across completed user turns when
-   thinking is active AND [clear_thinking] is false. The active tool exchange's
-   interleaved reasoning has its own replay policy in [Reasoning_dialect].
-   [clear_thinking] resolves from the explicit
-   field, else the inverse of [preserve_thinking], else the client default [true].
-
-   Exposed on raw fields rather than on [t] because the request builders carry
-   different config records ([Provider_config.t] vs [Types.agent_config]); both
-   route through this one resolver so the gate cannot drift between them. *)
-let clear_thinking_value ~clear_thinking ~preserve_thinking =
-  match clear_thinking with
-  | Some clear -> clear
-  | None ->
-    (match preserve_thinking with
-     | Some preserve -> not preserve
-     | None -> true)
-;;
-
-let preserved_thinking_active ~enable_thinking ~clear_thinking ~preserve_thinking =
-  (* The declared clear-thinking wire defaults [thinking.type] to [enabled].
-     An omitted toggle therefore still permits explicitly retained history.
-     Ref: https://docs.z.ai/api-reference/llm/chat-completion (2026-11-01). *)
-  enable_thinking <> Some false
-  && not (clear_thinking_value ~clear_thinking ~preserve_thinking)
-;;
-
-let clear_thinking_object_request_field
-      ~(preserve_thinking_control_format : Capabilities.preserve_thinking_control_format)
-      ~supports_reasoning
-      ~enable_thinking
-      ~clear_thinking
-      ~preserve_thinking
-  =
-  match preserve_thinking_control_format with
-  | Capabilities.Thinking_object_clear_thinking ->
-    (match enable_thinking, clear_thinking, preserve_thinking with
-     | None, None, None when not supports_reasoning -> None
-     | _ -> Some (clear_thinking_value ~clear_thinking ~preserve_thinking))
-  | Capabilities.No_preserve_thinking_control
-  | Capabilities.Thinking_object_keep_all
-  | Capabilities.Chat_template_kwargs_preserve_thinking
-  | Capabilities.Always_preserved_thinking -> None
-;;
 
 type tool_choice_request_rejection =
   | Unsupported_named_tool_choice of

@@ -94,7 +94,6 @@ type t =
         the request carries no control asks for this: there, silence and this
         declaration produce the same request, and nothing else says which one
         was meant. [false] elsewhere and by default. *)
-  ; clear_thinking : bool option
   ; tool_stream : bool
   ; tool_choice : Types.tool_choice option
   ; disable_parallel_tool_use : bool
@@ -251,7 +250,6 @@ val make
   -> ?preserve_thinking:bool
   -> ?reasoning_effort:Reasoning_effort.t
   -> ?reasoning_uncontrolled:bool
-  -> ?clear_thinking:bool
   -> ?tool_stream:bool
   -> ?tool_choice:Types.tool_choice
   -> ?disable_parallel_tool_use:bool
@@ -333,35 +331,6 @@ type reasoning_effort = Reasoning_effort.t =
 
 val reasoning_effort_to_string : reasoning_effort -> string
 val reasoning_effort_of_string : string -> reasoning_effort option
-
-(** Resolve the [thinking.clear_thinking] member: the explicit field, else the
-    inverse of [preserve_thinking], else the client default [true]. SSOT for both
-    request builders. *)
-
-(** [true] iff the request explicitly enables Preserved Thinking: thinking
-    active (the declared wire defaults an omitted toggle to enabled) AND
-    [clear_thinking] false. This enables reasoning across completed user turns.
-    It does not decide replay inside the active tool exchange;
-    {!Reasoning_dialect} retains that interleaved reasoning separately. *)
-val preserved_thinking_active
-  :  enable_thinking:bool option
-  -> clear_thinking:bool option
-  -> preserve_thinking:bool option
-  -> bool
-
-(** Top-level [thinking.clear_thinking] request-field resolver, gated on the
-    declared preserve wire. Reasoning rows explicitly send the client's clear
-    default even when all controls are omitted, so provider defaults cannot
-    disagree with replay selection. Non-reasoning rows omit an all-omitted
-    request. An omitted toggle leaves [thinking.type] absent. Other preserve
-    wires omit the field. No provider identity, endpoint, or model id participates. *)
-val clear_thinking_object_request_field
-  :  preserve_thinking_control_format:Capabilities.preserve_thinking_control_format
-  -> supports_reasoning:bool
-  -> enable_thinking:bool option
-  -> clear_thinking:bool option
-  -> preserve_thinking:bool option
-  -> bool option
 
 (** Capability catalog provider identity for [config]. Uses the explicitly
     carried [provider_id], otherwise the typed wire kind. Endpoint URLs and

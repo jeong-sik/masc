@@ -49,7 +49,6 @@ let request_fingerprint
                      ; preserve_thinking
                      ; reasoning_effort
                      ; reasoning_uncontrolled
-                     ; clear_thinking
                      ; tool_stream
                      ; tool_choice
                      ; disable_parallel_tool_use
@@ -140,7 +139,6 @@ let request_fingerprint
       ; "preserve_thinking", opt_json (fun b -> `Bool b) preserve_thinking
       ; ( "reasoning_effort"
         , opt_json (fun e -> `String (Reasoning_effort.to_string e)) reasoning_effort )
-      ; "clear_thinking", opt_json (fun b -> `Bool b) clear_thinking
       ; "tool_choice", opt_json Types.tool_choice_to_json tool_choice
       ; "disable_parallel_tool_use", `Bool disable_parallel_tool_use
       ; "response_format", Types.response_format_to_json response_format

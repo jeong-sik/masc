@@ -236,7 +236,6 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
       | None | Some Types.None_ -> false
       | Some (Types.Auto) | Some (Types.Any) | Some (Types.Tool _) -> true)
   || Option.is_some config.preserve_thinking
-  || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages
   || List.exists
        (fun (message : Types.message) ->

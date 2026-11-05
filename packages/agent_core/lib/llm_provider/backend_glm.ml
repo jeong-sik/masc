@@ -1,7 +1,8 @@
 (** ZhipuAI Glm native backend.
 
     Openai wire format with Glm-specific extensions:
-    - thinking control parameter with type=enabled and clear_thinking=true
+    - thinking control parameter with type=enabled; [clear_thinking] only when
+      the row declares [preserve_thinking] (RFC-0488)
     - [reasoning_content] in response message and streaming delta
     - String error codes (e.g., ["1305"])
     - Temperature range 0-1 (not 0-2)
@@ -437,32 +438,7 @@ let%test "build_request with thinking injects correct format" =
   let open Yojson.Safe.Util in
   let thinking = json |> member "thinking" in
   thinking |> member "type" |> to_string = "enabled"
-  && thinking |> member "clear_thinking" |> to_bool = true
-;;
-
-let%test "build_request can preserve reasoning on demand" =
-  let config =
-    Provider_config.make
-      ~kind:Glm
-      ~model_id:"glm-5"
-      ~base_url:Zai_catalog.coding_base_url
-      ~enable_thinking:true
-      ~clear_thinking:false
-      ()
-  in
-  let messages =
-    [ { origin = Types.Conversation;  role = User
-      ; content = [ Text "reason" ]
-      ; name = None
-      ; tool_call_id = None
-      ; metadata = []
-      }
-    ]
-  in
-  let body = build_request ~config ~messages () in
-  let json = Yojson.Safe.from_string body in
-  let open Yojson.Safe.Util in
-  json |> member "thinking" |> member "clear_thinking" |> to_bool = false
+  && thinking |> member "clear_thinking" = `Null
 ;;
 
 let%test "build_request maps preserve_thinking to GLM clear_thinking=false" =
@@ -498,12 +474,12 @@ let%test
      [Reasoning_dialect.replay_policy] resolved once in [for_provider_config],
      where the branch predicate is the declared
      [preserve_thinking_control_format], not a provider identity or a
-     serialize-time branch in the request builder. A config under Preserved
-     Thinking (enable_thinking + clear_thinking=false) must echo a prior
-     assistant [Thinking] block back as [reasoning_content]; the default config
-     (clear_thinking=true) must not. Reverting the dialect resolution leaves the
-     GLM dialect at the dead [No_replay] default and turns the [preserved] case
-     red. *)
+     serialize-time branch in the request builder. A config that declares
+     [preserve_thinking = true], and one that declares nothing, must echo a
+     prior assistant [Thinking] block back as [reasoning_content] unchanged;
+     only a declared [preserve_thinking = false] drops it (RFC-0488 §3.2).
+     Reverting the dialect resolution leaves the GLM dialect at the dead
+     [No_replay] default and turns the [preserved] case red. *)
   let preserved =
     Provider_config.make
       ~kind:Glm
@@ -518,6 +494,14 @@ let%test
       ~kind:Glm
       ~model_id:"glm-5"
       ~base_url:Zai_catalog.coding_base_url
+      ()
+  in
+  let clearing =
+    Provider_config.make
+      ~kind:Glm
+      ~model_id:"glm-5"
+      ~base_url:Zai_catalog.coding_base_url
+      ~preserve_thinking:false
       ()
   in
   (* Provenance stamp mirroring the production response path; the projection
@@ -548,7 +532,7 @@ let%test
     |> List.exists (fun m ->
       m |> member "reasoning_content" |> to_string_option = Some "prior reasoning")
   in
-  replays preserved && not (replays default_config)
+  replays preserved && replays default_config && not (replays clearing)
 ;;
 
 let%test "build_request preserves ZAI GLM OpenAI-compatible replay and tool content shape"

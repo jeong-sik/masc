@@ -186,7 +186,6 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
     ; "has_system_prompt", `Bool (Option.is_some cfg.system_prompt)
     ; "enable_thinking", Json_util.bool_opt_to_json cfg.enable_thinking
     ; "preserve_thinking", Json_util.bool_opt_to_json cfg.preserve_thinking
-    ; "clear_thinking", Json_util.bool_opt_to_json cfg.clear_thinking
     ; ( "resolved_reasoning_effort"
       , Json_util.string_opt_to_json
           (Option.map Llm_provider.Reasoning_effort.to_string cfg.reasoning_effort) )

@@ -23,13 +23,13 @@ let field_count key json =
        0
 ;;
 
-let glm_config ?enable_thinking ?clear_thinking ?(tool_stream = false) () =
+let glm_config ?enable_thinking ?preserve_thinking ?(tool_stream = false) () =
   PC.make
     ~kind:PC.Glm
     ~model_id:"glm-5.1"
     ~base_url:"https://api.z.ai/api/paas/v4"
     ?enable_thinking
-    ?clear_thinking
+    ?preserve_thinking
     ~tool_stream
     ()
 ;;
@@ -120,7 +120,7 @@ let test_build_request_thinking_modes_and_tool_stream () =
     K.build_request
       ~stream:true
       ~config:
-        (glm_config ~enable_thinking:true ~clear_thinking:false ~tool_stream:true ())
+        (glm_config ~enable_thinking:true ~preserve_thinking:true ~tool_stream:true ())
       ~messages
       ~tools:
         [ `Assoc
@@ -165,11 +165,10 @@ let test_build_request_thinking_modes_and_tool_stream () =
   let passthrough =
     K.build_request ~config:(glm_config ()) ~messages () |> Yojson.Safe.from_string
   in
-  check int "clear policy field count" 1 (field_count "thinking" passthrough);
-  check bool "client clear policy is explicit" true
-    (passthrough |> member "thinking" |> member "clear_thinking" |> to_bool);
-  check bool "thinking toggle remains omitted" true
-    (passthrough |> member "thinking" |> member "type" = `Null)
+  (* RFC-0488 §3.2: a row that declares neither control sends no [thinking]
+     object, so the endpoint's documented default applies. *)
+  check int "undeclared row sends no thinking object" 0
+    (field_count "thinking" passthrough)
 ;;
 
 let test_parse_response_extracts_reasoning_and_usage () =

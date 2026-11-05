@@ -412,12 +412,7 @@ let test_deterministic_subcall_suppresses_thinking () =
     (option bool)
     "preserve_thinking must be explicitly false"
     (Some false)
-    cfg.Llm_provider.Provider_config.preserve_thinking;
-  check
-    (option bool)
-    "clear_thinking must be explicitly true"
-    (Some true)
-    cfg.Llm_provider.Provider_config.clear_thinking
+    cfg.Llm_provider.Provider_config.preserve_thinking
 ;;
 
 let test_deterministic_subcall_disables_tool_surface () =

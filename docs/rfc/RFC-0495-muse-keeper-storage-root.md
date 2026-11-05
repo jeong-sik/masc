@@ -126,7 +126,7 @@ Fresh state: Muse 를 쓰는 Keeper 의 `official-client-runtime/session.json` �
 ## 3. 바뀌는 것
 
 - Keeper 하나가 디스크에 남기는 Muse 세션은 많아야 하나다.
-- 새 세션마다 Muse 가 data 폴더를 처음부터 만든다. 그 비용은 L2 에서 잰다.
+- 새 세션마다 Muse 가 data 폴더를 처음부터 만든다. 그 비용은 배포 뒤 잰다(5).
 - Keeper 턴은 계정 home 의 `.local/share/muse` 를 쓰지 않는다. 로그인(`login_environment`)은 지금처럼 계정 home 을 쓴다.
 
 ## 4. 하지 않는 것
@@ -143,14 +143,15 @@ Fresh state: Muse 를 쓰는 Keeper 의 `official-client-runtime/session.json` �
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC | 리뷰 |
-| L2 | `storage` 합타입(2.1), Fusion·verification 을 `Stateless` 로 | type-check. 일회용 계정 사본에서 `Keeper_owned` root 로 Start → Resume 이 같은 세션으로 이어지는지, data 폴더를 처음 만드는 시간 측정 |
-| L3 | Keeper root(2.2)와 Start 직전 비우기(2.3) | 시험: Start 는 root 를 비우고 Resume 은 남긴다, 비우기 실패는 dispatch 전 실패. 배포 뒤 한 Keeper root 크기가 세션 하나 크기로 머무는지 |
-| L4 | changelog `Fresh state required`(2.4) | `changelog-fragments.py check` |
+| L2 | `storage` 합타입(2.1), Fusion·verification 은 `Stateless`, Keeper 는 자기 root(2.2)를 `Keeper_owned` 로 | type-check. 시험: `Stateless`+`Resume`·상대 경로는 spawn 전에 거절, host 의 XDG 폴더와 `TMPDIR` 가 root 아래 |
+| L3 | Start 직전 비우기(2.3), changelog `Fresh state required`(2.4) | 시험: Start 는 root 를 비우고 Resume 은 남긴다, root 를 준비하지 못하면 host 를 띄우지 않고 세션은 다음 턴에 이어진다. `changelog-fragments.py check` |
 
-L2 는 혼자 들어가도 동작이 바뀌지 않는다. L3 와 L4 는 같이 배포한다.
+L2 부터 Keeper 턴이 계정 home 의 data 폴더를 떠난다. 그래서 L2 와 L3 는 같이 배포한다.
+
+배포 뒤 확인: 한 Keeper root 크기가 세션 하나 크기로 머무는지, 빈 root 에서 첫 Start 가 얼마나 걸리는지, 빈 root 로 Start 한 뒤 Resume 이 로그인 없이 되는지(6.1).
 
 ## 6. 열린 질문
 
-1. 로그인 유지. `auth.json` 은 config 쪽에 있고(1.2) Fusion 은 빈 data 폴더로 돈다. 다만 Fusion 은 Resume 을 하지 않는다. L2 의 일회용 사본에서 빈 `Keeper_owned` root 로 Start 한 뒤 Resume 이 로그인 없이 되는지 확인한다.
+1. 로그인 유지. `auth.json` 은 config 쪽에 있고(1.2) Fusion 은 빈 data 폴더로 돈다. 다만 Fusion 은 Resume 을 하지 않는다. 빈 `Keeper_owned` root 로 Start 한 뒤 Resume 이 로그인 없이 되는지는 배포 뒤 확인한다.
 2. root 를 비우는 시점. 2.3 은 Start 직전이다. 새 세션이 settle 된 뒤 비우면 Start 가 실패했을 때 앞 세션 파일이 남지만, 그 세션은 이미 버려졌으니 쓸모가 없다.
 3. Muse host 에 세션 삭제 요청이 생기면. root 는 그대로 Keeper 마다 두고, 비우기 대신 host 에 지우라고 요청할지 그때 정한다. host 쪽에 기능 요청을 올릴지는 운영자가 정한다.

@@ -619,6 +619,34 @@ let test_worktrees_list_names_and_never_paths () =
          | Some _ | None -> Alcotest.fail "expected two worktree rows")
     | _ -> Alcotest.fail "answer is not an object")
 
+(* The TUI reads this answer with its own decoder; a shape the decoder refuses
+   would leave the screen with an error while the route looked fine. *)
+let test_worktrees_answer_decodes_in_the_tui () =
+  with_temp_dir (fun parent ->
+    let base = Filename.concat parent "ws" in
+    mkdir_p base;
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    commit_git ~cwd:base "first";
+    let linked = Filename.concat parent "linked-tree" in
+    catalog_git ~cwd:base [ "worktree"; "add"; "--detach"; linked ];
+    catalog_git ~cwd:base [ "worktree"; "lock"; linked ];
+    let json = W.For_testing.workspace_worktrees_json (worktrees_or_fail ~base ~path:"") in
+    match Masc.Tui_decode.decode_git_worktrees json with
+    | Error detail -> Alcotest.fail detail
+    | Ok decoded ->
+        (match decoded.gws_worktrees with
+         | [ main; second ] ->
+             check string "main name" "ws" main.gw_name;
+             check bool "main is first and on its branch" true
+               (main.gw_main && main.gw_state = Masc.Tui_decode.Git_worktree_branch "main");
+             check string "linked name" "linked-tree" second.gw_name;
+             check bool "a detached worktree decodes as detached and locked" true
+               (second.gw_state = Masc.Tui_decode.Git_worktree_detached
+                && second.gw_locked && not second.gw_main)
+         | other ->
+             Alcotest.fail
+               (Printf.sprintf "expected two worktrees, got %d" (List.length other))))
+
 let test_worktrees_of_a_checkout_without_commit () =
   with_temp_dir (fun base ->
     catalog_git ~cwd:base [ "init"; "-b"; "main" ];
@@ -1173,6 +1201,8 @@ let () =
     ; ( "worktree list"
       , [ test_case "lists names and never host paths" `Quick
             test_worktrees_list_names_and_never_paths
+        ; test_case "the answer decodes in the TUI" `Quick
+            test_worktrees_answer_decodes_in_the_tui
         ; test_case "a checkout without a commit still lists its main worktree" `Quick
             test_worktrees_of_a_checkout_without_commit
         ; test_case "stops at selected workspace and keeps nested prefix" `Quick

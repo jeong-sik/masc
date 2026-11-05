@@ -2439,6 +2439,32 @@ val decode_git_branches : Yojson.Safe.t -> (git_branches, string) result
     in the Git changes answer: null for none, [ahead]/[behind] both null for a
     gone upstream. An empty name or a negative time is an [Error _]. *)
 
+type git_worktree_state =
+  | Git_worktree_branch of string
+  | Git_worktree_detached
+  | Git_worktree_bare
+
+type git_worktree = {
+  gw_name : string;  (** The directory's last name; never a host path. *)
+  gw_main : bool;
+  gw_head : string option;  (** Full commit id. [None] only when bare. *)
+  gw_state : git_worktree_state;
+  gw_locked : bool;
+  gw_prunable : bool;  (** Git reports the checkout directory as gone. *)
+}
+
+type git_worktrees = {
+  gws_root : string;  (** Checkout root relative to the workspace. *)
+  gws_worktrees : git_worktree list;  (** Server order: main worktree first. *)
+  gws_truncated : bool;  (** The server says more worktrees exist. *)
+}
+
+val decode_git_worktrees : Yojson.Safe.t -> (git_worktrees, string) result
+(** Strict response of [/api/v1/git/worktrees]. [state] is ["branch"] with a
+    nonempty [branch], or ["detached"] or ["bare"] with a null one; anything
+    else is an [Error _]. A worktree that is not bare must have a [head]. An
+    empty name is an [Error _]. *)
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 (** Exact source bytes and their server revision are admitted together. *)
 val decode_workspace_file : Yojson.Safe.t -> (workspace_file_source, string) result

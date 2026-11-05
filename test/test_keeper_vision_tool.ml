@@ -2920,7 +2920,7 @@ let test_native_image_admission_continues_turn () =
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         let agent = Core.Agent.create ~media_store:test_media_store ~net:(Eio.Stdenv.net env)
             ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[native;analysis] () in
-        Fun.protect ~finally:(fun () -> Core.Agent.close agent) (fun () ->
+        (
           (match Core.Agent.run ~sw agent "inspect the screenshot" with
            | Ok _ -> ()
            | Error error -> failwith (Core.Error.to_string error));

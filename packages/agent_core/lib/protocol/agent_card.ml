@@ -491,7 +491,6 @@ type agent_info =
   ; config : Types.agent_config
   ; tool_schemas : Types.tool_schema list
   ; supported_providers : string list
-  ; mcp_clients_count : int
   ; has_elicitation : bool
   ; skills : skill_meta list
   ; supported_interfaces : supported_interfaces
@@ -507,7 +506,6 @@ let of_info (info : agent_info) : agent_card =
     @ (match info.config.enable_thinking with
        | Some true -> [ Thinking ]
        | Some false | None -> [])
-    @ optional_capability (info.mcp_clients_count > 0) MCP
     @ optional_capability info.has_elicitation Elicitation
   in
   let all_providers = List.sort_uniq String.compare info.supported_providers in

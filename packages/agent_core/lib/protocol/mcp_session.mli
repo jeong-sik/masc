@@ -1,8 +1,6 @@
-(** MCP session capture for the checkpoint record.
-
-    Captures the serializable parts of MCP connections (specs + tool schemas)
-    onto [Checkpoint.mcp_sessions]. Nothing reconnects from them: [Agent.resume]
-    takes its tools from the caller.
+(** JSON codec for the [Checkpoint.mcp_sessions] field.
+    [Agent_checkpoint.build_checkpoint] writes an empty list, and
+    [Agent.resume] takes its tools from the caller.
 
     @stability Internal
     @since 0.93.1 *)
@@ -23,9 +21,6 @@ type info =
   ; tool_schemas : tool_schema list
   ; transport_kind : transport_kind
   }
-
-val capture : Mcp.managed -> info
-val capture_all : Mcp.managed list -> info list
 
 (** {2 JSON serialization} *)
 

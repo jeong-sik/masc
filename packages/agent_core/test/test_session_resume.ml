@@ -525,8 +525,7 @@ let test_binding_exact_resume () = with_net (fun net ->
     (match (Agent.state agent).provider_binding with Some actual -> Binding_source.equal source actual | None -> false);
   let admitted=Agent.provider_config agent |> Option.get in
   Alcotest.(check bool) "admitted carrier is request-frozen" true (admitted.request_policy_snapshot<>None);
-  Alcotest.(check bool) "source checkpoint not mutated" true (before=Checkpoint.to_json cp);
-  Agent.close agent)
+  Alcotest.(check bool) "source checkpoint not mutated" true (before=Checkpoint.to_json cp))
 ;;
 let test_binding_provider_model_and_contract_mismatch () = with_net (fun net ->
   let original=binding_provider "https://same.example" in
@@ -562,8 +561,7 @@ let test_restore_reads_no_media () = with_net (fun net ->
     |> binding_resume_ok in
   Alcotest.(check bool) "the history is restored as saved" true
     ((Agent.state agent).messages == cp.messages);
-  Alcotest.(check int) "no media was read" 0 !reads;
-  Agent.close agent)
+  Alcotest.(check int) "no media was read" 0 !reads)
 ;;
 
 let test_binding_declared_rotation () = with_net (fun net ->
@@ -575,8 +573,7 @@ let test_binding_declared_rotation () = with_net (fun net ->
     Alcotest.(check bool) "declared text endpoint/path rotation admitted" true
       (plan.binding_disposition=Agent_checkpoint.Declared_endpoint_rotation);
     let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~options:(binding_options target) () |> binding_resume_ok in
-    Alcotest.(check bool) "original reasoning kept" true ((Agent.state agent).messages==cp.messages);
-    Agent.close agent)
+    Alcotest.(check bool) "original reasoning kept" true ((Agent.state agent).messages==cp.messages))
     [binding_provider "https://rotated.example";binding_provider ~path:"/other-chat" "https://original.example"])
 ;;
 let test_binding_signed_rotation_refused () = with_net (fun net ->
@@ -605,8 +602,7 @@ let test_binding_text_only_rebind () = with_net (fun net ->
   Alcotest.(check bool) "text-only source change has explicit disposition" true
     (plan.binding_disposition=Agent_checkpoint.Rebound_without_replay_loss);
   let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~options:(binding_options target) () |> binding_resume_ok in
-  Alcotest.(check bool) "text retained" true ((Agent.state agent).messages==cp.messages);
-  Agent.close agent)
+  Alcotest.(check bool) "text retained" true ((Agent.state agent).messages==cp.messages))
 ;;
 let test_binding_explicit_disable () = with_net (fun net ->
   let original=binding_provider "https://original.example" in
@@ -618,7 +614,6 @@ let test_binding_explicit_disable () = with_net (fun net ->
     (plan.binding_disposition=Agent_checkpoint.Replay_disabled_by_caller);
   let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config ~options:(binding_options target) () |> binding_resume_ok in
   Alcotest.(check bool) "caller exclusion does not destroy canonical reasoning" true ((Agent.state agent).messages==cp.messages);
-  Agent.close agent;
   let ignores_false=binding_provider ~kind:Binding_provider.Kimi "https://other.example" in
   Alcotest.(check int) "a wire ignoring false cannot claim caller exclusion" 0
     (expect_binding_incompatible(Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config
@@ -667,14 +662,12 @@ let test_binding_inline_carrier_producers () = with_net (fun net ->
      | Ok _ -> Alcotest.fail "inline carrier borrowed the session producer");
     let exact=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~options:(binding_options original) () |> binding_resume_ok in
     Alcotest.(check bool) "exact carrier retained" true ((Agent.state exact).messages==cp.messages);
-    Agent.close exact;
     let excluded=binding_provider ~replay:Llm_provider.Capabilities.Force_no_replay
       ~kind:Binding_provider.Kimi "https://other.example" in
     let config={ (Types.default_config ~model:excluded.model_id) with preserve_thinking=Some false} in
     let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:unbound ~config ~options:(binding_options excluded) () |> binding_resume_ok in
     Alcotest.(check bool) "explicit exclusion preserves canonical carrier" true
-      ((Agent.state agent).messages==unbound.messages);
-    Agent.close agent)
+      ((Agent.state agent).messages==unbound.messages))
     [[],"",[]; [],"<think></think>",[]; [Llm_provider.Types.Text "answer"],"answer",[0]])
 ;;
 let test_binding_non_dispatch_restore () = with_net (fun net ->
@@ -685,8 +678,7 @@ let test_binding_non_dispatch_restore () = with_net (fun net ->
     (plan.binding_disposition=Agent_checkpoint.Unconfigured_target && plan.provider_config=None);
   let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp () |> binding_resume_ok in
   Alcotest.(check bool) "unconfigured restore preserves input settlement state" true
-    (Agent.provider_config agent=None && (Agent.state agent).messages==cp.messages);
-  Agent.close agent)
+    (Agent.provider_config agent=None && (Agent.state agent).messages==cp.messages))
 ;;
 let test_binding_direct_old_or_invalid_checkpoint () = with_net (fun net ->
   let provider=binding_provider "https://same.example" in
@@ -736,8 +728,7 @@ let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net
         (if reenable then 0 else 1) !calls;
       Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp);
       Alcotest.(check bool) "native artifact remains canonical" true
-        (List.hd (Agent.state agent).messages=List.hd cp.messages);
-      Agent.close agent)
+        (List.hd (Agent.state agent).messages=List.hd cp.messages))
       [false,false;false,true;true,false;true,true]))
 ;;
 
@@ -800,7 +791,7 @@ let test_binding_explicit_source_change () = with_net (fun net ->
       let options = { (binding_options target) with transport=Some transport;
         reasoning_source_change=Binding_projection.Exclude_unselected } in
       let blocked = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config ~options () |> binding_resume_ok in
-      Fun.protect ~finally:(fun () -> Agent.close blocked) (fun () ->
+      (
         let api_strategy = if stream then Agent.Stream {on_event=ignore;on_telemetry=None}
           else Agent.Sync in
         (match Agent.Advanced.continue ~sw ~api_strategy
@@ -810,7 +801,7 @@ let test_binding_explicit_source_change () = with_net (fun net ->
          | Ok _ -> Alcotest.fail "continuation must retain mandatory replay admission");
         Alcotest.(check int) "active foreign replay never reaches transport" 0 !calls);
       let agent = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config ~options () |> binding_resume_ok in
-      Fun.protect ~finally:(fun () -> Agent.close agent) (fun () ->
+      (
         Alcotest.(check bool) "resume retains exact message spine" true
           ((Agent.state agent).messages == cp.messages);
         let outcome = if stream then Agent.run_stream ~sw ~on_event:ignore agent "next"
@@ -921,7 +912,7 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
           reasoning_source_change=Binding_projection.Exclude_unselected } in
         let agent=Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:cp ~config ~options
             ~tools:(if has_tools then [tool] else []) () |> binding_resume_ok in
-        Fun.protect ~finally:(fun () -> Agent.close agent) (fun () ->
+        (
           let outcome=if stream then Agent.run_stream ~sw ~on_event:ignore agent "new query"
             else Agent.run ~sw agent "new query" in
           (match blocked,outcome with
@@ -961,7 +952,7 @@ let test_binding_source_change_rejects_invalid_provenance () = with_net (fun net
     | 1, Error (Agent_checkpoint.Replay_rejected (Binding_projection.Invalid_reasoning_source {message_index=1;_}))
     | 2, Error (Agent_checkpoint.Replay_rejected (Binding_projection.Reasoning_source_on_non_assistant {message_index=1;_})) -> ()
     | _, Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error)
-    | _, Ok agent -> Agent.close agent;Alcotest.fail "source-change policy admitted invalid provenance"
+    | _, Ok _ -> Alcotest.fail "source-change policy admitted invalid provenance"
   ) invalid_messages)
 ;;
 

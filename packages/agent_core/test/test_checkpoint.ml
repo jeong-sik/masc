@@ -1002,7 +1002,7 @@ let test_provider_binding_persistence () =
   let state = ((Agent_checkpoint.build_resume ~checkpoint:restored ()) |> Result.get_ok).state in
   Alcotest.(check bool) "state restore retains producer" true (same_binding state.provider_binding);
   let captured = Agent_checkpoint.build_checkpoint ~pending_input:None ~state
-    ~tools:Tool_set.empty ~context:restored.context ~mcp_clients:[] () in
+    ~tools:Tool_set.empty ~context:restored.context () in
   Alcotest.(check bool) "capture retains producer" true (same_binding captured.provider_binding);
   let memo = Checkpoint.create_encoding_memo () in
   let pieces, _ = Checkpoint.to_pieces_with_encoding_memo memo cp in

@@ -80,8 +80,8 @@ status: reference
 
 **MCP**
 : Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
-  MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에
-  붙어 그쪽 도구를 가져온다.
+  MCP 서버로 내보내고(`masc_*` 도구), lane add-on worker 에는 MCP 클라이언트
+  (`Agent_core.Mcp`)로 붙는다.
 
 **MCP Sampling (MCP 샘플링)**
 : MCP 서버가 연결된 MCP 클라이언트에 언어 모델 생성을 요청하는 MCP 기능

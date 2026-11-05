@@ -170,8 +170,7 @@ let test_agent_default_options () =
   let opts = Agent.default_options in
   Alcotest.(check bool) "no provider config" true (opts.provider_config = None);
   Alcotest.(check bool) "no event_bus" true (opts.event_bus = None);
-  Alcotest.(check bool) "no skill_registry" true (opts.skill_registry = None);
-  Alcotest.(check int) "empty mcp" 0 (List.length opts.mcp_clients)
+  Alcotest.(check bool) "no skill_registry" true (opts.skill_registry = None)
 ;;
 
 (* ── Agent.clone ──────────────────────────────────────────── *)

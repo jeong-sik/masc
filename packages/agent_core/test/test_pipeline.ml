@@ -5188,7 +5188,7 @@ let test_text_response_persists_actual_provider_binding () =
     Alcotest.(check bool) "text-only state records actual collected source" true (same agent.state.provider_binding);
     let checkpoint = Agent_checkpoint.build_checkpoint ~pending_input:agent.pending_input
       ~state:agent.state ~tools:agent.tools ~context:agent.context
-      ~mcp_clients:agent.options.mcp_clients () in
+      () in
     let restored = Checkpoint.of_json (Checkpoint.to_json checkpoint) |> Result.get_ok in
     Alcotest.(check bool) "checkpoint retains actual source" true (same restored.provider_binding);
     let clone = Internal_agent.clone agent in

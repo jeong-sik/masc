@@ -30,8 +30,6 @@ type t =
   | TurnHolderBookkeepingFailures
   | OperatorCompact
   | OperatorClear
-  | ToolEmissionRegistrySize
-  | ToolEmissionPushes
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection

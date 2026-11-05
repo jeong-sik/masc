@@ -3256,8 +3256,6 @@
 
 (include stanzas/test_keeper_memory_write_supersedes.inc)
 
-(include stanzas/test_keeper_tool_emission_hook.inc)
-
 (include stanzas/test_keeper_tool_matrix.inc)
 
 (include stanzas/test_keeper_task_outcomes.inc)

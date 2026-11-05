@@ -1,7 +1,7 @@
 (** Cleanup completion delivery.
 
-    Meta mutation, lane join, registry removal, and accumulator removal are
-    owned by [Keeper_shutdown_finalize]. The [Supervisor_cleaned] lifecycle
+    Meta mutation, lane join, and registry removal are owned by
+    [Keeper_shutdown_finalize]. The [Supervisor_cleaned] lifecycle
     event and hook are delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 

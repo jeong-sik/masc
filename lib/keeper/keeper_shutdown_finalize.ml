@@ -948,8 +948,6 @@ let complete_cleanup
            | Dormant_meta -> true
            | Registered_lane _ -> false
          in
-         if accumulator_dropped
-         then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
          let completion =
            match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
            | None -> Completion_not_requested

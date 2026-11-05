@@ -1200,18 +1200,31 @@ let retraction_plan_receipt_to_json receipt =
 
 let retraction_plan_receipt_of_json = function
   | `Assoc fields ->
+    let with_revision_links =
+      [ "plan_id"
+      ; "state"
+      ; "prior_revision"
+      ; "prior_snapshot_sha256"
+      ; "target_revision"
+      ; "target_snapshot_sha256"
+      ; "revision_links"
+      ; "dropped"
+      ]
+    in
+    let without_revision_links =
+      List.filter
+        (fun name -> not (String.equal name "revision_links"))
+        with_revision_links
+    in
     let* () =
-      exact_field_names_detail ~subject:"retraction plan receipt"
-        [ "plan_id"
-        ; "state"
-        ; "prior_revision"
-        ; "prior_snapshot_sha256"
-        ; "target_revision"
-        ; "target_snapshot_sha256"
-        ; "revision_links"
-        ; "dropped"
-        ]
-        fields
+      match exact_field_names_detail ~subject:"retraction plan receipt"
+              with_revision_links fields with
+      | Ok () -> Ok ()
+      | Error with_links_error ->
+        (match exact_field_names_detail ~subject:"retraction plan receipt"
+                 without_revision_links fields with
+         | Ok () -> Ok ()
+         | Error _ -> Error with_links_error)
     in
     (match
        ( List.assoc_opt "plan_id" fields
@@ -1229,13 +1242,17 @@ let retraction_plan_receipt_of_json = function
        , Some (`String prior_snapshot_sha256)
        , Some (`Int target_revision)
        , Some (`String target_snapshot_sha256)
-       , Some revision_links_json
+       , revision_links_json
        , Some (`List dropped_json) )
        when prior_revision > 0
             && target_revision = prior_revision + 1
             && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
             && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
-       let* revision_links = Journal_codec.revision_links_of_json revision_links_json in
+       let* revision_links =
+         match revision_links_json with
+         | Some json -> Journal_codec.revision_links_of_json json
+         | None -> Ok []
+       in
        let* plan_id =
          match plan_id_json with
          | `Null -> Ok None

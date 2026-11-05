@@ -5,8 +5,9 @@ val read_sessions :
   config:Workspace.config ->
   (string * Keeper_id.Trace_id.t) list ->
   (string * Keeper_skill_activation_ledger.t) list * string list
-(** Read cold sessions once and reuse their committed ledgers. The second
-    list keeps the original per-Keeper unavailable diagnostics. *)
+(** Read cold sessions once and reuse their committed ledgers. Failed cold
+    reads remain retryable. The second list keeps the original per-Keeper
+    unavailable diagnostics. *)
 
 val usage_for_reference : config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
   reference:Skill_reference.t -> Keeper_skill_activation_ledger.catalog_usage option

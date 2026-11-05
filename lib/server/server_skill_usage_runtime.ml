@@ -1,7 +1,6 @@
 type session_entry = {
   mutex : Mutex.t;
   mutable ledger : Keeper_skill_activation_ledger.t option;
-  mutable unavailable : string option;
   usage : (string, Keeper_skill_activation_ledger.catalog_usage option) Hashtbl.t;
 }
 
@@ -17,7 +16,7 @@ let entry ~config trace_id =
     match Hashtbl.find_opt sessions key with
     | Some entry -> entry
     | None ->
-        let entry = { mutex = Mutex.create (); ledger = None; unavailable = None;
+        let entry = { mutex = Mutex.create (); ledger = None;
           usage = Hashtbl.create 8 } in
         Hashtbl.add sessions key entry;
         entry)
@@ -25,10 +24,9 @@ let entry ~config trace_id =
 let read_session ~config (keeper_name, trace_id) =
   let entry = entry ~config trace_id in
   Stdlib.Mutex.protect entry.mutex (fun () ->
-    match entry.ledger, entry.unavailable with
-    | Some ledger, _ -> Some (keeper_name, ledger), []
-    | None, Some detail -> None, [detail]
-    | None, None ->
+    match entry.ledger with
+    | Some ledger -> Some (keeper_name, ledger), []
+    | None ->
         (match !ledger_loader ~config ~trace_id with
          | Ok ledger ->
              entry.ledger <- Some ledger;
@@ -36,7 +34,6 @@ let read_session ~config (keeper_name, trace_id) =
          | Error error ->
              let detail = keeper_name ^ ": "
                ^ Keeper_skill_activation_ledger.store_error_code error in
-             entry.unavailable <- Some detail;
              None, [detail]))
 
 let read_sessions ~config sessions_to_read =
@@ -64,7 +61,6 @@ let retain_committed ~config ~keeper_name:_ ~trace_id ledger =
   let entry = entry ~config trace_id in
   Stdlib.Mutex.protect entry.mutex (fun () ->
     entry.ledger <- Some ledger;
-    entry.unavailable <- None;
     Hashtbl.reset entry.usage)
 
 let install () =

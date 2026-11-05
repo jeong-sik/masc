@@ -1,76 +1,10 @@
 /* MASC Dashboard — CSS Animations (@keyframes) */
 
-/* ── Pixel avatar animations ──────────────────────────── */
-
-@keyframes avatar-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-
-@keyframes avatar-vibrate {
-  0% { transform: translateX(0); }
-  25% { transform: translateX(-1px); }
-  50% { transform: translateX(1px); }
-  75% { transform: translateX(-1px); }
-  100% { transform: translateX(0); }
-}
-
-@keyframes avatar-breathe {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.03); opacity: 0.85; }
-}
-
-@keyframes avatar-pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
-  50% { box-shadow: 0 0 8px 2px rgb(var(--info-glow) / .3); }
-}
-
-@keyframes avatar-particle {
-  0% { transform: translateY(0) scale(1); opacity: 1; }
-  100% { transform: translateY(-12px) scale(0); opacity: 0; }
-}
-
-/* ── Agent state animations ────────────────────────────── */
-
-@keyframes workingPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .15); }
-  50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .25); }
-}
-
-@keyframes warnBlink {
-  0%, 100% { border-color: rgb(var(--warn-glow) / .28); }
-  50% { border-color: rgb(var(--warn-glow) / .5); }
-}
-
-@keyframes blocker-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgb(var(--err-glow) / .4); }
-  50% { box-shadow: 0 0 0 3px rgb(var(--err-glow) / .5); }
-}
-
 /* ── Component keyframes (consolidated) ──────────────────── */
-
-@keyframes fadeSlide {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.75; }
-}
-
-@keyframes orchestraFlow {
-  to { stroke-dashoffset: -40; }
-}
-
-@keyframes orchestraPulse {
-  0%, 100% { transform: scale(1); opacity: 0.92; }
-  50% { transform: scale(1.06); opacity: 1; }
-}
-
-@keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .25); }
-  50% { box-shadow: 0 0 6px 1px rgb(var(--ok-glow) / .12); }
 }
 
 @keyframes activityFadeIn {
@@ -78,29 +12,9 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes keeper-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-@keyframes pulse-ring {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
 @keyframes pipeline-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(var(--info-glow) / 0); }
   50% { box-shadow: 0 0 4px 1px rgb(var(--info-glow) / .25); }
-}
-
-@keyframes pipeline-badge-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-@keyframes keeperPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgb(var(--ok-glow) / .4); }
-  50% { opacity: 0.8; box-shadow: 0 0 0 3px rgb(var(--ok-glow) / 0); }
 }
 
 @keyframes loadingPulse {
@@ -124,17 +38,11 @@
   28% { transform: scale(1); }
 }
 
-/* ── SPEC v0.4 atom 14/14 — Motion primitives ────────────────────────
-   Four named animations from design-system primitives.html "Motion"
-   section. The dashboard's existing keyframes (above) are scoped to
-   specific surfaces (avatar, keeper, pipeline); these `anim-*` names
-   are general-purpose tokens callers reach for via the `motion()`
-   helper in components/motion.ts.
-
-   reduced-motion: a11y.css line 77 already enforces
-   `* { animation-duration: 0s !important; }` under
-   prefers-reduced-motion: reduce — these atoms inherit that gate, so
-   no per-atom motion-safe wrapper is needed. */
+/* ── Motion primitives ───────────────────────────────────────────────
+   `animation:` declarations in kpi.css, primitives.css and
+   primitives-v2.css name these four. a11y.css sets animation-duration
+   to 0s under prefers-reduced-motion: reduce, so none of them needs
+   its own gate. */
 
 @keyframes anim-heartbeat {
   0%, 100% { transform: scale(1);   opacity: 1; }
@@ -155,4 +63,3 @@
   0%, 50%  { opacity: 1; }
   51%, 100% { opacity: 0; }
 }
-.anim-pulse-glow { animation: anim-pulse-glow 2.4s var(--ease-inout) infinite; }

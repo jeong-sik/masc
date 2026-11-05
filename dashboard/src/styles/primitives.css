@@ -302,22 +302,11 @@ body[data-grid="1"]::before {
 /* ════════ MOTION PRESETS ════════
    Opt-in animation classes — pair with motion role tokens. */
 @keyframes anim-fade-in     { from { opacity: 0; } to { opacity: 1; } }
-@keyframes anim-fade-out    { from { opacity: 1; } to { opacity: 0; } }
-@keyframes anim-slide-up    { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes anim-slide-down  { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes anim-slide-left  { from { opacity: 0; transform: translateX(8px); }  to { opacity: 1; transform: none; } }
-@keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-@keyframes anim-pop         { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
-@keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 @keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--brass-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--brass-glow) / .5); } }
-@keyframes anim-pulse-err   { 0%,100% { box-shadow: 0 0 0 rgb(var(--err-glow)   / 0); } 50% { box-shadow: 0 0 10px rgb(var(--err-glow)   / .55); } }
-@keyframes anim-pulse-warn  { 0%,100% { box-shadow: 0 0 0 rgb(var(--warn-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--warn-glow)  / .5); } }
 @keyframes anim-pulse-ok    { 0%,100% { box-shadow: 0 0 0 rgb(var(--ok-glow)    / 0); } 50% { box-shadow: 0 0 10px rgb(var(--ok-glow)    / .5); } }
-@keyframes anim-pulse-info  { 0%,100% { box-shadow: 0 0 0 rgb(var(--info-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--info-glow)  / .5); } }
-@keyframes anim-pulse-stalled { 0%,100% { box-shadow: 0 0 0 rgb(var(--stalled-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--stalled-glow) / .5); } }
 @keyframes anim-heartbeat   { 0%,100% { transform: scale(1); } 14%,42% { transform: scale(1.08); } 28% { transform: scale(1); } }
 @keyframes anim-shimmer     { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-@keyframes anim-spin        { to { transform: rotate(360deg); } }
 @keyframes anim-blink       { 0%,60% { opacity: 1; } 61%,100% { opacity: 0; } }
 
 .anim-fade-in     { animation: anim-fade-in     var(--motion-enter); }

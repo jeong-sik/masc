@@ -22,16 +22,10 @@ type t =
   | TurnRegressions
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
-  | ProviderCooldownRemainingSec
-  | ProviderBlockDurationSec
-  | TurnQueueDepth
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
-  | TurnHolderBookkeepingFailures
-  | OperatorCompact
   | OperatorClear
   | ToolUnderusedAllowedCount
-  | ToolUnderusedAllowed
   | PathRejection
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
@@ -66,8 +60,6 @@ type t =
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
-  | RunContextFailures
-  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -75,26 +67,17 @@ type t =
   | SessionCleanupFailures
   | ToolExecuteFailures
   | LifecycleDispatchRejections
-  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
-  | UnexpectedToolPartialTolerance
-  | ToolCallTotal
-  | ProfileConfigConflicts
   | Agent_coreTimeoutClassifications
-  | NoToolProvider
   | ProactiveOutcome
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | Agent_coreCancel
-  | ClaimAutoProvision
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | StaleStormPaused
   | CycleExceptions
-  | SnapshotReadFailures
   | SnapshotWriteFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -122,7 +105,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -144,18 +126,12 @@ type t =
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
   | StimulusConsumed
-  | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | Agent_coreRunTimeout
   | RuntimeSelected
   | ToolUseFailure
-  | ToolNotAllowed
   | ReceiptUnmappedDisposition
-  | ExecuteNetworkUpgrade
-  | ExecuteLocalExecution
   | ProactiveSkip
-  | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -167,18 +143,13 @@ type t =
   | MemoryOsExplicitFactWrite
   | MemorySearch
   | RuntimeRequestWireBytes
-  | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
   | VisionIngestEvictions
   | VisionIngestErrors
   | VisionDownscale
   | PromptSegmentBytes
-  | PromptTemplateRenderOutcome
-  | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
-  | KeeperToolCallRetryLoop
-  | ShellIrEffectTotal
   | RawTraceSinkDegraded
   | RawTraceRetentionDeleted
   | RawTraceRetentionSkipped

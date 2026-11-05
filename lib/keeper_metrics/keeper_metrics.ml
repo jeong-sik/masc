@@ -31,16 +31,10 @@ type t =
   | TurnRegressions
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
-  | ProviderCooldownRemainingSec
-  | ProviderBlockDurationSec
-  | TurnQueueDepth
   | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime
-  | TurnHolderBookkeepingFailures
-  | OperatorCompact
   | OperatorClear
   | ToolUnderusedAllowedCount
-  | ToolUnderusedAllowed
   | PathRejection
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
@@ -75,8 +69,6 @@ type t =
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
-  | RunContextFailures
-  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -84,26 +76,17 @@ type t =
   | SessionCleanupFailures
   | ToolExecuteFailures
   | LifecycleDispatchRejections
-  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
-  | UnexpectedToolPartialTolerance
-  | ToolCallTotal
-  | ProfileConfigConflicts
   | Agent_coreTimeoutClassifications
-  | NoToolProvider
   | ProactiveOutcome
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | Agent_coreCancel
-  | ClaimAutoProvision
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | StaleStormPaused
   | CycleExceptions
-  | SnapshotReadFailures
   | SnapshotWriteFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -131,7 +114,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -153,18 +135,12 @@ type t =
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
   | StimulusConsumed
-  | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | Agent_coreRunTimeout
   | RuntimeSelected
   | ToolUseFailure
-  | ToolNotAllowed
   | ReceiptUnmappedDisposition
-  | ExecuteNetworkUpgrade
-  | ExecuteLocalExecution
   | ProactiveSkip
-  | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -176,7 +152,6 @@ type t =
   | MemoryOsExplicitFactWrite
   | MemorySearch
   | RuntimeRequestWireBytes
-  | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
   | VisionIngestEvictions
@@ -184,11 +159,7 @@ type t =
   | VisionDownscale
   (* Instruction monitoring metrics *)
   | PromptSegmentBytes          (* histogram: bytes per prompt segment *)
-  | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
-  | ToolCallParamCompleteness   (* counter: tool calls with all required params vs missing *)
   | KeeperTurnInstructionHash   (* gauge: hash of system+user prompt for change detection *)
-  | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
-  | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
   | RawTraceRetentionDeleted   (* counter: unreachable raw-trace files deleted after TurnRecord commit *)
   | RawTraceRetentionSkipped   (* counter: retention skipped because the reachability root was uncertain *)
@@ -239,16 +210,10 @@ let to_string = function
   | TurnRegressions -> "masc_keeper_turn_regressions_total"
   | TurnLatencyBucket -> "masc_keeper_turn_latency_bucket_total"
   | TurnLatencyByModelBucket -> "masc_keeper_turn_latency_by_model_bucket_total"
-  | ProviderCooldownRemainingSec -> "masc_keeper_provider_cooldown_remaining_sec"
-  | ProviderBlockDurationSec -> "masc_keeper_provider_block_duration_sec"
-  | TurnQueueDepth -> "masc_keeper_turn_queue_depth"
   | SupervisorSweepStarts -> "masc_keeper_supervisor_sweep_starts_total"
   | SupervisorLastSweepUnixtime -> "masc_keeper_supervisor_last_sweep_unixtime"
-  | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
-  | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
-  | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
   | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
@@ -287,8 +252,6 @@ let to_string = function
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
   | AgentToolDispatchRuntimeFailures -> "masc_keeper_tool_dispatch_runtime_failures_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
-  | RunContextFailures -> "masc_keeper_run_context_failures_total"
-  | SearchFilesFailures -> "masc_keeper_search_files_failures_total"
   | TagDispatchFailures -> "masc_keeper_tag_dispatch_failures_total"
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
@@ -296,27 +259,17 @@ let to_string = function
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
-  | LifecycleTransactions -> "masc_keeper_lifecycle_transactions_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
-  | UnexpectedToolPartialTolerance ->
-    "masc_keeper_unexpected_tool_partial_tolerance_total"
-  | ToolCallTotal -> "masc_keeper_tool_call_total"
-  | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
   | Agent_coreTimeoutClassifications -> "masc_keeper_agent_core_timeout_classifications_total"
-  | NoToolProvider -> "masc_keeper_no_tool_provider_total"
   | ProactiveOutcome -> "masc_keeper_proactive_outcome_total"
   | TaskLoadFailures -> "masc_keeper_task_load_failures_total"
   | ToolSelectionFailures -> "masc_keeper_tool_selection_failures_total"
   | ReconcileFailures -> "masc_keeper_reconcile_failures_total"
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
-  | Agent_coreCancel -> "masc_keeper_agent_core_cancel_total"
-  | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
-  | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
-  | SnapshotReadFailures -> "masc_keeper_snapshot_read_failures_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
@@ -344,7 +297,6 @@ let to_string = function
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
   | MemoryLaneLatestPending -> "masc_keeper_memory_lane_latest_pending"
-  | MemoryLaneExecutionSlotBusy -> "masc_keeper_memory_lane_execution_slot_busy_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
   | MetricsSseFailures -> "masc_keeper_metrics_sse_failures_total"
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
@@ -368,18 +320,12 @@ let to_string = function
     "masc_keeper_registry_orphan_threshold_breached_total"
   | RegistryInvalidEntry -> "masc_keeper_registry_invalid_entry_total"
   | StimulusConsumed -> "masc_keeper_stimulus_consumed_total"
-  | UnsupportedStimulus -> "masc_keeper_unsupported_stimulus_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
-  | Agent_coreRunTimeout -> "masc_keeper_agent_core_run_timeout_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
-  | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
-  | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
-  | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
-  | NoProgressStreak -> "masc_keeper_no_progress_streak"
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
@@ -395,19 +341,13 @@ let to_string = function
       "masc_keeper_memory_os_explicit_fact_write_total"
   | MemorySearch -> "masc_keeper_memory_search_total"
   | RuntimeRequestWireBytes -> "masc_keeper_runtime_request_wire_bytes"
-  | RuntimeHttpProbeJsonParseFailures ->
-      "masc_runtime_http_probe_json_parse_failures_total"
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"
   | VisionCandidateAttempts -> "masc_keeper_vision_candidate_attempts_total"
   | VisionIngestEvictions -> "masc_keeper_vision_ingest_evictions_total"
   | VisionIngestErrors -> "masc_keeper_vision_ingest_errors_total"
   | VisionDownscale -> "masc_keeper_vision_downscale_total"
   | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
-  | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
-  | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
   | KeeperTurnInstructionHash -> "masc_keeper_turn_instruction_hash"
-  | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
-  | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
   | RawTraceRetentionDeleted -> "masc_keeper_raw_trace_retention_deleted_total"
   | RawTraceRetentionSkipped -> "masc_keeper_raw_trace_retention_skipped_total"
@@ -442,10 +382,8 @@ let collection = function
   | TotalCostUsd | TurnScheduled | TurnCompleted | FailureRoute | IdleSeconds
   | InFlightElapsedSeconds | SinceLastProgressSeconds | StreamProjectionEventCutoff
   | MetricEmitDropped | ContextMaxObserved | TurnStarts | TurnReattempts | TurnRegressions
-  | TurnLatencyBucket | TurnLatencyByModelBucket | ProviderCooldownRemainingSec
-  | ProviderBlockDurationSec | TurnQueueDepth | SupervisorSweepStarts | SupervisorLastSweepUnixtime
-  | TurnHolderBookkeepingFailures | OperatorCompact | OperatorClear
-  | ToolUnderusedAllowedCount | ToolUnderusedAllowed | PathRejection
+  | TurnLatencyBucket | TurnLatencyByModelBucket | SupervisorSweepStarts
+  | SupervisorLastSweepUnixtime | OperatorClear | ToolUnderusedAllowedCount | PathRejection
   | PathResolverIdentityMismatch | KeeperMetaOverlayDrift | HeartbeatSuccesses | HeartbeatFailures
   | CleanupTrackingFailures | DispatchEventFailures | DirectiveFailures | ToolCallDuration
   | ToolCallDurationBucket | WriteMetaFailures | MetaReadFailures | ApprovalQueueFailures
@@ -454,15 +392,12 @@ let collection = function
   | CrashPersistenceFailures | KeepaliveSignalFailures | BoardSignalRoutedTotal
   | BoardSignalCursorDeferredTotal | BoardSignalDeliveryTotal | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal | MetaJsonFailures | ToolsAgent_coreFailures
-  | TurnUpUpdateFailures | AgentToolDispatchRuntimeFailures | PromptFailures | RunContextFailures
-  | SearchFilesFailures | TagDispatchFailures | TraceEmitFailures | TransitionAuditFailures
-  | ExecutionReceiptFailures | SessionCleanupFailures | ToolExecuteFailures
-  | LifecycleDispatchRejections | LifecycleTransactions | RecordingErrorDedup
-  | PausedStatePersistErrors | UnexpectedToolPartialTolerance | ToolCallTotal
-  | ProfileConfigConflicts | Agent_coreTimeoutClassifications | NoToolProvider | ProactiveOutcome
+  | TurnUpUpdateFailures | AgentToolDispatchRuntimeFailures | PromptFailures | TagDispatchFailures
+  | TraceEmitFailures | TransitionAuditFailures | ExecutionReceiptFailures | SessionCleanupFailures
+  | ToolExecuteFailures | LifecycleDispatchRejections | RecordingErrorDedup
+  | PausedStatePersistErrors | Agent_coreTimeoutClassifications | ProactiveOutcome
   | TaskLoadFailures | ToolSelectionFailures | ReconcileFailures | DecisionAuditFlushFailures
-  | Agent_coreCancel | ClaimAutoProvision | WorkspaceInitFailures | PresenceSyncFailures
-  | StaleStormPaused | CycleExceptions | SnapshotReadFailures | SnapshotWriteFailures
+  | WorkspaceInitFailures | PresenceSyncFailures | CycleExceptions | SnapshotWriteFailures
   | SseBroadcastFailures | WorkspaceHeartbeatFailures | TurnMetricsSnapshotFailures
   | Agent_coreExecutionErrors | MemoryOsLibrarianFailures | MemoryActivityEmitFailures
   | SupervisorSweepFailures | TomlReconcileSweepFailures | ToolUsageFlushFailures
@@ -470,23 +405,19 @@ let collection = function
   | ThinkingPersistFailures | CheckpointFailures | DecisionAuditRingOverflows | HitlSummaryOutcomes
   | Agent_coreEnvKeyRejections | MemoryLaneUnitFailures | MemoryLaneSubmitted | MemoryLaneRanInline
   | MemoryLaneDropped | MemoryLaneCoalesced | MemoryLanePending | MemoryLaneInFlight
-  | MemoryLaneLatestPending | MemoryLaneExecutionSlotBusy | WriteMetaCycleFailures
-  | MetricsSseFailures | ChatStoreFailures | ChatJournalAuditMismatches | ChatTransportFailures
-  | PersonNoteStoreFailures | KeeperMaterializationFailures | ObservationQueryFailures
-  | Agent_coreOnStop | InvariantViolations | FsmEdgeTransitions | TurnFsmTransitions
-  | TurnPhaseDuration | LifecycleTransitions | LifecycleCallbackFailures | EventBusDrain
-  | SupervisorCleanupFailures | RegistryUpdateDropped | RegistryOrphanThresholdBreached
-  | RegistryInvalidEntry | StimulusConsumed | UnsupportedStimulus | RestartAttempts
-  | RestartOutcomes | Agent_coreRunTimeout | RuntimeSelected | ToolUseFailure | ToolNotAllowed
-  | ReceiptUnmappedDisposition | ExecuteNetworkUpgrade | ExecuteLocalExecution
-  | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
+  | MemoryLaneLatestPending | WriteMetaCycleFailures | MetricsSseFailures | ChatStoreFailures
+  | ChatJournalAuditMismatches | ChatTransportFailures | PersonNoteStoreFailures
+  | KeeperMaterializationFailures | ObservationQueryFailures | Agent_coreOnStop
+  | InvariantViolations | FsmEdgeTransitions | TurnFsmTransitions | TurnPhaseDuration
+  | LifecycleTransitions | LifecycleCallbackFailures | EventBusDrain | SupervisorCleanupFailures
+  | RegistryUpdateDropped | RegistryOrphanThresholdBreached | RegistryInvalidEntry
+  | StimulusConsumed | RestartAttempts | RestartOutcomes | RuntimeSelected | ToolUseFailure
+  | ReceiptUnmappedDisposition | ProactiveSkip | UsageTrust | UsageAnomalyReason
   | ConfigEnvParseFailures | PostTurnWireinFailures | TurnCleanupFailures
   | MemoryRecallHistorySwallowedExceptions | MemoryRecallReadErrors | MemoryOsRecallUnavailable
-  | MemoryOsExplicitFactWrite | MemorySearch | RuntimeRequestWireBytes
-  | RuntimeHttpProbeJsonParseFailures | VisionAnalyze | VisionCandidateAttempts
-  | VisionIngestEvictions | VisionIngestErrors | VisionDownscale | PromptSegmentBytes
-  | PromptTemplateRenderOutcome | ToolCallParamCompleteness | KeeperTurnInstructionHash
-  | KeeperToolCallRetryLoop | ShellIrEffectTotal | RawTraceSinkDegraded | RawTraceRetentionDeleted
+  | MemoryOsExplicitFactWrite | MemorySearch | RuntimeRequestWireBytes | VisionAnalyze
+  | VisionCandidateAttempts | VisionIngestEvictions | VisionIngestErrors | VisionDownscale
+  | PromptSegmentBytes | KeeperTurnInstructionHash | RawTraceSinkDegraded | RawTraceRetentionDeleted
   | RawTraceRetentionSkipped | RawTraceRetentionUnlinkFailed | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures | WireCaptureRecordSkipped | TurnBoundaryFailures
   | HistoryFragmentFailures | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes

@@ -2361,7 +2361,7 @@ let test_idle_duration_never_stops_keeper () =
 
 (* A crashed lane whose failure is not a stale observation still follows the
    ordinary restart path regardless of prior restart count. *)
-let test_non_storm_crashed_restarts_normally () =
+let test_ordinary_crash_restarts_normally () =
   with_restart_launch_noop @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2376,7 +2376,7 @@ let test_non_storm_crashed_restarts_normally () =
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "non-storm-keeper" in
+      let name = "ordinary-crash-keeper" in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.replace_snapshot config meta with
@@ -2388,9 +2388,6 @@ let test_non_storm_crashed_restarts_normally () =
         ~restart_count:50 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 3));
-      let baseline_pause =
-        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
-      in
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -2405,15 +2402,10 @@ let test_non_storm_crashed_restarts_normally () =
         }
       in
       sweep_and_recover_no_materialize ctx;
-      let after_pause =
-        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
-      in
-      check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
-        baseline_pause after_pause;
       (* meta.paused stays false. *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
-           check bool "meta.paused stays false after non-storm crash"
+           check bool "meta.paused stays false after an ordinary crash"
              false m.paused
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -3090,7 +3082,7 @@ let () =
       test_case "restart intake epoch survives shutdown overlap" `Quick
         test_restart_intake_epoch_survives_shutdown_overlap;
     ];
-    "stale_storm_phase2", [
+    "supervisor_lifecycle", [
       test_case "supervisor cleanup suppresses cancellation and classifies failures" `Quick
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "supervised stop joins Board worker" `Quick
@@ -3109,7 +3101,7 @@ let () =
         test_sweep_waits_for_lane_join_before_unregister;
       test_case "idle duration never stops keeper" `Quick
         test_idle_duration_never_stops_keeper;
-      test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
-        test_non_storm_crashed_restarts_normally;
+      test_case "ordinary Crashed lane restarts regardless of restart count" `Quick
+        test_ordinary_crash_restarts_normally;
     ];
   ]

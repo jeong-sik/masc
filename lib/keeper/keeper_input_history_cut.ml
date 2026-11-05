@@ -15,10 +15,6 @@ let cut_checkpoint (t:t) = Ok (private_copy t.cut)
    the seed a decode, and the codec keeps only what it writes. *)
 let same_message x y =
   Yojson.Safe.equal (Agent_core.Checkpoint.message_to_json x) (Agent_core.Checkpoint.message_to_json y)
-let rec prefix expected actual = match expected,actual with
-  | [],_ -> true
-  | x::xs,y::ys -> same_message x y && prefix xs ys
-  | _::_,[] -> false
 let contains_tool_result (message:Agent_core.Types.message) = List.exists (function
   | Agent_core.Types.ToolResult _ -> true
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
@@ -57,7 +53,7 @@ let bind_seed (t:t) ~seed =
   let seed=Checkpoint.exact_snapshot_reference seed in
   let* ()=match actual.pending_input with
     | None when Keeper_id.Trace_id.equal seed.trace_id t.cut_ref.trace_id
-        && prefix cut.messages actual.messages -> Ok ()
+        && List_util.is_prefix ~equal:same_message cut.messages actual.messages -> Ok ()
     | Some _ | None -> Error "next native seed does not preserve the exact input history cut" in
   Ok {source=t.source_ref;cut=t.cut_ref;seed}
 let checkpoint binding = binding.cut

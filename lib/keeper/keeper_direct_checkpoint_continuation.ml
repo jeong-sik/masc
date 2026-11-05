@@ -40,11 +40,6 @@ let validate_scope ~operation_id (checkpoint : Agent_core.Checkpoint.t) =
       (Keeper_execution_scope_id.direct_operation operation_id) -> Ok frame
   | Some _ | None -> Error "checkpoint does not own the original direct operation"
 
-let rec original_prefix original current = match original, current with
-  | [], _ -> true
-  | first :: rest, current :: tail when first = current -> original_prefix rest tail
-  | _ :: _, [] | _ :: _, _ :: _ -> false
-
 let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
   let* pending = Owner.direct_checkpoint ~base_path ~keeper_name ~operation_id |> owner in
   match pending with
@@ -63,7 +58,9 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
     let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "current canonical checkpoint is unavailable") in
     let checkpoint = Checkpoint.exact_snapshot_checkpoint current in
-    let* () = if original_prefix original_checkpoint.messages checkpoint.messages then Ok ()
+    let* () =
+      if List_util.is_prefix ~equal:( = ) original_checkpoint.messages checkpoint.messages
+      then Ok ()
       else Error "current history does not retain the original input and completed effects" in
     let* target = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
     let* frame = Snapshot.restore_scope ~scope:(Keeper_execution_scope_id.direct_operation operation_id)

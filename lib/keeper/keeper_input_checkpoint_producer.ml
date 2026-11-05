@@ -34,11 +34,6 @@ let same_pending left right = Option.equal
       (Agent_core.Agent_input_request.pending_to_json left)
       (Agent_core.Agent_input_request.pending_to_json right)) left right
 
-let rec preserves_messages prefix messages = match prefix, messages with
-  | [], _ -> true
-  | expected::prefix, actual::messages -> expected = actual && preserves_messages prefix messages
-  | _::_, [] -> false
-
 let prepare ~base_path ~keeper_name ~session_dir ~trace_id ~source =
   let* writer = Registry.begin_input_checkpoint ~base_path ~keeper_name ~trace_id
     |> Result.map_error (fun error -> Owner_failed error) in
@@ -55,7 +50,7 @@ let prepare ~base_path ~keeper_name ~session_dir ~trace_id ~source =
            let observed = Store.exact_snapshot_checkpoint snapshot in
            if source.Agent_core.Checkpoint.session_id = Keeper_id.Trace_id.to_string trace_id
                && same_pending observed.pending_input source.pending_input
-               && preserves_messages observed.messages source.messages then Ok false
+               && List_util.is_prefix ~equal:( = ) observed.messages source.messages then Ok false
            else Error Source_changed)
       | Store.Retained_superseded { pending_input = Some _; _ } ->
         (match source with

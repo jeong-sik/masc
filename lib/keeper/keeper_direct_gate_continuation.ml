@@ -47,11 +47,6 @@ let bind ~base_path ~keeper_name approval_id =
     if request.keeper_name <> keeper_name then Error "Gate request belongs to another Keeper"
     else Semantic.gate_obligation ~approval_id ~tool_name:request.tool_name ~input_hash:request.input_hash
 
-let rec original_prefix original current = match original, current with
-  | [], _ -> true
-  | first :: rest, current :: tail when first = current -> original_prefix rest tail
-  | _ :: _, [] | _ :: _, _ :: _ -> false
-
 (* A direct operation's session directory is its trace directory directly under
    the session root; the admitted directory must be that one. *)
 let check_session_dir ~config ~session_dir ~session_id =
@@ -79,7 +74,7 @@ let current_with_original ~config ~operation_id ~session_dir ~session_id (waitin
     |> Result.map_error (fun _ -> "current Keeper checkpoint is unavailable") in
   let original_checkpoint = Checkpoint.exact_snapshot_checkpoint original in
   let current_checkpoint = Checkpoint.exact_snapshot_checkpoint current in
-  if not (original_prefix original_checkpoint.messages current_checkpoint.messages) then
+  if not (List_util.is_prefix ~equal:( = ) original_checkpoint.messages current_checkpoint.messages) then
     Error "current history no longer retains the exact original Gate input; reconciliation is required"
   else
     let* source = Keeper_repetition_scope.load original_checkpoint.context |> Result.map_error Snapshot.error_to_string in

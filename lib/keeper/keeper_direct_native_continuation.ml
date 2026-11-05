@@ -61,12 +61,6 @@ let config (prepared : prepared) = prepared.config
 let prepared_checkpoint (prepared : prepared) = prepared.checkpoint
 let prepared_input (prepared : prepared) = prepared.input
 
-let rec is_prefix prefix messages =
-  match prefix, messages with
-  | [], _ -> true
-  | expected :: prefix, actual :: messages -> expected = actual && is_prefix prefix messages
-  | _ :: _, [] -> false
-
 let validate_scope binding (checkpoint : Agent_core.Checkpoint.t) =
   let* frame = Keeper_repetition_context.load checkpoint.context
     |> Result.map_error Keeper_repetition_snapshot.error_to_string in
@@ -95,7 +89,7 @@ let restore_checkpoints binding (call : Native.t) =
   let* seed = load_checkpoint binding call.seed_checkpoint in
   let* checkpoint = load_checkpoint binding call.checkpoint in
   let* () = if seed.agent_name = checkpoint.agent_name && seed.model = checkpoint.model
-      && is_prefix seed.messages checkpoint.messages then Ok ()
+      && List_util.is_prefix ~equal:( = ) seed.messages checkpoint.messages then Ok ()
     else Error "native checkpoint no longer contains its exact admitted seed" in
   let* system_prompt = match seed.system_prompt with
     | Some prompt -> Ok prompt
@@ -373,7 +367,9 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
               | None -> Ok settled.messages
               | Some cut -> Keeper_input_history_cut.cut_checkpoint cut.proof
                   |> Result.map (fun checkpoint -> checkpoint.Agent_core.Checkpoint.messages) in
-            if not terminal.has_tool_attempts || is_prefix expected seed.messages then Ok ()
+            if not terminal.has_tool_attempts
+               || List_util.is_prefix ~equal:( = ) expected seed.messages
+            then Ok ()
             else Error "next native call does not retain the settled call's exact history"
           | Native.No_native_call -> Ok ()
           | Native.Active _

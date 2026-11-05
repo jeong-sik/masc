@@ -258,6 +258,48 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
       check string "watch evidence wording" "Namespace health is bad" evidence
   | _ -> fail "expected watch evidence list"
 
+(* #32971: the briefing's [summary] object carries workspace_health and
+   project only. Two open incidents and one action read as zero when the
+   sections looked for their counts there. *)
+let test_briefing_counts_come_from_the_lists_beside_the_summary () =
+  let briefing_json =
+    `Assoc
+      [
+        ("summary", `Assoc [ ("workspace_health", `String "ok"); ("project", `String "p") ]);
+        ( "incidents",
+          `List
+            [ `Assoc [ ("summary", `String "first") ]; `Assoc [ ("summary", `String "second") ] ] );
+        ("recommended_actions", `List [ `Assoc [] ]);
+        ( "command_focus",
+          `Assoc [ ("top_attention", `Assoc [ ("summary", `String "first") ]) ] );
+      ]
+  in
+  match Briefing.briefing_summary_of_briefing briefing_json with
+  | Error detail -> fail detail
+  | Ok briefing_summary_json ->
+    check int "incidents" 2
+      (match get_field "incident_count" briefing_summary_json with
+       | `Int value -> value
+       | _ -> fail "incident_count is not an int");
+    check int "recommended actions" 1
+      (match get_field "recommended_action_count" briefing_summary_json with
+       | `Int value -> value
+       | _ -> fail "recommended_action_count is not an int");
+    check_string_field briefing_summary_json "top_attention_summary" "first";
+    let _watch_summary, sections =
+      Briefing.build_briefing_sections ~briefing_summary_json ~agents:[]
+        ~recent_messages:[] ~metadata_gaps:[]
+    in
+    check_string_field (find_section sections "watch") "status" "watch"
+
+let test_briefing_without_an_incident_list_fails_the_render () =
+  match
+    Briefing.briefing_summary_of_briefing
+      (`Assoc [ ("summary", `Assoc []); ("recommended_actions", `List []) ])
+  with
+  | Ok _ -> fail "a briefing with no incidents list rendered"
+  | Error _ -> ()
+
 let () =
   run "Dashboard Mission Briefing"
     [
@@ -279,6 +321,10 @@ let () =
         [
           test_case "inactive agents ignored for focus gaps" `Quick
             test_collect_metadata_gaps_ignores_inactive_agents;
+          test_case "counts come from the lists beside the summary" `Quick
+            test_briefing_counts_come_from_the_lists_beside_the_summary;
+          test_case "a briefing without an incident list fails the render" `Quick
+            test_briefing_without_an_incident_list_fails_the_render;
           test_case "watch evidence uses namespace wording" `Quick
             test_build_briefing_sections_watch_evidence_uses_namespace_wording;
         ] );

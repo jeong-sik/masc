@@ -1712,7 +1712,6 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
               ; meta_removed = false
               ; session_removed = false
               ; registry_unregistered = false
-              ; accumulator_dropped = false
               ; completion =
                   Shutdown_types.Completion_pending
                     Shutdown_types.Supervisor_cleaned

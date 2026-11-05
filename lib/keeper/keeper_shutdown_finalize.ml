@@ -940,14 +940,6 @@ let complete_cleanup
            | Remove_meta -> true
            | Retain_operator_pause -> false
          in
-         let accumulator_dropped =
-           meta_removed
-           || registry_unregistered
-           ||
-           match operation.lane_ownership with
-           | Dormant_meta -> true
-           | Registered_lane _ -> false
-         in
          let completion =
            match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
            | None -> Completion_not_requested
@@ -958,7 +950,6 @@ let complete_cleanup
            ; meta_removed
            ; session_removed = operation.cleanup_intent.remove_session
            ; registry_unregistered
-           ; accumulator_dropped
            ; completion
            }
          in

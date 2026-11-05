@@ -171,14 +171,14 @@ let numbered_slot_lines ~max_cells style ~label values =
            ~max_cells:(max 1 (max_cells - Message_layout.display_width under_label))
            (List.map Terminal_text.single_line values))
 
-let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
-    ~right_title ~right_rows ~actions =
+let lane_overview_summary_block ~titled ~cols ~label ~purpose ~left_title
+    ~left_rows ~right_title ~right_rows ~actions =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   wrap_indented_line ~max_cells Ansi.bold
     (Printf.sprintf "%s · %s"
        (Terminal_text.single_line label)
        (Terminal_text.single_line purpose))
-  @ split_summary_columns ~cols
+  @ split_summary_columns ~titled ~cols
       ~left_title ~left_rows ~right_title ~right_rows
   @ List.map
       (fun line -> Theme.info (), "  " ^ line)
@@ -214,7 +214,8 @@ let exact_lane_overview_actions =
    1. Why is it in this state right now? (상태)
    2. How well is it performing? (성적 · 속도)
    3. Which models run in what order? (1차 HTTP · 2차 CLI 후보 순서) *)
-let standalone_lane_summary_lines ~now ~cols (lane : Tui_decode.standalone_lane) =
+let standalone_lane_summary_lines ~titled ~now ~cols
+    (lane : Tui_decode.standalone_lane) =
   let state_style = standalone_lane_state_style lane in
   let runs_style =
     if lane.sl_failed_count > 0 then Theme.warn ()
@@ -245,7 +246,7 @@ let standalone_lane_summary_lines ~now ~cols (lane : Tui_decode.standalone_lane)
       ~cli_slots:lane.sl_cli_slots
       ~dropped_slots:lane.sl_dropped_slots ()
   in
-  lane_overview_summary_block ~cols ~label:lane.sl_label
+  lane_overview_summary_block ~titled ~cols ~label:lane.sl_label
     ~purpose:(standalone_lane_purpose lane)
     ~left_title:"현재 상태 · 실행 성적" ~left_rows
     ~right_title:"모델 호출 순서 (Failover)" ~right_rows
@@ -270,7 +271,7 @@ let toggleable_lane_summary_columns ~state_line ~off_note ~right_title
     ]
   , [ open_hint; hint "Space" "켜기/끄기"; hint "d" "전체 상세" ] )
 
-let inventory_row_summary_lines ~cols ~standing ~selected_output
+let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
   let open Masc.Tui_decode_lane_inventory in
   let standing_style =
@@ -390,8 +391,9 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
           ]
         else [ hint "Enter" "열기"; hint "d" "전체 상세" ] )
   in
-  lane_overview_summary_block ~cols ~label:row.label ~purpose:row.purpose
-    ~left_title ~left_rows ~right_title ~right_rows ~actions
+  lane_overview_summary_block ~titled ~cols ~label:row.label
+    ~purpose:row.purpose ~left_title ~left_rows ~right_title ~right_rows
+    ~actions
 
 let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
   let without = lane.sl_runs_without_slot in
@@ -899,14 +901,25 @@ let render_lanes_overview (state : state) =
        in
        if available > 0 then begin
          box_divider buf cols;
-         let detail = match selected_standalone_lane state with
+         let summary ~titled =
+           match selected_standalone_lane state with
            | Some lane ->
-               standalone_lane_summary_lines ~now:(Unix.gettimeofday ()) ~cols lane
+               standalone_lane_summary_lines ~titled
+                 ~now:(Unix.gettimeofday ()) ~cols lane
            | None ->
-               inventory_row_summary_lines ~cols
+               inventory_row_summary_lines ~titled ~cols
                  ~standing:(standing inventory_row)
                  ~selected_output:(Masc_tui_types.lanes_exact_output_name state inventory_row)
                  inventory_row
+         in
+         (* Titles name the sections of a pane with room for them. Short of
+            rows, every row already carries its own label (상태:, 1차 HTTP:),
+            so the titles go first and the rows they would have left under a
+            clip stay. *)
+         let detail =
+           let titled = summary ~titled:true in
+           if List.length titled <= available then titled
+           else summary ~titled:false
          in
          let shown = take_rows available [] detail in
          let shown =
@@ -1559,7 +1572,7 @@ let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
     ]
     @ contract_rows
   in
-  split_summary_columns ~cols
+  split_summary_columns ~titled:true ~cols
     ~left_title:"판정 · 실행 상태" ~left_rows
     ~right_title:"응답 모델 · 호출 주체" ~right_rows
   @ gate_judgment

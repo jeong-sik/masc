@@ -6014,7 +6014,8 @@ let wrap_summary_column_items ~width items =
            :: List.map (fun line -> style, "  " ^ line) rest)
     items
 
-let split_summary_columns ~cols ~left_title ~left_rows ~right_title ~right_rows =
+let split_summary_columns ~titled ~cols ~left_title ~left_rows ~right_title
+    ~right_rows =
   let inner = max 1 (framed_inner_width cols) in
   let heading_style = Theme.recede () ^ Ansi.bold in
   if cols >= keeper_split_threshold_cols then begin
@@ -6025,14 +6026,12 @@ let split_summary_columns ~cols ~left_title ~left_rows ~right_title ~right_rows 
     let body_width = max 2 (inner - indent_width) in
     let left_width = max 1 ((body_width - divider_width) / 2) in
     let right_width = max 1 (body_width - left_width - divider_width) in
-    let left_lines =
-      (heading_style, left_title)
-      :: wrap_summary_column_items ~width:left_width left_rows
+    let column title rows ~width =
+      let items = wrap_summary_column_items ~width rows in
+      if titled then (heading_style, title) :: items else items
     in
-    let right_lines =
-      (heading_style, right_title)
-      :: wrap_summary_column_items ~width:right_width right_rows
-    in
+    let left_lines = column left_title left_rows ~width:left_width in
+    let right_lines = column right_title right_rows ~width:right_width in
     let total = max (List.length left_lines) (List.length right_lines) in
     let cell width (style, text) =
       fit_width (style ^ text ^ Ansi.reset) width
@@ -6051,15 +6050,18 @@ let split_summary_columns ~cols ~left_title ~left_rows ~right_title ~right_rows 
         ^ cell right_width right ))
   end
   else begin
-    let width = max 1 (inner - 4) in
-    let indent_rows rows =
-      wrap_summary_column_items ~width rows
-      |> List.map (fun (style, line) -> style, "    " ^ line)
+    (* Under a title the rows nest two cells in; without one they start where
+       the title would. *)
+    let section title rows =
+      let indent = if titled then "    " else "  " in
+      let width = max 1 (inner - String.length indent) in
+      let items =
+        wrap_summary_column_items ~width rows
+        |> List.map (fun (style, line) -> style, indent ^ line)
+      in
+      if titled then (heading_style, "  " ^ title) :: items else items
     in
-    [ heading_style, "  " ^ left_title ]
-    @ indent_rows left_rows
-    @ [ heading_style, "  " ^ right_title ]
-    @ indent_rows right_rows
+    section left_title left_rows @ section right_title right_rows
   end
 
 let runtime_substrate_tab_strip (state : state) ~cols ~before ~after

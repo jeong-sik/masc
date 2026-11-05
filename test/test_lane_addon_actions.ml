@@ -848,7 +848,7 @@ let test_private_addon_events_are_scoped_to_their_readers () =
           ; "instance_id", `String "private-instance"
           ; "visibility", visibility ]
       in
-      let shared_external = ref [] in
+      let shared_external = ref 0 in
       Sse.subscribe_external
         ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
         ~id:subscription

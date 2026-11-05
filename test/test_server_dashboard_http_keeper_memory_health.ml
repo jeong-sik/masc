@@ -1262,6 +1262,8 @@ let test_cold_health_read_and_commit_do_not_deadlock () =
   let base = fresh_dir "masc-memory-health-lock-order" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "before commit"]);
+  let cold_health = Health.For_testing.keeper_health
+      ~config:(Workspace.default_config base) ~keepers_dir "alpha" in
   let read_started = Atomic.make false in
   let allow_return = Atomic.make false in
   let writer_finished = Atomic.make false in
@@ -1280,9 +1282,10 @@ let test_cold_health_read_and_commit_do_not_deadlock () =
       incr attempts;
       if !attempts = 1 then begin
         Atomic.set read_started true;
-        while not (Atomic.get allow_return) do Unix.sleepf 0.001 done
-      end;
-      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+        while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
+        cold_health
+      end else
+        Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
     (fun () ->
       let reader = Domain.spawn (fun () ->
         Health.keeper_memory_health_http_json ~base_path:base)

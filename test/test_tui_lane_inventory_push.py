@@ -268,6 +268,7 @@ class LaneInventoryPushTest(unittest.TestCase):
             step("keys", "o")
             step("wait", lambda: lane.response_count("reopen", ADDONS) >= 1,
                  "the Add-on detail did not reopen")
+            step("drain", 0.3)
             lane.set_phase("manual")
             step("keys", "r")
             step("wait", lambda: lane.response_count("manual", ADDONS) >= 1,

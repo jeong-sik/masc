@@ -1642,6 +1642,7 @@ let test_a_failed_session_load_is_retried () =
 
 let test_cold_read_and_commit_do_not_deadlock () =
   with_session @@ fun config trace _session_dir ->
+  let cold_ledger = ok "initial cold read" (Ledger.load ~config ~trace_id:trace) in
   let read_started = Atomic.make false in
   let allow_return = Atomic.make false in
   let writer_finished = Atomic.make false in
@@ -1655,10 +1656,10 @@ let test_cold_read_and_commit_do_not_deadlock () =
     wait ()
   in
   Server_skill_usage_runtime.For_testing.with_runtime
-    ~ledger_loader:(fun ~config ~trace_id ->
+    ~ledger_loader:(fun ~config:_ ~trace_id:_ ->
       Atomic.set read_started true;
       while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
-      Ledger.load ~config ~trace_id:trace)
+      Ok cold_ledger)
     (fun () ->
       let reader = Domain.spawn (fun () ->
         Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ])

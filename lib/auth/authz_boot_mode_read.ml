@@ -139,7 +139,7 @@ let input ~base_path ~config_dir ~anonymous_mutations =
 
 type stop =
   | Refuse of B.refusal * B.refusal list
-  | Multi_account_not_activatable
+  | Activation_requested
   | Multi_account_not_served of B.mode
 
 type decision =
@@ -149,7 +149,7 @@ type decision =
 let decide input =
   match B.judge input with
   | Ok B.Single_user -> Boot_single_user
-  | Ok B.Activation_requested -> Stop Multi_account_not_activatable
+  | Ok B.Activation_requested -> Stop Activation_requested
   | Ok ((B.Multi_account | B.Multi_account_uncertain) as mode) ->
     Stop (Multi_account_not_served mode)
   | Error (first, rest) -> Stop (Refuse (first, rest))
@@ -167,13 +167,14 @@ let high_water_detail = function
 
 let messages (input : B.input) = function
   | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
-  | Multi_account_not_activatable ->
-    ( "config.json asks for Multi_account and nothing is set up yet; this server has no \
-       host-local bootstrap to activate it (Multi_account_not_activatable)"
+  | Activation_requested ->
+    ( "config.json asks for Multi_account and nothing is set up yet; run masc auth bootstrap \
+       --external-store PATH on this workspace while no server runs, then start the server \
+       (Activation_requested)"
     , [] )
   | Multi_account_not_served mode ->
     ( Printf.sprintf
-        "the authorization log made Multi_account (%s); this server does not have the account \
+        "the authorization log made Multi_account (%s); this build does not have the account \
          layers that serve it"
         (B.mode_to_string mode)
     , high_water_detail input.high_water )

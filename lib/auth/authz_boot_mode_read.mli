@@ -58,12 +58,15 @@ val input
   -> Authz_boot_mode.input
 
 (** Why a boot does not go on. [Multi_account] before activation needs the
-    host-local bootstrap, which this server does not have yet. [Multi_account]
-    after activation needs the account layers that serve it; booting it without
-    them would serve multi-owned records with the behavior of a single user. *)
+    host-local bootstrap, [masc auth bootstrap], which runs while no server runs
+    on the base path, so a server has nothing to open there (design 5.1, row 5).
+    [Multi_account] after activation needs the account layers that serve it;
+    booting it without them would serve multi-owned records with the behavior
+    of a single user. The lines say "this build", because [masc auth bootstrap]
+    prints them too. *)
 type stop =
   | Refuse of Authz_boot_mode.refusal * Authz_boot_mode.refusal list
-  | Multi_account_not_activatable
+  | Activation_requested
   | Multi_account_not_served of Authz_boot_mode.mode
 
 (** What the boot does. Only a single user boots. *)

@@ -62,6 +62,8 @@ Eio mutex로 key 교체와 DB 효과를 순서화한다. Sse registry·다른 st
 
 `Workspace_dataset_event.Play_room`은 열린 room에만 `revalidate`를 적용한다. machine 일치 여부로 transcript를 제한하지 않는다. hidden room은 기존 Leave 규칙을 유지하고, 재진입은 새 Read를 시작한다.
 
+Observer는 현재 열린 room의 `(machine, client_id)`를 `play_machine`·`play_client_id`로 본다. `observer_play`가 이 scope를 추적하며 room 열림·닫힘·machine 변경을 기존 machine/browser scope와 같은 재연결 판단에 반영한다. 늦게 room을 열어도 presence가 연결되고, 닫으면 Observer disconnect가 presence를 정리한다. `play_machine`은 Control `machine`과 무관하며 Watch를 진행하지 않는다.
+
 ## 경계와 금지 사항
 
 - `play_client_id`는 기존 identifier 계약과 동일한 1..128자의 ASCII letters/digits/dots/underscores/hyphens다.

@@ -126,19 +126,22 @@
 ### Task 3: Stop successful polling and retain exact revalidation
 
 **Files:**
-- Modify: `bin/masc_tui_play_room.ml`, `bin/masc_tui.ml`, `bin/masc_tui_http.ml`
+- Modify: `bin/masc_tui_play_room.ml`, `bin/masc_tui_play_room.mli`, `bin/masc_tui.ml`, `bin/masc_tui_http.ml`, `bin/masc_tui_types.ml`
 - Modify: `test/test_tui_play_room.ml`
 - Create: `test/test_tui_play_room_push.py`, `test/stanzas/test_tui_play_room_push.inc`
 
 **Interfaces:**
 - Consumes: Task 1's `Masc_tui_play_room.revalidate` and `Play_room` dataset.
+- `Masc_tui_play_room.client_id` exposes only the generated room client identity for Observer scope.
 - Observer accepts optional `~play:(Machine_lane.t * string)`; HTTP emits `play_machine` and `play_client_id` only for the currently open room. It does not alter Control `machine` or Browser scopes.
+- `observer_play` tracks the emitted pair and joins the existing machine/browser scope reconciliation, so room open/close and machine changes reconnect the Observer.
 - Every open room revalidates on `Play_room` regardless of source machine; hidden rooms preserve Leave and do not read.
 
 - [ ] **Step 1: Write failing tests**
   - After a successful active Read, polling produces no new request at `now=3` and `now=3600`.
   - A failed Read retries at `now+2`; `revalidate` during pending produces exactly one trailing Read; `active=false` preserves Leave and its retries.
   - `test_tui_play_room_push.py` records initial POST 1, idle POST 0 after 2.4s, dataset POST 1, pending trailing POST 1, reconnect POST 1, hidden POST 0, and `play_machine`/`play_client_id` query.
+  - The PTY proves that opening a room adds its Observer scope and hiding it removes that scope without a Control step.
 
 - [ ] **Step 2: Verify RED remotely**
   - Run `test_tui_play_room,test_tui_play_room_push`.
@@ -148,13 +151,14 @@
   - Set successful active `next_read=infinity`; keep failed reads at `now+2` and inactive Leave behavior.
   - Response with `changed_since` schedules immediate trailing read, otherwise success becomes infinity. Cross-machine events use the same path.
   - Add the optional play query without moving ownership from render state or enabling machine advance in Watch.
+  - Track `observer_play` through launch, close, workspace reset, and machine/browser reconciliation so late room entry also attaches presence.
 
 - [ ] **Step 4: Verify GREEN remotely**
   - Rerun those suites and `test_tui_observer,test_tui_spectator_push,test_tui_execute_stream_http`.
   - Expect all selected suites to pass. Record actual phase request counts rather than claiming them from source.
 
 - [ ] **Step 5: Commit**
-  - `git add bin/masc_tui_play_room.ml bin/masc_tui.ml bin/masc_tui_http.ml test/test_tui_play_room.ml test/test_tui_play_room_push.py test/stanzas/test_tui_play_room_push.inc`
+  - `git add bin/masc_tui_play_room.ml bin/masc_tui_play_room.mli bin/masc_tui.ml bin/masc_tui_http.ml bin/masc_tui_types.ml test/test_tui_play_room.ml test/test_tui_play_room_push.py test/stanzas/test_tui_play_room_push.inc`
   - `git -c core.hooksPath=/dev/null commit -m "feat(tui): replace play polling with SSE revalidation"`
 
 ### Task 4: Full regression, measurements, evidence, and independent review

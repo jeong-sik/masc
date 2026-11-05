@@ -52,7 +52,7 @@
     [handle_dashboard_ack_eio] /
     [handle_dashboard_ack_notification],
     [tool_call_outcome],
-    [jsonrpc_id_label], [tool_profile_label],
+    [jsonrpc_id_label],
     [mcp_tool_call_log_details],
     [read_line_message], [write_framed_message],
     [write_line_message]). *)
@@ -64,12 +64,9 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
   | Seat
-(** Capability profile selected per request.  Pinned at
-    this boundary because {!handle_request} accepts
-    [?profile] and downstream callers
-    ([Mcp_server_eio.handle_request] in
-    [lib/mcp_server_eio.ml]) coerce it through the
-    {!Mcp_server_eio_types.tool_profile} alias. *)
+(** Capability profile selected per request: the same type as
+    {!Mcp_server_eio_types.tool_profile}, which {!handle_request} accepts
+    through [?profile]. *)
 
 (** {1 Authentication requirement} *)
 

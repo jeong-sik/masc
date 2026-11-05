@@ -284,13 +284,7 @@ let handle_initialize_eio ?(profile = Full) id params =
                       ~key:Mcp_server.server_meta_key
                       [ "serverStartedAt", `String (Masc_domain.now_iso ())
                       ; "serverVersion", `String Runtime_build_version.current
-                      ; ( "profile"
-                        , `String
-                            (match profile with
-                             | Full -> "full"
-                             | Managed_agent -> "managed_agent"
-                             | Operator_remote -> "operator_remote"
-                             | Seat -> "seat") )
+                      ; "profile", `String (Mcp_server_eio_types.tool_profile_to_string profile)
                       ]) )
              ])
 ;;
@@ -433,13 +427,7 @@ let handle_list_tools_eio
   (match agent_id with
    | Some aid ->
      let tool_names = List.map fst tools in
-     let profile_str =
-       match profile with
-       | Full -> "full"
-       | Managed_agent -> "managed_agent"
-       | Operator_remote -> "operator_remote"
-       | Seat -> "seat"
-     in
+     let profile_str = Mcp_server_eio_types.tool_profile_to_string profile in
      ignore
        (Tool_assignment_telemetry.emit_assigned
           ~agent_id:aid
@@ -834,13 +822,6 @@ let method_allowed_in_profile profile method_ =
      | _ -> false)
 ;;
 
-let tool_profile_label = function
-  | Full -> "full"
-  | Managed_agent -> "managed_agent"
-  | Operator_remote -> "operator_remote"
-  | Seat -> "seat"
-;;
-
 let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_session_id () =
   `Assoc
     ([ "event_family", `String "tool_call"
@@ -848,7 +829,7 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      ; "phase", `String phase
      ; "request_id", `String (jsonrpc_id_label id)
      ; ( "session_id", Json_util.string_opt_to_json mcp_session_id )
-     ; "profile", `String (tool_profile_label profile)
+     ; "profile", `String (Mcp_server_eio_types.tool_profile_to_string profile)
      ]
      @
      match outcome with
@@ -933,7 +914,7 @@ let handle_request
                 ~id
                 Mcp_error_code.Method_not_found
                 (Printf.sprintf "%s is not available on the %s endpoint" req.method_
-                   (tool_profile_label profile)))
+                   (Mcp_server_eio_types.tool_profile_to_string profile)))
           else if Mcp_transport_protocol.is_notification req
           then (
             match req.method_ with

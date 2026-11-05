@@ -173,6 +173,10 @@ let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base conf
   let left,left_resolve=Eio.Promise.create () in
   let before=Masc.Workspace.get_tasks_raw config in
   let parts=ref [] and seen=ref [] in
+  check bool "a recorded Keeper answer owes a follow-up read" true (Ui.ask_followup_unfinished state);
+  state.ask_followup_owed <- Masc_tui_owed_read.(changed settled);
+  check bool "an owed read of an unfinished follow-up is due" true (Ui.ask_followup_read_due state ~now:0.);
+  state.ask_followup_owed <- Masc_tui_owed_read.settled;
   let request,submission=begin_read state in
   launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve left_resolve ()))
     (actual_read base ask resolution ~parts ~before_source:(function
@@ -187,6 +191,12 @@ let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base conf
   Masc_tui_message_input.insert state.msg_input "new input while follow-up is observed";
   Eio.Promise.resolve release ();Eio.Promise.await left;
   check bool "terminal retained without taking shared notification" true (terminal state results seen=Ok ());
+  check bool "a completed read ends the follow-up" false (Ui.ask_followup_unfinished state);
+  state.ask_followup_owed <- Masc_tui_owed_read.(changed settled);
+  check bool "a change noted during the completing read reads nothing more" false
+    (Ui.ask_followup_read_due state ~now:0.);
+  check bool "the completed follow-up settles its owed read" true
+    (state.ask_followup_owed = Masc_tui_owed_read.settled);
   Ui.retire_ask_followup_read state;
   check bool "retiring completed actual read preserves its original terminal cause" true
     (Option.bind (Ui.current_ask_followup state) Projection.followup_completion=Some (Ok ()));
@@ -213,6 +223,7 @@ let test_failure_and_reopened_scope_keep_original_facts () = with_answer @@ fun 
   (match terminal state results seen with
    | Error (Projection.Followup_read_failed _) -> ()
    | Ok () | Error (Followup_cancelled | Followup_not_started _ | Followup_withdrawn) -> fail "actual disconnect lost its failed cause");
+  check bool "a failed read leaves the follow-up owed" true (Ui.ask_followup_unfinished state);
   Ui.retire_ask_followup_read state;
   (match Option.bind (Ui.current_ask_followup state) Projection.followup_completion with
    | Some (Error (Projection.Followup_read_failed _)) -> ()

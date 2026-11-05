@@ -10,7 +10,9 @@ let changed = function
   | Settled -> Owed { failures = 0 }
   | Owed _ as owed -> owed
   | Reading reading -> Reading { reading with changed_since = true }
-  | Waiting { failures; _ } -> Owed { failures }
+  (* A change during a failure wait stays on the wait: the scheduled retry
+     reads the changed state, and the failures that grew the wait are kept. *)
+  | Waiting _ as waiting -> waiting
 
 let started = function
   | Settled -> Reading { failures = 0; changed_since = false }

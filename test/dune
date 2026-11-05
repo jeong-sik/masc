@@ -1173,6 +1173,9 @@
  ;; test_enum_mirror_sync names the connected Browser_lane backends in the
  ;; capability table it checks; the browser lane is its own library.
  masc.browser_lane
+ ;; test_observability_redact calls the shared JSON redaction pass of the
+ ;; unwrapped secret-pattern library directly.
+ masc.secret_patterns
  masc.agent_core mcp_protocol))
 
 (test

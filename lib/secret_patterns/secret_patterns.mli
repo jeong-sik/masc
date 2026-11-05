@@ -52,14 +52,22 @@ val key_suggests_secret : string -> bool
     ([*_env] naming an environment variable, [*_type] naming a value
     kind, the runtime inventory's [credential_kind]/[credential_file], and
     the collision event's exact [token_hash_prefix] correlation field)
-    answer [false] so safe metadata stays readable. Callers mask
+    answer [false] so safe metadata stays readable. {!redact_json_with} masks
     every string value and object member name in the subtree under such a
     key while non-string
     scalars keep their shape, so counts and flags survive while no
     secret-shaped string passes in clear. *)
 
+val redact_json_with : on_string:(string -> string) -> Yojson.Safe.t -> Yojson.Safe.t
+(** The structural pass behind {!redact_json_strings}; the caller supplies the
+    rewrite of string values. Object keys go through {!redact_text}. The value
+    of a sensitive key (judged on the key as it came) becomes [\[REDACTED\]].
+    Under a key for which {!key_suggests_secret} holds, every string value and
+    object member name becomes [\[REDACTED\]]. [on_string] sees only the string
+    values outside those two cases. Structure, member order and non-string
+    scalars are preserved; two keys that redact to the same text are both
+    kept, in order. *)
+
 val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
-(** Recursively apply {!redact_text} to string leaves and to object keys,
-    and replace the value of a sensitive key (judged on the key as it came)
-    with [\[REDACTED\]], preserving structure and without truncation. Two
-    keys that redact to the same text are both kept, in order. *)
+(** {!redact_json_with} with {!redact_text} as the string rewrite, so string
+    values are redacted without truncation. *)

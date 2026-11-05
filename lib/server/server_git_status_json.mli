@@ -11,3 +11,9 @@ val snapshot
   -> branch:Repo_git.branch_status
   -> changes:Repo_git.status_file list
   -> Yojson.Safe.t
+
+(** [upstream_json upstream] is the [upstream] member shared by the status
+    answer's [branch] and each entry of the branch list: null without an
+    upstream, otherwise [{name; ahead; behind}] with null counts when the
+    configured upstream ref is gone. *)
+val upstream_json : Repo_git.upstream_state -> Yojson.Safe.t

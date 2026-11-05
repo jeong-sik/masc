@@ -446,6 +446,92 @@ let test_catalog_distinguishes_empty_from_unavailable () =
     | Error (W.Catalog_scan_failed _) -> ()
     | Ok _ | Error _ -> Alcotest.fail "Git failure became empty or missing checkout")
 
+let commit_git ~cwd message =
+  catalog_git ~cwd
+    [ "-c"; "user.name=tester"; "-c"; "user.email=tester@example.com"; "commit"
+    ; "--allow-empty"; "-m"; message ]
+
+let branches_or_fail ~base ~path =
+  match W.For_testing.workspace_branches ~base ~path with
+  | Ok found -> found
+  | Error W.Branches_invalid_path -> Alcotest.fail "unexpected invalid branches path"
+  | Error W.Branches_directory_unavailable -> Alcotest.fail "branches directory unavailable"
+  | Error W.Branches_repository_unavailable -> Alcotest.fail "branches repository unavailable"
+  | Error (W.Branches_failed detail) -> Alcotest.fail detail
+
+let test_branches_list_the_owning_checkout () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    commit_git ~cwd:base "first";
+    catalog_git ~cwd:base [ "branch"; "feat/x" ];
+    let found = branches_or_fail ~base ~path:"" in
+    check string "root stays workspace relative" "" found.branches_root;
+    let names =
+      List.sort String.compare
+        (List.map (fun (e : Repo_git.branch_entry) -> e.be_name)
+           found.branches_list.bl_entries)
+    in
+    check (list string) "both branches" [ "feat/x"; "main" ] names;
+    (match W.For_testing.workspace_branches_json found with
+     | `Assoc fields ->
+         check bool "answer is not truncated" true
+           (List.assoc_opt "truncated" fields = Some (`Bool false));
+         (match List.assoc_opt "branches" fields with
+          | Some (`List rows) ->
+              check int "one row per branch" 2 (List.length rows);
+              List.iter
+                (function
+                  | `Assoc row ->
+                      List.iter
+                        (fun key ->
+                          check bool ("row has " ^ key) true (List.mem_assoc key row))
+                        [ "name"; "current"; "upstream"; "commit_epoch"; "subject" ];
+                      check bool "a branch without upstream says null" true
+                        (List.assoc_opt "upstream" row = Some `Null)
+                  | _ -> Alcotest.fail "branch row is not an object")
+                rows
+          | Some _ | None -> Alcotest.fail "branches is not a list")
+     | _ -> Alcotest.fail "answer is not an object"))
+
+let test_branches_stop_at_workspace_and_keep_nested_prefix () =
+  with_temp_dir (fun parent ->
+    catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
+    commit_git ~cwd:parent "outer";
+    let base = Filename.concat parent "keeper" in
+    mkdir_p base;
+    (match W.For_testing.workspace_branches ~base ~path:"" with
+     | Error W.Branches_repository_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "branches borrowed the enclosing checkout");
+    let repo = Filename.concat base "repos/example" in
+    mkdir_p (Filename.concat repo "src");
+    catalog_git ~cwd:repo [ "init"; "-b"; "main" ];
+    commit_git ~cwd:repo "inner";
+    let found = branches_or_fail ~base ~path:"repos/example/src" in
+    check string "owning nested checkout" "repos/example" found.branches_root;
+    check int "one branch" 1 (List.length found.branches_list.bl_entries))
+
+let test_branches_distinguish_empty_from_unavailable () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    let found = branches_or_fail ~base ~path:"" in
+    check int "a checkout with no commit has no branch yet" 0
+      (List.length found.branches_list.bl_entries);
+    write_file (Filename.concat base "a.ml") "let a = 1\n";
+    (match W.For_testing.workspace_branches ~base ~path:".env" with
+     | Error W.Branches_invalid_path -> ()
+     | Ok _ | Error _ -> Alcotest.fail "confidential directory was not rejected");
+    (match W.For_testing.workspace_branches ~base ~path:"missing" with
+     | Error W.Branches_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "missing directory became an empty list");
+    (match W.For_testing.workspace_branches ~base ~path:"a.ml" with
+     | Error W.Branches_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a file was read as a directory");
+    rm_rf (Filename.concat base ".git");
+    write_file (Filename.concat base ".git") "gitdir: missing-git-dir\n";
+    match W.For_testing.workspace_branches ~base ~path:"" with
+    | Error (W.Branches_failed _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "Git failure became an empty list")
+
 (* Use the production router and file reader: a surviving project file must
    never stand in for the selected scope after its catalog was accepted. *)
 let workspace_http_response ?(meth = "GET") ?(body = "") ?token ~router target =
@@ -937,6 +1023,14 @@ let () =
             test_catalog_never_searches_above_workspace
         ; test_case "distinguishes empty checkout and unavailable directory" `Quick
             test_catalog_distinguishes_empty_from_unavailable
+        ] )
+    ; ( "branch list"
+      , [ test_case "lists the owning checkout" `Quick
+            test_branches_list_the_owning_checkout
+        ; test_case "stops at selected workspace and keeps nested prefix" `Quick
+            test_branches_stop_at_workspace_and_keep_nested_prefix
+        ; test_case "distinguishes empty checkout and unavailable directory" `Quick
+            test_branches_distinguish_empty_from_unavailable
         ] )
     ; ( "selected file scope"
       , [ test_case "removed repository registration cannot read project file" `Quick

@@ -855,19 +855,37 @@ type workspace_file_catalog_error =
   | Catalog_repository_unavailable
   | Catalog_scan_failed of string
 
+(* Why a directory the operator named is not a checkout to read. *)
+type checkout_refusal =
+  | Checkout_invalid_path
+  | Checkout_directory_unavailable
+  | Checkout_repository_unavailable
+
+(* The Git checkout that owns [path] under [base], never one above [base]. The
+   file catalog and the branch list both start from a directory the same way. *)
+let checkout_of_directory ~base ~path =
+  match resolve_workspace_file base path with
+  | Error _ -> Error Checkout_invalid_path
+  | Ok directory ->
+      (match (Unix.stat directory.resolved_path).Unix.st_kind with
+       | Unix.S_DIR ->
+           (match repository_containing ~base ~directory:directory.lexical_path with
+            | Some root -> Ok root
+            | None -> Error Checkout_repository_unavailable)
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+           Error Checkout_directory_unavailable)
+
 let workspace_file_catalog ~base ~path =
   let ( let* ) = Result.bind in
-  let* directory =
-    resolve_workspace_file base path
-    |> Result.map_error (fun _ -> Catalog_invalid_path)
-  in
   try
-    if (Unix.stat directory.resolved_path).Unix.st_kind <> Unix.S_DIR then
-      Error Catalog_directory_unavailable
-    else
-      match repository_containing ~base ~directory:directory.lexical_path with
-      | None -> Error Catalog_repository_unavailable
-      | Some root ->
+    let* root =
+      checkout_of_directory ~base ~path
+      |> Result.map_error (function
+           | Checkout_invalid_path -> Catalog_invalid_path
+           | Checkout_directory_unavailable -> Catalog_directory_unavailable
+           | Checkout_repository_unavailable -> Catalog_repository_unavailable)
+    in
+    begin
           let* paths =
             Repo_git.file_paths_at ~local_path:root ()
             |> Result.map_error (fun detail -> Catalog_scan_failed detail)
@@ -893,11 +911,58 @@ let workspace_file_catalog ~base ~path =
               paths
           in
           Ok { catalog_root = rel_under base root; catalog_paths }
+    end
   with
   | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
       Error Catalog_directory_unavailable
   | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
       Error (Catalog_scan_failed (Printexc.to_string ex))
+
+type workspace_branches = {
+  branches_root : string;
+  branches_list : Repo_git.branch_list;
+}
+
+type workspace_branches_error =
+  | Branches_invalid_path
+  | Branches_directory_unavailable
+  | Branches_repository_unavailable
+  | Branches_failed of string
+
+let branches_max_entries = 200
+
+let workspace_branches ~base ~path =
+  try
+    match checkout_of_directory ~base ~path with
+    | Error Checkout_invalid_path -> Error Branches_invalid_path
+    | Error Checkout_directory_unavailable -> Error Branches_directory_unavailable
+    | Error Checkout_repository_unavailable -> Error Branches_repository_unavailable
+    | Ok root ->
+        (match Repo_git.branches_at ~local_path:root ~max_entries:branches_max_entries () with
+         | Ok branches ->
+             Ok { branches_root = rel_under base root; branches_list = branches }
+         | Error detail -> Error (Branches_failed detail))
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+      Error Branches_directory_unavailable
+  | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
+      Error (Branches_failed (Printexc.to_string ex))
+
+let branch_entry_json (entry : Repo_git.branch_entry) =
+  `Assoc
+    [ ("name", `String entry.be_name)
+    ; ("current", `Bool entry.be_current)
+    ; ("upstream", Server_git_status_json.upstream_json entry.be_upstream)
+    ; ("commit_epoch", `Int entry.be_commit_epoch)
+    ; ("subject", `String entry.be_subject)
+    ]
+
+let workspace_branches_json (found : workspace_branches) =
+  `Assoc
+    [ ("root", `String found.branches_root)
+    ; ("branches", `List (List.map branch_entry_json found.branches_list.bl_entries))
+    ; ("truncated", `Bool found.branches_list.bl_truncated)
+    ]
 
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
@@ -907,6 +972,8 @@ module For_testing = struct
   let resolve_workspace_file = resolve_workspace_file
   let repository_owning = repository_owning
   let workspace_file_catalog = workspace_file_catalog
+  let workspace_branches = workspace_branches
+  let workspace_branches_json = workspace_branches_json
   let load_workspace_file_content = load_workspace_file_content
   let workspace_file_revision = workspace_file_revision
   let save_workspace_file = save_workspace_file
@@ -1224,6 +1291,40 @@ let add_routes router =
                          | Catalog_repository_unavailable ->
                              `Not_found, "Open a Git repository directory to find files"
                          | Catalog_scan_failed detail -> `Internal_server_error, detail
+                       in
+                       json_response ~status request reqd (json_error message))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/branches" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+               match Uri.get_query_param uri "path" with
+               | None ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "Missing path parameter")
+               | Some path ->
+                   let result =
+                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                       workspace_branches ~base ~path)
+                   in
+                   match result with
+                   | Ok found ->
+                       json_response_with_source ~status:`OK ~source request reqd
+                         (workspace_branches_json found)
+                   | Error error ->
+                       let status, message =
+                         match error with
+                         | Branches_invalid_path -> `Bad_request, "Invalid path"
+                         | Branches_directory_unavailable ->
+                             `Not_found, "The selected directory is unavailable"
+                         | Branches_repository_unavailable ->
+                             `Not_found, "Open a Git repository directory to list branches"
+                         | Branches_failed detail -> `Internal_server_error, detail
                        in
                        json_response ~status request reqd (json_error message))
 

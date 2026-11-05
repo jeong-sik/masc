@@ -134,9 +134,10 @@ val text_on : t -> (string, t) result
     holds what the choice needs is not rewritten, because a rewrite drops the
     comment on its line; switching recall back on over the list a switched-off
     file kept writes the switch alone. A list that does change is written
-    whole, and the comments inside it go. A key the file does not have yet is
-    added at the end of the table's lines, after a comment that sits above
-    the next table's header ([Toml_line_editor] puts every new key there).
+    whole, and the comments inside it go. A key the file does not have yet
+    goes below the table's last value line, above the blank lines and the
+    comment that sit above the next table's header ([Toml_line_editor] puts
+    every new key there).
 
     Switching off writes only [memory_recall = false], so a Keeper list the
     file keeps stays there for the next time recall is switched on. {!All}

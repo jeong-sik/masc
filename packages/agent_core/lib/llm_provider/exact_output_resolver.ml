@@ -148,6 +148,7 @@ type frozen_target =
   ; capabilities : Caps.capabilities
   ; anthropic_thinking_control : Caps.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
   ; credential : credential_outcome
   ; identity : target_identity
   }
@@ -170,6 +171,7 @@ type projection_target =
   ; capabilities : Caps.capabilities
   ; anthropic_thinking_control : Caps.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
   ; model_admitted : bool
   }
 
@@ -178,6 +180,7 @@ type selected_target =
   ; capabilities : Caps.capabilities
   ; anthropic_thinking_control : Caps.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
   ; identity : target_identity
   ; generation : catalog_generation
   ; evidence : catalog_evidence
@@ -796,6 +799,17 @@ let load_resolver_snapshot
               | Some _ as declared -> declared
               | None -> catalog_policy)
          in
+         (* The binding's own requests send its declared headers, so an exact
+            request on it sends them too (an OpenCode Go endpoint refuses a
+            request without its session header). They stay out of
+            [projection_config.headers]: the plan refuses headers there as
+            caller-supplied, and writes these from [declared_headers]. *)
+         let declared_headers =
+           match target.wire with
+           | Catalog_provider_wire -> Exact_output_declared_headers.empty
+           | Binding_wire { config = binding; _ } ->
+             Exact_output_declared_headers.of_binding_headers binding.PC.headers
+         in
          let projection_config =
            PC.make
              ~kind
@@ -821,7 +835,7 @@ let load_resolver_snapshot
          in
          let identity_fingerprint =
            hash_parts
-             ([ "agent_core-exact-output-target-v5"
+             ([ "agent_core-exact-output-target-v6"
               ; target_ref_id target.target_ref
               ; provider.id
               ; PC.string_of_provider_kind kind
@@ -846,6 +860,9 @@ let load_resolver_snapshot
               ; codec
               ; "content-type\000application/json"
               ]
+              @ List.map
+                  (fun (name, value) -> "declared-header\000" ^ name ^ "\000" ^ value)
+                  (Exact_output_declared_headers.to_list declared_headers)
               @ Binding.functional_capability_projection
                   capabilities
                   ~anthropic_thinking_control)
@@ -881,6 +898,7 @@ let load_resolver_snapshot
               ; capabilities
               ; anthropic_thinking_control
               ; body_timeout_s = target.body_timeout_s
+              ; declared_headers
               ; credential
               ; identity
               }
@@ -956,6 +974,7 @@ let projection_target (admitted : admitted_target) =
   ; capabilities = target.capabilities
   ; anthropic_thinking_control = target.anthropic_thinking_control
   ; body_timeout_s = target.body_timeout_s
+  ; declared_headers = target.declared_headers
   ; model_admitted =
       Binding.target_model_admitted target.capabilities ~model_id:target.config.model_id
   }
@@ -971,6 +990,7 @@ let resolve_target (admitted : admitted_target) =
       ; capabilities = target.capabilities
       ; anthropic_thinking_control = target.anthropic_thinking_control
       ; body_timeout_s = target.body_timeout_s
+      ; declared_headers = target.declared_headers
       ; identity = target.identity
       ; generation = admitted.generation
       ; evidence = admitted.evidence

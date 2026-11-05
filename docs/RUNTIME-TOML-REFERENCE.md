@@ -136,7 +136,8 @@ Resolution (`lib/runtime/runtime_adapter.ml` and `lib/runtime/runtime_toml.ml`):
 - `healthcheck.path` (absolute) is provider-owned metadata for install/setup
   probes; runtime startup does not use it for admission.
 - `headers` injects fixed non-auth HTTP headers per request (e.g.
-  OpenRouter's `HTTP-Referer`). `authorization`, `x-api-key`, `api-key` and
+  OpenRouter's `HTTP-Referer`), on Keeper turns and exact-output slots alike;
+  an exact request writes its own `Content-Type` and `Content-Length`. `authorization`, `x-api-key`, `api-key` and
   `x-auth-token` are stripped (case-insensitively) and never reach the
   request — authentication uses the credentials table only.
 - `usage-read` reads usage windows without a model call: `shape` is one of

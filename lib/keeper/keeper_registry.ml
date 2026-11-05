@@ -542,29 +542,6 @@ let restore_supervisor_state ~base_path name ~restart_count ~crash_log =
     ~update_entry:update_entry_unit
 ;;
 
-let cleanup_tracking ~base_path name =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key (Atomic.get registry) with
-  | Some entry ->
-    (match
-       put_entry
-         ~base_path
-         name
-         { entry with
-           tool_usage = StringMap.empty
-         ; board_cursor_ts = 0.0
-         ; board_cursor_post_id = None
-         }
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "%s: failed to cleanup registry tracking: %s"
-         name
-         (registry_entry_validation_error_to_string err))
-  | None -> ()
-;;
-
 let cleanup_tracking_entry current =
   { current with
     tool_usage = StringMap.empty

@@ -2340,7 +2340,7 @@ let () =
             `Quick
             test_ollama_parse_rejects_malformed_tool_call
         ; test_case
-            "ollama non-object tool arguments rejected"
+            "ollama non-object tool arguments kept unreadable"
             `Quick
             test_ollama_parse_keeps_non_object_tool_arguments_unreadable
         ; test_case

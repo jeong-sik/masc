@@ -383,7 +383,9 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
         (Stop_reason_wire.wire_finish_of_string done_reason)
         ~has_tool_blocks:(tool_blocks <> [] || unreadable_tool_uses <> [])
     in
-    (* A call the length limit cut off is unfinished, not unreadable. *)
+    (* A call the length limit cut off is unfinished, not unreadable: telling
+       the model its arguments were not one JSON object would be false, so it
+       is dropped. The stop reason still says the response was cut. *)
     let unreadable_tool_uses =
       if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in

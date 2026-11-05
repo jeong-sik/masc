@@ -175,6 +175,30 @@ let chat_control () =
     (List.for_all (function `Assoc fields->not(List.mem_assoc "phase" fields)
       | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _->false) messages)
 
+(* The API takes a reasoning item back only together with the item that
+   followed it, and refuses one with nothing after it. Admission leaves it
+   alone two ways: a call whose arguments were not one JSON object, and a call
+   it refused by name. *)
+let reasoning_without_its_following_item () =
+  let reasoning=`Assoc Streams.encrypted_reasoning_fields in
+  let call arguments=`Assoc["type",`String"function_call";"call_id",`String"call";"name",`String"test";"arguments",`String arguments] in
+  let item_types response=match assistant_message_of_response response with
+    | Ok message->List.map(fun item->Yojson.Safe.Util.(item|>member "type"|>to_string))(replay_input_items message)
+    | Error error->Alcotest.fail(show_assistant_message_error error) in
+  let unreadable=Sync.parse(Sync.response[reasoning;call "[]"]) in
+  Alcotest.(check int) "the call is kept unreadable" 1 (List.length unreadable.unreadable_tool_uses);
+  Alcotest.(check (list string)) "no reasoning item goes back without its call" []
+    (item_types {unreadable with unreadable_tool_uses=[]});
+  let readable=Sync.parse(Sync.response[reasoning;call "{}"]) in
+  Alcotest.(check (list string)) "an admitted call keeps its reasoning" ["reasoning";"function_call"]
+    (item_types readable);
+  let refused=match retain_response_content ~retained_indices:[0]
+      ~content:(List.filteri(fun index _->index=0)readable.content) readable with
+    | Ok response->response
+    | Error detail->Alcotest.fail detail in
+  Alcotest.(check (list string)) "a refused call takes its reasoning out of the request" []
+    (item_types refused)
+
 let () = Alcotest.run "provider replay conformance" [
  "sync",[
   Alcotest.test_case "native groups" `Quick Sync.parts;
@@ -184,7 +208,8 @@ let () = Alcotest.run "provider replay conformance" [
   Alcotest.test_case "telemetry roundtrip" `Quick Sync.telemetry_roundtrip;
   Alcotest.test_case "manual phase control" `Quick Sync.legacy;
   Alcotest.test_case "public response cache" `Quick cache_roundtrip;
-  Alcotest.test_case "Chat control" `Quick chat_control];
+  Alcotest.test_case "Chat control" `Quick chat_control;
+  Alcotest.test_case "reasoning without its following item" `Quick reasoning_without_its_following_item];
  "stream",[
   Alcotest.test_case "native multipart and order" `Quick Streams.native_order;
   Alcotest.test_case "nullable phases" `Quick Streams.nullable;

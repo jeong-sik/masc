@@ -314,10 +314,25 @@ let tool_result_items blocks =
     | Audio _ -> None)
 ;;
 
+(* The API takes a reasoning item back only together with the item it came
+   before, and refuses one with nothing after it. Admission can remove that
+   item: a refused call leaves its group empty and [Response_replay.retain]
+   drops the group, and a length-cut response loses its cut call the same way.
+   History keeps the reasoning; only this request leaves it out. *)
+let without_trailing_reasoning groups =
+  let rec drop = function
+    | (Response_replay.Reasoning, _) :: rest -> drop rest
+    | ((Response_replay.Message _ | Response_replay.Function_call), _) :: _ as kept ->
+      kept
+    | [] -> []
+  in
+  List.rev (drop (List.rev groups))
+;;
+
 let input_items_of_native_groups content replay =
   let groups =
     match Response_replay.partition ~content replay with
-    | Ok groups -> groups
+    | Ok groups -> without_trailing_reasoning groups
     | Error detail -> invalid_arg detail
   in
   List.concat_map

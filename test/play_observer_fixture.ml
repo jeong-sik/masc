@@ -32,14 +32,18 @@ let await_condition clock predicate =
     in
     wait ())
 
-let open_observer ~sw ~clock ~port ~session_id ~token ~instance_id play_client =
+let open_observer ~sw ~clock ~port ~session_id ~token ~instance_id ?play_client () =
   let response, publish_response = Eio.Promise.create () in
   let ended, publish_ended = Eio.Promise.create () in
   let chunks = ref [] in
+  let play_fields = match play_client with
+    | None -> []
+    | Some play_client -> ["play_machine", "msx"; "play_client_id", play_client]
+  in
   let url =
     Uri.add_query_params'
       (Uri.of_string (Printf.sprintf "http://127.0.0.1:%d/mcp" port))
-      [ "sse_kind", "observer"; "play_machine", "msx"; "play_client_id", play_client ]
+      (("sse_kind", "observer") :: play_fields)
     |> Uri.to_string
   in
   let headers =

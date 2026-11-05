@@ -226,13 +226,34 @@ let test_http_read_say_and_idempotent_join () = workspace (fun base_path ->
     ignore (perform_http base_path (action "leave"));
     check int "the final HTTP Leave announces" 3 (event_count heard)))
 
+let test_registration_cas_rejects_older_commit () = workspace (fun base_path ->
+  let session_id = "play-room-cas-" ^ Random_id.hex ~bytes:4 in
+  let auth = Masc_test_deps.make_sse_auth base_path "cas-observer" in
+  ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
+  let previous_hook = Atomic.get Masc.Sse.register_commit_test_hook in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Masc.Sse.register_commit_test_hook previous_hook;
+      Masc.Sse.unregister session_id)
+    (fun () ->
+      Atomic.set Masc.Sse.register_commit_test_hook (Some (fun () ->
+        Atomic.set Masc.Sse.register_commit_test_hook None;
+        match Masc.Sse.register_with_client ~kind:Masc.Sse.Observer ~auth session_id ~last_event_id:0 with
+        | Ok _ -> ()
+        | Error error -> fail (Masc.Sse.registration_error_to_string error)));
+      (match Masc.Sse.register_with_client ~kind:Masc.Sse.Observer ~auth session_id ~last_event_id:0 with
+       | Error (Masc.Sse.Registration_stale _) -> ()
+       | Error error -> fail (Masc.Sse.registration_error_to_string error)
+       | Ok _ -> fail "the older registration commit replaced its successor");
+      check bool "the newer registration remains committed" true (Masc.Sse.exists session_id)))
+
 let test_register_returns_exact_client_identity () = workspace (fun base_path ->
   let session_id = "play-room-register-" ^ Random_id.hex ~bytes:4 in
   let auth = Masc_test_deps.make_sse_auth base_path "registered-keeper" in
   ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
   match Masc.Sse.register_with_client ~kind:Masc.Sse.Observer ~auth session_id ~last_event_id:0 with
   | Error error -> fail (Masc.Sse.registration_error_to_string error)
-  | Ok (client, _) ->
+  | Ok (client, _, _) ->
     Fun.protect ~finally:(fun () -> Masc.Sse.unregister_if_current session_id client.id) (fun () ->
       check string "principal comes from the registered credential" "registered-keeper" client.agent_name;
       check bool "role comes from the registered credential" true (client.role = Masc_domain.Worker);
@@ -248,5 +269,6 @@ let () = run "Play room Observer presence" ["presence", [
   test_case "query is strict and independent from Control" `Quick test_room_scope_is_strict_and_separate;
   test_case "Play machine never steps Control" `Quick test_play_machine_does_not_step_control;
   test_case "HTTP Read and Say do not own presence" `Quick test_http_read_say_and_idempotent_join;
+  test_case "registration CAS rejects an older commit" `Quick test_registration_cas_rejects_older_commit;
   test_case "registration returns its exact client identity" `Quick test_register_returns_exact_client_identity;
 ]]

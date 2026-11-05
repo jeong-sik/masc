@@ -1212,7 +1212,7 @@ let test_play_observer_reconnect_keeps_replacement_presence env =
 module Play_fixture = Play_observer_fixture
 
 let open_play ~sw ~clock ~port ~session_id ~token ~instance_id =
-  Play_fixture.open_observer ~sw ~clock ~port ~session_id ~token ~instance_id "tab-1"
+  Play_fixture.open_observer ~sw ~clock ~port ~session_id ~token ~instance_id ~play_client:"tab-1" ()
 
 let http_play_action workspace operation =
   let action = Masc.Play_room.parse_action (`Assoc [
@@ -1373,6 +1373,25 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
     Alcotest.(check (list string)) "the transport still completes Play Leave"
       [] (Play_fixture.member_names workspace);
     assert_http_join_available workspace)
+
+let test_generic_replacement_disconnects_predecessor_once env =
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    let calls = ref 0 in
+    Server_mcp_transport_http.For_testing.with_disconnect_hook
+      (fun _ -> incr calls) (fun () ->
+        let first = Play_fixture.open_observer ~sw ~clock ~port ~session_id ~token ~instance_id () in
+        Alcotest.(check int) "the generic Observer opens" 200 (Play_fixture.await clock first.response);
+        let second = Play_fixture.open_observer ~sw ~clock ~port ~session_id ~token ~instance_id () in
+        Alcotest.(check int) "the generic replacement opens" 200 (Play_fixture.await clock second.response);
+        Play_fixture.await clock first.ended;
+        Alcotest.(check int) "the predecessor hook runs exactly once" 1 !calls;
+        Alcotest.(check (list string)) "generic streams create no Play membership"
+          [] (Play_fixture.member_names workspace);
+        Server_mcp_transport_http.stop_sse_session session_id;
+        Play_fixture.await clock second.ended;
+        Alcotest.(check int) "the current disconnect runs its own hook once" 2 !calls;
+        Alcotest.(check (list string)) "generic disconnect creates no Play membership"
+          [] (Play_fixture.member_names workspace)))
 
 let test_mcp_future_cursor_resets_before_live_delivery env =
   let module Transport = Server_mcp_transport_http in
@@ -1609,6 +1628,7 @@ let () =
         ; case "readiness loss cleans predecessor presence" test_readiness_loss_cleans_predecessor_presence
         ; case "ping renews Play presence" test_ping_scheduler_renews_play_presence
         ; case "transport disconnect finishes Leave before cancellation" test_transport_disconnect_finishes_leave_before_cancellation
+        ; case "generic replacement disconnects predecessor once" test_generic_replacement_disconnects_predecessor_once
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
     ; ( "SSE response"

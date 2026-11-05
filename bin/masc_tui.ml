@@ -39638,6 +39638,12 @@ Use relative paths for resources already held in the package. -->
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- Planning_scroll_offset 0
+                 | Planning_list when Option.is_some state.task_detail_id ->
+                     (* The Task detail is the second detail Work owns, and its
+                        footer says [Left / Esc:back]. Esc closes it the same
+                        way in the arm for Esc above. *)
+                     state.task_detail_id <- None;
+                     reset_task_detail_scroll state
                  | Planning_list -> ())
             | Fusion ->
                 (match state.fusion_mode with

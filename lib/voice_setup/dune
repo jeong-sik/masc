@@ -5,4 +5,9 @@
  (public_name masc.voice_setup)
  (wrapped false)
  (modules voice_setup)
- (libraries masc.runtime masc.runtime_toml_namespace masc.toml_line_editor masc.voice_config))
+ (libraries
+  masc.runtime
+  masc.runtime_toml_namespace
+  masc.toml_line_editor
+  masc.voice_config
+  masc.voice_runtime_overlay))

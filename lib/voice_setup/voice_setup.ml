@@ -17,6 +17,7 @@ type error =
   | Configuration_rejected of string
   | Endpoint_path_unusable of string
   | Standalone_source_active of string
+  | Voice_not_on_endpoint of string
 
 type source =
   | Runtime_toml
@@ -41,11 +42,15 @@ let error_message = function
        nothing was written. Configure voice in that file, or move it into \
        runtime.toml first"
       path
+  | Voice_not_on_endpoint detail ->
+    "a voice this edit names is not one its endpoint has, so nothing was written: "
+    ^ detail
 ;;
 
 exception Revision_changed
 exception Voice_invalid of string
 exception Standalone_active of string
+exception Voice_missing of string
 
 let endpoints_path = function
   | Tts -> voice_table ^ ".tts.endpoints"
@@ -148,16 +153,76 @@ let apply_change contents = function
       ~value:voice
 ;;
 
+(* The names each enabled command speaker can be asked for. say speaks a name
+   it does not have in another voice and exits 0, so only its own list can
+   tell a wrong name from a right one. *)
+let command_voices = function
+  | Some { Voice_config.tts = Some tts; _ } ->
+    List.concat_map
+      (fun (endpoint : Voice_config.endpoint) ->
+        if not endpoint.Voice_config.enabled
+        then []
+        else (
+          match Voice_runtime_overlay.speaker_of_endpoint endpoint with
+          | Voice_runtime_overlay.By_command ->
+            [ endpoint, Voice_config.voices_at_endpoint tts endpoint ]
+          | Voice_runtime_overlay.Over_http
+          | Voice_runtime_overlay.By_mcp_tool
+          | Voice_runtime_overlay.Does_not_speak -> []))
+      tts.Voice_config.endpoints
+  | Some { Voice_config.tts = None; _ } | None -> []
+;;
+
+(* What the edit asks of a command speaker that it was not asked before. A name
+   it already answered to is not checked again, so an edit elsewhere in the
+   section is not refused over a name this edit did not write. The same id
+   under another kind is another speaker with its own list. *)
+let newly_asked ~before ~after =
+  List.filter_map
+    (fun ((endpoint : Voice_config.endpoint), voices) ->
+      let asked_before =
+        match
+          List.find_opt
+            (fun ((earlier : Voice_config.endpoint), _) ->
+              String.equal earlier.Voice_config.id endpoint.Voice_config.id
+              && earlier.Voice_config.kind = endpoint.Voice_config.kind)
+            before
+        with
+        | Some (_, voices) -> voices
+        | None -> []
+      in
+      match List.filter (fun voice -> not (List.mem voice asked_before)) voices with
+      | [] -> None
+      | _ :: _ as voices -> Some (endpoint, voices))
+    after
+;;
+
 (* The edited text has to read back as a voice configuration before it is
    written. Nothing reads [voice] at boot: a section that does not load stays
    quiet until the first speak or transcribe, which is how it once went
    unnoticed for six days. A writer that committed text it had not read back
    would reproduce that. *)
-let checked contents changes =
+let edited contents changes =
   let updated = List.fold_left apply_change contents changes in
   match Voice_config.parse_runtime_toml_text updated with
-  | Ok _ -> updated
   | Error message -> raise (Voice_invalid message)
+  | Ok after -> updated, after
+;;
+
+(* A text that did not load before the edit asked its speakers nothing, so
+   every name the edited text asks of them is checked. *)
+let require_command_voices ~check_command_voices contents after =
+  let before =
+    match Voice_config.parse_runtime_toml_text contents with
+    | Ok config -> command_voices config
+    | Error _ -> []
+  in
+  List.iter
+    (fun (endpoint, voices) ->
+      match check_command_voices endpoint ~voices with
+      | Ok () -> ()
+      | Error reason -> raise (Voice_missing reason))
+    (newly_asked ~before ~after:(command_voices after))
 ;;
 
 let revision_of (observation : Runtime.config_observation) =
@@ -198,7 +263,9 @@ let refuse_over_standalone ~standalone_path contents =
   | Ok _ | Error _ -> ()
 ;;
 
-let preview ~runtime_config_path ~standalone_path ~expected_revision changes =
+let preview
+    ~check_command_voices ~runtime_config_path ~standalone_path ~expected_revision changes
+  =
   match Runtime.load_config_observation ~runtime_config_path () with
   | Error detail -> Error (Configuration_unavailable detail)
   | Ok observation ->
@@ -207,16 +274,19 @@ let preview ~runtime_config_path ~standalone_path ~expected_revision changes =
     else (
       match
         refuse_over_standalone ~standalone_path observation.source_text;
-        checked observation.source_text changes
+        let updated, after = edited observation.source_text changes in
+        require_command_voices ~check_command_voices observation.source_text after;
+        updated
       with
       | updated -> Ok updated
       | exception Standalone_active path -> Error (Standalone_source_active path)
       | exception Voice_invalid message -> Error (Voice_section_invalid message)
+      | exception Voice_missing reason -> Error (Voice_not_on_endpoint reason)
       | exception Entry_refused error ->
         Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error)))
 ;;
 
-let apply ~runtime_config_path ~standalone_path ~expected_revision changes =
+let commit ~runtime_config_path ~standalone_path ~expected_revision changes =
   (* The revision is checked again here, inside edit_config_text's lock, because
      preview read it outside one. *)
   let edit contents =
@@ -224,7 +294,7 @@ let apply ~runtime_config_path ~standalone_path ~expected_revision changes =
     if not (String.equal (revision_of observation) expected_revision)
     then raise Revision_changed;
     refuse_over_standalone ~standalone_path contents;
-    checked contents changes
+    fst (edited contents changes)
   in
   match Runtime.edit_config_text ~runtime_config_path edit with
   (* The revision this write produced, out of the commit itself. Reading it
@@ -239,6 +309,26 @@ let apply ~runtime_config_path ~standalone_path ~expected_revision changes =
   | exception Voice_invalid message -> Error (Voice_section_invalid message)
   | exception Entry_refused error ->
     Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error))
+;;
+
+let apply
+    ~check_command_voices ~runtime_config_path ~standalone_path ~expected_revision changes
+  =
+  (* The voice names are asked for here, outside the lock: listing say's voices
+     takes about 0.6 seconds, and the same lock guards the server's keeper
+     assignments and the TUI's own keys. The revision is a digest of the text,
+     so the locked edit below, which commits only at [expected_revision],
+     commits the text whose names were checked. *)
+  match
+    preview
+      ~check_command_voices
+      ~runtime_config_path
+      ~standalone_path
+      ~expected_revision
+      changes
+  with
+  | Error error -> Error error
+  | Ok _ -> commit ~runtime_config_path ~standalone_path ~expected_revision changes
 ;;
 
 type voice_placement =

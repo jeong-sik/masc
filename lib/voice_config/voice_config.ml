@@ -894,6 +894,20 @@ let voice_for_agent_at_endpoint (tts : tts_config) (endpoint : endpoint) agent_i
   | None, None -> voice_for_agent tts agent_id
 ;;
 
+let voices_at_endpoint (tts : tts_config) (endpoint : endpoint) =
+  let unmapped =
+    match endpoint.default_voice with
+    | Some voice -> voice
+    | None -> tts.default_voice
+  in
+  let mapped =
+    List.map
+      (fun (agent_id, _) -> voice_for_agent_at_endpoint tts endpoint agent_id)
+      (endpoint.agent_voices @ tts.agent_voices)
+  in
+  Json_util.dedupe_keep_order (unmapped :: mapped)
+;;
+
 let tuning_for_agent (tts : tts_config) agent_id =
   match List.assoc_opt agent_id tts.agent_voice_settings with
   | Some tuning -> tuning

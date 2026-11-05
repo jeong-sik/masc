@@ -195,8 +195,10 @@ class MemoryPushTest(unittest.TestCase):
             step("wait", lambda: memory.response_count("reconnect", "health") >= 1,
                  "observer replacement did not revalidate Memory")
 
-            memory.set_phase("hidden")
+            memory.set_phase("leaving")
             step("keys", "\x1b")
+            step("drain", 0.5)
+            memory.set_phase("hidden")
             memory.events.put(memory_dataset())
             step("drain", 0.5)
             self.assertEqual(memory.count("hidden", "health"), 0,

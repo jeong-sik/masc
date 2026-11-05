@@ -910,6 +910,8 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
   let workspace = Masc_test_deps.setup_test_workspace () in
   Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace) (fun () ->
     let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+    let auth = Masc_test_deps.make_sse_auth workspace "machine-observer" in
+    let token = Option.get auth.Masc.Sse.token in
     let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
       | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
     let admit ~base_path:_ _request = Ok () in
@@ -935,7 +937,8 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
         let before = Masc.Sse.client_count () in
         let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
         match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
-                ~url ~headers:[ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-machine-test" ] () with
+                ~url ~headers:[ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-machine-test"
+                              ; "Authorization", "Bearer " ^ token ] () with
         | Error detail -> Alcotest.failf "MCP request failed: %s" detail
         | Ok response ->
           Alcotest.(check int) "machine query outcome" expected_status response.status;

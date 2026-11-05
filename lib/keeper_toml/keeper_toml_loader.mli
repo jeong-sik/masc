@@ -7,38 +7,7 @@
     The conversion from TOML to keeper_profile_defaults is done in
     {!Keeper_types_profile} to avoid circular dependencies. *)
 
-(** A single parsed TOML value. *)
-type toml_value =
-  | Toml_string of string
-  | Toml_int of int
-  | Toml_float of float
-  | Toml_bool of bool
-  | Toml_string_array of string list
-  | Toml_array of toml_value list
-  | Toml_table of (string * toml_value) list
-  | Toml_inline_table of (string * toml_value) list
-  | Toml_table_array of toml_value list
-  | Toml_offset_datetime of string
-  | Toml_local_datetime of string
-  | Toml_local_date of string
-  | Toml_local_time of string
-
-(** A parsed TOML document: mapping from dotted key (e.g. ["keeper.instructions"])
-    to value. Tables are flattened with dot separators. *)
-type toml_doc = (string * toml_value) list
-
-val normalize_source : string -> string
-(** Normalize CRLF syntax and Otoml's basic-string escape handling. *)
-
-val normalize_editor_source : string -> (string, string) result
-(** Normalize editor input and reject physical newlines in single-line strings. *)
-
-val of_otoml : Otoml.t -> (toml_doc, string) result
-(** Project an already parsed normalized TOML table; refuse a non-table root. *)
-
-(** Parse a TOML 1.0 string with Otoml into a flat canonical key-value list.
-    Returns [Error msg] on syntax errors. *)
-val parse_toml : string -> (toml_doc, string) result
+include module type of struct include Keeper_toml_parser end
 
 (** {1 Accessor helpers} *)
 

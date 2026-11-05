@@ -11,6 +11,7 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
     | Masc.Workspace_dataset_event.Machine_live _
     | Masc.Workspace_dataset_event.Browser_observation _
     | Masc.Workspace_dataset_event.Memory_health _
+    | Masc.Workspace_dataset_event.Play_room _
     | Masc.Workspace_dataset_event.Lane_addons _) -> Ignore
   | (Lanes | Overview | Addons _), (Masc.Workspace_dataset_event.Repositories
     | Masc.Workspace_dataset_event.Verification_requests

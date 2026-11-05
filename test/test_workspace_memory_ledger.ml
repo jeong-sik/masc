@@ -398,6 +398,41 @@ let test_same_claim_in_two_files_is_two_facts () =
     [ ordinary_ref "reviewer" claim; source_ref "writer" "notes/a.md" claim ]
     (List.map fst (Ledger.dispositions result.ledger))
 
+let test_fact_refs_are_ordered_by_keeper_store_path_then_claim () =
+  let ordinary keeper_id claim_sha256 = Ledger.Ordinary { keeper_id; claim_sha256 } in
+  let bound keeper_id path claim_sha256 =
+    Ledger.Source_bound { keeper_id; path; claim_sha256 }
+  in
+  let in_order =
+    [ ordinary "a" "1"
+    ; ordinary "a" "2"
+    ; bound "a" "" "1"
+    ; bound "a" "x.md" "1"
+    ; bound "a" "x.md" "2"
+    ; bound "a" "y.md" "1"
+    ; ordinary "b" "1"
+    ; bound "b" "x.md" "1"
+    ]
+  in
+  List.iteri
+    (fun i left ->
+       List.iteri
+         (fun j right ->
+            Alcotest.(check int)
+              (Printf.sprintf "ref %d against ref %d" i j)
+              (Int.compare i j)
+              (Int.compare (Ledger.compare_fact_ref left right) 0))
+         in_order)
+    in_order;
+  let map =
+    List.fold_left
+      (fun map fact -> Ledger.Fact_map.add fact () map)
+      Ledger.Fact_map.empty
+      (List.rev in_order)
+  in
+  Alcotest.(check (list fact_ref)) "a map lists facts in that order" in_order
+    (List.map fst (Ledger.Fact_map.bindings map))
+
 let pending keeper_id claim : Ledger.pending_fact =
   { fact = ordinary_ref keeper_id claim; claim }
 
@@ -460,7 +495,9 @@ let () =
       , [ Alcotest.test_case "ordinary identity is the store's memory_id" `Quick
             test_ordinary_identity_is_the_memory_id
         ; Alcotest.test_case "same claim in two files is two facts" `Quick
-            test_same_claim_in_two_files_is_two_facts ] )
+            test_same_claim_in_two_files_is_two_facts
+        ; Alcotest.test_case "fact refs are ordered by Keeper, store, path, then claim" `Quick
+            test_fact_refs_are_ordered_by_keeper_store_path_then_claim ] )
     ; ( "codec"
       , [ Alcotest.test_case "round trip is canonical" `Quick test_codec_round_trip_is_canonical
         ; Alcotest.test_case "malformed ledgers are refused" `Quick test_codec_refuses_malformed_ledgers

@@ -28,6 +28,15 @@ val fact_ref_of_json : Yojson.Safe.t -> (fact_ref, string) result
 (** Strict source identity codec shared by ledger rows and retained Curator
     batches. Unknown, missing and repeated fields are rejected. *)
 
+val compare_fact_ref : fact_ref -> fact_ref -> int
+(** Total order: Keeper, then store (ordinary before source-bound), then path,
+    then claim hash. Two refs compare equal only when they are the same fact,
+    so an ordinary ref and a source-bound ref of one Keeper and claim stay
+    distinct. {!dispositions} lists facts in this order. *)
+
+module Fact_map : Map.S with type key = fact_ref
+(** Maps keyed by {!compare_fact_ref}. *)
+
 type disposition =
   | Claim_member of string  (** a [claim_id] in the ledger *)
   | Conflict_member of string  (** a [conflict_id] in the ledger *)

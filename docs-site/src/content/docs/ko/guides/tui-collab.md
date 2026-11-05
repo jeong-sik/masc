@@ -22,9 +22,10 @@ Collab 허브는 `masc-tui`에 내장되어 있으며 터미널에서 바로 접
 - **DOS 플레이 초대 (`n` / `/play invite`)**: Collab에서 `n`을 누르거나 채팅창에서 `/play invite <이름> <시간>`을 실행해 새 DOS 플레이어 초대 링크를 발급하고, `x`로 회수하며, `r`로 목록을 새로고침합니다. 초대받은 게스트나 외부 AI 에이전트는 브라우저의 `/play#<token>` 또는 MCP 엔드포인트 `/mcp/play`(안내 문서는 `/play/agent.md`)를 통해 공유 DOS 머신을 함께 보고 조작할 수 있습니다.
 
 ### 주요 코드 및 모듈 좌표
-- `bin/masc_tui_collab.ml` / `bin/masc_tui_collab.mli`: Collab 허브 상태 머신 및 레이아웃 렌더링.
-- `bin/masc_tui_keys.ml`: 탐색 키 바인딩(`&`, `g`, `m`, `d`, `F5`, `F4`, `Tab`).
-- `bin/masc_tui_types.ml`: `Collab_focus` (`Spectator` | `Conversation` | `PlayInvites`).
+- `bin/masc_tui_collab.ml` / `bin/masc_tui_collab.mli`: Collab 허브 상태 머신(`m`, `d`, `g`, `n`, `x`, `r`, `u` 키) 및 레이아웃 렌더링.
+- `bin/masc_tui_keys.ml`: Collab 을 여는 `&` 항목을 포함한 키 도움말.
+- `bin/masc_tui_msx.ml`: 공유 머신 화면. 화면이 열려 있는 동안의 `F5`(조작 전환), `F4`(MSX/DOS 전환), `Tab`(채팅 입력 전환) 처리는 `bin/masc_tui.ml`.
+- `bin/masc_tui_play_room.ml` / `bin/masc_tui_play_room.mli`: 공용 관전 채팅 상태(초안·입력 전환·전송).
 - `bin/masc_tui_play_pending.ml`: 전송 전 초대 변경 의도를 영속 기록하는 저널(`.masc/tui-play-pending.jsonl`).
 
 ---

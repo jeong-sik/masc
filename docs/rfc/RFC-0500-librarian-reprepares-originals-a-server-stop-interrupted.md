@@ -112,17 +112,26 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 
 "Complete discovery precedes every local repair" 는 그대로다. walk 는 part 마다 `discover` 로 전체를 검증한 뒤 `evaluate` 한다. 옮기기는 그 뒤의 수리다.
 
-### 3.3 2층: history 는 끊긴 원본을 종단 거절로 다룬다
+### 3.3 2층: history 는 끊긴 원본을 끝난 원본으로 분류한다
 
-- `Final (Refusal (Exact.Outcome_unknown, record))` 에서 §3.1 을 만족하면 `Refused` 를 돌려준다. 그 밖의 `Outcome_unknown` 은 지금처럼 `Pending (Worker_unknown, _)` 이다.
-- 그다음은 기존 경로다. `librarian-history-settles-finished-originals` §3.1 이 원본을 옮기고, 다음 패스가 같은 범위를 새 원본으로 잡는다.
-- 2층 PR 은 replacement intent, gate, predecessor 사슬과 겹치는 경우를 확인한다. 1층이 그것을 정하지 않는다.
+- history 에서 `Outcome_unknown` 을 끝나지 않은 원본으로 보는 곳은 둘이다.
+  - inventory 검증 `Commit.validate_with` 는 `Rejected {stage = Execution}` 의 `Outcome_unknown` 을 `Unfinished` 로 분류한다(`keeper_librarian_durable_commit.ml:247`).
+  - `Owner.resume` 은 `Pending (Worker_unknown, _)` 을 돌려준다(`keeper_librarian_durable_owner.ml:179`).
+- 2층은 검증에서 §3.1 을 만족하는 원본을 `Settled` 로 분류한다. `Cut`·`Raised` 는 지금처럼 `Unfinished` 다.
+  - 그러면 기존 `finished_chains` 가 그 원본을 옮긴다(`librarian-history-settles-finished-originals` §3.1). 같은 패스가 같은 범위를 새 원본으로 잡는다.
+- `Owner.resume` 은 `Refused` 를 돌려주지 않는다.
+  - `Refused` 를 받은 패스는 `Consumer.mark_range_failed` 를 부른다(`keeper_librarian_durable_execution.ml:316`). 그 뒤로는 첫 cut point 까지만 읽는다(`keeper_librarian_durable_consumer.ml:1675`).
+  - 끊긴 까닭은 범위 크기와 상관없다. 그래서 끊긴 원본이 읽기를 좁히면 안 된다.
+- 대신 `Owner.resume` 이 끊긴 거절을 처음 남긴 패스는 `wake` 를 부르고 `Pending` 을 돌려준다. 그 거절 뒤에는 호스트 사건이 없어서, 부르지 않으면 다음 패스가 다른 사건을 기다린다.
+- replacement 사슬: 끊긴 원본이 `Conflicted` 부모의 replacement 자식이면, 부모도 `Settled` 라 `finished_chains` 가 잎부터 둘을 같이 옮긴다. 부모는 source 를 ACK 하지 않았으므로 다음 새 원본이 그 범위를 다시 읽는다. 다른 실행 단계 거절(`Invalid_output` 등)을 받은 자식과 같은 경로다.
+- gate: 끊긴 원본에는 gate 가 없다. gate 의 시작 의도는 `Judged` 에만 붙는다(§3.2).
+- floor step 도 `Outcome_unknown` 을 `Pending` 으로 둔다(`keeper_librarian_floor_step_owner.ml:50`). 11-06 운영 기록에 끊긴 floor step 은 0개다. 이 RFC 는 floor step 을 바꾸지 않는다.
 
 ### 3.4 설계 문서를 고친다
 
 `docs/design/librarian-addon-execution.md:54` 의 문장을 이렇게 바꾼다.
 
-> An unknown sent outcome does not authorize another model call, except when the host retained `interrupted`: the process that started the attempt stopped before it ended. That original settles and the next pass prepares it again.
+> An unknown sent outcome does not authorize another model call, except when the host retained `interrupted`: the process that started the attempt stopped before it ended. That original settles. Admission evaluates its part again, and history reads its range again in the next pass (RFC-0500).
 
 ### 3.5 되풀이
 
@@ -152,7 +161,7 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 2. 1층: admission. §3.1 의 읽기, §3.2 의 옮기기, 대기 이유의 원인.
 3. 2층: history. §3.3.
 
-설계 문서 문장(§3.4)은 1층 PR 이 고친다.
+설계 문서 문장(§3.4)은 1층 PR 이 고치고, 2층 PR 이 history 몫을 더한다.
 
 ## 6. 검증
 
@@ -160,7 +169,7 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 
 - admission: 호스트 Exact 기록에 다른 프로세스가 남긴 시작 표시(`{"started": <다른 incarnation>}`)를 둔다. 서버가 호출 중에 멈춘 뒤 남는 모양이다. `run_queue` 를 돌리면 그 실행이 settled 위치로 가고, 같은 part 에 새 요청 ID 의 실행이 생겨 후보가 커밋된다.
 - admission: 이 프로세스가 끊은 실행(`cut`)은 그대로 남는다. settled 위치로 가지 않고 provider 를 다시 부르지 않는다.
-- history(2층): `interrupted` 원본이 종단 거절로 옮겨지고, 다음 패스가 같은 범위를 새 원본으로 잡는다.
+- history(2층): 다른 incarnation 의 시작 표시를 둔 원본이 settled 위치로 가고, 같은 범위의 새 원본이 커밋된다. 끊긴 거절을 남긴 패스 뒤에는 worker 전달이 없으므로, 시험은 그 패스의 `wake` 로만 커밋까지 간다. `cut` 은 기존 시험(`test_purge_joins_unknown_then_worker_restart_does_not_resubmit`)이 그대로 막힌다고 확인한다.
 
 ### 6.2 운영
 

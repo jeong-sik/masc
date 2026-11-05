@@ -28,7 +28,7 @@
 
 (** {1 Tree node record} *)
 
-type tree_node = {
+type tree_node = Dashboard_goals_types.tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
   tasks : Masc_domain.task list;
@@ -44,7 +44,8 @@ type tree_node = {
     {!build_forest}.  Concrete record because
     [dashboard_http_keeper] reaches the [.goal] /
     [.linked_keeper_names] / [.children] fields directly
-    when assembling the per-keeper goal block. *)
+    when assembling the per-keeper goal block. The same type as
+    {!Dashboard_goals_types.tree_node}. *)
 
 (** {1 Flat goal projection} *)
 

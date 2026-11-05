@@ -136,6 +136,27 @@ let installs_paths_that_outlive_the_source_and_keeps_the_token fixture =
 let test_installs_paths_that_outlive_the_source_and_keeps_the_token () =
   with_fixture installs_paths_that_outlive_the_source_and_keeps_the_token
 
+(* A macOS release host finds its libraries at [@loader_path/lib], so the copy
+   has the source's [lib] files beside it and keeps them once the source is
+   gone. A host with no [lib] beside it gets none. *)
+let test_the_libraries_beside_the_host_are_copied_with_it () =
+  with_fixture (fun fixture ->
+    let plain = install_ok (host_only fixture) in
+    check bool "a host with no lib directory gets none" false
+      (exists (Filename.concat (Filename.dirname plain.S.host) "lib"));
+    let source_lib = Filename.concat fixture.root "lib" in
+    Unix.mkdir source_lib 0o755;
+    write (Filename.concat source_lib "libssl.3.dylib") "ssl bytes";
+    write (Filename.concat source_lib "libzstd.1.dylib") "zstd bytes";
+    Unix.mkdir (Filename.concat source_lib "not-a-library") 0o755;
+    let installed = install_ok (host_only fixture) in
+    let copied name = Filename.concat (Filename.concat (Filename.dirname installed.S.host) "lib") name in
+    Sys.remove (Filename.concat source_lib "libssl.3.dylib");
+    check string "libssl beside the copy" "ssl bytes" (read (copied "libssl.3.dylib"));
+    check string "libzstd beside the copy" "zstd bytes" (read (copied "libzstd.1.dylib"));
+    check bool "a directory in lib is not a library" false (exists (copied "not-a-library")))
+;;
+
 (* Every character a shell treats specially, in the workspace's own name. *)
 let test_a_hostile_workspace_name_reaches_the_host_exactly () =
   with_fixture_named "w $HOME `id` \"q\" \\ back\nnew\xc3\xa9 ' end"
@@ -528,6 +549,8 @@ let () =
             test_firefox_manifest_directory_follows_the_host_os
         ; test_case "a hostile workspace name reaches the host exactly" `Quick
             test_a_hostile_workspace_name_reaches_the_host_exactly
+        ; test_case "the libraries beside the host are copied with it" `Quick
+            test_the_libraries_beside_the_host_are_copied_with_it
         ; test_case "a lane token is sixteen visible characters" `Quick
             test_a_lane_token_is_sixteen_visible_characters_around_which_space_is_trimmed
         ; test_case "a token the host would refuse is refused first" `Quick

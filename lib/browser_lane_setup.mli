@@ -89,7 +89,10 @@ val install : request -> (installed, error) result
     written: the request, the host to copy, the extension this build carries,
     the token, and each directory (it must exist as a directory and be
     writable). Then it writes, in this order: the token (once, mode [0600],
-    published whole and never replaced), the host, the launcher, the extension
+    published whole and never replaced), the files of the [lib] directory
+    beside the source host into [lib] beside the copy (a macOS release host
+    loads its libraries from there; a host with no such directory has none),
+    the host, the launcher, the extension
     files and the manifest when the extension route is asked for, and last
     [launch.json]. [launch.json] is what makes
     the launcher count as installed, so an install that stops part way reads

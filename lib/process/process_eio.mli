@@ -292,7 +292,7 @@ type output_destination =
           the output is not bounded by any capture cap. *)
 
 type input_origin =
-  | Inherited
+  | Plumbed
       (** the pipe from the stage before; a lone process, or the first stage,
           reads an input already at its end and never this process's stdin *)
   | From_string of string  (** feed the child a string this process holds *)
@@ -348,7 +348,7 @@ type pipeline_stage = {
 }
 (** One process stage in a native pipeline.
 
-    [Inherited] and [Captured] mean the stage takes the pipeline's own
+    [Plumbed] and [Captured] mean the stage takes the pipeline's own
     plumbing: the pipe from the stage before it, the pipe to the stage after
     it, the stderr this runtime collects. A file replaces that plumbing for
     one stream, which is how a shell reads [a > f | b] -- b's stdin is still

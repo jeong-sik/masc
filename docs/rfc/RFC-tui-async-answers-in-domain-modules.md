@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: ["#48685"]
+implementation_prs: ["#48685", "#48721"]
 ---
 
 # RFC: TUI 비동기 답은 그 답의 묶음 모듈이 받아서 반영한다
@@ -26,7 +26,8 @@ TUI 가 서버에서 받은 답(`async_msg`)은 `bin/masc_tui.ml` 의
 이 RFC 는 묶음 모듈이 세 가지를 함께 갖게 한다.
 
 1. 자기 답 타입 `msg`
-2. 답을 상태에 반영하는 함수 `apply`. IO 는 하지 않고, 남은 할 일을 값으로 돌려준다.
+2. 답을 상태에 반영하는 함수 `apply`. 터미널·네트워크 IO 는 하지 않고, 남은 할 일을 값으로
+   돌려준다.
 3. 프로토콜과 루프가 답을 어떻게 다룰지 정하는 kind(`answer_kind`). 읽기 답인가, 입력을
    기다려야 하는가 같은 질문은 답마다가 아니라 kind 로 정한다.
 
@@ -171,6 +172,9 @@ val apply : Masc_tui_types.state -> msg -> answer_followup
   Masc_tui_code_results.msg` 로 가리킨다.
 - `apply` 의 본문은 지금 `apply_async_message_body` 의 Code 갈래 본문이다. 터미널·네트워크
   IO 는 하지 않는다. 할 일이 남으면 `answer_followup` 값으로 돌려준다.
+- 로그는 `apply` 안에서 남긴다. 로그를 남기는 데는 `masc_tui.ml` 이 필요 없다. 할 일 값으로
+  빼면 한가운데는 받은 문자열을 찍기만 한다. 254갈래 중 15갈래가 로그를 남긴다. 그중 묶음
+  모듈로 옮길 갈래는 Runtime 4개, Keeper 2개, Fleet 1개다.
 - 프로토콜과 루프는 Code 답에 다섯을 묻는다. 읽기인가, 입력을 기다리는가, 작업 영수증을
   싣는가, 작업 공간이 바뀌면 치울 것이 있는가, 작업 공간 도장을 찍는가. 묶음 모듈은 답마다
   kind 를 정하고, 묻는 쪽은 kind 를 빠짐없이 match 한다.
@@ -289,12 +293,15 @@ Github 의 `deliver` 를 받는다.
 
 ## 4. 층 계획
 
-층마다 gh stack 의 작은 PR 하나이고, 묶음 하나(얇은 묶음은 서너 개)를 끝까지 옮긴다.
+층마다 gh stack 의 작은 PR 하나이고, 묶음 하나를 끝까지 옮긴다. 얇은 묶음도 하나씩 옮긴다.
+묶음 모듈을 새로 만드는 층은 파일 10개를 바꾼다. 새 파일 다섯(묶음 모듈 `.ml`·`.mli`, 시험,
+시험 stanza, changelog)과 고치는 파일 다섯(`bin/dune`, 프로토콜 `.ml`·`.mli`,
+`bin/masc_tui.ml`, `test/dune`)이다. 묶음 둘을 한 층에 넣으면 14개다.
 
 | 층 | 하는 일 | 끝난 기준 |
 |---|---|---|
 | L1(#48685) | Code 시범. `code_msg`·`apply`·`answer_kind` 를 `Masc_tui_code_results` 로 옮기고, `deliver` 를 `msg -> unit` 으로 바꾼다 | Code 를 반영하는 갈래 11 → 1, Code 생성자를 나열하던 분류 자리 5곳(프로토콜 함수 넷, 받지 않는 답의 갈래) → 0, `masc_tui_code_requests` 의 감싸기 13 → 0, 시험이 생성자마다 `apply` 를 부른다 |
-| L2~ | 나머지 얇은 묶음 16개를 서너 개씩 | L1 과 같은 기준 |
+| L2(#48721)~ | 나머지 얇은 묶음 16개. L2 는 Context | L1 과 같은 기준 |
 | Ls | 1.3 의 공용 함수 13개를 `masc_tui.ml` 아래 라이브러리로 내리거나 할 일 값으로 바꾼다 | 두꺼운 묶음이 그 함수를 모듈 이름 없이 부르지 않는다 |
 | Lt | 두꺼운 묶음(Runtime, Lane, Voice, Board, Observer 등) | L1 과 같은 기준 |
 | 마지막 | Keeper(51갈래, 1,579줄, `masc_tui.ml` 함수 62개) | L1 과 같은 기준 |
@@ -319,7 +326,8 @@ Github 의 `deliver` 를 받는다.
 - 프로토콜이 묶음 모듈을 보게 된다. Code 는 반영 모듈에 둔다(L1). `masc_tui_code_results`
   가 받는 라이브러리 8개는 프로토콜이 이미 받는다. 그래서 프로토콜의 의존은 이 라이브러리
   하나만 는다. 다른 묶음도 같은 방법으로 잰다. 묶음 모듈이 프로토콜이 받지 않는 라이브러리를
-  받으면 그때 타입만 담은 모듈을 검토한다.
+  받으면 그때 타입만 담은 모듈을 검토한다. 여기서 받는다는 것은 링크된다는 뜻이다. stanza 에
+  직접 적지 않았어도 다른 라이브러리를 거쳐 링크되면 받는 것이다.
 - 묶음 모듈은 dune 라이브러리여야 한다. 프로토콜이 라이브러리(`masc_tui_async_protocol`)라서
   `masc_tui` 실행 파일의 모듈을 볼 수 없다. `masc_tui_code_results` 는 이미 라이브러리다.
   `masc_tui_identity_requests` 는 실행 파일의 모듈이라 Identity 의 `msg` 를 둘 수 없다.
@@ -327,6 +335,8 @@ Github 의 `deliver` 를 받는다.
   그 묶음 라이브러리를 직접 적어야 한다. L1 은 시험 stanza 에 더했다.
 - 옮기는 동안 두 모양이 섞인다. 층마다 묶음 하나를 끝까지 옮겨서, 반쯤 옮긴 묶음은 남기지
   않는다.
+- 층이 하나씩이라 스택이 높아진다. main 이 `bin/masc_tui.ml` 을 바꾸면 위 층마다 충돌을 다시
+  푼다. 리뷰를 마친 층까지 먼저 병합해서 높이를 줄인다.
 
 ## 7. 열린 질문
 
@@ -351,6 +361,8 @@ Github 의 `deliver` 를 받는다.
   `state.f.g <- e` 를 "직접 바꾸는 필드 `f`"로 센다.
 - 감싸는 곳은 묶음 생성자(`<묶음>_msg`)를 만드는 식과 match 하는 패턴을 센다. 만드는 곳
   369곳 중 274곳, match 779곳 중 339곳이 `bin/masc_tui.ml` 이다. 프로토콜은 match 405곳이다.
+- 로그 갈래: 본문에 `Log.<모듈>.warn`·`info`·`debug`·`err`·`error` 를 부르는 줄이 하나라도
+  있는 갈래를 센다.
 - 한계: 다른 모듈 함수 안에서 바꾸는 필드는 세지 않는다. 갈래 안에서 같은 이름을 다시 묶으면
   그 이름은 세지 않는다. 측정 도구는 저장소에 넣지 않았다.
 

@@ -88,7 +88,7 @@ TUI 의 Memory 화면은 2초마다 fleet 전체 Memory health(`GET /api/v1/dash
 | L1 | 서버: `GET /api/v1/dashboard/keeper-memory-health?keeper=<k>`. 합계·경보 요약 계산을 공용 모듈로 옮기고, fleet 응답도 그 모듈을 쓴다 | main |
 | L2 | wire 와 TUI: dataset `Memory_health { keeper }`. 알림이 오면 그 Keeper 행만 읽고 합친다. Memory 입력 창도 선택한 Keeper 알림에 읽는다. Browser lane 에서 돌아오면 그 화면에 도착한 것으로 읽는다. 2초 갈래는 아직 둔다 | L1, RFC-0480 2층(#48489, subject 디코더) |
 | L3a | 서버: 행이 읽는 파일(입력 1~6·10·11)의 쓰기 알림. 공용 통로, `C`·`R` → `base_path` 묶음, 알림 전 fleet 캐시 비우기 | L2 |
-| L3b | 서버: Keeper 가 fleet 에 들어오고 나가는 쓰기(입력 13 의 생성·삭제, Keeper 전체 purge)와 보관 기간 정리 알림 | L3a |
+| L3b | 서버: Keeper 가 fleet 에 들어오고 나가는 쓰기(입력 13 의 생성·삭제, Keeper 전체 purge), 보관 기간 정리, Keeper meta 가 생기거나 없어지거나 trace 가 바뀌는 쓰기(입력 9) 알림 | L3a |
 | L4 | 서버: 메모리 안 입력 7·8·12 의 observer. TUI: Memory 2초 갈래를 지운다 | L3b |
 
 L4 가 2초 갈래를 지운다. 그 전까지는 2초 갈래가 남아 있어 중간 층이 main 에 들어가도 화면이 멈추지 않는다.

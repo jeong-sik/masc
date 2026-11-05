@@ -93,7 +93,10 @@ let test_first_scan_records_candidates_and_waits_a_day () =
       Alcotest.(check int) "two blobs" 2 report.blobs;
       Alcotest.(check int) "one candidate" 1 report.candidates;
       Alcotest.(check int) "nothing deletable without a previous record" 0 report.deletable;
-      Alcotest.(check bool) "no previous record" true (Option.is_none report.previous);
+      (match report.previous with
+       | S.No_previous_record -> ()
+       | S.Previous_record_invalid _ | S.Compared_with_previous _ ->
+         Alcotest.fail "the first scan has no previous record");
       Alcotest.(check bool) "record written" true (Sys.file_exists (S.record_path ~base_path));
       Alcotest.(check bool) "candidate still readable" true (fetch_exists store dead);
       let opened = report.scan_started_at in
@@ -150,8 +153,9 @@ let test_previous_deletable_now_live_is_classified () =
       Alcotest.(check bool) "read" true (fetch_exists store read_again);
       let third = observe_ok ~base_path in
       match third.previous with
-      | None -> Alcotest.fail "the third scan has a previous record"
-      | Some previous ->
+      | S.No_previous_record | S.Previous_record_invalid _ ->
+        Alcotest.fail "the third scan compares with the second"
+      | S.Compared_with_previous previous ->
         Alcotest.(check int) "previous deletable" 3 previous.previous_deletable;
         Alcotest.(check int) "one of them read" 1 previous.previous_deletable_read;
         Alcotest.(check int) "put again: the file would be written back" 1
@@ -164,20 +168,45 @@ let test_previous_deletable_now_live_is_classified () =
         Alcotest.(check bool) "the record names the reference left without a file" true
           (List.mem ("u " ^ left_alone.sha256) (String.split_on_char '\n' record)))
 
+let test_invalid_record_is_replaced_and_compares_nothing () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let stale = put store "output older than an invalid record" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let _first = observe_ok ~base_path in
+      Fs_compat.save_file (S.record_path ~base_path) "not a candidate record\n";
+      let replaced = observe_ok ~base_path in
+      (match replaced.previous with
+       | S.Previous_record_invalid { line; detail = _ } ->
+         Alcotest.(check int) "the header line is the invalid one" 1 line
+       | S.No_previous_record | S.Compared_with_previous _ ->
+         Alcotest.fail "an invalid record is reported as invalid");
+      Alcotest.(check int) "nothing deletable without a comparison" 0 replaced.deletable;
+      let next = observe_ok ~base_path in
+      match next.previous with
+      | S.Compared_with_previous _ ->
+        Alcotest.(check int) "the replaced record counts as the previous scan" 1 next.deletable
+      | S.No_previous_record | S.Previous_record_invalid _ ->
+        Alcotest.fail "the scan after a replacement compares with it")
+
 let test_failed_scan_keeps_the_marks () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
       forget_marks ();
       let marked = put store "output marked before a failed scan" in
       let _first = observe_ok ~base_path in
-      Fs_compat.save_file (S.record_path ~base_path) "not a candidate record\n";
+      (* A directory where the record belongs cannot be read or replaced. *)
+      let record = S.record_path ~base_path in
+      Sys.remove record;
+      Unix.mkdir record 0o755;
       (match S.observe ~base_path ~board_posts_file with
-       | Error (S.Record_invalid _) -> ()
+       | Error (S.Record_unreadable _) -> ()
        | Error
-           (( S.Scan_failed _ | S.Listing_failed _ | S.Record_unreadable _
-            | S.Record_write_failed _ | S.Marker_failed _ ) as error) ->
-         Alcotest.failf "expected an invalid record: %s" (S.error_to_string error)
-       | Ok _ -> Alcotest.fail "an invalid record cannot be compared");
+           (( S.Scan_failed _ | S.Listing_failed _ | S.Record_write_failed _
+            | S.Marker_failed _ ) as error) ->
+         Alcotest.failf "expected an unreadable record: %s" (S.error_to_string error)
+       | Ok _ -> Alcotest.fail "a directory is not a record");
       Alcotest.(check bool) "the mark survives the failed scan" true
         (Option.is_some (B.touch_of (B.observe_touches ()) ~sha256:marked.sha256)))
 
@@ -190,6 +219,8 @@ let () =
             test_second_scan_leaves_out_marked_and_rewritten_blobs
         ; Alcotest.test_case "previous deletable now live is classified" `Quick
             test_previous_deletable_now_live_is_classified
+        ; Alcotest.test_case "invalid record is replaced and compares nothing" `Quick
+            test_invalid_record_is_replaced_and_compares_nothing
         ; Alcotest.test_case "failed scan keeps the marks" `Quick
             test_failed_scan_keeps_the_marks
         ] )

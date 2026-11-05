@@ -321,4 +321,6 @@ val blob_status : t -> sha256:string -> blob_status
 (** [lstat] of the blob file, without following a link. [modified_at] is the
     file's mtime: a first [put] of an address in a process and every
     [put_durable] write the file again, so a blob another process wrote after
-    some instant has an mtime after it. An invalid digest is [Stat_failed]. *)
+    some instant has an mtime after it. An invalid digest is [Stat_failed].
+    It checks no directory ownership and is only an observation: a caller that
+    removes a blob goes through {!delete}, which checks the owned path. *)

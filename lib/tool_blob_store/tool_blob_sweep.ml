@@ -12,6 +12,14 @@ type previous_comparison =
   ; now_live : previous_now_live
   }
 
+type previous =
+  | No_previous_record
+  | Previous_record_invalid of
+      { line : int
+      ; detail : string
+      }
+  | Compared_with_previous of previous_comparison
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -21,7 +29,7 @@ type report =
   ; deletable : int
   ; deletable_bytes : int
   ; unstatable : int
-  ; previous : previous_comparison option
+  ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
 
@@ -30,11 +38,6 @@ type error =
   | Listing_failed of Tool_blob_store.list_error
   | Record_unreadable of
       { path : string
-      ; detail : string
-      }
-  | Record_invalid of
-      { path : string
-      ; line : int
       ; detail : string
       }
   | Record_write_failed of
@@ -51,8 +54,6 @@ let error_to_string = function
   | Listing_failed { path; reason } -> Printf.sprintf "blob listing path=%s: %s" path reason
   | Record_unreadable { path; detail } ->
     Printf.sprintf "candidate record unreadable path=%s: %s" path detail
-  | Record_invalid { path; line; detail } ->
-    Printf.sprintf "candidate record invalid path=%s line=%d: %s" path line detail
   | Record_write_failed { path; detail } ->
     Printf.sprintf "candidate record write path=%s: %s" path detail
   | Marker_failed { path; detail } -> Printf.sprintf "scan marker path=%s: %s" path detail
@@ -61,8 +62,10 @@ let error_to_string = function
 let report_to_string report =
   let previous =
     match report.previous with
-    | None -> "previous=none"
-    | Some previous ->
+    | No_previous_record -> "previous=none"
+    | Previous_record_invalid { line; detail } ->
+      Printf.sprintf "previous=invalid line=%d detail=%S" line detail
+    | Compared_with_previous previous ->
       Printf.sprintf
         "previous_deletable=%d previous_deletable_read=%d now_live_rewritten=%d \
          now_live_read_only=%d now_live_untouched=%d"
@@ -190,8 +193,13 @@ let add_line kind sha256 tally =
   | Untouched_live -> { tally with untouched_lines = tally.untouched_lines + 1 }
 ;;
 
-let parse_record ~path payload =
-  let invalid line detail = Error (Record_invalid { path; line; detail }) in
+type invalid_record =
+  { invalid_line : int
+  ; invalid_detail : string
+  }
+
+let parse_record payload =
+  let invalid line detail = Error { invalid_line = line; invalid_detail = detail } in
   let length = String.length payload in
   let line_end start =
     match String.index_from_opt payload start '\n' with
@@ -242,11 +250,22 @@ let parse_record ~path payload =
            })
 ;;
 
+type loaded_record =
+  | Record_absent
+  | Record_unparsable of invalid_record
+  | Record_loaded of record
+
+(* A record that does not parse was not written by a completed scan of this
+   format. It is reported and replaced, never compared: deletion needs two
+   consecutive recorded scans, so starting over deletes nothing. *)
 let load_record ~base_path =
   let path = record_path ~base_path in
   match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
-  | Ok None -> Ok None
-  | Ok (Some payload) -> Result.map Option.some (parse_record ~path payload)
+  | Ok None -> Ok Record_absent
+  | Ok (Some payload) ->
+    (match parse_record payload with
+     | Ok record -> Ok (Record_loaded record)
+     | Error invalid -> Ok (Record_unparsable invalid))
   | Error error ->
     Error
       (Record_unreadable { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
@@ -440,12 +459,19 @@ let observe ~base_path ~board_posts_file =
       blobs
   in
   let touches = Tool_blob_store.observe_touches () in
+  let nothing_deletable = { deletable_set = String_set.empty; bytes = 0; unstatable_count = 0 } in
   let deletable, comparison, untouched_live =
     match previous with
-    | None -> { deletable_set = String_set.empty; bytes = 0; unstatable_count = 0 }, None, String_set.empty
-    | Some previous ->
+    | Record_absent -> nothing_deletable, No_previous_record, String_set.empty
+    | Record_unparsable { invalid_line; invalid_detail } ->
+      ( nothing_deletable
+      , Previous_record_invalid { line = invalid_line; detail = invalid_detail }
+      , String_set.empty )
+    | Record_loaded previous ->
       let comparison, untouched = compare_previous ~store ~touches ~previous ~live in
-      deletable_now ~store ~touches ~previous ~candidates, Some comparison, untouched
+      ( deletable_now ~store ~touches ~previous ~candidates
+      , Compared_with_previous comparison
+      , untouched )
   in
   let* () =
     write_record

@@ -1990,14 +1990,25 @@ let test_parse_tool_calls_rejects_malformed_arguments () =
       ()
   in
   match Parse.parse_openai_response_result (Yojson.Safe.to_string json) with
+  | Ok response ->
+    (* Not repaired and not run: the call leaves [content] whole. *)
+    check_bool "no runnable call" true (response.content = []);
+    (match response.unreadable_tool_uses with
+     | [ { tool_use_id; tool_name; arguments; arguments_problem; arguments_assembly } ] ->
+       check_string "id" "call-bad" tool_use_id;
+       check_string "name" "lookup" tool_name;
+       check_string "argument text" {|{"city":|} arguments;
+       check_bool
+         "invalid json"
+         true
+         (match arguments_problem with
+          | Tool_call_input.Invalid_json _ -> true
+          | Tool_call_input.Not_object -> false);
+       check_bool "arrived whole" true (Option.is_none arguments_assembly)
+     | _ -> Alcotest.fail "expected one unreadable tool use");
+    check_string "tool stop" "tool_use" (stop_reason_to_string response.stop_reason)
   | Error msg ->
-    check_bool
-      "malformed arguments are not repaired"
-      true
-      (String.starts_with
-         ~prefix:"malformed_tool_call_arguments:index:0:"
-         (Parse.parse_error_to_string msg))
-  | Ok _ -> Alcotest.fail "expected malformed tool arguments to fail closed"
+    Alcotest.failf "the response stands without the call: %s" (Parse.parse_error_to_string msg)
 ;;
 
 let test_parse_tool_calls_rejects_non_object_arguments () =
@@ -2022,12 +2033,14 @@ let test_parse_tool_calls_rejects_non_object_arguments () =
            ()
        in
        match Parse.parse_openai_response_result (Yojson.Safe.to_string json) with
+       | Ok response ->
+         (match response.unreadable_tool_uses with
+          | [ { arguments_problem = Tool_call_input.Not_object; arguments = observed; _ } ] ->
+            check_string (label ^ " argument text") arguments observed
+          | _ -> Alcotest.fail (label ^ " expected one not_object call"))
        | Error msg ->
-         check_string
-           (label ^ " rejected")
-           "malformed_tool_call_arguments:index:0:not_object"
-           (Parse.parse_error_to_string msg)
-       | Ok _ -> Alcotest.fail (label ^ " tool arguments must fail closed"))
+         Alcotest.failf "%s: the response stands without the call: %s" label
+           (Parse.parse_error_to_string msg))
     [ "number", "42"
     ; "array", "[]"
     ; "boolean", "true"

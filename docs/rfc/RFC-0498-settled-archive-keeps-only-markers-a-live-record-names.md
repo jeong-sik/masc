@@ -209,7 +209,7 @@ type owner_family =
 - content-addressed blob(`evidence/`, `sequences/`)과 Curator 원장 판본 파일: 가리키는 쪽이 여럿이다. 보관 기록이 줄면 가리키는 쪽이 하나 줄 뿐이다.
 - 실행 기록(`exact_lane_run_registry` 의 `completed_retention`): 이미 레인마다 최근 2,000개로 정해져 있다.
 - 살아 있는 scope 옆에 남은 본문(멈춘 retain·settle 이 남긴 것): 이슈 #45320.
-- Librarian scope 이름을 접두사 대신 typed codec 으로 읽는 일. 지금 `purpose` 는 접두사를 순서대로 맞대고, 겹치는 접두사가 있다(§4.2).
+- Librarian scope 이름을 접두사 대신 typed codec 으로 읽는 일. 지금 `purpose` 는 접두사를 순서대로 맞대고, 겹치는 접두사가 있다(§4.2, 이슈 #49021).
 
 ## 6. 구현 순서
 

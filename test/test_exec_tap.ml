@@ -160,6 +160,20 @@ let test_a_header_argument_without_a_name_falls_back_to_shapes () =
   must_not_contain ~tag:"loose sk token" line "sk-proj-loose-token";
   must_contain ~tag:"still redacted" line "[REDACTED]"
 
+(* A raw @ in a URL password used to end the redaction at the first @, which
+   left the rest of the password in the corpus. *)
+let test_url_password_with_at_is_redacted_whole () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:[ "git"; "clone"; "https://user:pa@ss@host.example/repo.git" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"password tail" line "ss@host";
+  must_contain ~tag:"redacted url" line "https://[REDACTED]@host.example/repo.git"
+
 let () =
   test_off_is_noop ();
   test_on_emits_one_line ();
@@ -170,4 +184,5 @@ let () =
   test_argv_redaction ();
   test_header_values_are_redacted_by_position ();
   test_a_header_argument_without_a_name_falls_back_to_shapes ();
+  test_url_password_with_at_is_redacted_whole ();
   print_endline "[test_exec_tap] all tests passed"

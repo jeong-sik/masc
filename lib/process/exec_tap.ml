@@ -106,31 +106,8 @@ let rec skip_token s i =
   if i < String.length s && is_token_char s.[i] then skip_token s (i + 1) else i
 ;;
 
-(** [redact_url_credentials s i] is called when [s.[i-3..i-1] = "://"].
-    It returns [Some (replacement, end_of_authority)] if an embedded
-    [user:pass@] or [user@] authority is found, so it can be replaced with
-    [[REDACTED]@]; otherwise [None]. *)
-let redact_url_credentials s i =
-  let len = String.length s in
-  let end_of_auth =
-    let rec scan j =
-      if j >= len then j
-      else
-        match s.[j] with
-        | '/' | ' ' | '?' | '#' -> j
-        | _ -> scan (j + 1)
-    in
-    scan i
-  in
-  let authority = String.sub s i (end_of_auth - i) in
-  match String.index_opt authority '@' with
-  | None -> None
-  | Some at_idx ->
-    let host_port = String.sub authority (at_idx + 1) (String.length authority - at_idx - 1) in
-    Some ("[REDACTED]@" ^ host_port, end_of_auth)
-;;
-
 let redact_arg s =
+  let s = Url_userinfo.redact_text s in
   let len = String.length s in
   let buf = Buffer.create len in
   let rec loop i =
@@ -160,16 +137,6 @@ let redact_arg s =
       in
       Buffer.add_string buf "[REDACTED]";
       loop (skip_token s (i + String.length prefix)))
-    else if i + 3 <= len && String.sub s i 3 = "://"
-    then (
-      match redact_url_credentials s (i + 3) with
-      | Some (replacement, end_of_auth) ->
-        Buffer.add_string buf "://";
-        Buffer.add_string buf replacement;
-        loop end_of_auth
-      | None ->
-        Buffer.add_string buf "://";
-        loop (i + 3))
     else (
       Buffer.add_char buf s.[i];
       loop (i + 1))

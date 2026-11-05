@@ -95,6 +95,24 @@ let aws_assignments_redact_through_typed_commands () =
        [ "env"; "AWS_PROFILE=production"; "AWS_REGION=us-east-1"; "deploy" ])
 ;;
 
+let url_userinfo_is_redacted_whole () =
+  Alcotest.(check string) "userinfo masked, host kept"
+    "git clone https://[REDACTED]@host.example/repo.git"
+    (Exec_policy_log_sanitize.sanitize_parts
+       [ "git"; "clone"; "https://user:pa@ss@host.example/repo.git" ]);
+  Alcotest.(check string) "a scheme other than http is masked too"
+    "psql postgres://[REDACTED]@db.example:5432/app"
+    (Exec_policy_log_sanitize.sanitize_parts
+       [ "psql"; "postgres://user:pw@db.example:5432/app" ])
+;;
+
+let at_sign_outside_the_authority_is_not_userinfo () =
+  Alcotest.(check string) "@ in the query is kept"
+    "curl https://host.example?next=a@b"
+    (Exec_policy_log_sanitize.sanitize_parts
+       [ "curl"; "https://host.example?next=a@b" ])
+;;
+
 let () =
   Alcotest.run
     "exec_policy_log_sanitize"
@@ -111,6 +129,10 @@ let () =
             aws_assignments_redact_through_typed_commands
         ; Alcotest.test_case "innocent words pass through" `Quick
             innocent_words_pass_through
+        ; Alcotest.test_case "URL userinfo is redacted whole" `Quick
+            url_userinfo_is_redacted_whole
+        ; Alcotest.test_case "@ outside the authority is not userinfo" `Quick
+            at_sign_outside_the_authority_is_not_userinfo
         ] )
     ]
 ;;

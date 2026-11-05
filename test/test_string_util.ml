@@ -580,6 +580,55 @@ let test_redact_ignores_scheme_separator_after_the_authority () =
     "[REDACTED]@host/redirect/http://x@y"
     "user:pw@host/redirect/http://x@y"
 
+(* ---- Url_userinfo.redact_text ---- *)
+
+let check_redact_text label expected input =
+  Alcotest.(check string) label expected (Url_userinfo.redact_text input)
+
+let test_redact_text_replaces_userinfo_of_every_url () =
+  check_redact_text "one url among words"
+    "curl https://[REDACTED]@api.example.com/v1 --fail"
+    "curl https://user:pw@api.example.com/v1 --fail";
+  check_redact_text "two urls"
+    "a http://[REDACTED]@h1/x b ftp://[REDACTED]@h2"
+    "a http://u1@h1/x b ftp://u2:p2@h2";
+  check_redact_text "a scheme other than http"
+    "postgres://[REDACTED]@h:5432/db" "postgres://u:p@h:5432/db"
+
+let test_redact_text_takes_the_last_at_of_the_authority () =
+  check_redact_text "raw @ in the password is redacted whole"
+    "https://[REDACTED]@host/x" "https://user:pa@ss@host/x"
+
+let test_redact_text_stops_the_authority_at_boundaries () =
+  check_redact_text "query" "https://host?x=a@b" "https://host?x=a@b";
+  check_redact_text "fragment" "https://host#a@b" "https://host#a@b";
+  check_redact_text "space" "see https://host and me@x.com"
+    "see https://host and me@x.com";
+  check_redact_text "tab" "https://host\tme@x.com" "https://host\tme@x.com";
+  check_redact_text "newline after userinfo" "https://[REDACTED]@h\nnext@line"
+    "https://tok@h\nnext@line"
+
+let test_redact_text_leaves_text_without_url_userinfo () =
+  check_redact_text "empty" "" "";
+  check_redact_text "no scheme separator" "user:pw@host" "user:pw@host";
+  check_redact_text "trailing separator" "abc://" "abc://";
+  check_redact_text "empty authority" "https:///x@y" "https:///x@y"
+
+let test_redact_text_resumes_after_a_separator_inside_an_authority () =
+  check_redact_text "malformed authority holding a second ://"
+    "://://[REDACTED]@aa" "://://b@aa"
+
+let test_redact_text_is_idempotent () =
+  List.iter
+    (fun input ->
+      let once = Url_userinfo.redact_text input in
+      Alcotest.(check string) input once (Url_userinfo.redact_text once))
+    [ "curl https://user:pw@api.example.com/v1";
+      "https://user:pa@ss@host/x";
+      "a http://u1@h1/x b ftp://u2:p2@h2";
+      "://://b@aa";
+      "" ]
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -680,4 +729,17 @@ let () =
           test_case "the authority ends at / ? and #" `Quick
             test_redact_stops_the_authority_at_slash_question_and_hash;
           test_case "a :// after the authority is not the scheme separator"
-            `Quick test_redact_ignores_scheme_separator_after_the_authority ] ) ]
+            `Quick test_redact_ignores_scheme_separator_after_the_authority ] );
+      ( "url_userinfo_text",
+        [ test_case "userinfo of every URL in the text is replaced" `Quick
+            test_redact_text_replaces_userinfo_of_every_url;
+          test_case "the last @ of the authority separates userinfo" `Quick
+            test_redact_text_takes_the_last_at_of_the_authority;
+          test_case "the authority ends at / ? # and whitespace" `Quick
+            test_redact_text_stops_the_authority_at_boundaries;
+          test_case "text without URL userinfo is unchanged" `Quick
+            test_redact_text_leaves_text_without_url_userinfo;
+          test_case "scanning resumes inside a malformed authority" `Quick
+            test_redact_text_resumes_after_a_separator_inside_an_authority;
+          test_case "redacting twice changes nothing more" `Quick
+            test_redact_text_is_idempotent ] ) ]

@@ -754,6 +754,79 @@ let test_branches_decoder_refuses_bad_rows () =
   rejected "branches that are not a list"
     (`Assoc [ "root", `String ""; "branches", `Null; "truncated", `Bool false ])
 
+let worktree_head = String.make 40 'b'
+
+let worktree_json ?(main = false) ?(head = `String worktree_head) ?(state = "branch")
+    ?(branch = `String "main") ?(locked = false) ?(prunable = false) name =
+  `Assoc
+    [ "name", `String name; "main", `Bool main; "head", head; "state", `String state
+    ; "branch", branch; "locked", `Bool locked; "prunable", `Bool prunable ]
+
+let worktrees_json ?(truncated = false) worktrees =
+  `Assoc [ "root", `String "repos/example"; "worktrees", `List worktrees
+         ; "truncated", `Bool truncated ]
+
+let test_worktrees_decoder_keeps_order_and_every_state () =
+  match
+    Decode.decode_git_worktrees
+      (worktrees_json ~truncated:true
+         [ worktree_json ~main:true "repo"
+         ; worktree_json ~state:"detached" ~branch:`Null ~locked:true "linked"
+         ; worktree_json ~state:"bare" ~branch:`Null ~head:`Null "bare"
+         ; worktree_json ~branch:(`String "feat/a") ~prunable:true "gone" ])
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok found ->
+      Alcotest.(check string) "root" "repos/example" found.gws_root;
+      Alcotest.(check bool) "truncated" true found.gws_truncated;
+      Alcotest.(check (list string)) "server order"
+        [ "repo"; "linked"; "bare"; "gone" ]
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_name) found.gws_worktrees);
+      Alcotest.(check bool) "branch, detached and bare are told apart" true
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_state) found.gws_worktrees
+         = [ Decode.Git_worktree_branch "main"; Decode.Git_worktree_detached
+           ; Decode.Git_worktree_bare; Decode.Git_worktree_branch "feat/a" ]);
+      Alcotest.(check (list bool)) "main, locked and prunable flags"
+        [ true; false; false; false ]
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_main) found.gws_worktrees);
+      Alcotest.(check (list bool)) "locked" [ false; true; false; false ]
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_locked) found.gws_worktrees);
+      Alcotest.(check (list bool)) "prunable" [ false; false; false; true ]
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_prunable) found.gws_worktrees);
+      Alcotest.(check bool) "only the bare entry has no head" true
+        (List.map (fun (w : Decode.git_worktree) -> w.gw_head) found.gws_worktrees
+         = [ Some worktree_head; Some worktree_head; None; Some worktree_head ])
+
+let test_worktrees_decoder_refuses_bad_rows () =
+  let rejected label json =
+    match Decode.decode_git_worktrees json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (label ^ " became a usable worktree list")
+  in
+  rejected "an empty name" (worktrees_json [ worktree_json "" ]);
+  rejected "state branch with a null branch"
+    (worktrees_json [ worktree_json ~branch:`Null "a" ]);
+  rejected "state branch with an empty branch"
+    (worktrees_json [ worktree_json ~branch:(`String "") "a" ]);
+  rejected "state detached that still names a branch"
+    (worktrees_json [ worktree_json ~state:"detached" "a" ]);
+  rejected "state bare that still names a branch"
+    (worktrees_json [ worktree_json ~state:"bare" ~head:`Null "a" ]);
+  rejected "an unknown state"
+    (worktrees_json [ worktree_json ~state:"rebasing" ~branch:`Null "a" ]);
+  rejected "a non-bare entry without a head"
+    (worktrees_json [ worktree_json ~head:`Null "a" ]);
+  rejected "an empty head" (worktrees_json [ worktree_json ~head:(`String "") "a" ]);
+  rejected "a head that is not a string" (worktrees_json [ worktree_json ~head:(`Int 1) "a" ]);
+  rejected "a missing locked flag"
+    (worktrees_json
+       [ `Assoc [ "name", `String "a"; "main", `Bool false; "head", `String worktree_head
+                ; "state", `String "detached"; "branch", `Null; "prunable", `Bool false ] ]);
+  rejected "a missing truncated flag"
+    (`Assoc [ "root", `String ""; "worktrees", `List [] ]);
+  rejected "worktrees that are not a list"
+    (`Assoc [ "root", `String ""; "worktrees", `Null; "truncated", `Bool false ])
+
 let test_finder_ready_content_cannot_borrow_reconfirmed_authority () =
   let state, _ = finder_fixture () in
   let request = finder_select state "lib/new.ml" in
@@ -1818,6 +1891,10 @@ let () =
             test_branches_decoder_keeps_order_and_every_upstream_shape
         ; Alcotest.test_case "branches decoder refuses bad rows" `Quick
             test_branches_decoder_refuses_bad_rows
+        ; Alcotest.test_case "worktrees decoder keeps order and every state" `Quick
+            test_worktrees_decoder_keeps_order_and_every_state
+        ; Alcotest.test_case "worktrees decoder refuses bad rows" `Quick
+            test_worktrees_decoder_refuses_bad_rows
         ; Alcotest.test_case "branch palette lists the landed answer and filters by typing" `Quick
             test_branch_palette_lists_the_landed_answer_and_filters_by_typing
         ; Alcotest.test_case "branch list needs the palette and directory it was asked in" `Quick

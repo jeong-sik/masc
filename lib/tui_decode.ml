@@ -7501,6 +7501,71 @@ let decode_git_branches json =
   let* gbs_truncated = required_bool_field json "truncated" in
   Ok { gbs_root; gbs_branches; gbs_truncated }
 
+type git_worktree_state =
+  | Git_worktree_branch of string
+  | Git_worktree_detached
+  | Git_worktree_bare
+
+type git_worktree = {
+  gw_name : string;
+  gw_main : bool;
+  gw_head : string option;
+  gw_state : git_worktree_state;
+  gw_locked : bool;
+  gw_prunable : bool;
+}
+
+type git_worktrees = {
+  gws_root : string;
+  gws_worktrees : git_worktree list;
+  gws_truncated : bool;
+}
+
+(* The state name and the branch member must agree, and a worktree that is not
+   bare has a HEAD. The server never sends anything else, so a mismatch is a
+   server that does not speak this contract, not a row to guess at. *)
+let decode_git_worktree json =
+  let* gw_name = required_string_field json "name" in
+  let* gw_main = required_bool_field json "main" in
+  let* gw_locked = required_bool_field json "locked" in
+  let* gw_prunable = required_bool_field json "prunable" in
+  let* state_name = required_string_field json "state" in
+  match json with
+  | `Assoc fields ->
+      let* gw_head =
+        match json_field fields "head" with
+        | `Null -> Ok None
+        | `String head when not (String.equal head "") -> Ok (Some head)
+        | _ -> Error "git worktree head must be a nonempty string or null"
+      in
+      let* gw_state =
+        match state_name, json_field fields "branch" with
+        | "branch", `String name when not (String.equal name "") ->
+            Ok (Git_worktree_branch name)
+        | "branch", _ -> Error "git worktree in state branch needs a nonempty branch"
+        | "detached", `Null -> Ok Git_worktree_detached
+        | "bare", `Null -> Ok Git_worktree_bare
+        | ("detached" | "bare"), _ ->
+            Error (Printf.sprintf "git worktree in state %s must have a null branch" state_name)
+        | other, _ -> Error (Printf.sprintf "git worktree has an unknown state %S" other)
+      in
+      if String.equal gw_name "" then Error "git worktree name must be nonempty"
+      else
+        (match gw_state, gw_head with
+         | Git_worktree_bare, (Some _ | None)
+         | (Git_worktree_branch _ | Git_worktree_detached), Some _ ->
+             Ok { gw_name; gw_main; gw_head; gw_state; gw_locked; gw_prunable }
+         | (Git_worktree_branch _ | Git_worktree_detached), None ->
+             Error "git worktree that is not bare needs a head")
+  | _ -> Error "git worktree must be an object"
+
+let decode_git_worktrees json =
+  let* gws_root = required_string_field json "root" in
+  let* worktrees = required_list_field json "worktrees" in
+  let* gws_worktrees = decode_list "worktrees" decode_git_worktree worktrees in
+  let* gws_truncated = required_bool_field json "truncated" in
+  Ok { gws_root; gws_worktrees; gws_truncated }
+
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 
 let decode_workspace_file json =

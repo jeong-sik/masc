@@ -1520,6 +1520,20 @@ let fetch_git_branches ?keeper ?repo ~expected_workspace ~host ~port ~path () =
   in
   Result.bind reading Masc.Tui_decode.decode_git_branches
 
+(** The worktrees of the repository that owns [path] ([/api/v1/git/worktrees]). *)
+let fetch_git_worktrees ?keeper ?repo ~expected_workspace ~host ~port ~path () =
+  let route =
+    "/api/v1/git/worktrees?path=" ^ percent_encode_query_value path
+    ^ keeper_query_suffix keeper ^ repo_query_suffix repo
+  in
+  let reading =
+    Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
+      ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
+        get_json ~host ~port ~path:route)
+    |> Result.map_error (fun detail -> "worktrees: " ^ detail)
+  in
+  Result.bind reading Masc.Tui_decode.decode_git_worktrees
+
 (** The file's commit history ([/api/v1/git/log]), most recent first. *)
 let fetch_git_log ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) ~(limit : int) () :

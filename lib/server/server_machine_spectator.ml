@@ -5,6 +5,11 @@ let machine_of_request_target target =
   | Some "dos" -> Ok (Some Machine_lane.Dos)
   | Some value -> Error ("unknown observer machine: " ^ value)
 
+type step_error =
+  | Unavailable of string
+  | Outcome_unknown of string
+  | Host_refusal of string
+
 let step = ref (fun ~config ~machine ->
   match machine with
   | Machine_lane.Msx ->
@@ -14,18 +19,24 @@ let step = ref (fun ~config ~machine ->
         ~arguments:(`Assoc ["frames", `Int 18; "include_frame", `Bool true])
       |> Result.map ignore
       |> Result.map_error (function
-        | Lane_addon_runtime.Unavailable detail | Lane_addon_runtime.Outcome_unknown detail -> detail
+        | Lane_addon_runtime.Unavailable detail -> Unavailable detail
+        | Lane_addon_runtime.Outcome_unknown detail -> Outcome_unknown detail
         | Lane_addon_runtime.Host_refusal
             (Lane_addon_call_context.Rejected detail | Lane_addon_call_context.Unavailable detail
             | Lane_addon_call_context.Activity_disabled detail
-            | Lane_addon_call_context.Activity_unobserved detail) -> detail)
+            | Lane_addon_call_context.Activity_unobserved detail) -> Host_refusal detail)
   | Machine_lane.Dos -> Ok ())
 
 let start ~sw ~clock ~stop_promise ~machine ~config =
   Eio.Fiber.fork ~sw (fun () ->
     let rec tick () =
       match !step ~config ~machine with
-      | Error detail -> Log.Server.warn "machine spectator tick stopped: %s" detail
+      | Error (Unavailable detail) ->
+          Log.Server.warn "machine spectator worker unavailable; retrying: %s" detail;
+          Eio.Time.sleep clock 1.0;
+          tick ()
+      | Error (Outcome_unknown detail | Host_refusal detail) ->
+          Log.Server.warn "machine spectator tick stopped: %s" detail
       | Ok () ->
           Eio.Time.sleep clock 0.3;
           tick ()

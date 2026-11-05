@@ -23,7 +23,9 @@ let test_ticker_retries_an_unavailable_worker () = with_env (fun env sw ->
   Server_machine_spectator.For_testing.with_step
     (fun ~config:_ ~machine:_ ->
       incr calls;
-      if !calls = 1 then Error "worker temporarily unavailable" else Ok ())
+      if !calls = 1 then
+        Error (Server_machine_spectator.Unavailable "worker temporarily unavailable")
+      else Ok ())
     (fun () ->
       let stop_promise, stop = Eio.Promise.create () in
       Server_machine_spectator.start ~sw ~clock:(Eio.Stdenv.clock env) ~stop_promise

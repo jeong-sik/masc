@@ -97,6 +97,35 @@ let test_room_routes () = with_gateway (fun ~base_path ~token client ->
   let message = List.hd snapshot.messages in
   check string "authenticated actor owns message" "guest" message.who;
   check string "body preserved" "hello from H2" message.text;
+  let scope = { Server_play_room_events.play_client = "tab-a"; machine = Masc.Machine_lane.Dos } in
+  (match Server_play_room_events.connect ~base_path ~agent_name:"guest" ~role:Masc_domain.Player
+    ~scope ~sse_client_id:91 with
+   | Ok _ -> ()
+   | Error error -> fail (Masc.Play_room.error_message error));
+  let join_body = {|{"action":"join","client_id":"tab-a","machine":"dos"}|} in
+  let status, json = request ~token ~meth:`POST ~body:join_body client path in
+  check int "active lease ignores HTTP Join" 200 status;
+  check int "HTTP Join cannot replace Observer presence" 1
+    (match Masc.Play_room.view_of_json json with
+     | Ok (_, snapshot) -> List.length snapshot.members
+     | Error detail -> fail detail);
+  let leave_body = {|{"action":"leave","client_id":"tab-a","machine":"dos"}|} in
+  let status, json = request ~token ~meth:`POST ~body:leave_body client path in
+  check int "active lease ignores HTTP Leave" 200 status;
+  check int "HTTP Leave cannot remove Observer presence" 1
+    (match Masc.Play_room.view_of_json json with
+     | Ok (_, snapshot) -> List.length snapshot.members
+     | Error detail -> fail detail);
+  (match Server_play_room_events.disconnect ~base_path ~agent_name:"guest" ~role:Masc_domain.Player
+    ~scope ~sse_client_id:91 with
+   | Ok _ -> ()
+   | Error error -> fail (Masc.Play_room.error_message error));
+  let status, json = request ~token ~meth:`POST ~body:leave_body client path in
+  check int "Leave is allowed after exact disconnect" 200 status;
+  check int "the final HTTP Leave removes membership" 0
+    (match Masc.Play_room.view_of_json json with
+     | Ok (_, snapshot) -> List.length snapshot.members
+     | Error detail -> fail detail);
   let status, _ = request ~token ~meth:`GET client (path ^ "?before=0") in
   check int "shared query validation" 400 status;
   let status, _ = request ~token ~meth:`POST ~body:"not json" client path in

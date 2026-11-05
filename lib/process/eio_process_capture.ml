@@ -253,6 +253,13 @@ let ignore_chunk (_ : string) = ()
 let drain_to_eof ?file_capture ?(on_chunk = ignore_chunk) r acc =
   drain_into ?file_capture r acc ~on_chunk (Cstruct.create drain_chunk_size)
 
+let child_input ~sw = function
+  | Some source -> source
+  | None ->
+    let reader, writer = Eio_unix.pipe sw in
+    Eio.Flow.close writer;
+    (reader :> Eio.Flow.source_ty Eio.Resource.t)
+
 (** Spawn a process with explicit pipes and drain stdout into [stdout_buf]
     before returning.  Draining inline (rather than handing the pipe to a
     background copier) avoids a race where [Eio.Process.await] returns —
@@ -266,7 +273,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
   let proc =
     Eio.Process.spawn ~sw
       (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
-      ?stdin:stdin_source
+      ~stdin:(child_input ~sw stdin_source)
       ~stdout:stdout_w
       argv
   in
@@ -299,7 +306,7 @@ let spawn_and_drain_both ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_sour
   let proc =
     Eio.Process.spawn ~sw
       (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:child_exit_grace_seconds) ~cwd ?env
-      ?stdin:stdin_source
+      ~stdin:(child_input ~sw stdin_source)
       ~stdout:stdout_w
       ~stderr:stderr_w
       argv

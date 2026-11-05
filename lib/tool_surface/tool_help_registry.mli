@@ -1,23 +1,10 @@
 
-(** Tool_help_registry — derived per-tool help entries.
+(** Tool_help_registry — per-tool help entries.
 
-    Generates {!help_entry} records from {!Masc_domain.tool_schema} via
-    a layered pipeline:
-
-    + Manual override table (curated entries for prominent tools).
-    + Schema metadata extraction (description, constraints).
-    + Heuristic fallback (first-sentence summaries, derived
-      details).
-
-    Internal: 7 text helpers ([normalize_spaces], [first_sentence],
-    [truncate], [help_doc_refs], [help_prompt_hints],
-    [default_when_to_use], [manual_help_entry]),
-    [canonicalize_schema] (singular — folded into
-    {!canonicalize_schemas}).
-
-    [trim_terminal_punctuation], [constraints_from_metadata],
-    [derived_short_description], [derived_details] and [index_json] were
-    deleted rather than hidden — nothing called them. *)
+    Generates {!help_entry} records from {!Masc_domain.tool_schema}. A tool
+    whose [config/tools/<name>.toml] has a [\[help\]] table gets that table as
+    its entry. Any other tool gets an entry derived from its schema metadata
+    and description (first-sentence summary, constraint notes). *)
 
 (** {1 Help entry record} *)
 

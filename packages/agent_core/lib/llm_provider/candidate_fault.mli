@@ -72,11 +72,4 @@ type t =
       (** Dispatched, and the result is unknown. Whether re-sending is allowed
           is the walk's effect rule, not this judgment. *)
 
-(** Whether the request was dispatched. *)
-type dispatch =
-  | Not_dispatched
-  | Dispatched
-
 val of_api_error : Retry.api_error -> t
-
-val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t

@@ -29,9 +29,8 @@ val enqueue_record :
     without reaching the store. *)
 val start_drain_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 
-(** Read recent crash events from disk. Performs I/O -- call from
-    dashboard handlers, not from keeper_registry context.
-    [store_root] is the workspace's state root. *)
+(** Read recent crash events from disk. Performs I/O -- tests use it to check
+    what the drain fiber wrote. [store_root] is the workspace's state root. *)
 val recent_crashes :
   store_root:Dated_jsonl.Store.root ->
   name:string ->

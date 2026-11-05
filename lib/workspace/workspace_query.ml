@@ -406,10 +406,10 @@ let is_valid_filename name =
 
 let select_recent_message_names ~since_seq ~limit names =
   let insert_candidate acc name =
-    let seq = message_seq_of_filename name in
-    if limit <= 0 || seq <= since_seq then
-      acc
-    else
+    match message_seq_of_filename name with
+    | None -> acc
+    | Some seq when limit <= 0 || seq <= since_seq -> acc
+    | Some seq ->
       let rec insert prefix = function
         | [] -> List.rev_append prefix [ (seq, name) ]
         | ((existing_seq, _) as existing) :: rest ->
@@ -431,8 +431,9 @@ let select_recent_message_names ~since_seq ~limit names =
 let select_all_message_names ~since_seq names =
   names
   |> List.filter_map (fun name ->
-       let seq = message_seq_of_filename name in
-       if seq <= since_seq then None else Some (seq, name))
+       match message_seq_of_filename name with
+       | Some seq when seq > since_seq -> Some (seq, name)
+       | Some _ | None -> None)
   |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
        let cmp = Int.compare seq_a seq_b in
        if cmp <> 0 then cmp else String.compare name_a name_b)
@@ -486,8 +487,10 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
       | [] -> List.rev acc
       | name :: rest ->
           safe_yield ();
-          if message_seq_of_filename name <= since_seq then List.rev acc
-          else
+          match message_seq_of_filename name with
+          | Some seq when seq <= since_seq -> List.rev acc
+          | None -> loop remaining acc rest
+          | Some _ ->
             let path = Filename.concat msgs_path name in
             match read_json config path with
             | json ->

@@ -41,25 +41,27 @@ let file_a_message dir seq =
   close_out out
 
 let test_a_name_yields_its_sequence () =
-  check int "as the writer pads it" 75
+  check (option int) "as the writer pads it" (Some 75)
     (Paths.message_seq_of_filename
        "000000075_keeper-alpha-agent_wmsg-abc_broadcast.json");
   (* Any width, so a change to the padding cannot make a filed message
-     invisible to the counter -- which is the failure this path exists to
-     prevent. No file of this shape is in the store; the assertion is about
-     the parser, not about history. *)
-  check int "and at any width" 1664
+     invisible to the counter. The assertion is about the parser. *)
+  check (option int) "and at any width" (Some 1664)
     (Paths.message_seq_of_filename "1664_keeper-alpha-agent_broadcast.json")
 
 let test_a_name_that_is_not_ours_yields_none () =
-  check int "no sequence" 0
+  check (option int) "no sequence" None
     (Paths.message_seq_of_filename "notes_keeper-alpha_broadcast.json");
-  check int "empty leader" 0 (Paths.message_seq_of_filename "_alpha.json");
-  check int "no separator" 0 (Paths.message_seq_of_filename "000000075.json");
-  (* Zero is what a name without a sequence answers, so a file numbered zero
-     cannot be told from one, and neither may lift the counter. *)
-  check int "zero itself" 0
-    (Paths.message_seq_of_filename "000000000_alpha_wmsg-x_broadcast.json")
+  check (option int) "empty leader" None
+    (Paths.message_seq_of_filename "_alpha_broadcast.json");
+  check (option int) "no separator" None
+    (Paths.message_seq_of_filename "000000075.json");
+  check (option int) "zero itself" None
+    (Paths.message_seq_of_filename "000000000_alpha_wmsg-x_broadcast.json");
+  (* The backend stages an atomic write next to the row it will become. *)
+  check (option int) "an atomic-write staging file" None
+    (Paths.message_seq_of_filename
+       "000008108_alpha_wmsg-x_broadcast.json.tmp-atomic")
 
 let test_an_empty_store_starts_at_zero () =
   with_workspace (fun config _messages ->

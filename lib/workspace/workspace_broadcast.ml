@@ -308,10 +308,11 @@ let deliver_delivery delivery =
 let message_file config (message : Masc_domain.message) =
   Filename.concat (messages_dir config)
     (Printf.sprintf
-       "%09d_%s_%s_broadcast.json"
+       "%09d_%s_%s%s"
        message.seq
        (safe_filename message.from_agent)
-       message.request_id)
+       message.request_id
+       committed_message_suffix)
 
 let mention_outbox_dir config =
   Filename.concat (masc_dir config) "message-mention-outbox"
@@ -1069,7 +1070,7 @@ let find_broadcast_message ~request_id config ~from_agent ~content =
   let lookup () =
     let* names = authoritative_directory_names config (messages_dir config)
       |> Result.map_error (fun detail -> Broadcast_dependency_unavailable detail) in
-    let suffix = "_" ^ request_id ^ "_broadcast.json" in
+    let suffix = "_" ^ request_id ^ committed_message_suffix in
     match List.filter (fun name -> Filename.check_suffix name suffix) names with
     | [] -> Ok None
     | [name] ->

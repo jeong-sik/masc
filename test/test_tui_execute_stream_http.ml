@@ -1230,18 +1230,19 @@ let assert_http_join_available workspace =
 let test_stale_reconnect_cannot_replace_successor env =
   Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
     let calls = ref 0 in
-    let paused, resume = Eio.Promise.create () in
+    let started, announce = Eio.Promise.create () in
+    let release, resume = Eio.Promise.create () in
     Server_play_room_events.For_testing.with_perform
       (fun ~base_path ~who ~speaker ~now action ->
         incr calls;
         if !calls = 1 then begin
-          Eio.Promise.resolve resume ();
-          Eio.Promise.await paused
+          Eio.Promise.resolve announce ();
+          Eio.Promise.await release
         end;
         Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
       (fun () ->
         let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
-        Play_fixture.await clock paused;
+        Play_fixture.await clock started;
         let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
         Alcotest.(check int) "the successor publishes before the stale connect resumes"
           200 (Play_fixture.await clock second.response);
@@ -1263,19 +1264,20 @@ let test_stale_reconnect_cannot_replace_successor env =
 
 let test_disconnect_before_lease_install_cleans_up env =
   Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
-    let paused, resume = Eio.Promise.create () in
+    let started, announce = Eio.Promise.create () in
+    let release, resume = Eio.Promise.create () in
     let entered = ref false in
     Server_play_room_events.For_testing.with_perform
       (fun ~base_path ~who ~speaker ~now action ->
         if not !entered then begin
           entered := true;
-          Eio.Promise.resolve resume ();
-          Eio.Promise.await paused
+          Eio.Promise.resolve announce ();
+          Eio.Promise.await release
         end;
         Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
       (fun () ->
         let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
-        Play_fixture.await clock paused;
+        Play_fixture.await clock started;
         Masc.Sse.unregister session_id;
         Eio.Promise.resolve resume ();
         Play_fixture.await clock first.ended;

@@ -581,6 +581,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         () );
     ("fd_accountant", fd_accountant_json);
+    ("provider_connection_cache", provider_connection_cache_json ());
     ("disk_observation", disk_observation_json);
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);

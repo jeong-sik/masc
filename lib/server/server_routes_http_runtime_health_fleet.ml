@@ -655,6 +655,31 @@ let fd_accountant_snapshot_json () =
     ]
 ;;
 
+let provider_connection_cache_json () =
+  match Provider_connection_cache_ref.get () with
+  | None -> `Null
+  | Some cache ->
+    let stats = Llm_provider.Http_client.cache_stats cache in
+    let closed = stats.closed_total in
+    `Assoc
+      [ ( "idle_per_origin"
+        , `List
+            (List.map
+               (fun (origin, idle) -> `Assoc [ "origin", `String origin; "idle", `Int idle ])
+               stats.idle_per_host) )
+      ; "idle_total", `Int stats.total_idle
+      ; "reused_total", `Int stats.reuse_count_total
+      ; "created_total", `Int stats.create_count_total
+      ; ( "closed_total"
+        , `Assoc
+            [ "request_failed", `Int closed.request_failed
+            ; "not_persistent", `Int closed.not_persistent
+            ; "body_not_drained", `Int closed.body_not_drained
+            ; "transport_ended", `Int closed.transport_ended
+            ] )
+      ]
+;;
+
 let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
   `Assoc
     [ "schema", `String "masc.runtime_truth.v1"

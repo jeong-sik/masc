@@ -53,6 +53,11 @@ val keeper_event_queue_health_json :
 
 val fd_accountant_snapshot_json : unit -> Yojson.Safe.t
 
+val provider_connection_cache_json : unit -> Yojson.Safe.t
+(** The installed provider connection cache's counts (RFC-0492 §6): idle
+    connections per origin, reuses, new connections, and connections closed
+    by reason. [`Null] when no cache is installed. *)
+
 val runtime_truth_json :
   build:Build_identity.t ->
   path_diagnostics:Server_base_path_diagnostics.t ->

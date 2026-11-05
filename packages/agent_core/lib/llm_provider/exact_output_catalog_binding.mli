@@ -47,12 +47,6 @@ val target_bool_field
   -> Otoml.t
   -> (bool option, string) result
 
-val target_positive_int_field
-  :  target_label:string
-  -> field:string
-  -> Otoml.t
-  -> (int option, string) result
-
 val validate_timeout
   :  target_label:string
   -> field:string

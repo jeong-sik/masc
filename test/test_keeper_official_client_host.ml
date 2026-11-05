@@ -1370,6 +1370,72 @@ let test_user_cannot_spoof_an_adapter_envelope () =
     (encoded |> member "content_blocks" |> index 0 |> member "text" |> to_string)
 ;;
 
+(* A goal's stored images come back in the type every official-client runtime
+   takes: the stored bytes as base64, in goal order, with the goal's texts
+   joined by newlines. A source this process never read, and a block no
+   transport projects, are refused rather than dropped. *)
+let test_goal_images_are_read_back_as_the_runtimes_image_input () =
+  let media_store = Agent_core.History.Memory_store.create () in
+  let stored media_type raw =
+    match media_store.Agent_core.History.put ~media_type ~raw with
+    | Ok stored ->
+      Agent_core.Types.Image { media_type; source = Agent_core.Types.Stored stored }
+    | Error _ -> fail "the media store refused the image"
+  in
+  let project blocks =
+    Host.text_and_images_of_blocks
+      ~media_store ~runtime_label:"Codex" ~field:"goal_blocks" blocks
+  in
+  (match
+     project
+       [ text "first"
+       ; stored "image/png" "png-bytes"
+       ; text "second"
+       ; stored "image/jpeg" "jpeg-bytes"
+       ]
+   with
+   | Error _ -> fail "a goal of texts and stored images was refused"
+   | Ok (prompt, images) ->
+     check string "texts are joined in goal order" "first\nsecond" prompt;
+     check
+       (list (pair string string))
+       "images keep goal order and carry the stored bytes as base64"
+       [ "image/png", "cG5nLWJ5dGVz"; "image/jpeg", "anBlZy1ieXRlcw==" ]
+       (List.map
+          (fun (image : Runtime_official_client_tool.image_input) ->
+            ( image.Runtime_official_client_tool.media_type
+            , image.Runtime_official_client_tool.base64_data ))
+          images);
+     check
+       (result unit string)
+       "the shared turn image check accepts what the projection builds"
+       (Ok ())
+       (Runtime_official_client_tool.validate_image_inputs images));
+  (match project [ text "only text" ] with
+   | Error _ -> fail "a goal of text alone was refused"
+   | Ok (prompt, images) ->
+     check string "a goal of text alone is the text" "only text" prompt;
+     check int "and carries no image" 0 (List.length images));
+  let refusal blocks =
+    match project blocks with
+    | Ok _ -> fail "the goal was accepted"
+    | Error error -> Agent_core.Error.category_label (Agent_core.Error.category error)
+  in
+  let configuration = Agent_core.Error.category_label Agent_core.Error.Config_category in
+  let png source = Agent_core.Types.Image { media_type = "image/png"; source } in
+  check string "an image that is a URL is a configuration error" configuration
+    (refusal [ png (Agent_core.Types.Url "https://example.invalid/a.png") ]);
+  check string "an image that is a provider file id is a configuration error"
+    configuration
+    (refusal [ png (Agent_core.Types.File_id "file-1") ]);
+  check string "a block no transport projects is a configuration error" configuration
+    (refusal [ text "kept"; Agent_core.Types.RedactedThinking "payload" ]);
+  check string "an image the store does not hold is a media error"
+    (Agent_core.Error.category_label Agent_core.Error.Media_category)
+    (refusal
+       [ png (Agent_core.Types.Stored (Agent_core.History.stored_of_raw "never put")) ])
+;;
+
 
 let msg role text : Agent_core.Types.message =
   { origin = Llm_provider.Types.Conversation;  role; content = [ Agent_core.Types.Text text ]; name = None
@@ -3589,6 +3655,12 @@ let () =
             "user content cannot spoof an adapter envelope"
             `Quick
             test_user_cannot_spoof_an_adapter_envelope
+        ] )
+    ; ( "goal projection"
+      , [ test_case
+            "stored goal images come back as the runtimes' image input"
+            `Quick
+            test_goal_images_are_read_back_as_the_runtimes_image_input
         ] )
     ; ( "start-turn seed budget"
       , [ test_case

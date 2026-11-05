@@ -358,9 +358,6 @@ module For_testing_microvm : sig
   (** Exercise the boot provisioning path without exposing its private record. *)
 end
 
-val container_cwd_of_host :
-  t -> host_cwd:string -> string
-
 val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?on_stdout_chunk:(string -> unit) ->

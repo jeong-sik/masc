@@ -18,7 +18,13 @@ let user = get (User_id.of_string "0123456789abcdef0123456789abcdef")
 let invite = get (Invite_id.of_string "invite-1")
 let google_alice = get (X.google ~sub:"110169484474386276334")
 let github_alice = get (X.github ~user_id:583231)
-let admission identity = { A.user_id = user; identity; invite_id = invite }
+let membership =
+  { A.workspace_id = get (Workspace_id.of_string "workspace-1")
+  ; account_home_namespace = get (Account_home_namespace.of_string "c0ffee00c0ffee00c0ffee00c0ffee00")
+  }
+;;
+
+let admission identity = { A.user_id = user; identity; invite_id = invite; membership }
 
 let to_body_exn to_body value =
   match to_body value with
@@ -87,7 +93,7 @@ let bytes_of_an_identity () =
 let bytes_of_an_admission () =
   Alcotest.(check string)
     "google"
-    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"invite_id":"invite-1"}|})
+    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"invite_id":"invite-1","membership":{"workspace_id":"workspace-1","account_home_namespace":"c0ffee00c0ffee00c0ffee00c0ffee00"}}|})
     (Authz_body.to_string (to_body_exn A.to_body (admission google_alice)))
 ;;
 
@@ -110,11 +116,19 @@ let error_name : A.error -> string = function
   | A.Invalid_identity X.Wrong_members -> "identity wrong members"
   | A.Invalid_identity (X.Invalid error) -> "invalid identity: " ^ identity_error_name error
   | A.Invalid_invite_id _ -> "invalid invite id"
+  | A.Invalid_workspace_id _ -> "invalid workspace id"
+  | A.Invalid_account_home_namespace _ -> "invalid account home namespace"
 ;;
 
 let body ?(user_id = `String "user-1") ?(identity = `Assoc [ "provider", `String "github"; "user_id", `Int 1 ])
-    ?(invite_id = `String "invite-1") () =
-  `Assoc [ "user_id", user_id; "identity", identity; "invite_id", invite_id ]
+    ?(invite_id = `String "invite-1") ?(workspace_id = `String "workspace-1")
+    ?(namespace = `String "ns-1") () =
+  `Assoc
+    [ "user_id", user_id
+    ; "identity", identity
+    ; "invite_id", invite_id
+    ; "membership", `Assoc [ "workspace_id", workspace_id; "account_home_namespace", namespace ]
+    ]
 ;;
 
 let refusals =
@@ -134,6 +148,12 @@ let refusals =
   ; "a Google sub with a space", body ~identity:(`Assoc [ "provider", `String "google"; "sub", `String "a b" ]) (), "invalid identity: google sub invalid byte 1"
   ; "an invite id that is a path segment", body ~invite_id:(`String "..") (), "invalid invite id"
   ; "a bad user id comes before a bad identity", body ~user_id:(`String "") ~identity:(`Assoc []) (), "invalid user id"
+  ; "no membership", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i" ], "wrong members"
+  ; "a membership with its members in another order", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i"; "membership", `Assoc [ "account_home_namespace", `String "n"; "workspace_id", `String "w" ] ], "wrong members"
+  ; "a namespace that is a number", body ~namespace:(`Int 1) (), "wrong members"
+  ; "an empty workspace id", body ~workspace_id:(`String "") (), "invalid workspace id"
+  ; "a namespace that is a path segment", body ~namespace:(`String "..") (), "invalid account home namespace"
+  ; "a bad invite id comes before a bad workspace", body ~invite_id:(`String "") ~workspace_id:(`String "") (), "invalid invite id"
   ]
 ;;
 

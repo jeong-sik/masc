@@ -13,6 +13,10 @@ module Policy_id : Authz_id.S
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 
+(** The name of the directory, inside a workspace, that holds the provider
+    account homes of one member (design 4.1 and 5.4). *)
+module Account_home_namespace : Authz_id.S
+
 module Principal : sig
   type t =
     | Human of User_id.t

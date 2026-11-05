@@ -3,6 +3,7 @@
 open Authz_types
 open Authz_records
 module User_map = Map.Make (User_id)
+module Namespace_map = Map.Make (Account_home_namespace)
 module Identity = Authz_external_identity
 
 type status = Active
@@ -12,17 +13,36 @@ type principal =
   ; status : status
   }
 
-(* [by_identity] names, for each bound identity, the principal it is bound to.
-   The maps and the set change together in [admit] and nowhere else. *)
+type membership =
+  { workspace_id : Workspace_id.t
+  ; account_home_namespace : Account_home_namespace.t
+  ; status : status
+  }
+
+(* [by_identity] and [by_namespace] name, for each bound identity and each
+   namespace given, the principal it belongs to. The maps grow together in
+   [admit]; [admins] also shrinks in [revoke_admin]. *)
 type t =
   { by_id : principal User_map.t
   ; by_identity : User_id.t Identity.Map.t
+  ; memberships : membership User_map.t
+  ; by_namespace : User_id.t Namespace_map.t
   ; admins : User_id.Set.t
   }
 
-let empty = { by_id = User_map.empty; by_identity = Identity.Map.empty; admins = User_id.Set.empty }
+let empty =
+  { by_id = User_map.empty
+  ; by_identity = Identity.Map.empty
+  ; memberships = User_map.empty
+  ; by_namespace = Namespace_map.empty
+  ; admins = User_id.Set.empty
+  }
+;;
+
 let find t user_id = User_map.find_opt user_id t.by_id
 let find_identity t identity = Identity.Map.find_opt identity t.by_identity
+let find_membership t user_id = User_map.find_opt user_id t.memberships
+let find_namespace t namespace = Namespace_map.find_opt namespace t.by_namespace
 let is_admin t user_id = User_id.Set.mem user_id t.admins
 
 type refusal =
@@ -34,6 +54,14 @@ type refusal =
   | User_id_taken of User_id.t
   | Identity_bound of
       { identity : Identity.t
+      ; user_id : User_id.t
+      }
+  | Workspace_differs of
+      { given : Workspace_id.t
+      ; workspace_id : Workspace_id.t
+      }
+  | Namespace_taken of
+      { namespace : Account_home_namespace.t
       ; user_id : User_id.t
       }
 
@@ -58,6 +86,16 @@ let refusal_to_string = function
       "the identity %s is bound to %s"
       (Identity.to_string identity)
       (User_id.to_string user_id)
+  | Workspace_differs { given; workspace_id } ->
+    Printf.sprintf
+      "the admission names the workspace %s, and the installation is %s"
+      (Workspace_id.to_string given)
+      (Workspace_id.to_string workspace_id)
+  | Namespace_taken { namespace; user_id } ->
+    Printf.sprintf
+      "the account home namespace %s was given to %s"
+      (Account_home_namespace.to_string namespace)
+      (User_id.to_string user_id)
 ;;
 
 type admitted =
@@ -76,17 +114,30 @@ let author_is_the_person (author : Author.t) user_id =
   | Author.System_migration -> false
 ;;
 
-let admit t ~invites ~author ~at_ms ({ Authz_admission_event.user_id; identity; invite_id } : Authz_admission_event.t) =
+let admit
+  t
+  ~invites
+  ~workspace_id
+  ~author
+  ~at_ms
+  ({ Authz_admission_event.user_id; identity; invite_id; membership } : Authz_admission_event.t)
+  =
   if not (author_is_the_person author user_id)
   then Error (Author_is_not_the_person { author; user_id })
   else (
     match Authz_invite_state.consume invites invite_id ~user_id ~at_ms with
     | Error refusal -> Error (Invitation refusal)
     | Ok (invites, role) ->
-      (match User_map.mem user_id t.by_id, find_identity t identity with
-       | true, (None | Some _) -> Error (User_id_taken user_id)
-       | false, Some bound -> Error (Identity_bound { identity; user_id = bound })
-       | false, None ->
+      let { Authz_admission_event.workspace_id = given; account_home_namespace = namespace } = membership in
+      (match
+         User_map.mem user_id t.by_id, find_identity t identity, find_namespace t namespace
+       with
+       | true, (None | Some _), (None | Some _) -> Error (User_id_taken user_id)
+       | false, Some bound, (None | Some _) -> Error (Identity_bound { identity; user_id = bound })
+       | false, None, (None | Some _) when not (Workspace_id.equal given workspace_id) ->
+         Error (Workspace_differs { given; workspace_id })
+       | false, None, Some holder -> Error (Namespace_taken { namespace; user_id = holder })
+       | false, None, None ->
          let admins =
            match role with
            | Authz_invite_event.Admin -> User_id.Set.add user_id t.admins
@@ -95,6 +146,12 @@ let admit t ~invites ~author ~at_ms ({ Authz_admission_event.user_id; identity; 
          let principals =
            { by_id = User_map.add user_id { identity; status = Active } t.by_id
            ; by_identity = Identity.Map.add identity user_id t.by_identity
+           ; memberships =
+               User_map.add
+                 user_id
+                 { workspace_id; account_home_namespace = namespace; status = Active }
+                 t.memberships
+           ; by_namespace = Namespace_map.add namespace user_id t.by_namespace
            ; admins
            }
          in

@@ -678,6 +678,14 @@ module Invite_event = Authz_invite_event
 
 let invite_id = get (Authz_types.Invite_id.of_string "invite-1")
 
+(* Each member has a namespace of their own, so a draft names it after the
+   identity of the member. *)
+let zone_membership ~sub =
+  { Authz_admission_event.workspace_id = workspace
+  ; account_home_namespace = get (Account_home_namespace.of_string ("ns-" ^ sub))
+  }
+;;
+
 let invite_draft
   ?(author = Author.Local_operator)
   ?(at_ms = at_ms + 1)
@@ -797,7 +805,7 @@ let an_admin_admission_has_an_intent () =
     let person = get (User_id.of_string "0123456789abcdef0123456789abcdef") in
     let identity = get (Authz_external_identity.google ~sub:"111") in
     let body =
-      match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id } with
+      match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id; membership = zone_membership ~sub:"111" } with
       | Ok body -> body
       | Error _ -> Alcotest.fail "fixture admission refused"
     in
@@ -826,7 +834,10 @@ let first_admin = get (User_id.of_string "0123456789abcdef0123456789abcdef")
 
 let admission_draft_of ~person ~sub ~invite_id ~at_ms : Z.draft =
   let identity = get (Authz_external_identity.google ~sub) in
-  match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id } with
+  match
+    Authz_admission_event.to_body
+      { Authz_admission_event.user_id = person; identity; invite_id; membership = zone_membership ~sub }
+  with
   | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human person); kind = R.Kind.Admission; body }
   | Error _ -> Alcotest.fail "fixture admission refused"
 ;;

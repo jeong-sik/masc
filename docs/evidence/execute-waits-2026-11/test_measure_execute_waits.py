@@ -24,6 +24,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import measure_execute_waits as waits  # noqa: E402
 
+CLOCK_OF = waits.load_lane_time().clock_of
+
 NOON = 1793534400.0  # 2026-11-01T12:00:00Z
 SINCE = 1793491200.0  # 2026-11-01T00:00:00Z
 MIDNIGHT = 1793577600.0  # 2026-11-02T00:00:00Z
@@ -106,6 +108,16 @@ def write_day(base: pathlib.Path, name: str, lines: list[object], month: str = "
     (folder / name).write_bytes(b"\n".join(chunks) + b"\n")
 
 
+def write_turns(base: pathlib.Path, keeper: str, name: str, first: float, last: float) -> pathlib.Path:
+    """A turn file whose first line is stamped `first` and last line `last`, as read by the lane-time script."""
+    folder = base / ".masc" / "keeper_turn_events" / keeper
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_text(json.dumps({"ts": first}) + "\n" + json.dumps({"ts": last}) + "\n", encoding="utf-8")
+    os.utime(path, (last, last))
+    return path
+
+
 def call(
     keeper: str,
     seconds: float,
@@ -116,9 +128,10 @@ def call(
     repos: tuple[str, ...] = (),
     kind: waits.Kind | None = None,
     day: date = DAY,
+    end: float = NOON,
 ) -> waits.ExecuteCall:
     chosen = kind if kind is not None else (waits.Kind.RUN if run_ids else waits.Kind.REST)
-    return waits.ExecuteCall(keeper, seconds, has_command, sleeping, run_ids, repos, chosen, day)
+    return waits.ExecuteCall(keeper, seconds, has_command, sleeping, run_ids, repos, chosen, day, end)
 
 
 class NumberOfTest(unittest.TestCase):
@@ -866,7 +879,7 @@ class ReadLedgerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_day(base, "01.jsonl", [execute_row("a", 0, "")])
-            self.assertEqual(self.read(base).executes, [waits.ExecuteCall("a", 0.0, True, False, (), (), waits.Kind.REST, DAY)])
+            self.assertEqual(self.read(base).executes, [waits.ExecuteCall("a", 0.0, True, False, (), (), waits.Kind.REST, DAY, NOON)])
 
     def test_a_line_the_json_parser_gives_up_on_for_its_depth_is_skipped_and_counted(self) -> None:
         # How deep a line must nest before the parser raises RecursionError depends on the Python build.
@@ -922,12 +935,12 @@ class ReadLedgerTest(unittest.TestCase):
                 ],
             )
             calls = self.read(base).executes
-            self.assertEqual(calls[0], waits.ExecuteCall("a", 61.5, True, True, (RUN_A,), ("o/r",), waits.Kind.RUN, DAY))
-            self.assertEqual(calls[1], waits.ExecuteCall("b", 3.0, True, False, (RUN_B,), ("o/r",), waits.Kind.RUN, DAY))
-            self.assertEqual(calls[2], waits.ExecuteCall("c", 2.0, False, False, (), (), waits.Kind.REST, DAY))
-            self.assertEqual(calls[3], waits.ExecuteCall("d", 5.0, True, True, (), (), waits.Kind.REST, DAY))
-            self.assertEqual(calls[4], waits.ExecuteCall("e", 1.0, True, False, (), (), waits.Kind.REST, DAY))
-            self.assertEqual(calls[5], waits.ExecuteCall("f", 1.0, True, False, (), (), waits.Kind.REST, DAY))
+            self.assertEqual(calls[0], waits.ExecuteCall("a", 61.5, True, True, (RUN_A,), ("o/r",), waits.Kind.RUN, DAY, NOON))
+            self.assertEqual(calls[1], waits.ExecuteCall("b", 3.0, True, False, (RUN_B,), ("o/r",), waits.Kind.RUN, DAY, NOON))
+            self.assertEqual(calls[2], waits.ExecuteCall("c", 2.0, False, False, (), (), waits.Kind.REST, DAY, NOON))
+            self.assertEqual(calls[3], waits.ExecuteCall("d", 5.0, True, True, (), (), waits.Kind.REST, DAY, NOON))
+            self.assertEqual(calls[4], waits.ExecuteCall("e", 1.0, True, False, (), (), waits.Kind.REST, DAY, NOON))
+            self.assertEqual(calls[5], waits.ExecuteCall("f", 1.0, True, False, (), (), waits.Kind.REST, DAY, NOON))
 
     def test_schedule_creates(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -987,6 +1000,91 @@ class ReadLedgerTest(unittest.TestCase):
             self.assertEqual(self.read(base).schedule_creates, 1)
 
 
+class SummarizeTurnTimeTest(unittest.TestCase):
+    TURNS = {"a": CLOCK_OF([(NOON, NOON + 3600)]), "b": CLOCK_OF([(NOON, NOON + 1800)])}
+
+    def test_each_group_splits_into_the_hours_inside_and_outside_the_turn_intervals(self) -> None:
+        calls = [
+            call("a", 600, sleeping=True, run_ids=(RUN_A,), end=NOON + 1000),  # long github, a poll, inside
+            call("a", 600, kind=waits.Kind.GH, end=NOON + 5000),  # long github, outside
+            call("a", 600, kind=waits.Kind.BUILD, end=NOON + 3900),  # long build, half inside
+            call("b", 30, end=NOON + 100),  # short, inside
+            call("c", 100, end=NOON + 1000),  # long, a Keeper without turn files
+            call("a", 59, sleeping=True, run_ids=(RUN_B,), end=NOON + 2000),  # a poll that is not long, inside
+        ]
+        summary = waits.summarize_turn_time(calls, self.TURNS)
+        self.assertEqual((summary["keepers_with_turn_traces"], summary["hours"]), (2, 1.5))
+        self.assertEqual(
+            object_of(summary["execute"]),
+            {"calls": 6, "hours": 0.55, "inside_hours": 0.27, "outside_hours": 0.28, "inside_percent_of_turn_time": 18.3},
+        )
+        self.assertEqual(
+            object_of(summary["long_calls"]),
+            {"calls": 4, "hours": 0.53, "inside_hours": 0.25, "outside_hours": 0.28, "inside_percent_of_turn_time": 16.7},
+        )
+        self.assertEqual(
+            object_of(summary["github_calls"]),
+            {"calls": 2, "hours": 0.33, "inside_hours": 0.17, "outside_hours": 0.17, "inside_percent_of_turn_time": 11.1},
+        )
+        self.assertEqual(
+            object_of(summary["build_or_test_calls"]),
+            {"calls": 1, "hours": 0.17, "inside_hours": 0.08, "outside_hours": 0.08, "inside_percent_of_turn_time": 5.6},
+        )
+        self.assertEqual(
+            object_of(summary["poll_calls"]),
+            {"calls": 2, "hours": 0.18, "inside_hours": 0.18, "outside_hours": 0.0, "inside_percent_of_turn_time": 12.2},
+        )
+        self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 1, "calls": 1, "hours": 0.03})
+
+    def test_a_call_counts_only_in_the_intervals_of_its_own_keeper(self) -> None:
+        # Keeper b is in a turn from NOON to NOON + 1800 only, so a call of b at NOON + 3000 is outside.
+        summary = waits.summarize_turn_time([call("b", 100, end=NOON + 3000)], self.TURNS)
+        self.assertEqual(object_of(summary["execute"])["inside_hours"], 0.0)
+
+    def test_the_two_github_kinds_and_only_long_calls_make_the_github_group(self) -> None:
+        calls = [
+            call("a", 100, kind=waits.Kind.RUN, end=NOON + 1000),
+            call("a", 100, kind=waits.Kind.GH, end=NOON + 1000),
+            call("a", 100, kind=waits.Kind.BUILD, end=NOON + 1000),
+            call("a", 100, kind=waits.Kind.REST, end=NOON + 1000),
+            call("a", 59, kind=waits.Kind.GH, end=NOON + 1000),
+        ]
+        summary = waits.summarize_turn_time(calls, self.TURNS)
+        self.assertEqual(object_of(summary["github_calls"])["calls"], 2)
+        self.assertEqual(object_of(summary["build_or_test_calls"])["calls"], 1)
+        self.assertEqual(object_of(summary["long_calls"])["calls"], 4)
+
+    def test_a_poll_call_is_sleeping_and_names_a_run_whatever_its_length(self) -> None:
+        calls = [
+            call("a", 5, sleeping=True, run_ids=(RUN_A,), end=NOON + 1000),
+            call("a", 500, sleeping=False, run_ids=(RUN_A,), end=NOON + 1000),
+            call("a", 500, sleeping=True, end=NOON + 1000),
+        ]
+        self.assertEqual(object_of(waits.summarize_turn_time(calls, self.TURNS)["poll_calls"])["calls"], 1)
+
+    def test_without_turn_files_every_call_is_outside_and_no_share_is_given(self) -> None:
+        summary = waits.summarize_turn_time([call("a", 3600, end=NOON + 1000), call("b", 3600, end=NOON + 1000)], {})
+        self.assertEqual((summary["keepers_with_turn_traces"], summary["hours"]), (0, 0.0))
+        self.assertEqual(
+            object_of(summary["execute"]),
+            {"calls": 2, "hours": 2.0, "inside_hours": 0.0, "outside_hours": 2.0, "inside_percent_of_turn_time": None},
+        )
+        self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 2, "calls": 2, "hours": 2.0})
+
+    def test_no_calls_hold_no_time_and_no_share(self) -> None:
+        summary = waits.summarize_turn_time([], self.TURNS)
+        empty = {"calls": 0, "hours": 0.0, "inside_hours": 0.0, "outside_hours": 0.0, "inside_percent_of_turn_time": 0.0}
+        for group in ("execute", "long_calls", "github_calls", "build_or_test_calls", "poll_calls"):
+            self.assertEqual(object_of(summary[group]), empty, group)
+        self.assertEqual(object_of(summary["execute_of_keepers_without_turn_traces"]), {"keepers": 0, "calls": 0, "hours": 0.0})
+
+    def test_the_turn_time_is_the_sum_of_the_keepers_merged_intervals(self) -> None:
+        turns = {"a": CLOCK_OF([(0, 100), (50, 150)]), "b": CLOCK_OF([(0, 100)])}
+        # Keeper a holds 150 s, b 100 s: 250 s, not 350 s.
+        summary = waits.summarize_turn_time([call("a", 25, end=100.0)], turns)
+        self.assertEqual(object_of(summary["execute"])["inside_percent_of_turn_time"], 10.0)
+
+
 class MainTest(unittest.TestCase):
     def run_main(self, base: pathlib.Path, *arguments: str) -> tuple[dict[str, object], str]:
         argv = ["measure_execute_waits.py", "--base-path", str(base), *arguments]
@@ -1004,27 +1102,34 @@ class MainTest(unittest.TestCase):
                 [
                     execute_row("a", 108, argv=["bash", "-c", f"sleep 108; gh run view {RUN_A}"]),
                     schedule_row("a", target="a", message=f"run {RUN_A}", due=300),
+                    schedule_row("a", target="a", message="later", due=60),
+                    schedule_row("a", target="other", message="hello", due=60),
                     execute_row("early", 90, "ls", ts=SINCE - 1),
                     execute_row("late", 90, "ls", ts=MIDNIGHT),
                     "{not json",
+                    "[1, 2]",
                     execute_row("no_stamp", 5, "ls", ts=None),
                     execute_row("no_duration", None, "ls"),
                 ],
             )
+            # A rotated segment of the same day: its rows count too, and the three loss counters differ from each other.
+            write_day(base, "01.001.jsonl", [execute_row("b", 5, "ls"), '{"ts": NaN}', execute_row("no_stamp_either", 5, "ls", ts="noon")])
             target = base / "out.json"
             summary, printed = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--json-out", str(target))
             self.assertEqual(target.read_text(encoding="utf-8"), printed.rstrip("\n") + "\n")
             self.assertEqual(summary["window"], {"from": "2026-11-01", "to": "2026-11-01", "until": "2026-11-02T00:00:00+00:00"})
-            self.assertEqual(summary["rows_in_window"], 3)
-            self.assertEqual((summary["files_read"], summary["days_without_file"]), (1, []))
-            self.assertEqual((summary["rows_without_timestamp"], summary["executes_without_duration"], summary["skipped_lines"]), (1, 1, 1))
+            self.assertEqual(summary["rows_in_window"], 6)
+            self.assertEqual((summary["files_read"], summary["days_without_file"]), (2, []))
+            self.assertEqual((summary["skipped_lines"], summary["rows_without_timestamp"], summary["executes_without_duration"]), (3, 2, 1))
             execute = object_of(summary["execute"])
-            self.assertEqual(execute["calls"], 1)
+            self.assertEqual(execute["calls"], 2)
             run_waits = object_of(summary["run_waits"])
             self.assertEqual((run_waits["waits"], run_waits["polls"]), (1, 1))
             wakes = object_of(summary["schedule_wakes"])
-            self.assertEqual((wakes["creates"], wakes["self_wakes"], wakes["self_wakes_naming_a_run"]), (1, 1, 1))
+            self.assertEqual((wakes["creates"], wakes["self_wakes"], wakes["self_wakes_naming_a_run"]), (3, 2, 1))
             self.assertEqual(summary["keepers_in_both"], [{"keeper": "a", "blocked_hours": 0.03, "self_wakes_naming_a_run": 1}])
+            turn_time = object_of(summary["turn_time"])
+            self.assertEqual((turn_time["keepers_with_turn_traces"], turn_time["hours"]), (0, 0.0))
 
     def test_the_output_is_sorted_indented_ascii_json(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1126,16 +1231,92 @@ class MainTest(unittest.TestCase):
             window = object_of(summary["window"])
             self.assertEqual(window["until"], "2026-11-01T12:00:30+00:00")
 
+    def test_the_turn_time_is_read_with_the_lane_time_script(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(
+                base,
+                "01.jsonl",
+                [
+                    execute_row("a", 600, "ls", ts=NOON),  # inside the turns of a
+                    execute_row("a", 600, "ls", ts=NOON + 3600),  # after the last turn of a
+                    execute_row("b", 300, "ls", ts=NOON + 100),  # b has no turn file
+                ],
+            )
+            write_turns(base, "a", "first.jsonl", NOON - 1000, NOON - 300)
+            write_turns(base, "a", "second.jsonl", NOON - 500, NOON + 100)
+            summary, _ = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
+            turn_time = object_of(summary["turn_time"])
+            # The two files of a overlap: 1100 s of turn time, counted once.
+            self.assertEqual((turn_time["keepers_with_turn_traces"], turn_time["hours"]), (1, 0.31))
+            self.assertEqual(
+                object_of(turn_time["execute"]),
+                {"calls": 3, "hours": 0.42, "inside_hours": 0.17, "outside_hours": 0.25, "inside_percent_of_turn_time": 54.5},
+            )
+            self.assertEqual(object_of(turn_time["execute_of_keepers_without_turn_traces"]), {"keepers": 1, "calls": 1, "hours": 0.08})
+
+    def test_the_turn_time_equals_the_busy_time_of_the_lane_time_script(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
+            write_turns(base, "a", "one.jsonl", NOON, NOON + 100)
+            write_turns(base, "a", "two.jsonl", NOON + 50, NOON + 300)
+            write_turns(base, "a", "three.jsonl", NOON + 1000, NOON + 1100)
+            write_turns(base, "b", "one.jsonl", NOON, NOON + 40)
+            summary, _ = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
+            lane = sys.modules[waits.LANE_TIME_MODULE]
+            runs = cast(dict[str, list[tuple[float, float]]], lane.read_runs(base, SINCE, MIDNIGHT))
+            union = cast(Callable[[list[tuple[float, float]]], float], lane.union_seconds)
+            lane_seconds = sum(union(intervals) for intervals in runs.values())
+            self.assertEqual(lane_seconds, 300 + 100 + 40)
+            self.assertEqual(object_of(summary["turn_time"])["hours"], waits.hours(lane_seconds))
+
+    def test_until_cuts_the_turn_intervals_too(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 100, "ls", ts=NOON + 100)])
+            write_turns(base, "a", "one.jsonl", NOON, NOON + 1000)
+            summary, _ = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--until", "2026-11-01T12:08:20Z")
+            self.assertEqual(object_of(summary["turn_time"])["hours"], waits.hours(500))
+
+    def test_a_turn_file_last_written_before_the_window_is_not_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
+            write_turns(base, "a", "old.jsonl", SINCE - 1000, SINCE - 10)
+            summary, _ = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
+            self.assertEqual(object_of(summary["turn_time"])["keepers_with_turn_traces"], 0)
+
+    def test_a_lane_time_script_that_cannot_be_loaded_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
+            sources: dict[str, str | None] = {"missing.py": None, "no_reader.py": "x = 1\n", "syntax.py": "def (\n", "not_python.txt": "x = 1\n"}
+            for name, source in sources.items():
+                with self.subTest(name=name):
+                    path = base / name
+                    if source is not None:
+                        path.write_text(source, encoding="utf-8")
+                    with mock.patch.object(waits, "LANE_TIME_SCRIPT", path):
+                        message = self.fails(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01")
+                    self.assertIn(f"error: cannot load the turn reader from {path}", message)
+                    self.assertNotIn(waits.LANE_TIME_MODULE, sys.modules)
+
 
 class ProgramTest(unittest.TestCase):
     def test_the_script_run_as_a_program_prints_the_summary(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_day(base, "01.jsonl", [execute_row("a", 108, f"sleep 108; gh run view {RUN_A}")])
+            write_turns(base, "a", "one.jsonl", NOON - 200, NOON + 100)
             command = [sys.executable, "-B", "-I", str(SCRIPT), "--base-path", str(base), "--from-date", "2026-11-01", "--to-date", "2026-11-01"]
             done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=PROGRAM_TIMEOUT_SECONDS)
             self.assertEqual((done.returncode, done.stderr), (0, ""))
-            self.assertEqual(object_of(object_of(json.loads(done.stdout))["execute"])["calls"], 1)
+            summary = object_of(json.loads(done.stdout))
+            self.assertEqual(object_of(summary["execute"])["calls"], 1)
+            turn_time = object_of(summary["turn_time"])
+            self.assertEqual((turn_time["keepers_with_turn_traces"], object_of(turn_time["execute"])["inside_hours"]), (1, 0.03))
+            self.assertEqual(list(SCRIPT.parent.parent.glob("lane-time-2026-11/__pycache__")), [])
 
 
 if __name__ == "__main__":

@@ -65,6 +65,19 @@ Definitions:
   (scripts/lib/recorded_tool_outcome.py: `disposition` is `completed`, else
   `wire_outcome` is `ok`) and whose input `keeper_name` equals the row's Keeper, a
   Keeper waking itself. It names a run when its `message` holds a run id.
+- turn interval: the time from the first to the last line of one file in
+  `<base-path>/.masc/keeper_turn_events/<keeper>/`, cut to the window. The files
+  are read by `read_runs` of docs/evidence/lane-time-2026-11/measure_lane_time.py,
+  so both scripts count the same turn time: the union of a Keeper's intervals,
+  summed over the Keepers. A turn that left no file has no interval.
+- inside a turn: the seconds of a call that lie in the turn intervals of its
+  Keeper. A call that starts and ends between the intervals, or whose Keeper has no
+  interval at all, is outside. `turn_time` gives for the execute calls, the long
+  calls, the github calls, the long calls of kind `build_or_test` and the poll
+  calls their hours, the hours inside and outside a turn, and the inside hours as
+  a share of the turn time. A share of the turn time counts the inside hours only,
+  because the turn time holds no time outside a turn. `turn_time` also gives the
+  execute calls of the Keepers that have no interval.
 
 The command, run id and kind matching only labels a call in this report. No
 runtime decision reads it. Percentiles are nearest rank: the ceil(p * n)-th value
@@ -78,20 +91,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import pathlib
 import re
 import sys
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
 from itertools import pairwise
-from typing import cast
+from typing import Protocol, cast
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+LANE_TIME_SCRIPT = REPO_ROOT / "docs" / "evidence" / "lane-time-2026-11" / "measure_lane_time.py"
+LANE_TIME_MODULE = "measure_lane_time"
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "lib"))
 
 import masc_base_path  # noqa: E402
@@ -145,6 +161,29 @@ class ExecuteCall:
     repos: tuple[str, ...]
     kind: Kind
     day: date
+    end: float  # `ts` of the row, in seconds since the epoch; the call began `seconds` earlier
+
+
+Interval = tuple[float, float]
+
+
+class TurnTime(Protocol):
+    """The turn time of one Keeper, as `TurnClock` of measure_lane_time.py spells it."""
+
+    @property
+    def seconds(self) -> float: ...
+
+    def overlap(self, start: float, end: float) -> float:
+        """The seconds of [start, end] that lie in the turn time."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class LaneTime:
+    """What this script takes from measure_lane_time.py: the reading of turn intervals and the clock made of them."""
+
+    read_runs: Callable[[pathlib.Path, float, float], dict[str, list[Interval]]]
+    clock_of: Callable[[Iterable[Interval]], TurnTime]
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +285,7 @@ def execute_call_of(row: dict[str, object], stamp: float) -> ExecuteCall | None:
         repos_of(text),
         kind_of(text, run_ids),
         datetime.fromtimestamp(stamp, timezone.utc).date(),
+        stamp,
     )
 
 
@@ -302,6 +342,29 @@ def read_ledger(base: pathlib.Path, first: date, last: date, since: float, until
                         if wake is not None:
                             ledger.wakes.append(wake)
     return ledger
+
+
+def load_lane_time() -> LaneTime:
+    """measure_lane_time.py: the one place that says what a turn interval is and how a call is clipped to it."""
+    spec = importlib.util.spec_from_file_location(LANE_TIME_MODULE, LANE_TIME_SCRIPT)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"{LANE_TIME_SCRIPT} is not a Python file")
+    module = importlib.util.module_from_spec(spec)
+    # The dataclasses of that script resolve their annotations through sys.modules.
+    sys.modules[LANE_TIME_MODULE] = module
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True  # the import leaves no __pycache__ next to the other script
+    try:
+        spec.loader.exec_module(module)
+        return LaneTime(
+            cast(Callable[[pathlib.Path, float, float], dict[str, list[Interval]]], module.read_runs),
+            cast(Callable[[Iterable[Interval]], TurnTime], module.TurnClock.of),
+        )
+    except BaseException:
+        del sys.modules[LANE_TIME_MODULE]
+        raise
+    finally:
+        sys.dont_write_bytecode = previous
 
 
 def hours(seconds: float) -> float:
@@ -543,7 +606,51 @@ def keepers_in_both(calls: list[ExecuteCall], wakes: list[ScheduleWake]) -> list
     return [{"keeper": keeper, "blocked_hours": hours(blocked[keeper]), "self_wakes_naming_a_run": woken[keeper]} for keeper in both]
 
 
-def summarize(ledger: Ledger) -> dict[str, object]:
+def seconds_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnTime]) -> float:
+    inside = 0.0
+    for call in calls:
+        clock = turns.get(call.keeper)
+        if clock is not None:
+            inside += clock.overlap(call.end - call.seconds, call.end)
+    return inside
+
+
+def summarize_inside_turns(calls: list[ExecuteCall], turns: Mapping[str, TurnTime], turn_seconds: float) -> dict[str, object]:
+    total = sum(call.seconds for call in calls)
+    inside = seconds_inside_turns(calls, turns)
+    return {
+        "calls": len(calls),
+        "hours": hours(total),
+        "inside_hours": hours(inside),
+        "outside_hours": hours(total - inside),
+        "inside_percent_of_turn_time": percent(inside, turn_seconds),
+    }
+
+
+def summarize_turn_time(calls: list[ExecuteCall], turns: Mapping[str, TurnTime]) -> dict[str, object]:
+    turn_seconds = sum(clock.seconds for clock in turns.values())
+    long_calls = [call for call in calls if call.seconds >= LONG_CALL_SECONDS]
+    without_files = [call for call in calls if call.keeper not in turns]
+    groups = {
+        "execute": calls,
+        "long_calls": long_calls,
+        "github_calls": [call for call in long_calls if call.kind in GITHUB_KINDS],
+        "build_or_test_calls": [call for call in long_calls if call.kind is Kind.BUILD],
+        "poll_calls": poll_calls(calls),
+    }
+    return {
+        "keepers_with_turn_traces": len(turns),
+        "hours": hours(turn_seconds),
+        **{name: summarize_inside_turns(members, turns, turn_seconds) for name, members in groups.items()},
+        "execute_of_keepers_without_turn_traces": {
+            "keepers": len({call.keeper for call in without_files}),
+            "calls": len(without_files),
+            "hours": hours(sum(call.seconds for call in without_files)),
+        },
+    }
+
+
+def summarize(ledger: Ledger, turns: Mapping[str, TurnTime]) -> dict[str, object]:
     return {
         "rows_in_window": ledger.rows_in_window,
         "skipped_lines": ledger.skipped_lines,
@@ -552,6 +659,7 @@ def summarize(ledger: Ledger) -> dict[str, object]:
         "files_read": ledger.files_read,
         "days_without_file": [day.isoformat() for day in ledger.days_without_file],
         "execute": summarize_execute(ledger.executes),
+        "turn_time": summarize_turn_time(ledger.executes, turns),
         "run_waits": summarize_run_waits(ledger.executes),
         "schedule_wakes": summarize_wakes(ledger.wakes, ledger.schedule_creates),
         "keepers_in_both": keepers_in_both(ledger.executes, ledger.wakes),
@@ -591,13 +699,18 @@ def main() -> int:
     ledger = read_ledger(base, args.from_date, args.to_date, since, until)
     if ledger.files_read == 0:
         parser.error(f"no ledger file for {args.from_date.isoformat()}..{args.to_date.isoformat()} under {base}")
+    try:
+        lane_time = load_lane_time()
+    except (ImportError, OSError, SyntaxError, AttributeError) as error:
+        parser.error(f"cannot load the turn reader from {LANE_TIME_SCRIPT}: {error}")
+    turns = {keeper: lane_time.clock_of(intervals) for keeper, intervals in lane_time.read_runs(base, since, until).items()}
     summary = {
         "window": {
             "from": args.from_date.isoformat(),
             "to": args.to_date.isoformat(),
             "until": datetime.fromtimestamp(until, timezone.utc).isoformat(),
         },
-        **summarize(ledger),
+        **summarize(ledger, turns),
     }
     text = json.dumps(summary, indent=2, sort_keys=True)
     if args.json_out:

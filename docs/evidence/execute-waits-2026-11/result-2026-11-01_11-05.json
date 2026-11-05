@@ -140,7 +140,7 @@
     }
   },
   "executes_without_duration": 0,
-  "files_read": 56,
+  "files_read": 57,
   "keepers_in_both": [
     {
       "blocked_hours": 8.97,
@@ -294,6 +294,50 @@
     ]
   },
   "skipped_lines": 0,
+  "turn_time": {
+    "build_or_test_calls": {
+      "calls": 84,
+      "hours": 4.58,
+      "inside_hours": 1.53,
+      "inside_percent_of_turn_time": 0.2,
+      "outside_hours": 3.05
+    },
+    "execute": {
+      "calls": 75471,
+      "hours": 117.15,
+      "inside_hours": 90.98,
+      "inside_percent_of_turn_time": 11.5,
+      "outside_hours": 26.16
+    },
+    "execute_of_keepers_without_turn_traces": {
+      "calls": 1593,
+      "hours": 4.36,
+      "keepers": 1
+    },
+    "github_calls": {
+      "calls": 450,
+      "hours": 39.46,
+      "inside_hours": 35.52,
+      "inside_percent_of_turn_time": 4.5,
+      "outside_hours": 3.94
+    },
+    "hours": 792.17,
+    "keepers_with_turn_traces": 28,
+    "long_calls": {
+      "calls": 729,
+      "hours": 56.52,
+      "inside_hours": 47.24,
+      "inside_percent_of_turn_time": 6.0,
+      "outside_hours": 9.27
+    },
+    "poll_calls": {
+      "calls": 277,
+      "hours": 27.41,
+      "inside_hours": 24.75,
+      "inside_percent_of_turn_time": 3.1,
+      "outside_hours": 2.66
+    }
+  },
   "window": {
     "from": "2026-11-01",
     "to": "2026-11-05",

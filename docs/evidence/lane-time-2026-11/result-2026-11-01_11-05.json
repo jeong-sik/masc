@@ -138,21 +138,21 @@
       "sum_s": 86997.0
     },
     "latency": {
-      "mean_s": 487.5,
-      "n": 3561,
+      "mean_s": 497.8,
+      "n": 3562,
       "p50_s": 3.7,
-      "p90_s": 494.3,
-      "sum_s": 1736033.9
+      "p90_s": 494.9,
+      "sum_s": 1773180.0
     },
-    "no_turn_started": 20,
+    "no_turn_started": 19,
     "stimuli": 5307,
-    "total_wait_s": 1736033.9,
-    "turn_started": 3561,
-    "wait_overlapping_a_run_of_the_same_keeper_s": 980533.9,
+    "total_wait_s": 1773180.0,
+    "turn_started": 3562,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 982198.3,
     "wait_overlapping_long_execute_s": 77832.6,
     "waited_at_least_30_min": {
-      "n": 185,
-      "sum_s": 1442731.3,
+      "n": 186,
+      "sum_s": 1479877.4,
       "top_keepers": [
         {
           "keeper": "e-masc-the-leader",
@@ -211,6 +211,73 @@
       "p90": 30,
       "p99": 150
     },
+    "calls_without_trace_file": {
+      "by_turn_kind": {
+        "autonomous": {
+          "calls": 1564,
+          "execute_time_s": 15323.4,
+          "tool_time_s": 15339.3
+        },
+        "direct": {
+          "calls": 23672,
+          "execute_time_s": 73678.5,
+          "tool_time_s": 76195.9
+        }
+      },
+      "calls": 25236,
+      "execute_time_s": 89001.9,
+      "keepers_with_a_trace_file": {
+        "by_turn_kind": {
+          "direct": {
+            "calls": 23579,
+            "execute_time_s": 73302.6,
+            "tool_time_s": 75806.6
+          }
+        },
+        "calls": 23579,
+        "execute_time_s": 73302.6,
+        "tool_time_s": 75806.6
+      },
+      "keepers_without_any_trace_file": {
+        "by_turn_kind": {
+          "autonomous": {
+            "calls": 1564,
+            "execute_time_s": 15323.4,
+            "tool_time_s": 15339.3
+          },
+          "direct": {
+            "calls": 93,
+            "execute_time_s": 375.8,
+            "tool_time_s": 389.3
+          }
+        },
+        "calls": 1657,
+        "execute_time_s": 15699.3,
+        "keepers": [
+          "native-image-goal-20261101-0340",
+          "ocaml-refactor-woman"
+        ],
+        "tool_time_s": 15728.6
+      },
+      "tool_time_inside_turns_s": 0.0,
+      "tool_time_s": 91535.2,
+      "turns": 1233,
+      "turns_by_kind_set": {
+        "autonomous": {
+          "turns": 10002,
+          "without_trace_file": 98
+        },
+        "autonomous+direct": {
+          "turns": 67,
+          "without_trace_file": 0
+        },
+        "direct": {
+          "turns": 1143,
+          "without_trace_file": 1135
+        }
+      },
+      "turns_in_window": 11212
+    },
     "execute_time_s": 421722.4,
     "execution_modes": {
       "concurrent": {
@@ -222,47 +289,51 @@
         "time_s": 437863.0
       }
     },
-    "long_execute": {
-      "calls": 729,
+    "inside_turns": {
+      "between_calls_s": 1625902.4,
+      "execute_time_s": 327532.9,
+      "long_execute_time_s": 170078.0,
+      "other_turn_time_s": 876803.1,
+      "percent_of_turn_time": {
+        "between_calls": 57.0,
+        "execute": 11.5,
+        "long_execute": 6.0,
+        "other": 30.7,
+        "polling": 4.5,
+        "rereads_after_first_call": 2.9,
+        "tool": 12.2
+      },
       "polling_by_keeper": {
-        "build-maniac": {
-          "polling_s": 151.2,
-          "turn_time_s": 10886.5
-        },
         "code-reviewer": {
           "polling_s": 418.6,
           "turn_time_s": 159286.0
         },
         "code-reviewer-brother": {
-          "polling_s": 2929.2,
+          "polling_s": 200.5,
           "turn_time_s": 41688.4
         },
         "code-reviewer-father": {
-          "polling_s": 1052.5,
+          "polling_s": 236.2,
           "turn_time_s": 112336.9
         },
         "code-reviewer-mother": {
           "polling_s": 228.8,
           "turn_time_s": 46348.9
         },
-        "code-reviewer-sister": {
-          "polling_s": 271.6,
-          "turn_time_s": 35997.2
-        },
         "code-reviewer-uncle": {
-          "polling_s": 260.9,
+          "polling_s": 163.4,
           "turn_time_s": 66999.8
         },
         "context-reviewer": {
-          "polling_s": 1176.3,
+          "polling_s": 875.0,
           "turn_time_s": 151151.6
         },
         "e-masc-the-leader": {
-          "polling_s": 1155.6,
+          "polling_s": 1013.6,
           "turn_time_s": 135167.1
         },
         "github-pr-checker": {
-          "polling_s": 12684.9,
+          "polling_s": 11004.9,
           "turn_time_s": 74260.6
         },
         "goo-yang-bong": {
@@ -277,20 +348,16 @@
           "polling_s": 1723.3,
           "turn_time_s": 150140.7
         },
-        "ocaml-refactor-woman": {
-          "polling_s": 319.2,
-          "turn_time_s": 0.0
-        },
         "pr-updater": {
-          "polling_s": 11865.9,
+          "polling_s": 5132.8,
           "turn_time_s": 140744.0
         },
         "sangsu": {
-          "polling_s": 13020.1,
+          "polling_s": 12377.0,
           "turn_time_s": 148328.7
         },
         "wkbl-data": {
-          "polling_s": 34419.3,
+          "polling_s": 33809.6,
           "turn_time_s": 199690.8
         },
         "wkbl-front": {
@@ -306,11 +373,16 @@
           "turn_time_s": 108747.8
         }
       },
+      "polling_time_s": 128835.5,
+      "rereads_after_first_call_turn_time_s": 81785.3,
+      "tool_time_s": 349102.4
+    },
+    "long_execute": {
+      "calls": 729,
       "polling_calls": 445,
       "polling_time_s": 143328.9,
       "time_s": 203466.7
     },
-    "other_turn_time_s": 374408.2,
     "rereads_after_first_call": {
       "calls": 33559,
       "turn_time_s": 87216.4
@@ -469,6 +541,21 @@
           }
         ]
       }
+    },
+    "traced_calls_outside_turns": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 1168,
+          "execute_time_outside_turns_s": 5187.6,
+          "tool_time_outside_turns_s": 5544.7
+        }
+      },
+      "calls": 1168,
+      "calls_partly_inside_turn_time": 0,
+      "execute_time_outside_turns_s": 5187.6,
+      "tool_time_outside_turns_s": 5544.7,
+      "turns": 71,
+      "turns_that_also_have_autonomous_calls": 63
     },
     "turn_time_s": 2851807.9,
     "turns": 11212

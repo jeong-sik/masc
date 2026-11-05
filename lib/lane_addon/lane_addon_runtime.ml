@@ -3688,6 +3688,7 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
                  message="Lane declaration is unavailable to this caller";current=None})
       | None ->
       let* declaration = offload (fun () -> Lane_addon_config.load_source
+        ~manifest_scope:Lane_addon_config.Operator_declared
         ~source_path:document.source_path ~source_text:document.source_text)
         |> Result.map_error (fun _ -> {Lane_addon_declaration.code=Invalid_request;
             message="Lane declaration is unavailable to this caller";current=None}) in
@@ -3743,6 +3744,7 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
       | Lane_addon_sources.Operator_configuration -> Ok None
       | Keeper _ | Unauthenticated ->
           let* declaration = offload (fun () -> Lane_addon_config.load_source
+            ~manifest_scope:(Lane_addon_config.Within_workspace config.Workspace.base_path)
             ~source_path:(Filename.concat directory request.file_name) ~source_text:request.source_text)
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;message;current=None}) in
           let* () = Lane_addon_sources.authorize ~access declaration.binding
@@ -4324,10 +4326,23 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       let* path = request_result (text args "manifest_path") in let* run_id = request_result (text args "run_id") in
       let* binding = match List.assoc_opt "binding" args with Some (`Assoc _ as value) -> Ok value
         | _ -> Error (Request_rejected "binding requires an object") in
-      let* package = offload (fun () -> Lane_addon_manifest.load ~path)
-        |> Result.map_error (function
-          | Lane_addon_manifest.Invalid_manifest detail -> Request_rejected detail
-          | Io_failure detail -> Runtime_failed detail) in
+      let source_access = match caller, access with
+        | None, Lane_addon_sources.Operator_configuration -> Lane_addon_sources.Unauthenticated
+        | None, ((Keeper _ | Unauthenticated) as access)
+        | Some _, ((Operator_configuration | Keeper _ | Unauthenticated) as access) -> access in
+      (* Operator configuration names packages wherever it installed them. A
+         Keeper or an unauthenticated caller only reaches a manifest inside the
+         workspace, checked before the file is opened. *)
+      let* package = offload (fun () ->
+          let readable = match source_access with
+            | Lane_addon_sources.Operator_configuration -> Some path
+            | Keeper _ | Unauthenticated ->
+                Lane_addon_manifest.resolve_in_workspace ~workspace:config.Workspace.base_path path in
+          match readable with
+          | None -> Error (Request_rejected Lane_addon_manifest.outside_workspace)
+          | Some path -> Lane_addon_manifest.load ~path |> Result.map_error (function
+              | Lane_addon_manifest.Invalid_manifest detail -> Request_rejected detail
+              | Io_failure detail -> Runtime_failed detail)) in
       let* () = request_result (Lane_addon_sources.validate binding) in
       let* () = request_result (match package.binding_schema with
         | None -> Ok ()
@@ -4336,10 +4351,6 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-      let source_access = match caller, access with
-        | None, Lane_addon_sources.Operator_configuration -> Lane_addon_sources.Unauthenticated
-        | None, ((Keeper _ | Unauthenticated) as access)
-        | Some _, ((Operator_configuration | Keeper _ | Unauthenticated) as access) -> access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
       (* A private attachment keeps its source owner for every later wake.

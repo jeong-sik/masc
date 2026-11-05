@@ -1001,7 +1001,7 @@ contributions=["observe"]
 max_reply_bytes=4096
 |};
   let path=Filename.concat directory "ego.toml" in
-  let load space=Config.load_source ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
+  let load space=Config.load_source ~manifest_scope:Config.Operator_declared ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
   let workspace=unwrap (load "") and first=unwrap (load "space=\"first Goal\"\n")
   and second=unwrap (load "space=52\n") in
   check bool "Space is retained in declaration binding" true (Yojson.Safe.Util.member "space" second.binding=`Int 52);

@@ -79,7 +79,7 @@ let read_bytes path = protect (fun () ->
           with End_of_file -> reject Io_error "declaration changed while reading"))
 
 let describe ~snapshot ~path source_text =
-  let parsed = Lane_addon_config.load_source ~source_path:path ~source_text in
+  let parsed = Lane_addon_config.load_source ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:path ~source_text in
   let desired_revision, messages = match parsed with
     | Error message -> None,[message]
     | Ok declaration ->

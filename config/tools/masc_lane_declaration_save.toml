@@ -23,7 +23,7 @@ description = "One direct-child .toml filename, returned by read or chosen for a
 name = "source_text"
 type = "string"
 required = true
-description = "Complete declaration TOML; relative paths resolve from its final configuration directory."
+description = "Complete declaration TOML; relative paths resolve from its final configuration directory. A Keeper's manifest_path has to resolve inside the workspace."
 
 [[params]]
 name = "expected_source_revision"

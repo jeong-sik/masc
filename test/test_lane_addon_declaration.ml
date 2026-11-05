@@ -476,7 +476,66 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
   | None -> fail "publication staging was not exercised"
   | Some path -> check bool "owned staging is cleaned after refused publication" false (Sys.file_exists path))
 
+(* A Keeper names a manifest only inside the workspace, and the refusal comes
+   before the file is opened: the outside files are not valid TOML, so opening
+   one would answer with its parse error instead. [escape] reads as
+   [<root>/escape.toml] if [..] is folded before the link is followed; the
+   kernel follows the link first and opens the file outside. Operator
+   configuration still opens the path it names. *)
+let test_keeper_manifest_outside_workspace_is_refused_unopened () =
+  with_fixture (fun _clock config directory root started ->
+  let outside = Filename.temp_file "lane-outside-" ".toml" in
+  let escape_dir = Filename.temp_dir "lane-escape-" "" |> Unix.realpath in
+  let escape_inner = Filename.concat escape_dir "inner" in
+  let escape_file = Filename.concat escape_dir "escape.toml" in
+  let escape_link = Filename.concat root "inner-link" in
+  Unix.mkdir escape_inner 0o700;
+  write escape_file "id = [unclosed";
+  Unix.symlink escape_inner escape_link;
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.remove outside;
+      Unix.unlink escape_link;
+      Sys.remove escape_file;
+      Unix.rmdir escape_inner;
+      Unix.rmdir escape_dir)
+    (fun () ->
+    write outside "id = [unclosed";
+    let escape = Filename.concat escape_link "../escape.toml" in
+    let link = Filename.concat root "outside-link.toml" in
+    Unix.symlink outside link;
+    check (option string) "a path inside the workspace resolves to the file it opens"
+      (Some (Filename.concat root ".masc/package.toml"))
+      (Lane_addon_manifest.resolve_in_workspace ~workspace:root
+         (Filename.concat root ".masc/config/../package.toml"));
+    let attach ?access path = Runtime.dispatch ~caller:"keeper-a" ?access ~config
+        ~operation:Runtime.Attach (`Assoc ["manifest_path",`String path;"run_id",`String "outside";
+          "binding",`Assoc ["sources",`List []]]) in
+    let refused = Error Lane_addon_manifest.outside_workspace in
+    check (result reject string) "Keeper attach outside the workspace" refused (attach outside);
+    check (result reject string) "Keeper attach through a link inside the workspace" refused (attach link);
+    check (result reject string) "Keeper attach through a link and then .." refused (attach escape);
+    check bool "operator attach still opens the path it names" true
+      (match attach ~access:Lane_addon_sources.Operator_configuration outside with
+       | Error message -> message <> Lane_addon_manifest.outside_workspace
+       | Ok _ -> false);
+    (match Runtime.save_declaration ~caller:"keeper-a" ~config
+             (request ~mode:"create" ~file_name:"outside.toml" (declaration ~manifest_path:outside ())) with
+     | Error {Editor.code=Editor.Invalid_declaration;message;_} ->
+         check string "Keeper save outside the workspace" Lane_addon_manifest.outside_workspace message
+     | Ok _ | Error _ -> fail "Keeper save outside the workspace was not refused as a declaration");
+    (match Runtime.save_declaration ~caller:"keeper-a" ~config
+             (request ~mode:"create" ~file_name:"outside.toml" (declaration ~manifest_path:escape ())) with
+     | Error {Editor.code=Editor.Invalid_declaration;message;_} ->
+         check string "Keeper save through a link and then .." Lane_addon_manifest.outside_workspace message
+     | Ok _ | Error _ -> fail "Keeper save through a link and then .. was not refused as a declaration");
+    check bool "refused save wrote no declaration" false
+      (Sys.file_exists (Filename.concat directory "outside.toml"));
+    check (Alcotest.list Alcotest.string) "no worker started" [] !started))
+
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "Keeper manifest outside the workspace is refused unopened" `Quick
+      test_keeper_manifest_outside_workspace_is_refused_unopened;
   test_case "invalid Ego Space never publishes or attaches" `Quick test_invalid_ego_space_never_publishes_or_attaches;
   test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick

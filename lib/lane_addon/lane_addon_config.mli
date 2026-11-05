@@ -39,10 +39,23 @@ type snapshot = {
     accepting deployment stage an absent key retains the current enabled behavior. *)
 val load_file : path:string -> (declaration, string) result
 
+(** Who wrote the source bytes [load_source] reads. *)
+type manifest_scope =
+  | Operator_declared
+  (** Operator configuration, or a declaration file already on disk:
+      [manifest_path] is read where it points. [load] and [load_file] read
+      this way. *)
+  | Within_workspace of string
+  (** A save from a Keeper or an unauthenticated caller: the resolved
+      [manifest_path] has to stay inside this workspace
+      ([Lane_addon_manifest.resolve_in_workspace]) before it is opened. *)
+
 (** Validate edited source bytes using the same contract as [load_file].
     Relative paths resolve from the final declaration path; no declaration is
     written. Package manifest reads remain effects owned by the caller. *)
-val load_source : source_path:string -> source_text:string -> (declaration, string) result
+val load_source :
+  manifest_scope:manifest_scope -> source_path:string -> source_text:string ->
+  (declaration, string) result
 
 (** Read the immediate [.toml] children in deterministic filename order.
     Missing directories are an empty complete configuration. Read failures make

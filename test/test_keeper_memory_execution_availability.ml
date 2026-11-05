@@ -12,7 +12,7 @@ let empty : R.tool_execution_snapshot = {serving=[];conflicts=[];unready=[]}
 let declaration ?(extra="") () =
   let manifest=Sys.getenv "MASC_TEST_LIBRARIAN_PACKAGE" in
   let manifest=if Filename.is_relative manifest then Filename.concat (Sys.getcwd ()) manifest else manifest in
-  Lane_addon_config.load_source ~source_path:"/memory-test/keeper-librarian.toml"
+  Lane_addon_config.load_source ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:"/memory-test/keeper-librarian.toml"
     ~source_text:(Printf.sprintf "id=\"memory-worker\"\nrun_id=\"memory\"\nmanifest_path=%S\n%s\n[binding]\nsources=[]\n" manifest extra)
   |> require
 let observe ?(setting=Env_config_keeper.KeeperMemoryOs.Enabled) ?(route=fun _ -> Ok ()) ~mode declarations =

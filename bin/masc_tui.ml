@@ -6155,7 +6155,6 @@ let launch_browser_lane state ~mailbox operation =
         | exn -> Error (Printexc.to_string exn)
       in
       let perform () =
-        Log.Transport.warn "browser operation dispatch";
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
@@ -8063,18 +8062,6 @@ let observer_browser_scope state =
   if Option.is_some !browser_pointer_press then None
   else Masc_tui_types.observer_browser_scope_of_state state
 
-let debug_browser_scope = function
-  | None -> "none"
-  | Some (scope : Masc.Workspace_dataset_event.browser_scope) ->
-      let client = Option.value scope.client_id ~default:"-" in
-      let view = match scope.view with
-        | Masc.Workspace_dataset_event.Read -> "read"
-        | Masc.Workspace_dataset_event.Viewport -> "viewport"
-        | Masc.Workspace_dataset_event.Scene _ -> "scene"
-      in
-      Printf.sprintf "%s/%s/%d/%s"
-        (Browser_lane.Lane_name.to_wire scope.source) client scope.tab_id view
-
 let owe_machine_live_read state machine =
   let visible = match machine with
     | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
@@ -8110,11 +8097,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       owe_runtime_surface_read state
   | Masc.Workspace_dataset_event.Machine_live { machine } -> owe_machine_live_read state machine
   | Masc.Workspace_dataset_event.Browser_observation observation ->
-      let matches = Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope in
-      Log.Transport.warn "browser observation event scope=%s current=%s matches=%b"
-        (debug_browser_scope (Some observation.scope))
-        (debug_browser_scope (Masc_tui_types.observer_browser_scope_of_state state)) matches;
-      if matches then
+      if Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope then
         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health _ ->
       state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
@@ -9131,43 +9114,27 @@ let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
   | None -> state.browser_observation_owed <- Masc_tui_owed_read.settled
   | Some view ->
-      (match view.Browser_lane_view.load with
-       | Browser_lane_view.Failed _ ->
-           let owed_kind = match state.browser_observation_owed with
-             | Masc_tui_owed_read.Settled -> "settled"
-             | Masc_tui_owed_read.Owed _ -> "owed"
-             | Masc_tui_owed_read.Reading _ -> "reading"
-             | Masc_tui_owed_read.Waiting { retry_at; _ } ->
-                 Printf.sprintf "waiting:%.3f" retry_at
-           in
-           Log.Transport.warn
-             "browser observation failed tick owed=%s now=%.3f ready=%b history=%b"
-             owed_kind (monotonic_now_s ()) (server_authority_ready state)
-             (Option.is_some state.browser_history)
-       | Browser_lane_view.Loading _ | Browser_lane_view.Idle
-       | Browser_lane_view.No_browser -> ());
       let owed = match view.Browser_lane_view.load with
         | Browser_lane_view.Loading _ -> state.browser_observation_owed
         | Browser_lane_view.Idle -> Masc_tui_owed_read.succeeded state.browser_observation_owed
-        | Browser_lane_view.Failed _ -> failed_read state.browser_observation_owed
+        | Browser_lane_view.Failed _ ->
+            (match state.browser_observation_owed with
+             | Masc_tui_owed_read.Settled | Masc_tui_owed_read.Reading _ ->
+                 failed_read state.browser_observation_owed
+             | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ ->
+                 state.browser_observation_owed)
         | Browser_lane_view.No_browser -> Masc_tui_owed_read.settled
       in
       state.browser_observation_owed <- owed;
-      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
+      if server_authority_ready state
+         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
          && Option.is_none !browser_pointer_press then begin
-        Log.Transport.warn "browser observation owed read due scope=%s"
-          (debug_browser_scope (observer_browser_scope state));
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
         match Browser_lane_view.cadence_operation ?viewport view with
         | Some operation ->
-            Log.Transport.warn "browser observation cadence selected ready=%b busy=%b history=%b"
-              (server_authority_ready state) (Browser_lane_view.busy view)
-              (Option.is_some state.browser_history);
             state.browser_observation_owed <- Masc_tui_owed_read.started owed;
             launch_browser_lane state ~mailbox operation
-        | None ->
-            Log.Transport.warn "browser observation cadence refused";
-            state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
+        | None -> state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
       end
 
 let launch_owed_lanes state ~mailbox =
@@ -18753,8 +18720,6 @@ let reconcile_observer_machine state ~host ~port ~mailbox =
   let machine = Masc_tui_types.observer_machine_of_state state in
   let browser = observer_browser_scope state in
   if machine <> state.observer_machine || browser <> state.observer_browser then begin
-    Log.Transport.warn "browser observer scope change old=%s new=%s"
-      (debug_browser_scope state.observer_browser) (debug_browser_scope browser);
     Option.iter (fun owner -> Masc_tui_workspace_job.cancel_observation state ~key:owner)
       state.observer_stream_owner;
     state.observer_stream_owner <- None;

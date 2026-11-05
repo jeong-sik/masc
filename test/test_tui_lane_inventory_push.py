@@ -204,14 +204,18 @@ class LaneInventoryPushTest(unittest.TestCase):
         def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
             lane = cast(LaneServer, server)
             lane.set_phase("open")
-            step("keys", "\t\t\t\t9pp")
+            step("keys", ":go Features\r")
             step("wait", lambda: lane.response_count("open", LANES) >= 1, "Lanes did not open")
-            step("keys", "/addons\n")
+            step("drain", 0.3)
+            step("keys", "o")
             step("wait", lambda: lane.response_count("open", ADDONS) >= 1, "Add-ons did not open")
             step("drain", 2.4)
             self.assertEqual(lane.response_count("open", LANES), 1, "Lane reads continued while idle")
             self.assertEqual(lane.response_count("open", ADDONS), 1, "Add-on reads continued while idle")
             step("keys", "\r")
+            step("wait", lambda: lane.response_count("open", ADDONS) == 2,
+                 "the selected Add-on detail did not open")
+            step("drain", 0.3)
 
             lane.set_phase("inspect")
             lane.events.put(dataset("lane_addons", "quiz-1"))

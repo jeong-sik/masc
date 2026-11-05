@@ -4558,7 +4558,6 @@ let fetch_browser_lane_clients ~host ~port =
   decode_discovery json
 
 let fetch_browser_lane ~host ~port view =
-  Log.Transport.warn "browser read HTTP dispatch host=%s port=%d" host port;
   (* The server can spend 20s listing tabs and 20s reading the page. *)
   match post_json_with_timeout ~timeout_sec:45.0 ~host ~port
           ~path:"/api/v1/dashboard/browser-lane/read"

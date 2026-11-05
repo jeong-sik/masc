@@ -155,13 +155,9 @@ let observation history () =
 let schemas () =
   Msx_tool.all
   |> List.map (fun tool ->
-      let name = Msx_tool.name tool in
-      match Embedded_config.read ("tools/" ^ name ^ ".toml") with
-      | None -> invalid_arg ("missing MSX tool definition: " ^ name)
-      | Some contents ->
-          match Tool_definition_toml.load ~name ~contents with
-          | Ok definition -> tool, definition.Tool_definition_toml.schema
-          | Error message -> invalid_arg message)
+      match Tool_definition_embedded.find (Msx_tool.name tool) with
+      | Ok definition -> tool, definition.Tool_definition_toml.schema
+      | Error message -> invalid_arg message)
 
 let definition (schema : Masc_domain.tool_schema) =
   match S.tool_of_yojson (`Assoc ["name", `String schema.name;

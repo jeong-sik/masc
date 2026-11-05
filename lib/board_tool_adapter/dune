@@ -45,7 +45,7 @@
   uri
   time_compat
   yojson
-  ; Board_tool_schemas reads config/tools/masc_board_*.toml from the
+  ; Board_tool_handlers reads the shipped runtime.toml from the
   ; binary-embedded config tree.
   masc.embedded_config
   masc.config

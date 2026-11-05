@@ -8,14 +8,7 @@
     advertising a partial Board surface. *)
 
 let schema_of_board_name board_name : Masc_domain.tool_schema =
-  let name = Tool_name.Board_name.to_string board_name in
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
+  Tool_definition_embedded.schema (Tool_name.Board_name.to_string board_name)
 ;;
 
 let tool_post_create = schema_of_board_name Tool_name.Board_name.Board_post

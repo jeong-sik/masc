@@ -337,7 +337,7 @@ let addon_exports_for_request ~profile ~auth_token state =
           | Full -> true
           | Seat -> TP.is_seat_tool name
           | Managed_agent | Operator_remote -> false in
-        profile_permits && Result.is_ok (Auth.authorize_tool_v2 config.base_path ~agent_name
+        profile_permits && Result.is_ok (Auth.authorize_tool config.base_path ~agent_name
           ~token:auth_token ~tool_name:permission_tool) in
       let exports = List.filter (fun (export : Lane_addon_runtime.tool_export) ->
         permits export.tool.name) reading.exports in

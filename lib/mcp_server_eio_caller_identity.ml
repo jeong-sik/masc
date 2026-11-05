@@ -202,7 +202,7 @@ let resolve_auth_fallback_agent_name
     record that merely shares the prefix — with no [dashboard.json] record
     present, ["dashboard"] resolves to ["dashboard-admin-deft-cobra"].
 
-    The resolved name is then the subject of [Auth.authorize_tool_v2], which
+    The resolved name is then the subject of [Auth.authorize_tool], which
     verifies the presented token against *that subject's* credential. So a
     caller holding the dashboard's own valid credential was authorized as a
     different agent and rejected with [InvalidToken "Token mismatch"] — the

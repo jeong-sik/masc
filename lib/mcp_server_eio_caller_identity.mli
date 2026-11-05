@@ -30,7 +30,7 @@ val alias_may_rewrite_identity :
 (** Whether the workspace display alias ([Workspace.resolve_agent_name], a
     prefix scan over [agents_dir]) may replace this caller name.
 
-    The resolved name becomes the subject of [Auth.authorize_tool_v2], which
+    The resolved name becomes the subject of [Auth.authorize_tool], which
     checks the presented token against that subject's credential. A prefix
     match onto an unrelated record therefore turns a valid credential into
     [InvalidToken "Token mismatch"]. Answers [false] exactly when the

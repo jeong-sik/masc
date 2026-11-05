@@ -224,7 +224,7 @@ let execute_tool_eio
           (* A seat tool asks for CanPlayMachine through the same catalog check
              every other tool uses; the profile already refused anything else. *)
           | Full | Managed_agent | Seat ->
-            Auth.authorize_tool_v2
+            Auth.authorize_tool
               config.base_path
               ~agent_name
               ~token

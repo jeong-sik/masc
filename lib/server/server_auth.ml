@@ -1144,7 +1144,7 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
   let* actor = resolve_request_authorization_actor ~token agent_name_opt in
   let agent_name = request_authorization_actor_name actor in
-  let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
+  let* () = Auth.authorize_tool base_path ~agent_name ~token ~tool_name in
   Ok agent_name
 
 type request_error =

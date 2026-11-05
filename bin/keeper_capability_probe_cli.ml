@@ -360,7 +360,8 @@ let run_doctor () =
             | Tool_definition_toml.Deferrable -> false))
       verdict_of
   in
-  Printf.printf "== masc tool doctor -- %d tool names ==\n\n" (List.length names);
+  Printf.printf "== masc-keeper-capability-probe --doctor -- %d tool names ==\n\n"
+    (List.length names);
   List.iter
     (fun (name, verdict) ->
       Printf.printf "  %-38s %-20s %-9s%s\n" name (verdict_short verdict)

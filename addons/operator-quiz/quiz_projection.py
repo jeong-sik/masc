@@ -10,7 +10,7 @@ verdict a question already had, over graded attempts. All are n/d.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 from zoneinfo import ZoneInfo
@@ -23,6 +23,8 @@ QUESTIONS = "quiz/questions"
 TOPICS = "quiz/topics"
 ITEMS = "quiz/items"
 MEASURES = "quiz/measures"
+SCORECARD = "quiz/scorecard"
+REVIEW = "quiz/review"
 GRADED = {g.CORRECT, g.INCORRECT, g.SKIPPED}
 OPEN = "open"
 
@@ -170,6 +172,91 @@ def topic_rows(items: list[g.Item], first_posed: dict[str, float]) -> list[dict]
     return out
 
 
+def answered_sessions(sessions: list[q.Session]) -> list[tuple[q.Session, q.AnswerReceived]]:
+    """Each answered session with its answer, oldest first."""
+    out: list[tuple[q.Session, q.AnswerReceived]] = []
+    for session in sessions:
+        if session.answer is not None:
+            out.append((session, session.answer))
+    out.sort(key=lambda pair: pair[1].answered_at)
+    return out
+
+
+def scorecard_rows(sessions: list[q.Session], zone: ZoneInfo) -> list[dict]:
+    """One row per window: the graded answers inside it. The anchor is the
+    local day of the log's latest answer, not the calendar, so an observation
+    with nothing new gives the same rows. No answer yet, no rows."""
+    attempts = [(posed, verdict, answer.answered_at)
+                for session, answer in answered_sessions(sessions)
+                for posed, verdict in attempt_states(session)]
+    if not attempts:
+        return []
+    reference = max(at for _, _, at in attempts)
+    anchor = local_day(reference, zone)
+    windows: list[tuple[str, int | None]] = [("day", 1), ("7d", 7), ("30d", 30), ("all", None)]
+    rows: list[dict] = []
+    for name, days in windows:
+        window = [(posed, verdict) for posed, verdict, at in attempts
+                  if verdict in GRADED
+                  and (days is None or anchor - timedelta(days=days - 1) <= local_day(at, zone) <= anchor)]
+        correct = sum(verdict == g.CORRECT for _, verdict in window)
+        misses: dict[str, int] = {}
+        for posed, verdict in window:
+            if verdict in g.MISSES:
+                misses[posed.topic] = misses.get(posed.topic, 0) + 1
+        miss_topics = sorted(misses.items(), key=lambda pair: (-pair[1], pair[0]))[:3]
+        fields = {"window": name, "days": days, "anchor_local_date": anchor.isoformat(),
+                  "graded": len(window), "correct": correct,
+                  "incorrect": sum(verdict == g.INCORRECT for _, verdict in window),
+                  "skipped": sum(verdict == g.SKIPPED for _, verdict in window),
+                  "score": fraction(correct, len(window)),
+                  "miss_topics": [{"topic": topic, "misses": count} for topic, count in miss_topics]}
+        title = {"day": "성적표 — 마지막 응답 날", "7d": "성적표 — 최근 7일",
+                 "30d": "성적표 — 최근 30일", "all": "성적표 — 전체"}[name]
+        rows.append(row(SCORECARD, name, title, reference, fields))
+    return rows
+
+
+def review_rows(sessions: list[q.Session], items: list[g.Item]) -> list[dict]:
+    """The wrong-answer note: one row per item whose latest attempt is a
+    miss, carrying its last answered question. A question still open is not
+    an attempt and never gets a row, so an open re-ask shows no sources and
+    no key (§5)."""
+    last_pose: dict[str, tuple[q.Session, q.AnswerReceived, q.Posed]] = {}
+    for session, answer in answered_sessions(sessions):
+        # A void judgment is not an attempt, so its pose must not be the
+        # note's question: the note carries the last pose that counted.
+        for posed, verdict in attempt_states(session):
+            if verdict != g.VOID:
+                last_pose[posed.item_id] = (session, answer, posed)
+    out: list[dict] = []
+    for item in items:
+        if not item.open_debt:
+            continue
+        found = last_pose.get(item.item_id)
+        if found is None:
+            continue
+        session, answer, posed = found
+        response = next(a.response for a in answer.answers
+                        if a.question_id == posed.question_id)
+        judgments = session.judgments_of(posed.question_id)
+        last_miss = max(attempt.answered_at for attempt in item.attempts
+                        if attempt.verdict in g.MISSES)
+        fields = {"item_id": item.item_id, "topic": item.topic, "latest": item.latest,
+                  "correct_streak": item.correct_streak, "attempts": len(item.attempts),
+                  "last_miss_at": last_miss,
+                  "question": posed.question, "response": q.response_to_json(response),
+                  "key": q.key_to_json(posed.key),
+                  "by": "judgment" if judgments else "key",
+                  "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
+                                 "request_id": j.request_id} for j in judgments],
+                  "sources": [source.to_json() for source in item.sources]}
+        out.append(row(REVIEW, item.item_id, f"오답 노트 — {item.topic}",
+                       answer.answered_at, fields, kind="event",
+                       evidence=retained(item.sources)))
+    return out
+
+
 def measures_row(sessions: list[q.Session], items: list[g.Item], zone: ZoneInfo, observed_at: float,
                  evidence: list | None) -> dict:
     recoveries = [r for r in (recovered(item, zone) for item in items) if r is not None]
@@ -215,6 +302,8 @@ def observation(sessions: list[q.Session], scopes: dict[str, str | None], zone: 
     rows += [r for session in sessions for r in question_rows(session)]
     rows += topic_rows(items, first_posed)
     rows += [item_row(item, first_posed[item.item_id]) for item in items]
+    rows += scorecard_rows(sessions, zone)
+    rows += review_rows(sessions, items)
     # Without an export the row times come from the log, so an observation
     # with nothing new gives the same rows.
     observed_at = now if export else max((r["observed_at"] for r in rows), default=now)

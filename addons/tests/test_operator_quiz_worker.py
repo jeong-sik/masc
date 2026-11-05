@@ -17,7 +17,8 @@ import unittest
 from test_operator_quiz_flow import FakeHost, first_quote, answering, post
 
 SERVER = Path(__file__).resolve().parents[1] / "operator-quiz" / "server.py"
-LANES = {"quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures"}
+LANES = {"quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures",
+          "quiz/scorecard", "quiz/review"}
 ROW_FIELDS = {"id", "lane_id", "kind", "title", "observed_at", "subject_id", "clock",
               "actor", "fields", "evidence", "related_ids"}
 CONTEXT = {"instance_id": "operator-quiz-1", "incarnation": "operator-quiz-1"}

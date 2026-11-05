@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.2.1"
+revision = "0.3.0"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
@@ -22,7 +22,8 @@ schema = "schemas/author.json"
 schema = "schemas/grade.json"
 
 [world.outputs.quiz]
-lanes = ["quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures"]
+lanes = ["quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures",
+         "quiz/scorecard", "quiz/review"]
 
 [resources]
 cpus = 0.5
@@ -85,6 +86,14 @@ presentation = '''{
     {"lane_id": "quiz/questions", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},
     {"lane_id": "quiz/topics", "path": ["open_debt"], "label": "Open debt", "unit": "items", "format": "number"},
-    {"lane_id": "quiz/items", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"}
+    {"lane_id": "quiz/items", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
+    {"lane_id": "quiz/scorecard", "path": ["score"], "label": "Correct of graded in the window", "unit": "answers", "format": "json"},
+    {"lane_id": "quiz/scorecard", "path": ["anchor_local_date"], "label": "Anchor day of the window", "unit": null, "format": "text"},
+    {"lane_id": "quiz/scorecard", "path": ["miss_topics"], "label": "Missed topics in the window", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
+    {"lane_id": "quiz/review", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["judgments"], "label": "Judgments", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"}
   ]
 }'''

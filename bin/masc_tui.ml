@@ -43,6 +43,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
       (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
 
 module Code_results = Masc_tui_code_results
+module Context_results = Masc_tui_context_results
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
@@ -1849,6 +1850,14 @@ let deliver_code state =
     match Code_results.answer_kind answer with
     | Code_results.Read -> enqueue mailbox (Code_msg answer)
     | Code_results.Save -> enqueue_async mailbox (Code_msg answer)
+
+(* Every Context answer is wrapped in [Context_msg] here, stamped when its
+   request starts, as in [workspace_enqueue]. *)
+let deliver_context state =
+  let enqueue = workspace_enqueue state in
+  fun mailbox answer ->
+    match Context_results.answer_kind answer with
+    | Context_results.Read -> enqueue mailbox (Context_msg answer)
 
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
@@ -10102,7 +10111,7 @@ let launch_runtime_catalog_load ?(intent=Snapshot_read.Poll) state ~mailbox =
 
 let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
-  let enqueue_async = workspace_enqueue state in
+  let deliver = deliver_context state mailbox in
   let host = server_peer_host in
   let port = state.port in
   supersede_context_inspector_load state None;
@@ -10122,8 +10131,7 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   let target = state.context_inspector_target in
   let run () =
     let publish reading =
-      enqueue_async mailbox
-        (Context_msg (Context_inspector_loaded (generation, keeper_name, reading)))
+      deliver (Context_results.Context_inspector_loaded (generation, keeper_name, reading))
     in
     try
       match target with
@@ -10153,16 +10161,16 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      enqueue_async mailbox
-        (Context_msg (Context_inspector_loaded
+      deliver
+        (Context_results.Context_inspector_loaded
            ( generation
            , keeper_name
            , Masc_tui_context_inspector.Request_failed
-               "Eio switch is unavailable" )))
+               "Eio switch is unavailable" ))
   end
 
 let launch_context_inspector_part_load state ~mailbox request =
-  let enqueue_async = workspace_enqueue state in
+  let deliver = deliver_context state mailbox in
   let host = server_peer_host in
   let port = state.port in
   let key = Masc_tui_fetched.request_key request in
@@ -10173,7 +10181,7 @@ let launch_context_inspector_part_load state ~mailbox request =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Context_msg (Context_inspector_part_loaded (request, result)))
+    deliver (Context_results.Context_inspector_part_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -10189,9 +10197,9 @@ let launch_context_inspector_part_load state ~mailbox request =
             (fun () -> Eio.Promise.await superseded);
           `Stop_daemon)
   | None ->
-      enqueue_async mailbox
-        (Context_msg (Context_inspector_part_loaded
-           (request, Error "Eio switch is unavailable")))
+      deliver
+        (Context_results.Context_inspector_part_loaded
+           (request, Error "Eio switch is unavailable"))
 
 (* Runs once per loop pass. The pane names the part it shows; when that is
    not the part held, the held one's read stops and the shown one is read.
@@ -22549,6 +22557,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Code_msg answer ->
           (match Code_results.answer_kind answer with
            | Code_results.(Read | Save) -> ())
+        | Context_msg answer ->
+          (match Context_results.answer_kind answer with
+           | Context_results.Read -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
         | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
         | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
@@ -22574,8 +22585,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_chat_interrupt_done (_, _, _)) | (Keeper_msg (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)))
         | Keeper_msg (Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
-        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)) | Context_msg (Context_inspector_loaded (_, _, _)
-        | Context_inspector_part_loaded (_, _))
+        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _))
         | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
         | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _) | Lane_msg (Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _)) | Measurement_artifact_loaded (_, _, _)
@@ -26988,62 +26998,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              request.request_id detail);
         launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
       end
-  | Context_msg (Context_inspector_loaded (generation, keeper_name, reading)) ->
-      if
-        state.context_inspector_open
-        && generation = state.context_inspector_generation
-        && Option.exists (String.equal keeper_name)
-             state.context_inspector_keeper
-      then begin
-        let previous = Option.map snd state.context_inspector_reading in
-        let reading = Masc_tui_context_inspector.merge_progress
-            ~previous reading in
-        let proof_active =
-          state.context_inspector_tab = Masc_tui_context_inspector.Input_map
-          || (state.context_inspector_tab = Masc_tui_context_inspector.Response
-              && state.context_inspector_response_return = Masc_tui_context_inspector.Input_map)
-        in
-        let proof_changed = proof_active
-          && Masc_tui_context_inspector.proof_scroll_should_reset
-               ~target:state.context_inspector_target ~previous reading in
-        if Masc_tui_context_inspector.page_scroll_should_reset ~previous reading
-        then begin
-          state.context_inspector_scroll <- 0;
-          state.context_inspector_response_scroll <- 0
-        end;
-        if proof_changed then begin
-          state.context_inspector_scroll <- 0;
-          state.context_inspector_cursor <- 0;
-          state.context_inspector_detail_scroll <- 0;
-          state.context_inspector_exact <- None;
-          supersede_context_inspector_part_load state None;
-          (* Withdraw the in-flight read, retaining a completed immutable part
-             for the same turn and digest if the observation returns. *)
-          state.context_inspector_part <-
-            Masc_tui_fetched.cancel_pending ~reason:"Proof source changed"
-              state.context_inspector_part
-        end;
-        state.context_inspector_loading <- Masc_tui_context_inspector.is_loading reading;
-        state.context_inspector_reading <- Some (keeper_name, reading);
-        state.context_inspector_read_at <- Some (Unix.gettimeofday ());
-        (* A refresh reads a failed part again. A part already read stays:
-           the same turn, index and digest name the same bytes. *)
-        (match Masc_tui_fetched.current state.context_inspector_part with
-         | Some (_, Masc_tui_fetched.Failed _) ->
-             state.context_inspector_part <-
-               Masc_tui_fetched.clear state.context_inspector_part
-         | Some
-             ( _
-             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-               | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ) )
-         | None -> ())
-      end
-  | Context_msg (Context_inspector_part_loaded (request, result)) ->
-      (* An answer for a part the pane moved past is dropped by [complete]. *)
-      state.context_inspector_part <-
-        Masc_tui_fetched.complete
-          ~equal:Masc_tui_context_inspector.same_part_key
-          state.context_inspector_part request result
+  | Context_msg answer -> Context_results.apply state answer
   | Keeper_msg (Keeper_chat_copy_loaded (generation, _, _)) when generation <> state.msg_copy_generation -> ()
   | Keeper_msg (Keeper_chat_copy_loaded (_, keeper_name, result)) ->
       state.msg_copy_pending <- None;

@@ -266,8 +266,9 @@ type memory_health_read =
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
    domain whose module applies its own answers declares the type there:
-   [Code_msg] carries [Masc_tui_code_results.msg]. One variant takes at most
-   244 constructors with arguments (#48617). A domain with a single answer
+   [Code_msg] carries [Masc_tui_code_results.msg], and [Context_msg] carries
+   [Masc_tui_context_results.msg]. One variant takes at most 244
+   constructors with arguments (#48617). A domain with a single answer
    keeps it in [async_msg], and so does a constructor that carries another
    [async_msg]. *)
 
@@ -579,13 +580,6 @@ type board_msg =
   | Board_quarantines_bulk_requeued of
       string * (string * Masc_tui_http.post_outcome) list
 
-type context_msg =
-  | Context_inspector_loaded of
-      int * string * Masc_tui_context_inspector.reading
-  | Context_inspector_part_loaded of
-      Masc_tui_context_inspector.part_key Masc_tui_fetched.request
-      * (string, string) result
-
 type local_msg =
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
@@ -862,7 +856,7 @@ type async_msg =
   | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Approvals_msg of approvals_msg
   | Board_msg of board_msg
-  | Context_msg of context_msg
+  | Context_msg of Masc_tui_context_results.msg
   | Live_context_loaded of Masc_tui_context_state.request * int64
       * (Masc.Tui_decode.context_observation, string) result
   | Local_msg of local_msg

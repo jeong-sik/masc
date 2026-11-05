@@ -402,18 +402,89 @@ let wake_line () =
   message, measure message
 ;;
 
+type range_reads =
+  { messages : Agent_core.Types.message list
+  ; digest_at : int -> string option
+  ; continuity : Keeper_turn_driver_try_provider.continuity
+  ; turn_start : Keeper_carried_front.turn_start
+  ; seed : Keeper_carried_front.seed option Lazy.t
+  }
+
+let read_range ~config ~keeper_name ~trace_id history =
+  let wake, (_ : int) = wake_line () in
+  let messages = history @ [ wake ] in
+  (* The Librarian point every candidate of the turn starts from, as the
+     driver chooses it once per turn. Its notes are the turn's to log; a
+     reader here only looks. *)
+  let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note list) =
+    Keeper_turn_driver_try_provider.read_keeper_continuity
+      ~config ~keeper_name ~trace_id ~messages:history
+  in
+  { messages
+  ; digest_at = Runtime_model_input_tail_window.atom_opening_digest messages
+  ; continuity
+  ; (* Where a candidate with no front starts: the end of the last
+       completed turn on this history, as the driver reads it. *)
+    turn_start =
+      Keeper_turn_driver_try_provider.turn_start
+        ~config ~keeper_name ~trace_id ~messages:history
+  ; (* Stdlib lazy: private to the synchronous reader of these values, never
+       shared across fibers. A ledger that holds needs no store scan unless a
+       Librarian point weighs the accepted start; candidates share the one
+       read when they need it. *)
+    seed = lazy (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed
+  }
+;;
+
+type first_request =
+  { carried : carried
+  ; ledger_front : Keeper_carried_front.seed option
+  }
+
+(* The front the driver reads when the turn has no Librarian point: the
+   pair's ledger while this history holds its positions, else the seed the
+   newest response-observed record on the trace gives every candidate alike.
+   Only reads: a ledger that does not hold is passed over here and dropped by
+   the turn driver's next composition. Where the range starts is then the
+   driver's own choice ({!Keeper_turn_driver_try_provider.choose_range_start}).
+   A Librarian point weighs the seed alone, never the ledger: the driver reads
+   the accepted start from the turn record, and only for a Librarian point. *)
+let first_request ~keeper_name ~trace_id ~runtime_id reads =
+  let ledger_front, front, counted_tokens =
+    match
+      Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
+    with
+    | Some ledger when Keeper_model_input_ledger.holds ~digest_at:reads.digest_at ledger ->
+      let front = Keeper_carried_front.of_ledger ledger in
+      front, front, ledger.Keeper_model_input_ledger.total_tokens
+    | Some _ | None -> None, Lazy.force reads.seed, None
+  in
+  let accepted =
+    match Keeper_turn_driver_try_provider.continuity_choice reads.continuity with
+    | Keeper_turn_driver_try_provider.Chose_a_librarian_point -> Lazy.force reads.seed
+    | Keeper_turn_driver_try_provider.Chose_no_point -> None
+  in
+  { carried =
+      carry
+        ~measure:(Keeper_context_core.message_measurer ())
+        ~continuity:(Some reads.continuity)
+        ~front
+        ~accepted
+        ~turn_start:reads.turn_start
+        ~counted_tokens
+        reads.messages
+  ; ledger_front
+  }
+;;
+
 let candidate
       ~keeper_name
       ~trace_id
-      ~messages
-      ~digest_at
+      ~reads
       ~history_atoms
       ~wake_bytes
       ~readings
       ~records_read
-      ~seed
-      ~continuity
-      ~turn_start
       ~place
       runtime_id
   =
@@ -423,33 +494,7 @@ let candidate
   let carried =
     match lane with
     | Error _ -> None
-    | Ok () ->
-      (* The front the driver reads when the turn has no Librarian point:
-         the pair's ledger while this history holds its positions, else the
-         seed the newest response-observed record on the trace gives every
-         candidate alike. The forecast only reads: a ledger that does not
-         hold is passed over here and dropped by the turn driver's next
-         composition. Where the range starts is then the driver's own
-         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). A
-         Librarian point weighs the seed alone, never the ledger: the
-         driver reads the accepted start from the turn record too. *)
-      let front, counted_tokens =
-        match
-          Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
-        with
-        | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
-          Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
-        | Some _ | None -> Lazy.force seed, None
-      in
-      Some
-        (carry
-           ~measure:(Keeper_context_core.message_measurer ())
-           ~continuity:(Some continuity)
-           ~front
-           ~accepted:(Lazy.force seed)
-           ~turn_start
-           ~counted_tokens
-           messages)
+    | Ok () -> Some (first_request ~keeper_name ~trace_id ~runtime_id reads).carried
   in
   let assembly =
     match parts, carried with
@@ -496,36 +541,16 @@ let forecast ~config ~keeper_name =
          | Keeper_checkpoint_store.No_saved_history
          | Keeper_checkpoint_store.Saved_history_superseded _ -> []
        in
-       let wake, wake_line_bytes = wake_line () in
-       let messages = history @ [ wake ] in
+       let (_ : Agent_core.Types.message), wake_line_bytes = wake_line () in
+       let reads = read_range ~config ~keeper_name ~trace_id history in
        let _labelled, history_atoms =
-         Runtime_model_input_tail_window.annotate messages
+         Runtime_model_input_tail_window.annotate reads.messages
        in
-       let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
        let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
        (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
        let now = Unix.gettimeofday () in
        let records, records_read = records_of_store ~config ~keeper_name in
        let readings = readings_of_records records in
-       (* Where a candidate with no front starts: the end of the last
-          completed turn on this history, as the driver reads it. *)
-       let turn_start =
-         Keeper_turn_driver_try_provider.turn_start
-           ~config ~keeper_name ~trace_id ~messages:history
-       in
-       (* The Librarian point every candidate of the turn starts from, as
-          the driver chooses it once per turn. Its notes are the turn's to
-          log; a forecast only looks. *)
-       let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note list) =
-         Keeper_turn_driver_try_provider.read_keeper_continuity
-           ~config ~keeper_name ~trace_id ~messages:history
-       in
-       (* Stdlib lazy: private to this synchronous candidate walk, never
-          shared across fibers. A valid warm ledger needs no store scan;
-          cold candidates share the one read when they need it. *)
-       let seed = lazy (
-         (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed)
-       in
        let walk, candidates =
          (* The walk this Keeper's next turn takes: a failed attempt it
             recorded itself does not move the head (RFC-0458 §3.4). *)
@@ -542,15 +567,11 @@ let forecast ~config ~keeper_name =
                   candidate
                     ~keeper_name
                     ~trace_id
-                    ~messages
-                    ~digest_at
+                    ~reads
                     ~history_atoms
                     ~wake_bytes:wake_line_bytes
                     ~readings
                     ~records_read
-                    ~seed
-                    ~continuity
-                    ~turn_start
                     ~place:
                       { walks_at
                       ; declared_at = declared_at ~declared runtime_id

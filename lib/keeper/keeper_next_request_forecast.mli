@@ -184,6 +184,46 @@ val carry
     {!Keeper_turn_driver_try_provider.project_range_start}. [counted_tokens]
     rides along only when the range opens on [front]. *)
 
+(** What the turn driver reads before a turn's first request, over a history
+    with the autonomous wake line appended as its newest atom. The same for
+    every candidate of the turn. *)
+type range_reads =
+  { messages : Agent_core.Types.message list  (** The history and the wake line. *)
+  ; digest_at : int -> string option
+        (** {!Runtime_model_input_tail_window.atom_opening_digest} of
+            [messages]. *)
+  ; continuity : Keeper_turn_driver_try_provider.continuity
+        (** {!Keeper_turn_driver_try_provider.read_keeper_continuity}; its
+            notes are not logged. *)
+  ; turn_start : Keeper_carried_front.turn_start
+  ; seed : Keeper_carried_front.seed option Lazy.t
+        (** {!Keeper_carried_front.read_seed}, read when first forced. *)
+  }
+
+val read_range :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  Agent_core.Types.message list ->
+  range_reads
+(** The reads over the trace's saved history. The seed is not read yet. *)
+
+type first_request =
+  { carried : carried
+  ; ledger_front : Keeper_carried_front.seed option
+        (** The front of the last request on this (keeper, runtime, trace)
+            while the history still holds that ledger; [None] when there is
+            no ledger, it does not hold, or its last request carried no atom. *)
+  }
+
+val first_request :
+  keeper_name:string -> trace_id:string -> runtime_id:string -> range_reads -> first_request
+(** The range the next request on [runtime_id] carries, as the driver
+    composes it: the front is the pair's ledger while it holds, else the
+    seed; the accepted start is the seed and is read only for a Librarian
+    point. {!forecast} and the turn's System basis
+    ({!Keeper_turn_system}) both call it. *)
+
 
 type composition =
   { fixed_bytes : int  (** Tool schemas + keeper instructions. *)

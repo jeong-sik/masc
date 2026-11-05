@@ -18,6 +18,21 @@ let test_ticker_stops_with_the_observer_stream () = with_env (fun env sw ->
       Eio.Time.sleep (Eio.Stdenv.clock env) 0.45;
       check int "a closed stream advances nothing more" stopped !calls))
 
+let test_ticker_retries_an_unavailable_worker () = with_env (fun env sw ->
+  let calls = ref 0 in
+  Server_machine_spectator.For_testing.with_step
+    (fun ~config:_ ~machine:_ ->
+      incr calls;
+      if !calls = 1 then Error "worker temporarily unavailable" else Ok ())
+    (fun () ->
+      let stop_promise, stop = Eio.Promise.create () in
+      Server_machine_spectator.start ~sw ~clock:(Eio.Stdenv.clock env) ~stop_promise
+        ~machine:Masc.Machine_lane.Msx
+        ~config:(Masc.Workspace.default_config "/fixture");
+      Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
+      check bool "a transient unavailable worker is tried again" true (!calls >= 2);
+      Eio.Promise.resolve stop ()))
+
 let test_observer_machine_query () =
   List.iter
     (fun (target, expected) ->
@@ -36,6 +51,8 @@ let test_observer_machine_query () =
 let () =
   run "machine spectator"
     [ "lifecycle", [ test_case "ticker stops with its observer stream" `Quick
-        test_ticker_stops_with_the_observer_stream ]
+        test_ticker_stops_with_the_observer_stream
+      ; test_case "an unavailable worker is retried" `Quick
+        test_ticker_retries_an_unavailable_worker ]
     ; "query", [ test_case "only a named machine is admitted" `Quick
         test_observer_machine_query ] ]

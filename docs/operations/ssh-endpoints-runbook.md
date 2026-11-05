@@ -136,7 +136,9 @@ The bootstrap then:
    the operator's existing SSH authentication;
 2. proves the pinned key works in batch mode;
 3. checks that the account is root or can run `sudo -n`, and stops there if
-   neither;
+   neither. The public key from step 1 stays in that account's
+   `authorized_keys`: a rerun after the account gets sudo reuses it, and a
+   host that will not be provisioned needs it removed there;
 4. uploads and installs the shim and `/etc/masc-exec-shim.conf`;
 5. records the remote shim probe under `/usr/local/share/masc/`;
 6. prepares `remote_root/<keeper>` for every `--keeper` and

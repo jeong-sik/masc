@@ -941,7 +941,8 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
                               ; "Authorization", "Bearer " ^ token ] () with
         | Error detail -> Alcotest.failf "MCP request failed: %s" detail
         | Ok response ->
-          Alcotest.(check int) "machine query outcome" expected_status response.status;
+          if response.status <> expected_status then
+            Alcotest.failf "%s: expected %d, got %d: %s" target expected_status response.status response.body;
           Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
       [ "/mcp?sse_kind=observer&machine=other", 400
       ; "/mcp?sse_kind=agent&machine=msx", 400

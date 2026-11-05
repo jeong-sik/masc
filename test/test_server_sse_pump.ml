@@ -118,14 +118,29 @@ let with_subscribed_queue ~live hub pump =
     pump queue)
 ;;
 
+(* The SSE frames in [bytes], each with its blank-line terminator. *)
+let split_frames bytes =
+  let terminator = "\n\n" in
+  let rec go from acc =
+    match Str.search_forward (Str.regexp_string terminator) bytes from with
+    | at -> go (at + 2) (String.sub bytes from (at + 2 - from) :: acc)
+    | exception Not_found -> List.rev acc
+  in
+  go 0 []
+;;
+
 let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1)
     ?(step = fleet_step) ?(idle = always_keepalive) hub =
   let frames = Eio.Stream.create max_int in
   let ending, resolve_ending = Eio.Promise.create () in
   let sent = ref 0 in
-  let send frame =
-    Eio.Stream.add frames frame;
-    incr sent;
+  (* One send may carry several queued frames. Each is recorded on its own,
+     and [stop_after] and [gate_from] count frames: the send carrying the
+     [stop_after]th frame is refused. *)
+  let send bytes =
+    let carried = split_frames bytes in
+    List.iter (Eio.Stream.add frames) carried;
+    sent := !sent + List.length carried;
     if !sent >= gate_from then Option.iter Eio.Promise.await gate;
     if !sent < stop_after then Sse.Written else refusal
   in
@@ -505,6 +520,64 @@ let test_an_idle_finish_ends_the_stream_without_a_frame () =
       check int "the subscription is removed" 0 !live))
 ;;
 
+(* A pump over plain numbered events whose [send] records the frames each send
+   carried. Event [n]'s frame is [frame_for n]; [last] ends the stream. *)
+let frame_for ?(size = 16) n = Printf.sprintf "data: %d%s\n\n" n (String.make size 'x')
+
+let sends_of ?(capacity = 64) ?(on_send = fun _ _ -> ()) ~step events =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let queue = Pump.Queue.create ~max_queued_events:capacity in
+    List.iter (Pump.Queue.push queue) events;
+    let sends = ref [] in
+    let ending =
+      Pump.run ~queue ~step:(step queue) ~idle:(fun () -> Pump.Finish) ~clock ~ping_interval_s
+        ~send:(fun bytes ->
+          sends := split_frames bytes :: !sends;
+          on_send queue (List.length !sends);
+          Sse.Written)
+    in
+    ending, List.rev !sends)
+;;
+
+let numbered ~last ?size _queue n =
+  if n = last then Pump.Send_last (frame_for ?size n) else Pump.Send (frame_for ?size n)
+;;
+
+let test_the_events_already_queued_go_out_in_one_send () =
+  let ending, sends = sends_of ~step:(numbered ~last:5) [ 1; 2; 3; 4; 5 ] in
+  check ending_t "the last frame ends the stream" Pump.Finished ending;
+  check (list (list string)) "one send with every frame, in order"
+    [ List.map frame_for [ 1; 2; 3; 4; 5 ] ] sends
+;;
+
+(* Frames of 40 KiB: a batch holding one takes the next and then is full. *)
+let test_a_batch_takes_no_more_frames_once_it_is_full () =
+  let size = 40 * 1024 in
+  let ending, sends = sends_of ~step:(numbered ~last:4 ~size) [ 1; 2; 3; 4 ] in
+  check ending_t "the last frame ends the stream" Pump.Finished ending;
+  check (list int) "two sends of two frames" [ 2; 2 ] (List.map List.length sends);
+  check bool "no send holds more than the bound plus one frame" true
+    (List.for_all
+       (fun frames ->
+          let bytes = List.fold_left (fun total frame -> total + String.length frame) 0 frames in
+          bytes <= Pump.max_batch_bytes + String.length (frame_for ~size 1))
+       sends)
+;;
+
+(* Event 1's step overflows a queue of two, as producers do while the pump
+   builds a batch. The batch stops there: event 2's frame is not written. *)
+let test_a_batch_stops_at_a_pile_up () =
+  let step queue n =
+    if n = 1 then List.iter (Pump.Queue.push queue) [ 3; 4; 5 ];
+    Pump.Send (frame_for n)
+  in
+  let ending, sends = sends_of ~capacity:2 ~step [ 1; 2 ] in
+  check ending_t "the client fell behind" Pump.Fell_behind ending;
+  check (list (list string)) "only the frame taken before the pile-up"
+    [ [ frame_for 1 ] ] sends
+;;
+
 let producer_domains = 4
 let pushes_per_domain = 1_000
 
@@ -642,6 +715,11 @@ let () =
             test_a_last_frame_ends_the_stream_once_written
         ; test_case "a stop ends the stream without a frame" `Quick
             test_a_stop_ends_the_stream_without_a_frame
+        ; test_case "the events already queued go out in one send" `Quick
+            test_the_events_already_queued_go_out_in_one_send
+        ; test_case "a batch takes no more frames once it is full" `Quick
+            test_a_batch_takes_no_more_frames_once_it_is_full
+        ; test_case "a batch stops at a pile-up" `Quick test_a_batch_stops_at_a_pile_up
         ; test_case "a quiet interval writes nothing and asks again" `Quick
             test_a_quiet_interval_writes_nothing_and_asks_again
         ; test_case "an idle finish ends the stream without a frame" `Quick

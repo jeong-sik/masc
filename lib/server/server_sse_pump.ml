@@ -20,6 +20,7 @@ type 'event wake =
   | Ping
 
 let keepalive_frame = ": keepalive\n\n"
+let max_batch_bytes = 65_536
 
 module Queue = struct
   type 'event t =
@@ -56,6 +57,14 @@ module Queue = struct
     event
   ;;
 
+  let take_nonblocking t =
+    match Eio.Stream.take_nonblocking t.events with
+    | None -> None
+    | Some event ->
+      Atomic.decr t.reserved;
+      Some event
+  ;;
+
   let fell_behind t = Atomic.get t.behind
 end
 
@@ -77,7 +86,7 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
       | Event event ->
         (match step event with
          | Skip -> serve ()
-         | Send frame -> after_send ~last:false (send frame)
+         | Send frame -> batch [ frame ] ~bytes:(String.length frame)
          | Send_last frame -> after_send ~last:true (send frame)
          | Stop -> Finished)
       | Ping ->
@@ -85,6 +94,23 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
          | Keepalive -> after_send ~last:false (send keepalive_frame)
          | Quiet -> serve ()
          | Finish -> Finished))
+  (* The events already queued go out in the same send, so a burst waits for
+     the socket once per batch instead of once per frame. Each take first
+     looks for a pile-up: a frame for an event queued after a dropped one is
+     never written. *)
+  and batch frames ~bytes =
+    let write ~last frames = after_send ~last (send (String.concat "" (List.rev frames))) in
+    if bytes >= max_batch_bytes || Queue.fell_behind queue
+    then write ~last:false frames
+    else
+      match Queue.take_nonblocking queue with
+      | None -> write ~last:false frames
+      | Some event ->
+        (match step event with
+         | Skip -> batch frames ~bytes
+         | Send frame -> batch (frame :: frames) ~bytes:(bytes + String.length frame)
+         | Send_last frame -> write ~last:true (frame :: frames)
+         | Stop -> write ~last:true frames)
   and after_send ~last : Server_sse_response.outcome -> ending = function
     | Written -> if last then Finished else serve ()
     | Closed -> Client_gone

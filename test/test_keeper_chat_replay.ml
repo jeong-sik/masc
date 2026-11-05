@@ -325,6 +325,19 @@ let live_event_of_type event_type =
   | Some (_, event) -> event
   | None -> Alcotest.fail "the live fixture lacks the event type"
 
+(* The SSE frames in what one send carried, each with its blank-line
+   terminator: the pump writes the frames already queued in one send. *)
+let split_frames bytes =
+  let length = String.length bytes in
+  let rec go ~start ~pos acc =
+    match String.index_from_opt bytes pos '\n' with
+    | Some at when at + 1 < length && bytes.[at + 1] = '\n' ->
+      go ~start:(at + 2) ~pos:(at + 2) (String.sub bytes start (at + 2 - start) :: acc)
+    | Some at -> go ~start ~pos:(at + 1) acc
+    | None -> List.rev acc
+  in
+  go ~start:0 ~pos:0 []
+
 let ending_name = function
   | Pump.Client_gone -> "Client_gone"
   | Pump.Fell_behind -> "Fell_behind"
@@ -337,7 +350,7 @@ let serve_chat ~replayed items =
   Eio_main.run (fun env ->
     let queue = Pump.Queue.create ~max_queued_events:64 in
     let written = ref [] in
-    let send frame = written := frame :: !written; Sse.Written in
+    let send bytes = written := List.rev_append (split_frames bytes) !written; Sse.Written in
     List.iter (Pump.Queue.push queue) items;
     let ending =
       Pump.run ~queue
@@ -374,7 +387,7 @@ let serve_accepted ?(queued = []) ?(after_send = fun _ -> []) ?closed_from
       match closed_from with
       | Some n when !sends >= n -> Sse.Closed
       | Some _ | None ->
-        written := frame :: !written;
+        written := List.rev_append (split_frames frame) !written;
         List.iter (Pump.Queue.push queue) (after_send !sends);
         Sse.Written
     in

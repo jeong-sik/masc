@@ -34,6 +34,12 @@ type idle =
   | Quiet  (** Nothing is written; the next interval starts. *)
   | Finish  (** Nothing is written and the stream ends. *)
 
+val max_batch_bytes : int
+(** A batch takes no more queued frames once it holds this many bytes,
+    64 KiB, so one [send] carries at most this plus one frame. A client that
+    takes less than this within the response's stall bound has stopped
+    reading, so the bound keeps its meaning for a batch. *)
+
 val keepalive_frame : string
 (** The SSE comment written for [Keepalive]. A reader that sees it knows a
     quiet stream from a dead connection, and the SSE decoder yields no event
@@ -70,4 +76,8 @@ val run :
       interval counts from the last frame or skip, so a stream that carries
       events is not asked.
     - An event taken as the interval runs out is that event: it has left the
-      queue, and the idle answer is not used in its place. *)
+      queue, and the idle answer is not used in its place.
+    - The frames of the events already queued when one is taken go out in the
+      same [send], within {!max_batch_bytes}, so a burst waits for the client
+      once per batch. A [Send_last] or [Stop] ends the batch and then the
+      stream. No frame for an event queued after a pile-up is written. *)

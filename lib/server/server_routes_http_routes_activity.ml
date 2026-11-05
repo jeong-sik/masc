@@ -1472,17 +1472,11 @@ let add_routes ~sw ~clock router =
                Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in
              let surface_profile_json reference skill =
-               match
-                 Keeper_skill_observability.of_skill_with_reference reference skill
-                 |> Keeper_skill_observability.to_yojson
-               with
-               | `Assoc fields ->
-                 `Assoc
-                   (List.filter
-                      (fun (name, _) ->
-                         not (String.equal name "reference" || String.equal name "kind"))
-                      fields)
-               | _ -> assert false
+               `Assoc
+                 (Keeper_skill_observability.of_skill_with_reference reference skill
+                  |> Keeper_skill_observability.to_fields
+                  |> List.filter (fun (name, _) ->
+                       not (String.equal name "reference" || String.equal name "kind")))
              in
              let diagnostic_messages identity =
                diagnostics

@@ -77,6 +77,9 @@ val of_skill_with_reference : Skill_reference.t -> Keeper_skill_catalog.skill ->
 val of_catalog : Keeper_skill_catalog.t -> profile list
 val to_yojson : profile -> Yojson.Safe.t
 
+(** The fields of {!to_yojson}, for callers that add or drop fields. *)
+val to_fields : profile -> (string * Yojson.Safe.t) list
+
 val tool_component_bytes : Agent_core.Tool.t -> int
 (** Exact name + description + serialized input-schema bytes used by official
     client runtime measurements. JSON request-envelope framing is excluded. *)

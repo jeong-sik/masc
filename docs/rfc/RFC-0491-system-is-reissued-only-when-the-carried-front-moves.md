@@ -3,7 +3,7 @@ rfc: "0491"
 title: "System 은 범위 앞부분이 움직일 때만 다시 만들고, 그 사이 바뀐 세계 상태는 끝 문맥으로 보낸다"
 status: Draft
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -17,7 +17,7 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 ## 0. 요약
 
-에이전트 코어로 도는 Keeper 요청은 System, 대화 기록, 끝 문맥 순서로 간다. provider 는 앞에서부터 같은 바이트까지만 캐시를 쓴다. 그래서 System 이 바뀐 턴의 첫 요청은 대화 기록 전체를 캐시 없이 다시 읽는다.
+에이전트 코어로 도는 Keeper 요청은 System, 대화 기록, 끝 문맥 순서로 간다. System 이 바뀐 턴의 첫 요청은 대화 기록까지 캐시를 놓친다. 11-05 에 System 만 바뀐 턴의 첫 요청 미적중률은 74.4~98.6% 였고, 아무 블록도 바뀌지 않은 턴은 33.0% 였다(§1.2). provider 문서는 이 규칙을 적지 않는다(§1.4).
 
 2026-11-05 00:00~11:00Z 에 턴 첫 요청이 놓친 토큰의 25.1% 가 System 이 바뀐 턴에서 나왔다(§1). 바뀐 블록은 셋이다.
 
@@ -84,6 +84,19 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 조항 원장(`<base-path>/.masc/constitution/articles.jsonl`)은 10-08~11-05 사이 하루 0~7번 바뀌었다. 지금 조항은 34개, 본문은 9,373B 다.
 
+### 1.4 provider 문서
+
+2026-11-06 에 읽었다. 측정 기간(11-05 00:00~11:00Z)의 `per_request` 행은 9,148개다. 미적중 토큰은 opencode Go `deepseek-v4.1-flash` 가 44.4%, GLM `glm-5.3-flash` 가 38.1%, `glm-5.3` 이 10.9%, 나머지 opencode Go 모델이 6.6% 다.
+
+- Z.AI 문서는 캐시가 요청의 어느 자리를 맞추는지 말하지 않는다(https://docs.z.ai/guides/capabilities/cache).
+  - "Context caching works by computing input message content and identifying content that is identical or highly similar to previous requests."
+  - "Minor formatting differences may affect cache effectiveness."
+  - 캐시는 설정 없이 걸린다. "Caching is automatically triggered based on content similarity, no manual configuration required"
+- opencode Go 문서는 캐시 규칙을 적지 않는다(https://opencode.ai/docs/go). 적힌 것은 `Cached Read`·`Cached Write` 가격과 다음 한 문장이다. "Send a stable session ID in `x-opencode-session` for each conversation so we can optimize routing and prompt caching."
+- OpenAI 문서는 앞부분 규칙을 적는다(https://developers.openai.com/api/docs/guides/prompt-caching). "Cache reuse requires the entire rendered prefix to match. If content or a relevant setting changes before a breakpoint, the prefix after that change cannot match the existing cache entry." 측정한 행에 OpenAI 요청은 없다.
+
+그래서 GLM·opencode Go 에서 System 이 바뀌면 뒤 대화 기록의 캐시도 놓친다는 것은 문서가 아니라 §1.2 측정으로 본다.
+
 ## 2. 지금 코드
 
 - System 은 턴마다 `Keeper_run_context.prepare_run_context` 가 새로 만든다. `Keeper_unified_prompt.build_system_prompt` 가 Keeper 지시문과 `World_constitution_store.load_articles` 로 읽은 조항(`World_constitution_render.articles`)을 넣는다(`lib/keeper/keeper_unified_prompt.ml:1195-1198`).
@@ -136,7 +149,7 @@ Keeper 마다 세 값을 프로세스 메모리에 든다. System 을 만들 때
 - **조항을 대화 기록에 덧붙인다.** 하지 않는다. 기록은 agent_core 의 checkpoint 가 소유하고 Librarian 이 읽는다. 런타임이 만든 조항이 기록 atom 이 되면 같은 사실이 조항 원장과 기록 두 곳에 생긴다.
 - **조항 원장 쓰기를 모아서 늦춘다.** 하지 않는다. 원장은 일어난 일을 적는 곳이다. 쓰기를 늦추는 장치는 행동을 통제하는 gate 가 된다.
 - **System 기준점을 턴 기록에 저장한다.** 하지 않는다. 턴 기록에 새 필드가 생기고, 그 필드 없이도 durable truth 는 손상되지 않는다. 프로세스 메모리로 충분하다. 재시작 뒤 한 번 깨지는 비용은 §5 에 적는다.
-- **provider 캐시 breakpoint 로 System 을 따로 캐시한다.** 해당 없다. GLM·opencode 는 앞부분 일치로만 캐시하고 breakpoint 가 없다.
+- **provider 캐시 breakpoint 로 System 을 따로 캐시한다.** 해당 없다. Z.AI 문서는 캐시가 설정 없이 걸린다고 쓰고, opencode Go 문서에는 breakpoint 가 없다(§1.4).
 
 ## 5. 영향
 

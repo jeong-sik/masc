@@ -7312,12 +7312,17 @@ let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
   else begin
     state.clients_surface_inflight <- true;
+    (* Marks the read in flight on the owed read, so the answer settles
+       it rather than leaving it due for the next loop. *)
+    begin_clients_read state;
     let host = server_peer_host in
     let port = state.port in
     state.clients_surface_generation <- state.clients_surface_generation + 1;
     let generation = state.clients_surface_generation in
     Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.clients_surface_inflight <- false)
+      ~on_not_run:(fun () ->
+        state.clients_surface_inflight <- false;
+        abandon_clients_read state)
       ~deliver:(fun result ->
         enqueue_async mailbox (Clients_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_clients ~host ~port)
@@ -8156,29 +8161,6 @@ let owe_connectors_read state =
    §3.4). *)
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
-
-(* The Clients roster reads again when a workspace client row changes, when
-   a Keeper registry row or every row changes, on a revalidation, and after
-   a failed read (RFC-0480 §3.4). A heartbeat that only moves a row's
-   [last_seen] is not announced. *)
-let owe_clients_read state =
-  state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
-
-(* Runs on every loop iteration. Off the Clients surface nothing is owed:
-   arriving reads it. A read in flight is let finish first; one whose
-   generation was superseded returns abandoned. *)
-let launch_owed_clients state ~mailbox =
-  if state.view <> Clients then state.clients_owed <- Masc_tui_owed_read.settled
-  else begin
-    let reading = state.clients_surface_inflight in
-    let read =
-      if reading then state.clients_owed
-      else Masc_tui_owed_read.abandoned state.clients_owed
-    in
-    state.clients_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
-      launch_clients_load state ~mailbox
-  end
 
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
@@ -9195,6 +9177,26 @@ let launch_owed_identity_logins state ~mailbox =
                ~deliver:(workspace_enqueue state mailbox) keeper_name
            end
          end)
+
+(* The Clients roster's owed read lives in {!Masc_tui_types}: owe, begin,
+   abandon and settle, with the settle decision testable without the event
+   loop. *)
+
+(* Runs on every loop iteration. Off the Clients surface nothing is owed:
+   arriving reads it. A read in flight is let finish first; one whose
+   generation was superseded returns abandoned. *)
+let launch_owed_clients state ~mailbox =
+  if state.view <> Clients then state.clients_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.clients_surface_inflight in
+    let read =
+      if reading then state.clients_owed
+      else Masc_tui_owed_read.abandoned state.clients_owed
+    in
+    state.clients_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_clients_load state ~mailbox
+  end
 
 let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
@@ -27884,15 +27886,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
-      (* A source the server could not read leaves its rows out, so the
-         roster is shorter than a complete reading and stays owed a read
-         through the same failed-read path as an error. *)
-      state.clients_owed <-
-        (match result with
-         | Ok { Masc.Tui_decode.cls_read_failures = []; _ } ->
-             Masc_tui_owed_read.succeeded state.clients_owed
-         | Ok { Masc.Tui_decode.cls_read_failures = _ :: _; _ } | Error _ ->
-             failed_read state.clients_owed);
+      Masc_tui_types.settle_clients_read state ~now:(monotonic_now_s ()) result;
       if generation = state.clients_surface_generation then (
         match result with
         | Ok snapshot ->

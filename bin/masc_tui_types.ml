@@ -15263,6 +15263,37 @@ let update_identity_login_read (state : state) keeper_name f =
 let owe_identity_login_read (state : state) keeper_name =
   update_identity_login_read state keeper_name Masc_tui_owed_read.changed
 
+(* The Clients surface's owed read (RFC-0480 §3.4). The state moves live
+   here so the settle sequence is testable without the event loop: a read
+   that starts and answers settles, instead of the screen reading again
+   every loop. *)
+let clients_read_retry_s = 2.0
+let clients_read_max_retry_s = 60.0
+
+let owe_clients_read (state : state) =
+  state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
+
+let begin_clients_read (state : state) =
+  state.clients_owed <- Masc_tui_owed_read.started state.clients_owed
+
+let abandon_clients_read (state : state) =
+  state.clients_owed <- Masc_tui_owed_read.abandoned state.clients_owed
+
+(* An answer whose read_failures is not empty left rows unread, so the
+   roster it carries is shorter than a complete reading and the read backs
+   off like a failed one instead of settling on the partial roster. *)
+let settle_clients_read (state : state) ~now
+    (result : (Masc.Tui_decode.clients_snapshot, string) result) =
+  state.clients_owed <-
+    (match result with
+     | Ok { Masc.Tui_decode.cls_read_failures = []; _ } ->
+         Masc_tui_owed_read.succeeded state.clients_owed
+     | Ok { Masc.Tui_decode.cls_read_failures = _ :: _; _ } | Error _ ->
+         Masc_tui_owed_read.failed
+           ~retry_s:clients_read_retry_s
+           ~max_retry_s:clients_read_max_retry_s ~now
+           state.clients_owed)
+
 (* Authority coming back owes every Keeper a kept expectation names: while
    the feed was gone its announcements were lost, and this is the one moment
    the whole wait is known to be stale. *)

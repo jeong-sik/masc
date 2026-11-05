@@ -100,6 +100,37 @@ let test_a_registry_row_reads_without_times () =
        (Some "2026-11-04T03:30:00Z") client.cr_last_seen
    | Ok _ | Error _ -> fail "an agent record row with times was refused")
 
+(* The surface's owed read settles once its answer lands (RFC-0480
+   §3.4), so launch_owed_clients does not read again on the next loop. *)
+let snapshot ?(failures = []) () : Masc.Tui_decode.clients_snapshot =
+  { Masc.Tui_decode.cls_observed_at = "2026-11-05T04:00:00Z"
+  ; cls_clients = []
+  ; cls_read_failures = failures
+  }
+
+let test_an_owed_read_that_answers_settles () =
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  Masc_tui_types.owe_clients_read state;
+  Masc_tui_types.begin_clients_read state;
+  Masc_tui_types.settle_clients_read state ~now:0. (Ok (snapshot ()));
+  (* Not due is what keeps launch_owed_clients from reading again. *)
+  check bool "the settled read is not due again"
+    false
+    (Masc_tui_owed_read.due ~now:0. state.Masc_tui_types.clients_owed)
+
+let test_an_answer_with_unread_rows_backs_off () =
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  Masc_tui_types.owe_clients_read state;
+  Masc_tui_types.begin_clients_read state;
+  Masc_tui_types.settle_clients_read state ~now:0.
+    (Ok (snapshot ~failures:[ "runtime agent roster: read failed" ] ()));
+  check bool "a partial roster is not due at once"
+    false
+    (Masc_tui_owed_read.due ~now:0. state.Masc_tui_types.clients_owed);
+  check bool "the retry is due after the backoff"
+    true
+    (Masc_tui_owed_read.due ~now:2. state.Masc_tui_types.clients_owed)
+
 let () =
   run "tui client rows"
     [ ( "acting for"
@@ -119,5 +150,11 @@ let () =
     ; ( "times"
       , [ test_case "a registry row reads without times" `Quick
             test_a_registry_row_reads_without_times
+        ] )
+    ; ( "owed read"
+      , [ test_case "an owed read that answers settles" `Quick
+            test_an_owed_read_that_answers_settles
+        ; test_case "an answer with unread rows backs off" `Quick
+            test_an_answer_with_unread_rows_backs_off
         ] )
     ]

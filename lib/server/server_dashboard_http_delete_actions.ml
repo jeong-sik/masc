@@ -286,7 +286,7 @@ let unbind_exact_workspace_agents config aliases =
         aliases
     in
     if unbound <> []
-    then begin
+    then
       ignore
         (Workspace.update_state config (fun current ->
            { current with
@@ -295,10 +295,6 @@ let unbind_exact_workspace_agents config aliases =
                  (fun active -> not (List.exists (String.equal active) aliases))
                  current.active_agents
            }));
-      (* The purged names stopped being workspace-state rows, so the Clients
-         roster draws differently even though no record was written. *)
-      Workspace_agent_record.report_roster_changed config
-    end;
     Ok unbound
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -337,7 +333,13 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
                  ])
             |> List.sort_uniq String.compare
           in
-          (match remove_paths_strict filesystem_paths with
+          let removal = remove_paths_strict filesystem_paths in
+          (* Reported once the records are gone or their removal has been
+             attempted: the state list was already pruned above, so a reader
+             has to be told either way, and one that woke before the removal
+             could still see the rows and settle. *)
+          Workspace_agent_record.report_roster_changed config;
+          (match removal with
            | Error _ as error -> error
            | Ok () ->
              (match delete_credentials config aliases with

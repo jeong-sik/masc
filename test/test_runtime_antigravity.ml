@@ -424,6 +424,48 @@ let test_an_empty_piece_is_not_forwarded () =
          | _ -> fail "An empty piece changed what the reader was shown")
 ;;
 
+(* Text on a step that is not a response step is not the answer. When the
+   response step carries the answer, only its pieces reach the reader; when
+   no response step does, the result is the account of the answer. *)
+let test_text_on_other_steps_is_not_an_answer_piece () =
+  let pieces fixture =
+    let events = ref [] in
+    with_fixture fixture (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok _ ->
+        List.filter_map
+          (function
+            | Runtime_antigravity.Text_delta { step_index; text } -> Some (step_index, text)
+            | Turn_started _ | Text_completed _ | Native_tool_started _ | Native_tool_finished _
+            | Usage_reported _ | Turn_finished _ -> None)
+          (List.rev !events))
+  in
+  check
+    (list (pair (option int) string))
+    "only the response step's pieces"
+    [ Some 3, "PONG\n" ]
+    (pieces
+       [ init ()
+       ; step ~index:0 ~step_type:"system_message" ~text_delta:"NOTICE" ()
+       ; step ~index:1 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command"
+           ~text_delta:"$ ls" ()
+       ; step ~index:1 ~step_type:"tool" ~tool_name:"run_command" ()
+       ; step ~index:2 ~step_type:"unknown" ~text_delta:"plan" ()
+       ; step ~index:3 ~step_type:"agent_response" ~text_delta:"PONG\n" ()
+       ; result ~response:"PONG\n" ()
+       ]);
+  check
+    (list (pair (option int) string))
+    "the result when no response step carried text"
+    [ None, "PONG\n" ]
+    (pieces
+       [ init ()
+       ; step ~index:0 ~step_type:"system_message" ~text_delta:"NOTICE" ()
+       ; result ~response:"PONG\n" ()
+       ])
+;;
+
 (* Two response steps around a tool step, as agy 1.2.11 wrote them
    (measured 2026-09-25): each response step ends its text with "\n", and the
    result repeats both steps' text. *)
@@ -2113,6 +2155,10 @@ let () =
             "an empty piece is not forwarded"
             `Quick
             test_an_empty_piece_is_not_forwarded
+        ; test_case
+            "text on other steps is not an answer piece"
+            `Quick
+            test_text_on_other_steps_is_not_an_answer_piece
         ; test_case
             "answer pieces name their step"
             `Quick

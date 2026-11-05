@@ -267,8 +267,9 @@ u <sha256>
 2층보다 먼저 낸다. 1층과 같은 서버 스캔을 쓰고, 지우지 않는다.
 
 - 범위를 `Tool_blob_maintenance` 가 내보내는 값 하나로 둔다. `vision_artifact_reference.ml` 의 사본은 지우고 이 값을 쓴다.
-- 닫힌 분류: 스캔을 열 때 세 곳의 직속 항목을 모두 나열한다. `<base>/.masc`, `lane-addons/`, config 의 `keepers/` 다. 항목마다 "범위" 또는 "제외(이유를 적은 variant)" 중 하나여야 한다. 어느 쪽에도 없는 항목이 있으면 그 스캔은 오류로 끝나고 기록을 쓰지 않는다. 새 저장소를 만든 PR 은 이 오류로 분류를 정하게 된다.
-  - 폴더는 이름으로 분류한다.
+- 닫힌 분류: 스캔을 열 때 세 곳의 직속 항목을 모두 나열한다. `<base>/.masc`, `lane-addons/`, config 의 `keepers/` 다. 항목마다 "범위" 또는 "제외(이유를 적은 variant)" 중 하나여야 한다. 어느 쪽에도 없는 항목이 있어도 스캔은 끝까지 돌고 후보 기록을 쓴다. 기록 머리에 그 이름을 `unclassified` 목록으로 적고, 그 기록의 `deletable` 은 0 이다. 스캔마다 그 이름을 경고 로그에 남긴다. 새 저장소를 만든 PR 은 이 경고로 분류를 정하게 된다.
+  - 측정을 멈추지 않는 까닭: 분류에 없는 항목은 스캔이 읽지 않는 곳이다. 그래서 지우기만 멈추면 안전하다. 측정까지 멈추면 1층 수치와 `u` 줄이 쌓이지 않고, 건드림 기록도 회전하지 않는다. 운영 장비에는 사람이 둔 파일이 다시 생긴다.
+  - 폴더는 이름으로 분류한다. 이름은 만드는 모듈이 내보내는 상수를 쓴다(`Lane_addon_store.tool_request_archive_directory` 등). 이름이 바뀌면 컴파일이 깨진다.
   - config `keepers/` 의 파일은 접미사로 분류한다. 예: `.toml` 은 제외(설정), `.vision` 은 제외(다른 저장소, §3.5), `.working-context.json` 은 범위.
   - 이름이 날마다 바뀌는 파일과 임시 파일도 규칙으로 적는다. 예: 날짜 파일 이름 규칙, 기존 `Atomic_temp_name` 판정. 적지 않으면 평소에 생기는 임시 파일 때문에 스캔이 계속 오류로 끝난다.
 - Librarian 요청: owner 기록 안에 참조 목록을 구조로(`normalized_artifact_ref_to_json`) 둔다. 본문과 owner 기록은 다른 파일이고 본문이 먼저 게시된다. 그래서 조건은 "owner 기록이 보이면 그 안에 목록이 있다"다. 문자열 안을 훑어 참조를 찾는 코드는 두지 않는다. RFC-0498 이 settle 때 본문을 지우므로 보관 위치는 범위에 넣지 않는다.
@@ -278,22 +279,23 @@ u <sha256>
 - Librarian 작업 맥락: config 폴더의 `*.working-context.json` 을 범위에 넣는다. 참조는 같은 모듈의 디코더(`Keeper_chat_operation`)로 꺼낸다.
 - Librarian 작업 맥락 색인: config 폴더의 `*.working-context-recall.json` 을 범위에 넣는다. 참조는 `Keeper_librarian_context_recall` 의 색인 디코더로 꺼낸다. 접미사 규칙에서 `.working-context.json` 과 다른 항목이다.
 - Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
-  - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
+  - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 먼저 `evidence`(6.4GB)를 줄인다. 이 폴더의 파일은 sha256 으로 이름 지은 불변 파일이라, 한 번 읽은 이름의 참조를 기억하면 다음 스캔은 새 파일만 읽는다. `exact-requests`·`host-results` 는 기록이 바뀌어서 이 방법이 맞지 않는다. 그쪽은 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
 - 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:
-  - `trajectories`: 도구 결과를 500바이트로 자른 사본이다(`trajectory.ml:107`). 잘린 표시가 남고, 표시를 푸는 코드가 없다. 범위에 넣으면 잘린 표시 때문에 스캔이 오류로 끝난다.
+  - `trajectories`: 도구 결과를 500바이트로 자른 사본이다(`trajectory.ml:107`). 잘린 표시가 남고, 표시를 푸는 코드가 없다. 범위에 넣으면 잘린 표시 때문에 스캔이 오류로 끝난다. 스캔이 잘린 표시를 건너뛰게 하지 않는다. 그러면 다른 저장소의 진짜 깨진 표시도 같이 덮인다. trajectory 가 참조를 붙잡아야 한다면, 쓸 때 표시를 자르지 않게 고친 뒤 범위에 넣는다.
   - `lane-addons/tool-request-owners-settled`: 보관 위치다. 543개 파일에 표시가 있지만 보관 본문을 읽는 코드가 없다(RFC-0498 §3.1).
   - `.DS_Store`: macOS Finder 가 만든다. 세 곳 모두에 생길 수 있다.
   - `tool_blobs`, `tool_blob_maintenance`: 이 정리가 다루는 저장소와 그 후보 기록이다.
 - 이름에 붙는 접미사는 원래 이름의 분류를 따른다. `.lock`(`File_lock_eio.lock_file_path`), `.last-good`(`goal_measurement.ml:100` 등), SQLite 의 `-wal`·`-shm` 이다. `antigravity-<owner>.prepare.lock`(`runtime_antigravity_home.ml:581`)처럼 이름 가운데가 바뀌는 것은 규칙 하나로 적는다.
 - 분류는 코드가 만드는 이름을 모두 적는다. 지금 운영에 없는 것도 적는다. 예: `lane-addons/fleet-delivery`(`lane_addon_runtime.ml`), `lane-addons/broadcasts`.
-- 만드는 코드가 없는 운영 잔여 항목은 분류에 넣지 않는다. 그 항목이 남아 있으면 스캔은 오류로 끝나고 아무것도 지우지 않는다. 이 층 PR 의 Upgrade notes 에 목록을 적고, 운영자가 지우거나 `.masc` 밖으로 옮긴 뒤 배포한다. 11-06 목록:
+- 만드는 코드가 없는 운영 잔여 항목은 분류에 넣지 않는다. 그 항목이 남아 있으면 후보 기록의 `unclassified` 에 이름이 남고, 2층은 지우지 않는다. 이 층 PR 의 Upgrade notes 에 목록을 적는다. 운영자가 지우거나 `.masc` 밖으로 옮기면 그다음 스캔부터 지울 수 있다. 11-06 목록:
   - 폴더: `accountability`, `browser-downloads`, `gondolin-work`, `keeper-wake-payload`, `services`, `hardcut-46247-archive-20261027-131821`, `hardcut-46397-archive-20261028-021939`, `hardcut-aside-20261102`
   - 파일: `autonomy_stats.jsonl`, `board_posts.initialized.jsonl`(와 `.lock`), `verify-after-restart.sh`, `verify-feedback-ratio.py`
   - `tui-keeper-chat-recovery.json`(와 잠금 둘)은 `scripts/capture-tui-keeper-chat.py` 가 쓴다. 서버 코드는 만들지 않는다. 같은 길로 다룬다.
   - `lane-addons/quiz-measure` 는 이름을 그대로 쓰는 코드가 없다. 이 층 PR 이 namespace 로 만드는지 확인한다.
 - 끝 조건은 둘이다.
-  - 닫힌 분류가 운영 workspace 에서 통과한다.
+  - 운영 workspace 의 후보 기록에서 `unclassified` 가 빈다.
   - 새로 넣은 저장소마다 스캔이 참조를 찾은 파일 수를, 같은 시각에 따로 센 수와 맞춰 본다. 따로 셀 때는 두 모양(`[masc:blob sha256=<64자> bytes=` 표시와 `_blob` 객체)과 그 escape 된 모양을 모두 센다.
+  - 따로 세는 명령을 이 층 PR 본문에 적어서 다시 돌릴 수 있게 한다.
   - §3.4 의 수는 크기를 보여 줄 뿐 기준값이 아니다. 저장소는 계속 바뀐다. 11-06 에 `tool-request-bodies` 를 다시 세니 모양에 따라 20~157개였고, 첫 측정의 184개는 다시 나오지 않았다.
   - 단위는 참조 개수가 아니라 참조를 하나라도 가진 파일 수다.
 - `u` 줄(§5.2)은 보조 지표다. 0 이어도 범위가 닫혔다는 증거가 아니다. 스캔이 읽지 않는 곳에만 참조가 있는 blob 은 "참조됨"으로 보인 적이 없어서 `u` 에 나타나지 않는다. 범위를 고친 직후 첫 스캔에서는 처음 보이는 참조 때문에 `u` 가 0 이 아닐 수 있다.
@@ -303,6 +305,7 @@ u <sha256>
 ### 5.4 2층: 지우기
 
 - 범위층의 두 끝 조건을 채운 뒤에 낸다.
+- 이번 스캔과 앞 기록의 `unclassified` 가 둘 다 비었을 때만 지운다. 앞 기록이 분류에 없는 항목을 두고 만든 후보는 그 항목의 참조를 몰랐을 수 있다.
 - 운영자가 1층 수치를 보고 켠다. 코드에 켜는 기준값을 두지 않는다. 2층 PR 이 1층 수치를 근거로 든다. §5.2 의 "읽으려 했다"나 "아무 흔적이 없다"가 나오면, 그 producer 를 먼저 고치고 2층을 낸다.
 - §4.3 의 `delete` 와 `h.deleting` 되돌리기를 넣는다.
 - 오프라인 명령 `tool-blob-maintenance` 와 그 lease 경로를 지운다. `Tool_blob_maintenance.mode` 도 지운다.
@@ -317,6 +320,8 @@ u <sha256>
 - 후보 표본을 `fetch` 해서 확인하기. 후보는 디스크에 있는 blob 이라 `fetch` 는 늘 성공한다. 재려는 위험(지운 뒤 다시 생기는 참조)을 재지 못한다. §5.2 가 그것을 바로 센다.
 - 스캔이 못 읽는 다섯 곳(§3.4)을 일시 저장으로 보고 범위에서 빼기. Librarian 재시도와 완료 검토 재개가 blob 을 읽는다. 그 저장이 얼마나 오래 사는지 코드가 정하지 않는다.
 - 저장소마다 자기 참조를 돌려주는 함수를 등록하고, GC 는 그 합집합만 쓰기. 방향은 맞다. 하지만 지금은 16곳을 모두 바꿔야 해서 2층이 오래 막힌다. 범위층의 닫힌 분류가 "등록하지 않은 저장소"를 실행 시점에 잡는다.
+- 스캔이 잘린 표시를 건너뛰고 `trajectories` 를 범위에 넣기. 다른 저장소의 진짜 깨진 표시까지 덮는다(§5.3).
+- 사람이 둔 파일을 받는 운영자 폴더를 `.masc` 아래에 새로 두기. `unclassified` 목록이 이미 측정을 이어 가게 한다. 새 폴더는 새 약속을 하나 더 만든다. 잔여 항목이 계속 생기는지 1층 경고 로그로 본 뒤 정한다.
 - 오래된 blob 만 지우기(나이 기준). 나이는 참조 여부를 말하지 않는다. §4.2 의 mtime 조건은 나이가 아니라 "앞 스캔 뒤에 누가 썼다"는 흔적이라, 오래됐다고 지우지 않고 새로 썼으면 남긴다.
 
 ## 7. 확인할 것

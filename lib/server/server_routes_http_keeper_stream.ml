@@ -1297,37 +1297,6 @@ let split_keeper_reply_chunks (text : string) : string list =
        as the reply. *)
     List.rev !chunks
 
-let notify_closed on_closed =
-  match on_closed with
-  | None -> ()
-  | Some f -> f ()
-
-let mark_closed ?on_closed closed =
-  if not !closed then begin
-    closed := true;
-    notify_closed on_closed
-  end
-
-let keeper_stream_send_raw ?on_closed writer mutex closed data =
-  if !closed || Httpun.Body.Writer.is_closed writer then begin
-    mark_closed ?on_closed closed;
-    false
-  end else
-    try
-      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-          Httpun.Body.Writer.write_string writer data;
-          Httpun.Body.Writer.flush writer (fun _ -> ()));
-      true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Keeper.warn "keeper_stream_send_raw write failed: %s" (Printexc.to_string exn);
-      mark_closed ?on_closed closed;
-      false
-
-let keeper_stream_send_event ?seq ?on_closed writer mutex closed event =
-  keeper_stream_send_raw ?on_closed writer mutex closed (Ag_ui.event_to_sse ?id:seq event)
-
 (** Execute keeper dispatch with real-time streaming.
     Calls the private direct-delivery stream which forwards MODEL text deltas to [on_text_delta].
     Projects the typed keeper result into the local HTTP stream response pair.
@@ -3770,84 +3739,113 @@ let operation_terminal_after_replay ~base_path ~keeper_name
   | Queued | Running _ | Succeeded _ | Cancelled _ -> None
 ;;
 
+let keeper_chat_max_queued_events = 4096
+
+(* What the sending fiber takes from a Keeper chat stream's queue. The live
+   sink puts [Live]; the sending fiber puts the other two after the replay,
+   so they come after every live event that arrived during it. *)
+type chat_stream_item =
+  | Live of int option * Ag_ui.event
+  | Missed_terminal of Ag_ui.event
+      (** The terminal the operation record holds and the wire never carried. *)
+  | Settled
+      (** The turn ended before the live part: the operation had settled, or
+          the replay wrote its terminal. *)
+
+let keeper_chat_step ~replayed : chat_stream_item -> Server_sse_pump.step = function
+  | Live (seq, event) ->
+    if not (live_event_is_new ~replayed seq)
+    then Skip
+    else
+      let frame = Ag_ui.event_to_sse ?id:seq event in
+      if ag_ui_terminal_event event then Send_last frame else Send frame
+  | Missed_terminal event -> Send_last (Ag_ui.event_to_sse event)
+  | Settled -> Stop
+;;
+
+let keeper_chat_idle ~base_path ~keeper_name ~operation_id ~request_id response
+  : Server_sse_pump.idle
+  =
+  if Server_sse_response.is_closed response
+  then Finish
+  else (
+    let state =
+      match Keeper_owner_registry.exact_operation ~base_path ~keeper_name request_id with
+      | Ok (Some operation) -> Some operation.Keeper_owner.Chat_operation.state
+      | Ok None -> None
+      | Error error ->
+        Log.Keeper.warn
+          "keeper chat heartbeat could not read operation=%s: %s"
+          operation_id
+          (Keeper_owner_registry.command_error_to_string error);
+        None
+      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+      | exception exn ->
+        Log.Keeper.warn
+          "keeper chat heartbeat operation read raised operation=%s: %s"
+          operation_id
+          (Printexc.to_string exn);
+        None
+    in
+    (* A queued operation has no journal events until its Keeper gets the
+       slot. The comment keeps the stream alive during that silence, so a
+       healthy queue does not trip the TUI's per-chunk idle bound. It proves
+       only transport liveness, not model progress. *)
+    match operation_heartbeat_decision state with
+    | `Send_comment -> Keepalive
+    | `Finish_stream ->
+      (* The operation settled without a wire terminal. Closing lets the TUI
+         settle its exact request from the operation record. *)
+      Finish
+    | `Retain_idle_timeout ->
+      (* The operation record cannot be read. A comment would hold the stream
+         open with nothing able to end it if the operation settled without a
+         wire terminal, so nothing is written and the TUI's idle bound stays
+         in force. Cost: with no write, a departed client goes unnoticed
+         until the record is readable again. *)
+      Quiet)
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
-  let origin = get_origin request in
-  let headers = keeper_chat_stream_headers origin in
-  let response = Httpun.Response.create ~headers `OK in
-  let writer = Httpun.Reqd.respond_with_streaming reqd response in
-  let mutex = Eio.Mutex.create () in
-  let closed = ref false in
-  let close_stream () =
-    if not !closed
-    then begin
-      closed := true;
-      (try Httpun.Body.Writer.close writer
-       with
-       | Eio.Cancel.Cancelled _ as e ->
-         Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
-       | exn ->
-         Log.Misc.warn "keeper_stream writer close: %s"
-           (Printexc.to_string exn))
-    end
+  let response =
+    Server_sse_response.respond
+      ~clock
+      ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+      ~flush_headers_immediately:true
+      reqd
+      (Httpun.Response.create ~headers:(keeper_chat_stream_headers (get_origin request)) `OK)
   in
   let thread_id = "keeper:" ^ payload.name in
   let operation_id =
     Keeper_owner.Chat_operation.Operation_id.to_string payload.request_id
   in
-  let finished, resolve_finished = Eio.Promise.create () in
-  let finish () =
-    (* See stream terminal fan-in: the first terminal notification wins. *)
-    ignore (Eio.Promise.try_resolve resolve_finished () : bool)
-  in
-  ignore
-    (keeper_stream_send_raw writer mutex closed
-       (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms));
+  let send frame = Server_sse_response.send response frame in
+  (* [sw] lives as long as the server, so a failure of this one stream is
+     logged here instead of failing it. *)
   Eio.Fiber.fork ~sw (fun () ->
+    match
     Eio.Switch.run (fun stream_sw ->
-      Eio.Switch.on_release stream_sw close_stream;
-      let handoff = Server_keeper_stream_handoff.create () in
+      Eio.Switch.on_release stream_sw (fun () -> Server_sse_response.close response);
       let base_path = (Mcp_server.workspace_config state).base_path in
       let interrupt_redaction =
         Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
       in
-      (* Seqs the reconnect replay wrote to this stream. Filled by the handler
-         before accepting the handoff. Its state mutex publishes this immutable
-         set to the sole live sender; producers buffer throughout replay. *)
+      let queue =
+        Server_sse_pump.Queue.create ~max_queued_events:keeper_chat_max_queued_events
+      in
+      (* The sink is registered before the submit, so no event of this
+         operation is published before it. Nothing between registering and
+         putting the removal on the switch can be cancelled. A publisher still
+         holding the removed sink only fills a queue nobody takes from. *)
+      let unregister =
+        register_operation_live_sink ~base_path ~keeper_name:payload.name ~operation_id
+          (fun ~seq event -> Server_sse_pump.Queue.push queue (Live (seq, event)))
+      in
+      Eio.Switch.on_release stream_sw unregister;
+      (* Seqs the reconnect replay wrote to this stream. Only this fiber reads
+         and writes it. *)
       let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
-      let send_event ~seq event =
-        let sent = keeper_stream_send_event ?seq writer mutex closed event in
-        if
-          (not sent)
-          || match event.Ag_ui.event_type with
-             | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-             | Run_started | Text_message_start | Text_message_content
-             | Text_message_end | Tool_call_start | Tool_call_args
-             | Tool_call_end | Custom -> false
-        then finish ();
-        sent
-      in
-      let send_live (seq, event) =
-        if not (live_event_is_new ~replayed seq)
-        then Server_keeper_stream_handoff.Continue
-        else
-          match send_event ~seq event with
-          | true -> Server_keeper_stream_handoff.Continue
-          | false -> Server_keeper_stream_handoff.Stop
-          | exception exn ->
-            let backtrace = Printexc.get_raw_backtrace () in
-            finish ();
-            Printexc.raise_with_backtrace exn backtrace
-      in
-      let sink ~seq event =
-        Server_keeper_stream_handoff.publish handoff ~send:send_live (seq, event)
-      in
-      let unregister = register_operation_live_sink ~base_path ~keeper_name:payload.name ~operation_id sink in
-      Eio.Switch.on_release stream_sw (fun () ->
-        (* A publisher may already hold a registry snapshot containing this
-           sink. Close its queue before unregistering so it cannot restart. *)
-        Server_keeper_stream_handoff.close handoff;
-        unregister ());
-      let publish_acceptance (acceptance, interactive) =
+      let acceptance_frame (acceptance, interactive) =
         let operation = acceptance.Keeper_owner.operation in
         let state =
           match operation.state with
@@ -3857,8 +3855,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           | Failed _ -> "Failed"
           | Cancelled _ -> "Cancelled"
         in
-        let event =
-          Ag_ui.of_custom
+        Ag_ui.event_to_sse
+          (Ag_ui.of_custom
             ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
             (`Assoc
                ([ "operation_id", `String operation_id
@@ -3879,43 +3877,75 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                    "signalled", `Bool receipt.signalled; "resumed", `Bool receipt.resumed;
                    "interrupt_error", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.message) interrupt_error;
                    "interrupt_error_code", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.code) interrupt_error;
-                   "interrupt_incident_id", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.incident_id) interrupt_error]]))
-        in
-        (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
-        ignore (keeper_stream_send_event writer mutex closed event);
-        (* Replay before live attach (RFC-0412 §3.2): the journaled suffix
-           above [since_seq] goes out through the same pure projection the
-           live adapter uses, with the ts the bus stamped, so the bytes equal
-           the frames the client missed. The sink is already registered, so
-           events published meanwhile stay in the handoff and drain below,
-           where [send_live] drops the seqs the replay already wrote. *)
-        (match acceptance.Keeper_owner.existing, payload.since_seq with
-         | true, since_seq ->
-           journal_replay_frames
-             ~base_path
-             ~keeper_name:payload.name
-             ~operation_id
-             ~since_seq
-           |> List.iter (fun (seq, event) ->
-             Hashtbl.replace replayed seq ();
-             ignore (send_event ~seq:(Some seq) event))
-         | false, Keeper_chat_event_log.After_seq _ ->
-           (* The owner has never seen this operation, so there is no turn
-              to catch up on. Replaying here would read whatever a previous
-              life of this operation_id left in the journal file. *)
-           Log.Keeper.warn
-             "keeper chat since_seq=%s ignored: operation=%s is a first submit"
-             (Keeper_chat_event_log.replay_position_to_string payload.since_seq)
-             operation_id
-         | false, Keeper_chat_event_log.Whole_turn ->
-           (* A first submit: nothing journaled, nothing asked for. *)
-           ());
-        Server_keeper_stream_handoff.accept handoff ~send:send_live;
-        Option.iter (fun event -> ignore (send_event ~seq:None event))
-          (operation_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
-        if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
+                   "interrupt_incident_id", Option.fold ~none:`Null ~some:(fun error -> `String error.Server_keeper_chat_public_error.incident_id) interrupt_error]])))
       in
-      let submit_result =
+      (* Replay before live (RFC-0412 §3.2): the journaled suffix above
+         [since_seq] goes out through the same pure projection the live
+         adapter uses, with the ts the bus stamped, so the bytes equal the
+         frames the client missed. *)
+      let replay_frames (acceptance : Keeper_owner.operation_acceptance) =
+        match acceptance.existing, payload.since_seq with
+        | true, since_seq ->
+          journal_replay_frames ~base_path ~keeper_name:payload.name ~operation_id ~since_seq
+        | false, Keeper_chat_event_log.After_seq _ ->
+          (* The owner has never seen this operation, so there is no turn
+             to catch up on. Replaying here would read whatever a previous
+             life of this operation_id left in the journal file. *)
+          Log.Keeper.warn
+            "keeper chat since_seq=%s ignored: operation=%s is a first submit"
+            (Keeper_chat_event_log.replay_position_to_string payload.since_seq)
+            operation_id;
+          []
+        | false, Keeper_chat_event_log.Whole_turn ->
+          (* A first submit: nothing journaled, nothing asked for. *)
+          []
+      in
+      (* Writes the replay in order and says whether the stream goes on, and
+         whether the replay carried a terminal. *)
+      let rec send_replay ~terminal_written = function
+        | [] -> `Live terminal_written
+        | (seq, event) :: rest ->
+          Hashtbl.replace replayed seq ();
+          (match send (Ag_ui.event_to_sse ~id:seq event) with
+           | Written ->
+             send_replay ~terminal_written:(terminal_written || ag_ui_terminal_event event) rest
+           | Closed | Stalled -> `Ended)
+      in
+      let serve_live (acceptance : Keeper_owner.operation_acceptance) ~terminal_written =
+        let operation = acceptance.operation in
+        Option.iter
+          (fun event -> Server_sse_pump.Queue.push queue (Missed_terminal event))
+          (operation_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
+        if terminal_written || Keeper_owner.Chat_operation.is_terminal operation.state
+        then Server_sse_pump.Queue.push queue Settled;
+        match
+          Server_sse_pump.run
+            ~queue
+            ~step:(keeper_chat_step ~replayed)
+            ~idle:(fun () ->
+              keeper_chat_idle ~base_path ~keeper_name:payload.name ~operation_id
+                ~request_id:payload.request_id response)
+            ~clock
+            ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
+            ~send
+        with
+        (* [Server_sse_response.send] logs a stalled frame with the request path. *)
+        | Client_gone | Stalled | Finished -> ()
+        | Fell_behind ->
+          Log.Keeper.warn ~keeper_name:payload.name
+            "keeper chat stream closed operation=%s: the client was %d events behind"
+            operation_id keeper_chat_max_queued_events
+      in
+      let submit_error_frame public =
+        Ag_ui.event_to_sse
+          (Ag_ui.run_error ~thread_id
+             ~run_id:("keeper-operation-run-" ^ public.Server_keeper_chat_public_error.incident_id)
+             ~message:public.message ~code:public.code ())
+      in
+      (* The submit does not wait for the client: a closed stream cannot roll
+         back a durable acceptance, and the frames are built (and their
+         failures logged) whether or not the client is still there. *)
+      let submitted =
         let open Result.Syntax in
         let* source =
           operation_source_of_payload
@@ -3936,91 +3966,39 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              |> Result.map (fun (acceptance, receipt) -> acceptance, Some receipt))
         |> Result.map_error (fun error -> `Owner error)
       in
-      (match submit_result with
-       | Ok acceptance -> publish_acceptance acceptance
-       | Error (`Input detail) ->
-         Server_keeper_stream_handoff.close handoff;
-         let public = Server_keeper_chat_public_error.make
-             ~incident_id:operation_id Invalid_input in
-         Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
-           public.incident_id public.code detail;
-         ignore
-           (keeper_stream_send_event writer mutex closed
-              (Ag_ui.run_error ~thread_id
-                 ~run_id:("keeper-operation-run-" ^ public.incident_id)
-                 ~message:public.message ~code:public.code ()));
-         finish ()
-       | Error (`Owner error) ->
-         Server_keeper_stream_handoff.close handoff;
-         let public = Server_keeper_chat_public_error.make
-             ~incident_id:operation_id (operation_command_error_kind error) in
-         Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
-           public.incident_id public.code
-           (Keeper_owner_registry.command_error_to_string error);
-         ignore
-           (keeper_stream_send_event writer mutex closed
-              (Ag_ui.run_error ~thread_id
-                 ~run_id:("keeper-operation-run-" ^ public.incident_id)
-                 ~message:public.message ~code:public.code ()));
-         finish ());
-      (* A queued operation has no journal events until its Keeper gets the
-         slot. Keep the HTTP stream alive during that silence, so a healthy
-         queue does not trip the TUI's per-chunk idle bound.
-         Check the exact durable operation before every comment: if it has
-         settled without a wire terminal, closing this stream lets the TUI
-         reconcile the terminal from the authoritative operation record.
-         The comment proves only transport liveness, not model progress. *)
-      let rec heartbeat () =
-        Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-        if !closed || Httpun.Body.Writer.is_closed writer then finish ()
-        else if Option.is_none (Eio.Promise.peek finished) then (
-          let state =
-            match
-              Keeper_owner_registry.exact_operation
-                ~base_path ~keeper_name:payload.name payload.request_id
-            with
-            | Ok (Some operation) -> Some operation.state
-            | Ok None -> None
-            | Error error ->
-              Log.Keeper.warn
-                "keeper chat heartbeat could not read operation=%s: %s"
-                operation_id
-                (Keeper_owner_registry.command_error_to_string error);
-              None
-            | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-            | exception exn ->
-              Log.Keeper.warn
-                "keeper chat heartbeat operation read raised operation=%s: %s"
-                operation_id (Printexc.to_string exn);
-              None
-          in
-          match operation_heartbeat_decision state with
-          | `Send_comment ->
-            if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
-            then heartbeat ()
-            else finish ()
-          | `Finish_stream ->
-            (* The live sink may be writing this operation's terminal at the
-               same moment. If the close wins, the client sees a stream that
-               ended after acceptance without a terminal: the same case as a
-               terminal the wire never carried, settled from the operation
-               record, so the race changes no outcome. *)
-            finish ()
-          | `Retain_idle_timeout ->
-            (* Preserve the existing idle/reconnect path while operation
-               authority is unreadable, without a rapid close/re-POST loop.
-               A comment here would hold the stream open with nothing able to
-               end it if the operation settled without a wire terminal.
-               Cost: with no write, a departed client goes unnoticed. This
-               fiber and its live sink stay until the store is readable
-               again (the next check then writes a comment, which fails, or
-               closes) or [finished] resolves, as every stream did before
-               this heartbeat existed. *)
-            heartbeat ())
+      let opening =
+        match submitted with
+        | Ok ((acceptance, _) as accepted) -> Ok (acceptance, acceptance_frame accepted)
+        | Error (`Input detail) ->
+          let public = Server_keeper_chat_public_error.make
+              ~incident_id:operation_id Invalid_input in
+          Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
+            public.incident_id public.code detail;
+          Error (submit_error_frame public)
+        | Error (`Owner error) ->
+          let public = Server_keeper_chat_public_error.make
+              ~incident_id:operation_id (operation_command_error_kind error) in
+          Log.Keeper.warn "keeper_chat_submit incident_id=%s code=%s detail=%s"
+            public.incident_id public.code
+            (Keeper_owner_registry.command_error_to_string error);
+          Error (submit_error_frame public)
       in
-      Eio.Fiber.first
-        (fun () -> Eio.Promise.await finished)
-        heartbeat))
+      match send (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms), opening with
+      | (Closed | Stalled), _ -> ()
+      | Written, Error frame -> ignore (send frame : Server_sse_response.outcome)
+      | Written, Ok (acceptance, frame) ->
+        (match send frame with
+         | Closed | Stalled -> ()
+         | Written ->
+           (match send_replay ~terminal_written:false (replay_frames acceptance) with
+            | `Ended -> ()
+            | `Live terminal_written -> serve_live acceptance ~terminal_written)))
+    with
+    | () -> ()
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      Log.Keeper.warn ~keeper_name:payload.name
+        "keeper chat stream failed operation=%s: %s" operation_id (Printexc.to_string exn))
 
 (** Build routes for MCP server *)
 
@@ -4034,6 +4012,11 @@ module For_testing = struct
   let live_event_is_new = live_event_is_new
   let journal_replay_frames = journal_replay_frames
   let operation_terminal_after_replay = operation_terminal_after_replay
+  type nonrec chat_stream_item = chat_stream_item =
+    | Live of int option * Ag_ui.event
+    | Missed_terminal of Ag_ui.event
+    | Settled
+  let keeper_chat_step = keeper_chat_step
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

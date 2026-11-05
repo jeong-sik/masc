@@ -275,14 +275,14 @@ val handle_keeper_chat_stream :
   Httpun.Reqd.t ->
   keeper_chat_stream_request ->
   unit
-(** Drives the [POST /api/keeper/chat-stream] SSE
-    response.  Streams keeper turn events back to the
-    client over [text/event-stream] with CORS + cache
-    suppression headers, gated by the per-request switch
-    [sw] and the wall clock [clock].  Closes the writer
-    on switch release; surfaces handler exceptions
-    through the SSE stream rather than the HTTP envelope
-    once the headers have flushed. *)
+(** Drives the [POST /api/keeper/chat-stream] SSE response
+    (RFC-0493 §3.2). One fiber forked on [sw] submits the operation and is
+    the stream's only sender: it writes the acceptance and the reconnect
+    replay, then serves the live events of the turn through
+    {!Server_sse_pump}. The Keeper turn only puts its events in that
+    stream's queue. The stream ends after the turn's terminal, when the
+    operation settled without one, or when the client is gone, stalled or a
+    full queue behind; the client then reconnects with [since_seq]. A failure of the stream is logged and does not fail [sw]. *)
 
 (** {1 Owner operation turn execution} *)
 
@@ -438,6 +438,21 @@ module For_testing : sig
     replayed:(int, unit) Hashtbl.t -> Ag_ui.event option
   (** Cursor-independent accepted operation failure, absent when this replay already
       delivered the terminal for that exact durable settlement. *)
+
+  (** What a Keeper chat stream's sending fiber takes from its queue. *)
+  type chat_stream_item =
+    | Live of int option * Ag_ui.event  (** From the live sink, with its seq. *)
+    | Missed_terminal of Ag_ui.event
+        (** The terminal the operation record holds and the wire never carried. *)
+    | Settled
+        (** The turn ended before the live part: the operation had settled, or
+            the replay wrote its terminal. *)
+
+  val keeper_chat_step :
+    replayed:(int, unit) Hashtbl.t -> chat_stream_item -> Server_sse_pump.step
+  (** The frame the stream writes for an item: nothing for a seq the replay
+      already wrote, the last frame for a terminal, and the end for
+      [Settled]. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

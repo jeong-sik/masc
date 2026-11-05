@@ -12,7 +12,8 @@ module Blocks = Keeper_chat_blocks
 module Projection = Server_keeper_chat_agui_projection
 module Replay = Server_keeper_chat_replay
 module Stream = Server_routes_http_keeper_stream
-module Handoff = Server_keeper_stream_handoff
+module Pump = Server_sse_pump
+module Sse = Server_sse_response
 
 (* Seq 3 is a connector-only block: journaled, never on the SSE wire. *)
 let events : E.keeper_chat_event list =
@@ -299,95 +300,134 @@ let test_dedup_keeps_the_event_the_journal_lost () =
   Alcotest.(check bool) "seq 6 arrives live only" true (is_new (Some 6));
   Alcotest.(check bool) "a seq-less settle event always passes" true (is_new None)
 
-(* Interrupt the first buffered send before writing its bytes, exactly where a
-   serving-domain handoff can meet a newer owner-domain publication. Calling the
-   actual sender reentrantly also fails if it holds a mutex over this effect. *)
-let test_handoff_keeps_buffered_frames_before_live () =
-  match live_frames () with
-  | first :: second :: third :: rest ->
-    let handoff = Handoff.create () in
+(* The fixture's live events as the live sink hands them over: the projected
+   event with the seq the bus gave it. *)
+let live_events () =
+  let _, rev =
+    List.fold_left
+      (fun (projection, acc) (entry : L.journaled_event) ->
+         let projection, projected =
+           Projection.project ~timestamp:entry.ts ~redact_text:Fun.id projection entry.event
+         in
+         ( projection
+         , match projected with
+           | Some event -> (entry.seq, event) :: acc
+           | None -> acc ))
+      (Projection.initial, [])
+      journaled
+  in
+  List.rev rev
+
+let live_event_of_type event_type =
+  match
+    List.find_opt (fun (_, (event : Ag_ui.event)) -> event.event_type = event_type) (live_events ())
+  with
+  | Some (_, event) -> event
+  | None -> Alcotest.fail "the live fixture lacks the event type"
+
+let ending_name = function
+  | Pump.Client_gone -> "Client_gone"
+  | Pump.Fell_behind -> "Fell_behind"
+  | Pump.Stalled -> "Stalled"
+  | Pump.Finished -> "Finished"
+
+(* Runs the stream's own step through the real pump, as the handler does after
+   its replay. [before_run] stands for the replay: it writes through [send]
+   and may push, as live events arrive while the replay writes. Returns every
+   frame written, in order, and how the stream ended. *)
+let serve_chat ~replayed ?(before_run = fun ~send:_ _ -> ()) items =
+  Eio_main.run (fun env ->
+    let queue = Pump.Queue.create ~max_queued_events:64 in
     let written = ref [] in
-    let injected = ref false in
-    let rec send entry =
-      if not !injected then (
-        injected := true;
-        Handoff.publish handoff ~send third;
-        Handoff.accept handoff ~send);
-      written := entry :: !written;
-      Handoff.Continue
+    let send frame = written := frame :: !written; Sse.Written in
+    List.iter (Pump.Queue.push queue) items;
+    before_run ~send queue;
+    let ending =
+      Pump.run ~queue
+        ~step:(Stream.For_testing.keeper_chat_step ~replayed)
+        ~idle:(fun () -> Pump.Finish)
+        ~clock:(Eio.Stdenv.clock env)
+        ~ping_interval_s:30.0
+        ~send
     in
-    Handoff.publish handoff ~send first;
-    Handoff.publish handoff ~send second;
-    Alcotest.(check int) "acceptance/replay still owns the wire" 0 (List.length !written);
-    Handoff.accept handoff ~send;
-    List.iter (Handoff.publish handoff ~send) rest;
-    Alcotest.(check (list (pair int string)))
-      "a new live frame cannot overtake either buffered frame"
-      (first :: second :: third :: rest) (List.rev !written)
-  | [] | [_] | [_; _] -> Alcotest.fail "live fixture requires three frames"
+    List.rev !written, ending_name ending)
 
-let test_handoff_keeps_replay_membership_dedup () =
-  let handoff = Handoff.create () in
+let live_item (seq, event) = Stream.For_testing.Live (Some seq, event)
+
+(* A reconnect replays the first three live seqs while the live sink keeps
+   publishing: two events were queued before the replay began and the rest
+   arrive after its first frame. Each replayed seq goes out once, from the
+   replay, and the stream writes byte-for-byte what the live adapter wrote,
+   ending at the turn's terminal. *)
+let test_live_events_queued_during_the_replay_follow_it () =
+  let live = live_events () in
+  let replay_part = List.filteri (fun i _ -> i < 3) live in
+  let queued_before = List.filteri (fun i _ -> i < 2) live in
+  let arriving = List.filteri (fun i _ -> i >= 2) live in
+  let replayed = Hashtbl.create 8 in
+  let before_run ~send queue =
+    List.iteri
+      (fun i (seq, event) ->
+         Hashtbl.replace replayed seq ();
+         ignore (send (frame (seq, event)) : Sse.outcome);
+         if i = 0 then List.iter (fun entry -> Pump.Queue.push queue (live_item entry)) arriving)
+      replay_part
+  in
+  let written, ending = serve_chat ~replayed ~before_run (List.map live_item queued_before) in
+  Alcotest.(check string) "the live terminal ends the stream" "Finished" ending;
+  Alcotest.(check (list string))
+    "replayed seqs once, then the live frames in order"
+    (List.map snd (live_frames ())) written
+
+(* Seq 4's append failed (fail-open) and the replay wrote 5. Live 5 is the
+   replay's duplicate; 4, 6 and an event that never went through the bus go
+   out. *)
+let test_the_step_drops_only_what_the_replay_wrote () =
   let replayed = Hashtbl.create 4 in
-  let written = ref [] in
-  let send seq =
-    if Stream.For_testing.live_event_is_new ~replayed seq
-    then written := seq :: !written;
-    Handoff.Continue
+  Hashtbl.replace replayed 5 ();
+  let delta = live_event_of_type Ag_ui.Text_message_content in
+  let written, ending =
+    serve_chat ~replayed
+      Stream.For_testing.
+        [ Live (Some 4, delta); Live (Some 5, delta); Live (Some 6, delta); Live (None, delta)
+        ; Settled ]
   in
-  Handoff.publish handoff ~send (Some 4);
-  Handoff.publish handoff ~send (Some 5);
-  (* The journal missed 4, but replay wrote 5 while the live sink buffered. *)
-  Hashtbl.add replayed 5 ();
-  written := [Some 5];
-  Handoff.publish handoff ~send (Some 6);
-  Handoff.accept handoff ~send;
-  Handoff.publish handoff ~send None;
-  Alcotest.(check (list (option int)))
-    "replay duplicates drop; journal gaps and seq-less settlement survive"
-    [Some 5; Some 4; Some 6; None] (List.rev !written)
+  Alcotest.(check string) "Settled ends the stream" "Finished" ending;
+  Alcotest.(check (list string))
+    "replay duplicates drop; journal gaps and seq-less events survive"
+    [ Ag_ui.event_to_sse ~id:4 delta; Ag_ui.event_to_sse ~id:6 delta; Ag_ui.event_to_sse delta ]
+    written
 
-let test_handoff_close_drops_pending_and_late_sinks () =
-  let rejected = Handoff.create () in
-  let written = ref [] in
-  let send value = written := value :: !written; Handoff.Continue in
-  Handoff.publish rejected ~send 1;
-  Handoff.close rejected;
-  Handoff.accept rejected ~send;
-  Handoff.publish rejected ~send 2;
-  Alcotest.(check (list int)) "rejection never activates held callbacks" [] !written;
-  let active = Handoff.create () in
-  let send_and_unsubscribe value =
-    written := value :: !written;
-    Handoff.close active;
-    (* A publisher already holding the unregistered sink must be harmless. *)
-    Handoff.publish active ~send 3;
-    Handoff.Continue
+(* The handler queues a missed terminal and [Settled] after the live events
+   that arrived during its replay, and the live sink may push more after
+   them. The stream writes the earlier live frames, then the missed terminal
+   without a seq, and nothing after it. A live terminal ends the stream the
+   same way, and [Settled] ends it without a frame. *)
+let test_terminals_and_settled_end_the_stream () =
+  let replayed = Hashtbl.create 1 in
+  let delta = live_event_of_type Ag_ui.Text_message_content in
+  let finished = live_event_of_type Ag_ui.Run_finished in
+  let failure =
+    Ag_ui.run_error ~thread_id:"keeper:replay" ~run_id:"keeper-operation-run-op"
+      ~message:"failed" ~code:"failed" ()
   in
-  Handoff.publish active ~send:send_and_unsubscribe 1;
-  Handoff.publish active ~send:send_and_unsubscribe 2;
-  Handoff.accept active ~send:send_and_unsubscribe;
-  Alcotest.(check (list int)) "release drops the pending tail and captured sink" [1] !written
-
-let test_handoff_send_failure_closes_and_preserves_cancellation () =
-  let disconnected = Handoff.create () in
-  let writes = ref 0 in
-  let send _ = incr writes; Handoff.Stop in
-  Handoff.publish disconnected ~send 1;
-  Handoff.publish disconnected ~send 2;
-  Handoff.accept disconnected ~send;
-  Handoff.publish disconnected ~send 3;
-  Alcotest.(check int) "failed transport stops the queue" 1 !writes;
-  let cancelled = Handoff.create () in
-  let cancellation = Eio.Cancel.Cancelled (Failure "handoff send cancelled") in
-  let send _ = incr writes; raise cancellation in
-  Handoff.publish cancelled ~send 1;
-  Handoff.publish cancelled ~send 2;
-  Alcotest.check_raises "send cancellation propagates unchanged" cancellation
-    (fun () -> Handoff.accept cancelled ~send);
-  Handoff.publish cancelled ~send 3;
-  Handoff.accept cancelled ~send;
-  Alcotest.(check int) "cancelled sender cannot leave a restartable queue" 2 !writes
+  let open Stream.For_testing in
+  let written, ending =
+    serve_chat ~replayed
+      [ Live (Some 7, delta); Missed_terminal failure; Live (Some 8, delta); Settled ]
+  in
+  Alcotest.(check string) "a missed terminal ends the stream" "Finished" ending;
+  Alcotest.(check (list string)) "live first, then the terminal without a seq"
+    [ Ag_ui.event_to_sse ~id:7 delta; Ag_ui.event_to_sse failure ] written;
+  let written, ending =
+    serve_chat ~replayed [ Live (Some 9, finished); Live (Some 10, delta); Settled ]
+  in
+  Alcotest.(check string) "a live terminal ends the stream" "Finished" ending;
+  Alcotest.(check (list string)) "nothing after a live terminal"
+    [ Ag_ui.event_to_sse ~id:9 finished ] written;
+  let written, ending = serve_chat ~replayed [ Settled; Live (Some 11, delta) ] in
+  Alcotest.(check string) "Settled ends the stream" "Finished" ending;
+  Alcotest.(check (list string)) "Settled writes nothing" [] written
 
 (* A transport comment must never conceal an operation whose wire terminal was
    missed. The stream closes on a durable terminal so the TUI can reconcile
@@ -501,14 +541,12 @@ let () =
             test_read_result_names_missing_corrupt_and_unreadable
         ; Alcotest.test_case "dedup keeps the event the journal lost" `Quick
             test_dedup_keeps_the_event_the_journal_lost
-        ; Alcotest.test_case "buffered frames precede concurrent live publication" `Quick
-            test_handoff_keeps_buffered_frames_before_live
-        ; Alcotest.test_case "handoff retains replay membership dedup" `Quick
-            test_handoff_keeps_replay_membership_dedup
-        ; Alcotest.test_case "closed handoff drops pending and late sinks" `Quick
-            test_handoff_close_drops_pending_and_late_sinks
-        ; Alcotest.test_case "send failure closes and preserves cancellation" `Quick
-            test_handoff_send_failure_closes_and_preserves_cancellation
+        ; Alcotest.test_case "live events queued during the replay follow it" `Quick
+            test_live_events_queued_during_the_replay_follow_it
+        ; Alcotest.test_case "the step drops only what the replay wrote" `Quick
+            test_the_step_drops_only_what_the_replay_wrote
+        ; Alcotest.test_case "terminals and Settled end the stream" `Quick
+            test_terminals_and_settled_end_the_stream
         ; Alcotest.test_case "heartbeat preserves terminal reconciliation" `Quick
             test_heartbeat_preserves_terminal_reconciliation
         ; Alcotest.test_case "handler replay matches the pure fold" `Quick

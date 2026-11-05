@@ -2,17 +2,12 @@
 
 open Masc
 
-(* [Keeper_tool_call_log.read_recent], [read_recent_rows] and
+(* [Keeper_tool_call_log.read_recent] and
    [Dashboard_http_tool_quality.aggregate] answer [Error Index_unavailable]
    when the read index cannot be read (audit F397). Every case in this file
    exercises rows, so the failure is the case's failure. *)
 let read_recent ?keeper_name ?n () =
   match Keeper_tool_call_log.read_recent ?keeper_name ?n () with
-  | Ok rows -> rows
-  | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
-
-let read_recent_rows ~n () =
-  match Keeper_tool_call_log.read_recent_rows ~n () with
   | Ok rows -> rows
   | Error (Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
 
@@ -526,43 +521,13 @@ let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
       "unfiltered read returns exactly the newest n"
       [ "t9"; "t10" ]
       (tools (read_recent ~n:2 ()));
-    (* alice's two rows sit at opposite ends of the store, so finding both
-       requires reading well past n — this is what the over-scan buys. *)
+    (* alice's two rows sit at opposite ends of the store; the keeper read
+       still returns both. *)
     Alcotest.(check (list string))
-      "keeper-filtered read still scans past n to find n matches"
+      "keeper-filtered read finds n matches across the store"
       [ "t1"; "t10" ]
       (tools (read_recent ~keeper_name:"alice" ~n:2 ())))
 ;;
-
-let test_fleet_rows_derivation_matches_read_recent () =
-  with_tmp_log (fun () ->
-    List.iter
-      (fun (keeper, tool) ->
-        Keeper_tool_call_log.log_call
-          ~keeper_name:keeper ~tool_name:tool
-          ~input:(`Assoc []) ~output_text:"out"
-          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ())
-      [ ("alice", "t1"); ("bob", "t2"); ("alice", "t3");
-        ("carol", "t4"); ("alice", "t5"); ("bob", "t6") ];
-    let n = 2 in
-    let fleet =
-      read_recent_rows
-        ~n:(n * Keeper_tool_call_log.read_over_scan_factor) ()
-    in
-    List.iter
-      (fun keeper ->
-        let direct =
-          read_recent ~keeper_name:keeper ~n ()
-        in
-        let derived =
-          Keeper_tool_call_log.filter_rows_for_keeper
-            ~keeper_name:keeper ~n fleet
-        in
-        Alcotest.(check (list string))
-          (Printf.sprintf "derived slice equals read_recent for %s" keeper)
-          (List.map Yojson.Safe.to_string direct)
-          (List.map Yojson.Safe.to_string derived))
-      [ "alice"; "bob"; "carol"; "absent-keeper" ])
 
 let test_exact_agent_core_occurrence_persisted () =
   with_tmp_log (fun () ->
@@ -3346,8 +3311,6 @@ let () =
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter
-        ; eio_test "fleet-row derivation equals read_recent"
-            test_fleet_rows_derivation_matches_read_recent
         ; eio_test "unfiltered read is exactly n; filtered still finds n"
             test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted

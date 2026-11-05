@@ -128,12 +128,6 @@ type operator_settlement =
   ; settled_at : float
   }
 
-let operator_settlement_kind_to_string = function
-  | Effect_confirmed_applied _ -> "effect_confirmed_applied"
-  | Effect_confirmed_failed _ -> "effect_confirmed_failed"
-  | Terminally_abandoned -> "terminally_abandoned"
-;;
-
 type approved_resolution_delivery =
   { request : approved_resolution_request
   ; state : approved_resolution_state

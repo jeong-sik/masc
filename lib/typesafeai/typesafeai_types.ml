@@ -9,12 +9,6 @@ let model_to_string = function
   | Custom s -> s
 ;;
 
-let model_of_string = function
-  | "jev-latest" -> Jev_latest
-  | "jev-preview" -> Jev_preview
-  | s -> Custom s
-;;
-
 type choice_question =
   { instructions : string
   ; criteria : (string * string option) list

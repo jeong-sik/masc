@@ -6438,7 +6438,6 @@ let test_composite_preserves_runtime_attempt_scopes () =
     let execution =
       Server_dashboard_http_composite_claims.composite_execution_receipt_json
         ~config
-        ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
         ~keeper_name
     in
     let open Yojson.Safe.Util in

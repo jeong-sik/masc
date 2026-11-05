@@ -693,9 +693,8 @@ let run_record_scope
       ~cleanup_failures
       cancellation
   | Some (Resource_scope.Raised failure) ->
-    (* A release failure here used to be wrapped with the callback exception
-       in an exception nothing caught, so it reached only a top-level print.
-       The callback exception continues with its own backtrace. *)
+    (* A release failure alongside the callback exception has no typed home
+       here. The callback exception continues with its own backtrace. *)
     Printexc.raise_with_backtrace failure.exception_ failure.backtrace
   | Some (Resource_scope.Returned row) ->
     (match outcome.parent_cancellation with

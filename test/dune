@@ -3003,6 +3003,7 @@
 
 (include stanzas/test_fleet_stream_loopback.inc)
 (include stanzas/test_server_sse_response.inc)
+(include stanzas/test_server_mcp_listen_stream.inc)
 
 (include stanzas/test_server_sse_pump.inc)
 

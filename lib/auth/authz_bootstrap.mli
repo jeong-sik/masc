@@ -31,8 +31,8 @@
     opening the log makes the directory [<base path>/.masc/auth]. The cut applies
     to the store that the install record names as well, so a refused call can
     leave that store shorter by a torn line.
-    - The path of the store is absolute, holds no NUL byte, and is in its normal
-      form: no empty, [.] or [..] segment and no separator at the end. It is not
+    - The path of the store is an {!Authz_install_record.Store_path.t}, the one
+      spelling the install record writes and reads. It is not
       the install record, and it is not inside the base path or inside the
       directory of the log, which a link can put outside the base path. The log,
       its lock file and the rest of what this module writes are in those
@@ -54,7 +54,11 @@
     - The path where the store will be created holds nothing, unless the install
       record names it and it holds a regular file. A directory, a symbolic link
       (one that leads nowhere included) or a file that the record does not name
-      is not opened, and the bootstrap fails (design 8.4).
+      is not opened, and the bootstrap fails (design 8.4). The path of the store
+      that the record names and the path of the new store are read with
+      {!Authz_presence}, so a dangling link on the way to either, such as a link
+      to a volume that is not mounted, is {!Path_not_inspected} and never a path
+      that holds nothing.
     - The authorization log has no record. A torn last line is cut when the log
       is opened, as it is at every start.
     - The store that the install record names, if there is a file, is a regular
@@ -140,11 +144,8 @@ type completed =
 
 (** Why the path of the store cannot be used. *)
 type path_problem =
-  | Not_absolute
-  | Holds_nul  (** No file has a name with a NUL byte: the system calls end the name there. *)
-  | Not_normal
-      (** The path has an empty, [.] or [..] segment, or ends with a separator.
-          Write the path without them. *)
+  | Store_path of Authz_install_record.Store_path.problem
+      (** The path is not in the one spelling that the install record keeps. *)
   | Inside_base_path
       (** The path is, or lies under, the base path or the directory of the log.
           The log is there. *)
@@ -163,8 +164,8 @@ type error =
       (** The record is unreadable or corrupt, or the config directory fails the
           test of {!Authz_install_record}. *)
   | Install_record_changed of
-      { expected : string option
-      ; found : string option
+      { expected : Authz_install_record.Store_path.t option
+      ; found : Authz_install_record.Store_path.t option
       }
       (** {!write} read the install record again and it is not the one that
           {!prepare} read. Nothing was written. [expected] is the store that
@@ -172,7 +173,11 @@ type error =
   | Path_not_inspected of
       { path : string
       ; detail : string
-      }  (** The file system could not say whether the path of the store holds a file. *)
+      }
+      (** The file system could not say whether the path holds a file: a call
+          failed, or a symbolic link on the way leads nowhere. The path is that
+          of the store to create, or that of the store that the install record
+          names. *)
   | External_store_in_the_way of { path : string }
       (** The path holds something that cannot be taken for the store: it is not
           a regular file, or the install record does not name it. It was not

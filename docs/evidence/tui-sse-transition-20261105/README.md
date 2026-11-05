@@ -20,7 +20,7 @@ TUI 렌더링 최적화는 별도 완료 증거인 [`tui-smoothness-20261104`](.
 - `41961038163`: 첫 20개 targeted suite, Browser hidden 경합 1건과 Lane cold-build 600초 초과로 **실패**
 - `41963750774`: hidden 진입을 보정한 20개 targeted suite, **성공**
 - `41963753486`: test-only head `5c1420fb9703c78ff403929d3f04563539a4a478`의 `pr-type-check.yml`, **성공**
-- 독립 whole-branch review: **대기**
+- 독립 whole-branch review: **With fixes**; 후속 수정의 독립 review는 아래 실행과 별도로 진행
 
 최종 후보의 `--help`에는 `--refresh`가 없다(`candidate-help.txt`). 시작·명시적 `r`·실패 재시도·재연결·표시 전용 애니메이션·로그인 마감은 별개다.
 
@@ -54,6 +54,21 @@ TUI 렌더링 최적화는 별도 완료 증거인 [`tui-smoothness-20261104`](.
 - Skill은 첫 ledger 읽기 실패를 영구 캐시해 복구 후에도 재시도하지 않았다. `41965753071`에서 RED를 확인하고 `bea45f2c591`에서 실패 cold read만 재시도하도록 고쳤다. GREEN `41966485936`은 **성공**이다. 이전 type-check `41966489387`은 최신 head로 자동 취소됐고, 최종 head 검사로 대체한다.
 - Memory도 첫 `read_error`가 남아 유효한 스냅샷 복구를 보지 못했다. `41966147270`에서 RED를 확인하고 `881854d58d2`에서 `read_error=None`인 health만 재사용하도록 고쳤다. GREEN `41966803734`과 type-check `41966807144`는 **성공**이다.
 
+## 후속 수정과 검증 상태
+
+위 실측 source 이후의 독립 review에서 발견한 결함은 별도 RED/GREEN으로 추적한다. 이 항목의 현재 후속 head는 `2329a5b18e0`다.
+
+- `41976321616`: Skill·Memory lock-order, exact-limit log, transient Machine step, private Add-on 권한의 **실제 native RED**. 이전 실행들의 test type 오류와 cold-build timeout은 제품 RED로 세지 않는다.
+- `e6d923a0734`: 두 cold read를 cache mutex 밖으로 옮기고 commit generation으로 stale overwrite를 막았다. `41977170917` **성공**; Skill 44개·Memory 27개 테스트에서 writer 완료와 최신 commit을 확인했다.
+- `68cd397b9be`: Watch `r`이 global refresh보다 먼저 소비돼 repaint만 하던 경로에 visible machine owed-read를 추가했다.
+- `c9b89f65b3b`: Machine step은 `Unavailable`만 재시도하고 `Outcome_unknown`·`Host_refusal`은 중단한다. Log는 `limit+1` lookahead로 exact page를 append하고 overflow만 최신 page로 reset한다.
+- `843119b65f4`: Add-on 알림에 durable visibility를 포함하고, live·replay는 등록 시 검증된 `agent_name`·`role`로 제한한다. identity 없는 external은 shared만 받고, 누락·중복·비정상 visibility는 거부한다.
+- `41977992916`: 후속 head의 type-check **성공**.
+- `41977989608`: 10 suite 중 7개 **성공**, 3개 **실패**. manual `r` 재읽기는 Machine·Add-on 모두 성공했다. replay gap은 `Last-Event-ID`보다 작은 fixture gap이라 TUI가 거부했고, privacy는 owner stream을 assertion마다 반복 drain한 테스트 오류였다.
+- `33721ddc4d1`: 유효한 gap(`Last-Event-ID + 1`)과 한 번만 drain하는 live fixture로 보정했다. `41980035709`의 3 suite는 **성공**했다.
+- 독립 후속 review: **With fixes**. replay가 현재 `session_id`의 identity를 상속해 credential 교체 후 이전 연결에 새 credential을 적용할 수 있는 P1을 추가로 확인했다. 반복 drain 지적은 `33721ddc4d1`에서 해소했다. `7909513a9f9`의 교체 회귀는 `41981658955`에서 기대 `[false; false; true]` 대신 `[true; true; true]`로 RED였다. `2329a5b18e0`은 exact `client_id`가 현재 등록과 일치할 때만 private를 허용하고, absent/stale ID는 shared만 남긴다. GREEN `41982732418`과 type-check `41982736264`는 **성공**, 독립 재검토는 **Approve**다. 최종 24 suite `41983585123`도 **24/24 OK, 실패·timeout 0**으로 완료했다.
+- `41979508701`: production `843119b65f4`의 macOS binary와 `24b75a43376c2690b70f572eaf4c1b6d5caedcb21109662436da41ef8f78f307`를 확보했다. native behavior 12개 중 8개만 통과해 전체는 **실패**다. 같은 binary의 수정된 replay PTY는 Machine **9.185초**, Add-on **17.527초**로 성공했고, manual/reconnect가 각각 정확히 1회 읽힌 것을 JSON으로 확인했다.
+
 ## native proof의 한계
 
 `41960928980`의 artifact는 exact source와 binary identity를 증명하지만 `behavior_passed=false`다. `test_browser_addon_tool`, `test_browser_ego_peer`, `test_browser_native_workflow`, `test_keeper_vision_tool`이 실패했다. Node fixture module 부재와 Browser tool/vision assertion 실패가 있으며, 이 번들에서 기존 결함이라고 단정하지 않는다. 이 artifact로 수행한 PTY 통과를 native 전체 통과나 실제 Browser backend 검증으로 부르지 않는다.
@@ -74,10 +89,13 @@ PYTHONPATH=test python3 docs/evidence/tui-sse-transition-20261105/measure_browse
 
 - `candidate-{browser,memory,spectator,lane}-requests.json`: 최종 phase별 요청 수와 통과 여부
 - `remote-targeted-suites.txt`: 20/20 `OK`와 Lane 498초·spectator 20초·Memory 23초·Browser 21초를 확인한 suite 요약
+- `followup-targeted-suites.txt`: 후속 24/24 `OK`, Lane 709초·spectator 22초·Memory 27초·Browser 25초를 확인한 suite 요약
 - `candidate-{browser,memory,spectator,lanes}-result.log`: 최종 PTY 결과
 - `candidate-browser-idle-result.log`, `candidate-help.txt`: 고정 idle와 CLI 결과
 - `baseline-{browser,browser-idle,spectator,memory}-result.log`: 기준선 결과와 실패를 그대로 보존
 - `browser-retry-red.json`: 수정 전 backoff 증폭 진단
 - `summary.json`: source·hash·측정값·남은 범위의 기계 판독용 요약
+- `independent-review.json`, `followup-independent-review.json`: 원래 whole-branch와 후속·재검토 판정 및 non-blocking 잔여 범위
+- `artifacts/tui-sse-lanes-20261104/41979508701/followup-{spectator,lane}-requests.json`: 후속 macOS PTY의 manual/reconnect 각 1회 요청 증거
 
 원본 크기가 큰 PTY/native artifact는 `artifacts/tui-sse-lanes-20261104/`에 둔다. 공유 main-worktree binary가 측정 중 바뀐 `f6d50a3…` v2 capture는 비교에서 제외했다. 실제 backend, 설치 상태, Play room, 그리고 위에 적은 native 실패는 미검증 또는 미완료 범위로 남는다.

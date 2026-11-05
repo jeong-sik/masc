@@ -170,10 +170,74 @@
     "estimated_words": { "before": 261360000, "after": 228560000 },
     "limit": "Frame Build/Present timings, not causal key-to-physical-display latency; observation caps are retained in the linked bundle."
   },
+  "followup": {
+    "source": "2329a5b18e0",
+    "native_red_run": 41976321616,
+    "skill_memory_lock_order": {
+      "fix_source": "e6d923a0734",
+      "green_run": 41977170917,
+      "skill_tests": 44,
+      "memory_tests": 27
+    },
+    "machine_watch_r_source": "68cd397b9be",
+    "machine_step_and_log_source": "c9b89f65b3b",
+    "addon_visibility_source": "843119b65f4",
+    "addon_detail_fixture_source": "4156f5ee74b",
+    "type_check": { "run": 41977992916, "result": "success" },
+    "behavior": {
+      "run": 41977989608,
+      "suite_count": 10,
+      "passed": 7,
+      "failed": 3,
+      "result": "fixture_failure",
+      "manual_machine_and_addon_reads": "one each; passed",
+      "replay_gap": "invalid missed-through lower than Last-Event-ID",
+      "privacy": "live stream was drained once per payload"
+    },
+    "corrected_behavior": { "run": 41980035709, "suite_count": 3, "result": "success" },
+    "native_proof": {
+      "run": 41979508701,
+      "production_source": "843119b65f48aeaf53f0fa19f8992236da9b1b71",
+      "binary_sha256": "24b75a43376c2690b70f572eaf4c1b6d5caedcb21109662436da41ef8f78f307",
+      "result": "failure",
+      "behavior_suites_passed": 8,
+      "behavior_suites_failed": 4,
+      "local_machine_pty": { "result": "pass", "seconds": 9.185, "manual_reads": 1, "reconnect_reads": 1 },
+      "local_addon_pty": { "result": "pass", "seconds": 17.527, "manual_reads": 1, "reconnect_reads": 1 },
+      "request_evidence": [
+        "artifacts/tui-sse-lanes-20261104/41979508701/followup-spectator-requests.json",
+        "artifacts/tui-sse-lanes-20261104/41979508701/followup-lane-requests.json"
+      ]
+    },
+    "independent_review": {
+      "verdict": "With fixes",
+      "evidence": "followup-independent-review.json",
+      "replacement_identity_regression": "7909513a9f9",
+      "replacement_identity_red_run": 41981658955,
+      "repair_source": "2329a5b18e0",
+      "repair": "exact current client_id and kind only; absent/stale ids receive unrestricted/shared events",
+      "green_run": 41982732418,
+      "type_check_run": 41982736264,
+      "verification": "success",
+      "independent_rereview": "Approve; no P0-P3 findings",
+      "full_regression": {
+        "run": 41983585123,
+        "source": "2329a5b18e0479725fb281bb2eb74cbe5d35b101",
+        "suite_count": 24,
+        "result": "success",
+        "failed_suites": 0,
+        "timeouts": 0,
+        "evidence": "followup-targeted-suites.txt",
+        "lane_pty_seconds": 709,
+        "spectator_pty_seconds": 22,
+        "memory_pty_seconds": 27,
+        "browser_pty_seconds": 25
+      }
+    }
+  },
   "remaining_work": [
     "Play room still polls POST /api/v1/play/room every two seconds while active, including presence renewal; server-owned presence and change notification design is still required.",
     "Browser change detection is server sampling every two seconds, not backend-native browser events.",
-    "The targeted 20-suite run passed; the independent whole-branch review is still in progress at this capture.",
     "Real Browser backends were not exercised; PTY peers are HTTP/SSE fixtures.",
     "Native browser-lane proof retains the four failed suites named above; missing Node fixture modules and Browser tool/vision assertion failures are not claimed to be pre-existing.",
     "PR #48180 is closed with no open replacement at capture time; merge/conflict handling belongs to another owner.",

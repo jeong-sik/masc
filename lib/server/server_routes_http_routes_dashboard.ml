@@ -3035,12 +3035,30 @@ let add_routes ~sw ~clock router =
            Http.Response.json_value ~compress:true ~request:req json reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-memory-health" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         respond_cached_read ~request:req ~reqd
-           ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
-           ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
-               ~base_path))
-       )
+         (* [?keeper=] answers that Keeper's row alone, so a reader told that
+            one Keeper's row moved reads that row instead of the fleet
+            (RFC-0487). *)
+         match Option.map String.trim (Server_utils.query_param req "keeper") with
+         | None ->
+           respond_cached_read ~request:req ~reqd
+             ~cache_key:(Printf.sprintf "keeper_memory_health:%s" base_path)
+             ~ttl:standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
+                 ~base_path))
+         | Some "" ->
+           respond_json_value_with_cors ~status:`Bad_request req reqd
+             (`Assoc [ "error", `String "keeper is empty" ])
+         | Some keeper ->
+           (match
+              Pool_work.submit
+                (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                   Server_dashboard_http_keeper_memory_health.keeper_memory_health_row_http_json
+                     ~base_path ~keeper))
+            with
+            | Some json -> Http.Response.json_value ~compress:true ~request:req json reqd
+            | None ->
+              respond_json_value_with_cors ~status:`Not_found req reqd
+                (`Assoc [ "error", `String ("no memory health row for keeper " ^ keeper) ])))
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-observables" (fun _state req reqd ->
          let json =
            Server_dashboard_http_runtime_observables.runtime_observables_http_json ()

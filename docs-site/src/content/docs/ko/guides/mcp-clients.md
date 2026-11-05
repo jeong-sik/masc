@@ -72,7 +72,7 @@ claude mcp add --transport http masc http://127.0.0.1:8935/mcp \
 
 ```bash
 masc token list                 # 어떤 bearer 가 있는지
-masc token revoke --agent NAME  # 하나 폐기
+masc token revoke <agent>       # 하나 폐기
 masc token prune                # 만료된 것만
 ```
 

@@ -640,9 +640,15 @@ let system_log_row ~styles ~level_style ~layout values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified. *)
+   request asks for: that this task be verified. It is the column that says
+   which task a row is, so it takes what the others leave and its floor is kept
+   before any other column is. The detail pane under the list carries the
+   submitter and both evidence counts for the selected row, and the verdict
+   sentence in full, so those give way first when the row is too wide: the
+   submitter, then the evidence counts, then the verdict. *)
 let verification_task_width = 14
 let verification_evidence_width = 17
+let verification_review_width = 16
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
@@ -661,30 +667,59 @@ let verification_no_values =
   ; vrow_title = ""
   }
 
-let verification_cells ~submitter_width ~title_width values =
-  [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
-  ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
-      values.vrow_submitted_by
-  ; Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
-      values.vrow_evidence
-  ; Table.cell ~header:"자동 검증" ~width:16 values.vrow_review
-  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
-      values.vrow_title
-  ]
+type verification_column =
+  | Verification_task
+  | Verification_submitter
+  | Verification_evidence
+  | Verification_review
+  | Verification_title
 
-let verification_title_width ~inner_width ~submitter_width =
-  let named =
-    Table.used_width
-      (verification_cells ~submitter_width ~title_width:0 verification_no_values)
-  in
-  max verification_minimum_title_width (inner_width - named)
+let verification_column_width ~submitter_width = function
+  | Verification_task -> verification_task_width
+  | Verification_submitter -> submitter_width
+  | Verification_evidence -> verification_evidence_width
+  | Verification_review -> verification_review_width
+  | Verification_title -> verification_minimum_title_width
 
-let verification_header_row ~submitter_width ~title_width =
+let verification_layout ~inner_width ~submitter_width =
+  Table.fit ~inner_width
+    ~width:(verification_column_width ~submitter_width)
+    ~flex:Verification_title
+    ~drop_order:[ Verification_submitter; Verification_evidence; Verification_review ]
+    [ Verification_task
+    ; Verification_submitter
+    ; Verification_evidence
+    ; Verification_review
+    ; Verification_title
+    ]
+
+let verification_cells ~submitter_width ~(layout : verification_column Table.layout)
+    values =
+  List.map
+    (function
+      | Verification_task ->
+          Table.cell ~header:"TASK" ~width:verification_task_width
+            values.vrow_task
+      | Verification_submitter ->
+          Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
+            values.vrow_submitted_by
+      | Verification_evidence ->
+          Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
+            values.vrow_evidence
+      | Verification_review ->
+          Table.cell ~header:"자동 검증" ~width:verification_review_width
+            values.vrow_review
+      | Verification_title ->
+          Table.cell ~fold:Table.Fold_tail ~header:"TITLE"
+            ~width:layout.Table.flex_width values.vrow_title)
+    layout.Table.shown
+
+let verification_header_row ~submitter_width ~layout =
   Table.header_row
-    (verification_cells ~submitter_width ~title_width verification_no_values)
+    (verification_cells ~submitter_width ~layout verification_no_values)
 
-let verification_row ~submitter_width ~title_width values =
-  Table.row (verification_cells ~submitter_width ~title_width values)
+let verification_row ~submitter_width ~layout values =
+  Table.row (verification_cells ~submitter_width ~layout values)
 
 (* Schedules list columns.
 

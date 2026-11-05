@@ -111,13 +111,13 @@ let render_verification_list (state : state) =
       16 requests
     |> min 26
   in
-  let title_width =
-    Render_schedule.verification_title_width
+  let layout =
+    Render_schedule.verification_layout
       ~inner_width:(max 1 (framed_inner_width cols - 2))
       ~submitter_width
   in
   let col_hdr =
-    "  " ^ Render_schedule.verification_header_row ~submitter_width ~title_width
+    "  " ^ Render_schedule.verification_header_row ~submitter_width ~layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -193,7 +193,7 @@ let render_verification_list (state : state) =
           let asks = r.vr_task_title in
           let line =
             "  "
-            ^ Render_schedule.verification_row ~submitter_width ~title_width
+            ^ Render_schedule.verification_row ~submitter_width ~layout
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
                 ; vrow_submitted_by =

@@ -489,12 +489,20 @@ let test_an_idle_finish_ends_the_stream_without_a_frame () =
 ;;
 
 let producer_domains = 4
+let pushes_per_domain = 1_000
 
-(* Producers on several domains lose and double no event while the queue has
-   room, and past the bound they only mark the client behind; a push that
-   waited would hang here, as nothing takes. The moment two producers race for
-   the last slot is too short to force: the slot reservation in [Queue.push]
-   covers it. *)
+(* Rounds of producers racing for the last slots of a queue nobody takes
+   from. A push that waited would hang its round. *)
+let overflow_rounds = 500
+let overflow_capacity = 16
+
+(* Longer than every round needs; reaching it means a push waited. *)
+let push_patience_s = 10.0
+
+(* Producers on several domains push while the pump takes, so pushes wake a
+   take that is waiting and takes race pushes: while the queue has room, no
+   event is lost or doubled. Past the bound, producers racing for the last
+   slots only mark the client behind and never wait. *)
 let test_producers_on_several_domains_lose_no_event () =
   Eio_main.run (fun env ->
     let domain_mgr = Eio.Stdenv.domain_mgr env in
@@ -508,27 +516,38 @@ let test_producers_on_several_domains_lose_no_event () =
              done))
         (List.init producer_domains Fun.id)
     in
-    let fits = Pump.Queue.create ~max_queued_events:(producer_domains * 16) in
-    push_from_every_domain fits ~each:16;
-    let taken = ref [] in
-    let ending =
-      Pump.run ~queue:fits
-        ~step:(fun n ->
-          taken := n :: !taken;
-          if List.length !taken = producer_domains * 16 then Pump.Send_last "" else Pump.Send "")
-        ~idle:(fun () -> Pump.Finish)
-        ~clock ~ping_interval_s
-        ~send:(fun _ -> Sse.Written)
+    let total = producer_domains * pushes_per_domain in
+    let fits = Pump.Queue.create ~max_queued_events:total in
+    let taken = ref [] and count = ref 0 in
+    let ending, () =
+      Eio.Fiber.pair
+        (fun () ->
+           Pump.run ~queue:fits
+             ~step:(fun n ->
+               taken := n :: !taken;
+               incr count;
+               if !count = total then Pump.Send_last "" else Pump.Send "")
+             ~idle:(fun () -> Pump.Finish)
+             ~clock ~ping_interval_s
+             ~send:(fun _ -> Sse.Written))
+        (fun () -> push_from_every_domain fits ~each:pushes_per_domain)
     in
     check ending_t "every event that fit was served" Pump.Finished ending;
     check (list int) "none lost or doubled"
-      (List.init (producer_domains * 16) (fun n -> n + 1))
+      (List.init total (fun n -> n + 1))
       (List.sort compare !taken);
-    let overflow = Pump.Queue.create ~max_queued_events:16 in
-    push_from_every_domain overflow ~each:16;
-    check ending_t "past the bound the client is behind" Pump.Fell_behind
-      (Pump.run ~queue:overflow ~step:(fun _ -> Pump.Send "") ~idle:(fun () -> Pump.Finish)
-         ~clock ~ping_interval_s ~send:(fun _ -> Sse.Written)))
+    for _ = 1 to overflow_rounds do
+      let overflow = Pump.Queue.create ~max_queued_events:overflow_capacity in
+      (match
+         Eio.Time.with_timeout clock push_patience_s (fun () ->
+           Ok (push_from_every_domain overflow ~each:overflow_capacity))
+       with
+       | Ok () -> ()
+       | Error `Timeout -> fail "a push past the bound waited");
+      check ending_t "past the bound the client is behind" Pump.Fell_behind
+        (Pump.run ~queue:overflow ~step:(fun _ -> Pump.Send "") ~idle:(fun () -> Pump.Finish)
+           ~clock ~ping_interval_s ~send:(fun _ -> Sse.Written))
+    done)
 ;;
 
 let test_cancelling_a_connection_removes_its_subscription () =

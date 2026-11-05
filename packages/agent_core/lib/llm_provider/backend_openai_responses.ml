@@ -593,38 +593,82 @@ let content_blocks_of_reasoning_item item =
     (Responses_reasoning.decode item)
 ;;
 
-let content_block_of_function_call item =
-  let* {Responses_function_call.call_id;name;input;arguments=_} =
+(* What one output item becomes. A [function_call] whose argument text is not
+   one JSON object is a call the model made that cannot run: it leaves
+   [content] for [unreadable_tool_uses], and its replay group then holds no
+   block, the way a dropped call's group does. *)
+type output_item_projection =
+  | Output_blocks of content_block list
+  | Unreadable_function_call of
+      { tool_use_id : string
+      ; tool_name : string
+      ; arguments : string
+      ; arguments_problem : Tool_call_input.parse_error
+      }
+
+let projection_of_function_call item =
+  let* {Responses_function_call.call_id;name;arguments} =
     Responses_function_call.decode item in
-  Ok (ToolUse { id = call_id; name; input })
+  match Tool_call_input.parse_object arguments with
+  | Ok (input, _dropped) -> Ok (Output_blocks [ ToolUse { id = call_id; name; input } ])
+  | Error arguments_problem ->
+    Ok
+      (Unreadable_function_call
+         { tool_use_id = call_id; tool_name = name; arguments; arguments_problem })
 ;;
 
 let content_blocks_of_output_item ~drop_function_call item =
   match opt_bind (json_assoc_opt "type" item) json_string_opt with
-  | Some "message" -> Ok (content_blocks_of_output_message item)
-  | Some "reasoning" -> content_blocks_of_reasoning_item item
-  | Some "function_call" when drop_function_call -> Ok []
-  | Some "function_call" ->
-    let* block = content_block_of_function_call item in
-    Ok [ block ]
+  | Some "message" -> Ok (Output_blocks (content_blocks_of_output_message item))
+  | Some "reasoning" ->
+    Result.map (fun blocks -> Output_blocks blocks) (content_blocks_of_reasoning_item item)
+  | Some "function_call" when drop_function_call -> Ok (Output_blocks [])
+  | Some "function_call" -> projection_of_function_call item
   | Some _ ->
     (* Responses output items are an extensible set. Hosted-tool items such as
        web-search calls are valid non-content for this parser; preserve later
        message/reasoning/function_call items instead of failing the whole
-       response because OpenAI added a new output item type. Malformed
-       supported items (notably function_call) still fail closed above. *)
-    Ok []
+       response because OpenAI added a new output item type. A function_call
+       without its identity still fails closed above. *)
+    Ok (Output_blocks [])
   | None -> Error "malformed_responses_output_item:missing_type"
 ;;
 
+(* [tool_calls] counts the function calls kept so far, readable or not, so an
+   unreadable call takes the place the output gave it among them. *)
 let content_and_replay_of_output ~drop_function_call output =
-  let rec loop content_rev groups_rev = function
+  let rec loop content_rev groups_rev unreadable_rev tool_calls = function
     | [] ->
       let content = List.rev content_rev |> List.concat in
       let* replay = Response_replay.make ~content (List.rev groups_rev) in
-      Ok (content, replay)
+      Ok (content, replay, List.rev unreadable_rev)
     | item :: rest ->
-      let* blocks = content_blocks_of_output_item ~drop_function_call item in
+      let* projection = content_blocks_of_output_item ~drop_function_call item in
+      let blocks, unreadable_rev, tool_calls =
+        match projection with
+        | Output_blocks blocks ->
+          let readable_calls =
+            List.length
+              (List.filter
+                 (function
+                   | ToolUse _ -> true
+                   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+                   | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+                 blocks)
+          in
+          blocks, unreadable_rev, tool_calls + readable_calls
+        | Unreadable_function_call { tool_use_id; tool_name; arguments; arguments_problem } ->
+          let call : Types.unreadable_tool_use =
+            { tool_use_id
+            ; tool_name
+            ; tool_use_ordinal = tool_calls
+            ; arguments
+            ; arguments_problem
+            ; arguments_assembly = None
+            }
+          in
+          [], call :: unreadable_rev, tool_calls + 1
+      in
       let* kind = match opt_bind (json_assoc_opt "type" item) json_string_opt with
         | Some "message" ->
           let fields = match item with `Assoc fields -> fields | _ -> [] in
@@ -637,9 +681,9 @@ let content_and_replay_of_output ~drop_function_call output =
         | Some (Response_replay.Message _ as kind), _
         | Some kind, (_ :: _) -> {Response_replay.kind; content_count=List.length blocks} :: groups_rev
         | Some (Reasoning | Function_call), [] | None, _ -> groups_rev in
-      loop (blocks :: content_rev) groups_rev rest
+      loop (blocks :: content_rev) groups_rev unreadable_rev tool_calls rest
   in
-  loop [] [] output
+  loop [] [] [] 0 output
 ;;
 
 let usage_of_response_json json =
@@ -780,7 +824,9 @@ let parse_response_result json_str =
         | "incomplete" | "failed" -> true
         | _ -> false
       in
-      let* content, replay = content_and_replay_of_output ~drop_function_call output in
+      let* content, replay, unreadable_tool_uses =
+        content_and_replay_of_output ~drop_function_call output
+      in
       let has_tool_calls =
         List.exists
           (function
@@ -794,6 +840,7 @@ let parse_response_result json_str =
             | Document _
             | Audio _ -> false)
           content
+        || unreadable_tool_uses <> []
       in
       let* stop_reason = stop_reason_of_response_json ~has_tool_calls json in
       let model = opt_bind (json_assoc_opt "model" json) json_string_opt |> Option.value ~default:"" in
@@ -802,7 +849,7 @@ let parse_response_result json_str =
             opt_bind (json_assoc_opt "id" json) json_string_opt
             |> Option.value ~default:""
         ; model
-        ; unreadable_tool_uses = []
+        ; unreadable_tool_uses
         ; stop_reason
         ; content
         ; usage = usage_of_response_json json

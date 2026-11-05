@@ -253,31 +253,31 @@ let build_request ?stream ~config ~messages ?tools () =
 
 (* ── Response parsing ────────────────────────────────── *)
 
+(* What the [arguments] field of one call carries. Native Ollama sends an
+   object; some servers send the object as JSON text. Any other JSON value, or
+   text that is not one JSON object, is the model's argument text that cannot
+   run: the call is kept as unreadable and the rest of the response stands. *)
+type ollama_tool_arguments =
+  | Object_arguments of Yojson.Safe.t
+  | Unreadable_arguments of
+      { text : string
+      ; problem : Tool_call_input.parse_error
+      }
+
 let parse_ollama_tool_arguments ~tool_index json =
   match json with
-  | `Assoc _ as input -> Ok input
+  | `Assoc _ as input -> Ok (Object_arguments input)
   | `String s when not (Api_common.string_is_blank s) ->
-    (match Yojson.Safe.from_string s with
-     | `Assoc _ as input -> Ok input
-     | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
-       Error
-         (Printf.sprintf
-            "malformed_ollama_tool_call_arguments:index:%d:not_object"
-            tool_index)
-     | exception Yojson.Json_error msg ->
-       Error
-         (Printf.sprintf
-            "malformed_ollama_tool_call_arguments:index:%d:%s"
-            tool_index
-            msg))
+    (match Tool_call_input.parse_object s with
+     | Ok (input, _dropped) -> Ok (Object_arguments input)
+     | Error problem -> Ok (Unreadable_arguments { text = s; problem }))
   | `Null | `String _ ->
     Error
       (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_arguments" tool_index)
-  | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
-    Error
-      (Printf.sprintf
-         "malformed_ollama_tool_call_arguments:index:%d:not_object"
-         tool_index)
+  | (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _) as value ->
+    Ok
+      (Unreadable_arguments
+         { text = Yojson.Safe.to_string value; problem = Tool_call_input.Not_object })
 ;;
 
 let parse_ollama_tool_call ~tool_index tc =
@@ -295,26 +295,40 @@ let parse_ollama_tool_call ~tool_index tc =
     | Some _ | None ->
       Error (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_name" tool_index)
   in
-  let* input = parse_ollama_tool_arguments ~tool_index (fn |> member "arguments") in
+  let* arguments = parse_ollama_tool_arguments ~tool_index (fn |> member "arguments") in
   let id =
     match tc |> member "id" |> to_string_option with
     | Some id when not (Api_common.string_is_blank id) -> id
     | Some _ | None -> Api_common.fresh_tool_use_id ()
   in
-  Ok (ToolUse { id; name; input })
+  match arguments with
+  | Object_arguments input -> Ok (Either.Left (ToolUse { id; name; input }))
+  | Unreadable_arguments { text; problem } ->
+    Ok
+      (Either.Right
+         ({ tool_use_id = id
+          ; tool_name = name
+          ; tool_use_ordinal = tool_index
+          ; arguments = text
+          ; arguments_problem = problem
+          ; arguments_assembly = None
+          }
+          : Types.unreadable_tool_use))
 ;;
 
 let parse_ollama_tool_calls = function
-  | `Null -> Ok []
+  | `Null -> Ok ([], [])
   | `List calls ->
-    let rec loop acc index = function
-      | [] -> Ok (List.rev acc)
+    let rec loop readable unreadable index = function
+      | [] -> Ok (List.rev readable, List.rev unreadable)
       | tc :: rest ->
         (match parse_ollama_tool_call ~tool_index:index tc with
-         | Ok tool_call -> loop (tool_call :: acc) (index + 1) rest
+         | Ok (Either.Left tool_call) ->
+           loop (tool_call :: readable) unreadable (index + 1) rest
+         | Ok (Either.Right call) -> loop readable (call :: unreadable) (index + 1) rest
          | Error _ as error -> error)
     in
-    loop [] 0 calls
+    loop [] [] 0 calls
   | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
     Error "malformed_ollama_tool_calls:not_list"
 ;;
@@ -329,7 +343,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     Error "malformed_ollama_error:not_string_or_object"
   | `Null ->
     let message = json |> member "message" in
-    let* text_content, tool_blocks, thinking_blocks =
+    let* text_content, tool_blocks, unreadable_tool_uses, thinking_blocks =
       match message with
       | `Assoc _ ->
         let* txt =
@@ -339,7 +353,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
           | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
             Error "malformed_ollama_message:content_not_string"
         in
-        let* tools = parse_ollama_tool_calls (message |> member "tool_calls") in
+        let* tools, unreadable = parse_ollama_tool_calls (message |> member "tool_calls") in
         if List.length tools > 1
         then
           Diag.debug
@@ -354,7 +368,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
           | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
             Error "malformed_ollama_message:thinking_not_string"
         in
-        Ok (txt, tools, thinking)
+        Ok (txt, tools, unreadable, thinking)
       | `Null -> Error "malformed_ollama_response:missing_message"
       | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
         Error "malformed_ollama_response:message_not_object"
@@ -367,7 +381,11 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     let stop_reason =
       Stop_reason_wire.of_finish
         (Stop_reason_wire.wire_finish_of_string done_reason)
-        ~has_tool_blocks:(tool_blocks <> [])
+        ~has_tool_blocks:(tool_blocks <> [] || unreadable_tool_uses <> [])
+    in
+    (* A call the length limit cut off is unfinished, not unreadable. *)
+    let unreadable_tool_uses =
+      if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in
     let input_tokens = Cli_common_json.member_int "prompt_eval_count" json in
     let output_tokens = Cli_common_json.member_int "eval_count" json in
@@ -431,7 +449,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
     Ok
       { id = json |> member "model" |> to_string_option |> Option.value ~default:"ollama"
       ; model
-      ; unreadable_tool_uses = []
+      ; unreadable_tool_uses
       ; stop_reason
       ; content =
           thinking_blocks

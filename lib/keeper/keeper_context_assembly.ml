@@ -13,11 +13,10 @@ type receipt =
   ; sha256 : string
   ; spans : span list
   }
-type system_observation = Active_goals of string | Completion_authority of string
+type system_observation = Active_goals of string
 
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text
-  | Completion_authority text -> Prompt_block_id.Completion_authority, text
 
 type system_prompt =
   { base_text : string
@@ -94,6 +93,25 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     ; dynamic_context_partition
     ; system_prompt = None
     }
+;;
+
+let split_block block assembly =
+  let wanted (id, _) = Prompt_block_id.equal id block in
+  match List.filter wanted assembly.blocks, assembly.extra_system_context, assembly.receipt with
+  | [ (_, text) ], Some carrier, Some receipt ->
+    let existing_extra_system_context =
+      match receipt.spans with
+      | { kind = Unattributed Existing_prefix; offset; bytes; _ } :: _ ->
+        Some (String.sub carrier offset bytes)
+      | ({ kind = Block _ | Unattributed Separator; _ } :: _) | [] -> None
+    in
+    let rest =
+      assemble ~dynamic_context_partition:assembly.dynamic_context_partition
+        ~existing_extra_system_context
+        ~blocks:(List.filter (fun block -> not (wanted block)) assembly.blocks)
+    in
+    Some ({ rest with system_prompt = assembly.system_prompt }, text)
+  | ([] | _ :: _ :: _), _, _ | [ _ ], None, _ | [ _ ], Some _, None -> None
 ;;
 
 let with_system_observations ~base_text ~observations assembly =

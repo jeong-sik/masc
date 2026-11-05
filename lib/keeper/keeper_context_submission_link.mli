@@ -21,14 +21,12 @@ val encoded_carrier :
     out of a section it sent in part ({!Keeper_context_layers.Head_and_rows});
     that section then attributes as its head, its other rows and its tail, and
     the proof names the rows left out. *)
-type observation_target = Official_start_user | Official_resume_user
 val encoded_system_observation :
-  target:observation_target -> block:Prompt_block_id.t ->
+  block:Prompt_block_id.t ->
   assembly:Keeper_context_assembly.t option -> Agent_core.Types.message -> t
-(** Encode an official Start or Resume User observation. Its source is the
-    unique typed span in the canonical issued System partition, never an
-    assertion that this partition was submitted as the client's System. The
-    target identifies the actual User prompt receiving the encoded bytes. *)
+(** Encode an official Resume User observation. Its source is the unique typed
+    span in the canonical issued System partition, never an assertion that
+    this partition was submitted as the client's System. *)
 val concat : separator:string -> t list -> t
 val trim : t -> t
 val omit_held : assembly:Keeper_context_assembly.t option ->

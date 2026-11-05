@@ -16879,13 +16879,16 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      next workspace's screens must not carry it. *)
   state.home_decision_receipt <- None;
   (* Keeper names are local to a workspace. Retire both the selected roster
-     and its input request before another workspace can reuse the same name. *)
+     and its input request before another workspace can reuse the same name:
+     Enter must select a newly read B health row, never A's retained row. The
+     next workspace's fleet is owed, so a Memory or Metrics screen left empty
+     reads it once that workspace can be read (RFC-0487). *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
-  state.memory_health_owed <- Masc_tui_owed_read.settled;
+  state.memory_health_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
   state.memory_health_rows_owed <- [];
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
@@ -16929,14 +16932,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_facts_scroll <- 0;
   state.memory_fact_claim_wrap <- None;
   state.memory_facts_category <- Category_all;
-  (* Enter must select a newly read B health row, never A's retained row. *)
-  state.memory_health <- None;
-  state.memory_health_error <- None;
-  state.memory_health_inflight <- false;
-  state.memory_health_owed <- Masc_tui_owed_read.settled;
-  state.memory_health_rows_owed <- [];
-  state.memory_health_cursor <- 0;
-  state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
   state.preset_save_draft_description <- "";
   state.preset_save_draft_source <- Preset_form_local;

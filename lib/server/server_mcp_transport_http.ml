@@ -212,7 +212,7 @@ let body_jsonrpc_params body_str =
   | `Assoc fields -> List.assoc_opt "params" fields
   | _ | (exception Yojson.Json_error _) -> None
 
-let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
+let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version
       ~clock ~body_str reqd =
   match body_jsonrpc_id body_str with
   (* JSON-RPC 2.0 requires a request id and 2026-07-28 forbids a null one, so a
@@ -232,29 +232,18 @@ let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
       (Httpun.Response.create ~headers `Bad_request)
       body
   | Some subscription_id ->
-    let info =
-      stream_post_sse_start ~deps ~origin ~session_id ~protocol_version reqd
-    in
-    spawn_post_sse_keepalive ~sw ~clock info;
-    let send json = send_raw info (Sse.format_event (Yojson.Safe.to_string json)) in
-    let filter =
-      Mcp_subscriptions.honoured_filter
-        (Mcp_transport_protocol.subscription_filter_of_params
-           (body_jsonrpc_params body_str))
-    in
-    (match
-       Mcp_subscriptions.register_after_ack ~subscription_id ~filter ~send
-         ~acknowledge:(fun () ->
-           send (Mcp_subscriptions.acknowledgement ~subscription_id filter))
-     with
-     | None -> ()
-     | Some token ->
-       (* [stop_promise] is resolved when the stream closes. A cancelled
-          request must unregister without attempting a further response. *)
-       Fun.protect
-         ~finally:(fun () ->
-           Eio.Cancel.protect (fun () -> Mcp_subscriptions.unregister token))
-         (fun () -> Eio.Promise.await info.stop_promise))
+    Server_mcp_listen_stream.serve
+      ~clock
+      ~ping_interval_s:post_sse_keepalive_interval_s
+      ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+      ~max_queued_events:Sse.stream_capacity
+      ~subscription_id
+      ~filter:
+        (Mcp_subscriptions.honoured_filter
+           (Mcp_transport_protocol.subscription_filter_of_params
+              (body_jsonrpc_params body_str)))
+      ~headers:(stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version)
+      reqd
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode
@@ -595,7 +584,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               then
                                 serve_subscriptions_listen ~deps ~origin
                                   ~session_id
-                                  ~protocol_version:response_protocol_version ~sw
+                                  ~protocol_version:response_protocol_version
                                   ~clock ~body_str reqd
                               else if wants_streaming_post then
                                 match !inline_sse with

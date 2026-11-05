@@ -151,6 +151,13 @@ val data_payload_of_frame : string -> (string, data_payload_error) result
     LF/CRLF line endings emitted on the wire.  A frame without a [data:]
     field is rejected; bare JSON is not an SSE frame. *)
 
+val stream_capacity : int
+(** The most events one client's stream holds. A client that leaves this many
+    unread is closed and reconnects: the {!delivery_stream} of a
+    {!register}ed client, and an MCP [subscriptions/listen] stream in
+    [Server_mcp_listen_stream]. Read from
+    [MASC_SSE_STREAM_CAPACITY], clamped to 8-1024, default 256. *)
+
 val format_event : ?id:int -> ?event_type:string -> string -> string
 (** [format_event] prefixes every logical line of [data] with [data:] so
     embedded newlines cannot escape the SSE field framing. An omitted [id]

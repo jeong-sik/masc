@@ -26,6 +26,10 @@ type expected =
       } (** The property declares [enum]; [allowed] are its members. *)
   | Expected_const of Yojson.Safe.t
   | Expected_required (** A required field with no property schema. *)
+  | Expected_declared_field of { declared : string list }
+      (** The object declares [additionalProperties: false] and no
+          [patternProperties], and this field is not one of its [properties];
+          [declared] are the names it accepts. *)
 
 (** A single field-level validation error. *)
 type field_error =
@@ -41,7 +45,9 @@ type validation_result =
 
 (** Validate [input] against the authoritative schema's [required] and
     property [type]/[enum]/[const] constraints when [tool] carries one,
-    otherwise against its parameter view. The authoritative check descends
+    otherwise against its parameter view. In the authoritative check a closed
+    object ([additionalProperties: false]) also refuses each field it does not
+    declare. The check descends
     into nested object [properties] and array [items] and returns every
     violation, each with its JSON path (e.g. ["/questions/0/mode"]). Tool input is always an object,
     including tools with no parameters. Missing required fields and exact JSON

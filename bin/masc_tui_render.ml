@@ -143,6 +143,17 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
+(* The state word after "Health:" is drawn in the colour the connection badge
+   uses for the same kind of state: green for ok, red for the server's error
+   rung and yellow for the rest, an unknown state included. *)
+let workspace_health_tone = function
+  | Workspace_health_critical | Workspace_health_bad -> Masc_tui_theme.Bad
+  | Workspace_health_risk | Workspace_health_warning | Workspace_health_degraded
+  | Workspace_health_initializing | Workspace_health_unknown -> Masc_tui_theme.Warn
+  | Workspace_health_ok -> Masc_tui_theme.Ok
+
+let health_word tone word = Theme.text_status tone ^ word ^ Ansi.reset
+
 (* Dashboard rows summarize sources without changing their meaning. The full
    task list lives in Work, Keeper rows in Keepers, and account windows in
    Usage. A missing reading is never projected as a zero. *)
@@ -169,7 +180,8 @@ let render_overview (state : state) home =
   let overview_error, overview = overview_refresh_reading state in
   let health =
     match Terminal_text.optional_single_line overview_error, overview with
-    | Some error, _ -> " Health: unavailable · " ^ error
+    | Some error, _ ->
+        " Health: " ^ health_word Masc_tui_theme.Bad "unavailable" ^ " · " ^ error
     | None, None ->
         let status =
           match state.connection_status, state.http_refresh_started_ns with
@@ -178,11 +190,14 @@ let render_overview (state : state) home =
           | (Connected | Degraded | Disconnected), Some _ ->
               "Loading Dashboard…"
           | (Connected | Degraded | Disconnected), None ->
-              "Health: not observed — press 'r' to refresh"
+              "Health: " ^ health_word Masc_tui_theme.Warn "not observed"
+              ^ " — press 'r' to refresh"
         in
         " " ^ status
     | None, Some overview ->
-        " Health: " ^ workspace_health_label overview.ov_workspace_health
+        " Health: "
+        ^ health_word (workspace_health_tone overview.ov_workspace_health)
+            (workspace_health_label overview.ov_workspace_health)
         ^ (match overview.ov_keeper_listing with
            | Keeper_snapshot_unread.Unreadable detail ->
                " · Keepers unlisted: " ^ Terminal_text.single_line detail
@@ -267,7 +282,7 @@ let render_overview (state : state) home =
               Message_layout.wrap_words ~max_cells:(max 1 cells)
                 (Terminal_text.single_line line)
             in
-            List.concat_map wrapped [ String.trim health ]
+            Message_layout.wrap_styled_words ~max_cells:(max 1 cells) (String.trim health)
             @ List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset)
                 (wrapped
                    (Message_layout.join_fitting ~sep:work_separator ~cells work_items))

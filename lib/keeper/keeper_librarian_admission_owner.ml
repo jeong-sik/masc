@@ -412,6 +412,8 @@ let run_queue ~base_path ~keeper_name =
        | Ok Addon_off -> if committed then Ok (Settled {has_more=false}) else addon_unattached ()
        | Ok (Terminal (_,did_commit)) -> walk ~committed:(committed || did_commit) rest
        | Ok (Children (left,right)) -> walk ~committed (left::right::rest)
+       (* The fresh execution's attempt carries this process's incarnation, so
+          a cut of it reads as [Cut] and the part does not settle twice. *)
        | Ok Reprepared -> walk ~committed (part::rest)) in
   walk ~committed:false parts
 let run_enabled ~base_path ~keeper_name =

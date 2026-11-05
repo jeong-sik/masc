@@ -2153,8 +2153,8 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     (Hashtbl.mem state.stops unsent);
   check bool "and its export stays callable" true
     (match exports () with
-     | Ok [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
-     | Ok _ | Error _ -> false);
+     | [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
+     | [] | _ :: _ :: _ -> false);
   detach config unsent;
   await_phase clock config unsent "detached";
   (* A mediated call counts as written from its first RPC, the controller

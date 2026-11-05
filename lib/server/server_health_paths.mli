@@ -11,6 +11,10 @@ val liveness : string
 val readiness : string
 (** [/health/ready] *)
 
+val full : string
+(** [/health?full=1], the request that answers with the full health rollup
+    instead of the probe shape. *)
+
 val is_public : string -> bool
 (** [is_public path] is [true] iff [path] is one of [public]. Use
     instead of hand-coded [String.equal path "/health/live" || ...]

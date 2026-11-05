@@ -24,6 +24,8 @@ let liveness = "/health/live"
 
 let readiness = "/health/ready"
 
+let full = health ^ "?full=1"
+
 (** All public health probe paths whitelisted for unauthenticated
     read access and treated as benign during startup takeover. *)
 let public : string list = [ liveness; readiness ]

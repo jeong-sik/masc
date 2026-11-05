@@ -3,7 +3,7 @@ rfc: "0490"
 title: "antigravity 레인은 masc 도구를 eager 로 넘기지 않는다 — agy 가 지연 목록에서 찾고, masc 는 schema 읽기만 연다"
 status: Draft
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -17,10 +17,11 @@ related: ["0451", "0390", "attached-service-tool-scoping"]
 - 11-05 10:17Z 부터 msx-retro-mania 는 antigravity 턴마다 같은 말을 했다. "DOS 도구는 eject·inventory·meta·pass·peek·save·step 뿐이고 screen·press·type 이 없다." 그래서 삼국지 3 을 한 수도 두지 못했다.
 - 서버 쪽 도구 목록은 온전했다. 10:26Z `keeper_tools_list` 는 DOS 도구 13개를 모두 `active` 로 보였다.
 - 원인은 agy 1.5.1 이다. masc 는 도구 206개를 모두 `tools.<이름>.eager` 로 넘긴다. agy 는 작은 도구부터 공백 없는 JSON 으로 약 62,000 자까지만 등록한다. 나머지는 지연 목록에도 넣지 않고 말없이 버린다. 측정은 [근거](../evidence/2026-11-05-antigravity-mcp-tool-budget/README.md)에 있다.
-- 제안은 셋이다.
+- 제안은 넷이다.
   1. masc 는 antigravity 에 eager 표시를 하지 않는다. agy 가 모든 도구를 지연 목록에 싣고, 모델이 거기서 찾는다.
   2. settings 에서 지연 도구의 schema 폴더 읽기를 연다. 전체 읽기 거부(`read_file(*)`)는 빼고, 비밀이 있는 두 경로를 정확히 막는다.
   3. 거절만 내는 PreToolUse hook 을 둔다. 허용 밖 경로를 읽거나 쓰려 하면 그 호출만 오류로 돌아가고 턴은 이어진다. 다른 레인과 같은 동작이다.
+  4. masc 가 띄우는 agy 는 스스로 업데이트하지 않는다.
 - 결과 한도 변경은 필요 없다. 큰 결과 파일은 agy 가 스스로 연다(측정 8a).
 
 ## 1. 지금
@@ -43,6 +44,8 @@ related: ["0451", "0390", "attached-service-tool-scoping"]
 masc 가 `defer_loading` 없이 선언한 도구만 해도 64개, 79,991 자다(같은 재는 법). 선언을 따라 eager 를 고르는 것으로는 예산 안에 들지 않는다.
 
 예산 값은 agy 문서에 없다. 버린 도구는 agy 로그에도 남지 않는다. agy 는 실행할 때마다 스스로 업데이트한다(`auto_updater.go: Spawned background update process`). 1.5.1 이전에도 이 예산이 있었는지는 모른다.
+
+`AGY_CLI_DISABLE_AUTO_UPDATE=true` 를 주면 agy 는 업데이트 프로세스를 띄우지 않는다. 값이 `1` 이면 띄운다(측정 11). masc 의 agy 환경(`official_client_environment`, `runtime_antigravity.ml:651`)에는 이 변수가 없다.
 
 ### 1.3 지연 로딩에 걸리는 것
 
@@ -90,6 +93,12 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 목표는 다른 레인과 같은 동작이다. 허용 밖 경로를 읽거나 쓰려는 호출은 그 호출만 실패하고, 모델은 오류를 보고 하던 일을 잇는다.
 
 - masc 는 Keeper·readiness·probe home 마다 `<HOME>/.gemini/config/hooks.json` 에 PreToolUse hook 을 건다. settings 를 쓰는 `prepare_native_tools`·`settings_json ()` 과 같은 자리에서 쓴다.
+- hook 은 따로 설치하는 작은 실행 파일 `masc-antigravity-path-hook` 이다(`bin/dune` 의 다른 `masc-*` 실행 파일과 같은 방식).
+  - 서버 바이너리의 하위 명령으로 두지 않는다. hook 은 경로 도구 호출마다 돈다. 서버 바이너리는 모든 모듈을 싣고 시작하고, 그 초기화가 하나라도 깨지면 모든 읽기가 거절된다. 두 바이너리의 시작 시간은 재지 않았다.
+  - 실행 파일은 경로 판정과 JSON 읽기만 한다. 서버 상태·저장소·네트워크를 읽지 않는다. 사람 리뷰가 그 파일 하나로 끝난다.
+  - masc 는 실행 중인 서버 바이너리 옆에서만 찾는다(`browser_lane_setup.ml` 의 `beside_this_executable` 과 같은 규칙). PATH 는 찾지 않는다. 보안 경계를 PATH 에 놓인 다른 파일이 대신하면 안 된다.
+  - 찾지 못하면 home 준비가 실패한다. hook 없이 턴을 띄우지 않는다.
+  - `hooks.json` 에는 그 절대 경로와 허용 루트를 인자로 적는다. 서버와 같은 설치에서 왔으니 버전이 어긋나지 않는다.
 - hook 은 경로를 받는 내장 도구만 판정한다. 측정한 모델에게 보이는 것은 `read_file`·`write_file`·`edit_file` 이다(측정 9, 자기 보고).
   - 읽기는 schema 폴더와 그 자세의 workspace 안이어야 한다. 쓰기는 `Native_full` 의 workspace 안이어야 한다.
   - 경로는 realpath 로 풀고 경로 성분 단위로 비교한다. 문자열 접두어로 비교하지 않는다.
@@ -100,6 +109,13 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 - 이 hook 은 보안 경계다. 구현 층에 `//HIGH-RISK-UNREVIEWED` 를 달고 사람 리뷰를 받는다.
 - hook 이 덮지 않는 Ask 는 남는다. `Native_full` 에서 sandbox 밖으로 나가려는 명령과 agy 가 나중에 더할 동작이다. 그런 실행은 #48773 이 `Actions_denied` 로 실패시킨다.
 
+### 2.4 masc 가 띄우는 agy 는 업데이트하지 않는다
+
+- `official_client_environment` 가 만드는 환경에 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 를 넣는다. masc 가 agy 를 띄우는 곳은 모두 이 환경을 쓴다. Keeper 턴·readiness·probe(`run_turn`), 모델 목록·사용량·context 조회, 계정 로그인(`bin/masc_cli_antigravity.ml`)이다.
+- 이유는 둘이다. 동작이 버전마다 바뀌는데(1.2) Keeper 턴이 띄운 업데이트가 다음 턴의 바이너리를 바꾼다. 여러 턴이 동시에 업데이트 프로세스를 띄운다.
+- 버전을 고정하지 않는다. `~/.local/bin/agy` 는 운영자가 직접 쓰는 agy 와 같은 파일이다. 고정하려면 masc 가 agy 설치를 맡아야 한다. 업데이트는 운영자가 agy 를 직접 쓸 때나 `agy update` 로 일어난다.
+- 턴마다 agy 버전을 기록하는 필드는 더하지 않는다. masc 는 사용량·context 조회 때 이미 `agy --version` 을 읽는다(`runtime_antigravity_usage.ml:138`). 버전이 바뀐 뒤의 동작 변화는 L5 같은 실측으로 잡는다.
+
 ## 3. 바뀌는 것
 
 - 모델이 도구를 처음 쓸 때 schema 를 한 번 읽는다. 대화를 이어 가면(`--conversation`) 읽은 schema 가 맥락에 남는다.
@@ -108,6 +124,7 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 - 10 KB 넘는 결과는 agy 가 파일로 빼고, 모델이 그 파일을 한 번 더 읽는다(측정 8a). masc 결과 한도(16,384 B, `common.ml:214`)는 그대로 둔다.
 - 허용 밖 경로 읽기는 모든 자세에서 그 호출만 실패한다(2.3). 지금은 `Native_read` 에서 턴이 끝나고(1.4), `Native_none` 에서만 이어진다.
 - 모든 `read_file`·`write_file`·`edit_file` 호출마다 hook 실행 파일이 한 번 돈다.
+- masc 가 띄운 agy 는 업데이트 프로세스를 띄우지 않는다. 로그에 `Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE` 가 남는다.
 - 첫 요청이 작아진다. 입력 토큰과 캐시 읽기 토큰을 더하면 eager 116개일 때 50,188(측정 2), 지연 206개일 때 13,876–14,204(측정 4b·4d)다. 같은 모델로 한 번씩 쟀다.
 
 ## 4. 하지 않는 것
@@ -126,14 +143,19 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 | --- | --- | --- |
 | L1 | 이 RFC 와 근거 | 리뷰 |
 | L2 | settings 표(2.2) | 자세별 settings JSON 시험(allow·deny 경로, `read_file(*)` 없음). 일회용 HOME 에서 schema 읽힘·설정 폴더 거절·토큰 경로 거절 실측 |
-| L3 | hook(2.3)과 `hooks.json` 게시 | hook 판정 시험(허용 루트 안·밖, symlink 탈출, 계약 밖 입력, 경로 없는 도구). 일회용 HOME 에서 결정 없는 출력의 모양, 허용 밖 읽기 뒤 턴이 이어지는지, `write_file`·`edit_file` 의 경로 인자 이름 실측 |
+| L2b | agy 자동 업데이트 끄기(2.4) | 환경 시험: home 이 있든 없든 환경에 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 가 한 번만 있다. 일회용 HOME 에서 `updater/` 폴더가 생기지 않는다 |
+| L3 | hook 실행 파일 `masc-antigravity-path-hook`(2.3)과 `hooks.json` 게시 | hook 판정 시험(허용 루트 안·밖, symlink 탈출, 계약 밖 입력, 경로 없는 도구). 서버 옆에 실행 파일이 없으면 home 준비가 실패한다. 일회용 HOME 에서 결정 없는 출력의 모양, 허용 밖 읽기 뒤 턴이 이어지는지, `write_file`·`edit_file` 의 경로 인자 이름 실측 |
 | L4 | eager 제거(2.1), readiness·probe 를 지연 길로 | type-check. readiness 가 `call_mcp_tool` 로 통과 |
 | L5 | 실제 Keeper 턴 확인 | msx-retro-mania antigravity 턴에서 `masc_dos_screen`·`masc_dos_press` 가 bridge 에 도착 |
 
-L2 를 먼저 낸다. L2 만 들어가도 eager 도구는 지금처럼 불린다. L4 가 L2 보다 먼저 들어가면 `Native_none` home 은 schema 를 못 읽는다. L3 는 L4 와 따로 들어가도 된다. #48773 은 이 스택과 관계없이 들어간다.
+L2 를 먼저 낸다. L2 만 들어가도 eager 도구는 지금처럼 불린다. L4 가 L2 보다 먼저 들어가면 `Native_none` home 은 schema 를 못 읽는다. L2b 와 L3 는 L4 와 따로 들어가도 된다. #48773 과 #48796 은 이 스택과 관계없이 들어간다.
 
-## 6. 열린 질문
+## 6. 결정 (2026-11-06)
 
-1. hook 실행 파일. 서버 바이너리의 하위 명령으로 둘지, 작은 실행 파일을 따로 둘지. 어느 쪽이든 `hooks.json` 에는 절대 경로와 허용 루트를 인자로 적는다.
-2. agy 자동 업데이트. 동작이 버전마다 바뀌는데 masc 는 버전을 고정하지 않는다. 턴마다 agy 버전을 raw trace 에 남길지, 업데이트를 끌 설정이 있는지 확인할지.
-3. 토큰 파일. agy 는 keyring 으로도 로그인한다(측정 로그 `ChainedAuth: authenticated via keyring`). masc home 이 파일 없이 keychain 만으로 로그인할 수 있으면 appDataDir 에 평문 비밀이 남지 않는다. 그러면 2.2 의 토큰 deny 는 필요 없어진다.
+1. hook 실행 파일은 따로 둔다(2.3). 서버 바이너리 옆에서만 찾고, 없으면 home 준비가 실패한다.
+2. masc 가 띄우는 agy 는 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 로 업데이트를 끈다(2.4). 버전은 고정하지 않고, 턴마다 기록하지 않는다.
+3. 토큰 파일을 그대로 두고 2.2 의 정확한 경로 deny 도 둔다. keychain 만으로 로그인하지 않는다.
+   - masc 는 이 파일로 계정을 묶는다. `existing_generation`(`runtime_antigravity_home.ml:700`)은 파일의 계정 digest 가 고른 generation 과 다르면 home 을 거부한다.
+   - keychain 이 없는 곳에서는 `keychain_state` 가 `Unsupported` 이고 파일만 쓴다.
+   - masc home 의 keychain 은 지금도 손이 많이 간다. 아무도 보지 않는 턴에 확인 창을 띄웠고(masc#28922), 잠긴 keychain 이 하루 81번 창을 띄웠다(같은 파일 29–61줄 주석).
+   - deny 를 달아도 로그인은 된다(측정 8b).

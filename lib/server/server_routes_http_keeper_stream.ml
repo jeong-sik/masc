@@ -3845,6 +3845,16 @@ let serve_accepted_chat ~send ~queue ~acceptance_frame ~replay ~missed_terminal 
             ~ping_interval_s ~send))
 ;;
 
+(* The retry frame goes first: it sets the client's reconnect delay, and the
+   client hears from the stream before the submit returns. The submit runs
+   while that frame waits for the socket: a closed stream cannot roll back a
+   durable acceptance, and a client that left before the head went out
+   leaves the frame waiting until the stall bound (Server_sse_response
+   [Stalled]). The next frame is sent after both. *)
+let send_retry_beside_submit ~send ~retry_frame submit =
+  Eio.Fiber.pair (fun () -> send retry_frame) submit
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
   let response =
     Server_sse_response.respond
@@ -3942,13 +3952,12 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
              ~run_id:("keeper-operation-run-" ^ public.Server_keeper_chat_public_error.incident_id)
              ~message:public.message ~code:public.code ())
       in
-      (* The retry frame goes first: it sets the client's reconnect delay, and
-         the client hears from the stream before the submit returns. *)
-      let retry = send (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms) in
-      (* The submit happens whether or not the client is still there: a closed
-         stream cannot roll back a durable acceptance, and the frames are
-         built (and their failures logged) either way. *)
-      let submitted =
+      (* The submit happens whether or not the client is still there, and the
+         frames are built (and their failures logged) either way. *)
+      let retry, submitted =
+        send_retry_beside_submit ~send
+          ~retry_frame:(Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
+        @@ fun () ->
         let open Result.Syntax in
         let* source =
           operation_source_of_payload
@@ -4039,6 +4048,7 @@ module For_testing = struct
   let keeper_chat_step = keeper_chat_step
   let keeper_chat_idle = keeper_chat_idle
   let serve_accepted_chat = serve_accepted_chat
+  let send_retry_beside_submit = send_retry_beside_submit
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

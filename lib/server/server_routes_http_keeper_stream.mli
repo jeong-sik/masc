@@ -483,6 +483,15 @@ module For_testing : sig
       replay wrote a terminal) behind the live events that arrived meanwhile,
       then runs the pump. [None] when the client was gone before the live
       part. *)
+
+  val send_retry_beside_submit :
+    send:(string -> Server_sse_response.outcome) ->
+    retry_frame:string ->
+    (unit -> 'submitted) ->
+    Server_sse_response.outcome * 'submitted
+  (** The handler before the acceptance: hands [retry_frame] to [send] and
+      runs the submit while that frame waits for the socket. Returns once
+      both are done. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

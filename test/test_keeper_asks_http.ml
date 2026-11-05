@@ -1,42 +1,54 @@
 open Alcotest
 open Masc
 
-let wire_raw_response ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router target =
+(* Long enough for every route here; a connection still open after it would
+   stay open on a real socket too. *)
+let connection_patience_s = 10.0
+
+(* The two loops gluten-eio runs for one connection (gluten_eio.ml [IO_loop]),
+   over a client that sends [raw] and then closes its side. The handler runs on
+   the read side while the write side drains, so a streaming handler that waits
+   for each frame is driven as on a socket, and the exchange ends only when
+   httpun ends both sides. *)
+let wire_raw_response ~clock ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
   let raw = Printf.sprintf "%s %s %s\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
       (Httpun.Method.to_string meth) target http_version (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
-  (* As gluten-eio does, the handler runs on the read side while the write
-     side drains: a streaming handler waits for each frame to be written. *)
-  let handled, handler_done = Eio.Promise.create () in
-  let rec drain () = match Httpun.Server_connection.next_write_operation connection with
+  let await_wakeup register =
+    let ready, resolve = Eio.Promise.create () in
+    register connection (fun () -> Eio.Promise.resolve resolve ());
+    Eio.Promise.await ready in
+  let rec read_loop off = match Httpun.Server_connection.next_read_operation connection with
+    | `Read ->
+      let consumed = Httpun.Server_connection.read_eof connection input ~off
+          ~len:(Bigstringaf.length input - off) in
+      read_loop (off + consumed)
+    | `Yield -> await_wakeup Httpun.Server_connection.yield_reader; read_loop off
+    | `Close -> () in
+  let rec write_loop () = match Httpun.Server_connection.next_write_operation connection with
     | `Write iovecs ->
       let written = List.fold_left (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
         Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
         total+iov.len) 0 iovecs in
       Httpun.Server_connection.report_write_result connection (`Ok written);
-      drain ()
-    | `Yield when Buffer.length output=0 || not (Eio.Promise.is_resolved handled) ->
-      let ready,resolve = Eio.Promise.create () in
-      Httpun.Server_connection.yield_writer connection (fun () -> Eio.Promise.resolve resolve ());
-      if Eio.Promise.is_resolved handled then Eio.Promise.await ready
-      else Eio.Fiber.first (fun () -> Eio.Promise.await ready) (fun () -> Eio.Promise.await handled);
-      drain ()
-    | `Yield | `Close _ -> () in
-  Eio.Fiber.both
-    (fun () ->
-      ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
-      Eio.Promise.resolve handler_done ())
-    drain;
+      write_loop ()
+    | `Yield -> await_wakeup Httpun.Server_connection.yield_writer; write_loop ()
+    | `Close _ -> () in
+  (match Eio.Time.with_timeout clock connection_patience_s (fun () ->
+     Ok (Eio.Fiber.both (fun () -> read_loop 0) write_loop)) with
+   | Ok () -> ()
+   | Error `Timeout -> failf "%s: the connection was still open after %.0f seconds" target
+       connection_patience_s);
   let raw = Buffer.contents output in
   let boundary = Str.search_forward (Str.regexp_string "\r\n\r\n") raw 0 in
   let status = int_of_string (List.nth (String.split_on_char ' ' raw) 1) in
   status, String.sub raw (boundary+4) (String.length raw-boundary-4)
 
-let wire_response ?meth ?body ~router target =
-  let status,body = wire_raw_response ?meth ?body ~router target in
+let wire_response ~clock ?meth ?body ~router target =
+  let status,body = wire_raw_response ~clock ?meth ?body ~router target in
   status,Yojson.Safe.from_string body
 
 let test_original_questions_are_bound_to_receiving_workspace () =
@@ -80,6 +92,8 @@ let test_original_questions_are_bound_to_receiving_workspace () =
                ~clock:(Eio.Stdenv.clock env) state)
         |> Server_route.post Server_route.Always_public "/api/v1/keepers/ask-answer"
              (Server_routes_http_keeper_stream.handle_keeper_ask_answer ~actor:"operator" state) in
+      let clock = Eio.Stdenv.clock env in
+      let wire_response = wire_response ~clock and wire_raw_response = wire_raw_response ~clock in
       let base = Unix.realpath config.base_path and root = Unix.realpath (Workspace.masc_dir config) in
       let encode = Uri.pct_encode ~component:`Query_value in
       let query = "expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in

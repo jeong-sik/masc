@@ -163,12 +163,11 @@ let test_a_client_that_stops_reading_ends_the_response_as_stalled () =
     server.stop ())
 ;;
 
-(* httpun resolves a waiting frame as [Closed] only when its bytes had reached
-   the connection writer before the connection failed; a failed connection
-   closes the body without draining it (httpun reqd.ml [report_error]). A
-   frame still in the body then ends at the stall bound. Either way the sender
-   stops and the response is closed. *)
-let test_a_client_that_closes_ends_the_response () =
+(* A client that goes away is seen only when a write to it fails, and httpun
+   then closes the body without answering the flush that waits (httpun reqd.ml
+   [report_error], gluten-eio [writev]). The waiting frame ends at the stall
+   bound. *)
+let test_a_client_that_goes_away_while_a_frame_waits_ends_at_the_stall_bound () =
   with_env (fun env sw ->
     let ended, resolve = Eio.Promise.create () in
     let server =
@@ -180,17 +179,51 @@ let test_a_client_that_closes_ends_the_response () =
       let flow = connect ~sw:client_sw env ~port:server.port in
       within env "the response head" (fun () -> read_until flow "200 OK"));
     let refusal, closed = within env "the sender to stop" (fun () -> Eio.Promise.await ended) in
-    check bool "a closed client refuses a frame" true
-      (match refusal with
-       | Refused (Sse.Closed | Sse.Stalled) -> true
-       | Refused Sse.Written | Kept_written -> false);
+    check refusal_t "the waiting frame stalled" (Refused Sse.Stalled) refusal;
     check bool "the response is closed" true closed;
     server.stop ())
 ;;
 
-let test_close_does_not_wait_for_a_pending_send () =
+type sender =
+  { started : int Atomic.t
+  ; returned : int Atomic.t
+  ; last : Sse.outcome Eio.Promise.t
+  }
+
+(* Sends whole frames until one is not [Written], in a fiber of its own. *)
+let start_sender ~sw response =
+  let started = Atomic.make 0 and returned = Atomic.make 0 in
+  let last, resolve = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec go () =
+      Atomic.incr started;
+      let outcome = Sse.send response frame in
+      Atomic.incr returned;
+      match outcome with
+      | Sse.Written -> go ()
+      | (Closed | Stalled) as last -> Eio.Promise.resolve resolve last
+    in
+    go ());
+  { started; returned; last }
+;;
+
+(* Returns once every sender has had one send unanswered for [pending_for_s]. *)
+let await_all_pending env senders =
+  let clock = Eio.Stdenv.clock env in
+  within env "every send to stay pending" (fun () ->
+    let rec settled () =
+      let before = List.map (fun sender -> Atomic.get sender.returned) senders in
+      Eio.Time.sleep clock pending_for_s;
+      let pending sender returned =
+        Atomic.get sender.started = returned + 1 && Atomic.get sender.returned = returned
+      in
+      if not (List.for_all2 pending senders before) then settled ()
+    in
+    settled ())
+;;
+
+let test_close_ends_every_waiting_send () =
   with_env (fun env sw ->
-    let clock = Eio.Stdenv.clock env in
     let opened, resolve = Eio.Promise.create () in
     let server =
       start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
@@ -198,40 +231,44 @@ let test_close_does_not_wait_for_a_pending_send () =
     in
     let flow = connect ~sw env ~port:server.port in
     let response = within env "the response" (fun () -> Eio.Promise.await opened) in
-    let started = Atomic.make 0 and returned = Atomic.make 0 in
+    let senders = [ start_sender ~sw response; start_sender ~sw response ] in
+    within env "the response head" (fun () -> read_until flow "200 OK");
+    (* The client reads no more. *)
+    await_all_pending env senders;
+    Sse.close response;
+    List.iter
+      (fun sender ->
+         check outcome_t "the waiting send ends as Closed" Sse.Closed
+           (within env "the waiting send" (fun () -> Eio.Promise.await sender.last)))
+      senders;
+    check outcome_t "a send after close writes nothing" Sse.Closed
+      (Sse.send response "data: late\n\n");
+    server.stop ())
+;;
+
+let test_a_waiting_send_can_be_cancelled () =
+  with_env (fun env sw ->
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~sw env ~stalled_after_s:kept_stalled_after_s ~on_response:(fun response ->
+        Eio.Promise.resolve resolve response)
+    in
+    let flow = connect ~sw env ~port:server.port in
+    let response = within env "the response" (fun () -> Eio.Promise.await opened) in
     let sender_ended, sender_end = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
       (match
          Eio.Switch.run (fun sender_sw ->
-           Eio.Fiber.fork ~sw:sender_sw (fun () ->
-             let rec go () =
-               Atomic.incr started;
-               let outcome = Sse.send response frame in
-               Atomic.incr returned;
-               match outcome with
-               | Sse.Written -> go ()
-               | Closed | Stalled -> ()
-             in
-             go ());
+           let sender = start_sender ~sw:sender_sw response in
            within env "the response head" (fun () -> read_until flow "200 OK");
-           (* The client reads no more. Wait until one send has gone unanswered. *)
-           within env "a send to stay pending" (fun () ->
-             let rec settled () =
-               let before = Atomic.get returned in
-               Eio.Time.sleep clock pending_for_s;
-               if not (Atomic.get started = before + 1 && Atomic.get returned = before)
-               then settled ()
-             in
-             settled ());
-           within env "close" (fun () -> Sse.close response);
-           check outcome_t "a send after close writes nothing" Sse.Closed
-             (within env "a send after close" (fun () -> Sse.send response "data: late\n\n"));
+           await_all_pending env [ sender ];
            Eio.Switch.fail sender_sw Exit)
        with
        | () -> ()
        | exception Exit -> ());
       Eio.Promise.resolve sender_end ());
-    within env "the pending send to be cancelled" (fun () -> Eio.Promise.await sender_ended);
+    within env "the waiting send to be cancelled" (fun () -> Eio.Promise.await sender_ended);
+    check bool "cancelling a send does not close the response" false (Sse.is_closed response);
     server.stop ())
 ;;
 
@@ -242,10 +279,10 @@ let () =
             test_a_frame_the_socket_takes_is_written
         ; test_case "a client that stops reading ends the response as Stalled" `Quick
             test_a_client_that_stops_reading_ends_the_response_as_stalled
-        ; test_case "a client that closes ends the response" `Quick
-            test_a_client_that_closes_ends_the_response
-        ; test_case "close does not wait for a pending send" `Quick
-            test_close_does_not_wait_for_a_pending_send
+        ; test_case "a client that goes away while a frame waits ends at the stall bound" `Quick
+            test_a_client_that_goes_away_while_a_frame_waits_ends_at_the_stall_bound
+        ; test_case "close ends every waiting send" `Quick test_close_ends_every_waiting_send
+        ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
         ] )
     ]
 ;;

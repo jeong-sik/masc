@@ -5103,6 +5103,7 @@
 (include stanzas/test_tui_wrap_words.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_tab_strip.inc)
+(include stanzas/test_tui_detail_heading.inc)
 
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)

@@ -981,8 +981,10 @@ let heading_id_floor = 12
    - the id down to [heading_id_floor], folded in the middle so its opening
      and its distinguishing tail both stay;
    - [after], the readings about the record (a count, a freshness verdict, a
-     filter), cut at its end with the cut mark, and dropped when nothing is
-     left for it;
+     filter), as the pieces the caller spells them in, each carrying its own
+     leading gap. Pieces are left out whole from the end, so a filter is not
+     cut to "le…". When not even the first piece fits it is cut at its end
+     with the cut mark, and dropped when nothing is left for it;
    - the id below its floor, down to the cut mark alone, and then the id;
    - the lead, cut at its end. A lead and a tail that do not fit side by side
      are the one case where the lead is cut: the badge carries the workspace
@@ -992,9 +994,10 @@ let heading_id_floor = 12
    its entries in it.
 
    The headings that put an id, a name or a path before the badge are laid
-   out here; test_tui_row_wiring names each one. Written by hand, the id was
-   drawn before the badge at whatever width it had: a 54-cell run id left the
-   badge four cells at eighty columns. Two rows keep their own layout: a
+   out here; test_tui_detail_heading checks how the pieces after the id are
+   laid out. An id drawn at whatever width it has leaves the badge too few
+   cells: a 54-cell run id left it four at eighty columns. Two rows keep their
+   own layout: a
    Config pane's title ([Masc_tui_render_prim.config_pane_title]), whose pane
    reading and pane name give way in an order of their own before its file
    path does, and the Overview's, whose workspace name every PTY scenario
@@ -1006,7 +1009,8 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   let styled text = String.contains text '\027' in
   let tail = "  " ^ tail in
   let id = Terminal_text.single_line id in
-  let id_cells = cells id and after_cells = cells after in
+  let id_cells = cells id in
+  let after_whole = String.concat "" after in
   let lead_floor =
     match lead with
     | Lead_text text -> cells text
@@ -1020,17 +1024,25 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   in
   let room = framed_inner_width cols - cells tail - lead_floor in
   let id_floor_drawn, room = take (min id_cells heading_id_floor) room in
+  (* The pieces that fit what the id's floor leaves, whole and from the first.
+     When not even the first fits it is the one that is cut below. *)
+  let after_laid_out =
+    Masc_tui_message_layout.join_fitting ~sep:"" ~cells:room after
+  in
+  let after_cells = cells after_laid_out in
   let after_drawn, room = take after_cells room in
   let id_extra, room = take (id_cells - id_floor_drawn) room in
   let id_drawn = id_floor_drawn + id_extra in
   let id = Masc_tui_message_layout.truncate_middle id_drawn id in
-  (* A cut or dropped [after] may have been what closed a style the lead
+  (* A cut or dropped piece may have been what closed a style the lead
      opened, so the reset it carried is put back. *)
   let after =
-    if after_drawn >= after_cells then after
+    if after_drawn >= cells after_whole then after_whole
     else
-      (if after_drawn = 0 then "" else fit_width after after_drawn)
-      ^ if styled after then Ansi.reset else ""
+      (if after_drawn >= after_cells then after_laid_out
+       else if after_drawn = 0 then ""
+       else fit_width after_laid_out after_drawn)
+      ^ if styled after_whole then Ansi.reset else ""
   in
   let lead =
     match lead with

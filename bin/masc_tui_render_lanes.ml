@@ -1050,7 +1050,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     detail_heading ~cols
       ~lead:(Lead_text (screen_title " MASC Features" ^ " \xc2\xb7 "))
       ~id:(observed_lane_label lane)
-      ~after:(Printf.sprintf " (%s)" coverage)
+      ~after:[ Printf.sprintf " (%s)" coverage ]
       ~tail:(connection_badge state)
   in
   box_top buf cols;
@@ -1951,7 +1951,7 @@ let render_lane_run_detail (state : state) ~run_id =
               (if measurement then measurement_detail_title
                else lane_run_detail_title)
            ^ "  "))
-      ~id:run_id ~after:"" ~tail:(connection_badge state)
+      ~id:run_id ~after:[] ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

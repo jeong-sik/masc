@@ -85,7 +85,7 @@ let facts_title ~cols ~screen ~keeper ~reading ~timestamp ~badge =
         query_label
   in
   detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
-    ~after ~tail:(timestamp ^ "  " ^ badge)
+    ~after:[ after ] ~tail:(timestamp ^ "  " ^ badge)
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each

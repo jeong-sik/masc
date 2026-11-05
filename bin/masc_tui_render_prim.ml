@@ -2973,7 +2973,7 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
                ^ planning_workspace_strip ~width:(width - around) tabs
                ^ mark)
          })
-    ~id:task_id ~after:"" ~tail
+    ~id:task_id ~after:[] ~tail
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -3482,7 +3482,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let total = List.length diff_rows in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
-      ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
+      ~id:ds.ds_address ~after:[ "  vs HEAD" ] ~tail:(connection_badge state)
   in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width

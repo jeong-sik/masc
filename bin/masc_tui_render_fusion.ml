@@ -1080,7 +1080,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
-      ~id:run_id ~after:"" ~tail:(connection_badge state)
+      ~id:run_id ~after:[] ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;

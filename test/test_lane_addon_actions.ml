@@ -849,6 +849,7 @@ let test_private_addon_events_are_scoped_to_their_readers () =
           ; "visibility", visibility ]
       in
       let shared_external = ref 0 in
+      let private_external = ref 0 in
       Sse.subscribe_external
         ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
         ~id:subscription
@@ -858,8 +859,8 @@ let test_private_addon_events_are_scoped_to_their_readers () =
               (match List.assoc_opt "visibility" fields with
                | Some (`Assoc [ "kind", `String "shared" ]) ->
                    incr shared_external
-               | Some _ | None -> ())
-          | _ -> ())
+               | Some _ | None -> incr private_external)
+          | _ -> incr private_external)
         ();
       let owner_only = payload (`Assoc [ "kind", `String "keeper"; "keeper", `String "owner" ]) in
       let operator_only = payload (visibility "operator") in
@@ -881,7 +882,8 @@ let test_private_addon_events_are_scoped_to_their_readers () =
       check (list bool) "operator reads all events" [ true; true; true ]
         (List.map (fun payload -> List.mem payload (ids (received admin_stream)))
           [ owner_only; operator_only; shared ]);
-      check int "an external subscriber without identity sees only shared" 1 !shared_external;
+      check int "an external subscriber without identity sees shared" 1 !shared_external;
+      check int "an external subscriber without identity sees no private event" 0 !private_external;
       let replay session_id =
         (Sse.replay_after_for_session
           ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
@@ -894,7 +896,10 @@ let test_private_addon_events_are_scoped_to_their_readers () =
         (List.map (fun payload -> List.mem payload (replay other_session)) [ owner_only; operator_only ]);
       check (list bool) "replay retains operator access" [ true; true; true ]
         (List.map (fun payload -> List.mem payload (replay admin_session))
-          [ owner_only; operator_only; shared ]))
+          [ owner_only; operator_only; shared ]);
+      check (list bool) "replay without a registered identity sees only shared" [ false; true ]
+        (List.map (fun payload -> List.mem payload (replay "private-unregistered"))
+          [ owner_only; shared ]))
 
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];

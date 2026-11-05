@@ -1263,7 +1263,7 @@ let test_cold_health_read_and_commit_do_not_deadlock () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "before commit"]);
   let cold_health = Health.For_testing.keeper_health
-      ~config:(Workspace.default_config base) ~keepers_dir "alpha" in
+      ~config:(Masc.Workspace.default_config base) ~keepers_dir "alpha" in
   let read_started = Atomic.make false in
   let allow_return = Atomic.make false in
   let writer_finished = Atomic.make false in

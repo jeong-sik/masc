@@ -778,6 +778,7 @@ val detail_section_lines : ?first:bool -> string -> string list
 (** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
 
 val split_summary_columns :
+  titled:bool ->
   cols:int ->
   left_title:string ->
   left_rows:(string * string) list ->
@@ -785,7 +786,9 @@ val split_summary_columns :
   right_rows:(string * string) list ->
   (string * string) list
 (** Side-by-side 2-column summary block (with [ │ ] divider on wide viewports and
-    stacked fallback on narrow viewports). *)
+    stacked fallback on narrow viewports). With [~titled:false] the block has
+    no title rows, for a caller that is short of rows and whose rows each name
+    themselves; on a narrow viewport the rows then start where a title would. *)
 
 val runtime_substrate_tab_strip :
   Masc_tui_types.state ->

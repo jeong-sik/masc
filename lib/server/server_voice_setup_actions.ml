@@ -490,10 +490,11 @@ let observe ~base_path =
          ; "gate", gate
          ])
 
-let preview ~base_path json =
+let preview ~check_command_voices ~base_path json =
   let* revision, changes = request_of_json json in
   match
     Voice_setup.preview
+      ~check_command_voices
       ~runtime_config_path:(runtime_config_path ~base_path)
       ~standalone_path:(standalone_path ~base_path)
       ~expected_revision:revision
@@ -502,11 +503,12 @@ let preview ~base_path json =
   | Error error -> Error (Setup_failed error)
   | Ok text -> Ok (`Assoc [ "runtime_toml", `String text ])
 
-let apply ~base_path json =
+let apply ~check_command_voices ~base_path json =
   let* revision, changes = request_of_json json in
   let path = runtime_config_path ~base_path in
   match
     Voice_setup.apply
+      ~check_command_voices
       ~runtime_config_path:path
       ~standalone_path:(standalone_path ~base_path)
       ~expected_revision:revision

@@ -48,11 +48,6 @@ type say_voice =
 
 val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
 
-(** Ask a say endpoint for its catalogue and look [voice] up in it. A blank
-    voice is [Ok]: say then uses its own. [Error] says why the voice will not
-    be the one asked for, or why the catalogue could not be read. *)
-val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
-
 (** Parse what [espeak-ng --voices] prints. Separate from the asking so a
     recorded answer can be replayed on a machine that has no espeak-ng. *)
 val espeak_catalogue_of_output : string -> catalogue_voice list
@@ -66,11 +61,15 @@ val espeak_catalogue_of_output : string -> catalogue_voice list
     asked for and points at the list it can be picked from. *)
 val espeak_voice_in_catalogue : catalogue_voice list -> voice:string -> bool
 
-(** Ask an espeak-ng endpoint for its catalogue and look [voice] up in it. A
-    blank voice is [Ok]: espeak-ng then uses its default. [Error] says why the
-    voice will not be the one asked for, or why the catalogue could not be
-    read. *)
-val check_espeak_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
+(** Whether a say or espeak-ng endpoint has every one of [voices], listing its
+    voices once however many names are asked. A blank name is [Ok]: the
+    command then uses its own default. [Error] is the first name it lacks, or
+    why the list could not be read. Any other kind is refused: it is not a
+    command speaker. *)
+val check_command_voices
+  :  Voice_config.endpoint
+  -> voices:string list
+  -> (unit, string) result
 
 val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
 (** The container a kind's clips are written in. [say] encodes WAVE and has no

@@ -2463,21 +2463,6 @@ let voice_local_changes ~refuse (ground : Masc_cli_runtime_config_remote.voice_g
            ground.speaking then
       Error (refuse "The endpoint macos-say already names another provider; nothing was written.")
     else
-      (* The name is typed here, and say does not fail on one it does not
-         have: it speaks in another voice and exits 0. Measured 2026-09-13,
-         -v NoSuchVoice wrote the same bytes as -v Yuna. Written unchecked, the
-         mistake surfaced only as a keeper with the wrong voice. The endpoint
-         this writes runs plain say, so that is the catalogue asked. *)
-      match
-        match speak_voice with
-        | None -> Ok ()
-        | Some voice ->
-          Masc.Voice_bridge.check_say_voice
-            (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
-            ~voice
-      with
-      | Error reason -> Error (refuse (reason ^ ". Nothing was written."))
-      | Ok () ->
       let speaking =
         match speak_voice with
         | None -> []
@@ -2564,7 +2549,9 @@ let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
     | Error code -> code
     | Ok changes ->
       (match
-         Voice_setup.apply ~runtime_config_path ~standalone_path
+         Voice_setup.apply
+           ~check_command_voices:Masc.Voice_bridge.check_command_voices
+           ~runtime_config_path ~standalone_path
            ~expected_revision:revision changes
        with
        | Error error -> refuse (Voice_setup.error_message error)

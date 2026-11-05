@@ -3,7 +3,15 @@
    this build does not have is a request for something that will not work, and
    answering it with a guess writes the guess to runtime.toml. *)
 
-module Actions = Server_voice_setup_actions
+(* These cases are about the wire shape, not voice names, so the list they
+   pass has every name. Test_voice_setup covers the names. *)
+module Actions = struct
+  include Server_voice_setup_actions
+
+  let accept_every_voice _endpoint ~voices:_ = Ok ()
+  let preview = preview ~check_command_voices:accept_every_voice
+  let apply = apply ~check_command_voices:accept_every_voice
+end
 
 let runtime_toml =
   {|[providers."deepseek"]

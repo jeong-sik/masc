@@ -565,6 +565,109 @@ let test_branches_distinguish_empty_from_unavailable () =
     | Error (W.Branches_failed _) -> ()
     | Ok _ | Error _ -> Alcotest.fail "Git failure became an empty list")
 
+let worktrees_or_fail ~base ~path =
+  match W.For_testing.workspace_worktrees ~base ~path with
+  | Ok found -> found
+  | Error W.Worktrees_invalid_path -> Alcotest.fail "unexpected invalid worktrees path"
+  | Error W.Worktrees_directory_unavailable -> Alcotest.fail "worktrees directory unavailable"
+  | Error W.Worktrees_repository_unavailable -> Alcotest.fail "worktrees repository unavailable"
+  | Error (W.Worktrees_failed detail) -> Alcotest.fail detail
+
+let mentions text needle =
+  match Str.search_forward (Str.regexp_string needle) text 0 with
+  | _ -> true
+  | exception Not_found -> false
+
+(* A linked worktree outside the workspace is listed by its last name only: the
+   answer reaches clients that must not learn the host's directory layout. *)
+let test_worktrees_list_names_and_never_paths () =
+  with_temp_dir (fun parent ->
+    let base = Filename.concat parent "ws" in
+    mkdir_p base;
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    commit_git ~cwd:base "first";
+    let linked = Filename.concat parent "linked-tree" in
+    catalog_git ~cwd:base [ "worktree"; "add"; linked; "-b"; "linked-branch" ];
+    catalog_git ~cwd:base [ "worktree"; "lock"; linked ];
+    let found = worktrees_or_fail ~base ~path:"" in
+    check string "root stays workspace relative" "" found.worktrees_root;
+    let json = W.For_testing.workspace_worktrees_json found in
+    check bool "no host path in the answer" false
+      (mentions (Yojson.Safe.to_string json) parent);
+    match json with
+    | `Assoc fields ->
+        check bool "answer is not truncated" true
+          (List.assoc_opt "truncated" fields = Some (`Bool false));
+        (match List.assoc_opt "worktrees" fields with
+         | Some (`List [ `Assoc main; `Assoc second ]) ->
+             check bool "the main worktree comes first" true
+               (List.assoc_opt "name" main = Some (`String "ws")
+                && List.assoc_opt "main" main = Some (`Bool true)
+                && List.assoc_opt "state" main = Some (`String "branch")
+                && List.assoc_opt "branch" main = Some (`String "main")
+                && List.assoc_opt "locked" main = Some (`Bool false));
+             check bool "the linked worktree keeps its name, branch and lock" true
+               (List.assoc_opt "name" second = Some (`String "linked-tree")
+                && List.assoc_opt "main" second = Some (`Bool false)
+                && List.assoc_opt "branch" second = Some (`String "linked-branch")
+                && List.assoc_opt "locked" second = Some (`Bool true)
+                && List.assoc_opt "prunable" second = Some (`Bool false));
+             (match List.assoc_opt "head" second with
+              | Some (`String head) ->
+                  check int "the full commit id" 40 (String.length head)
+              | Some _ | None -> Alcotest.fail "linked worktree has no head")
+         | Some _ | None -> Alcotest.fail "expected two worktree rows")
+    | _ -> Alcotest.fail "answer is not an object")
+
+let test_worktrees_of_a_checkout_without_commit () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    let found = worktrees_or_fail ~base ~path:"" in
+    match found.worktrees_list.wl_entries with
+    | [ only ] ->
+        check bool "an unborn branch is still the named branch" true
+          (only.wt_state = Repo_git.Worktree_branch "main");
+        check bool "the main worktree is marked" true only.wt_main
+    | other ->
+        Alcotest.fail
+          (Printf.sprintf "expected one worktree, got %d" (List.length other)))
+
+let test_worktrees_stop_at_workspace_and_keep_nested_prefix () =
+  with_temp_dir (fun parent ->
+    catalog_git ~cwd:parent [ "init"; "-b"; "main" ];
+    commit_git ~cwd:parent "outer";
+    let base = Filename.concat parent "keeper" in
+    mkdir_p base;
+    (match W.For_testing.workspace_worktrees ~base ~path:"" with
+     | Error W.Worktrees_repository_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "worktrees borrowed the enclosing checkout");
+    let repo = Filename.concat base "repos/example" in
+    mkdir_p (Filename.concat repo "src");
+    catalog_git ~cwd:repo [ "init"; "-b"; "main" ];
+    commit_git ~cwd:repo "inner";
+    let found = worktrees_or_fail ~base ~path:"repos/example/src" in
+    check string "owning nested checkout" "repos/example" found.worktrees_root;
+    check int "one worktree" 1 (List.length found.worktrees_list.wl_entries))
+
+let test_worktrees_distinguish_empty_from_unavailable () =
+  with_temp_dir (fun base ->
+    catalog_git ~cwd:base [ "init"; "-b"; "main" ];
+    write_file (Filename.concat base "a.ml") "let a = 1\n";
+    (match W.For_testing.workspace_worktrees ~base ~path:".env" with
+     | Error W.Worktrees_invalid_path -> ()
+     | Ok _ | Error _ -> Alcotest.fail "confidential directory was not rejected");
+    (match W.For_testing.workspace_worktrees ~base ~path:"missing" with
+     | Error W.Worktrees_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "missing directory became an empty list");
+    (match W.For_testing.workspace_worktrees ~base ~path:"a.ml" with
+     | Error W.Worktrees_directory_unavailable -> ()
+     | Ok _ | Error _ -> Alcotest.fail "a file was read as a directory");
+    rm_rf (Filename.concat base ".git");
+    write_file (Filename.concat base ".git") "gitdir: missing-git-dir\n";
+    match W.For_testing.workspace_worktrees ~base ~path:"" with
+    | Error (W.Worktrees_failed _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "Git failure became an empty list")
+
 (* Use the production router and file reader: a surviving project file must
    never stand in for the selected scope after its catalog was accepted. *)
 let workspace_http_response ?(meth = "GET") ?(body = "") ?token ~router target =
@@ -1062,6 +1165,16 @@ let () =
             test_branches_stop_at_workspace_and_keep_nested_prefix
         ; test_case "distinguishes empty checkout and unavailable directory" `Quick
             test_branches_distinguish_empty_from_unavailable
+        ] )
+    ; ( "worktree list"
+      , [ test_case "lists names and never host paths" `Quick
+            test_worktrees_list_names_and_never_paths
+        ; test_case "a checkout without a commit still lists its main worktree" `Quick
+            test_worktrees_of_a_checkout_without_commit
+        ; test_case "stops at selected workspace and keeps nested prefix" `Quick
+            test_worktrees_stop_at_workspace_and_keep_nested_prefix
+        ; test_case "distinguishes empty checkout and unavailable directory" `Quick
+            test_worktrees_distinguish_empty_from_unavailable
         ] )
     ; ( "selected file scope"
       , [ test_case "removed repository registration cannot read project file" `Quick

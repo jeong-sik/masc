@@ -12,16 +12,25 @@ A repeat told the model nothing the previous call had not. It is not
 necessarily a mistake: a model may poll a state that happens to stay the same.
 The report only counts them, per tool, per streak length and per run.
 
+The size of a result is the UTF-8 length of the `tool_result` text the trace
+logged. A record without `tool_result` has no size and adds 0. The result of a
+repeat equals the one before it, so `repeated_result_bytes` is the text that
+entered the run again. Whether a later request carries that text depends on how
+the history is kept; the number is a size, not a token count.
+
 Reported:
 
 - `calls`: runs, runs with at least one finished call, finished calls, repeats,
-  their share, and the repeats whose result was an error.
-- `by_tool`: per tool with a repeat, its calls and repeats.
+  their share, the repeats whose result was an error, and the bytes of all
+  results and of the results of repeats (`result_bytes`,
+  `repeated_result_bytes`, `share_of_result_bytes`).
+- `by_tool`: per tool with a repeat, its calls, repeats and result bytes.
 - `streaks`: how many, their length (p50 / p90 / p99 / max), the repeats by
   streak length, and the wall time from the first start to the last finish of
   every streak, summed.
-- `by_profile`: per runtime profile with a repeat, its calls and repeats.
-- `runs_with_the_most_repeats`: the eight runs with the most repeats.
+- `by_profile`: per runtime profile with a repeat, its calls, repeats and result bytes.
+- `runs_with_the_most_repeats`: the eight runs with the most repeats, with the
+  bytes of the results of those repeats.
 
 Reads the raw traces and never writes to them. A line that is not a JSON object
 is counted under `unreadable_lines`. A file that is listed and gone before it is
@@ -71,6 +80,7 @@ class Call:
     tool: str
     input_digest: str | None
     result_digest: str | None
+    result_bytes: int | None
     error: bool
     started: float | None
     finished: float | None
@@ -133,6 +143,16 @@ def digest_of(row: JsonObject, key: str) -> str | None:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:DIGEST_CHARS]
 
 
+def result_bytes_of(row: JsonObject) -> int | None:
+    """The size of the result as the trace logged it. A record without the key has none."""
+    if "tool_result" not in row:
+        return None
+    value = row["tool_result"]
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    # A lone surrogate escape in the log decodes to a str that strict UTF-8 refuses to encode.
+    return len(text.encode("utf-8", errors="surrogatepass"))
+
+
 def profile_of(agent_name: str | None) -> str:
     """`agent_core-glm-coding.glm-5.3-flash` names the profile after the first dot."""
     if agent_name is None:
@@ -180,6 +200,7 @@ def read_run(path: pathlib.Path, keeper: str, unreadable: Unreadable) -> Run | N
                         tool=begin[0] if begin else (as_text(row.get("tool_name")) or "?"),
                         input_digest=begin[1] if begin else None,
                         result_digest=digest_of(row, "tool_result"),
+                        result_bytes=result_bytes_of(row),
                         error=row.get("tool_error") is True,
                         started=begin[2] if begin else None,
                         finished=ts,
@@ -226,6 +247,11 @@ def streaks_of(calls: tuple[Call, ...]) -> list[Streak]:
     return found
 
 
+def repeated_calls(calls: tuple[Call, ...]) -> list[Call]:
+    """The calls that repeat the call right before them."""
+    return [call for index, call in enumerate(calls) if index > 0 and call.repeats(calls[index - 1])]
+
+
 def percentile(sorted_values: list[float], share: float) -> float:
     return sorted_values[min(len(sorted_values) - 1, int(len(sorted_values) * share))]
 
@@ -247,10 +273,23 @@ def share(part: int, whole: int) -> float:
     return round(part / whole, 4) if whole else 0.0
 
 
-def counted_rows(label: str, calls: Counter[str], repeats: Counter[str]) -> list[JsonObject]:
+def counted_rows(
+    label: str,
+    calls: Counter[str],
+    repeats: Counter[str],
+    result_bytes: Counter[str],
+    repeated_result_bytes: Counter[str],
+) -> list[JsonObject]:
     ordered = sorted(repeats.items(), key=lambda item: (-item[1], item[0]))
     return [
-        {label: name, "calls": calls[name], "repeats": count, "share_of_calls": share(count, calls[name])}
+        {
+            label: name,
+            "calls": calls[name],
+            "repeats": count,
+            "share_of_calls": share(count, calls[name]),
+            "result_bytes": result_bytes[name],
+            "repeated_result_bytes": repeated_result_bytes[name],
+        }
         for name, count in ordered
     ]
 
@@ -284,6 +323,7 @@ def run_row(run: Run, streaks: list[Streak]) -> JsonObject:
         "hours": round((run.end - run.start) / SECONDS_PER_HOUR, 2),
         "calls": len(run.calls),
         "repeats": sum(repeats.values()),
+        "repeated_result_bytes": sum(call.result_bytes or 0 for call in repeated_calls(run.calls)),
         "top_repeated_tool": top_tool,
         "ended_by": run.ended_by,
     }
@@ -296,6 +336,10 @@ def measure(base: pathlib.Path, first_day: date | None, last_day: date | None) -
     repeats_by_tool: Counter[str] = Counter()
     calls_by_profile: Counter[str] = Counter()
     repeats_by_profile: Counter[str] = Counter()
+    bytes_by_tool: Counter[str] = Counter()
+    repeated_bytes_by_tool: Counter[str] = Counter()
+    bytes_by_profile: Counter[str] = Counter()
+    repeated_bytes_by_profile: Counter[str] = Counter()
     all_streaks: list[Streak] = []
     rows_by_run: list[tuple[int, JsonObject]] = []
     repeated_errors = 0
@@ -303,16 +347,24 @@ def measure(base: pathlib.Path, first_day: date | None, last_day: date | None) -
         for call in run.calls:
             calls_by_tool[call.tool] += 1
             calls_by_profile[run.profile] += 1
+            bytes_by_tool[call.tool] += call.result_bytes or 0
+            bytes_by_profile[run.profile] += call.result_bytes or 0
         streaks = streaks_of(run.calls)
         all_streaks.extend(streaks)
         for streak in streaks:
             repeats_by_tool[streak.tool] += streak.length - 1
             repeats_by_profile[run.profile] += streak.length - 1
-        repeated_errors += sum(1 for index, call in enumerate(run.calls) if index > 0 and call.error and call.repeats(run.calls[index - 1]))
+        repeated = repeated_calls(run.calls)
+        repeated_errors += sum(1 for call in repeated if call.error)
+        for call in repeated:
+            repeated_bytes_by_tool[call.tool] += call.result_bytes or 0
+            repeated_bytes_by_profile[run.profile] += call.result_bytes or 0
         if streaks:
             rows_by_run.append((sum(s.length - 1 for s in streaks), run_row(run, streaks)))
     total_calls = sum(calls_by_tool.values())
     total_repeats = sum(repeats_by_tool.values())
+    total_bytes = sum(bytes_by_tool.values())
+    total_repeated_bytes = sum(repeated_bytes_by_tool.values())
     rows_by_run.sort(key=lambda item: (-item[0], str(item[1]["keeper"]), str(item[1]["day"])))
     return {
         "window": {
@@ -330,10 +382,13 @@ def measure(base: pathlib.Path, first_day: date | None, last_day: date | None) -
             "repeats": total_repeats,
             "share_of_calls": share(total_repeats, total_calls),
             "repeats_that_were_errors": repeated_errors,
+            "result_bytes": total_bytes,
+            "repeated_result_bytes": total_repeated_bytes,
+            "share_of_result_bytes": share(total_repeated_bytes, total_bytes),
         },
-        "by_tool": counted_rows("tool", calls_by_tool, repeats_by_tool),
+        "by_tool": counted_rows("tool", calls_by_tool, repeats_by_tool, bytes_by_tool, repeated_bytes_by_tool),
         "streaks": streak_stats(all_streaks),
-        "by_profile": counted_rows("profile", calls_by_profile, repeats_by_profile),
+        "by_profile": counted_rows("profile", calls_by_profile, repeats_by_profile, bytes_by_profile, repeated_bytes_by_profile),
         "runs_with_the_most_repeats": [row for _, row in rows_by_run[:TOP_RUNS]],
     }
 

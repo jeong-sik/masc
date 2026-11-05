@@ -217,6 +217,9 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(top[0]["rounds"], 4)
         self.assertEqual(top[0]["top_repeated_tool"], "Execute")
         self.assertEqual(top[0]["day"], "2026-11-02")
+        # Execute repeats three times with a 4-byte result; the first call of the streak is not a repeat.
+        self.assertEqual(top[0]["repeated_result_bytes"], 3 * 4)
+        self.assertEqual(top[1]["repeated_result_bytes"], 4)
         self.assertEqual(top[1]["profile"], "glm-5.3-flash")
         self.assertTrue(str(top[1]["ended_by"]).startswith("Rate limited"))
 
@@ -233,6 +236,64 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(obj(profiles["glm-5.3-flash"])["calls"], 3)
         self.assertEqual(obj(profiles["glm-5.3-flash"])["repeats"], 1)
         self.assertEqual(obj(profiles["unrecorded"])["repeats"], 1)
+
+
+class ResultBytesTests(unittest.TestCase):
+    def test_a_result_is_measured_by_the_utf8_length_of_its_logged_text(self) -> None:
+        # "가나다" is 9 bytes. The object is logged as text with its characters kept: 12 bytes.
+        calls = obj(measured_runs([call("t", "i", "가나다"), call("u", "i", {"k": "가"})])["calls"])
+        self.assertEqual(calls["result_bytes"], 9 + 12)
+
+    def test_the_bytes_of_repeats_are_those_of_the_repeated_results_only(self) -> None:
+        small = call("masc_board_list", {"limit": 2}, "abcd")
+        large = call("Execute", {"argv": ["ls"]}, "x" * 13)
+        result = measured_runs([small, small, small, large, large])
+        calls = obj(result["calls"])
+        self.assertEqual(calls["result_bytes"], 3 * 4 + 2 * 13)
+        self.assertEqual(calls["repeated_result_bytes"], 2 * 4 + 13)
+        self.assertEqual(calls["share_of_result_bytes"], round(21 / 38, 4))
+        by_tool = {row["tool"]: row for row in rows_of(result["by_tool"])}
+        self.assertEqual(obj(by_tool["masc_board_list"])["result_bytes"], 12)
+        self.assertEqual(obj(by_tool["masc_board_list"])["repeated_result_bytes"], 8)
+        self.assertEqual(obj(by_tool["Execute"])["result_bytes"], 26)
+        self.assertEqual(obj(by_tool["Execute"])["repeated_result_bytes"], 13)
+
+    def test_by_profile_carries_the_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(base, "alpha", "turn-a.jsonl", DAY1, [call("t", "i", "abcd")] * 3)
+            write_run(base, "beta", "turn-b.jsonl", DAY1, [call("t", "i", "xy")] * 2, agent=None)
+            profiles = {row["profile"]: row for row in rows_of(m.measure(base, None, None)["by_profile"])}
+        self.assertEqual(obj(profiles["glm-5.3-flash"])["result_bytes"], 12)
+        self.assertEqual(obj(profiles["glm-5.3-flash"])["repeated_result_bytes"], 8)
+        self.assertEqual(obj(profiles["unrecorded"])["result_bytes"], 4)
+        self.assertEqual(obj(profiles["unrecorded"])["repeated_result_bytes"], 2)
+
+    def test_a_record_without_a_result_has_no_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            rows = trace_rows(DAY1, 1, [call("t", "i", "abcd")] * 2, PROFILE_AGENT, 2.0)
+            rows[-1].pop("tool_result")
+            folder = base / ".masc" / "keepers" / "alpha" / "raw-traces"
+            folder.mkdir(parents=True)
+            folder.joinpath("turn-a.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            calls = obj(m.measure(base, None, None)["calls"])
+        self.assertEqual(calls["result_bytes"], 4)
+        self.assertEqual(calls["repeated_result_bytes"], 0)
+
+    def test_a_lone_surrogate_in_a_result_is_measured_and_does_not_stop_the_read(self) -> None:
+        # A preview cut inside an emoji leaves half of a surrogate pair: 3 bytes with the byte before it.
+        calls = obj(measured_runs([call("t", "i", "a\ud83d"), call("t", "i", "a\ud83d")])["calls"])
+        self.assertEqual(calls["result_bytes"], 2 * (1 + 3))
+        self.assertEqual(calls["repeated_result_bytes"], 1 + 3)
+
+    def test_the_repeated_calls_are_the_ones_the_streaks_count(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(base, "alpha", "turn-a.jsonl", DAY1, [A, A, B, B, B, C, A, A])
+            runs = m.read_runs(base, m.Unreadable())
+        self.assertEqual(len(m.repeated_calls(runs[0].calls)), sum(s.length - 1 for s in m.streaks_of(runs[0].calls)))
+        self.assertEqual(len(m.repeated_calls(runs[0].calls)), 4)
 
 
 class StoreTests(unittest.TestCase):

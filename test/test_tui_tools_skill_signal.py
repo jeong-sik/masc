@@ -231,6 +231,14 @@ class ToolsSkillSignalTest(unittest.TestCase):
             step("drain", 3.5)
             for path in (INVENTORY_PATH,) + SKILL_PATHS:
                 self.assertEqual(server.count("quiet", path), 0, path)
+            # The TUI was running all along: [r] still reads the inventory.
+            server.set_phase("refresh")
+            step("keys", "r")
+            step(
+                "wait",
+                lambda: server.response_count("refresh", INVENTORY_PATH) >= 1,
+                "[r] did not read the inventory after the quiet cadence",
+            )
 
         for panes in (0, 2, 3):
             with self.subTest(panes=panes):

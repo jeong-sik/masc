@@ -147,7 +147,6 @@ export async function fetchKeeperSandboxLiveStatus(
 export type {
   KeeperRuntimeTraceTurnIdentity,
   KeeperRuntimeTraceEventBusSummary,
-  KeeperRuntimeTraceMemorySummary,
   KeeperRuntimeLensTurnClock,
   KeeperRuntimeLensLifecycleAxis,
   KeeperRuntimeLensProviderLaneAxis,
@@ -155,7 +154,6 @@ export type {
   KeeperRuntimeLensSourceClockAxis,
   KeeperRuntimeLensConfigDriftAxis,
   KeeperRuntimeLensContextAxis,
-  KeeperRuntimeLensMemoryAxis,
   KeeperRuntimeLensAxes,
   KeeperRuntimeLensLaneEvent,
   KeeperRuntimeLensLane,

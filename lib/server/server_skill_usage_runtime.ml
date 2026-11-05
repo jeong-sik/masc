@@ -1,5 +1,6 @@
 type session_entry = {
   mutex : Mutex.t;
+  mutable generation : int;
   mutable ledger : Keeper_skill_activation_ledger.t option;
   usage : (string, Keeper_skill_activation_ledger.catalog_usage option) Hashtbl.t;
 }
@@ -16,25 +17,43 @@ let entry ~config trace_id =
     match Hashtbl.find_opt sessions key with
     | Some entry -> entry
     | None ->
-        let entry = { mutex = Mutex.create (); ledger = None;
+        let entry = { mutex = Mutex.create (); generation = 0; ledger = None;
           usage = Hashtbl.create 8 } in
         Hashtbl.add sessions key entry;
         entry)
 
 let read_session ~config (keeper_name, trace_id) =
   let entry = entry ~config trace_id in
-  Stdlib.Mutex.protect entry.mutex (fun () ->
-    match entry.ledger with
+  let rec read () =
+    let cached, generation = Stdlib.Mutex.protect entry.mutex (fun () ->
+      entry.ledger, entry.generation)
+    in
+    match cached with
     | Some ledger -> Some (keeper_name, ledger), []
     | None ->
         (match !ledger_loader ~config ~trace_id with
-         | Ok ledger ->
-             entry.ledger <- Some ledger;
-             Some (keeper_name, ledger), []
+         | Ok loaded ->
+             let committed = Stdlib.Mutex.protect entry.mutex (fun () ->
+               if entry.generation = generation then begin
+                 entry.ledger <- Some loaded;
+                 Some loaded
+               end else
+                 entry.ledger)
+             in
+             (match committed with
+              | Some ledger -> Some (keeper_name, ledger), []
+              | None -> read ())
          | Error error ->
-             let detail = keeper_name ^ ": "
-               ^ Keeper_skill_activation_ledger.store_error_code error in
-             None, [detail]))
+             let changed = Stdlib.Mutex.protect entry.mutex (fun () ->
+               entry.generation <> generation)
+             in
+             if changed then read ()
+             else
+               let detail = keeper_name ^ ": "
+                 ^ Keeper_skill_activation_ledger.store_error_code error in
+               None, [detail])
+  in
+  read ()
 
 let read_sessions ~config sessions_to_read =
   List.fold_left (fun (loaded, unavailable) session ->
@@ -60,6 +79,7 @@ let usage_for_reference ~config ~trace_id ~reference =
 let retain_committed ~config ~keeper_name:_ ~trace_id ledger =
   let entry = entry ~config trace_id in
   Stdlib.Mutex.protect entry.mutex (fun () ->
+    entry.generation <- entry.generation + 1;
     entry.ledger <- Some ledger;
     Hashtbl.reset entry.usage)
 

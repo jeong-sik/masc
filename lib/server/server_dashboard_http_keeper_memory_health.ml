@@ -538,6 +538,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
 
 type cached_keeper_health = {
   mutex : Mutex.t;
+  mutable generation : int;
   mutable value : keeper_health option;
 }
 
@@ -556,19 +557,30 @@ let cache_entry ~keepers_dir keeper_id =
     match Hashtbl.find_opt health_cache key with
     | Some entry -> entry
     | None ->
-        let entry = { mutex = Mutex.create (); value = None } in
+        let entry = { mutex = Mutex.create (); generation = 0; value = None } in
         Hashtbl.add health_cache key entry;
         entry)
 
 let cached_keeper_health ~config ~keepers_dir keeper_id =
   let entry = cache_entry ~keepers_dir keeper_id in
-  Stdlib.Mutex.protect entry.mutex (fun () ->
-    match entry.value with
+  let rec read () =
+    let cached, generation = Stdlib.Mutex.protect entry.mutex (fun () ->
+      entry.value, entry.generation)
+    in
+    match cached with
     | Some health when health.read_error = None -> health
     | Some _ | None ->
         let health = !health_reader ~config ~keepers_dir keeper_id in
-        entry.value <- (if health.read_error = None then Some health else None);
-        health)
+        let current = Stdlib.Mutex.protect entry.mutex (fun () ->
+          if entry.generation = generation then begin
+            entry.value <- (if health.read_error = None then Some health else None);
+            true
+          end else
+            false)
+        in
+        if current then health else read ()
+  in
+  read ()
 
 let invalidate_after_write ~keepers_dir ~keeper_id =
   let keepers_dir = health_directory_identity keepers_dir in
@@ -578,7 +590,9 @@ let invalidate_after_write ~keepers_dir ~keeper_id =
   | None -> ()
   | Some base_path ->
       let entry = cache_entry ~keepers_dir keeper_id in
-      Stdlib.Mutex.protect entry.mutex (fun () -> entry.value <- None);
+      Stdlib.Mutex.protect entry.mutex (fun () ->
+        entry.generation <- entry.generation + 1;
+        entry.value <- None);
       Dashboard_cache.invalidate (Printf.sprintf "keeper_memory_health:%s" base_path);
       Workspace_dataset_event.announce ~base_path
         (Workspace_dataset_event.Memory_health { keeper = keeper_id })

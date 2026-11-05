@@ -22,6 +22,7 @@ let target =
       | Some Tui_types.Text_runtime_model_form -> "runtime-model-form"
       | Some Tui_types.Text_runtime_account_form -> "runtime-account-form"
       | Some Tui_types.Text_memory_recall_form -> "memory-recall-form"
+      | Some Tui_types.Text_typesafeai_exclusion_form -> "typesafeai-exclusion-form"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
@@ -715,6 +716,32 @@ let test_the_recall_form_claims_only_on_the_runtime_pane () =
   check target "another pane keeps its keys" None (resolved state)
 ;;
 
+(* The exclusion form stands on the same pane under the same rules. *)
+let test_the_exclusion_form_claims_only_on_the_runtime_pane () =
+  let state = fresh_state () in
+  let form =
+    match
+      Masc_tui_typesafeai_exclusion_form.open_on
+        ~keepers:
+          [ { Masc_tui_typesafeai_exclusion_form.name = "alpha"
+            ; presence = Masc_tui_typesafeai_exclusion_form.Unknown
+            }
+          ]
+        "[models.probe]\napi-name = \"probe\"\n"
+    with
+    | Ok form -> form
+    | Error reason -> Alcotest.fail reason
+  in
+  state.Tui_types.view <- Tui_types.Config;
+  state.Tui_types.config_pane <- Tui_types.Config_runtime;
+  state.Tui_types.typesafeai_exclusion_form <- Some form;
+  check target "the exclusion form owns the keys"
+    (Some Tui_types.Text_typesafeai_exclusion_form) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.config_pane <- Tui_types.Config_prompts;
+  check target "another pane keeps its keys" None (resolved state)
+;;
+
 (* The server's reading for the recall form is numbered per open. An answer
    that carries the number of a form the operator already left is dropped, and
    one that arrives with no form open lands nowhere. *)
@@ -931,6 +958,8 @@ let () =
             test_the_account_form_claims_only_on_the_runtime_pane;
           test_case "the recall form claims only on the runtime pane" `Quick
             test_the_recall_form_claims_only_on_the_runtime_pane;
+          test_case "the exclusion form claims only on the runtime pane" `Quick
+            test_the_exclusion_form_claims_only_on_the_runtime_pane;
         test_case "the recall form hears only the answer of its own open" `Quick
             test_the_recall_form_hears_only_the_answer_of_its_own_open;
         test_case "a retired reading does not leave the recall form waiting" `Quick

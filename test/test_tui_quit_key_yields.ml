@@ -15,6 +15,7 @@ let every_text_target =
   ; ("runtime model form", Text_runtime_model_form)
   ; ("runtime account form", Text_runtime_account_form)
   ; ("memory recall form", Text_memory_recall_form)
+  ; ("typesafeai exclusion form", Text_typesafeai_exclusion_form)
   ; ("voice wizard", Text_voice_wizard)
   ; ("command palette", Text_palette)
   ; ("row search", Text_row_search)

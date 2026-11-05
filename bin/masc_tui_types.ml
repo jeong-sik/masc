@@ -9953,6 +9953,11 @@ type state = {
      while it is open. Unlike the two forms above it has no save of its own:
      Enter hands its text to the pane's raw-edit save, the one [e] ends in. *)
   mutable memory_recall_form: Masc_tui_memory_recall_form.t option;
+  (* The [x] form on the runtime.toml pane, which sets [\[typesafeai\]
+     excluded_keepers]. Like the recall form it holds the text it was opened
+     on, takes every key while it is open, and hands its text to the pane's
+     raw-edit save. *)
+  mutable typesafeai_exclusion_form: Masc_tui_typesafeai_exclusion_form.t option;
   (* Which open of that form the server's reading of the recall gate was asked
      for. An answer that carries another number belongs to a form the operator
      already left. *)
@@ -15760,6 +15765,7 @@ type text_input_target =
   | Text_runtime_model_form
   | Text_runtime_account_form
   | Text_memory_recall_form
+  | Text_typesafeai_exclusion_form
   | Text_voice_wizard
   | Text_palette
   | Text_row_search
@@ -15845,6 +15851,10 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Config && state.config_pane = Config_runtime
     && Option.is_some state.memory_recall_form && not compact_viewport
   then Some Text_memory_recall_form
+  else if
+    state.view = Config && state.config_pane = Config_runtime
+    && Option.is_some state.typesafeai_exclusion_form && not compact_viewport
+  then Some Text_typesafeai_exclusion_form
   else if state.view = Config && state.config_pane = Config_models
     && Option.is_some state.runtime_model_form && not compact_viewport
   then Some Text_runtime_model_form
@@ -15918,7 +15928,8 @@ let quit_key_allowed_for = function
   | Some
       ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_resource_save | Text_runtime_lane_name | Text_runtime_param
-      | Text_runtime_account_form | Text_memory_recall_form | Text_runtime_model_form
+      | Text_runtime_account_form | Text_memory_recall_form | Text_typesafeai_exclusion_form
+      | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
@@ -19856,6 +19867,7 @@ let create_state
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   memory_recall_form = None;
+  typesafeai_exclusion_form = None;
   memory_recall_standing_generation = 0;
   runtime_model_form = None;
   runtime_form_saves = Runtime_form_saves.empty;

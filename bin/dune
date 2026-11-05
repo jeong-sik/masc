@@ -1869,6 +1869,7 @@
   masc_tui_runtime_config_snapshot
   masc_tui_runtime_account_form
   masc_tui_memory_recall_form
+  masc_tui_typesafeai_exclusion_form
   masc_tui_model_form
   masc_tui_image_preview
   masc
@@ -2063,6 +2064,13 @@
  (wrapped false)
  (modules masc_tui_memory_recall_form)
  (libraries masc masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
+  masc_tui_ansi masc_tui_message_layout))
+
+(library
+ (name masc_tui_typesafeai_exclusion_form)
+ (wrapped false)
+ (modules masc_tui_typesafeai_exclusion_form)
+ (libraries masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
   masc_tui_ansi masc_tui_message_layout))
 
 (library
@@ -2824,6 +2832,7 @@
   masc.runtime_toml_namespace
   masc_tui_runtime_account_form
   masc_tui_memory_recall_form
+  masc_tui_typesafeai_exclusion_form
   masc_tui_model_form
   ;; The Lanes provider jump reads runtime.toml table headers by the TOML
   ;; grammar's key path rather than by spelling.

@@ -114,6 +114,9 @@ let config_bindings =
       ~help:"runtime.toml: declare an account by copying a provider", Some [ Config_runtime ]
   ; b ~ko:"기억 판정" Act "m" "recall"
       ~help:"runtime.toml: choose which keepers memory recall asks Jev about", Some [ Config_runtime ]
+  ; b ~ko:"판정 서버 제외" Act "x" "exclude"
+      ~help:"runtime.toml: choose which keepers no [typesafeai] gate asks a destination about",
+      Some [ Config_runtime ]
   ; b ~ko:"조각" Act "a" "fragments"
       ~help:"prompts: show or hide internal fragments", Some [ Config_prompts ]
   ; b ~ko:"키퍼 목소리" Act "a" "keeper voices"
@@ -1532,6 +1535,20 @@ let memory_recall_form_bindings =
 
 let footer_hints_memory_recall_form () =
   hints_of_bindings memory_recall_form_bindings
+
+(* The exclusion form takes every key while it is open, as the recall form
+   does, so its row names only what the form reads. *)
+let typesafeai_exclusion_form_bindings =
+  [ b ~ko:"행" Navigate "\xe2\x86\x91/\xe2\x86\x93" "row" ~help:"between the keeper rows"
+  ; b ~ko:"고르기" Act "Space" "pick"
+      ~help:"exclude the keeper under the cursor, or include it again"
+  ; b ~ko:"저장" Act "Enter" "save"
+      ~help:"write the list into runtime.toml through the preview and save [e] uses"
+  ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ]
+
+let footer_hints_typesafeai_exclusion_form () =
+  hints_of_bindings typesafeai_exclusion_form_bindings
 
 (* After a save the form shows the sign-in command and types nothing, so
    [y] copies it as it does in the link and browser views. *)

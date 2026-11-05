@@ -16694,6 +16694,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_status_open <- false;
   state.runtime_account_form <- None;
   state.memory_recall_form <- None;
+  state.typesafeai_exclusion_form <- None;
   state.runtime_model_jump <- None;
 
   state.presets_snapshot <- None;
@@ -30219,6 +30220,56 @@ let main
           then report_action state "system" "바뀐 게 없어요. 파일에 쓰지 않았어요"
           else save_runtime_config_edit_session ~workspace (Edit.edit text session))
   in
+  (* [x] on the runtime.toml pane: the exclusion form, opened on the file the
+     pane shows, with a stopped Keeper marked the way the recall form marks it. *)
+  let handle_typesafeai_exclusion_form_open () =
+    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
+    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | Some _, Some reading ->
+      let session = runtime_config_working_session reading in
+      let module Form = Masc_tui_typesafeai_exclusion_form in
+      let roster_entry (keeper : keeper) =
+        let reading = Masc_tui_types.keeper_reading state keeper in
+        { Form.name = keeper.k_name
+        ; presence =
+            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
+             else
+               match Masc_tui_keeper_control.runs reading with
+               | Some true -> Form.Running
+               | Some false -> Form.Stopped
+               | None -> Form.Unknown) }
+      in
+      (match
+         Form.open_on ~source_revision:session.base.source_revision
+           ~keepers:(List.map roster_entry state.keepers)
+           session.text
+       with
+       | Ok form -> state.typesafeai_exclusion_form <- Some form
+       | Error reason -> report_action state "error" reason)
+  in
+  (* Enter on the exclusion form, saved the way the recall form's choice is:
+     only while the pane still holds the document the form was opened on, and
+     through the raw edit's preview, revision check and conflict handling. *)
+  let submit_typesafeai_exclusion_form form =
+    let module Edit = Masc_tui_runtime_config_edit in
+    let module Form = Masc_tui_typesafeai_exclusion_form in
+    let refuse reason = state.typesafeai_exclusion_form <- Some (Form.refused form reason) in
+    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
+    | None, _ | _, None -> refuse "config identity not loaded yet; r to reload"
+    | Some workspace, Some reading ->
+      let session = runtime_config_working_session reading in
+      if not (Option.equal String.equal (Form.source_revision form)
+                (Some session.base.source_revision))
+      then refuse "runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 x 로 다시 열어 주세요"
+      else (
+        match Form.text_on form with
+        | Error form -> state.typesafeai_exclusion_form <- Some form
+        | Ok text ->
+          state.typesafeai_exclusion_form <- None;
+          if String.equal text session.text
+          then report_action state "system" "바뀐 게 없어요. 파일에 쓰지 않았어요"
+          else save_runtime_config_edit_session ~workspace (Edit.edit text session))
+  in
   let open_runtime_model_settings runtime_id =
     state.runtime_model_form <- None;
     state.runtime_model_jump <- Some runtime_id;
@@ -32776,9 +32827,9 @@ Use relative paths for resources already held in the package. -->
                     Option.map (fun form -> Masc_tui_runtime_account_form.paste form text)
                       state.runtime_account_form
                 end
-            (* The recall form has no text field: a paste is dropped, not read as
-               keys. *)
-            | Some Text_memory_recall_form -> ()
+            (* The recall and exclusion forms have no text field: a paste is
+               dropped, not read as keys. *)
+            | Some (Text_memory_recall_form | Text_typesafeai_exclusion_form) -> ()
             | Some Text_voice_wizard ->
                 Option.iter
                   (fun session ->
@@ -34621,6 +34672,16 @@ Use relative paths for resources already held in the package. -->
               | Masc_tui_memory_recall_form.Editing form -> state.memory_recall_form <- Some form
               | Masc_tui_memory_recall_form.Cancelled -> state.memory_recall_form <- None
               | Masc_tui_memory_recall_form.Submitted form -> submit_memory_recall_form form)
+       | Some k
+         when text_input_target state ~compact_viewport = Some Text_typesafeai_exclusion_form ->
+           (match state.typesafeai_exclusion_form with
+            | None -> ()
+            | Some form -> match Masc_tui_typesafeai_exclusion_form.key form k with
+              | Masc_tui_typesafeai_exclusion_form.Editing form ->
+                state.typesafeai_exclusion_form <- Some form
+              | Masc_tui_typesafeai_exclusion_form.Cancelled -> state.typesafeai_exclusion_form <- None
+              | Masc_tui_typesafeai_exclusion_form.Submitted form ->
+                submit_typesafeai_exclusion_form form)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_runtime_account_form ->
            (match state.runtime_account_form with
@@ -37711,6 +37772,7 @@ Use relative paths for resources already held in the package. -->
                    | Text_ask_answer | Text_fusion_launch | Text_preset_name | Text_resource_save
                    | Text_runtime_lane_name | Text_runtime_param
                    | Text_runtime_model_form | Text_runtime_account_form | Text_memory_recall_form
+                   | Text_typesafeai_exclusion_form
                    | Text_voice_wizard | Text_palette | Text_row_search
                    | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter | Text_skill_source_filter
                    | Text_identity_app_form | Text_identity_filter
@@ -40977,6 +41039,13 @@ Use relative paths for resources already held in the package. -->
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
            handle_memory_recall_form_open ()
+       (* [x] on the runtime.toml pane: the [typesafeai] exclusion list, under
+          the same condition as [m]. Lower case only: [X] on this pane is the
+          draft's discard, read by the draft keys above. *)
+       | Some "x"
+         when state.view = Config && state.config_pane = Config_runtime
+              && not state.runtime_config_status_open ->
+           handle_typesafeai_exclusion_form_open ()
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.

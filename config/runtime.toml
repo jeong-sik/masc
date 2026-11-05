@@ -101,9 +101,12 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # until one answers (a destination whose variable is empty is left out and
 # reported at boot; every refusal moves on to the next);
 # board_attention is this gate; absorb_gate is the librarian absorb gate
-# (off unless true); excluded_keepers names keepers that neither gate ever
-# asks the vendor about, so their posts, context and memories never leave
-# the machine (a name that is no keeper is reported at boot).
+# (off unless true); excluded_keepers names keepers that no [typesafeai]
+# gate ever asks a destination about, so their posts, context and memories
+# are not sent to the destinations (a name that is no keeper is reported at
+# boot). An excluded keeper's Board candidates are still judged, by the
+# board_attention_exact slots below, and the model a slot names receives
+# the post. In the TUI, Config > runtime.toml [x] edits this list.
 # When enabled, MASC POSTs each destination's key as an Authorization bearer
 # credential to that destination's endpoint and nowhere else. The JSON body's top-level
 # fields are model, state, and questions. state.signal is only the current

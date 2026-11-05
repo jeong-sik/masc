@@ -125,15 +125,25 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 - 대신 `Owner.resume` 이 끊긴 거절을 처음 남긴 패스는 `wake` 를 부르고 `Pending` 을 돌려준다. 그 거절 뒤에는 호스트 사건이 없어서, 부르지 않으면 다음 패스가 다른 사건을 기다린다.
 - replacement 사슬: 끊긴 원본이 `Conflicted` 부모의 replacement 자식이면, 부모도 `Settled` 라 `finished_chains` 가 잎부터 둘을 같이 옮긴다. 부모는 source 를 ACK 하지 않았으므로 다음 새 원본이 그 범위를 다시 읽는다. 다른 실행 단계 거절(`Invalid_output` 등)을 받은 자식과 같은 경로다.
 - gate: 끊긴 원본에는 gate 가 없다. gate 의 시작 의도는 `Judged` 에만 붙는다(§3.2).
-- floor step 도 `Outcome_unknown` 을 `Pending` 으로 둔다(`keeper_librarian_floor_step_owner.ml:50`). 11-06 운영 기록에 끊긴 floor step 은 0개다. 이 RFC 는 floor step 을 바꾸지 않는다.
+- floor step 도 `Outcome_unknown` 을 `Pending` 으로 둔다(`keeper_librarian_floor_step_owner.ml:50`). 11-06 운영 기록에 끊긴 floor step 은 0개다. 1·2층은 floor step 을 바꾸지 않는다. 3층이 맡는다(§3.4).
 
-### 3.4 설계 문서를 고친다
+### 3.4 3층: floor step 은 1·2층을 운영에서 확인한 뒤에 연다
+
+- 여는 조건: 1·2층 배포 뒤 운영 기록에서 끊긴 floor step 이 1개라도 보이거나, 시험이 그 모양을 재현한다.
+- 재료는 이미 있다.
+  - `Floor_chain.Stopped {position; report}` 가 멈춘 위치를 알린다(`keeper_librarian_floor_chain.ml:27`).
+  - `Floor_cleanup.settle_step ~position` 이 그 step 하나만 옮긴다(`keeper_librarian_floor_cleanup.ml:115`). 다음 패스가 같은 위치를 새 요청 ID 로 묻는다.
+- 3층 PR 이 시험으로 보일 것은 둘이다.
+  - `Stopped` 는 `Memory_refused [report]` 로 돌아간다. 끊긴 step 의 report 가 읽기 범위를 좁히지 않는다.
+  - step 사슬의 위치가 옮긴 뒤에도 이어진다.
+
+### 3.5 설계 문서를 고친다
 
 `docs/design/librarian-addon-execution.md:54` 의 문장을 이렇게 바꾼다.
 
 > An unknown sent outcome does not authorize another model call, except when the host retained `interrupted`: the process that started the attempt stopped before it ended. That original settles. Admission evaluates its part again, and history reads its range again in the next pass (RFC-0500).
 
-### 3.5 되풀이
+### 3.6 되풀이
 
 - `interrupted` 는 시도를 시작한 프로세스가 멈췄을 때만 생긴다. 같은 프로세스 안에서 끊기면 `cut` 이고, 그것은 막는다.
 - 그래서 같은 원본이 다시 `interrupted` 로 끝나려면 그때마다 서버가 멈춰야 한다.
@@ -141,7 +151,7 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
   - 옮길 때마다 남는 로그 줄로 같은 part 의 되풀이를 센다.
   - 되풀이가 보이면 그때 따로 정한다.
 
-### 3.6 하드컷과 migration 은 없다
+### 3.7 하드컷과 migration 은 없다
 
 - 29개 원본 모두 거절 증거에 `cause` 가 있다(§1.2). 새 코드가 다음 패스에서 그대로 읽는다.
 - 원인 없는 옛 `outcome_unknown` 증거가 남아 있으면 §3.1 이 읽지 못해 오류가 난다. 배포 직전에 다시 세고, 있으면 그 owner 의 scope 를 `exact-outcome-unknown-names-its-cause` §3.8-3 대로 옮긴다. 11-06 에는 0개였다.
@@ -160,8 +170,9 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 1. RFC(이 문서)
 2. 1층: admission. §3.1 의 읽기, §3.2 의 옮기기, 대기 이유의 원인.
 3. 2층: history. §3.3.
+4. 3층: floor step. §3.4 의 조건이 찰 때 연다.
 
-설계 문서 문장(§3.4)은 1층 PR 이 고치고, 2층 PR 이 history 몫을 더한다.
+설계 문서 문장(§3.5)은 1층 PR 이 고치고, 2층 PR 이 history 몫을 더한다.
 
 ## 6. 검증
 

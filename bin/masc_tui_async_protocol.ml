@@ -360,9 +360,11 @@ type keeper_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
       * Masc_tui_operator_projection.Flow.generation
-      (** keeper, tool call id, allow, and whether a wait was released — the
-          Approvals-surface twin of [Keeper_chat_approval_answered], which
-          needs the chat request this path does not have. *)
+      (** keeper, tool call id, approval id, allow, what the server did with
+          the answer, and the generation of the Approvals action slot the
+          decision took. The Approvals-surface twin of
+          [Keeper_chat_approval_answered], which needs the chat request this
+          path does not have. *)
   | Keeper_roster_reloaded of keeper_roster_observation
   | Keeper_row_reloaded of keeper_row_observation
   | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option

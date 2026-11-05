@@ -26,16 +26,18 @@ val reasons_title : int -> string
 val plain_reasons :
   indent:string -> inner:int -> rows:int -> string list -> (string option * string) list
 (** The reasons as the plain layout draws them, one element to a row: the
-    heading {!reasons_title}, the lines of each reason that is drawn, and, when
-    some are left out, a last row that says how many. A row is an optional
-    style and its text; the lines of a reason carry their own colour. [indent]
-    begins each reason line and the note, and a reason line is wrapped to
-    [inner] cells with it, so none is wider.
+    heading, the lines of each reason that is drawn and, when some are left
+    out, a last row that says how many. A row is an optional style and its
+    text; the lines of a reason carry their own colour. The heading is
+    {!reasons_title} after the layout's one-space margin. [indent] begins each
+    reason line and the note, and a reason line is wrapped to the cells that
+    [inner] leaves after it.
 
-    The reasons drawn are the first ones, whole and in order: as many as fit in
-    [rows] rows together with the note. The length of the list is the height
-    drawn. It is empty when there is no reason, or when not even the first fits
-    under the heading with the note that follows it. *)
+    The reasons drawn are the first ones, whole and in order. All of them are
+    drawn when they fit in [rows] rows; otherwise as many as fit together with
+    the note. The length of the list is the height drawn. It is empty when
+    there is no reason, or when the first one does not fit under the heading
+    (with the note, when there is more than one reason). *)
 
 val draw :
   inner:int ->

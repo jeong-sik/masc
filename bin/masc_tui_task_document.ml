@@ -30,7 +30,11 @@ let history_rows = function
                   (Planning_detail.short_ts event.th_ts)
                   event.th_label transition actor provenance
                 :: (match event.th_note with
-                    | Some note -> [ "      " ^ note ]
+                    | Some note ->
+                        (* The note is pretty-printed JSON: every line takes
+                           the note's indent, not only the first. *)
+                        List.map (fun line -> "      " ^ line)
+                          (Masc_tui_text_block.lines note)
                     | None -> []))
               events
 
@@ -193,7 +197,8 @@ let equal_input a b = match a,b with
 let prepare_input = function
   | History_input (cols,events) ->
       history_rows events |> List.concat_map (fun line ->
-        Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line)
+        Masc_tui_text_block.preformatted_rows
+          ~max_cells:(max 1 (framed_inner_width cols)) line)
   | Body_input (cols,goals,task) ->
       let field label text =
         let prefix="  " ^ label ^ ": " in

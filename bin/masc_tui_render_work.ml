@@ -158,7 +158,8 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
       ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
         state.task_history_request)
      |> List.concat_map (fun line -> if line="" then [""] else
-       Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)) line))
+       Masc_tui_text_block.preformatted_rows
+         ~max_cells:(max 1 (framed_inner_width cols)) line))
   @ task_document_lines state ~cols Masc_tui_task_document.History
 
 let task_detail_height ~rows ~count =

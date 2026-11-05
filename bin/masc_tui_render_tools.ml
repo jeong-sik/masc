@@ -332,7 +332,9 @@ let async_source_task_lines ~cols state source =
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
        ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
          state.tools_async_task_history_request)
-      |> List.concat_map (text ""))
+      |> List.concat_map (fun line ->
+           Masc_tui_text_block.preformatted_rows ~max_cells:width line
+           |> List.map (fun row -> "", row)))
   @ (task_document_lines state ~cols Masc_tui_task_document.History
      |> List.map (fun line -> "",line))
 

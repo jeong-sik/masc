@@ -4961,7 +4961,8 @@
 (test
  (name test_tui_text_block)
  (modules test_tui_text_block)
- (libraries alcotest astring masc_tui_text_block))
+ ; masc_tui_message_layout so a wrapped row's width is asked in display cells.
+ (libraries alcotest astring masc_tui_message_layout masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)

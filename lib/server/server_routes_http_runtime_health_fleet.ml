@@ -655,11 +655,19 @@ let fd_accountant_snapshot_json () =
     ]
 ;;
 
+let cache_close_counts_json (closed : Llm_provider.Http_client.cache_close_counts) =
+  `Assoc
+    [ "request_failed", `Int closed.request_failed
+    ; "not_persistent", `Int closed.not_persistent
+    ; "body_not_drained", `Int closed.body_not_drained
+    ; "transport_ended", `Int closed.transport_ended
+    ]
+;;
+
 let provider_connection_cache_json () =
   match Provider_connection_cache_ref.stats () with
   | None -> `Null
   | Some stats ->
-    let closed = stats.closed_total in
     let idle_max_per_origin =
       List.fold_left (fun most (_origin, idle) -> max most idle) 0 stats.idle_per_host
     in
@@ -668,13 +676,8 @@ let provider_connection_cache_json () =
       ; "idle_max_per_origin", `Int idle_max_per_origin
       ; "reused_total", `Int stats.reuse_count_total
       ; "created_total", `Int stats.create_count_total
-      ; ( "closed_total"
-        , `Assoc
-            [ "request_failed", `Int closed.request_failed
-            ; "not_persistent", `Int closed.not_persistent
-            ; "body_not_drained", `Int closed.body_not_drained
-            ; "transport_ended", `Int closed.transport_ended
-            ] )
+      ; "closed_total", cache_close_counts_json stats.closed_total
+      ; "closed_after_reuse", cache_close_counts_json stats.closed_after_reuse
       ]
 ;;
 

@@ -119,7 +119,13 @@ let test_two_runs_share_one_connection () =
     Alcotest.(check int) "it is parked again" 1 (count "idle_total" cache);
     Alcotest.(check int) "on its one origin" 1 (count "idle_max_per_origin" cache);
     Alcotest.(check (list string)) "no field names an origin"
-      [ "idle_total"; "idle_max_per_origin"; "reused_total"; "created_total"; "closed_total" ]
+      [ "idle_total"
+      ; "idle_max_per_origin"
+      ; "reused_total"
+      ; "created_total"
+      ; "closed_total"
+      ; "closed_after_reuse"
+      ]
       (Yojson.Safe.Util.keys cache));
   Alcotest.(check bool) "no cache is reported once its switch is released" true
     (Health.provider_connection_cache_json () = `Null)

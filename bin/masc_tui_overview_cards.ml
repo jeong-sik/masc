@@ -24,8 +24,9 @@ let reasons_title count = Printf.sprintf "Action needed (%d)" count
    heading, the lines of each reason that is drawn and, when some are left out,
    a last row that says how many. The layout draws exactly this list, so its
    length is its height. The reasons drawn are the first ones, whole and in
-   order: the longest run that fits [rows] together with the note that
-   follows it. A short reason after one that does not fit never jumps ahead. *)
+   order: all of them when they fit [rows], else the longest run that fits
+   together with the note. A short reason after one that does not fit never
+   jumps ahead. *)
 let plain_reasons ~indent ~inner ~rows reasons =
   let cells = inner - Layout.display_width indent in
   let blocks = List.map (reason_lines ~cells) reasons in

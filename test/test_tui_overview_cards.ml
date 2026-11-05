@@ -185,6 +185,8 @@ let test_a_reason_is_a_row_in_the_warning_colour () =
               (Cards.row_lines ~cells reason) (List.map strip lines);
             List.iter
               (fun line ->
+                 check bool "a line opens in the warning colour" true
+                   (String.starts_with ~prefix:(Masc_tui_ansi.Theme.warn ()) line);
                  check bool "a line closes the colour it opened" true
                    (String.ends_with ~suffix:reset line))
               lines)
@@ -225,19 +227,26 @@ let owed_count ~inner ~rows given =
 let owed_rows ~inner given kept =
   let cells = inner - Layout.display_width indent in
   let omitted = List.length given - kept in
-  match kept with
-  | 0 -> []
-  | _ ->
-      (Some Masc_tui_ansi.Ansi.bold, " " ^ Cards.reasons_title (List.length given))
-      :: List.concat_map
-           (fun reason ->
-              List.map (fun line -> None, indent ^ line) (Cards.reason_lines ~cells reason))
-           (take kept given)
-      @ if omitted > 0 then
-          [ Some (Masc_tui_ansi.Theme.recede ()), indent ^ Masc_tui_card.more_text omitted ]
-        else []
+  if kept = 0 then []
+  else begin
+    let lines =
+      List.concat_map
+        (fun reason ->
+           List.map (fun line -> None, indent ^ line) (Cards.reason_lines ~cells reason))
+        (take kept given)
+    in
+    let note =
+      if omitted > 0 then
+        [ Some (Masc_tui_ansi.Theme.recede ()), indent ^ Masc_tui_card.more_text omitted ]
+      else []
+    in
+    ((Some Masc_tui_ansi.Ansi.bold, " " ^ Cards.reasons_title (List.length given)) :: lines)
+    @ note
+  end
 
 let rows_testable = pair (option string) string
+
+let widths = [ 14; 26; 42; 82 ]
 
 let plain ~inner ~rows given = Cards.plain_reasons ~indent ~inner ~rows given
 
@@ -253,7 +262,7 @@ let test_the_rows_are_the_heading_the_first_reasons_and_the_note () =
               (Printf.sprintf "rows at %d cells and %d rows" inner rows)
               (owed_rows ~inner reasons kept) (plain ~inner ~rows reasons))
          (List.init 25 Fun.id))
-    [ 14; 26; 42; 82 ]
+    widths
 
 (* The edge of the rows: the whole list fits in exactly its height, and one row
    less leaves some out. *)
@@ -266,9 +275,16 @@ let test_the_reasons_fit_exactly_at_their_height () =
        check (list rows_testable) "all shown, no note"
          (owed_rows ~inner reasons (List.length reasons)) all;
        let short = plain ~inner ~rows:(needed - 1) reasons in
-       check bool "one row less leaves some out" true
-         (List.length short < needed && short <> []))
-    [ 14; 26; 42; 82 ]
+       let left_out =
+         List.length reasons - owed_count ~inner ~rows:(needed - 1) reasons
+       in
+       check bool "one row less leaves some out" true (left_out > 0);
+       match List.rev short with
+       | (Some _, note) :: _ ->
+           check bool "the note says how many" true
+             (contains_flat ~needle:(string_of_int left_out) (strip note))
+       | [] | (None, _) :: _ -> fail "the last row is the note")
+    widths
 
 let test_no_reason_draws_no_row () =
   List.iter
@@ -284,8 +300,15 @@ let test_rows_too_few_for_the_first_reason_and_the_note_draw_nothing () =
   List.iter
     (fun rows -> check int "no rows" 0 (List.length (plain ~inner ~rows reasons)))
     (List.init first_with_note Fun.id);
-  check int "the first reason and its note" first_with_note
-    (List.length (plain ~inner ~rows:first_with_note reasons))
+  let drawn = plain ~inner ~rows:first_with_note reasons in
+  check int "the first reason and its note" first_with_note (List.length drawn);
+  match drawn, List.rev drawn with
+  | (Some _, heading) :: _, (Some _, note) :: _ ->
+      check bool "the heading counts all the reasons" true
+        (contains_flat ~needle:(string_of_int (List.length reasons)) (strip heading));
+      check bool "the note counts the others" true
+        (contains_flat ~needle:(string_of_int (List.length reasons - 1)) (strip note))
+  | _ -> fail "a styled heading first and a styled note last"
 
 (* Over many lists, widths and row counts: the rows are those owed, in no more
    rows than were given, and a reason line fits the width. *)
@@ -301,7 +324,6 @@ let random_reason state =
 
 let test_the_rows_owed_over_many_lists_widths_and_row_counts () =
   let state = Random.State.make [| 42 |] in
-  let cases = ref 0 in
   for _ = 1 to 500 do
     let given = List.init (Random.State.int state 7) (fun _ -> random_reason state) in
     (* From four cells: the indent takes two and a letter two cells wide does
@@ -310,7 +332,6 @@ let test_the_rows_owed_over_many_lists_widths_and_row_counts () =
     let rows = Random.State.int state 18 in
     let drawn = plain ~inner ~rows given in
     let kept = owed_count ~inner ~rows given in
-    incr cases;
     check bool "no more rows than it was given" true (List.length drawn <= rows);
     check (list rows_testable) "the rows owed" (owed_rows ~inner given kept) drawn;
     List.iter
@@ -320,8 +341,7 @@ let test_the_rows_owed_over_many_lists_widths_and_row_counts () =
               (Layout.display_width (strip text) <= inner)
         | Some _, _ -> ())
       drawn
-  done;
-  check bool "the cases ran" true (!cases > 0)
+  done
 
 let () =
   run "tui overview cards"

@@ -35,3 +35,10 @@ val single_latin_key : string -> string option
 (** Read back one two-set key without replaying a composed syllable or a
     compound letter as several commands. [None] leaves the original input
     unchanged. Intended for command-only panels with action shortcuts. *)
+
+val latin_text : string -> string
+(** [latin_text key] is the keys [key] was typed with, written one after the
+    other, when [key] is one Hangul character the two-set layout can spell,
+    and [key] itself otherwise. For a query over English text, where a
+    composed syllable is the several letters the operator pressed:
+    [latin_text "메"] is ["ap"]. *)

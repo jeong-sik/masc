@@ -33565,7 +33565,7 @@ Use relative paths for resources already held in the package. -->
                  | "esc" ->
                      state.help_filter <- Help_filter_off;
                      state.help_scroll <- 0
-                 | "\r" ->
+                 | "\r" | "\n" ->
                      state.help_filter <-
                        (if String.equal query "" then Help_filter_off
                         else Help_filter_kept query)
@@ -33575,7 +33575,12 @@ Use relative paths for resources already held in the package. -->
                  | s
                    when (String.length s = 1 && Char.code s.[0] >= 32)
                         || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                     filter_with (query ^ s)
+                     (* The sheet's keys and nearly all of its wording are
+                        English. A Hangul key is read back as the letters the
+                        operator pressed, a composed syllable as all of them,
+                        so Korean mode types the same query English mode
+                        does. *)
+                     filter_with (query ^ Masc_tui_key_ime.latin_text s)
                  | _ -> ())
             | Help_filter_kept _ when String.equal k "esc" ->
                 (* The first Esc puts the whole sheet back; the next closes it. *)

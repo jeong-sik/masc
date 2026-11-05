@@ -126,10 +126,13 @@ let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option
                (phase ^ fit_runtime_id (width - phase_width) runtime_id)
                width)
 
-(* One activation mode and the sandbox declaration from the roster row. *)
+(* One activation mode and the sandbox declaration from the roster row. The
+   cell fills the whole flags field, so the columns to its right line up with
+   their header. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
+  let gap = String.make Render_schedule.keeper_flags_gap ' ' in
   match runtime with
-  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
+  | None -> Ansi.dim ^ "-" ^ gap ^ "-" ^ Ansi.reset
   | Some row ->
       let module Mark = Masc_tui_keeper_mark in
       let sandbox =
@@ -144,7 +147,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      Mark.activation_letter row.kr_activation_mode ^ " " ^ sandbox
+      Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
 
 let keeper_activity_word (activity : Keeper_list_model.activity) =
   match activity with
@@ -258,7 +261,9 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; " "
     ; Message_layout.fit_width "NOW" Render_schedule.keeper_status_width
     ; (if columns.kcol_show_flags then
-         " " ^ Message_layout.fit_width "Mode S" Render_schedule.keeper_flags_width
+         " "
+         ^ Message_layout.fit_width Render_schedule.keeper_flags_header
+             Render_schedule.keeper_flags_width
        else "")
     ; " " ^ Message_layout.pad_left "AGE" Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then

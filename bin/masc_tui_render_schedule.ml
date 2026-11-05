@@ -141,12 +141,14 @@ end
 
 let keeper_marker_width = 3
 let keeper_status_width = 12
-(* "A P S": autoboot, proactive, sandbox. The width and the inner-width
-   threshold below move together -- widening the cell without raising the
-   threshold spends two columns the layout had already promised to the name and
-   task cells, and the row grows past the frame at exactly the widths where
-   flags first appear. *)
-let keeper_flags_width = 5
+
+(* The flag cell is two one-cell letters: an activation letter under "Mode" and
+   a sandbox letter under "S". The field is as wide as that header, so the
+   header, the cells and the column budget come from one string. *)
+let keeper_flags_header = "Mode S"
+let keeper_flag_letter_count = 2
+let keeper_flags_width = String.length keeper_flags_header
+let keeper_flags_gap = keeper_flags_width - keeper_flag_letter_count
 
 (* Six cells fit [Message_layout.span_text]'s widest reading ("99d23h"). *)
 let keeper_last_turn_width = 6

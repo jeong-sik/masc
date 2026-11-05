@@ -484,15 +484,47 @@ except (OSError, KeyError, ValueError) as error:
 |}
 ;;
 
-let prepare_directory_command ?owner ~path ~mode () =
+(* HIGH-RISK-UNREVIEWED: how the SSH user reaches the root-owned install
+   paths, observed on the host before anything is installed. Root writes them
+   directly; any other user needs a passwordless [sudo -n]. *)
+type remote_privilege =
+  | Remote_user_is_root
+  | Remote_user_uses_sudo
+
+let as_root privilege words =
   String.concat " "
-    ([ "sudo"; "-n"; "python3"; "-c"; shell_quote prepare_directory_script
+    ((match privilege with
+      | Remote_user_is_root -> []
+      | Remote_user_uses_sudo -> [ "sudo"; "-n" ])
+     @ words)
+;;
+
+let observe_remote_privilege ssh (endpoint : Exec_ssh_endpoint.t) =
+  let* uid_command = pinned_ssh ssh "id -u" in
+  let* uid = run_capture_stdout uid_command in
+  match int_of_string_opt (String.trim uid) with
+  | None -> Error (Printf.sprintf "endpoint %s answered id -u with %S" endpoint.name uid)
+  | Some 0 -> Ok Remote_user_is_root
+  | Some _ ->
+    let* sudo_command = pinned_ssh ssh "sudo -n true" in
+    (match run_capture_stdout sudo_command with
+     | Ok _ -> Ok Remote_user_uses_sudo
+     | Error detail ->
+       Error
+         (Printf.sprintf
+            "remote user %s on endpoint %s is not root and cannot run sudo -n, so the shim was not installed: %s"
+            endpoint.user endpoint.name detail))
+;;
+
+let prepare_directory_command ?owner ~privilege ~path ~mode () =
+  as_root privilege
+    ([ "python3"; "-c"; shell_quote prepare_directory_script
      ; shell_quote path; Printf.sprintf "%o" mode
      ]
      @ (match owner with None -> [] | Some user -> [ shell_quote user ]))
 ;;
 
-let install_shim ssh endpoint shim_path =
+let install_shim ssh ~privilege endpoint shim_path =
   let* stat =
     try Ok (Unix.lstat shim_path) with
     | Unix.Unix_error (error, operation, target) ->
@@ -505,7 +537,8 @@ let install_shim ssh endpoint shim_path =
   else
     let* config = endpoint_shim_config ssh endpoint in
     let* prepare_root =
-      pinned_ssh ssh (prepare_directory_command ~path:endpoint.remote_root ~mode:0o755 ())
+      pinned_ssh ssh
+        (prepare_directory_command ~privilege ~path:endpoint.remote_root ~mode:0o755 ())
     in
     let* () = run_inherited prepare_root in
     let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
@@ -513,18 +546,19 @@ let install_shim ssh endpoint shim_path =
     let* () = run_with_file_stdin upload shim_path in
     let command =
       String.concat " && "
-        [ "config_temp=$(sudo -n mktemp /etc/masc-exec-shim.conf.XXXXXX)"
-        ; "trap 'sudo -n rm -f \"$config_temp\"' EXIT"
+        [ "config_temp=$(" ^ as_root privilege [ "mktemp /etc/masc-exec-shim.conf.XXXXXX" ] ^ ")"
+        ; "trap '" ^ as_root privilege [ "rm -f \"$config_temp\"" ] ^ "' EXIT"
         ; "printf %s " ^ shell_quote config
-          ^ " | sudo -n tee \"$config_temp\" >/dev/null"
-        ; "sudo -n chmod 0644 \"$config_temp\""
-        ; "sudo -n install -m 0755 " ^ shell_quote remote_temp
-          ^ " /usr/local/bin/masc-exec-shim"
+          ^ " | " ^ as_root privilege [ "tee \"$config_temp\" >/dev/null" ]
+        ; as_root privilege [ "chmod 0644 \"$config_temp\"" ]
+        ; as_root privilege
+            [ "install -m 0755"; shell_quote remote_temp; "/usr/local/bin/masc-exec-shim" ]
         ; "rm -f " ^ shell_quote remote_temp
-        ; "sudo -n mv -f \"$config_temp\" /etc/masc-exec-shim.conf"
-        ; "sudo -n install -d -m 0755 /usr/local/share/masc"
+        ; as_root privilege [ "mv -f \"$config_temp\" /etc/masc-exec-shim.conf" ]
+        ; as_root privilege [ "install -d -m 0755 /usr/local/share/masc" ]
         ; "probe=$(masc-exec-shim --probe)"
-        ; "printf '%s\\n' \"$probe\" | sudo -n tee /usr/local/share/masc/exec-shim.version >/dev/null"
+        ; "printf '%s\\n' \"$probe\" | "
+          ^ as_root privilege [ "tee /usr/local/share/masc/exec-shim.version >/dev/null" ]
         ]
     in
     let* install = pinned_ssh ssh command in
@@ -540,11 +574,11 @@ let validate_keeper_name keeper =
   else Ok keeper
 ;;
 
-let provision_keeper_workspace ssh (endpoint : Exec_ssh_endpoint.t) keeper =
+let provision_keeper_workspace ssh ~privilege (endpoint : Exec_ssh_endpoint.t) keeper =
   let keeper_root = Filename.concat endpoint.remote_root keeper in
   let* prepare =
     pinned_ssh ssh
-      (prepare_directory_command ~owner:endpoint.user ~path:keeper_root ~mode:0o700 ())
+      (prepare_directory_command ~owner:endpoint.user ~privilege ~path:keeper_root ~mode:0o700 ())
   in
   run_inherited prepare
 ;;
@@ -669,13 +703,16 @@ let run base_path endpoint_name shim_path replace_host_key keepers keeper_tokens
     let* ssh =
       Keeper_sandbox_ssh.create ~base_path ~keeper_name:"bootstrap" ~endpoint ()
     in
-    let* () = install_shim ssh endpoint shim_path in
+    let* privilege = observe_remote_privilege ssh endpoint in
+    let* () = install_shim ssh ~privilege endpoint shim_path in
     (* --probe alone does not load the shim configuration. Execute the framed
        endpoint check before reporting success or creating Keeper workspaces. *)
     let* () = Keeper_sandbox_remote.check_endpoint_preflight ssh in
     let* () =
       List.fold_left
-        (fun acc keeper -> let* () = acc in provision_keeper_workspace ssh endpoint keeper)
+        (fun acc keeper ->
+           let* () = acc in
+           provision_keeper_workspace ssh ~privilege endpoint keeper)
         (Ok ()) keepers
     in
     let* () =

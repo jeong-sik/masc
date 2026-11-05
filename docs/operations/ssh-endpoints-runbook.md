@@ -8,12 +8,13 @@ The lane is fail-closed: do not recover an SSH failure by silently switching
 
 - A Linux host reachable with OpenSSH and a dedicated remote account.
 - Existing operator SSH authentication for the one-time `ssh-copy-id` step.
-- Non-interactive sudo (`sudo -n`) for installing the shim/config and creating
-  keeper roots. The bootstrap fails instead of opening a PTY or waiting for a
-  sudo password.
+- Root access for installing the shim/config and creating keeper roots: either
+  the remote account is root, or it has non-interactive sudo (`sudo -n`).
+  Bootstrap checks which with `id -u` and `sudo -n true` before it uploads
+  anything, and fails instead of opening a PTY or waiting for a sudo password.
 - `git`, `rg`, `python3`, and enough free disk on the remote host. Install `gh`
   when provisioning a GitHub identity. Bootstrap uses Python's directory file
-  descriptors under non-interactive sudo to prepare workspaces without
+  descriptors, as root or under `sudo -n`, to prepare workspaces without
   following symbolic links.
 - Docker locally when building the static shim or running the live fixture.
 
@@ -134,12 +135,16 @@ The bootstrap then:
 1. creates or reuses the dedicated keypair and authorizes its public key using
    the operator's existing SSH authentication;
 2. proves the pinned key works in batch mode;
-3. uploads and installs the shim and `/etc/masc-exec-shim.conf`;
-4. records the remote shim probe under `/usr/local/share/masc/`;
-5. prepares `remote_root/<keeper>` for every `--keeper` and
+3. checks that the account is root or can run `sudo -n`, and stops there if
+   neither. The public key from step 1 stays in that account's
+   `authorized_keys`: a rerun after the account gets sudo reuses it, and a
+   host that will not be provisioned needs it removed there;
+4. uploads and installs the shim and `/etc/masc-exec-shim.conf`;
+5. records the remote shim probe under `/usr/local/share/masc/`;
+6. prepares `remote_root/<keeper>` for every `--keeper` and
    `--github-token-file` name; when a token is supplied, creates `.config/gh`
    there and sends the token only on SSH stdin;
-6. for each supplied token, writes its value to
+7. for each supplied token, writes its value to
    `.masc/ssh/redaction/<keeper>.token` at 0600 so
    output redaction knows it, without adding it to any execution environment.
 

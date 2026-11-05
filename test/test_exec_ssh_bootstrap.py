@@ -191,6 +191,27 @@ sys.exit(subprocess.run(["/bin/sh", "-c", command]).returncode)
                 self.assertNotIn("provisioned.", result.stdout)
                 self.assertEqual(self.known_hosts().read_text(), stored)
 
+    def test_root_user_installs_without_sudo(self):
+        # The install paths are root-owned. A root SSH user writes them itself,
+        # so a host with no sudo, such as an Alpine container, is provisioned.
+        sudo_calls = self.root / "sudo-calls"
+        self.make_command("id", 'if [ "$1" = -u ]; then echo 0; else exec /usr/bin/id "$@"; fi\n')
+        self.make_command("sudo", "echo called >> " + shlex.quote(str(sudo_calls)) + "\nexit 127\n")
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(sudo_calls.exists())
+        self.assertTrue((self.remote / "masc-exec-shim").exists())
+        self.assertTrue((self.workspace / "keeper-a").is_dir())
+
+    def test_user_without_root_or_sudo_is_refused_before_upload(self):
+        self.make_command("id", 'if [ "$1" = -u ]; then echo 1000; else exec /usr/bin/id "$@"; fi\n')
+        self.make_command("sudo", "exit 1\n")
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("provisioned.", result.stdout)
+        self.assertFalse((self.remote / "masc-exec-shim").exists())
+        self.assertEqual(list(self.remote.glob("upload.*")), [])
+
     def test_failed_probe_is_not_success(self):
         self.env["PROBE_EXIT"] = "19"
         result = self.run_bootstrap("--keeper", "keeper-a")

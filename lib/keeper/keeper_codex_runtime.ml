@@ -1208,8 +1208,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       |> Result.map_error internal_error in
     (* Resume configuration alone does not update the model-visible history.
        The runtime waits for this injection's ACK before [turn/start]. The
-       existing frontier acknowledges it only after a completed vendor turn;
-       compaction invalidates the receipt along with other held context. *)
+       existing frontier acknowledges it only after a completed vendor turn.
+       A compaction drops the other held context, but rebuilds the thread's
+       initial context from this turn's [developerInstructions]
+       (build_initial_context_with_world_state, codex rust-v0.166.0), which
+       begin with [system_projection]: the standing System stays held, and
+       injecting it again would put a second copy in the thread (#47644). *)
     let developer_context =
       (if refresh_system then [Keeper_context_submission_link.text system_projection] else [])
       @ Keeper_client_tool_outbox.developer_context tool_outbox in
@@ -1499,9 +1503,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         (match
            (* A tool boundary does not report whether Codex compacted the
               thread. Re-send context on the next Resume rather than treating
-              an unobserved copy as held. *)
+              an unobserved copy as held. The standing System is held either
+              way: a compaction re-renders it from [developerInstructions]. *)
            Keeper_official_client_session_store.settle_holding
-             ~held_context:[]
+             ~held_context:[ system_receipt ]
              ~base_path
              ~keeper_name
              ~expected:!session_state
@@ -1564,13 +1569,14 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
            | Tool_delivery_closed _ -> close_delivery_frontier ()
-           | Compaction_observed -> settled_held_context := []
+           | Compaction_observed -> settled_held_context := [ system_receipt ]
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
-                earlier in this turn still invalidates its context receipts. *)
+                earlier in this turn still invalidates its other context
+                receipts. *)
              (match frame with
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
-              | Context_window_filled _ -> settled_held_context := []
+              | Context_window_filled _ -> settled_held_context := [ system_receipt ]
               | Counted { last = Request_usage _; _ } -> ())
            | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _

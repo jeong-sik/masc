@@ -342,6 +342,40 @@ let describe_rejected_names names =
   if hidden = 0 then listed else Printf.sprintf "%s and %d more" listed hidden
 ;;
 
+(* The parser's account of where argument text broke. Yojson's message holds a
+   line break and the lexeme it stopped at, which can be long; the account
+   rides in a User message for the rest of the conversation. *)
+let unreadable_problem_char_limit = 160
+
+let describe_unreadable_tool_uses (calls : Llm_provider.Types.unreadable_tool_use list) =
+  let account (call : Llm_provider.Types.unreadable_tool_use) =
+    match call.arguments_problem with
+    | Llm_provider.Tool_call_input.Not_object -> "not an object"
+    | Llm_provider.Tool_call_input.Invalid_json message ->
+      Util.clip
+        (String.map (function '\n' | '\r' -> ' ' | c -> c) message)
+        unreadable_problem_char_limit
+  in
+  let rec take index shown = function
+    | [] -> List.rev shown, 0
+    | rest when index >= rejected_name_display_limit -> List.rev shown, List.length rest
+    | call :: rest -> take (index + 1) (call :: shown) rest
+  in
+  let shown, hidden = take 0 [] calls in
+  let listed =
+    String.concat
+      ", "
+      (List.map
+         (fun (call : Llm_provider.Types.unreadable_tool_use) ->
+            Printf.sprintf
+              "\"%s\" (%s)"
+              (Util.clip call.tool_name rejected_name_char_limit)
+              (account call))
+         shown)
+  in
+  if hidden = 0 then listed else Printf.sprintf "%s and %d more" listed hidden
+;;
+
 let schedule_tool_use ~tool_index index (id, name, input) =
   (* Resolving through [resolve_tool_call] (not a bare [find_in_index]) keeps
      the scheduled name, execution_mode, and completion consistent with what

@@ -90,6 +90,13 @@ val describe_rejected_names : string list -> string
     because the sentence lands in a User message, which the transcript replays
     on every later request. *)
 
+val describe_unreadable_tool_uses : Llm_provider.Types.unreadable_tool_use list -> string
+(** Render calls whose arguments were not one JSON object for the sentence the
+    model reads: each quoted tool name with the parser's account of where the
+    text broke, never the argument text itself. Names and accounts are clipped
+    on UTF-8 boundaries and the list carries a count of what it left out, under
+    the same bounds as [describe_rejected_names]. *)
+
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error
   | Recoverable_tool_error

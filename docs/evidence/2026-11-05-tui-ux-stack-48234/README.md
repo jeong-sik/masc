@@ -1,15 +1,15 @@
 # TUI UX stack #48234: before and after screens
 
 Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31, 33 to 36,
-38 and 40 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289,
-#48292, #48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370,
-#48386, #48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493,
-#48516, #48534, #48552). Layer 7 is the first version of this document. Layer 12
-added layers 6 and 8 to 11. Layer 18 added layers 13 to 17. Layer 21 added
-layers 19 and 20. Layer 26 is an RFC and has no screens. Layer 28 added layers
-22 to 25 and 27. Layer 30 added layer 29. Layer 32 added layer 31. Layer 37
-added layers 33 to 36. Layer 39 added layer 38. The layer that carries this text
-added layer 40.
+38, 40, 42 and 43 of the stack (#48231, #48232, #48233, #48250, #48254, #48266,
+#48289, #48292, #48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365,
+#48370, #48386, #48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481,
+#48493, #48516, #48534, #48552, #48581, #48605). Layer 7 is the first version of
+this document. Layer 12 added layers 6 and 8 to 11. Layer 18 added layers 13 to
+17. Layer 21 added layers 19 and 20. Layer 26 is an RFC and has no screens.
+Layer 28 added layers 22 to 25 and 27. Layer 30 added layer 29. Layer 32 added
+layer 31. Layer 37 added layers 33 to 36. Layer 39 added layer 38. Layer 41
+added layer 40. The layer that carries this text added layers 42 and 43.
 
 ## Source
 
@@ -42,6 +42,8 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 36) | `ee537e002edec7d33e812dc73fab59a9637f87ef` | 41960815641 | `118f0ae57bb201f6060a86a9ee23b5962b9c66c54376b74b4116d353b8b7911f` | `6bfc13656a2a33b7f5021f80f8422e3d904145077ee14c714d0066b1b39785a6` |
 | After (layers 1 to 38) | `92b883871eb84114b1512b94131a46a859b2060b` | 41968335391 | `b9c634c2ac26ba44986a74f1179a1851a3ae2adbbe47afbb4e67c9048f4f69cb` | `4ccfb7b664574d37bfac961638f3fbe0e1d5fb91df2e836b8927f16c578414f8` |
 | After (layers 1 to 40) | `4422e1e6c381551917958d31f45c4ff90b8af586` | 41973601229 | `26bba8cdd50174de96ea2f9add34755ef2812aff6d0080d0d57f37cbb737007e` | `b40ee783292ecd9a579943422823eb26c534fe4f3612b7460962f7071c895b80` |
+| After (layers 1 to 42) | `543f011f59273164de36bb3d9d145e324c8a2c2e` | 41980255227 | `84b387c0934cfe74e54a5b6ceddb21219a7caddd5c192cbaab135f9908495537` | `2522faa90efea429f8fd603b4d4202589f13c5d2adba938805ef39faebbcd980` |
+| After (layers 1 to 43) | `914842f0711572cba61c927b11774623772c83e5` | 41985675163 | `4fb88505271e2182a89a72d355c18695fe6203bffdb577708eeae9e7a20c2f10` | `0fe12fb2a19071f6dc1612fb6de3e18922f88bb5dc7def04fa32d207f33f831f` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -1326,6 +1328,166 @@ any-json-is-a-document      draws any JSON value as a document                 5
 non-finite-raises           raises on NaN and Infinity                         1
 ```
 
+### Layer 42: the plain Dashboard list shows the Action needed reasons (#48581)
+
+The Dashboard draws two columns of cards from 92 columns, and a plain list of
+rows below that (a card is at least 44 cells wide, with 2 cells between them).
+The fixture server reports three reasons it needs the operator. The cards show
+them in an `Action needed (3)` card. The plain list had no rows for them. The
+footer notice `ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers`
+is drawn at 100x30 and 120x35 and left out at 90x30, 80x24 and 60x24 (#48588),
+so the 80x24 Dashboard did not say that anything needed the operator. Layer 42
+draws the reasons in the plain list, after the Continue rows and before the
+Health and Work rows.
+
+Before is the layers 1 to 40 build. After is the layers 1 to 42 build. Layer 41
+changes no code.
+
+The Dashboard was captured in 13 sizes by each build: 120x35, 100x30, 90x30,
+80x24 and 60x24; 80 columns with 18, 16 and 15 rows; and the card layout at
+120x20, 120x18, 120x16, 100x22 and 100x20. The Before build was also captured
+at 80x14, 80x12 and 80x10, where it draws only `terminal too small -- resize to
+at least 15 rows`. With digits masked, the text of the two builds differs in
+these captures only:
+
+- 90x30, 80x24 and 60x24: the heading `Action needed (3)` and one row per reason
+  come between the Continue row and the Health row, followed by a blank row.
+  The Health and Work rows stay. The blank rows at the bottom of the screen are
+  as many fewer as the rows added.
+- 60x24: the second reason is 60 cells wide and the row has 56, so it breaks
+  after `runtime_` and `meta` is on the next row at the same indent.
+- 80x18: the same heading and rows, and the two blank rows that set off
+  Continue and the readings are gone. Health and Work stay.
+- 80x16 and 80x15: the Health and Work rows are gone. The reasons take their
+  rows.
+- 120x35, 100x30 and the five card captures from 120x20 to 100x20: no
+  difference.
+
+The heading is bold, like the Continue heading. Each reason is drawn in the
+warning colour (`ESC[93m`), the colour of the Action needed card. With digits
+masked, the colour codes differ in 7 rows at 60x24, 6 rows at 80x24, 6 rows at
+90x30, 6 rows at 80x16 and 8 rows at 80x18, and in none of the card captures.
+
+```
+80x24  before  Continue
+                Choose a Keeper  · start a conversation
+
+               Health: ok · 3 Keeper states unreadable
+               Work: 0 currently done in the last 24h · details in Work
+
+80x24  after   Continue
+                Choose a Keeper  · start a conversation
+
+               Action needed (3)
+                keeper_fleet_safety:no_executable_keeper_fibers
+                keeper_identity_drift:configured_keeper_without_runtime_meta
+                keeper_memory_execution:addon_unattached
+
+               Health: ok · 3 Keeper states unreadable
+               Work: 0 currently done in the last 24h · details in Work
+```
+
+![The Dashboard at 80x24 before](dashboard-reasons-80-before.png)
+*Before: the Continue row, then Health and Work.*
+
+![The Dashboard at 80x24 after](dashboard-reasons-80-after.png)
+*After: the heading and the three reasons come between Continue and Health.*
+
+At 80x16 the destinations come first and the reasons take the rows that are
+left, so Health and Work give way:
+
+![The Dashboard at 80x16 before](dashboard-reasons-80x16-before.png)
+*Before: Continue, then Health and Work, with blank rows around Continue.*
+
+![The Dashboard at 80x16 after](dashboard-reasons-80x16-after.png)
+*After: Continue and the three reasons. Health and Work are not drawn.*
+
+![The Dashboard at 60x24 after](dashboard-reasons-60-after.png)
+*60x24: the second reason breaks after `runtime_`, and `meta` is on a row of its
+own.*
+
+The tests and the other checks of the code behind these screens are under
+layer 43.
+
+### Layer 43: the plain Dashboard draws its reason rows from one list (#48605)
+
+Layer 42 draws the reasons in the plain list as a heading row, the lines of
+each reason that fits and, when some are left out, a `+N more` row. An
+independent review of layer 42 found that the height of these rows was counted
+in one place and the rows were drawn in another. A heading of two rows, set in
+only one of them, would have made the Dashboard draw more rows than it
+reserved.
+
+Layer 43 makes `plain_reasons` return all the rows as one list, each row an
+optional style and its text, and the Dashboard draws that list as it is. The
+rows it used are the length of the list. The blank rows that set off the
+blocks are handed out from one count of the free rows, one at a time.
+
+Before is the layers 1 to 42 build. After is the layers 1 to 43 build. The
+screen is meant not to change.
+
+Both builds captured the Dashboard in the 13 sizes of layer 42: 120x35, 100x30,
+90x30, 80x24 and 60x24; 80 columns with 18, 16 and 15 rows; and the card layout
+at 120x20, 120x18, 120x16, 100x22 and 100x20. With the times, `.jsonl`
+positions and durations masked and the digits kept, none of the 13 captures
+differs in its text. With the digits masked in the text between escapes, none
+differs in its colour codes either. The images of layer 42 are the screens of
+layer 43 as well.
+
+`plain_reasons` of layer 42 and of layer 43 were run on the same random inputs:
+200000 lists of 0 to 7 reasons made of English words, Hangul, an emoji and a
+combining mark, drawn at 4 to 83 cells and in -2 to 27 rows. Both gave the same
+rows in every case (130641 of the inputs gave at least one row). The blank rows
+of the two versions were compared for every count of free rows from 0 to 12,
+with and without reasons and with and without readings (52 combinations) and
+were the same.
+
+`test/test_tui_overview_cards.ml` has 17 cases, 7 of them about the reasons, and
+`test/test_tui_card.ml` has 13. They ran in a bytecode build outside the
+repository with small stand-ins for `Masc_tui_ansi` and `Masc_tui_theme`, and
+all passed, also with every warning an error for the cards modules and the
+tests. `masc_tui_render.ml` was type-checked with the project's checker against
+the changed interfaces. Two calls to functions that earlier layers of this
+stack add (`operator_actions` and `join_fitting`) were stubbed, because the
+checker's snapshot of the compiled interfaces predates them.
+The cases about the reasons check what the plain list owes rather than how a
+screen reads. A reason is its row in the warning colour, and the title names the
+count. The rows are the heading, the lines of the first reasons that fit and the
+note, compared with a count made from the lines of the reasons and not asked of
+the function. The whole list fits at exactly its height and one row less leaves
+some out. No reason draws no row. Rows that hold the heading, the first reason
+and not its note draw nothing. Over 500 random lists, widths and row counts, the
+rows are the ones owed, in no more rows than were given, and a reason line fits
+the width. The `type-check` check passed on the head of the layer 43 pull
+request.
+
+Eighteen copies of the two modules, each with one fault put in on purpose, were
+each failed by at least one case:
+
+```
+height-without-the-heading   leaves the heading out of the height                  5 cases fail
+fit-needs-a-spare-row        needs one spare row to show a list that fits          5
+note-always                  draws the "+N more" row when nothing is left out      4
+note-never                   never draws the "+N more" row                         4
+note-has-no-indent           draws the "+N more" row at the margin                 3
+note-has-no-style            draws the "+N more" row in the text colour            3
+note-counts-one-too-many     counts one reason too many as left out                3
+heading-has-no-style         draws the heading without bold                        4
+heading-counts-the-shown     counts only the reasons shown in the heading          4
+lines-have-no-indent         draws the reason lines at the margin                  4
+width-ignores-the-indent     wraps a reason at the full width, not less the indent 4
+reasons-reversed             takes the reasons from the last one                   5
+first-only                   draws at most the first reason                        4
+empty-draws-the-heading      draws a heading when there is no reason               5
+reason-colour-not-closed     leaves a reason's colour open at the end of its line  2
+reason-not-wrapped           draws a reason on one line however long it is         3
+title-has-no-count           leaves the count out of the title                     2
+card-more-row-own-words      the card says "+N fewer" instead of more_text         2
+```
+
+No test draws the Dashboard: the tests run `plain_reasons`, and the rows the
+Dashboard reserves for it are checked by the screens above.
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -1435,5 +1597,21 @@ non-finite-raises           raises on NaN and Infinity                         1
 - Layer 40 with a note of many paragraphs or a very deep object: only a note of
   two paragraphs was captured. The text of a deeply nested note grows with the
   square of its depth (#48554), which this layer does not change.
+- Layer 42 with the Keeper roster open beside the Dashboard: the sidebar takes
+  columns from the Dashboard, so the plain list is drawn at a width that was not
+  captured.
+- Layer 42 with a decision window that holds only some decisions, a warning row
+  above the destinations, or a candle line: the fixture has none of them. The
+  rows they take come out of the free rows by the same count, which the layer 43
+  tests cover without a screen.
+- Layer 42 with a reason that wraps to more than two rows, and the cut when a
+  reason does not fit: only the two-row case at 60x24 and the cut at 80x16 and
+  80x15 were captured. The second row of a wrapped reason has the same indent as
+  the first and reads like another reason. The Action needed card does the same.
+- Layer 42 below 15 rows: the TUI draws only `terminal too small` there, in the
+  Before and After builds alike.
+- Layer 42 at 100 columns and wider: the footer notice and the card layout are
+  unchanged, and the footer notice is still left out from 90 columns down
+  (#48588).
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

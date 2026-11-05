@@ -1266,7 +1266,7 @@ elif mode == "agy":
         "response":"", "num_turns":1, "usage":{"input_tokens":11,"output_tokens":7,"cache_read_tokens":3,"thinking_tokens":0,"total_tokens":18}}})
 else:
     admitted_effort = False
-    def counts(i,o): return {"inputTokens":i,"cachedInputTokens":0,"outputTokens":o,"reasoningOutputTokens":0,"totalTokens":i+o}
+    def counts(i,o): return {"inputTokens":i,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":o,"reasoningOutputTokens":0,"totalTokens":i+o}
     def usage(total,last):
         send({"method":"thread/tokenUsage/updated", "params":{"threadId":"thread-1","turnId":"turn-1",
             "tokenUsage":{"total":total,"last":last}}})
@@ -1634,7 +1634,7 @@ let test_official_client_usage_preserves_vendor_cache_conventions () =
   check int "Claude exclusive input adds both cache components" 170 claude.Fusion_types.input_tokens;
   check int "Claude reported output unchanged" 7 claude.output_tokens;
   let tokens = { Runtime_codex_app_server.input_tokens = 100; cached_input_tokens = 50;
-    cache_write_input_tokens = 20; output_tokens = 7; reasoning_output_tokens = 3; total_tokens = 107 } in
+    cache_write_input_tokens = Some 20; output_tokens = 7; reasoning_output_tokens = 3; total_tokens = 107 } in
   let codex = Usage.codex_usage (Runtime_codex_app_server.Thread_count
       {last = Request_usage tokens; thread_total = tokens}) in
   check int "Codex inclusive input does not double count cache" 100 codex.Fusion_types.input_tokens;

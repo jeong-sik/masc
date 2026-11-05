@@ -84,12 +84,14 @@ type thread_mode =
 (* The per-turn counts the app-server reports on thread/tokenUsage/updated,
    its [last] breakdown. OpenAI counting: [input_tokens] already includes the
    cached prefix and [output_tokens] already includes reasoning, the same
-   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
-   defaults to 0 on the wire. *)
+   reading Backend_openai_parse makes of the API wire.
+   [cache_write_input_tokens] is [None] when the breakdown has no
+   [cacheWriteInputTokens]: rust-v0.150.0 and later write it on every
+   breakdown, an older app-server does not report cache writes. *)
 type token_usage =
   { input_tokens : int
   ; cached_input_tokens : int
-  ; cache_write_input_tokens : int
+  ; cache_write_input_tokens : int option
   ; output_tokens : int
   ; reasoning_output_tokens : int
   ; total_tokens : int

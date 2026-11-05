@@ -276,16 +276,19 @@ let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config 
    includes the cached prefix), and its output, final once the frame for
    that response arrives. A compaction estimate is the whole new history:
    its size is the occupancy, and it has no cache split and no response
-   behind it. *)
+   behind it. An app-server that does not report cache writes leaves the
+   cache split unreported. *)
 let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runtime_observation.request_context =
   function
   | Runtime_codex_app_server.Request_usage usage ->
     { input_tokens = usage.input_tokens
     ; cache =
-        Some
-          { Runtime_observation.cache_creation_input_tokens = usage.cache_write_input_tokens
-          ; cache_read_input_tokens = usage.cached_input_tokens
-          }
+        Option.map
+          (fun cache_creation_input_tokens ->
+             { Runtime_observation.cache_creation_input_tokens
+             ; cache_read_input_tokens = usage.cached_input_tokens
+             })
+          usage.cache_write_input_tokens
     ; output_tokens = Some usage.output_tokens
     ; provenance = Turn_input_provenance.Measured_request
     }
@@ -300,15 +303,24 @@ let request_context_of_last_usage : Runtime_codex_app_server.last_usage -> Runti
 (* OpenAI counting, as Backend_openai_parse reads the API wire: the input
    count already includes the cached prefix and the output count already
    includes reasoning, so both copy across and the cache fields fill the
-   canonical record's cache slots. *)
+   canonical record's cache slots. An unreported cache write counts as none
+   for spend; {!reported_cache_usage_of_token_usage} keeps it unreported. *)
 let api_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
   : Agent_core.Types.api_usage
   =
   { input_tokens = usage.input_tokens
   ; output_tokens = usage.output_tokens
-  ; cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_creation_input_tokens = Option.value usage.cache_write_input_tokens ~default:0
   ; cache_read_input_tokens = usage.cached_input_tokens
   ; cost_usd = None
+  }
+;;
+
+let reported_cache_usage_of_token_usage (usage : Runtime_codex_app_server.token_usage)
+  : Agent_core.Types.reported_cache_usage
+  =
+  { cache_creation_input_tokens = usage.cache_write_input_tokens
+  ; cache_read_input_tokens = Some usage.cached_input_tokens
   }
 ;;
 
@@ -1777,11 +1789,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           A turn whose count a context-window fill replaced has no one count
           that measures it, so it reports no spend rather than the count
           that restarted from zero. *)
-       let spend, request_context =
+       let spend, reported_cache_usage, request_context =
          match turn.usage with
          | Some (Runtime_codex_app_server.Thread_count { last; thread_total }) ->
-           Some (api_usage_of_token_usage thread_total), Some (request_context_of_last_usage last)
-         | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None
+           ( Some (api_usage_of_token_usage thread_total)
+           , Some (reported_cache_usage_of_token_usage thread_total)
+           , Some (request_context_of_last_usage last) )
+         | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None, None
        in
        let response =
          { Agent_core.Types.id = turn.turn_id
@@ -1795,14 +1809,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                { Agent_core.Types.default_inference_telemetry with
                  request_latency_ms = Some latency_ms
                ; canonical_model_id = Some turn.model
-               ; reported_cache_usage =
-                   Option.map
-                     (fun (u : Agent_core.Types.api_usage) ->
-                        { Agent_core.Types.cache_creation_input_tokens =
-                            Some u.cache_creation_input_tokens
-                        ; cache_read_input_tokens = Some u.cache_read_input_tokens
-                        })
-                     spend
+               ; reported_cache_usage
                }
          }
        in

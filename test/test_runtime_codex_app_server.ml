@@ -49,31 +49,31 @@ let turn_failed =
 (* The app-server's per-turn count frame: [total] is the thread's running
    sum, [last] is this turn. *)
 let token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":0,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
 ;;
 
 (* The same frame for a turn this call is not awaiting. *)
 let other_turn_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-9","tokenUsage":{"total":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10},"last":{"inputTokens":5,"cachedInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10}}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-9","tokenUsage":{"total":{"inputTokens":5,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10},"last":{"inputTokens":5,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":5,"reasoningOutputTokens":0,"totalTokens":10}}}}|}
 ;;
 
 (* The frame after the turn's second model response: [total] moved on and
    [last] is that response alone. *)
 let second_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"cacheWriteInputTokens":0,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"cacheWriteInputTokens":0,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
 ;;
 
 (* After a compaction replaces the history, Codex re-estimates the context
    (recompute_token_usage): [last] carries only the estimate as its total,
    and the thread's running count does not move. *)
 let compaction_estimate_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
 ;;
 
 (* A request overflowed the window: fill_to_context_window replaces the
    running count with zero counts and the window as its total. *)
 let context_window_filled_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":272000},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":262300},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":0,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":272000},"last":{"inputTokens":0,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":262300},"modelContextWindow":272000}}}|}
 ;;
 
 (* The weekly limit ends the turn after it has already paid for responses. *)
@@ -119,32 +119,32 @@ let wrapped_context_terminal ~notification =
 
 (* Ours, with the breakdown missing two required counts. *)
 let truncated_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":0,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":0,"outputTokens":80}}}}|}
 ;;
 
 (* Ours, each with one breakdown whose counts do not nest, breaking one rule
    only. The first is an estimate that gained a cached count. *)
 let estimate_with_cached_input_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":500,"cacheWriteInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0,"totalTokens":45000},"modelContextWindow":272000}}}|}
 ;;
 
 let reasoning_over_output_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":0,"outputTokens":30,"reasoningOutputTokens":80,"totalTokens":1230},"modelContextWindow":272000}}}|}
 ;;
 
 let output_without_input_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":0,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":80,"reasoningOutputTokens":0,"totalTokens":80},"modelContextWindow":272000}}}|}
 ;;
 
 (* Cache reads and writes each fit inside the input, their sum does not: a
    provider that counts input apart from its cache. *)
 let cache_over_input_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":300,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":300,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
 ;;
 
 (* The thread's running count breaks a rule; [last] is a plain request. *)
 let total_reasoning_over_output_token_usage_updated =
-  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
+  {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":9000,"cachedInputTokens":8000,"cacheWriteInputTokens":0,"outputTokens":700,"reasoningOutputTokens":900,"totalTokens":9700},"last":{"inputTokens":1200,"cachedInputTokens":1000,"cacheWriteInputTokens":0,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"modelContextWindow":272000}}}|}
 ;;
 
 let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
@@ -1588,10 +1588,12 @@ let token_usage =
     (fun fmt (usage : Runtime_codex_app_server.token_usage) ->
        Format.fprintf
          fmt
-         "input=%d cached=%d cache_write=%d output=%d reasoning=%d total=%d"
+         "input=%d cached=%d cache_write=%s output=%d reasoning=%d total=%d"
          usage.input_tokens
          usage.cached_input_tokens
-         usage.cache_write_input_tokens
+         (match usage.cache_write_input_tokens with
+          | Some count -> string_of_int count
+          | None -> "unreported")
          usage.output_tokens
          usage.reasoning_output_tokens
          usage.total_tokens)
@@ -1601,7 +1603,7 @@ let token_usage =
 let fixture_last_usage : Runtime_codex_app_server.token_usage =
   { input_tokens = 1200
   ; cached_input_tokens = 1000
-  ; cache_write_input_tokens = 0
+  ; cache_write_input_tokens = Some 0
   ; output_tokens = 80
   ; reasoning_output_tokens = 30
   ; total_tokens = 1280
@@ -1611,7 +1613,7 @@ let fixture_last_usage : Runtime_codex_app_server.token_usage =
 let fixture_thread_total : Runtime_codex_app_server.token_usage =
   { input_tokens = 9000
   ; cached_input_tokens = 8000
-  ; cache_write_input_tokens = 0
+  ; cache_write_input_tokens = Some 0
   ; output_tokens = 700
   ; reasoning_output_tokens = 300
   ; total_tokens = 9700
@@ -1736,7 +1738,7 @@ let test_frame_shapes_parse_by_their_counts () =
   let usage ~input ~cached ~output ~total : Runtime_codex_app_server.token_usage =
     { input_tokens = input
     ; cached_input_tokens = cached
-    ; cache_write_input_tokens = 0
+    ; cache_write_input_tokens = Some 0
     ; output_tokens = output
     ; reasoning_output_tokens = 0
     ; total_tokens = total
@@ -9077,7 +9079,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
 let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
   let base_path = temp_workspace "masc-codex-production-resumed-spend-" in
   let resumed_token_usage_updated =
-    {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-2","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
+    {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-2","tokenUsage":{"total":{"inputTokens":11000,"cachedInputTokens":9500,"cacheWriteInputTokens":0,"outputTokens":740,"reasoningOutputTokens":310,"totalTokens":11740},"last":{"inputTokens":2000,"cachedInputTokens":1500,"cacheWriteInputTokens":0,"outputTokens":40,"reasoningOutputTokens":10,"totalTokens":2040},"modelContextWindow":272000}}}|}
   in
   let run_turn ~trace_id ~user_message lines =
     with_fixture lines (fun cli_path ->

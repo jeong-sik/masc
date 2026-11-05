@@ -342,6 +342,14 @@ val fold_file_appended_entries_result :
     Appended bytes are read only once. The same append-only contract applies:
     in-place prefix edits combined with growth are outside that contract. *)
 
+val fold_file_appended_complete_entries_result :
+  string -> cursor:append_cursor option -> init:'a ->
+  f:('a -> recent_entry -> 'a) -> ('a appended_read, read_error) result
+(** {!fold_file_appended_entries_result} for a reader that may run while a
+    line is being written. It stops at the last complete line and keeps its
+    cursor there, so an incomplete final row is read on a later call once it
+    is complete, or once the writer cuts it and appends another. *)
+
 val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).

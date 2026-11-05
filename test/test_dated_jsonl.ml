@@ -1583,6 +1583,28 @@ let test_strict_single_file_reports_malformed_and_torn_rows () =
     | Error (Dated_jsonl.Io_error {operation=Read_file;_}) -> ()
     | Error _ | Ok _ -> fail "torn authority row was silently skipped")
 
+let test_complete_entries_read_waits_for_a_torn_row () =
+  let path = Filename.temp_file "dated_complete_single" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun oc -> output_string oc "{\"i\":1}\n{\"i\":2");
+    let read cursor = Dated_jsonl.fold_file_appended_complete_entries_result path ~cursor
+      ~init:[] ~f:(fun rows -> function
+        | Dated_jsonl.Parsed row -> row :: rows
+        | Dated_jsonl.Malformed_json _ -> fail "a complete row was reported malformed") in
+    let require = function
+      | Ok (Dated_jsonl.Appended (rows, cursor)) -> List.length rows, cursor
+      | Ok Dated_jsonl.Cursor_invalidated -> fail "unexpected cursor invalidation"
+      | Error error -> fail (Dated_jsonl.read_error_to_string error)
+    in
+    let before, cursor = require (read None) in
+    check int "only the complete row is read" 1 before;
+    let unchanged, cursor = require (read (Some cursor)) in
+    check int "the torn row is still not read" 0 unchanged;
+    Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 path
+      (fun oc -> output_string oc "}\n");
+    let completed, _ = require (read (Some cursor)) in
+    check int "the row is read once it is complete" 1 completed)
+
 let test_strict_incremental_large_utf8_row_and_captured_extent () =
   let path = Filename.temp_file "dated_strict_large_utf8" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
@@ -1626,6 +1648,8 @@ let () =
         [
           test_case "strict single file reports malformed and torn evidence" `Quick
             test_strict_single_file_reports_malformed_and_torn_rows;
+          test_case "complete-entries read waits for a torn row" `Quick
+            test_complete_entries_read_waits_for_a_torn_row;
           test_case "large UTF-8 row preserves captured extent" `Quick
             test_strict_incremental_large_utf8_row_and_captured_extent;
           test_case "creates dated file" `Quick test_append_creates_dated_file;

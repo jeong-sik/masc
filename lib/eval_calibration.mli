@@ -62,13 +62,10 @@ type calibration_example = {
 
 (** {1 Store management} *)
 
-val get_store : unit -> Dated_jsonl.t
-(** Get or create the global verdict store at [.masc/verdicts/]. *)
-
-module For_testing : sig
-  val reset_store : unit -> unit
-  val set_store : base_path:string -> unit
-end
+val store : base_path:string -> Dated_jsonl.t
+(** The verdict store of the workspace at [base_path]
+    ([.masc/verdicts/]). Every reader and writer below takes the workspace
+    it works on, so verdicts and labels of two workspaces never mix. *)
 
 (** {1 Hashing} *)
 
@@ -80,6 +77,7 @@ val notes_hash : task_title:string -> notes:string -> string
 
 val record_verdict :
   ?producer_execution:Runtime_response_identity.t ->
+  base_path:string ->
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
@@ -91,6 +89,7 @@ val record_verdict :
     every earlier model or collaborator that authored the artifact. *)
 
 val record_human_label :
+  base_path:string ->
   notes_hash:string ->
   human_verdict:label_verdict ->
   labeler:string ->
@@ -101,11 +100,11 @@ val record_human_label :
 (** {1 Analysis} *)
 
 val find_divergences :
-  ?since:string -> ?until:string -> unit -> divergence list
+  ?since:string -> ?until:string -> base_path:string -> unit -> divergence list
 (** Find cases where evaluator and human verdicts disagree.
     Date filters use ["YYYY-MM-DD"] format. *)
 
-val select_examples : max_examples:int -> calibration_example list
+val select_examples : base_path:string -> max_examples:int -> calibration_example list
 (** Select few-shot calibration examples from recent divergences.
     Prioritizes false positives (evaluator approve + human reject). *)
 
@@ -118,7 +117,7 @@ val format_few_shot_block : calibration_example list -> string
 (** {1 Statistics} *)
 
 val calibration_stats :
-  ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+  ?since:string -> ?until:string -> base_path:string -> unit -> Yojson.Safe.t
 (** Compute summary statistics: verdict counts, gate distribution,
     false positive/negative rates, agreement rate. [distinct_runtime_rate]
     compares recorded runtime identifiers and is [null] when no pair was

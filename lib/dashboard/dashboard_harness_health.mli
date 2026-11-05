@@ -93,6 +93,7 @@ val read_recent_verdicts
   :  ?since:string
   -> ?until:string
   -> ?limit:int
+  -> base_path:string
   -> unit
   -> harness_verdict_item list
 
@@ -104,6 +105,7 @@ val read_recent_verdicts_for_agents
   :  ?since:string
   -> ?until:string
   -> ?limit:int
+  -> base_path:string
   -> agent_names:string list
   -> unit
   -> harness_verdict_item list
@@ -143,7 +145,7 @@ val set_wake_payload_store_for_testing : base_path:string -> unit
     eval-calibration stats, recent verdicts, and
     wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
-val json : ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+val json : ?since:string -> ?until:string -> base_path:string -> unit -> Yojson.Safe.t
 
 (** {1 Operator labels} *)
 
@@ -161,6 +163,6 @@ val parse_label_body : string -> (label_request, string) result
     divergence mining compares it against the evaluator's verdict under the
     same notes hash. *)
 
-val record_operator_label : labeler:string -> label_request -> unit
+val record_operator_label : base_path:string -> labeler:string -> label_request -> unit
 (** Append the label to the calibration ledger, joined to its verdict by
     [label_notes_hash]. *)

@@ -15,6 +15,7 @@
 module String_map = Set_util.StringMap
 
 let compute_outcomes_rollup
+    ~base_path
     ~keeper_name
     ~agent_name
     ~recent_crash_count
@@ -42,6 +43,7 @@ let compute_outcomes_rollup
     try
       Dashboard_harness_health.read_recent_verdicts_for_agents
         ~limit:50
+        ~base_path
         ~agent_names:[ keeper_name; agent_name ]
         ()
     with

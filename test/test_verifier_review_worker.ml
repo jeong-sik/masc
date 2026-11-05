@@ -587,8 +587,8 @@ let load_host store = loaded (O.load_retained ~store ~verification_id ~attempt:0
 let test_calibration_uses_original_on_readmission () =
   with_workspace_runtime (fun config store clock -> Eio.Switch.run (fun sw ->
     let module Cal = Masc.Eval_calibration in
-    Cal.For_testing.set_store ~base_path:config.Workspace_core.base_path;
-    Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
+    let base_path = config.Workspace_core.base_path in
+    (
       let task=prepare_domain config in
       let identity ~actor ~runtime_id ~model_id suffix =
         get (Runtime_response_identity.make ~execution_id:("execution-" ^ suffix)
@@ -632,7 +632,7 @@ let test_calibration_uses_original_on_readmission () =
          | Error _ -> () | Ok () -> Alcotest.fail "unavailable admission unexpectedly committed");
         Alcotest.(check int) "first wake did not dispatch a reviewer" 0 !reviewer_calls;
         Alcotest.(check int) "no verdict was calibrated before admission" 0
-          (List.length (Dated_jsonl.read_recent (Cal.get_store ()) 10));
+          (List.length (Dated_jsonl.read_recent (Cal.store ~base_path) 10));
         let captured=load_host store in
         (match P.phase (O.progress captured) with
          | Admission_wait _ -> ()
@@ -675,7 +675,7 @@ let test_calibration_uses_original_on_readmission () =
         get (Host.process_original_once ~registry:(R.replay path) ~config ~sw ~clock
           ~task:wake_task ~assignee:producer ~verification_id);
         Alcotest.(check int) "re-admission dispatches one reviewer" 1 !reviewer_calls;
-        let rows ()=Dated_jsonl.read_recent (Cal.get_store ()) 10 in
+        let rows ()=Dated_jsonl.read_recent (Cal.store ~base_path) 10 in
         let row=match rows () with [row] -> row
           | _ -> Alcotest.fail "expected exactly one actual calibration row" in
         let expected_hash=Agent_core_sha256.(digest_string
@@ -695,7 +695,7 @@ let test_calibration_uses_original_on_readmission () =
         Alcotest.(check bool) "calibration retains the observed evaluator execution" true
           (Yojson.Safe.equal (Runtime_response_identity.to_yojson evaluator)
             (Yojson.Safe.Util.member "evaluator_execution" row));
-        let model_pairs=Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ()) in
+        let model_pairs=Yojson.Safe.Util.member "model_identity_observation" (Cal.calibration_stats ~base_path ()) in
         Alcotest.(check int) "unbound producer is excluded from observed model pairs" 0
           Yojson.Safe.Util.(model_pairs |> member "observed_verdict_count" |> to_int);
         Alcotest.(check int) "unbound producer is counted as unobserved" 1

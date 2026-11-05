@@ -1119,6 +1119,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                 Task.Anti_rationalization.few_shot_block =
                   Eval_calibration.format_few_shot_block
                     (Eval_calibration.select_examples
+                       ~base_path:runtime.config.base_path
                        ~max_examples:judge_few_shot_examples)
               ; evidence_posture =
                   evidence_posture_of_snapshot prepared.evidence_access
@@ -1241,7 +1242,9 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             (* The v3 original freezes the generator runtime, not the submitting
                response identity. The current wake cannot bind that identity to
                this original, even when both name the same runtime. *)
-            Eval_calibration.record_verdict ~task_id:reviewed_request.task_id
+            Eval_calibration.record_verdict
+              ~base_path:runtime.config.base_path
+              ~task_id:reviewed_request.task_id
               ~req:reviewed_request ~result ();
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with

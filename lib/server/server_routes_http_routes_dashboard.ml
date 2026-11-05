@@ -3580,25 +3580,28 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/harness-health" (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let cache_key =
            Printf.sprintf "harness_health:%s:%s:%s"
-             (Mcp_server.workspace_config state).base_path
+             base_path
              (Option.value ~default:"-" since)
              (Option.value ~default:"-" until)
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> Dashboard_harness_health.json ?since ?until ()))
+           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+              Dashboard_harness_health.json ?since ?until ~base_path ()))
        )
   (* An operator's own verdict on a harness row. The label is ground truth
      for judge calibration, so it takes the admin permission and the
      authenticated caller becomes the labeler — no anonymous ground truth. *)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/harness-label" (fun _state agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/harness-label" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match Dashboard_harness_health.parse_label_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
              | Ok label ->
                Dashboard_harness_health.record_operator_label
+                 ~base_path:(Mcp_server.workspace_config state).base_path
                  ~labeler:agent_name label;
                Http.Response.json_value ~request:req
                  (`Assoc [ "ok", `Bool true ]) reqd))

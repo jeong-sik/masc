@@ -98,31 +98,12 @@ type calibration_example = {
 (* Store                                                             *)
 (* ================================================================ *)
 
-let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
-
-let location ~base_path =
-  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Verdicts)
-
-let rec get_store () =
-  match Atomic.get store_ref with
-  | Some s -> s
-  | None ->
-    let s =
-      Dated_jsonl.open_store (location ~base_path:(Env_config_core.base_path ()))
-    in
-    if Atomic.compare_and_set store_ref None (Some s)
-    then s
-    else
-      (* Another domain published the process-wide store while this domain
-         created its candidate.  All writers must use that single instance so
-         Dated_jsonl's per-store serialization remains authoritative. *)
-      get_store ()
-
-module For_testing = struct
-  let reset_store () = Atomic.set store_ref None
-  let set_store ~base_path =
-    Atomic.set store_ref (Some (Dated_jsonl.open_store (location ~base_path)))
-end
+(* Appends to one directory share the mutex [Dated_jsonl.open_store] keeps
+   per store directory, so opening the store on each call keeps them
+   serialized. *)
+let store ~base_path =
+  Dated_jsonl.open_store
+    Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Verdicts)
 
 
 (* ================================================================ *)
@@ -177,6 +158,7 @@ let identity_matching predicate identity =
 
 let record_verdict
     ?producer_execution
+    ~(base_path : string)
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
@@ -203,9 +185,10 @@ let record_verdict
       ; timestamp = Unix.gettimeofday ()
       }
     in
-    Dated_jsonl.append (get_store ()) (verdict_record_to_json record)
+    Dated_jsonl.append (store ~base_path) (verdict_record_to_json record)
 
 let record_human_label
+    ~(base_path : string)
     ~(notes_hash : string)
     ~(human_verdict : label_verdict)
     ~(labeler : string)
@@ -218,7 +201,7 @@ let record_human_label
     reason;
     timestamp = Unix.gettimeofday ();
   } in
-  Dated_jsonl.append (get_store ()) (label_record_to_json record)
+  Dated_jsonl.append (store ~base_path) (label_record_to_json record)
 
 (* ================================================================ *)
 (* JSON deserialization (for analysis)                                *)
@@ -236,8 +219,8 @@ let string_field json key =
 let divergence_scan_rows = 1000
 let calibration_scan_rows = 5000
 
-let find_divergences ?(since = "") ?(until = "") () : divergence list =
-  let store = get_store () in
+let find_divergences ?(since = "") ?(until = "") ~base_path () : divergence list =
+  let store = store ~base_path in
   let records =
     if since = "" && until = "" then
       Dated_jsonl.read_recent store divergence_scan_rows
@@ -289,8 +272,8 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
 (* Few-shot example selection                                        *)
 (* ================================================================ *)
 
-let select_examples ~(max_examples : int) : calibration_example list =
-  let divs = find_divergences () in
+let select_examples ~base_path ~(max_examples : int) : calibration_example list =
+  let divs = find_divergences ~base_path () in
   (* Prioritize false positives: evaluator approved but human rejected *)
   let false_positives, others = List.partition (fun d ->
     match d.evaluator_verdict, d.human_verdict with
@@ -358,8 +341,8 @@ let format_few_shot_block (examples : calibration_example list) : string =
 (* Statistics                                                        *)
 (* ================================================================ *)
 
-let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
-  let store = get_store () in
+let calibration_stats ?(since = "") ?(until = "") ~base_path () : Yojson.Safe.t =
+  let store = store ~base_path in
   let records =
     if since = "" && until = "" then
       Dated_jsonl.read_recent store calibration_scan_rows

@@ -180,10 +180,8 @@ let sample_hash = String.concat "" (List.init 8 (fun _ -> "0123abcd"))
 
 let test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate () =
   with_temp_dir "harness-model-identities" @@ fun dir ->
-  Calibration.For_testing.set_store ~base_path:dir;
-  Fun.protect ~finally:Calibration.For_testing.reset_store @@ fun () ->
   let assert_observation ~verdict_count ~runtime_rate =
-    let json = H.json () in
+    let json = H.json ~base_path:dir () in
     let overview = Yojson.Safe.Util.member "overview" json in
     let calibration = Yojson.Safe.Util.member "calibration" json in
     let observation = Yojson.Safe.Util.member "model_identity_observation" overview in
@@ -208,7 +206,7 @@ let test_model_identity_gaps_reach_the_dashboard_without_a_zero_rate () =
     ; evaluator_execution = None
     ; gate = Review.Structured_tool; fallback_reason = None
     ; retryable_runtimes = []; model_absent_runtimes = [] } in
-  Calibration.record_verdict ~task_id:"task-model-gap" ~req ~result ();
+  Calibration.record_verdict ~base_path:dir ~task_id:"task-model-gap" ~req ~result ();
   assert_observation ~verdict_count:1 ~runtime_rate:(`Float 1.0)
 
 let test_label_body_approve_parses () =

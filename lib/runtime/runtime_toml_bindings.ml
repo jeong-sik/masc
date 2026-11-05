@@ -1,7 +1,3 @@
-(** Layer 3 of the Runtime TOML parser: the binding tables of each provider
-    and the model sets that generate bindings. It also refuses the obsolete
-    top-level namespaces. *)
-
 open Runtime_toml_base
 
 (* --- Reserved namespace detection --- *)

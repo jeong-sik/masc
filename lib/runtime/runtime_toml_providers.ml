@@ -1,7 +1,3 @@
-(** Layer 1 of the Runtime TOML parser: the provider tables. It reads each
-    provider's credential, capabilities, headers, Antigravity CLI options and
-    usage-read declaration. *)
-
 open Runtime_toml_base
 
 (* --- Layer 1: Providers --- *)

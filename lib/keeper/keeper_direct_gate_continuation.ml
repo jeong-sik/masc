@@ -112,9 +112,10 @@ let capture_native ~operation_id ~(settled_session : Native.t) ~frame =
     Error "official-client Gate producer has no settled native authority"
 
 let confirm_retention ~session_dir snapshot =
-  match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
-  | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-  | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed"
+  Checkpoint.retain_exact_snapshot ~session_dir snapshot
+  |> Checkpoint.require_confirmed_installation
+  |> Result.map ignore
+  |> Result.map_error (fun _ -> "Gate checkpoint retention is not durably confirmed")
 
 let capture_preparation ~source ~config ~operation_id ~session_dir ~session_id () =
   let* () = check_session_dir ~config ~session_dir ~session_id in
@@ -298,11 +299,12 @@ let load_ready ~config ~(meta : Keeper_meta_contract.keeper_meta) ~operation_id 
       Ok (Official_client checkpoint)
     | Semantic.Agent_core reference ->
     let* source, checkpoint = current_with_original ~config ~operation_id ~session_dir ~session_id waiting in
-    let* () = match Checkpoint.save_agent_core_if_source ~session_dir
+    let* () = Checkpoint.save_agent_core_if_source ~session_dir
         ~expected_source_ref:(Checkpoint.exact_snapshot_reference source)
-        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
-      | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-      | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "current-history Gate admission is not durably confirmed" in
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint
+      |> Checkpoint.require_confirmed_installation
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> "current-history Gate admission is not durably confirmed") in
     let* checkpoint = match selected.decision with
       | Semantic.Gate_approved -> Ok checkpoint
       | Semantic.Gate_denied _ ->

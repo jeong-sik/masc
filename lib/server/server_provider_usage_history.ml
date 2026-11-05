@@ -18,8 +18,9 @@ let install config =
        a reader looks either way. *)
     Fun.protect
       ~finally:(fun () ->
-        Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
-          Workspace_dataset_event.Provider_usage)
+        Eio.Cancel.protect (fun () ->
+          Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+            Workspace_dataset_event.Provider_usage))
       (fun () ->
         Dated_jsonl.append journal
           (`List (Projection.record_json ~scope_id:(scope_id scope) ~observed_at report))))
@@ -48,47 +49,64 @@ let failure_in_window ~now ~window =
 (* A stored line that cannot be read is logged with its place and counted in
    the answer, and the rest of the window is still read: one bad line is one
    unknown report, not fourteen unknown days. The count is the evidence that
-   something is missing, so the reader never takes a gap for a quiet day. *)
+   something is missing, so the reader never takes a gap for a quiet day. A
+   line is logged once, when its file is first read up to it. *)
+let consume projection = function
+  | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+      Log.Server.warn "provider usage history unreadable report: %s:%s: %s" path
+        (Option.fold ~none:"?" ~some:string_of_int line_number)
+        detail;
+      Projection.note_unreadable projection
+  | Dated_jsonl.Parsed (`List items) ->
+      List.fold_left
+        (fun projection item ->
+          match Projection.consume_item projection item with
+          | Ok next -> next
+          | Error detail ->
+              Log.Server.warn "provider usage history unreadable report: stored report: %s"
+                detail;
+              Projection.note_unreadable projection)
+        projection items
+  | Dated_jsonl.Parsed _ ->
+      Log.Server.warn "provider usage history unreadable report: stored line: %s"
+        "expected a report list";
+      Projection.note_unreadable projection
+
+module Kept = Dated_jsonl_kept_days
+
+(* Each journal day file of the widest window, folded into its latest reading
+   per source, day and window and kept between reads: a read folds only what
+   the files gained since the last one, and a narrower window absorbs the
+   files of its own days. *)
+let kept : (string, Projection.t Kept.t) Hashtbl.t = Hashtbl.create 1
+let kept_mu = Stdlib.Mutex.create ()
+
 let read config ~now ~window =
   if failure_in_window ~now ~window then
     Error "provider usage history incomplete: a report could not be stored"
   else
-    let since_at = window_start ~now ~window in
-    let journal = store config in
-    (* The callback owns one accumulator cell; all history decisions return
-       a new immutable projection. Diagnostics stay in traversal order. *)
-    let projection = ref (Projection.create ~since_at ~now) in
-    let skip ~where detail =
-      Log.Server.warn "provider usage history unreadable report: %s: %s" where
-        detail;
-      projection := Projection.note_unreadable !projection
+    let days =
+      Kept.days_between ~since:(window_start ~now ~window:Fourteen_days) ~until:now
     in
-    let consume = function
-      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-          skip
-            ~where:
-              (Printf.sprintf "%s:%s" path
-                 (Option.fold ~none:"?" ~some:string_of_int line_number))
-            detail
-      | Dated_jsonl.Parsed (`List items) ->
-          List.iter
-            (fun item ->
-              match Projection.consume_item !projection item with
-              | Error detail -> skip ~where:"stored report" detail
-              | Ok next -> projection := next)
-            items
-      | Dated_jsonl.Parsed _ ->
-          skip ~where:"stored line" "expected a report list"
+    let previous =
+      Stdlib.Mutex.protect kept_mu (fun () ->
+        Option.value ~default:Kept.empty (Hashtbl.find_opt kept config.Workspace.base_path))
     in
-    let result =
-      Dated_jsonl.iter_range_entries_result journal
-        ~since:(Log.format_utc_date_of since_at)
-        ~until:(Log.format_utc_date_of now) consume
-    in
-    match result with
+    match
+      Kept.refresh (store config) ~days ~init:(Projection.unbounded ()) ~f:consume previous
+    with
     | Error read_error ->
         Log.Server.warn "provider usage history read failed: %s"
           (Dated_jsonl.read_error_to_string read_error);
         Error "provider usage history store unavailable"
-    | Ok () ->
-        Ok (Projection.response_json ~days:(days_of_window window) !projection)
+    | Ok files ->
+        Stdlib.Mutex.protect kept_mu (fun () ->
+          Hashtbl.replace kept config.Workspace.base_path files);
+        let since_at = window_start ~now ~window in
+        let projection =
+          Kept.fold files ~init:(Projection.create ~since_at ~now)
+            ~f:(fun projection (day : Kept.day) file ->
+              if day.starts_at >= since_at then Projection.absorb projection file
+              else projection)
+        in
+        Ok (Projection.response_json ~days:(days_of_window window) projection)

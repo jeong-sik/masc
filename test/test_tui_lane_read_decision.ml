@@ -33,10 +33,19 @@ let test_open_addon_wins_over_the_lanes_surface () =
     (Decision.of_views ~lanes:true ~addon:(Some "quiz-1")
        Masc.Workspace_dataset_event.Lanes = Decision.Read_lanes)
 
+let test_play_room_does_not_read_lane_surfaces () =
+  List.iter (fun view ->
+    check bool "Play room is handled by its own view, not Lane reads" true
+      (Decision.of_dataset ~view
+         (Masc.Workspace_dataset_event.Play_room { machine = Masc.Machine_lane.Dos })
+       = Decision.Ignore))
+    [Decision.Lanes; Decision.Overview; Decision.Addons None; Decision.Addons (Some "quiz-1")]
+
 let () =
   run "Lane read decision"
     [ "scope",
       [ test_case "Lanes reads only while visible" `Quick test_lanes_read_only_when_visible
       ; test_case "Add-on reads only the open instance" `Quick test_addon_read_is_scoped_to_the_open_instance
       ; test_case "an open Add-on wins over Lanes" `Quick test_open_addon_wins_over_the_lanes_surface
+      ; test_case "Play room does not read Lane surfaces" `Quick test_play_room_does_not_read_lane_surfaces
       ] ]

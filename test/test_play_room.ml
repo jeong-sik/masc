@@ -48,9 +48,10 @@ let test_idempotency () = workspace (fun base ->
   let other = perform base "bob" request in
   check int "another authenticated actor owns its own ids" 2 (List.length other.messages))
 
+let flags (change : Room.change) =
+  change.message_committed, change.membership_changed
+
 let test_change_metadata () = workspace (fun base ->
-  let flags (change : Room.change) =
-    change.message_committed, change.membership_changed in
   let _, join = perform_change ~base_path:base "alice" (action "join") in
   check (pair bool bool) "the first public member is a membership change" (false, true) (flags join);
   let _, first = perform_change ~base_path:base "alice" (action ~id:"first" ~text:"hello" "say") in
@@ -63,19 +64,32 @@ let test_change_metadata () = workspace (fun base ->
      | Error (Room.Conflict _) -> true | Ok _ | Error _ -> false);
   let _, renewal = perform_change ~base_path:base ~now:105. "alice" (action "join") in
   check (pair bool bool) "seen_at renewal is not a public change" (false, false) (flags renewal);
-  let _, second_tab = perform_change ~base_path:base ~now:106. "alice" (action ~client:"tab2" "join") in
-  check (pair bool bool) "the same public member is not duplicated" (false, false) (flags second_tab);
   let _, moved = perform_change ~base_path:base ~now:110. "alice" (action ~machine:"msx" "join") in
   check (pair bool bool) "changing the public machine is a membership change" (false, true) (flags moved);
-  let _, left = perform_change ~base_path:base "alice" (action "leave") in
+  let _, left = perform_change ~base_path:base ~now:111. "alice" (action "leave") in
   check (pair bool bool) "the last Leave removes the public member" (false, true) (flags left);
   let reread, reread_change = perform_change ~base_path:base ~now:150. "alice" (action "read") in
   check (pair bool bool) "Read neither revives nor moves presence" (false, false) (flags reread_change);
-  check (list string) "Read leaves no membership behind" [] (names reread);
+  check (list string) "Read leaves no membership behind" [] (names reread))
+
+let test_tab_membership_changes () = workspace (fun base ->
+  ignore (perform base "alice" (action "join"));
+  let _, second_tab = perform_change ~base_path:base ~now:101. "alice" (action ~client:"tab2" "join") in
+  check (pair bool bool) "the same public member is not duplicated" (false, false) (flags second_tab);
+  let remaining, first_leave = perform_change ~base_path:base ~now:102. "alice" (action "leave") in
+  check (pair bool bool) "one tab leaving is not a public change" (false, false) (flags first_leave);
+  check (list string) "the other tab retains public membership" ["alice"] (names remaining);
+  let empty, final_leave = perform_change ~base_path:base ~now:103. "alice" (action ~client:"tab2" "leave") in
+  check (pair bool bool) "the final tab leaving is a public change" (false, true) (flags final_leave);
+  check (list string) "the final tab removes public membership" [] (names empty))
+
+let test_expiry_announces_once () = workspace (fun base ->
   ignore (perform_change ~base_path:base "expiring" (action ~client:"expiry" "join"));
   let expired, expired_change = perform_change ~base_path:base ~now:160.5 "expiring" (action ~client:"expiry" "read") in
   check (pair bool bool) "a public member expiring is a change" (false, true) (flags expired_change);
-  check (list string) "the expired public member is gone" [] (names expired))
+  check (list string) "the expired public member is gone" [] (names expired);
+  let _, repeated = perform_change ~base_path:base ~now:161. "expiring" (action ~client:"expiry" "read") in
+  check (pair bool bool) "an already invisible member is not announced again" (false, false) (flags repeated))
 
 let test_presence () = workspace (fun base ->
   check (list string) "reading alone does not join" [] (names (read base ()));
@@ -168,6 +182,8 @@ let () = run "public play room" ["room", [
   test_case "shared durable conversation" `Quick test_shared_room;
   test_case "uncertain send deduplicates; conflicts do not write" `Quick test_idempotency;
   test_case "actual changes carry message and public membership effects" `Quick test_change_metadata;
+  test_case "only the final tab leaving changes public membership" `Quick test_tab_membership_changes;
+  test_case "public expiry announces once" `Quick test_expiry_announces_once;
   test_case "presence across tabs, expiry and read-only reads" `Quick test_presence;
   test_case "strict public request" `Quick test_invalid;
   test_case "unicode spaces beside text are kept" `Quick test_unicode_space_with_text;

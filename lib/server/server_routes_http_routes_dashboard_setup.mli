@@ -1,7 +1,6 @@
 (** Setup helpers consumed by the dashboard route builder. *)
 
 module Http = Http_server_eio
-module Provider_logs = Server_routes_http_dashboard_provider_logs
 module Keeper_api = Server_dashboard_http_keeper_api
 
 val dashboard_logs_json :

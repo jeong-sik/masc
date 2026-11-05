@@ -415,7 +415,6 @@ describe('post', () => {
   // never measured for byte-identical repeats.
   it('does not extend a listed route to its sub-routes', () => {
     expect(readCacheMode('/api/v1/dashboard/telemetry/summary')).toBe('no-store')
-    expect(readCacheMode('/api/v1/dashboard/provider-logs/tail')).toBe('no-store')
   })
 
   // This route repeats byte-identically, so it looks eligible on traffic
@@ -437,7 +436,6 @@ describe('post', () => {
     expect(readCacheMode('/api/v1/dashboard/tasks/history')).toBe('no-cache')
     expect(readCacheMode('/api/v1/dashboard/tasks/history?limit=50')).toBe('no-cache')
     expect(readCacheMode('/api/v1/dashboard/workspace')).toBe('no-cache')
-    expect(readCacheMode('/api/v1/dashboard/provider-logs')).toBe('no-cache')
     expect(readCacheMode('/api/v1/dashboard/briefing')).toBe('no-cache')
     expect(readCacheMode('/api/v1/dashboard/planning')).toBe('no-cache')
     expect(readCacheMode('/api/v1/tool-metrics')).toBe('no-cache')

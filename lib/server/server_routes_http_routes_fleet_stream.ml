@@ -1,11 +1,11 @@
 let max_queued_events = 64
 let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
+let stalled_after_s = Server_mcp_transport_http_headers.sse_stalled_after_s
 
-(* A client that reads takes a frame at once. One that has not accepted a frame
-   after this many keepalive intervals has stopped reading, or its connection is
-   half open. *)
-let stalled_after_ping_intervals = 3.0
-let stalled_after_s = stalled_after_ping_intervals *. ping_interval_s
+let frame event =
+  let revision = Fleet_stream.Revision.to_int (Fleet_stream.revision_of_event event) in
+  Sse_wire.format_event_yojson ~id:revision (Fleet_stream.encode event)
+;;
 
 (* Httpun adds no Content-Length to a streaming body, so closing the writer is
    the only end of the response; advertising keep-alive would make a client
@@ -22,40 +22,24 @@ let response_headers () =
 
 let serve ?(scope_is_current = fun () -> true) ?scope_replaced
     ~sw ~clock ~subscribe ~ping_interval_s ~stalled_after_s ~max_queued_events reqd =
-  let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
-  let writer =
-    Httpun.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
+  let response =
+    Server_sse_response.respond ~clock ~stalled_after_s ~flush_headers_immediately:true reqd
+      (Httpun.Response.create ~headers:(response_headers ()) `OK)
   in
-  (* Waits until the bytes reach the socket, so a client that stops reading
-     holds the pump here and its queue fills up to the bound, instead of the
-     writer's buffer growing without one. *)
-  let send data =
-    if not (scope_is_current ()) || Httpun.Body.Writer.is_closed writer
-    then false
+  let send data : Server_sse_response.outcome =
+    if scope_is_current ()
+    then Server_sse_response.send response data
     else (
-      Httpun.Body.Writer.write_string writer data;
-      let flushed, resolve = Eio.Promise.create () in
-      Httpun.Body.Writer.flush writer (Eio.Promise.resolve resolve);
-      match Eio.Promise.await flushed with
-      | `Written -> true
-      | `Closed -> false)
+      Server_sse_response.close response;
+      Closed)
   in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run (fun stream_sw ->
       Server_bootstrap_http.with_cleanups_on_release
         ~sw:stream_sw
-        [ (fun () ->
-            if not (Httpun.Body.Writer.is_closed writer)
-            then Httpun.Body.Writer.close writer)
-        ];
+        [ (fun () -> Server_sse_response.close response) ];
       let pump () =
-        Server_fleet_stream_pump.run
-          ~subscribe
-          ~clock
-          ~ping_interval_s
-          ~stalled_after_s
-          ~max_queued_events
-          ~send
+        Server_sse_pump.run ~subscribe ~frame ~clock ~ping_interval_s ~max_queued_events ~send
       in
       match
         (match scope_replaced with
@@ -65,15 +49,12 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
                (fun () -> Eio.Promise.await replaced; `Scope_replaced)
                (fun () -> `Ended (pump ())))
       with
-      | `Scope_replaced | `Ended Server_fleet_stream_pump.Client_gone -> ()
-      | `Ended Server_fleet_stream_pump.Fell_behind ->
+      (* [Server_sse_response.send] logs a stalled frame with the request path. *)
+      | `Scope_replaced | `Ended (Server_sse_pump.Client_gone | Server_sse_pump.Stalled) -> ()
+      | `Ended Server_sse_pump.Fell_behind ->
         Log.Server.warn
           "Fleet stream closed: the client was %d events behind"
           max_queued_events
-      | `Ended Server_fleet_stream_pump.Stalled ->
-        Log.Server.warn
-          "Fleet stream closed: the client accepted no frame for %.0f seconds"
-          stalled_after_s
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn ->
         Log.Server.warn "Fleet stream failed: %s" (Printexc.to_string exn)))

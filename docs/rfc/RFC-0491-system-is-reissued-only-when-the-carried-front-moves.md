@@ -124,16 +124,20 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 ### 3.2 조항은 System 을 만든 때의 것을 쓴다
 
-Keeper 마다 세 값을 프로세스 메모리에 든다. System 을 만들 때 쓴 조항 목록, 그 System 의 digest, 그때의 범위 앞부분이다. 턴의 System 은 이렇게 고른다.
+Keeper 마다 두 값을 프로세스 메모리에 든다. System 을 만들 때 쓴 조항 목록과 그 System 의 digest 다. 턴의 System 은 이렇게 고른다.
 
 | 조건 | System | 끝 문맥 `Constitution_amendments` |
 |---|---|---|
-| 범위 앞부분이 든 것과 같고, 든 조항으로 렌더한 System 의 digest 가 든 digest 와 같다 | 든 조항으로 렌더한 것 | 지금 조항과 든 조항의 차이 |
-| 그 밖: 앞부분이 다르다, 지시문이나 `keeper.md` 가 바뀌었다, 든 값이 없다 | 지금 조항으로 렌더하고 세 값을 새로 든다 | 없음 |
+| 이번 턴 첫 요청의 예상 앞부분이 그 runtime 의 직전 요청 앞부분과 같고, 든 조항으로 렌더한 System 의 digest 가 든 digest 와 같다 | 든 조항으로 렌더한 것 | 지금 조항과 든 조항의 차이 |
+| 그 밖: 앞부분이 다르다, 직전 요청이 없다, 지시문이나 `keeper.md` 가 바뀌었다, 든 값이 없다 | 지금 조항으로 렌더하고 두 값을 새로 든다 | 없음 |
 
 - 둘째 줄의 지시문 수정은 그 턴에 바로 반영된다. 그 턴은 어차피 System 바이트가 달라져 캐시가 깨지므로, 조항도 지금 것으로 맞춘다.
 - 차이는 조항 id 로 낸다. 추가된 조항은 id 와 본문을, 지운 조항은 id 를 적는다. 본문은 `World_constitution_render` 와 같은 escape 를 거친다.
-- 범위 앞부분은 이번 요청이 쓸 값이다. `Keeper_turn_driver_try_provider.choose_range_start` 가 정하고, `Keeper_next_request_forecast` 도 같은 함수로 미리 구한다. System 을 고르는 자리도 이 값을 쓴다.
+- 견주는 앞부분은 직전 요청의 것이다. provider 캐시에 남은 것은 직전 요청의 System 과 그 앞부분부터의 기록이다(§1.2). System 을 만든 때의 앞부분과 견주면, 턴 중간에 앞부분이 움직인 다음 턴은 캐시가 맞을 자리에서 System 을 다시 만든다.
+- 직전 요청의 앞부분은 (Keeper, runtime, session) 원장 `Keeper_model_input_ledger.Table` 이 든 값이다. 원장이 지금 기록을 덮지 않으면(`holds` 가 아니면) 직전 요청이 없는 것으로 본다.
+- 예상 앞부분은 `Keeper_next_request_forecast.carry` 로 구한다. 이 함수는 `Keeper_turn_driver_try_provider.choose_range_start` 와 `project_range_start` 를 그대로 거친다. 입력은 턴 driver 가 첫 요청에서 읽는 것과 같다. 원장 front(없으면 turn record seed), Librarian continuity, 턴 시작점, 이번 턴의 기록이다.
+- 실제 요청의 앞부분으로는 고르지 못한다. Agent Core 는 요청마다 System 을 먼저 정하고(`packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:207-213`), 그 뒤 `prepare_turn_for_agent`(같은 파일 236행)가 부르는 projection 이 앞부분을 정한다. System 은 턴마다 한 번 만들고, 그 턴의 모든 lane·시도·round 가 같이 쓴다.
+- 예상과 실제가 다를 수 있다. 크기 거절로 앞부분이 턴 경계로 옮겨지거나 다른 lane 으로 넘어갈 때다. 그 요청은 어차피 기록 캐시를 놓친다. 조항은 System 과 끝 문맥을 합쳐 늘 지금 것이 실린다. 예상은 캐시가 맞을지만 정하고, 무엇이 실리는지는 정하지 않는다.
 - 든 값은 저장하지 않는다. 조항 원장과 Keeper 지시문이 SSOT 이고, 든 값은 그 투영이다. 서버가 다시 뜨면 첫 턴은 지금 조항으로 만든다. 그 사이 조항이 바뀌었으면 그 턴 한 번 캐시가 깨진다.
 
 `Constitution_amendments` 는 끝 문맥이라 System 보다 뒤에 읽힌다. 뒤에 온 글이 지금 상태로 읽힌다는 것은 RFC-0366 이 운영자 메모를 맨 뒤에 둔 근거와 같다(`lib/keeper/keeper_run_tools_hooks.ml` `Operator_note` 주석). 끝 문맥은 런타임이 조립하는 `[system context]` 다. 모델이 쓴 글은 조항 본문뿐이고, 그 본문은 System 에서와 같은 escape 를 거친다.
@@ -148,6 +152,8 @@ Keeper 마다 세 값을 프로세스 메모리에 든다. System 을 만들 때
 - **조항을 System 에서 빼서 매 요청 끝 문맥으로 보낸다.** 하지 않는다. 11-04 `per_request` 요청은 15,030건이다. 조항 본문 9,373B 가 요청마다 캐시 없이 나간다. 조항이 바뀌어서 놓친 토큰(§1.2)보다 크다.
 - **조항을 대화 기록에 덧붙인다.** 하지 않는다. 기록은 agent_core 의 checkpoint 가 소유하고 Librarian 이 읽는다. 런타임이 만든 조항이 기록 atom 이 되면 같은 사실이 조항 원장과 기록 두 곳에 생긴다.
 - **조항 원장 쓰기를 모아서 늦춘다.** 하지 않는다. 원장은 일어난 일을 적는 곳이다. 쓰기를 늦추는 장치는 행동을 통제하는 gate 가 된다.
+- **System 을 만든 때의 앞부분과 견준다.** 하지 않는다. 턴 중간에 앞부분이 움직이면 캐시에는 움직인 앞부분부터의 기록이 남는다. 다음 턴 첫 요청이 그 앞부분에서 열리면 캐시가 맞을 자리인데, 만든 때의 앞부분과는 달라서 System 을 다시 만들고 캐시를 깬다.
+- **Agent Core 가 앞부분을 정한 뒤 System 을 고르게 순서를 바꾼다.** 하지 않는다. System 은 턴의 lane·시도·round 가 같이 쓰는 값이다. agent_core 의 prepare 순서를 바꾸면 모든 provider 경로가 바뀐다. 예상 앞부분으로 같은 결정을 턴 시작에 낸다.
 - **System 기준점을 턴 기록에 저장한다.** 하지 않는다. 턴 기록에 새 필드가 생기고, 그 필드 없이도 durable truth 는 손상되지 않는다. 프로세스 메모리로 충분하다. 재시작 뒤 한 번 깨지는 비용은 §5 에 적는다.
 - **provider 캐시 breakpoint 로 System 을 따로 캐시한다.** 해당 없다. Z.AI 문서는 캐시가 설정 없이 걸린다고 쓰고, opencode Go 문서에는 breakpoint 가 없다(§1.4).
 
@@ -167,5 +173,5 @@ Keeper 마다 세 값을 프로세스 메모리에 든다. System 을 만들 때
 
 1. 이 문서.
 2. §3.1 `Completion_authority` 를 끝 문맥 블록으로.
-3. §3.2 조항 기준점과 `Constitution_amendments`.
+3. §3.2 조항 기준점과 `Constitution_amendments`. 예상 앞부분은 forecast 의 `carry` 로 구한다.
 4. §3.3 `Active_goals`. 3 을 배포하고 다시 잰 뒤 연다.

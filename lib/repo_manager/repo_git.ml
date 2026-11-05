@@ -692,7 +692,10 @@ let branch_entry_of_record record =
         (Printf.sprintf "git branch row has %d fields, expected 6" (List.length fields))
 
 (* Keeps the first [max_entries] records. A record after that proves the list was
-   cut. A malformed record is an error, never a skipped one. *)
+   cut. The checked-out branch among the cut records follows the kept ones, so
+   a current branch whose tip is older than every kept tip stays listed and the
+   newest-first order holds. A malformed record that is kept is an error, never
+   a skipped one. *)
 let branch_list_of_for_each_ref ~max_entries output =
   if max_entries < 1 then Stdlib.Error "git branch listing needs max_entries of at least 1"
   else
@@ -701,10 +704,22 @@ let branch_list_of_for_each_ref ~max_entries output =
       | "" :: rest -> List.rev rest
       | _ -> String.split_on_char '\n' output
     in
+    let marks_head record =
+      match String.split_on_char '\000' record with
+      | "*" :: _ -> true
+      | [] | _ :: _ -> false
+    in
     let rec take acc count = function
       | [] -> Stdlib.Ok { bl_entries = List.rev acc; bl_truncated = false }
-      | _ :: _ when count >= max_entries ->
-          Stdlib.Ok { bl_entries = List.rev acc; bl_truncated = true }
+      | _ :: _ as cut when count >= max_entries ->
+          (match List.find_opt marks_head cut with
+           | None -> Stdlib.Ok { bl_entries = List.rev acc; bl_truncated = true }
+           | Some record ->
+               (match branch_entry_of_record record with
+                | Stdlib.Error msg -> Stdlib.Error msg
+                | Stdlib.Ok current ->
+                    Stdlib.Ok
+                      { bl_entries = List.rev_append acc [ current ]; bl_truncated = true }))
       | record :: rest ->
           (match branch_entry_of_record record with
            | Stdlib.Error msg -> Stdlib.Error msg

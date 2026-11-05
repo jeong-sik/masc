@@ -502,7 +502,18 @@ let test_branch_rows_refuse_what_they_cannot_read () =
   Alcotest.(check bool) "a record past the limit marks the list cut" true
     (match Repo_git.branch_list_of_for_each_ref ~max_entries:2 three with
      | Ok { bl_entries = [ _; _ ]; bl_truncated = true } -> true
-     | Ok _ | Error _ -> false)
+     | Ok _ | Error _ -> false);
+  let idle_current =
+    branch_rows
+      [ branch_record "a"; branch_record "b"; branch_record "c"
+      ; branch_record ~head:"*" "idle" ]
+  in
+  Alcotest.(check (option (list string))) "a cut keeps the checked-out branch last"
+    (Some [ "a"; "b"; "idle" ])
+    (match Repo_git.branch_list_of_for_each_ref ~max_entries:2 idle_current with
+     | Ok { bl_entries; bl_truncated = true } ->
+         Some (List.map (fun (e : Repo_git.branch_entry) -> e.be_name) bl_entries)
+     | Ok { bl_truncated = false; _ } | Error _ -> None)
 
 let test_branches_at_reads_a_checkout () =
   with_temp_dir (fun tmp ->

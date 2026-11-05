@@ -44,6 +44,23 @@ let prune_flat_jsonl_older_than ~days dir =
 
 let keeper_scoped_flat_stores = [ "raw-traces"; "runtime-manifests" ]
 
+(* A Keeper's memory health row reads the newest turn record that carries a
+   response observation, so removing its old day files can change the row
+   (RFC-0487 §2.7). No other dated store is read by the row. *)
+let pruned_store ~masc_root location =
+  match Dated_jsonl.Store.keeper_store location with
+  | Some (keeper, Dated_jsonl.Store.Keeper.Turn_records) ->
+    Keeper_memory_health_input.written
+      ~keepers_dir:(Filename.concat masc_root Common.keepers_runtime_dirname)
+      ~keeper_id:keeper
+  | Some
+      ( _
+      , Dated_jsonl.Store.Keeper.(
+          ( Metrics | Execution_receipts | Provider_inputs | Memory_recall_artifacts
+          | Crash_events | Continuity_requests )) )
+  | None -> ()
+;;
+
 (* Both startup and the periodic pass share one admitted physical root and
    the existing closed dated-store declarations/retention windows. *)
 let prune_shared_jsonl_stores ~days ~masc_root =
@@ -54,6 +71,7 @@ let prune_shared_jsonl_stores ~days ~masc_root =
         Retention_directory.fold_children parent ~init:0
           ~f:(fun count _name child -> count + prune_flat_jsonl_in ~days child)) in
     Dated_jsonl.prune_listed_stores_bound root held ~operator_window_days:days
+      ~on_pruned:(pruned_store ~masc_root)
     + Retention_directory.descend held [ "logs" ] (prune_flat_jsonl_in ~days)
     + prune_children [ "trajectories" ]
     + prune_children [ Keeper_chat_event_log.events_dirname ]

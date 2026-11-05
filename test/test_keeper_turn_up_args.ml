@@ -347,8 +347,22 @@ remote_root = "/srv/masc/playground"
          ; "remote_endpoint", `String "fixture"
          ])
   in
-  persist create
-    { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh };
+  (* RFC-0487: creating the manifest adds the Keeper's memory health row. *)
+  let told = ref [] in
+  let unsubscribe =
+    Keeper_memory_health_input.subscribe
+      (fun { Keeper_memory_health_input.keepers_dir; keeper_id } ->
+         told := (keepers_dir, keeper_id) :: !told)
+  in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    persist create
+      { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh });
+  check (list (pair string string)) "the committed manifest tells the memory health row"
+    [ ( Unix.realpath
+          (Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path)
+      , name )
+    ]
+    (List.rev !told);
   check (option string) "remote endpoint persisted" (Some "fixture") (read_back ());
   let clear =
     parse_or_fail

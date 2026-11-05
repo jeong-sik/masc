@@ -428,9 +428,12 @@ val prune_listed_stores : Store.root -> operator_window_days:int -> int
     of day files deleted. *)
 
 val prune_listed_stores_bound :
-  Store.root -> Fs_compat.Retention_directory.t -> operator_window_days:int -> int
+  Store.root -> Fs_compat.Retention_directory.t -> operator_window_days:int ->
+  on_pruned:(Store.location -> unit) -> int
 (** Same declared stores/windows through the caller's already bound runtime
-    root, so a shared flat/dated pass never reopens its root by pathname. *)
+    root, so a shared flat/dated pass never reopens its root by pathname.
+    [on_pruned] is called once for each store directory the pass deleted a day
+    file from, after its lock is released. *)
 
 (* OCaml 5.3 emits warning 32 on this exported signature item under
    [warn-error=+a] even though the implementation and internal call sites are

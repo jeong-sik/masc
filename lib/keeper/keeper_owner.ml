@@ -797,6 +797,14 @@ let notify t command =
 (* The first fault is otherwise visible only as [store_unavailable = true] in
    the projection; the detail resurfaces later as a rejected meta commit and
    reads as if that commit were the cause. Log the onset once, at the source. *)
+(* The memory health row measures the Librarian gap on the meta's trace and
+   has none to measure without a meta (RFC-0487). *)
+let memory_health_moved ~base_path ~keeper_name =
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)
+    ~keeper_id:keeper_name
+;;
+
 let set_metadata_fault t detail =
   match !(t.metadata_error) with
   | Some _ -> () (* Sticky until restart; the first detail is the cause. *)
@@ -807,6 +815,7 @@ let set_metadata_fault t detail =
     (* A failed durable replace or remove can still have changed the file
        before its durability became uncertain. Revalidate that observation. *)
     Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name;
+    memory_health_moved ~base_path:t.base_path ~keeper_name:t.keeper_name;
     notify_state_change_observer ~keeper_name:t.keeper_name
 ;;
 
@@ -864,6 +873,7 @@ let health_metadata_equal before after =
    cancellation of this fiber, and the row's readers must still hear. *)
 let observe_uncertain_write ~base_path ~keeper_name () =
   Keeper_row_broadcast.changed ~base_path ~keeper_name;
+  memory_health_moved ~base_path ~keeper_name;
   notify_state_change_observer ~keeper_name
 ;;
 
@@ -894,6 +904,16 @@ let apply_transition t store old_state transition =
      | Keeper_owner_reducer.No_persistence -> ()
      | Keeper_owner_reducer.Replace_snapshot _ | Keeper_owner_reducer.Remove_snapshot _ ->
        Keeper_row_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name);
+    (* Only a new trace, a created meta or a removed one moves the memory
+       health row. *)
+    let trace =
+      Option.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
+        meta.Keeper_meta_contract.runtime.trace_id)
+    in
+    if not
+         (Option.equal Keeper_id.Trace_id.equal (trace before)
+            (trace transition.projection.meta))
+    then memory_health_moved ~base_path:t.base_path ~keeper_name:t.keeper_name;
     if not (health_metadata_equal before transition.projection.meta) then
       notify_state_change_observer ~keeper_name:t.keeper_name;
     Ok state

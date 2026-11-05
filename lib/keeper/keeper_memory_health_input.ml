@@ -19,24 +19,22 @@ let subscribe callback =
       subscriptions := List.filter (fun current -> current != subscription) !subscriptions)
 ;;
 
+(* Every caller has already committed its write, and several still have
+   bookkeeping to do after this call (a config journal to clear, an Owner
+   command to answer). A subscriber belongs to another lifecycle, so whatever
+   it raises, a cancellation included, is reported like any failure; the
+   caller's next suspension point still sees a cancellation of its own fiber.
+   Subscribers must not yield, so they cannot observe one here. *)
 let notify current event =
-  let cancellation = ref None in
   List.iter
     (fun subscription ->
-       (* A subscriber belongs to another lifecycle. Its failure is not a
-          failure of the write that already returned. *)
-       try subscription.callback event with
-       | Eio.Cancel.Cancelled _ as exn ->
-         let backtrace = Printexc.get_raw_backtrace () in
-         if Option.is_none !cancellation then cancellation := Some (exn, backtrace)
-       | exn ->
+       match subscription.callback event with
+       | () -> ()
+       | exception exn ->
          Log.Keeper.warn ~keeper_name:event.keeper_id
            "memory health input subscriber failed keepers_dir=%s: %s"
            event.keepers_dir (Printexc.to_string exn))
-    current;
-  match !cancellation with
-  | None -> ()
-  | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+    current
 ;;
 
 let written ~keepers_dir ~keeper_id =

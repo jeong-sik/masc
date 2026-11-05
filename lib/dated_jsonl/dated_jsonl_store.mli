@@ -88,6 +88,10 @@ val dir : location -> string
 val of_location : location -> t
 (** The store the location was made for. *)
 
+val keeper_store : location -> (string * Keeper.t) option
+(** The Keeper and the per-keeper store a location made by {!keeper} names;
+    [None] for every other location. *)
+
 val pool_job_name : t -> string
 (** The store's path below [<base>/.masc], with the keeper's directory
     written as [keeper/]: one name per store, whichever keeper it is. A pool

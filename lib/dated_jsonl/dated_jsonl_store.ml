@@ -74,17 +74,24 @@ type t =
   | Decision_audit
 [@@deriving enumerate]
 
-type location = { store : t; dir : string; root : string; segments : string list }
+type location =
+  { store : t
+  ; dir : string
+  ; root : string
+  ; segments : string list
+  ; keeper_store : (string * Keeper.t) option
+  }
 type root = Masc_dir of string
 
 let root_of_base_path ~base_path = Masc_dir (Common.masc_dir_from_base_path ~base_path)
 let root_of_masc_dir dir = Masc_dir dir
-let under (Masc_dir root) store segments =
-  { store; dir = List.fold_left Filename.concat root segments; root; segments }
+let under ?keeper_store (Masc_dir root) store segments =
+  { store; dir = List.fold_left Filename.concat root segments; root; segments; keeper_store }
 let at root store = under root (Root store) (Root.segments store)
 
 let keeper root ~keeper store =
-  under root (Keeper store) [ Common.keepers_runtime_dirname; keeper; Keeper.dirname store ]
+  under ~keeper_store:(keeper, store) root (Keeper store)
+    [ Common.keepers_runtime_dirname; keeper; Keeper.dirname store ]
 
 let reaction_ledger root ~keeper ~generation =
   under
@@ -103,6 +110,7 @@ let decision_audit root ~keeper_dirname =
 
 let dir location = location.dir
 let of_location location = location.store
+let keeper_store location = location.keeper_store
 
 let pool_job_name = function
   | Root store -> "root/" ^ Root.relative_path store

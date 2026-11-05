@@ -100,6 +100,17 @@ type storage =
 - 1.3 에서 보듯 이 시점에 root 안의 세션은 모두 버린 세션이다. 같은 Keeper 의 다른 턴이 그 root 를 쓰는 중일 수 없다.
 - `Resume` 이면 비우지 않는다.
 - 세션을 바꾸는 일은 claim 경계에서만 일어난다. 1.3 의 `plan_claim` 거절 덕분에 같은 Keeper 의 턴이 살아 있는 동안에는 새 claim 이 없고, 비우기도 없다.
+
+비우는 순간 그 root 를 쓰는 Muse 프로세스가 없어야 한다. 경우를 나누면 이렇다.
+
+| 경우 | 지금 막는 것 | 남는 것 |
+| --- | --- | --- |
+| 같은 프로세스에서 턴을 중단했다 | `with_spawned_client` 는 `Eio.Process.spawn ~sw` 로 띄운다. switch 가 끝나면 child 에 `SIGKILL` 이 간다(`eio/process.mli`). 세션 기록은 `run_turn` 이 돌아온 뒤에야 `Turn_inflight` 를 벗어난다 | 없다 |
+| 같은 Keeper 의 두 번째 claim | `plan_claim` 이 `Start`·`Active`·`Turn_inflight` 에서 거절한다 | 없다 |
+| 서버가 죽어 Muse child 가 남았다 | 없다. 부모가 죽으면 `SIGKILL` 이 가지 않는다 | 남은 child 가 새 root 에 경로로 파일을 쓸 수 있다 |
+
+- 세 번째 경우에 남은 child 가 쓰는 것은 버린 세션이다. `session-index.db` 는 SQLite 라 여러 프로세스가 같이 써도 파일이 깨지지 않는다. 새 세션의 기록은 그대로고, 버린 세션 하나가 다음 Start 까지 남는다.
+- 그래서 따로 진행 중 호출 수를 세는 장치를 더하지 않는다. 같은 Keeper 의 겹침은 세션 기록의 phase 가 이미 막는다.
 - 비우기에 실패하면 그 턴은 dispatch 전 실패로 끝난다. 비우지 못한 root 로 새 세션을 열지 않는다.
 
 Muse 는 `model-catalog`·`plugins`·`skills` 도 data 폴더에 둔다(11-06 각각 8 KiB, 4.0 MiB, 6.1 MiB). 새 세션마다 다시 만든다. Fusion 은 지금도 호출마다 이렇게 돈다.
@@ -110,6 +121,7 @@ Fresh state: Muse 를 쓰는 Keeper 의 `official-client-runtime/session.json` �
 
 - 옛 세션을 새 root 로 옮기는 코드는 만들지 않는다.
 - 첫 턴은 새 세션으로 시작한다. MASC 의 canonical 기록은 그대로라 대화 내용은 잃지 않는다. Muse host 쪽 캐시는 한 번 비게 된다.
+- 계정 home 의 data 폴더는 그 계정을 쓰는 모든 Keeper 가 같이 쓴다. 그래서 일부 Keeper 만 지우지 않는다. 배포하면 Muse 를 쓰는 Keeper 전원이 새 세션으로 시작한다.
 
 ## 3. 바뀌는 것
 

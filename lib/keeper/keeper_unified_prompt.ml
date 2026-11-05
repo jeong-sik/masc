@@ -1178,23 +1178,11 @@ let format_goal_observation_summaries = function
        ^ "\n" ^ format_goal_observations summaries ^ "\n\n")
 ;;
 
-let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
-    ~(config : Workspace.config)
+let render_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ()
+    articles
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  (* The world's own articles (RFC-0442). A missing ledger is a world that has
-     written no norms yet, and [load_articles] answers it as no articles. A
-     ledger that exists but cannot be read is not that world: rendering it as
-     no articles ran the turn without its norms and changed the prompt the
-     vendor session was settled against (#38354). The read error goes back
-     to the caller, which refuses the turn before dispatch. Articles only:
-     the decoded history grows without bound and this turn renders just the
-     held norms. *)
-  match World_constitution_store.load_articles ~base_path:config.Workspace.base_path with
-  | Error error -> Error error
-  | Ok articles ->
   let constitution = World_constitution_render.articles articles in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
@@ -1211,7 +1199,24 @@ let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_met
      itself had dropped — so a keeper was told its checkpoint survives across
      cycles only when prompt config was degraded. The permanent content now
      lives in [keeper]; nothing in it varied per turn. *)
-  Ok base_system_prompt
+  base_system_prompt
+;;
+
+let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ()
+  =
+  (* The world's own articles (RFC-0442). A missing ledger is a world that has
+     written no norms yet, and [load_articles] answers it as no articles. A
+     ledger that exists but cannot be read is not that world: rendering it as
+     no articles ran the turn without its norms and changed the prompt the
+     vendor session was settled against (#38354). The read error goes back
+     to the caller, which refuses the turn before dispatch. Articles only:
+     the decoded history grows without bound and this turn renders just the
+     held norms. *)
+  World_constitution_store.load_articles ~base_path:config.Workspace.base_path
+  |> Result.map (render_system_prompt ~workspace_root ~meta ?profile_defaults)
 ;;
 
 (* The backlog read produces three distinct facts, and the Namespace State

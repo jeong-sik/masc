@@ -165,6 +165,16 @@ val build_system_prompt :
     [?profile_defaults] is omitted, [instructions] falls back to
     [meta.instructions]. *)
 
+val render_system_prompt :
+  workspace_root:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  World_constitution_types.t list ->
+  string
+(** {!build_system_prompt} with the given articles in place of the ledger's.
+    Raises [Invalid_argument] when a prompt slot is missing or fails to
+    render. *)
+
 val emit_prompt_metrics :
   meta:Keeper_meta_contract.keeper_meta ->
   system_prompt:string ->

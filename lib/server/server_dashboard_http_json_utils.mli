@@ -17,7 +17,3 @@ val json_number : string -> Yojson.Safe.t -> float option
 (** [Json_field.assoc] adapter wrapping back to [`Assoc fields]
     option. *)
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option
-
-(** Explicit-length prefix equality without throwing on short
-    input. *)
-val string_has_prefix : prefix:string -> string -> bool

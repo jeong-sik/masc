@@ -849,16 +849,9 @@ let observe_persist_error ~operation (entry : entry) = function
     Error error
 ;;
 
-let has_suffix ~suffix value =
-  let value_len = String.length value in
-  let suffix_len = String.length suffix in
-  value_len >= suffix_len
-  && String.equal (String.sub value (value_len - suffix_len) suffix_len) suffix
-;;
-
 let request_id_of_record_filename name =
   let suffix = ".json" in
-  if has_suffix ~suffix name
+  if String.ends_with ~suffix name
   then Some (String.sub name 0 (String.length name - String.length suffix))
   else None
 ;;

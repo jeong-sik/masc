@@ -22,7 +22,7 @@ let extract_repo_id_for_sync path =
   | Some rest ->
       let suffix_len = String.length sync_suffix in
       let rest_len = String.length rest in
-      if rest_len > suffix_len && String.sub rest (rest_len - suffix_len) suffix_len = sync_suffix then
+      if rest_len > suffix_len && String.ends_with ~suffix:sync_suffix rest then
         Some (String.sub rest 0 (rest_len - suffix_len))
       else
         None

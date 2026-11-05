@@ -91,7 +91,9 @@ let test_an_overflowing_body_says_how_many_rows_it_left_out () =
          (index < shown) (contains ~needle:row joined))
     body;
   check bool "the number left out is on the card" true
-    (contains ~needle:(string_of_int (List.length body - shown)) joined)
+    (contains ~needle:(string_of_int (List.length body - shown)) joined);
+  check bool "and it is said in the words more_text gives" true
+    (contains ~needle:(Card.more_text (List.length body - shown)) joined)
 
 let test_a_card_with_no_room_is_blank_rows_of_its_width () =
   List.iter

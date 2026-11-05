@@ -15,6 +15,30 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
+val reason_lines : cells:int -> string -> string list
+(** One reason the server gives for needing the operator, as the lines it is
+    drawn on: wrapped like {!row_lines}, each line in the warning colour. The
+    Action needed card and the plain layout draw a reason through this. *)
+
+val reasons_title : int -> string
+(** The heading over the reasons, naming how many there are. *)
+
+type reasons =
+  { shown : string list list  (** the lines of each reason that is drawn *)
+  ; omitted : int  (** how many reasons come after the last one drawn *)
+  }
+
+val plain_reasons : cells:int -> rows:int -> string list -> reasons
+(** The reasons as the plain layout draws them under {!reasons_title}, in at
+    most [rows] rows counted by {!reasons_height}. They come in order and only
+    whole, and no line is wider than [cells]. When some are left out, a row
+    after the last one says how many. [shown] is empty when there is no reason
+    or when not even the first fits. *)
+
+val reasons_height : reasons -> int
+(** The rows [reasons] takes with its heading and, when some are left out, the
+    row that says so. [0] when [shown] is empty, because nothing is drawn. *)
+
 val draw :
   inner:int ->
   rows:int ->

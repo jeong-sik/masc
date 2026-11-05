@@ -75,13 +75,6 @@ let table_paths text =
        (E.structural_lines lines))
 ;;
 
-let rec is_prefix prefix path =
-  match prefix, path with
-  | [], _ -> true
-  | _ :: _, [] -> false
-  | p :: prefix, s :: path -> String.equal p s && is_prefix prefix path
-;;
-
 let cannot_reach id what =
   Unsupported_layout
     (Printf.sprintf
@@ -216,7 +209,9 @@ let remove text ~id =
        | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
        | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (cannot_reach id "the binding table"))
   in
-  let provider_paths = List.filter (is_prefix [ "providers"; id ]) (table_paths text) in
+  let provider_paths =
+    List.filter (List_util.is_prefix ~equal:String.equal [ "providers"; id ]) (table_paths text)
+  in
   let* () =
     if provider_paths = [] then Error (cannot_reach id "the provider table") else Ok ()
   in

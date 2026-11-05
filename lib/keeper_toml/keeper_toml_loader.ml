@@ -160,26 +160,10 @@ let assignment_end lines start =
   loop start ""
 ;;
 
-let rec path_is_prefix prefix path =
-  match prefix, path with
-  | [], _ -> true
-  | prefix_head :: prefix_tail, path_head :: path_tail
-    when String.equal prefix_head path_head -> path_is_prefix prefix_tail path_tail
-  | _ -> false
-;;
-
-let rec drop_prefix prefix path =
-  match prefix, path with
-  | [], path -> Some path
-  | prefix_head :: prefix_tail, path_head :: path_tail
-    when String.equal prefix_head path_head -> drop_prefix prefix_tail path_tail
-  | _ -> None
-;;
-
 let longest_target_table_path ~base_path ~target_path lines =
   let choose best path =
-    if path_is_prefix base_path path
-       && path_is_prefix path target_path
+    if List_util.is_prefix ~equal:String.equal base_path path
+       && List_util.is_prefix ~equal:String.equal path target_path
        && List.length path < List.length target_path
     then
       match best with
@@ -236,7 +220,7 @@ let rewrite_field_in_content
      | Ok None -> Error (Printf.sprintf "table [%s] not found in TOML" table)
      | Ok (Some insertion_table_path) ->
        let insertion_key_path =
-         match drop_prefix insertion_table_path target_path with
+         match List_util.strip_prefix ~equal:String.equal insertion_table_path target_path with
          | Some (_ :: _ as path) -> path
          | Some [] | None -> key_path
        in

@@ -104,11 +104,10 @@ let canonical_absolute path =
       | "" :: parts -> List.for_all (fun part -> part <> "" && part <> "." && part <> "..") parts
       | _ -> false)
 let descendant ~parent path =
-  let parent = String.split_on_char '/' parent and path = String.split_on_char '/' path in
-  let rec prefix parents parts = match parents, parts with
-    | [], _ -> true | first :: parents, next :: parts when first = next -> prefix parents parts
-    | _ -> false in
-  prefix parent path
+  List_util.is_prefix
+    ~equal:String.equal
+    (String.split_on_char '/' parent)
+    (String.split_on_char '/' path)
 let volume_target path =
   canonical_absolute path
   && not (List.exists (fun reserved -> descendant ~parent:reserved path || descendant ~parent:path reserved)

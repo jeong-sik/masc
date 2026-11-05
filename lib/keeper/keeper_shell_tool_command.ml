@@ -193,14 +193,6 @@ let caller ~(dispatch : dispatch) ~(descriptor : Keeper_tool_descriptor.t)
    table.  Longer declared paths win over shorter ones, so a future
    [board] cannot shadow a declared [board post get]. *)
 let split_words (words : string list) : (string * string list) option =
-  let rec starts_with path words =
-    match (path, words) with
-    | [], rest -> Some rest
-    | _, [] -> None
-    | p :: path_rest, w :: word_rest when String.equal p w ->
-      starts_with path_rest word_rest
-    | _, _ -> None
-  in
   let paths =
     Lazy.force entries
     |> List.map fst
@@ -209,7 +201,7 @@ let split_words (words : string list) : (string * string list) option =
   let rec try_path = function
     | [] -> None
     | path :: rest -> (
-      match starts_with path words with
+      match List_util.strip_prefix ~equal:String.equal path words with
       | Some argument_words -> (
         match List.assoc_opt path (Lazy.force entries) with
         | Some tool -> Some (tool, argument_words)

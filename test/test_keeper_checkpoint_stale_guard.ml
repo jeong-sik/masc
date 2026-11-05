@@ -1497,7 +1497,17 @@ let test_exact_source_cas_updates_canonical_watermark () =
        check bool
          "release failure preserves the exact installed ref"
          true
-         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref)
+         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref);
+       (* The lock is released after the commit, so its failure does not make
+          the head less durable. The save below takes the same lock again. *)
+       (match
+          Keeper_checkpoint_store.require_confirmed_installation
+            (Keeper_checkpoint_store.Installed installed)
+        with
+        | Ok reference ->
+          check bool "release failure is a confirmed installation" true
+            (Keeper_checkpoint_ref.equal reference disk_ref)
+        | Error _ -> fail "a release failure after the commit was refused")
      | Keeper_checkpoint_store.Not_installed _ ->
        fail "release failure downgraded the installed checkpoint");
     match

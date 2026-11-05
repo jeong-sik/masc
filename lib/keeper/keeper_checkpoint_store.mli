@@ -633,15 +633,23 @@ type checkpoint_installation =
   | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
 
+val checkpoint_installation_auxiliary_to_string :
+  checkpoint_installation_auxiliary -> string
+
 val require_confirmed_installation : checkpoint_installation ->
   (Keeper_checkpoint_ref.t, checkpoint_installation) result
 (** Interpret the staged write result without performing another write or read.
-    Return its exact installed reference only when auxiliary evidence is empty.
-    Other results remain the original result value. An actual Eio cancellation
-    in observer/unwind auxiliary evidence is reraised with its original exception
-    and backtrace, including when bytes were already installed. Callers retain
-    that installed evidence but cannot convert cancellation into a retryable
-    storage error. This function does not reconfirm uncertain durability. *)
+    Return its exact installed reference when the head is known to be durable:
+    [Installed] with no [Commit_durability_unknown]. An observer failure, a
+    lock release failure or an interrupted unwind happened after the durable
+    commit, so it is accepted and logged with the reference; the caller still
+    holds it in the installation it passed. [Not_installed], and [Installed]
+    with [Commit_durability_unknown], remain the original result value. An
+    actual Eio cancellation in observer/unwind auxiliary evidence is reraised
+    with its original exception and backtrace, including when bytes were
+    already installed. Callers retain that installed evidence but cannot
+    convert cancellation into a retryable storage error. This function does
+    not reconfirm uncertain durability. *)
 
 (** Conditionally publish [candidate] only when the canonical head still
     names exactly [expected_source_ref]. The stable session lock is reacquired,

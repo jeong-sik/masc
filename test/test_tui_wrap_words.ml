@@ -371,7 +371,23 @@ let test_a_long_name_keeps_its_source_ranges () =
          spans)
     [ 24; 30; 38; 54 ]
 
-(* A long word costs a pass over it, not a pass for each row it takes. *)
+(* A long word costs a pass over it, not a pass for each row it takes: a word
+   four times as long allocates about four times as much, where a pass for each
+   row would make it sixteen times. *)
+let test_splitting_cost_grows_with_the_word () =
+  let allocated segments =
+    let word = String.concat "" (List.init segments (fun _ -> "segment_")) in
+    let before = Gc.allocated_bytes () in
+    ignore (Sys.opaque_identity (wrap ~cells:52 word));
+    Gc.allocated_bytes () -. before
+  in
+  let small = allocated 5_000 in
+  let large = allocated 20_000 in
+  check bool
+    (Printf.sprintf "four times the word, under six times the allocation (%.0f then %.0f bytes)"
+       small large)
+    true (large < 6. *. small)
+
 let test_a_very_long_word_is_split_whole () =
   let unit_ = "segment_" in
   let word = String.concat "" (List.init 20_000 (fun _ -> unit_)) in
@@ -421,6 +437,8 @@ let () =
             test_a_word_that_is_not_utf_8_is_cut_at_the_width
         ; test_case "a very long word is split whole" `Quick
             test_a_very_long_word_is_split_whole
+        ; test_case "splitting cost grows with the word" `Quick
+            test_splitting_cost_grows_with_the_word
         ] )
     ; ( "journal"
       , [ test_case "a long name keeps its source ranges" `Quick

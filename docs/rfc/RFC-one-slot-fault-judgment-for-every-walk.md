@@ -115,6 +115,10 @@ type t =
       (** 거절은 왔지만, 누구의 사정인지 응답이 기계가 읽는 모양으로 말하지 않는다 *)
   | Unknown_after_dispatch
       (** 보냈고 결과를 모른다. 다시 보내도 되는지는 걸음의 효과 규칙이 정한다 *)
+  | Local_admission
+      (** MASC 의 허가 대기열이나 로컬 용량에서 기다리다 기한이 지났다
+          (Queue·Capacity_backpressure 단계의 Timeout). 아무것도 보내지 않아
+          이 바인딩에 대해 말하는 것이 없다 *)
 
 (** 보냈는지. [Exact_output.generation_dispatch_fact] 를 이 모듈로 내린다.
     Exact_output 이 이 모듈을 읽으므로, 넘겨받는 사실의 타입은 이 아래에 있어야 한다. *)

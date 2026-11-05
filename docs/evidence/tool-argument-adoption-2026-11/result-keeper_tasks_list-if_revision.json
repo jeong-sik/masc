@@ -1,0 +1,35 @@
+{
+  "tool": "keeper_tasks_list",
+  "argument": "if_revision",
+  "read_at_utc": "2026-11-05T20:50Z",
+  "unreadable_lines": 0,
+  "rows_without_timestamp": 0,
+  "first_use_utc": null,
+  "windows": [
+    {
+      "label": "all",
+      "from_utc": "2026-11-01T00:00:00Z",
+      "until_utc": "2026-11-05T20:00:00Z",
+      "hours": 116.0,
+      "calls": 2794,
+      "calls_per_hour": 24.09,
+      "calls_with_argument": 0,
+      "share_with_argument": 0.0,
+      "keepers": 26,
+      "keepers_using_argument": {
+        "count": 0,
+        "top": []
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 6933197,
+        "per_hour": 59768.9,
+        "mean": 2481.5,
+        "p50": 1216,
+        "p99": 14892,
+        "mean_with_argument": null,
+        "mean_without_argument": 2481.5
+      }
+    }
+  ]
+}

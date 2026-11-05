@@ -1,0 +1,60 @@
+{
+  "tool": "masc_schedule_notes_list",
+  "argument": "contains",
+  "read_at_utc": "2026-11-05T20:55Z",
+  "unreadable_lines": 0,
+  "rows_without_timestamp": 0,
+  "first_use_utc": null,
+  "windows": [
+    {
+      "label": "before",
+      "from_utc": "2026-11-03T00:00:00Z",
+      "until_utc": "2026-11-05T08:31:30Z",
+      "hours": 56.52,
+      "calls": 39,
+      "calls_per_hour": 0.69,
+      "calls_with_argument": 0,
+      "share_with_argument": 0.0,
+      "keepers": 4,
+      "keepers_using_argument": {
+        "count": 0,
+        "top": []
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 1536348,
+        "per_hour": 27180.0,
+        "mean": 39393.5,
+        "p50": 15250,
+        "p99": 346196,
+        "mean_with_argument": null,
+        "mean_without_argument": 39393.5
+      }
+    },
+    {
+      "label": "after",
+      "from_utc": "2026-11-05T08:31:30Z",
+      "until_utc": "2026-11-05T20:00:00Z",
+      "hours": 11.47,
+      "calls": 4,
+      "calls_per_hour": 0.35,
+      "calls_with_argument": 0,
+      "share_with_argument": 0.0,
+      "keepers": 2,
+      "keepers_using_argument": {
+        "count": 0,
+        "top": []
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 33090,
+        "per_hour": 2883.7,
+        "mean": 8272.5,
+        "p50": 10146,
+        "p99": 13332,
+        "mean_with_argument": null,
+        "mean_without_argument": 8272.5
+      }
+    }
+  ]
+}

@@ -7312,12 +7312,17 @@ let launch_clients_load state ~mailbox =
   if state.clients_surface_inflight then ()
   else begin
     state.clients_surface_inflight <- true;
+    (* Marks the read in flight on the owed read, so the answer settles
+       it rather than leaving it due for the next loop. *)
+    begin_clients_read state;
     let host = server_peer_host in
     let port = state.port in
     state.clients_surface_generation <- state.clients_surface_generation + 1;
     let generation = state.clients_surface_generation in
     Masc_tui_async_read.launch
-      ~on_not_run:(fun () -> state.clients_surface_inflight <- false)
+      ~on_not_run:(fun () ->
+        state.clients_surface_inflight <- false;
+        abandon_clients_read state)
       ~deliver:(fun result ->
         enqueue_async mailbox (Clients_loaded (generation, result)))
       (fun () -> Masc_tui_loader.load_clients ~host ~port)
@@ -8163,6 +8168,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
+  | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
 
@@ -8175,7 +8181,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
-  | Clients -> launch_clients_load state ~mailbox
+  | Clients -> owe_clients_read state
   (* The list draws nothing from the Keeper composite; Info and Secrets read
      it on entry and when it changes. *)
   | Keepers
@@ -9171,6 +9177,26 @@ let launch_owed_identity_logins state ~mailbox =
                ~deliver:(workspace_enqueue state mailbox) keeper_name
            end
          end)
+
+(* The Clients roster's owed read lives in {!Masc_tui_types}: owe, begin,
+   abandon and settle, with the settle decision testable without the event
+   loop. *)
+
+(* Runs on every loop iteration. Off the Clients surface nothing is owed:
+   arriving reads it. A read in flight is let finish first; one whose
+   generation was superseded returns abandoned. *)
+let launch_owed_clients state ~mailbox =
+  if state.view <> Clients then state.clients_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.clients_surface_inflight in
+    let read =
+      if reading then state.clients_owed
+      else Masc_tui_owed_read.abandoned state.clients_owed
+    in
+    state.clients_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_clients_load state ~mailbox
+  end
 
 let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
@@ -18977,6 +19003,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        owe_runtime_config_read state;
        owe_harness_read state;
+       owe_clients_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
@@ -19370,6 +19397,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* The feed was gone while the authority was withdrawn: every login
        announcement it would have delivered was lost, so each Keeper a kept
        expectation names owes its read again. *)
+    owe_clients_read state;
     Masc_tui_types.owe_every_identity_login_read state;
     owe_async_requests_read state;
     owe_selected_tools_async_detail_read state;
@@ -23418,6 +23446,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change;
+                   (* The Clients roster lists the registry's Keepers by
+                      phase, so a registry row change re-reads it too. *)
+                   owe_clients_read state;
                    (* A Keeper's metadata and configuration feed its
                       effective tool surface. *)
                    (match change, selected_keeper state with
@@ -27855,6 +27886,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
+      Masc_tui_types.settle_clients_read state ~now:(monotonic_now_s ()) result;
       if generation = state.clients_surface_generation then (
         match result with
         | Ok snapshot ->
@@ -33088,6 +33120,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
+      launch_owed_clients state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
@@ -39152,8 +39185,7 @@ Use relative paths for resources already held in the package. -->
                        state.task_detail_id
                  | Planning_detail goal_id ->
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id)
-             | Clients ->
-                 launch_clients_load state ~mailbox:async_messages
+             | Clients -> owe_clients_read state
              | Lanes ->
                 launch_lanes_reread state ~mailbox:async_messages;
                 if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
@@ -41818,7 +41850,7 @@ Use relative paths for resources already held in the package. -->
             a failed read ([launch_owed_verification]). *)
          | Verification -> ()
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
-             | Clients -> launch_clients_load state ~mailbox:async_messages
+             | Clients -> owe_clients_read state
          (* Harness re-reads when a verdict or a label is recorded and
             retries a failed read ([launch_owed_harness]). *)
          | Harness -> ()

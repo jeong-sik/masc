@@ -3532,27 +3532,39 @@ let add_routes ~sw ~clock router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/clients" (fun state req reqd ->
          (* Everyone attached to this workspace in one reading: directory
-            agents, state-backed sessions, and runtime fibers, merged by
-            [dashboard_agents_safe]. The TUI's Runtime family reads this to
-            answer "who is connected", which no other surface lists — the
-            keeper roster carries keepers only, so a non-keeper MCP client
-            is invisible there. Sorted by name so two readings a refresh
-            apart diff as row changes, not reorderings. Observation-only:
-            joining a session to its task binding is a read, and the
-            backlog stays the authority on ownership. *)
+            agents, state-backed sessions, and runtime fibers, merged with
+            each row's source by [Workspace.get_active_agent_sources_observed].
+            The TUI's Runtime family reads this to answer "who is connected",
+            which no other surface lists — the keeper roster carries keepers
+            only, so a non-keeper MCP client is invisible there. Sorted by
+            name so two readings a refresh apart diff as row changes, not
+            reorderings. Observation-only: joining a session to its task
+            binding is a read, and the backlog stays the authority on
+            ownership. *)
          let config = Mcp_server.workspace_config state in
-         let agents =
+         let rows, read_failures =
+           Workspace.get_active_agent_sources_observed config
+         in
+         let sorted =
            List.sort
-             (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
+             (fun ((a : Masc_domain.agent), _) ((b : Masc_domain.agent), _) ->
                 String.compare a.name b.name)
-             (dashboard_agents_safe config)
+             rows
          in
          let json =
            `Assoc
-             [ ("schema", `String "masc.dashboard.clients.v1")
+             [ ("schema", `String "masc.dashboard.clients.v2")
              ; ("generated_at", `String (Masc_domain.now_iso ()))
              ; ("observation_only", `Bool true)
-             ; ("clients", `List (List.map dashboard_agent_json agents))
+             ; ( "clients"
+               , `List
+                   (List.map
+                      Server_dashboard_http_core_entities.dashboard_client_json
+                      sorted) )
+               (* A source that could not be read leaves its rows out; the
+                  reader is told so and reads again rather than taking the
+                  shorter roster as the whole one. *)
+             ; ("read_failures", `List (List.map (fun detail -> `String detail) read_failures))
              ]
          in
          Http.Response.json_value ~compress:true ~request:req json reqd

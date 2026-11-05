@@ -333,7 +333,13 @@ let purge_agent_filesystem_artifacts ~validate_alias config agent_names =
                  ])
             |> List.sort_uniq String.compare
           in
-          (match remove_paths_strict filesystem_paths with
+          let removal = remove_paths_strict filesystem_paths in
+          (* Reported once the records are gone or their removal has been
+             attempted: the state list was already pruned above, so a reader
+             has to be told either way, and one that woke before the removal
+             could still see the rows and settle. *)
+          Workspace_agent_record.report_roster_changed config;
+          (match removal with
            | Error _ as error -> error
            | Ok () ->
              (match delete_credentials config aliases with

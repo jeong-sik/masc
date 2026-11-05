@@ -8,12 +8,14 @@ module Kind = struct
     | Repositories
     | Verification_requests
     | Harness_verdicts
+    | Clients
     | Keeper_oauth_attempts
 
   let to_wire = function
     | Repositories -> "repositories"
     | Verification_requests -> "verification_requests"
     | Harness_verdicts -> "harness_verdicts"
+    | Clients -> "clients"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
   ;;
 
@@ -21,6 +23,7 @@ module Kind = struct
     | "repositories" -> Some Repositories
     | "verification_requests" -> Some Verification_requests
     | "harness_verdicts" -> Some Harness_verdicts
+    | "clients" -> Some Clients
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
     | _ -> None
   ;;
@@ -30,12 +33,14 @@ type dataset =
   | Repositories
   | Verification_requests
   | Harness_verdicts
+  | Clients
   | Keeper_oauth_attempts of { keeper : string }
 
 let kind = function
   | Repositories -> Kind.Repositories
   | Verification_requests -> Kind.Verification_requests
   | Harness_verdicts -> Kind.Harness_verdicts
+  | Clients -> Kind.Clients
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
 ;;
 
@@ -45,7 +50,7 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
    one Keeper carries its name; the others carry nothing. A later dataset can
    name an instance instead, and joins here. *)
 let subject_fields = function
-  | Repositories | Verification_requests | Harness_verdicts -> []
+  | Repositories | Verification_requests | Harness_verdicts | Clients -> []
   | Keeper_oauth_attempts { keeper } -> [ ("keeper", `String keeper) ]
 ;;
 
@@ -64,6 +69,7 @@ let of_fields fields =
      | Some Kind.Repositories -> Ok Repositories
      | Some Kind.Verification_requests -> Ok Verification_requests
      | Some Kind.Harness_verdicts -> Ok Harness_verdicts
+     | Some Kind.Clients -> Ok Clients
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

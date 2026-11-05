@@ -3322,6 +3322,8 @@
 
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 
+(include stanzas/test_workspace_agent_record.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
 (include stanzas/test_workspace_init_state_parity.inc)
@@ -4943,7 +4945,7 @@
 (test
  (name test_tui_client_rows)
  (modules test_tui_client_rows)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc_tui_types masc_tui_owed_read))
 
 (test
  (name test_tui_wire_age)

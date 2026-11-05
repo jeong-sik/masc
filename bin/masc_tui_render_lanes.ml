@@ -2081,6 +2081,20 @@ type client_table_column =
   | Client_status_column | Client_name_column | Client_type_column
   | Client_acting_for_column | Client_task_column | Client_last_seen_column
 
+(* Ages are measured to the server's read of the roster, not to this frame:
+   a heartbeat is not announced, so time since the read is not time since the
+   client was seen. A Keeper registry or workspace-state row carries no
+   observation time of its own, and its cell stays empty rather than showing
+   the read time as a fact about the client. *)
+let clients_read_at (state : state) =
+  Option.bind state.clients_surface (fun (snapshot : Masc.Tui_decode.clients_snapshot) ->
+    Time_codec.parse_rfc3339_opt snapshot.Masc.Tui_decode.cls_observed_at)
+
+let client_last_seen_text ~read_at (row : Masc.Tui_decode.client_row) =
+  match row.Masc.Tui_decode.cr_last_seen, read_at with
+  | Some last_seen, Some read_at -> Masc_tui_wire_age.text ~now:read_at last_seen
+  | Some _, None | None, (Some _ | None) -> Masc_tui_theme.Glyph.no_value
+
 let render_client_detail state (client : Masc.Tui_decode.client_row) =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -2110,9 +2124,9 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
         (Masc.Tui_decode.client_status_to_string client.cr_status)
     @ field "Acting for" (optional client.cr_keeper_name)
     @ field "Task" (optional client.cr_current_task)
-    @ field "Observation age"
-        (Masc_tui_wire_age.text ~now:(Unix.gettimeofday ()) client.cr_last_seen)
-    @ field ~style:Ansi.dim "Last seen (as read)" client.cr_last_seen
+    @ field "Seen before read"
+        (client_last_seen_text ~read_at:(clients_read_at state) client)
+    @ field ~style:Ansi.dim "Last seen (as read)" (optional client.cr_last_seen)
     @ detail_section_lines "2. 클라이언트 식별 정보 (Identity)"
     @ field "Name" client.cr_name
     @ field "Type" client.cr_agent_type
@@ -2139,6 +2153,8 @@ let render_clients (state : state) =
      render apart. *)
   let now_s = Unix.gettimeofday () in
   let now = Unix.localtime now_s in
+  (* Every row's span is a distance from the same read of the roster. *)
+  let read_at = clients_read_at state in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
@@ -2167,7 +2183,7 @@ let render_clients (state : state) =
   let table_width = max 0 (framed_inner_width cols - 2) in
   let last_seen_width =
     List.fold_left (fun widest (row : Masc.Tui_decode.client_row) ->
-      max widest (Message_layout.display_width (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)))
+      max widest (Message_layout.display_width (client_last_seen_text ~read_at row)))
       (Message_layout.display_width "LAST SEEN") clients
     (* The table keeps its status and identity floor. Exact observations that
        exceed this share are read in the selected client's scrollable detail. *)
@@ -2284,7 +2300,7 @@ let render_clients (state : state) =
                  header reading 09:31:39 on 2026-09-23, and the distance a
                  reader could take from that pointed two hours ahead. A span
                  carries its own day. *)
-              ~last_seen:(Masc_tui_wire_age.text ~now:now_s row.cr_last_seen))
+              ~last_seen:(client_last_seen_text ~read_at row))
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)

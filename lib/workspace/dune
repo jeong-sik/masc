@@ -23,6 +23,7 @@
   workspace_utils
   workspace_utils_ops
   workspace_utils_paths_backend
+  workspace_agent_record
   workspace_state
   workspace_gc
   workspace_init

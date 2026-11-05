@@ -18,6 +18,10 @@ type dataset =
   | Harness_verdicts
       (** The judge verdicts and operator labels [Eval_calibration] records,
           read by [GET /api/v1/dashboard/harness-health]. *)
+  | Clients
+      (** What [GET /api/v1/dashboard/clients] lists: an agent record's row
+          ({!Workspace_agent_record}) or a purge. Keeper registry rows change
+          with [keeper_row_changed] instead. *)
   | Keeper_oauth_attempts of { keeper : string }
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
@@ -35,6 +39,7 @@ module Kind : sig
     | Repositories
     | Verification_requests
     | Harness_verdicts
+    | Clients
     | Keeper_oauth_attempts
 
   val to_wire : t -> string

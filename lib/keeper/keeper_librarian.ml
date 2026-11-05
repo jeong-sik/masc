@@ -770,13 +770,8 @@ let current_facts inp =
 ;;
 
 (* The librarian states only what changes: which memories to retire, and what
-   to claim. A memory it does not name stays. That is what the apply step has
-   always done -- [Keeper_memory_os_current] keeps every fact no dropped
-   statement names -- so the whole-set roll call the answer used to carry was
-   validated here and then discarded at apply time, while costing the librarian
-   a correct restatement of every current identity on every pass. A single slip
-   in that restatement threw the whole pass away, which made "retain everything,
-   drop nothing, claim nothing" the one answer that always passed (RFC-0456).
+   to claim. A memory it does not name stays: [Keeper_memory_os_current] keeps
+   every fact no dropped statement names.
 
    What is checked here is not what deserves to be remembered -- that is the
    librarian's judgment and no rule here narrows it. It is whether the answer

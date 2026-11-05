@@ -1474,8 +1474,33 @@ let auth_cmd =
         $ base_path
         $ external_store)
   in
+  let invite_cmd =
+    let doc =
+      "Write one more Admin invitation while no server runs on the workspace, \
+       and print its link once."
+    in
+    let man =
+      [ `S Manpage.s_description
+      ; `P
+          "For a first invitation that expired before it was spent, or whose \
+           link was lost. The workspace must be activated with masc auth \
+           bootstrap. Member invitations, and the revocation of an invitation, \
+           are written by an Admin through the server."
+      ; `P
+          "MASC_HTTP_BASE_URL must be the http(s) address the person opens, as \
+           for masc auth bootstrap. The command takes the workspace lease, so \
+           stop the server first."
+      ]
+    in
+    Cmd.v
+      (Cmd.info "invite" ~doc ~man)
+      Term.(
+        const (fun base_path ->
+          Masc_cli_auth.invite ~base_path:(Env_config.normalize_masc_base_path_input base_path))
+        $ base_path)
+  in
   let doc = "Set up multi-account authorization on this workspace." in
-  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd ]
+  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd ]
 
 let login_cmd =
   let doc =

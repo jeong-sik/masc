@@ -2,6 +2,8 @@
    multi-account installation and prints the one link that lets the first
    Admin in. *)
 
+(** [masc auth bootstrap] and [masc auth invite]. *)
+
 (** [masc auth bootstrap]: activates a multi-account installation on a base
     path where no server runs (design 5.1-1, 8.4, plan B3d-1).
 
@@ -19,3 +21,9 @@
     Returns the exit code: [0] once the link is printed, [1] otherwise, with
     the reason on standard error. *)
 val bootstrap : base_path:string -> external_store:string -> int
+
+(** [masc auth invite]: writes one more Admin invitation with
+    {!Authz_activation.invite}, under the lease and with the reads of
+    {!bootstrap} first, and prints its link once. For a first invitation that
+    expired before it was spent, or whose link was lost. Same exit codes. *)
+val invite : base_path:string -> int

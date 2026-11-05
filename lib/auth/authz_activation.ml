@@ -2,6 +2,7 @@
 
 module B = Authz_boot_mode
 module E = Authz_invite_event
+module I = Authz_install_record
 module M = Authz_boot_mode_read
 module Z = Authz_zone
 
@@ -67,14 +68,15 @@ let error_to_string = function
     ^ detail
   | Already_active ->
     "the authorization log made Multi_account and the external store matches it: this \
-     installation is already activated"
+     installation is already activated, and masc auth invite writes one more Admin invitation"
   | Boot_stops (first, rest) ->
     "a boot stops on this installation, and an activation would not change that: "
     ^ String.concat "; " (first :: rest)
   | Workspace_id_not_built error -> "the workspace id was refused: " ^ id_error_to_string error
   | Bootstrap_failed error -> "the bootstrap failed: " ^ Authz_bootstrap.error_to_string error
   | Invitation_not_written error ->
-    "the installation is bootstrapped and holds no Admin invitation: "
+    "the installation is bootstrapped and holds no Admin invitation; masc auth invite writes \
+     one while no server runs: "
     ^ invitation_error_to_string error
 ;;
 
@@ -148,4 +150,52 @@ let activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms
       (write_invitation ~base_path ~external_store ~now_ms)
   in
   Ok { workspace_id; invitation }
+;;
+
+type invite_error =
+  | Not_activated
+  | Not_served_as_active of string * string list
+  | Store_not_located of string
+  | Invite_not_written of invitation_error
+
+let invite_error_to_string = function
+  | Not_activated ->
+    "no installation is active for multi-account use here: activate it with masc auth bootstrap"
+  | Not_served_as_active (first, rest) ->
+    "a boot stops on this installation, and not on an active one: " ^ String.concat "; " (first :: rest)
+  | Store_not_located detail -> "the external store is not located: " ^ detail
+  | Invite_not_written error -> "the Admin invitation was not written: " ^ invitation_error_to_string error
+;;
+
+(* Design 5.1: an installation that a boot finds in Multi_account, with an
+   external store that matches the log. *)
+let active ~base_path ~config_dir ~anonymous_mutations =
+  let input = M.input ~base_path ~config_dir ~anonymous_mutations in
+  match M.decide input with
+  | M.Stop (M.Multi_account_not_served B.Multi_account) -> Ok ()
+  | M.Boot_single_user | M.Stop M.Multi_account_not_activatable -> Error Not_activated
+  | M.Stop
+      ((M.Refuse _
+       | M.Multi_account_not_served
+           (B.Single_user | B.Activation_requested | B.Multi_account_uncertain)) as stop) ->
+    let first, rest = M.messages input stop in
+    Error (Not_served_as_active (first, rest))
+;;
+
+let located_store ~config_dir ~base_path =
+  match I.locate ~config_dir ~base_path with
+  | Error error -> Error (Store_not_located (I.locate_error_to_string error))
+  | Ok located ->
+    (match I.read located with
+     | Error error -> Error (Store_not_located (I.read_error_to_string error))
+     | Ok None -> Error (Store_not_located "the install record names no external store")
+     | Ok (Some store) -> Ok (store : I.Store_path.t :> string))
+;;
+
+let invite ~base_path ~config_dir ~anonymous_mutations ~now_ms =
+  let* () = active ~base_path ~config_dir ~anonymous_mutations in
+  let* external_store = located_store ~config_dir ~base_path in
+  Result.map_error
+    (fun error -> Invite_not_written error)
+    (write_invitation ~base_path ~external_store ~now_ms)
 ;;

@@ -336,6 +336,7 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Author_inactive _ -> "Author_inactive"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
+  | Authz_state.Admission_behind_log _ -> "Admission_behind_log"
 ;;
 
 let error_name : Z.error -> string = function
@@ -347,7 +348,6 @@ let error_name : Z.error -> string = function
   | Z.Abort_not_confirmed error -> "Abort_not_confirmed " ^ end_error_name error
   | Z.Store_entry_refused _ -> "Store_entry_refused"
   | Z.Settlement_not_written error -> "Settlement_not_written " ^ store_append_error_name error
-  | Z.Clock_behind_head _ -> "Clock_behind_head"
   | Z.Record_not_built (R.Author_not_admitted _) -> "Record_not_built"
   | Z.Refused refusal -> "Refused " ^ refusal_name refusal
   | Z.Intent_not_written error -> "Intent_not_written " ^ store_append_error_name error
@@ -1089,9 +1089,11 @@ let a_refused_invite_writes_nothing () =
       (invite_draft ~at_ms:(at_ms + 3) ()))
 ;;
 
-(* The time of the log does not go back, so a clock that was set back cannot
-   spend an invitation that had expired when the head was written (#48716). *)
-let a_clock_behind_the_head_writes_nothing () =
+(* The zone writes the time of its clock, and an admission cannot be at a time
+   before a record already in the log, so a clock set back cannot spend an
+   invitation that had expired when that record was written (#48716). A record
+   of another kind is not held to that time. *)
+let an_admission_behind_the_log_writes_nothing () =
   with_dirs (fun dirs ->
     ignore (bootstrap dirs : B.completed);
     let zone = open_zone dirs in
@@ -1104,20 +1106,21 @@ let a_clock_behind_the_head_writes_nothing () =
         (invite_draft ~at_ms:(at_ms + 1001) ~invite_id:second_invite_id ~token:"token-2" ())
     in
     let before = files dirs in
-    check_error
-      "an admission at a time before the head"
-      "Clock_behind_head"
-      zone
-      (admission_draft ~at_ms:(at_ms + 1000));
+    let behind = admission_draft ~at_ms:(at_ms + 1000) in
+    check_error "an admission before the second invitation" "Refused Admission_behind_log" zone behind;
     check_files "both files are as they were" before dirs;
     check_snapshot "the snapshot" ~mode:on ~head:second.Z.record_hash (Z.snapshot zone);
     check_error
-      "the admission at the time of the head"
+      "the admission at the time of the second invitation"
       "Refused Admission"
       zone
       (admission_draft ~at_ms:(at_ms + 1001));
-    let next = commit_ok zone (mode_draft ~at_ms:(at_ms + 1001) M.Off) in
-    ignore (check_restart "a restart" dirs ~mode:off ~head:next.Z.record_hash : opened))
+    let restarted = open_zone dirs in
+    check_error "the same admission after a restart" "Refused Admission_behind_log" restarted behind;
+    let switched = commit_ok restarted (mode_draft ~at_ms:(at_ms + 2) M.Off) in
+    ignore
+      (check_restart "an off from a clock that went back" dirs ~mode:off ~head:switched.Z.record_hash
+       : opened))
 ;;
 
 let a_failed_store_write_stops_every_commit () =
@@ -1581,9 +1584,9 @@ let () =
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing
         ; Alcotest.test_case
-            "a clock behind the head writes nothing"
+            "an admission behind the log writes nothing"
             `Quick
-            a_clock_behind_the_head_writes_nothing
+            an_admission_behind_the_log_writes_nothing
         ; Alcotest.test_case
             "the zone opens only a bootstrapped log"
             `Quick

@@ -8,6 +8,7 @@ type t =
   ; invites : Authz_invite_state.t
   ; principals : Authz_principal_state.t
   ; revocation_pending : Authz_records.Subject.t list
+  ; latest_at_ms : int option
   }
 
 let empty =
@@ -15,6 +16,7 @@ let empty =
   ; invites = Authz_invite_state.empty
   ; principals = Authz_principal_state.empty
   ; revocation_pending = []
+  ; latest_at_ms = None
   }
 
 let is_pending state subject = List.exists (Authz_records.Subject.equal subject) state.revocation_pending
@@ -45,6 +47,10 @@ type refusal =
   | Author_inactive of Authz_types.User_id.t
   | Accounts_off of K.t
   | Kind_not_read of K.t
+  | Admission_behind_log of
+      { at_ms : int
+      ; latest_at_ms : int
+      }
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -76,6 +82,11 @@ let refusal_to_string = function
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
+  | Admission_behind_log { at_ms; latest_at_ms } ->
+    Printf.sprintf
+      "the admission is at %d ms, before a record of the log at %d ms: the clock went back"
+      at_ms
+      latest_at_ms
 ;;
 
 type applied =
@@ -127,17 +138,30 @@ let invite state (record : R.t) =
      | Error refusal -> Error (Invite refusal))
 ;;
 
+(* The latest time of the log, when [record] comes before it. An admission is
+   judged against the expiry of its invitation with its own time, so a time
+   before a record already read would let a clock set back spend an invitation
+   that the log shows had expired. *)
+let latest_after state (record : R.t) =
+  match state.latest_at_ms with
+  | Some latest_at_ms when record.R.at_ms < latest_at_ms -> Some latest_at_ms
+  | Some (_ : int) | None -> None
+;;
+
 (* An admission spends a token that opens once (design 5.1-3) and makes a
    principal; an Admin invitation also makes an Admin assignment, which raises
    the role epoch of that principal (design 8.1). A log restored from before the
    admission would open the token again, so every admission is a [Grant] on the
    principal it makes, and the restored log disagrees with the store. *)
 let admission state ~workspace_id (record : R.t) =
-  match Authz_admission_event.of_body record.R.body with
-  | Error error -> Error (Admission_unreadable error)
-  | Ok event when is_pending state (Authz_records.Subject.Invite event.Authz_admission_event.invite_id) ->
+  match Authz_admission_event.of_body record.R.body, latest_after state record with
+  | Error error, (_ : int option) -> Error (Admission_unreadable error)
+  | Ok (_ : Authz_admission_event.t), Some latest_at_ms ->
+    Error (Admission_behind_log { at_ms = record.R.at_ms; latest_at_ms })
+  | Ok event, None
+    when is_pending state (Authz_records.Subject.Invite event.Authz_admission_event.invite_id) ->
     Error (Revocation_pending (Authz_records.Subject.Invite event.Authz_admission_event.invite_id))
-  | Ok event ->
+  | Ok event, None ->
     (match
        Authz_principal_state.admit
          state.principals
@@ -286,10 +310,18 @@ let author_refusal state (author : Authz_records.Author.t) =
   | Authz_records.Author.System_migration -> None
 ;;
 
+(* Every record that is read moves the latest time, whatever its kind. *)
+let later state (record : R.t) =
+  match state.latest_at_ms with
+  | Some latest_at_ms when latest_at_ms >= record.R.at_ms -> state
+  | Some (_ : int) | None -> { state with latest_at_ms = Some record.R.at_ms }
+;;
+
 let apply state (record : R.t) =
   match author_refusal state record.R.author with
   | Some refusal -> Error refusal
-  | None -> read state record
+  | None ->
+    Result.map (fun applied -> { applied with state = later applied.state record }) (read state record)
 ;;
 
 let step state record =

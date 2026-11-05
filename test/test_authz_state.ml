@@ -333,8 +333,9 @@ let identity_of sub =
 
 let bob = id_of_string Authz_types.User_id.of_string "user-2"
 let second_invite = id_of_string Authz_types.Invite_id.of_string "invite-2"
+let third_invite = id_of_string Authz_types.Invite_id.of_string "invite-3"
 
-let issue_record id token =
+let issue_record ?(at_ms = at_ms) id token =
   match
     I.to_body
       (I.Issued
@@ -451,10 +452,28 @@ let test_an_admission_that_is_refused () =
   (match S.step S.empty (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
    | Error (S.Before_bootstrap K.Admission) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  refused "an admission before a record already read"
+    (step_ok (invited ()) (issue_record ~at_ms:(at_ms + 5) third_invite "token-3"))
+    (admission_record ~at_ms:(at_ms + 4) ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+    (Printf.sprintf
+       "the admission is at %d ms, before a record of the log at %d ms: the clock went back"
+       (at_ms + 4)
+       (at_ms + 5));
   match S.step (step_ok (invited ()) (mode_record M.Off workspace))
           (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
   | Error (S.Accounts_off K.Admission) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
+(* Every record moves the latest time, whatever its kind, and only an
+   admission is held to it: an [off] from a clock that went back is read. *)
+let test_the_latest_time_of_the_log () =
+  Alcotest.(check (option int)) "before the first record" None S.empty.S.latest_at_ms;
+  let later = step_ok (invited ()) (issue_record ~at_ms:(at_ms + 5) third_invite "token-3") in
+  Alcotest.(check (option int)) "after a later invitation" (Some (at_ms + 5)) later.S.latest_at_ms;
+  let off = step_ok later (mode_record M.Off workspace) in
+  Alcotest.(check (option int)) "an earlier off leaves it" (Some (at_ms + 5)) off.S.latest_at_ms;
+  Alcotest.check mode "the off is read" (Mode.Off workspace) off.S.mode
 ;;
 
 (* ---- Admin assignments ---- *)
@@ -717,6 +736,7 @@ let () =
       , [ Alcotest.test_case "through an Admin invitation" `Quick
             test_an_admission_through_an_admin_invitation
         ; Alcotest.test_case "refused" `Quick test_an_admission_that_is_refused
+        ; Alcotest.test_case "the latest time of the log" `Quick test_the_latest_time_of_the_log
         ] )
     ; ( "admin assignments"
       , [ Alcotest.test_case "an Admin revokes an Admin" `Quick test_an_admin_revokes_an_admin

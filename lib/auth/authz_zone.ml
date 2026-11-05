@@ -155,10 +155,6 @@ type error =
       }
   | Store_holds_no_answer
   | Log_holds_records of { next_seq : int }
-  | Clock_behind_head of
-      { clock_ms : int
-      ; head_at_ms : int
-      }
   | Record_not_built of R.make_error
   | Refused of Authz_state.refusal
   | Store_entry_refused of
@@ -193,11 +189,6 @@ let error_to_string = function
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"
       next_seq
-  | Clock_behind_head { clock_ms; head_at_ms } ->
-    Printf.sprintf
-      "the clock reads %d ms, before the record at the head of the log, written at %d ms"
-      clock_ms
-      head_at_ms
   | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
     Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
   | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
@@ -264,14 +255,6 @@ let entered_to_add = function
   | Ok (H.Answered settled) -> Ok settled
 ;;
 
-(* A time before the head would let an admission spend an invitation that had
-   expired when the record before it was written. *)
-let clock_not_behind head clock_ms =
-  match R.head_at_ms head with
-  | Some head_at_ms when clock_ms < head_at_ms -> Error (Clock_behind_head { clock_ms; head_at_ms })
-  | Some (_ : int) | None -> Ok ()
-;;
-
 let abort_settlement = function
   | None -> H.Nothing_to_settle
   | Some intent -> H.Abort intent
@@ -292,7 +275,6 @@ let in_zone t draft store_writer log_writer head settlement =
   (* The clock is read inside both locks, so no other commit writes between the
      read and the append, and the time is the one the record is written at. *)
   let at_ms = t.now_ms () in
-  let* () = clock_not_behind head at_ms in
   let* record =
     Result.map_error
       (fun error -> Record_not_built error)

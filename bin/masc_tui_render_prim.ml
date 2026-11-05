@@ -603,6 +603,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     else if door_answers then Masc_tui_footer.ensure_help_item hints
     else hints
   in
+  (* The keys this frame announces, for the navigation trace (RFC-0485). *)
+  Masc_tui_nav_trace_log.announce hints;
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in

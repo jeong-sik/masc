@@ -5107,6 +5107,7 @@
 (include stanzas/test_tui_footer_notice_forms.inc)
 (include stanzas/test_tui_ask_arrival_notification.inc)
 (include stanzas/test_tui_nav_trace.inc)
+(include stanzas/test_tui_nav_trace_log.inc)
 
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)

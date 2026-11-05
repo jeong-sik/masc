@@ -11,7 +11,7 @@
     What the trace may hold of a key is decided by the type. A word for a key
     that is not text (the decoder's [left] and [pageup], a control byte's
     [ctrl-w]) is kept. A character is kept only as the footer's own spelling of
-    a key it announced; every other character is {!Other_char}, which has no
+    a key it announced; every other character is [Other_char], which has no
     field for its value. *)
 
 type key =
@@ -28,6 +28,9 @@ type key =
 type event =
   | Surface_opened of { from : string option; to_ : string }
   | Key_unchanged of { surface : string; key : key }
+  | Capped of { limit : int }
+      (** The last line of a trace that reached its line cap. [observe] never
+          returns it: the writer ends the file with it. *)
 
 val observe :
   previous_surface:string option ->

@@ -32,7 +32,7 @@ let key_of_press ~advertised raw =
       ~key:(Some raw) ~result:unchanged ~advertised
   with
   | [ Trace.Key_unchanged { surface = "changes"; key } ] -> key
-  | [ Trace.Key_unchanged _ ] | [ Trace.Surface_opened _ ] | [] | _ :: _ :: _ ->
+  | [ Trace.Key_unchanged _ ] | [ Trace.Surface_opened _ ] | [ Trace.Capped _ ] | [] | _ :: _ :: _ ->
     Alcotest.fail (Printf.sprintf "no single key event for %S" raw)
 
 (* A line that is not one JSON object, or has no key word, fails the case by
@@ -246,6 +246,8 @@ let test_each_event_is_one_json_object () =
     (fields_of (Trace.Surface_opened { from = None; to_ = "keepers" }));
   Alcotest.(check (list string)) "a change" [ "t"; "kind"; "from"; "to" ]
     (fields_of (Trace.Surface_opened { from = Some "keepers"; to_ = "changes" }));
+  Alcotest.(check (list string)) "the cap" [ "t"; "kind"; "limit" ]
+    (fields_of (Trace.Capped { limit = 4096 }));
   List.iter
     (fun key ->
       Alcotest.(check (list string)) "a key" [ "t"; "kind"; "surface"; "key"; "advertised" ]

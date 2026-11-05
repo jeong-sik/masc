@@ -6,6 +6,7 @@ type key =
 type event =
   | Surface_opened of { from : string option; to_ : string }
   | Key_unchanged of { surface : string; key : key }
+  | Capped of { limit : int }
 
 (* A terminal that does not speak the Kitty keyboard protocol sends these keys
    as one raw byte, and the handlers match both spellings. The trace writes the
@@ -148,5 +149,6 @@ let to_json_line ~at event =
       ; "key", `String word
       ; "advertised", `Bool advertised
       ]
+    | Capped { limit } -> [ "kind", `String "capped"; "limit", `Int limit ]
   in
   Yojson.Safe.to_string (`Assoc (("t", `Float at) :: fields))

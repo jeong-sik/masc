@@ -167,15 +167,9 @@ let () =
               check bool "top_20 is no longer than by_tool" true
                 (List.length top_20 <= List.length by_tool);
               let name row = row |> member "name" |> to_string in
-              let rec prefix short long =
-                match short, long with
-                | [], _ -> true
-                | a :: rest_a, b :: rest_b ->
-                  String.equal (name a) (name b) && prefix rest_a rest_b
-                | _ :: _, [] -> false
-              in
+              let same_name a b = String.equal (name a) (name b) in
               check bool "top_20 is the head of by_tool" true
-                (prefix top_20 by_tool);
+                (List_util.is_prefix ~equal:same_name top_20 by_tool);
               check int "never_called names match their count"
                 (report |> member "never_called_count" |> to_int)
                 (report |> member "never_called" |> to_list |> List.length));

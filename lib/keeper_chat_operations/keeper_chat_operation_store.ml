@@ -1797,18 +1797,13 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
     | Some plan ->
       let selected = List.filter (fun (operation : Operation.t) ->
         List.exists (Id.equal operation.operation_id) plan.members) candidates in
-      let rec is_prefix members candidates =
-        match members, candidates with
-        | [], _ -> true
-        | member :: members, (candidate : Operation.t) :: candidates
-          when Id.equal member candidate.operation_id ->
-          is_prefix members candidates
-        | _ :: _, [] | _ :: _, _ :: _ -> false
+      let member_is_candidate member (candidate : Operation.t) =
+        Id.equal member candidate.operation_id
       in
       let* () = match selected with
         | first :: _ :: _ when Id.equal first.operation_id head.operation_id
             && List.map (fun (operation : Operation.t) -> operation.operation_id) selected = plan.members
-            && is_prefix plan.members candidates -> Ok ()
+            && List_util.is_prefix ~equal:member_is_candidate plan.members candidates -> Ok ()
         | _ -> Error (Invalid_input "batch must contain its head and contiguous fresh members in queue order") in
       let* input_json = canonical_json "batch input" plan.input in
       let* input = json_of_stored "batch input" input_json in

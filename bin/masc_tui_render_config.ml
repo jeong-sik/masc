@@ -63,8 +63,13 @@ let render_runtime_params (state : state) =
        ("  " ^ Terminal_text.single_line detail));
   let rows = Option.value state.runtime_params ~default:[] in
   let selected = List.nth_opt rows state.runtime_params_cursor in
+  (* The panel below draws [framed_inner_width - 4] cells a line, and a field
+     is indented two of them. A field wrapped at the frame's own width has a
+     row the panel cannot draw whole once it takes a second row, and the check
+     below then gives the frame up for plain rows. *)
+  let panel_cells = max 1 (framed_inner_width cols - 4) in
   let field label value =
-    Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
+    Masc_tui_text_block.rows ~max_cells:(max 1 (panel_cells - 2))
       (label ^ " · " ^ value)
     |> List.map (fun line -> "  " ^ line)
   in
@@ -252,9 +257,9 @@ let render_runtime_params (state : state) =
      any exact JSON row or hide the document position. *)
   (match panel_title with
    | Some title
-     when Message_layout.display_width title <= framed_inner_width cols - 4
+     when Message_layout.display_width title <= panel_cells
        && List.for_all
-            (fun line -> Message_layout.display_width line <= framed_inner_width cols - 4)
+            (fun line -> Message_layout.display_width line <= panel_cells)
             selected_lines ->
        studio_panel ~width:(framed_inner_width cols) ~title ~lines:visible_lines
        |> List.iter (box_line buf cols)

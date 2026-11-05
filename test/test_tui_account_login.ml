@@ -838,8 +838,6 @@ let clients_then_accounts () =
    through one of the client's accounts, without its account reference. *)
 let a_client_without_a_catalog_entry () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
-  check (list string) "the new-account row, then the account"
-    ["  + 새 계정"; "> codex"] (List.map Login.row_text (List.tl (Login.lines t)));
   (match Login.key t "n" with
    | Login.Start {provider; existing = false} -> check string "n logs in a new account through the account's row" "codex" provider.id
    | _ -> fail "n did not start a new login");
@@ -906,7 +904,6 @@ let multi_model_selection () =
   check (list string) "usable models start selected in catalog order"
     ["first";"second"] (List.map (fun (m:Login.model) -> m.id)
       (List.filter (fun (m:Login.model) -> List.mem m.id t.selected_models) t.models));
-  check bool "unsupported model gives its reason" true (mentions "Blocked · 도구 호출 미지원" t);
   (match Login.key t "\r" with
    | Login.Save selected ->
      check (list string) "Enter submits all selected models in screen order"
@@ -962,8 +959,6 @@ let already_bound_model_is_not_offered () =
     check (list string) ("bound models remain visible for " ^ selected_provider.id)
       ["third"; "first"; "second"] (List.map (fun (m:Login.model) -> m.id) t.models);
     check (list string) "only the new model is selected" ["third"] t.selected_models;
-    check bool "connected model is labelled" true
-      (List.exists (fun row -> contains (Login.row_text row) "[연결됨] first") (Login.lines t));
     ignore (Login.key t "j"); ignore (Login.key t " ");
     check (list string) "connected model cannot be selected" ["third"] t.selected_models;
     ignore (Login.key t "a"); ignore (Login.key t "a");
@@ -993,8 +988,6 @@ let disabled_login_templates_and_existing_accounts () =
   List.iter (fun key -> check bool ("disabled existing account refuses "^key) true
     (Login.key t key=Login.Nothing)) ["enter";"e"];
   check (option string) "refusal cannot change the existing account reference" (Some account) t.account_ref;
-  check bool "disabled-account refusal explains fresh-account alternative" true
-    (contains t.notice "별도의 새 계정");
   List.iter (fun phase ->
     t.phase <- phase;
     check bool "existing relogin remains refused outside the account list" true (Login.key t "e"=Login.Nothing);

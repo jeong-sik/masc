@@ -5,8 +5,6 @@ open Result.Syntax
 type error =
   | Profile_unavailable of Keeper_types_profile.keeper_toml_load_error
   | Metadata_unavailable of Keeper_meta_store.current_meta_rejection
-  | Metadata_missing
-  | Metadata_owner_mismatch
   | Profile_rejected of string
   | Keeper_paused
   | Snapshot_lookup_failed of Config_dir_resolver.canonical_base_path_error
@@ -39,8 +37,6 @@ let recovery_hold_kind = function
 let error_to_string = function
   | Profile_unavailable error -> Keeper_types_profile.keeper_toml_load_error_to_string error
   | Metadata_unavailable (Unreadable detail | Invalid_json detail | Not_current detail) -> detail
-  | Metadata_missing -> "original Keeper metadata is missing"
-  | Metadata_owner_mismatch -> "metadata does not belong to the original Keeper"
   | Profile_rejected detail | Runtime_failed detail -> detail
   | Original_activation_unavailable error -> Yojson.Safe.to_string (Keeper_composition_draft.error_to_json error)
   | Original_task_skills_unavailable error -> Keeper_task_skill_turn.error_to_string error

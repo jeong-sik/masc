@@ -1242,7 +1242,6 @@ let test_unusable_skill_config_stops_resolution_unlike_a_stale_pin () =
       | Selection.Skill_config_unreadable { detail } ->
         check string "the unreadable detail is carried" "disk gone" detail
       | Selection.Skill_config_rejected _
-      | Selection.Tool_surface_unavailable _
       | Selection.Skill_source_unreadable _
       | Selection.Skill_entry_unreadable _ ->
         fail "unreadable configuration was not the unreadable error");
@@ -1252,7 +1251,6 @@ let test_unusable_skill_config_stops_resolution_unlike_a_stale_pin () =
     (function
       | Selection.Skill_config_rejected _ -> ()
       | Selection.Skill_config_unreadable _
-      | Selection.Tool_surface_unavailable _
       | Selection.Skill_source_unreadable _
       | Selection.Skill_entry_unreadable _ ->
         fail "rejected configuration was not the rejected error");
@@ -1314,7 +1312,6 @@ let test_unreadable_source_stops_resolution_unlike_a_stale_pin () =
           "task_skill_source_unreadable" (Selection.error_code error)
       | Selection.Skill_config_rejected _
       | Selection.Skill_config_unreadable _
-      | Selection.Tool_surface_unavailable _
       | Selection.Skill_entry_unreadable _ ->
         fail "an unreadable source was not the source-unreadable error"))
 ;;
@@ -1367,7 +1364,6 @@ let test_unreadable_candidate_stops_resolution_unlike_a_stale_pin () =
           "task_skill_entry_unreadable" (Selection.error_code error)
       | Selection.Skill_config_rejected _
       | Selection.Skill_config_unreadable _
-      | Selection.Tool_surface_unavailable _
       | Selection.Skill_source_unreadable _ ->
         fail "an unreadable candidate was not the entry-unreadable error"))
 ;;

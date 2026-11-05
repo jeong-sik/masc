@@ -946,7 +946,7 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
 let current_row_matches_source_reaction ~reaction_matches ~post_id ~expected_stimulus_kind = function
   | Current_reaction { metadata; reaction_kind; transition_receipt }
     when reaction_matches reaction_kind transition_receipt ->
-    (match assoc_field "reaction" metadata.raw with
+    (match Json_util.assoc_member_opt "reaction" metadata.raw with
      | Some reaction ->
        string_field "post_id" reaction = Some post_id
        && string_field "stimulus_kind" reaction = Some expected_stimulus_kind
@@ -1065,7 +1065,7 @@ let add_delivery_evidence ~keeper_name evidence = function
        if not (delivery_reaction_matches reaction_kind transition_receipt)
        then evidence
        else
-         let reference = match assoc_field "reaction" metadata.raw with
+         let reference = match Json_util.assoc_member_opt "reaction" metadata.raw with
            | None -> Error Missing_reaction
            | Some reaction -> decode_reaction_stimulus_reference reaction in
          match reference with
@@ -1237,13 +1237,13 @@ let event_queue_delivery_seen_for_source_strict_result
 ;;
 
 let nested_string_field outer inner json =
-  match assoc_field outer json with
+  match Json_util.assoc_member_opt outer json with
   | Some nested -> string_field inner nested
   | None -> None
 ;;
 
 let nested_float_field outer inner json =
-  match assoc_field outer json with
+  match Json_util.assoc_member_opt outer json with
   | Some nested -> float_field inner nested
   | None -> None
 ;;
@@ -1718,7 +1718,7 @@ let summary_for_keeper ~base_path ~keeper_name ~limit =
 ;;
 
 let summary_read_error_count json =
-  match assoc_field "read_error" json with
+  match Json_util.assoc_member_opt "read_error" json with
   | Some (`String _) -> 1
   | _ -> 0
 ;;
@@ -1902,7 +1902,7 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
                   | None -> `String "unknown")
                ; "pending_stimulus_count", `Int pending_count
                ; ( "pending_stimulus_ids"
-                 , match assoc_field "pending_stimulus_ids" summary with
+                 , match Json_util.assoc_member_opt "pending_stimulus_ids" summary with
                    | Some value -> value
                    | None -> `List [] )
                ]))

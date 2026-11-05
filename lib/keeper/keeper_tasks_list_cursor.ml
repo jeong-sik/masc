@@ -58,11 +58,6 @@ let to_string cursor =
     (Yojson.Safe.to_string (to_yojson cursor))
 ;;
 
-let field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
 let filter_of_yojson = function
   | `Assoc fields ->
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
@@ -76,7 +71,11 @@ let filter_of_yojson = function
 ;;
 
 let page_key_of_yojson json =
-  match field "priority" json, field "created_at" json, field "id" json with
+  match
+    Json_util.assoc_member_opt "priority" json,
+    Json_util.assoc_member_opt "created_at" json,
+    Json_util.assoc_member_opt "id" json
+  with
   | Some (`Int priority), Some (`String created_at), Some (`String id) ->
     Some { priority; created_at; id }
   | _ -> None
@@ -98,8 +97,8 @@ let of_string ~call raw =
   | None -> Error Cursor_unparseable
   | Some json ->
     (match
-       Option.bind (field "after" json) page_key_of_yojson,
-       Option.bind (field "filter" json) filter_of_yojson
+       Option.bind (Json_util.assoc_member_opt "after" json) page_key_of_yojson,
+       Option.bind (Json_util.assoc_member_opt "filter" json) filter_of_yojson
      with
      | Some after, Some filter ->
        if filter_equal filter call

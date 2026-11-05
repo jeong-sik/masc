@@ -1,6 +1,11 @@
+module Run_id = Keeper_tool_plan.Composition_run_id
+
+(* [result] is the stored [Tool_result.to_json] object. [result_disposition]
+   and [result_duration_ms] are read from it once, when the record is built or
+   loaded, so no reader parses the JSON again. *)
 type t =
   { reference : Skill_reference.t
-  ; composition_run_id : string
+  ; composition_run_id : Run_id.t
   ; parent_tool_use_id : string
   ; parent_turn : int
   ; parent_planned_index : int
@@ -9,6 +14,8 @@ type t =
   ; composition_tool : string
   ; composition_execution : Keeper_tool_composition_catalog.execution_mode
   ; result : Yojson.Safe.t
+  ; result_disposition : (unit, unit, unit) Tool_result.disposition
+  ; result_duration_ms : float
   ; executor_settlements : Yojson.Safe.t list
   ; recorded_at : float
   }
@@ -87,7 +94,9 @@ let valid_schedule = function
   | _ -> false
 ;;
 
-let valid_result = function
+(* The disposition and executor duration of a canonical [Tool_result.to_json]
+   object, or [None] when the object has any other shape. *)
+let parse_result = function
   | `Assoc fields ->
     let fields = List.sort (fun (a, _) (b, _) -> String.compare a b) fields in
     let without_metadata = List.remove_assoc "metadata" fields in
@@ -97,39 +106,45 @@ let valid_result = function
         0
         fields
     in
-    let valid_duration duration_ms =
-      Float.is_finite duration_ms && duration_ms >= 0.0
+    let outcome disposition duration_ms =
+      if Float.is_finite duration_ms && duration_ms >= 0.0
+      then
+        (match Tool_result.unit_disposition_of_string disposition with
+         | Ok disposition -> Some (disposition, duration_ms)
+         | Error _ -> None)
+      else None
     in
-    metadata_count <= 1
-    &&
-    (match without_metadata with
-     | [ "data", _
-       ; "disposition", `String ("completed" | "deferred")
-       ; "duration_ms", `Float duration_ms
-       ; "tool_name", `String tool_name
-       ] ->
-       String.trim tool_name <> "" && valid_duration duration_ms
-     | [ "data", _
-       ; "disposition", `String "failed"
-       ; "duration_ms", `Float duration_ms
-       ; "effect_disposition", `String effect_disposition
-       ; "failure_class", `String failure_class
-       ; "message", `String _
-       ; "tool_name", `String tool_name
-       ] ->
-       String.trim tool_name <> ""
-       && valid_duration duration_ms
-       && (match Tool_result.failure_effect_disposition_of_string effect_disposition with
-           | Some value -> String.equal effect_disposition
-               (Tool_result.failure_effect_disposition_to_string value)
-           | None -> false)
-       &&
-       (match Tool_result.tool_failure_class_of_string failure_class with
-        | Some value ->
-          String.equal failure_class (Tool_result.tool_failure_class_to_string value)
-        | None -> false)
-     | _ -> false)
-  | _ -> false
+    if metadata_count > 1
+    then None
+    else
+      (match without_metadata with
+       | [ "data", _
+         ; "disposition", `String (("completed" | "deferred") as disposition)
+         ; "duration_ms", `Float duration_ms
+         ; "tool_name", `String tool_name
+         ] ->
+         if String.trim tool_name <> "" then outcome disposition duration_ms else None
+       | [ "data", _
+         ; "disposition", `String ("failed" as disposition)
+         ; "duration_ms", `Float duration_ms
+         ; "effect_disposition", `String effect_disposition
+         ; "failure_class", `String failure_class
+         ; "message", `String _
+         ; "tool_name", `String tool_name
+         ] ->
+         if String.trim tool_name <> ""
+            && (match Tool_result.failure_effect_disposition_of_string effect_disposition with
+                | Some value -> String.equal effect_disposition
+                    (Tool_result.failure_effect_disposition_to_string value)
+                | None -> false)
+            && (match Tool_result.tool_failure_class_of_string failure_class with
+                | Some value ->
+                  String.equal failure_class (Tool_result.tool_failure_class_to_string value)
+                | None -> false)
+         then outcome disposition duration_ms
+         else None
+       | _ -> None)
+  | _ -> None
 ;;
 
 let valid_node = function
@@ -176,7 +191,7 @@ let valid_node = function
        && Result.is_ok (Ids.Execution_id.of_yojson execution_id)
        && Result.is_ok (Node_execution_origin.of_string execution_origin)
        && valid_schedule schedule
-       && valid_result result
+       && Option.is_some (parse_result result)
        && (match Json_util.assoc_member_opt "tool_name" result with
            | Some (`String result_tool_name) ->
              let canonical = Keeper_tool_descriptor_resolution.canonical_tool_name in
@@ -192,12 +207,13 @@ let validate_nodes nodes =
   else Error (Invalid_record "every node must carry typed identity, execution origin, schedule, and result")
 ;;
 
-let validate_composition_result ~composition_tool result =
-  if not (valid_result result)
-  then Error (Invalid_record "top-level result does not match Tool_result.to_json")
-  else if Json_util.assoc_member_opt "tool_name" result <> Some (`String composition_tool)
-  then Error (Invalid_record "top-level result tool does not match composition tool")
-  else Ok ()
+let parse_composition_result ~composition_tool result =
+  match parse_result result with
+  | None -> Error (Invalid_record "top-level result does not match Tool_result.to_json")
+  | Some outcome ->
+    if Json_util.assoc_member_opt "tool_name" result <> Some (`String composition_tool)
+    then Error (Invalid_record "top-level result tool does not match composition tool")
+    else Ok outcome
 ;;
 
 let make
@@ -211,13 +227,6 @@ let make
       ~result
       ~executor_settlements =
   let open Result.Syntax in
-  let raw_run_id =
-    Keeper_tool_plan.Composition_run_id.to_string composition_run_id
-  in
-  let* composition_run_id =
-    Random_id.parse_uuid_v7 raw_run_id
-    |> Result.map_error (fun detail -> Invalid_record detail)
-  in
   let parent_tool_use_id =
     Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
   in
@@ -228,7 +237,9 @@ let make
   let* keeper_name = nonblank "keeper_name" keeper_name in
   let* composition_tool = nonblank "composition_tool" composition_tool in
   let result = Tool_result.to_json result in
-  let* () = validate_composition_result ~composition_tool result in
+  let* result_disposition, result_duration_ms =
+    parse_composition_result ~composition_tool result
+  in
   let* executor_settlements = validate_nodes executor_settlements in
   let* request_id =
     match composition_execution, request_id with
@@ -251,6 +262,8 @@ let make
     ; composition_tool
     ; composition_execution
     ; result
+    ; result_disposition
+    ; result_duration_ms
     ; executor_settlements
     ; recorded_at = Time_compat.now ()
     }
@@ -260,7 +273,7 @@ let to_yojson value =
   `Assoc
     [ "schema", `String schema
     ; "reference", Skill_reference.to_yojson value.reference
-    ; "composition_run_id", `String value.composition_run_id
+    ; "composition_run_id", `String (Run_id.to_string value.composition_run_id)
     ; "parent_tool_use_id", `String value.parent_tool_use_id
     ; "parent_turn", `Int value.parent_turn
     ; "parent_planned_index", `Int value.parent_planned_index
@@ -302,8 +315,8 @@ let of_yojson json =
       |> Result.map_error (fun _ -> Invalid_record "reference is invalid")
     in
     let* composition_run_id =
-      Random_id.parse_uuid_v7 composition_run_id
-      |> Result.map_error (fun detail -> Invalid_record detail)
+      Run_id.of_string composition_run_id
+      |> Result.map_error (fun (Run_id.Invalid_uuid_v7 detail) -> Invalid_record detail)
     in
     let* keeper_name = nonblank "keeper_name" keeper_name in
     let* composition_tool = nonblank "composition_tool" composition_tool in
@@ -321,7 +334,9 @@ let of_yojson json =
       | Keeper_tool_composition_catalog.Async, _ ->
         Error (Invalid_record "async evidence requires request_id")
     in
-    let* () = validate_composition_result ~composition_tool result in
+    let* result_disposition, result_duration_ms =
+      parse_composition_result ~composition_tool result
+    in
     let* executor_settlements = validate_nodes executor_settlements in
     if parent_turn < 0 || parent_planned_index < 0
     then Error (Invalid_record "parent occurrence indices must not be negative")
@@ -339,6 +354,8 @@ let of_yojson json =
         ; composition_tool
         ; composition_execution
         ; result
+        ; result_disposition
+        ; result_duration_ms
         ; executor_settlements
         ; recorded_at
         }
@@ -416,7 +433,10 @@ let scan_runs config reference =
    ties so selection stays deterministic even for equal timestamps. *)
 let newest_order a b =
   match Float.compare a.recorded_at b.recorded_at with
-  | 0 -> String.compare a.composition_run_id b.composition_run_id
+  | 0 ->
+    String.compare
+      (Run_id.to_string a.composition_run_id)
+      (Run_id.to_string b.composition_run_id)
   | order -> order
 ;;
 
@@ -447,15 +467,12 @@ type run_summary =
   }
 
 let run_summary (run : t) =
-  let fields = match run.result with `Assoc fields -> fields | _ -> assert false in
-  { run_id = Keeper_tool_plan.Composition_run_id.of_string run.composition_run_id |> Result.get_ok
+  { run_id = run.composition_run_id
   ; keeper = run.keeper_name
   ; execution = run.composition_execution
   ; request_id = run.request_id
-  ; disposition = (match List.assoc "disposition" fields with
-      | `String value -> Tool_result.unit_disposition_of_string value |> Result.get_ok
-      | _ -> assert false)
-  ; duration_ms = (match List.assoc "duration_ms" fields with `Float value -> value | _ -> assert false)
+  ; disposition = run.result_disposition
+  ; duration_ms = run.result_duration_ms
   ; recorded_at = run.recorded_at
   }
 ;;
@@ -508,7 +525,7 @@ type observation = { latest : t option; runs : t list; statistics : statistics }
 let unique_runs runs =
   let module Runs = Map.Make (String) in
   List.fold_left (fun index candidate ->
-    Runs.update candidate.composition_run_id (function
+    Runs.update (Run_id.to_string candidate.composition_run_id) (function
       | None -> Some candidate
       | Some previous -> Some (if newest_order candidate previous >= 0 then candidate else previous))
       index) Runs.empty runs
@@ -535,17 +552,11 @@ let statistics runs =
       ; p50_ms = percentile 0.50; p95_ms = percentile 0.95
       ; max_ms = Some sorted.(samples - 1) }
   in
-  let completed, failed, deferred = List.fold_left (fun (completed, failed, deferred) run ->
-    let fields = match run.result with `Assoc fields -> fields | _ -> [] in
-    (* [t] is private and validates the canonical result before construction. *)
-    match List.assoc_opt "disposition" fields, List.assoc_opt "duration_ms" fields with
-    | Some (`String "completed"), Some (`Float duration) ->
-        duration :: completed, failed, deferred
-    | Some (`String "failed"), Some (`Float duration) ->
-        completed, duration :: failed, deferred
-    | Some (`String "deferred"), Some (`Float _) ->
-        completed, failed, deferred + 1
-    | _ -> invalid_arg "validated composition result lost its disposition or duration")
+  let completed, failed, deferred = List.fold_left (fun (completed, failed, deferred) (run : t) ->
+    match run.result_disposition with
+    | Tool_result.Completed () -> run.result_duration_ms :: completed, failed, deferred
+    | Failed () -> completed, run.result_duration_ms :: failed, deferred
+    | Deferred () -> completed, failed, deferred + 1)
     ([], [], 0) runs in
   let first_recorded_at, last_recorded_at = List.fold_left
     (fun (first, last) (run : t) ->
@@ -603,7 +614,9 @@ let save_latest config value =
       (reference_dir config value.reference)
     |> Result.map_error (fun error -> Directory_prepare_failed error)
   in
-  let target = run_path config value.reference value.composition_run_id in
+  let target =
+    run_path config value.reference (Run_id.to_string value.composition_run_id)
+  in
   let lock_path = (reference_dir config value.reference) ^ ".lock" in
   match
     File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->

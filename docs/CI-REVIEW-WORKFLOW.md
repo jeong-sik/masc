@@ -190,17 +190,18 @@ If a named test declares a custom `action`, the targeted runner selects Dune's
 nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
 Dune owns that action's arguments, wrappers, variables and dependencies; the
 runner does not translate them. The selected OCaml executables are built before
-starting the alias timeout. For a Python suite declared as
+starting the alias timeout. Dune still resolves any additional action dependencies
+inside the timed alias. These per-test aliases have existed since Dune
+3.20, below this repository's 3.22 minimum. See the
+[Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
+For a Python suite declared as
 `(rule (alias runtest-NAME) (deps ...) (action ...))`, the runner reads that
 rule's `(deps ...)` and any `%{exe:...}` its action names, and builds those
 before the alias timeout starts; the alias itself still runs inside the timeout.
 A suite whose body really hangs therefore still ends as `TIMEOUT`, and one whose
 body only needed compiling reaches `Ran N tests` instead of spending the whole
 budget on the build. If the reader fails, the run names the alias, prints the
-reason and falls back to building the alias inside its budget. These per-test
-aliases have existed since Dune
-3.20, below this repository's 3.22 minimum. See the
-[Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
+reason and falls back to building the alias inside its budget.
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
 Its shell-runner fixture substitutes the build command; it is not a product

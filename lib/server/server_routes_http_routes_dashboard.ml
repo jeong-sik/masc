@@ -2818,69 +2818,18 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/logs" (fun state req reqd ->
-         let limit =
-           Server_utils.int_query_param req "limit" ~default:200
-           |> max 1 |> min 3000
-         in
-         let level_filter =
-           match Server_utils.query_param req "level" with
-           | Some v -> v
-           | None -> "DEBUG"
-         in
-         match Log.level_of_string_opt level_filter with
-         | None ->
-           let json =
-             `Assoc
-               [ "error", `String "invalid_log_level"
-               ; "message", `String "level must be one of debug, info, warn, warning, error"
-               ; "level", `String level_filter
-               ]
-           in
+         match Server_logs_query.of_request req with
+         | Error json ->
            Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req json reqd
-         | Some applied_level ->
-           let min_level = Log.level_to_int applied_level in
-           let since_seq =
-             match Server_utils.query_param req "since_seq" with
-             | None -> None
-             | Some _ ->
-                 let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
-                 if seq < 0 then None else Some seq
-           in
-           let before_seq =
-             match Server_utils.query_param req "before_seq" with
-             | None -> None
-             | Some _ ->
-                 let seq = Server_utils.int_query_param req "before_seq" ~default:(-1) in
-                 if seq < 0 then None else Some seq
-           in
-           let module_filter = match Server_utils.query_param req "module" with
-             | Some v -> v
-             | None -> ""
-           in
-           let category_filter = Server_utils.query_param req "category" in
-           let exclude_category =
-             match Server_utils.query_param req "exclude_category" with
-             | None -> None
-             | Some raw ->
-                 let parts = String.split_on_char ',' raw in
-                 let trimmed = List.map String.trim parts in
-                 let non_empty = List.filter (fun s -> s <> "") trimmed in
-                 match non_empty with
-                 | [] -> None
-                 | xs -> Some xs
-           in
-           let entries =
-             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
-               ?before_seq ?category_filter ?exclude_category ()
-           in
+         | Ok query ->
+           let entries = Server_logs_query.read query in
            (* Bounds read after the slice: seqs are monotonic, so the
               window can only have grown — never claims more history
               than the slice actually had available. *)
            let ring_bounds = Log.Ring.bounds () in
            let json =
-             dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
-               ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
-               ~before_seq ~category_filter ~exclude_category ~ring_bounds entries
+             Server_logs_query.to_json ~config:(Mcp_server.workspace_config state) query
+               ~ring_bounds entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        )

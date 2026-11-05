@@ -261,6 +261,11 @@ module Ring = struct
      process never filled. *)
   let first_seq = Atomic.make 0
 
+  (* Broadcast after every entry lands in its slot. [Eio.Condition.broadcast]
+     takes no lock and needs no Eio context, so a push from any domain or
+     systhread wakes the fibers waiting in [await_newer_than]. *)
+  let appended = Eio.Condition.create ()
+
   (* File sink state *)
   let file_channel : out_channel option ref = ref None
   let file_current_date : string ref = ref ""
@@ -869,6 +874,7 @@ module Ring = struct
         category;
       } in
     buf.(idx) <- entry;
+    Eio.Condition.broadcast appended;
     (* A failed append closes the channel. Keep sending later entries to the
        configured sink so its next write can reopen it. *)
     if !file_base_dir <> "" then
@@ -977,6 +983,10 @@ module Ring = struct
      the window" look identical (2026-08-17 source audit,
      feature-matrix Log row). The bounds ride on every logs query
      response so the operator sees the cut, not silence. *)
+  let await_newer_than seq =
+    Eio.Condition.loop_no_mutex appended (fun () ->
+      if Atomic.get total - 1 > seq then Some () else None)
+
   let bounds () =
     let t = Atomic.get total in
     let first = Atomic.get first_seq in

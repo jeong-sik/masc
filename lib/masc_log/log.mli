@@ -144,6 +144,11 @@ module Ring : sig
 
   val bounds : unit -> bounds
 
+  val await_newer_than : int -> unit
+  (** [await_newer_than seq] returns once the ring has handed out a sequence
+      above [seq], at once if it already has. It suspends the calling Eio
+      fiber; an entry pushed from any domain or systhread wakes it. *)
+
   val recent :
     ?limit:int ->
     ?min_level:int ->

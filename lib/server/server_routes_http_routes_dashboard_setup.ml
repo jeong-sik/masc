@@ -6,9 +6,6 @@ module Mcp_eio = Mcp_server_eio
 module Pages = Server_routes_http_pages
 module Keeper_api = Server_dashboard_http_keeper_api
 
-(* Dashboard /logs JSON builder extracted to
-   [Server_dashboard_logs_json] (godfile decomp). *)
-let dashboard_logs_json = Server_dashboard_logs_json.build
 
 (* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
    along with [Dashboard_cache.get_or_compute] from the cold-start

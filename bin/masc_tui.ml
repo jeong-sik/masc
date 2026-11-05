@@ -15651,6 +15651,18 @@ let apply_overview_load state result =
         ~set_error:(fun value -> state.overview_error <- value)
         err
 
+let apply_quiz_load state result =
+  match result with
+  | Ok quiz ->
+      state.quiz_scorecard <- Some quiz;
+      state.quiz_scorecard_error <- None
+  | Error err ->
+      state.quiz_scorecard <- None;
+      remember_surface_error state ~surface:"operator quiz"
+        ~current_error:state.quiz_scorecard_error
+        ~set_error:(fun value -> state.quiz_scorecard_error <- value)
+        err
+
 let apply_approvals_load state result =
   (* Recovery and refresh publications already share Listing_order tickets.
      An admitted older refresh must not retire a newer recovery request;
@@ -16460,12 +16472,14 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
     (* Keeper questions and roster reads start with the other branches, not
        after the visible surface's transport/board/log requests. Every branch
        still belongs to this pass's initial and final workspace probes. *)
-    let (http_overview, http_approvals),
+    let ((http_overview, http_quiz), http_approvals),
         ((http_asks, http_keeper_roster), http_scoped) =
       Masc_tui_loader.read_pair
         (fun () ->
            Masc_tui_loader.read_pair
              (fun () ->
+                Masc_tui_loader.read_pair
+                  (fun () ->
                 if not needs.needs_overview_briefing then None else
                 Option.some @@
                 observe_http_reader ~on_progress Http_refresh_progress.Overview
@@ -16480,6 +16494,12 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                          (Result.to_option identity)
                  | None, (Ok _ | Error _) | Some _, Error _ -> ());
                 overview))
+                  (fun () ->
+                if not needs.needs_quiz_scorecard then None else
+                Option.some @@
+                observe_http_reader ~on_progress Http_refresh_progress.Quiz_rows
+                  ~outcome:Http_refresh_progress.of_result (fun () ->
+                    Masc_tui_loader.load_quiz_rows ~host ~port)))
              (fun () ->
                 Option.map
                   (fun ao_ticket ->
@@ -16524,7 +16544,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
         { http_scoped with http_asks; http_keeper_roster;
           http_scoped_server_identity = identity_after } in
       Refresh_surfaces
-        { http_overview; http_approvals; http_scoped; http_server_identity = identity_after }
+        { http_overview; http_quiz; http_approvals; http_scoped; http_server_identity = identity_after }
     else Refresh_workspace_unconfirmed
         { refresh_ticket; latest_identity = identity_after;
           detail = "Workspace identity changed or unavailable during surface collection; bundle discarded";
@@ -17713,6 +17733,7 @@ let apply_http_surfaces state ~mailbox results =
   apply_server_identity_reading state ~mailbox results.http_server_identity;
   let roster_refreshed = if Result.is_ok results.http_server_identity then begin
     Option.iter (apply_overview_load state) results.http_overview;
+    Option.iter (apply_quiz_load state) results.http_quiz;
     if state.workspace_identity = Workspace_identity_match then
       Option.iter (apply_approval_observation state) results.http_approvals;
     apply_http_scoped_data state ~datasets results.http_scoped
@@ -17730,6 +17751,7 @@ let apply_http_surfaces state ~mailbox results =
     Masc_tui_types.connection_status_of_refresh
       ~identity:(reached results.http_server_identity)
       ~surfaces:(reached_if_asked results.http_overview
+       @ reached_if_asked results.http_quiz
        @ reached_if_asked (Option.map (fun receipt -> receipt.bpr_result) results.http_scoped.http_board)
        @ reached_if_asked results.http_scoped.http_planning
        @ (Option.map
@@ -19602,9 +19624,11 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
      bundle's answers, and with no cadence roster read nothing else would
      free the roster's read slot. *)
   if needs.needs_keeper_roster then owe_whole_keeper_roster_read state;
-  (* The briefing rides the full refresh only; a scoped read has no reader
-     for it, and Home's next cadence pass reads it. *)
-  let needs = { needs with needs_keeper_roster = false; needs_overview_briefing = false } in
+  (* The briefing and the quiz rows ride the full refresh only; a scoped
+     read has no reader for either, and Home's next cadence pass reads
+     them. *)
+  let needs = { needs with needs_keeper_roster = false; needs_overview_briefing = false;
+                needs_quiz_scorecard = false } in
   let authority = state.workspace_authority in
   if Masc_tui_types.surface_needs_any needs then begin
     let collection_inflight = !full_refresh_inflight
@@ -37503,6 +37527,12 @@ Use relative paths for resources already held in the package. -->
        | Some ("p" | "P") when state.view = Overview ->
            Masc_tui_home.open_approvals state
              ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
+       | Some ("g" | "G") when state.view = Overview ->
+           (* The quiz line's door: the operator quiz installation's Results,
+              where the scorecard windows and the wrong-answer notes live.
+              [g] for the same reason Approvals answers [g]: the door to one
+              installation's Results. [q] stays the quit key. *)
+           open_installation_results state ~mailbox:async_messages "operator-quiz"
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match Masc_tui_home.home_selected_action (Masc_tui_home.prepare state) with
             | None -> report_action state "system" "Selection changed; choose again"

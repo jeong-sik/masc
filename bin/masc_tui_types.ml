@@ -386,6 +386,7 @@ end
 module Http_refresh_progress = struct
   type source =
     | Identity_before | Overview | Approvals | Questions | Keepers
+    | Quiz_rows
     | Surface_data of Surface_read_source.t
     | Identity_after
   type part_outcome = Part_received | Part_failed
@@ -426,6 +427,7 @@ module Http_refresh_progress = struct
     | Approvals -> "confirmations"
     | Questions -> "questions"
     | Keepers -> "keepers"
+    | Quiz_rows -> "operator quiz"
     | Surface_data source -> Surface_read_source.name source
     | Identity_after -> "workspace verification"
 
@@ -3935,6 +3937,14 @@ type overview_snapshot = {
   ov_keeper_liveness: keeper_liveness_counts;
 }
 
+(* The operator quiz's rows for the Home scorecard line: one scorecard row
+   per window and one review row per open wrong answer, both read through
+   the lane add-on inventory endpoint. *)
+type quiz_scorecard_snapshot = {
+  quiz_scorecards: Masc.Lane_addon_types.row list;
+  quiz_reviews: Masc.Lane_addon_types.row list;
+}
+
 (** Planning projections from [Tui_decode], which owns the current wire
     contract and its behavioral decoder tests. *)
 type system_log_snapshot = Tui_decode.system_log_snapshot
@@ -4529,6 +4539,9 @@ type surface_needs = {
   (* The Dashboard briefing ([/api/v1/dashboard/briefing], about 120KB) feeds
      only the Home Health line. *)
   needs_overview_briefing : bool;
+  (* The operator quiz's scorecard and review rows, read through the lane
+     add-on inventory endpoint. Feeds only the Home quiz line. *)
+  needs_quiz_scorecard : bool;
 }
 
 let nothing =
@@ -4546,6 +4559,7 @@ let nothing =
     needs_overview_goals = false;
     needs_account_emails = false;
     needs_overview_briefing = false;
+    needs_quiz_scorecard = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -4577,6 +4591,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Overview ->
       { nothing with needs_operator_approvals = true; needs_asks = true
       ; needs_overview_briefing = true
+      ; needs_quiz_scorecard = true
       ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -4657,6 +4672,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_account_emails && not previous.needs_account_emails
   ; needs_overview_briefing =
       next.needs_overview_briefing && not previous.needs_overview_briefing
+  ; needs_quiz_scorecard =
+      next.needs_quiz_scorecard && not previous.needs_quiz_scorecard
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -10318,6 +10335,10 @@ type state = {
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
   mutable overview_preview: overview_preview option;
+  (* [None] means nothing has been read yet, which is not the same as an
+     installation with no rows. *)
+  mutable quiz_scorecard: quiz_scorecard_snapshot option;
+  mutable quiz_scorecard_error: string option;
   mutable transport: Tui_decode.transport_health option;
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
@@ -11869,6 +11890,35 @@ let accept_overview_preview (state : state) preview =
      && workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
           (Ok preview.op_identity) = Workspace_identity_match then
     state.overview_preview <- Some preview
+
+(* One passive line for the operator quiz: the three window scores and the
+   count of open wrong answers. [None] while nothing has been read, which
+   is not an error. *)
+let quiz_scorecard_reading (state : state) =
+  match state.quiz_scorecard, state.quiz_scorecard_error with
+  | Some { quiz_scorecards = []; _ }, None ->
+      (* No scorecard rows at all means no live quiz installation was in the
+         inventory: no line, which is not the same as zero misses. *)
+      None
+  | Some quiz, None ->
+      let fraction subject =
+        List.find_opt (fun (row : Masc.Lane_addon_types.row) ->
+            String.ends_with row.lane_id ~suffix:"/quiz/scorecard" && row.subject_id = subject)
+          quiz.quiz_scorecards
+        |> Option.map (fun (row : Masc.Lane_addon_types.row) ->
+               match List.assoc_opt "score" row.fields with
+               | Some (`Assoc [ "n", `Int n; "d", `Int d ]) -> Printf.sprintf "%d/%d" n d
+               | _ -> "-")
+      in
+      let window label subject = match fraction subject with
+        | Some shown -> " · " ^ label ^ " " ^ shown
+        | None -> ""
+      in
+      Some (Printf.sprintf " Quiz:%s%s%s · unrecovered misses %d · g opens the notes"
+              (window "1일" "day") (window "7일" "7d") (window "30일" "30d")
+              (List.length quiz.quiz_reviews))
+  | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · g opens the lane"
+  | None, None -> None
 
 let overview_refresh_reading (state : state) =
   match state.overview_preview with
@@ -20063,6 +20113,8 @@ let create_state
   overview = None;
   overview_error = None;
   overview_preview = None;
+  quiz_scorecard = None;
+  quiz_scorecard_error = None;
   transport = None;
   transport_error = None;
   approval_snapshot = None;

@@ -1154,7 +1154,7 @@ let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empt
     check bool "the parent still has no gate preparation" true (Progress.preparation parent.progress=None);
     check int "missing policy publishes no child request" 0
       (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
-    let gate=Keeper_librarian_absorb_gate.run_captured authority ~cited_observations:[]
+    let gate=Keeper_librarian_absorb_gate.run_captured authority ~clock:fixture.clock ~cited_observations:[]
       ~facts:[] ~new_claims:[] ~superseding:[]
       ~absorbed:[{Types.absorbed="source";into="target"}]
       ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> fail "missing policy must not dispatch") () in

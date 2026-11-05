@@ -1512,7 +1512,7 @@ let run_resolved
     ?before_evaluate
     ?after_evaluate
     ?on_evaluation_aborted
-    ?clock
+    ~clock
     ~resolve_authority
     ~cited_observations
     ~facts
@@ -1592,7 +1592,7 @@ let run_resolved
              before_evaluate
          in
          let result =
-           try Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () with
+           try Typesafeai_client.evaluate ~clock ~destinations:armed ~state ~questions () with
            | Eio.Cancel.Cancelled _ as exn ->
              let backtrace = Printexc.get_raw_backtrace () in
              abort_evaluation evaluation_id `Cancelled;
@@ -1658,7 +1658,7 @@ let run_captured
     ?before_evaluate
     ?after_evaluate
     ?on_evaluation_aborted
-    ?clock
+    ~clock
     ~cited_observations
     ~facts
     ~new_claims
@@ -1666,7 +1666,7 @@ let run_captured
     ~absorbed
     () =
   run_resolved
-    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ?clock
+    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ~clock
     ~resolve_authority:(fun () -> authority)
     ~cited_observations ~facts ~new_claims ~superseding ~absorbed ()
 ;;
@@ -1720,7 +1720,7 @@ let run
     ?before_evaluate
     ?after_evaluate
     ?on_evaluation_aborted
-    ?clock
+    ~clock
     ~keeper_id
     ~cited_observations
     ~facts
@@ -1729,7 +1729,7 @@ let run
     ~absorbed
     () =
   run_resolved
-    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ?clock
+    ?observe ?before_evaluate ?after_evaluate ?on_evaluation_aborted ~clock
     ~resolve_authority:(fun () -> resolve ~keeper_id)
     ~cited_observations ~facts ~new_claims ~superseding ~absorbed ()
 ;;

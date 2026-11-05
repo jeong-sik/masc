@@ -130,7 +130,7 @@ val failure_kind : failure -> failure_kind
 
 val evaluate :
   ?timeout_sec:float ->
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   destinations:destination * destination list ->
   state:Yojson.Safe.t ->
   questions:(string * Typesafeai_types.question) list ->
@@ -146,9 +146,11 @@ val evaluate :
     is asked.
 
     [timeout_sec] bounds each destination's request/response exchange
-    separately and defaults to
+    separately on [clock] and defaults to
     {!Masc_http_client.default_request_timeout_sec}, the deadline the other
-    outbound clients share. *)
+    outbound clients share. The clock is required because the HTTP client
+    applies the deadline only when it has one: without it a server that
+    accepts the connection and never answers is waited on for good. *)
 
 module For_testing : sig
   val transport_failure : endpoint:string -> api_key:string -> string -> refusal

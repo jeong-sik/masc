@@ -11,7 +11,7 @@ val permits_publication : observation -> bool
 
 val run :
   ?observe:(observation -> unit) ->
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   keeper_id:string -> input:Keeper_librarian_context.input ->
   proposed:Keeper_librarian_context.pocket list -> unit -> observation
 (** One typed choice for the complete batch, including the source material of

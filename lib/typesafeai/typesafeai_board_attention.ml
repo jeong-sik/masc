@@ -77,7 +77,7 @@ let rationale
     probabilities
 ;;
 
-let judge_candidate ?clock ~destinations ~candidate () =
+let judge_candidate ~clock ~destinations ~candidate () =
   let* choices, board_policy = relevance_choices () in
   let* interests = Keeper_board_attention_candidate.board_interests candidate in
   let* question = relevance_question ~board_policy ~choices ~interests candidate in
@@ -90,7 +90,7 @@ let judge_candidate ?clock ~destinations ~candidate () =
   in
   let* evaluated =
     Typesafeai_client.evaluate
-      ?clock
+      ~clock
       ~destinations
       ~state
       ~questions:[ relevance_question_id, question ]
@@ -133,7 +133,7 @@ let judge_candidate ?clock ~destinations ~candidate () =
     }
 ;;
 
-let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_candidate.candidate list) () =
+let judge_candidates ~clock ~destinations ~(candidates : Keeper_board_attention_candidate.candidate list) () =
   match candidates with
   | [] -> Ok []
   | first :: _ ->
@@ -154,7 +154,7 @@ let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_
     in
     let* questions = questions [] candidates in
     let* evaluated =
-      Typesafeai_client.evaluate ?clock ~destinations
+      Typesafeai_client.evaluate ~clock ~destinations
         ~state:(`Assoc ["signal", signal]) ~questions ()
       |> Result.map_error Typesafeai_client.failure_to_string
     in

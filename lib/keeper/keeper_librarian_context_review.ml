@@ -115,7 +115,7 @@ let permits_publication = function
       ; _
       } -> true
 
-let run ?(observe = fun _ -> ()) ?clock ~keeper_id ~input ~proposed () =
+let run ?(observe = fun _ -> ()) ~clock ~keeper_id ~input ~proposed () =
   let finish observation = observe observation; observation in
   if proposed = [] then finish (Skipped No_contexts) else
   match Typesafeai_config.context_review_destinations ~keeper_id with
@@ -127,9 +127,9 @@ let run ?(observe = fun _ -> ()) ?clock ~keeper_id ~input ~proposed () =
     let request = { destinations = List.map Typesafeai_client.identify (first :: rest);
       state = state input proposed; question } in
     observe (Checking request);
-    let now () = match clock with Some clock -> Eio.Time.now clock | None -> Time_compat.now () in
+    let now () = Eio.Time.now clock in
     let started = now () in
-    let result = match Typesafeai_client.evaluate ?clock ~destinations:armed
+    let result = match Typesafeai_client.evaluate ~clock ~destinations:armed
         ~state:request.state ~questions:[question_id, request.question] () with
       | Error failure -> Failed failure
       | Ok receipt ->

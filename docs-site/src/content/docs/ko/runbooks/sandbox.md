@@ -74,7 +74,8 @@ Keeper 는 컨테이너를 띄우지 않습니다. 거절 메시지에 위 명�
 런타임을 지목합니다.
 
 ```bash
-masc sandbox-image --base-path ~/masc --runtime apple_container --image base
+masc sandbox-image --runtime apple_container
+masc sandbox-image promote base <that tag> --runtime apple_container --base-path ~/masc
 ```
 
 `apple_container` 는 `container build` 가 `-` 를 안 받고 컨텍스트 디렉터리를 받으므로

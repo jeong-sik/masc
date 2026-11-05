@@ -75,7 +75,8 @@ own image store, so an image built with the default Docker command is invisible 
 the microVM gate. Target the microVM runtime store explicitly:
 
 ```bash
-masc sandbox-image --base-path ~/masc --runtime apple_container --image base
+masc sandbox-image --runtime apple_container
+masc sandbox-image promote base <that tag> --runtime apple_container --base-path ~/masc
 ```
 
 Because `container build` does not accept `-` on stdin and expects a context

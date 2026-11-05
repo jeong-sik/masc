@@ -4326,6 +4326,19 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
         ~resets_at:(now +. 88441.0);
       Alcotest.(check string) "a fenced failure waits for the quota its attempt recorded"
         "wait 88441s for other.test_model" (decide ~now);
+      let rotated =
+        Driver.next_dispatch_after_failure ~now
+          ~route:(Keeper_runtime_failure_route.Rotate_now
+                    { rotate = Keeper_runtime_failure_route.Auth_failed })
+          ~assignment_id:"quota_lane" None
+      in
+      Alcotest.(check string) "a rotation with no candidate left waits for the same rest"
+        "wait 88441s for other.test_model" (describe_dispatch ~now rotated);
+      Alcotest.(check bool) "the wait is the walk's observed rest" true
+        (match rotated with
+         | Some (Driver.Wait_until { basis = Driver.Observed_path_rest; _ }) -> true
+         | Some (Driver.Wait_until { basis = Driver.Failure_response; _ })
+         | Some (Driver.Dispatch_now _) | None -> false);
       Alcotest.(check string) "the stated reset ends the wait"
         "no provider wait" (decide ~now:(now +. 88442.0))))
 ;;

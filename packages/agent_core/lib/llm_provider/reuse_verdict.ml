@@ -8,16 +8,15 @@ type t =
   | Park
   | Close of close_reason
 
+(* Every line of the field counts: a recipient combines repeated field lines
+   into one list (RFC 9110 §5.3). [Http.Header.get] returns only the last. *)
 let header_has_token headers name token =
-  match Http.Header.get headers name with
-  | None -> false
-  | Some value ->
-    value
-    |> String.split_on_char ','
-    |> List.exists (fun value ->
-      String.equal
-        (String.lowercase_ascii (String.trim value))
-        (String.lowercase_ascii token))
+  Http.Header.get_multi headers name
+  |> List.concat_map (String.split_on_char ',')
+  |> List.exists (fun value ->
+    String.equal
+      (String.lowercase_ascii (String.trim value))
+      (String.lowercase_ascii token))
 ;;
 
 let valid_single_content_length = function
@@ -47,9 +46,10 @@ let persistent ~request_headers response =
     || Option.is_some (Http.Header.get response_headers "upgrade")
     || header_has_token response_headers "connection" "upgrade"
   in
-  let response_has_no_body =
-    (status >= 100 && status < 200) || status = 204 || status = 304
-  in
+  (* cohttp returns the first status line it reads and does not skip an
+     interim 1xx response, so the final response is still on the connection. *)
+  let is_interim = status >= 100 && status < 200 in
+  let response_has_no_body = status = 204 || status = 304 in
   let response_framing =
     match
       ( Http.Header.get_multi response_headers "content-length"
@@ -70,7 +70,8 @@ let persistent ~request_headers response =
     | `Absent -> response_has_no_body
     | `Invalid -> false
   in
-  (not is_upgrade)
+  (not is_interim)
+  && (not is_upgrade)
   && response_allows_persistence
   && response_is_self_delimited
   && (not (header_has_token request_headers "connection" "close"))

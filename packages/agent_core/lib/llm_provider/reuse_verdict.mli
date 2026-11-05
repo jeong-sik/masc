@@ -7,8 +7,10 @@ type close_reason =
   (** The request or the body read ended in an error or an exception. *)
   | Not_persistent
   (** The request or the response ends the connection: HTTP/1.0 without
-      keep-alive, [connection: close] on either side, an upgrade, or a body
-      that only the close delimits (RFC 9112 §9.3, §9.6). *)
+      keep-alive, [connection: close] on any line of either side, an
+      upgrade, or a body that only the close delimits (RFC 9112 §9.3, §9.6).
+      An interim 1xx response is here too: the final response that follows
+      it is still unread on the connection. *)
   | Body_not_drained  (** The response body was not read to its end. *)
   | Transport_ended  (** The transport reported end of file. *)
 

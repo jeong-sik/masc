@@ -146,8 +146,8 @@ let apply t ~(author : Author.t) ~is_admin (event : E.t) =
     when is_admin id -> issue t ~invite_id ~token_digest ~expires_at_ms ~role
   | Author.Authenticated (Principal.Human id), E.Revoked { invite_id } when is_admin id ->
     revoke t ~invite_id
-  | Author.Authenticated principal, (E.Issued _ | E.Revoked _) ->
-    Error (Author_is_not_an_admin principal)
+  | Author.Authenticated ((Principal.Human _ | Principal.Service _) as principal), (E.Issued _ | E.Revoked _)
+    -> Error (Author_is_not_an_admin principal)
   | ( (Author.System_cron | Author.System_maintenance | Author.System_migration)
     , (E.Issued _ | E.Revoked _) ) -> Error (Not_an_invite_author author)
 ;;

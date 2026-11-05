@@ -216,23 +216,66 @@
         "autonomous": {
           "calls": 1564,
           "execute_time_s": 15323.4,
-          "tool_time_s": 15339.3,
-          "turns": 98,
-          "turns_of_this_kind": 8863
+          "tool_time_s": 15339.3
         },
         "direct": {
           "calls": 21551,
           "execute_time_s": 55913.5,
-          "tool_time_s": 58130.8,
-          "turns": 1003,
-          "turns_of_this_kind": 1075
+          "tool_time_s": 58130.8
         }
       },
       "calls": 23115,
       "execute_time_s": 71236.9,
+      "keepers_with_a_trace_file": {
+        "by_turn_kind": {
+          "direct": {
+            "calls": 21458,
+            "execute_time_s": 55537.6,
+            "tool_time_s": 57741.5
+          }
+        },
+        "calls": 21458,
+        "execute_time_s": 55537.6,
+        "tool_time_s": 57741.5
+      },
+      "keepers_without_any_trace_file": {
+        "by_turn_kind": {
+          "autonomous": {
+            "calls": 1564,
+            "execute_time_s": 15323.4,
+            "tool_time_s": 15339.3
+          },
+          "direct": {
+            "calls": 93,
+            "execute_time_s": 375.8,
+            "tool_time_s": 389.3
+          }
+        },
+        "calls": 1657,
+        "execute_time_s": 15699.3,
+        "keepers": [
+          "native-image-goal-20261101-0340",
+          "ocaml-refactor-woman"
+        ],
+        "tool_time_s": 15728.6
+      },
       "tool_time_inside_turns_s": 0.0,
       "tool_time_s": 73470.1,
       "turns": 1101,
+      "turns_by_kind_set": {
+        "autonomous": {
+          "turns": 8797,
+          "without_trace_file": 98
+        },
+        "autonomous+direct": {
+          "turns": 66,
+          "without_trace_file": 0
+        },
+        "direct": {
+          "turns": 1009,
+          "without_trace_file": 1003
+        }
+      },
       "turns_in_window": 9872
     },
     "execute_time_s": 343286.2,
@@ -336,7 +379,6 @@
       "polling_time_s": 105569.2,
       "time_s": 151343.5
     },
-    "other_turn_time_s": 354301.4,
     "rereads_after_first_call": {
       "calls": 32545,
       "turn_time_s": 74735.4
@@ -499,16 +541,17 @@
     "traced_calls_outside_turns": {
       "by_turn_kind": {
         "direct": {
-          "calls": 993,
-          "execute_time_outside_turns_s": 5051.8,
-          "tool_time_outside_turns_s": 5407.4
+          "calls": 1097,
+          "execute_time_outside_turns_s": 5051.9,
+          "tool_time_outside_turns_s": 5408.8
         }
       },
-      "calls": 993,
-      "execute_time_outside_turns_s": 5051.8,
-      "tool_time_outside_turns_s": 5407.4,
-      "turns": 64,
-      "turns_that_also_have_autonomous_calls": 58
+      "calls": 1097,
+      "calls_partly_inside_turn_time": 0,
+      "execute_time_outside_turns_s": 5051.9,
+      "tool_time_outside_turns_s": 5408.8,
+      "turns": 68,
+      "turns_that_also_have_autonomous_calls": 62
     },
     "turn_time_s": 2555344.8,
     "turns": 9872

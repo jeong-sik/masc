@@ -100,7 +100,7 @@ catalog/schema/dispatch 결. create 입력: trigger, payload(opaque), expires_at
 
 v1 트리거(`Port_up`, `Port_down`, `File_changed`)는 §1 의 서버 재기동 사례를 겨냥한다. 이 세 트리거의 수요는 재지 않았다. 도구 호출 원장에서 Keeper 가 오래 기다리는 대상을 재 보니 GitHub 쪽 상태(Actions 실행)를 기다리는 것으로 보이는 호출이 가장 컸다.
 
-`docs/evidence/execute-waits-2026-11/measure_execute_waits.py` 로 11-01T00:00Z ~ 11-05T05:00Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다. 턴 시간은 같은 창의 Keeper 턴 기록으로 센 값이다. 읽는 코드는 `docs/evidence/lane-time-2026-11/measure_lane_time.py` 의 것을 같이 쓰고, 그 폴더의 `result-2026-11-01_11-05.json` 과 같은 값이 나온다. `Execute` 117.15시간 중 26.16시간(22.3%)은 호출한 Keeper 의 턴 구간에 들지 않는다. 그중 24.72시간은 턴 기록 파일이 없는 턴의 호출이다(`result-2026-11-01_11-05.json` 의 `turn_time.calls_without_trace_file`). 그래서 턴 시간에 대한 비율은 구간 안의 시간으로만 센다.
+`docs/evidence/execute-waits-2026-11/measure_execute_waits.py` 로 11-01T00:00Z ~ 11-05T05:00Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다. 턴 시간은 같은 창의 Keeper trace 파일로 센 값이다. 읽는 코드는 `docs/evidence/lane-time-2026-11/measure_lane_time.py` 의 것을 같이 쓰고, 그 폴더의 `result-2026-11-01_11-05.json` 과 같은 값이 나온다. `Execute` 117.15시간 중 26.16시간(22.3%)은 호출한 Keeper 의 턴 구간에 들지 않는다. 그중 24.72시간은 trace 파일이 없는 턴의 호출이다(`result-2026-11-01_11-05.json` 의 `turn_time.calls_without_trace_file`). 그래서 턴 시간에 대한 비율은 구간 안의 시간으로만 센다.
 
 | 측정 | 값 |
 |---|---|

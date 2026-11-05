@@ -21,9 +21,11 @@ Definitions:
 - inside seconds: the part of a call or of a gap that lies in the turn time of
   the call's Keeper. The ledger and the trace files are written by different
   code, so a call can lie outside every run interval of its Keeper: its turn
-  wrote no trace file, or the call began before the file's first event or
-  ended after its last. Shares of turn time use inside seconds only.
-  The sums in `tool_time_s` and `between_calls` keep every call.
+  wrote no trace file, or its turn has one and the call still lies before the
+  file's first event or after its last. Shares of turn time use inside seconds
+  only. The sums in `tool_time_s` and `between_calls` keep every call. A Keeper
+  without any trace file in the window has no turn time, so all its calls have
+  zero inside seconds by construction (`keepers_without_any_trace_file`).
 - trace file: `keeper_turn_events/<keeper>/trace-<id>-<run>-<turn>-<hash>.jsonl`.
   A call has one when a file of its Keeper is named for its `trace_id` and
   `keeper_turn_id`. Only the file names are read, so a file pruned after the
@@ -32,10 +34,15 @@ Definitions:
   so a `direct` turn (`Keeper_turn.run_direct_turn_with_fsm`, the turn that
   answers a `masc_keeper_msg` message) writes none.
 - traced call outside the turn time: a call whose turn has a trace file and
-  of which more than 0.05 s lies outside the turn time of its Keeper.
+  of which more than a microsecond lies outside the turn time of its Keeper.
   `traced_calls_outside_turns` counts them and their outside seconds, in total
-  and by `turn_kind`, and `turns_that_also_have_autonomous_calls` counts the
+  and by `turn_kind`. `calls_partly_inside_turn_time` counts the ones that also
+  have seconds inside, and `turns_that_also_have_autonomous_calls` counts the
   turns among them whose key also carries an `autonomous` call.
+- turn kind set: the `turn_kind` values of the calls of one turn, joined with
+  `+` (`direct`, `autonomous`, `autonomous+direct`). The ledger writes
+  `turn_kind` per call, so one turn key can carry both. `turns_by_kind_set`
+  splits every turn of the window into exactly one set.
 - between-calls time: inside one turn (`trace_id`, `keeper_turn_id`), calls sorted
   by start (`ts` minus duration). The gap before every call after the first is
   its start minus the previous call's end. Overlapping calls count as 0.
@@ -105,7 +112,7 @@ REREAD_WINDOW_SEC = 3600.0
 TRACE_TAIL_BYTES = 65536
 TRACE_FILE_NAME = re.compile(r"^(trace-\d+-\d+)-(\d+)-[0-9a-f]+\.jsonl$")
 AUTONOMOUS_TURN_KIND = "autonomous"
-OUTSIDE_TOLERANCE_S = 0.05
+FLOAT_NOISE_S = 1e-6
 SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_MINUTE = 60.0
 ADMISSION_MARKER = b"provider_admission:waited"
@@ -576,58 +583,75 @@ def summarize_inside_turns(calls: list[Call], clocks: Mapping[str, TurnClock]) -
 def summarize_untraced(calls: list[Call], trace_keys: frozenset[str], clocks: Mapping[str, TurnClock]) -> dict[str, object]:
     """The calls of turns that have no trace file, and how many of their seconds the Keepers' turn time covers."""
     untraced = [call for call in calls if call.turn not in trace_keys]
-    by_kind: dict[str, list[Call]] = defaultdict(list)
-    for call in untraced:
-        by_kind[call.turn_kind].append(call)
-    turns_of_kind: dict[str, set[str]] = defaultdict(set)
+    kinds_of_turn: dict[str, set[str]] = defaultdict(set)
     for call in calls:
-        turns_of_kind[call.turn_kind].add(call.turn)
+        kinds_of_turn[call.turn].add(call.turn_kind)
+    turns_by_kind_set: dict[str, dict[str, int]] = {}
+    for turn, kinds in kinds_of_turn.items():
+        counts = turns_by_kind_set.setdefault("+".join(sorted(kinds)), {"turns": 0, "without_trace_file": 0})
+        counts["turns"] += 1
+        counts["without_trace_file"] += int(turn not in trace_keys)
+    without_clock = [call for call in untraced if call.keeper not in clocks]
+    with_clock = [call for call in untraced if call.keeper in clocks]
 
     def block(members: list[Call]) -> dict[str, object]:
         return {
             "calls": len(members),
-            "turns": len({call.turn for call in members}),
             "tool_time_s": round(sum(call.end - call.start for call in members), 1),
             "execute_time_s": round(sum(call.end - call.start for call in members if call.tool == EXECUTE_TOOL), 1),
         }
 
+    def by_turn_kind(members: list[Call]) -> dict[str, dict[str, object]]:
+        grouped: dict[str, list[Call]] = defaultdict(list)
+        for call in members:
+            grouped[call.turn_kind].append(call)
+        return {kind: block(group) for kind, group in sorted(grouped.items())}
+
     return {
         **block(untraced),
+        "turns": len({call.turn for call in untraced}),
         "tool_time_inside_turns_s": round(sum(seconds_inside(clocks, call.keeper, call.start, call.end) for call in untraced), 1),
-        "turns_in_window": len({call.turn for call in calls}),
-        "by_turn_kind": {
-            kind: {**block(members), "turns_of_this_kind": len(turns_of_kind[kind])} for kind, members in sorted(by_kind.items())
+        "keepers_with_a_trace_file": {**block(with_clock), "by_turn_kind": by_turn_kind(with_clock)},
+        "keepers_without_any_trace_file": {
+            "keepers": sorted({call.keeper for call in without_clock}),
+            **block(without_clock),
+            "by_turn_kind": by_turn_kind(without_clock),
         },
+        "turns_in_window": len(kinds_of_turn),
+        "turns_by_kind_set": dict(sorted(turns_by_kind_set.items())),
+        "by_turn_kind": by_turn_kind(untraced),
     }
 
 
 def summarize_traced_outside(calls: list[Call], trace_keys: frozenset[str], clocks: Mapping[str, TurnClock]) -> dict[str, object]:
-    """The calls of turns that have a trace file but lie partly outside the turn time of their Keeper."""
+    """The calls of turns that have a trace file but lie partly or wholly outside the turn time of their Keeper."""
     kinds_of_turn: dict[str, set[str]] = defaultdict(set)
     for call in calls:
         kinds_of_turn[call.turn].add(call.turn_kind)
-    hits: list[tuple[Call, float]] = []
+    hits: list[tuple[Call, float, float]] = []  # call, inside seconds, outside seconds
     for call in calls:
         if call.turn not in trace_keys:
             continue
-        outside_s = (call.end - call.start) - seconds_inside(clocks, call.keeper, call.start, call.end)
-        if outside_s > OUTSIDE_TOLERANCE_S:
-            hits.append((call, outside_s))
-    by_kind: dict[str, list[tuple[Call, float]]] = defaultdict(list)
+        inside_s = seconds_inside(clocks, call.keeper, call.start, call.end)
+        outside_s = (call.end - call.start) - inside_s
+        if outside_s > FLOAT_NOISE_S:
+            hits.append((call, inside_s, outside_s))
+    by_kind: dict[str, list[tuple[Call, float, float]]] = defaultdict(list)
     for hit in hits:
         by_kind[hit[0].turn_kind].append(hit)
-    turns = {call.turn for call, _ in hits}
+    turns = {call.turn for call, _, _ in hits}
 
-    def block(members: list[tuple[Call, float]]) -> dict[str, object]:
+    def block(members: list[tuple[Call, float, float]]) -> dict[str, object]:
         return {
             "calls": len(members),
-            "tool_time_outside_turns_s": round(sum(outside_s for _, outside_s in members), 1),
-            "execute_time_outside_turns_s": round(sum(outside_s for call, outside_s in members if call.tool == EXECUTE_TOOL), 1),
+            "tool_time_outside_turns_s": round(sum(outside_s for _, _, outside_s in members), 1),
+            "execute_time_outside_turns_s": round(sum(outside_s for call, _, outside_s in members if call.tool == EXECUTE_TOOL), 1),
         }
 
     return {
         **block(hits),
         "turns": len(turns),
+        "calls_partly_inside_turn_time": sum(1 for _, inside_s, _ in hits if inside_s > FLOAT_NOISE_S),
         "turns_that_also_have_autonomous_calls": sum(1 for turn in turns if AUTONOMOUS_TURN_KIND in kinds_of_turn[turn]),
         "by_turn_kind": {kind: block(members) for kind, members in sorted(by_kind.items())},
     }
@@ -679,7 +703,6 @@ def summarize_calls(calls: list[Call], busy_by_keeper: dict[str, float]) -> dict
             "same_tool": ranked_transitions(pair_count, pair_gap_s, same_tool=True),
             "cross_tool": ranked_transitions(pair_count, pair_gap_s, same_tool=False),
         },
-        "other_turn_time_s": round(busy_s - tool_s - sum(gaps), 1),
         "rereads_after_first_call": {"calls": len(reread_gaps), "turn_time_s": round(sum(reread_gaps), 1)},
         "long_execute": {
             "calls": len(long_execute),

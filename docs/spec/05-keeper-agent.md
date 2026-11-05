@@ -434,9 +434,9 @@ token intent. agent core `max_turns = 0` and Keeper `max_idle_turns = 0` are the
 unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
 Keeper work budget.
 
-**Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000)
+**Execution**: `AUTONOMOUS_MAX_TOKENS`(4000)
 
-**Other**: `DEBUG`(0), `SKILL_SELECTION`(agent), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
+**Other**: `DEBUG`(0), `BOOTSTRAP_PROACTIVE_WARMUP_SEC`(60)
 
 **Evidence 상한** (task tooling, `lib/keeper/keeper_tool_task_runtime.ml`): `evidence_total_bytes_limit` = 51,200바이트 — `keeper_task_done`이 `artifact:` evidence 전체 합계로 거절하는 상한. 초과 시 전환 전에 즉시 거절되며 총 바이트 수와 `note:` 대안이 안내된다. 코드 상수이며 환경변수·TOML 로 바꾸지 않는다.
 
@@ -463,7 +463,7 @@ Canonical file model:
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다 (`paused`는 RFC-0323에 의해 은퇴한 계약).
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다.
 
 ---
 

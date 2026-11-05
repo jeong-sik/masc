@@ -255,13 +255,16 @@ type config =
   ; trigger_policy : trigger_policy
   }
 
+let user_only_prefix = "user_only:"
+
 let parse_trigger_policy s =
   match s with
   | "mention_only" -> Ok Mention_only
   | "mention_or_thread" -> Ok Mention_or_thread
   | "all" -> Ok All
-  | _ when String.length s > 10 && String.sub s 0 10 = "user_only:" ->
-      let id = String.sub s 10 (String.length s - 10) in
+  | _ when String.starts_with ~prefix:user_only_prefix s ->
+      let prefix_len = String.length user_only_prefix in
+      let id = String.sub s prefix_len (String.length s - prefix_len) in
       if id = "" then Error "user_only:<id> requires non-empty id"
       else Ok (User_only id)
   | _ ->
@@ -273,7 +276,7 @@ let parse_trigger_policy s =
 let trigger_policy_to_string = function
   | Mention_only -> "mention_only"
   | Mention_or_thread -> "mention_or_thread"
-  | User_only id -> Printf.sprintf "user_only:%s" id
+  | User_only id -> user_only_prefix ^ id
   | All -> "all"
 
 (* ── Opaque state ──────────────────────────────────────────────── *)

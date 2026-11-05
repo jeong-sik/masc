@@ -90,6 +90,24 @@ let test_parse_trigger_policy_rejects () =
       | Error _ -> ())
     bad
 
+(* "user_only:" names the policy but gives no user. The error says the id is
+   missing instead of calling the policy name unknown. *)
+let test_parse_trigger_policy_user_only_without_id () =
+  match S.parse_trigger_policy "user_only:" with
+  | Ok _ -> fail "expected Error for \"user_only:\""
+  | Error msg ->
+    check string "error message" "user_only:<id> requires non-empty id" msg
+
+let test_trigger_policy_string_round_trip () =
+  List.iter
+    (fun policy ->
+      let text = S.trigger_policy_to_string policy in
+      match S.parse_trigger_policy text with
+      | Ok parsed when policy_equal parsed policy -> ()
+      | Ok _ -> failf "round trip of %S: wrong variant" text
+      | Error msg -> failf "round trip of %S: %s" text msg)
+    [ S.Mention_only; S.Mention_or_thread; S.All; S.User_only "1234567890" ]
+
 let test_presence_status_strings () =
   let cases =
     [ S.Online, "online"
@@ -2536,6 +2554,10 @@ let () =
             test_parse_trigger_policy_accepts
         ; test_case "parse_trigger_policy rejects others" `Quick
             test_parse_trigger_policy_rejects
+        ; test_case "parse_trigger_policy names the missing user id" `Quick
+            test_parse_trigger_policy_user_only_without_id
+        ; test_case "trigger_policy string round trip" `Quick
+            test_trigger_policy_string_round_trip
         ] )
     ; ( "parse_frame"
       , [ test_case "Hello envelope" `Quick test_parse_frame_hello

@@ -1767,9 +1767,12 @@ wizard-default = true
 api-name = "glm-5.3"
 tools-support = true
 thinking-support = true
-# Non-preserved reasoning by default: AGENT_CORE owns GLM's clear_thinking wire
-# contract, and preserved thinking replays history into every later keeper turn.
-preserve-thinking = false
+# Preserved Thinking (RFC-0488 §3.3): earlier turns' reasoning is sent back
+# unmodified, so the next request reads that history from the provider cache.
+# It is the Coding Plan endpoint's default; declaring it keeps the row the same
+# on the standard endpoint, whose default clears it.
+# Ref: https://docs.z.ai/guides/capabilities/thinking-mode (2026-11-05).
+preserve-thinking = true
 streaming = true
 
 [models.glm-5-3.capabilities]
@@ -1786,7 +1789,7 @@ wizard-default = true
 api-name = "glm-5.3-flash"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [models.glm-5-3-flash.capabilities]
@@ -1803,7 +1806,7 @@ max-concurrent = 4
 api-name = "glm-5.2"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-5-2]
@@ -1813,7 +1816,7 @@ max-concurrent = 4
 api-name = "glm-5.1"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-5-1]
@@ -1823,7 +1826,7 @@ max-concurrent = 4
 api-name = "glm-5-turbo"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-5-turbo]
@@ -1833,7 +1836,7 @@ max-concurrent = 4
 api-name = "glm-5"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-5]
@@ -1843,7 +1846,7 @@ max-concurrent = 4
 api-name = "glm-4.7"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-4-7]
@@ -1853,7 +1856,7 @@ max-concurrent = 4
 api-name = "glm-4.6"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-4-6]
@@ -1863,7 +1866,7 @@ max-concurrent = 4
 api-name = "glm-4.5"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-4-5]
@@ -1873,7 +1876,7 @@ max-concurrent = 4
 api-name = "glm-4.5-air"
 tools-support = true
 thinking-support = true
-preserve-thinking = false
+preserve-thinking = true
 streaming = true
 
 [glm-coding.glm-4-5-air]

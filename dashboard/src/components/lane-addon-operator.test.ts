@@ -51,23 +51,6 @@ function returned(url: string, origin = window.location.origin, source: Window =
 }
 const callbackUrl = () => `${window.location.origin}/addons/oauth/callback?state=fixture-state&code=PRIVATE_CODE#integration_key=PRIVATE_KEY`
 
-it('opens private app approval without synthesizing an opened acknowledgement', async () => {
-  const approval = { id: 'login_approval', label: 'Open approval', arguments: { operation_id: 'original' }, fields: [], opens_window: true }
-  const acknowledge = { id: 'login_opened', label: 'I opened 1Password', arguments: { operation_id: 'original' }, fields: [] }
-  const app = { title: '1Password', message: 'Approve login', actions: [approval, acknowledge] }
-  api.readAddonOperator.mockResolvedValue(app)
-  api.invokeAddonOperator.mockReset().mockResolvedValue({ ...app, open_url: 'onepassword://grant-brokered-access?PRIVATE_LINK' })
-  const screen = render(html`<${LaneAddonOperator} instance=${instance} authority=${authority} />`)
-  await fireEvent.click(screen.getByRole('button', { name: 'Connection settings' }))
-  await fireEvent.click(await screen.findByRole('button', { name: approval.label }))
-  await waitFor(() => expect(popup.location.replace).toHaveBeenCalledWith('onepassword://grant-brokered-access?PRIVATE_LINK'))
-  expect(api.invokeAddonOperator).toHaveBeenCalledTimes(1)
-  await fireEvent.click(screen.getByRole('button', { name: acknowledge.label }))
-  await waitFor(() => expect(api.invokeAddonOperator).toHaveBeenCalledTimes(2))
-  expect(api.invokeAddonOperator).toHaveBeenLastCalledWith(
-    { instance_id: 'original', expected_incarnation: 'original' }, 'login_opened', { operation_id: 'original' })
-})
-
 it('accepts only the original popup, origin, callback path and OAuth state', async () => {
   await begin()
   await act(() => {
@@ -290,18 +273,17 @@ it.each(['closed', 'cleared-lost'] as const)('allows the next operator window af
   api.invokeAddonOperator.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
   await act(() => returned(callbackUrl()))
   popup.postMessage = mode === 'closed' ? vi.fn(() => { throw new Error('PRIVATE_CLOSED_POPUP') }) : vi.fn()
-  const approval = { id: 'login_approval', label: 'Open original approval',
-    arguments: { operation_id: 'original' }, fields: [], opens_window: true }
-  await act(() => finish({ ...done, actions: [approval] }))
+  const reopen = { id: 'connect', label: 'Connect another account', arguments: {}, fields: [], opens_window: true }
+  await act(() => finish({ ...done, actions: [reopen] }))
   expect(popup.close).not.toHaveBeenCalled()
   expect(screen.container.textContent).not.toContain('PRIVATE_CLOSED_POPUP')
   const next = { location: { replace: vi.fn() }, close: vi.fn(), postMessage: vi.fn() } as unknown as Window
   vi.mocked(window.open).mockReturnValueOnce(next)
-  api.invokeAddonOperator.mockResolvedValueOnce({ ...done, actions: [approval], open_url: 'onepassword://grant-brokered-access?PRIVATE_LINK' })
-  await fireEvent.click(await screen.findByRole('button', { name: approval.label }))
-  await waitFor(() => expect(next.location.replace).toHaveBeenCalledWith('onepassword://grant-brokered-access?PRIVATE_LINK'))
+  api.invokeAddonOperator.mockResolvedValueOnce({ ...done, actions: [reopen], open_url: 'https://connect.example/next?PRIVATE_LINK' })
+  await fireEvent.click(await screen.findByRole('button', { name: reopen.label }))
+  await waitFor(() => expect(next.location.replace).toHaveBeenCalledWith('https://connect.example/next?PRIVATE_LINK'))
   expect(api.invokeAddonOperator).toHaveBeenLastCalledWith(
-    { instance_id: 'original', expected_incarnation: 'original' }, 'login_approval', { operation_id: 'original' })
+    { instance_id: 'original', expected_incarnation: 'original' }, 'connect', {})
   expect(popup.close).not.toHaveBeenCalled()
 })
 

@@ -163,7 +163,8 @@ let error_to_string = function
     "the intent that an earlier writer left was not closed: " ^ S.append_error_to_string error
   | Intent_not_written error -> "the intent was not written: " ^ S.append_error_to_string error
   | Record_not_appended error ->
-    "the record was not appended and its intent is in the external store: "
+    "the record was not appended, and an intent written for it stays in the external store \
+     until the next entry settles it: "
     ^ L.append_error_to_string error
   | Answer_not_written { record_hash; error } ->
     Printf.sprintf
@@ -226,17 +227,26 @@ let in_zone t draft store_writer log_writer head settlement =
       (fun error -> Record_not_built error)
       (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
   in
-  let* { Authz_state.state; high_water = change } =
+  let* { Authz_state.state; high_water } =
     Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
   in
+  (* The settlement comes first even for a record with no intent: the append
+     moves the head, and an intent left pending behind it could no longer be
+     aborted (design 8.2-1 and 8.2-5). *)
   let* () = write_settlement t store_writer log_writer settlement in
   let record_hash = record.R.hash in
-  let intent =
-    { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change }
-  in
   let* () =
-    write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
-      Intent_not_written error)
+    match high_water with
+    | None -> Ok ()
+    | Some change ->
+      let intent =
+        { S.previous_record_hash = R.head_hash head
+        ; intended_next_record_digest = record_hash
+        ; change
+        }
+      in
+      write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
+        Intent_not_written error)
   in
   let* head =
     Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
@@ -245,8 +255,11 @@ let in_zone t draft store_writer log_writer head settlement =
   let snapshot = { state; head } in
   Atomic.set t.current snapshot;
   let* () =
-    write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
-      Answer_not_written { record_hash; error })
+    match high_water with
+    | None -> Ok ()
+    | Some (_ : S.Change.t) ->
+      write_entry t store_writer (S.Committed { record_hash }) ~not_written:(fun error ->
+        Answer_not_written { record_hash; error })
   in
   Ok (snapshot, record_hash)
 ;;

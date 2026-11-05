@@ -23,11 +23,15 @@
       {!Authz_log.confirm_end} whether the log still ends where the intent
       began.
     + It writes [Intent_pending] to the store, appends the record to the log,
-      publishes the state with the record, and writes [Committed].
+      publishes the state with the record, and writes [Committed]. A record
+      whose {!Authz_state.applied} has no change, an invitation for one, has no
+      intent and no [Committed]: it is appended and published. Its settlement
+      is still written before the append, because the append moves the head
+      and an intent left behind it could no longer be aborted.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for
-    a commit that writes an intent after it.
+    a commit that gets past them.
 
     {b Snapshot.} The state and the head it belongs to are one immutable value
     in an [Atomic.t], so a reader takes it without a lock. Once the append
@@ -195,9 +199,10 @@ type error =
       (** The call stopped at the intent. A settlement before it is in the
           store, and nothing of the record is in the log. *)
   | Record_not_appended of Authz_log.append_error
-      (** The intent is in the store. When the error stopped the log, the next
-          start reads whether the record is in it. Otherwise it is not, and the
-          next commit or install aborts the intent. *)
+      (** The intent, when the record has one, is in the store. When the error
+          stopped the log, the next start reads whether the record is in it.
+          Otherwise it is not, and the next commit or install aborts the
+          intent. *)
   | Answer_not_written of
       { record_hash : Authz_record.Hash.t
       ; error : Authz_external_store.append_error

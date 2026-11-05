@@ -23,7 +23,8 @@
     appended (design 8.2): a mode event is an intent, and so will be every event
     that raises a scoped epoch or replaces a credential. The writer zone
     ({!Authz_zone}) writes that intent, the record and its answer, in this
-    order.
+    order. A record that changes no epoch, an invitation for one, has no intent,
+    and the zone appends it alone.
 
     The first record of every log is a [Fresh_bootstrap] mode event (design
     8.4), so any other record before it is refused. {!apply} matches every kind
@@ -31,7 +32,10 @@
     before the bootstrap, and the workspace of the bootstrap reaches a layer
     only from a branch that has one. *)
 
-type t = private { mode : Authz_mode_state.t }
+type t = private
+  { mode : Authz_mode_state.t
+  ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
+  }
 
 val empty : t
 
@@ -40,19 +44,24 @@ type refusal =
       (** A record of this kind comes before the [Fresh_bootstrap]. *)
   | Mode_event_unreadable of Authz_mode_event.error
   | Mode of Authz_mode_state.refusal
+  | Invite_unreadable of Authz_invite_event.error
+  | Invite of Authz_invite_state.refusal
+  | Accounts_off of Authz_record.Kind.t
+      (** The mode is [Off], and a record of this kind is not written while the
+          accounts are off (design 10.5). *)
   | Kind_not_read of Authz_record.Kind.t
       (** No layer reads records of this kind yet. *)
 
 val refusal_to_string : refusal -> string
 
 (** What one record does to the state. [high_water] is the change that the
-    external store takes as [Intent_pending] before the record is appended.
-    Every record that this module accepts has one, because a mode event is the
-    only kind it reads. A layer that reads a kind without one changes this
-    type. *)
+    external store takes as [Intent_pending] before the record is appended. A
+    mode event has one. An invite record has none, because an invitation raises
+    no scoped epoch (design 8.1 and 8.2): the zone appends it with no intent and
+    no answer in the store. *)
 type applied =
   { state : t
-  ; high_water : Authz_external_store.Change.t
+  ; high_water : Authz_external_store.Change.t option
   }
 
 val apply : t -> Authz_record.t -> (applied, refusal) result

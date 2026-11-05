@@ -240,14 +240,27 @@ let test_active_blocker_overrides_success_until_cleared () =
         Alcotest.(check string) (label ^ " disposition") expected
           (snapshot |> member "disposition" |> to_string);
         Alcotest.(check string) (label ^ " history retained") receipt_trace
-          (snapshot |> member "latest_receipt" |> member "trace_id" |> to_string))
+          (snapshot |> member "latest_receipt" |> member "trace_id" |> to_string);
+        (* The Alert's cause is the blocker, not the success before it, and
+           the registry recorded when its failure happened. *)
+        let causal = snapshot |> member "latest_causal_event" in
+        Alcotest.(check string) (label ^ " causal event is the blocker")
+          "runtime_blocker" (causal |> member "kind" |> to_string);
+        Alcotest.(check bool) (label ^ " blocker is dated by its failure")
+          false (causal |> member "observation_only" |> to_bool))
         [ "previous turn in same second", trace_id, 6, "Alert"
         ; "different trace with same turn", "previous-trace", 7, "Alert"
         ; "same turn before later failure", trace_id, 7, "Alert" ];
+      Alcotest.(check string) "the summary names the same cause" "runtime_blocker"
+        (K.summary_json ~config ~meta
+         |> member "latest_causal_event" |> member "kind" |> to_string);
       Masc.Keeper_registry.set_failure_reason ~base_path:base_dir meta.name None;
       let recovered = observe trace_id 7 in
       Alcotest.(check string) "registry recovery restores receipt disposition" "Pass"
-        (recovered |> member "disposition" |> to_string))
+        (recovered |> member "disposition" |> to_string);
+      Alcotest.(check bool) "a cleared blocker is no longer the cause" false
+        (String.equal "runtime_blocker"
+           (recovered |> member "latest_causal_event" |> member "kind" |> to_string)))
 ;;
 
 let test_historical_runtime_observation_projections () =

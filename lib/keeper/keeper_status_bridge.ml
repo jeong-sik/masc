@@ -112,7 +112,12 @@ let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keepe
 include Keeper_status_bridge_blocker
 
 
-let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper_meta) =
+type runtime_blocker_observation =
+  { surface : runtime_blocker_surface
+  ; failed_at_unix : float option
+  }
+
+let runtime_blocker_observation_opt (config : Workspace_utils.config) (meta : keeper_meta) =
   (* The registry is the only writer of a runtime blocker; the meta field that
      used to shadow it was written on one failure path and cleared on the next
      success, so it reported a past instant as a present state. *)
@@ -124,8 +129,16 @@ let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper
             ~latest_receipt:(fun () ->
               Keeper_execution_receipt.read_latest_receipt config meta.name)
             reason
+          |> Option.map (fun surface ->
+            { surface; failed_at_unix = entry.last_failure_at })
         | None -> None)
      | None -> None)
+;;
+
+let runtime_blocker_surface_opt config meta =
+  Option.map
+    (fun (observation : runtime_blocker_observation) -> observation.surface)
+    (runtime_blocker_observation_opt config meta)
 ;;
 
 let runtime_attempt_outcome_json = function

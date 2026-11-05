@@ -609,26 +609,56 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         Json_util.string_opt_to_json (Option.bind latest_receipt (json_string_opt_member "ended_at")) );
     ]
 
+let blocker_surface =
+  Option.map
+    (fun (blocker : Keeper_status_bridge.runtime_blocker_observation) ->
+       blocker.surface)
+
+(* The registry recorded when the failure behind an active blocker happened,
+   so the event carries that time and is ordered among the other events by
+   it. A blocker whose time the registry does not hold is only observed now,
+   so it stays an observation dated now. *)
+let runtime_blocker_timeline_event ~observed_at_unix ~meta ~next_human_action
+    (runtime_blocker : Keeper_status_bridge.runtime_blocker_observation option) =
+  Option.bind runtime_blocker
+    (fun (blocker : Keeper_status_bridge.runtime_blocker_observation) ->
+       let ts_unix, observation_only =
+         match blocker.failed_at_unix with
+         | Some failed_at_unix -> failed_at_unix, false
+         | None -> observed_at_unix, true
+       in
+       blocker_timeline_event ~ts_unix ~observed_at_unix
+         ~runtime_blocker:(Some blocker.surface)
+         ?task_id:(Keeper_runtime_contract.current_task_id_opt meta)
+         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         ~next_human_action ~observation_only ())
+
+(* The cause of the state the snapshot reports. An active runtime blocker is
+   that cause, by the same rule [latest_terminal_reason_opt] applies to the
+   terminal reason; a success recorded before it does not explain an Alert.
+   Without a blocker it is the newest event. *)
+let latest_causal_event_of ~blocker_event timeline =
+  match blocker_event with
+  | Some event -> event
+  | None -> latest_causal_from_timeline timeline
+
 let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     ~latest_receipt ~latest_tool_call ~latest_approval_audit
     ~runtime_blocker ~next_human_action =
-  let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let blocker_event =
+    runtime_blocker_timeline_event ~observed_at_unix ~meta ~next_human_action
+      runtime_blocker
+  in
   [
     terminal_reason_timeline_event ~latest_decision ~latest_receipt;
     Option.bind latest_decision decision_timeline_event;
     Option.bind latest_receipt receipt_timeline_event;
     Option.bind latest_tool_call tool_call_timeline_event;
     Option.bind latest_approval_audit approval_event_timeline_event;
-    blocker_timeline_event ~ts_unix:observed_at_unix
-      ~observed_at_unix
-      ~runtime_blocker ?task_id
-      ~trace_id ~next_human_action
-      ~observation_only:true ();
   ]
   |> List.filter_map Fun.id
   |> sort_timeline_events
-  |> fun events -> latest_causal_from_timeline (`List events)
+  |> fun events -> latest_causal_event_of ~blocker_event (`List events)
 
 let approval_audit_rows_or_fail = function
   | Ok rows -> rows
@@ -644,7 +674,7 @@ type raw_observations =
   ; latest_receipt : Yojson.Safe.t option
   ; latest_approval_audit : Yojson.Safe.t option
   ; pending_approval_projection : pending_approval_projection
-  ; runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option
+  ; runtime_blocker : Keeper_status_bridge.runtime_blocker_observation option
   ; attention : Keeper_attention_reason.t option
   ; observed_at_unix : float
   }
@@ -681,12 +711,12 @@ let collect_raw_observations_with_pending_reader
     pending_approval_projection_with_reader ~read_pending
       ~base_path:config.base_path ~keeper_name:meta.name
   in
-  let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
+  let runtime_blocker = Keeper_status_bridge.runtime_blocker_observation_opt config meta in
   let attention =
     Keeper_status_bridge.attention_of_surface
       config
       meta
-      runtime_blocker
+      (blocker_surface runtime_blocker)
       (approval_queue_attention_of_projection
          ~base_path:config.base_path
          pending_approval_projection)
@@ -715,11 +745,11 @@ let collect_summary_raw ~(config : Workspace.config) ~(meta : keeper_meta) =
 let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state
-      ~runtime_blocker:raw.runtime_blocker raw.latest_receipt
+      ~runtime_blocker:(blocker_surface raw.runtime_blocker) raw.latest_receipt
   in
   let latest_terminal_reason =
     latest_terminal_reason_opt
-      ~runtime_blocker:raw.runtime_blocker
+      ~runtime_blocker:(blocker_surface raw.runtime_blocker)
       ~latest_decision:raw.latest_decision ~latest_receipt:raw.latest_receipt
   in
   let latest_terminal_reason_json =
@@ -733,7 +763,7 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
   let trust_model =
     trust_model_of_observations
       ~pending_approval_projection:raw.pending_approval_projection
-      ~runtime_blocker:raw.runtime_blocker
+      ~runtime_blocker:(blocker_surface raw.runtime_blocker)
       ~latest_receipt:latest_receipt_for_runtime_state
       ~latest_next_action ~attention:raw.attention
   in
@@ -806,16 +836,9 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
     |> List.filter_map Fun.id
   in
   let blocker_events =
-    let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    [
-      blocker_timeline_event ~ts_unix:observed_at_unix
-        ~observed_at_unix
-        ~runtime_blocker ?task_id
-        ~trace_id ~next_human_action
-        ~observation_only:true ()
-    ]
-    |> List.filter_map Fun.id
+    runtime_blocker_timeline_event ~observed_at_unix ~meta ~next_human_action
+      runtime_blocker
+    |> Option.to_list
   in
   let latest_tool_call_event =
     match latest_tool_call with
@@ -900,12 +923,12 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let observations = raw.observations in
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state
-      ~runtime_blocker:observations.runtime_blocker
+      ~runtime_blocker:(blocker_surface observations.runtime_blocker)
       observations.latest_receipt
   in
   let latest_terminal_reason =
     latest_terminal_reason_opt
-      ~runtime_blocker:observations.runtime_blocker
+      ~runtime_blocker:(blocker_surface observations.runtime_blocker)
       ~latest_decision:observations.latest_decision
       ~latest_receipt:observations.latest_receipt
   in
@@ -929,7 +952,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let trust_model =
     trust_model_of_observations
       ~pending_approval_projection:observations.pending_approval_projection
-      ~runtime_blocker:observations.runtime_blocker
+      ~runtime_blocker:(blocker_surface observations.runtime_blocker)
       ~latest_receipt:latest_receipt_for_runtime_state ~latest_next_action
       ~attention:observations.attention
   in
@@ -965,7 +988,13 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
       ~pending_approval_projection:observations.pending_approval_projection
   in
   let latest_causal_event =
-    latest_causal_from_timeline causal_timeline
+    latest_causal_event_of
+      ~blocker_event:
+        (runtime_blocker_timeline_event
+           ~observed_at_unix:observations.observed_at_unix ~meta
+           ~next_human_action:trust_model.next_human_action
+           observations.runtime_blocker)
+      causal_timeline
   in
   `Assoc
     ([ ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
@@ -989,7 +1018,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      ; ( "runtime_blockers"
        , `Assoc
            (Keeper_status_bridge.runtime_blocker_fields_json_of_surface
-              observations.runtime_blocker) )
+              (blocker_surface observations.runtime_blocker)) )
      ; ("recent_tool_calls_unavailable", recent_tool_calls_unavailable)
      ]
      @ trust_model_json_fields trust_model

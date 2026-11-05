@@ -108,10 +108,6 @@ let metric_after_turn_response_model_empty = Otel_metric_store_core.declare_coun
 let metric_after_turn_response_model_alias = Otel_metric_store_core.declare_counter "masc_after_turn_response_model_alias_total"
 let metric_cost_emit_zero_source = Otel_metric_store_core.declare_counter "masc_cost_emit_zero_source_total"
 let metric_cost_ledger_status = Otel_metric_store_core.declare_counter "masc_cost_ledger_status_total"
-(* metric_keeper_meta_read_failures defined earlier at line 473 (single
-   source of truth). Re-binding here would silently shadow without
-   changing behavior because the strings are identical, but it makes
-   the constant look like it has two declaration sites. *)
 
 (* #20677 incremental-cache health: a boundary past the file size means the
    file shrank/rotated and the reader re-parses from byte 0 (the expensive

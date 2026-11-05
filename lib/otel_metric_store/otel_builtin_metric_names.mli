@@ -3,14 +3,6 @@
 include module type of Otel_metric_names
 
 
-(** #10097: per-(provider, tool) counter for keeper-bound runtime MCP
-    omissions.  Paired with a once-per-fingerprint WARN log so logs
-    carry structural facts and Otel_metric_store carries frequency.
-
-    RFC-0058 §2.4 / Phase 5.4: renamed from
-    `masc_codex_cli_mcp_tool_omission_total` to keep provider identity
-    out of the metric name; `provider` is now a label. *)
-
 (** #9520: total telemetry coverage gaps recorded. Labels:
     [source, producer, dashboard_surface, stale_reason]. This is the
     alertable pair to the durable
@@ -61,22 +53,6 @@ include module type of Otel_core_metric_names
 
 include module type of Otel_policy_metric_names
 
-(** Total stimuli consumed at turn entry, classified by [stimulus_class].
-    Labels: [keeper], [class]
-    (board_signal|bootstrap|unsupported).
-    Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
-    drill-down with payload prefix. *)
-
-(** Unsupported stimuli consumed at turn entry — the dequeued payload
-    did not match any known stimulus class. Each increment represents a
-    wake -> no_signal gap per #12684. Labels: [keeper]. *)
-
-(** Total supervisor restart attempts for crashed keepers. Labels:
-    [keeper]. *)
-
-(** Total supervisor restart outcomes. Labels:
-    [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
-
 val metric_agent_core_bus_capacity : string
 (** Gauge: total queue capacity for live subscribers grouped by
     [bus], [purpose], [capacity], and [overflow]. *)
@@ -105,13 +81,6 @@ include module type of Otel_identity_metric_names
 
 include module type of Otel_transport_metric_names
 
-(** [masc_keeper_agent_core_run_timeout_total] counter incremented in the
-    runtime FSM each time an [Agent.run] / [run_stream] returns
-    [Llm_provider.Retry.Timeout]. The [source] label is typed provider
-    timeout phase when AGENT_CORE exposes one, otherwise [provider]. Free-form
-    timeout messages are not reparsed into [max_execution_time] labels.
-
-    Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
 (** Counter incremented when an AGENT_CORE after-turn response is accepted but
@@ -122,7 +91,6 @@ val metric_after_turn_response_model_empty : string
 val metric_after_turn_response_model_alias : string
 val metric_cost_emit_zero_source : string
 val metric_cost_ledger_status : string
-(* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
 
 (** #20677: incremental telemetry cache fell back to a full re-parse
     (file shrank or rotated under the boundary).  Labels: [store]. *)

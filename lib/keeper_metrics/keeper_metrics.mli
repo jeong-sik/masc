@@ -17,16 +17,20 @@ type t =
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
-  | TurnStarts
-  | TurnReattempts
-  | TurnRegressions
-  | TurnLatencyBucket
+    (* counter: context_max observations; labels keeper, model_used, resolved_model_id,
+       context_max_bucket *)
+  | TurnStarts (* counter: turn starts, by keeper *)
+  | TurnReattempts (* counter: turn starts that reuse the previous start's turn id, by keeper *)
+  | TurnRegressions (* counter: turn starts whose turn id is below the previous start's, by keeper *)
+  | TurnLatencyBucket (* counter: turns by keeper and latency bucket *)
   | TurnLatencyByModelBucket
-  | SupervisorSweepStarts
-  | SupervisorLastSweepUnixtime
+    (* counter: TurnLatencyBucket with channel, provider_kind, model_used, resolved_model_id and
+       runtime_profile labels added *)
+  | SupervisorSweepStarts (* counter: supervisor sweep loops started, by base_path *)
+  | SupervisorLastSweepUnixtime (* gauge: unix time of the last supervisor sweep beat, by base_path *)
   | OperatorClear
-  | ToolUnderusedAllowedCount
-  | PathRejection
+  | ToolUnderusedAllowedCount (* gauge: allowed tools never called or called in under 1% of calls, by keeper *)
+  | PathRejection (* counter: keeper path rejections, by kind (one value per keeper_path_rejection constructor) *)
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
@@ -70,7 +74,7 @@ type t =
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | Agent_coreTimeoutClassifications
-  | ProactiveOutcome
+  | ProactiveOutcome (* counter: scheduled autonomous cycles, by keeper and outcome (tool_called, noop, error) *)
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
@@ -81,7 +85,7 @@ type t =
   | SnapshotWriteFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
-  | TurnMetricsSnapshotFailures
+  | TurnMetricsSnapshotFailures (* counter: post-cycle metrics snapshot write failures, by keeper and site *)
   | Agent_coreExecutionErrors
   | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures

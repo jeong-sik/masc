@@ -18,7 +18,7 @@ let section_rows ~width title =
   Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
   |> List.map (fun line -> "  " ^ paint (heading_style ()) line)
 
-let history_heading_rows ~width = section_rows ~width "4. 상태 전환 이력 (HISTORY)"
+let history_heading_rows ~width = section_rows ~width "상태 전환 이력 (HISTORY)"
 
 let history_rows = function
         | [] -> [ "    (no events in the observed prefix)" ]
@@ -136,7 +136,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
   in
   let section_head title = section_rows ~width title in
   let identity_section =
-    section_head "1. 작업 식별 · 상태 및 목표 (Task Identity & Status)"
+    section_head "작업 식별 · 상태 및 목표 (Task Identity & Status)"
     @ labeled_lines "title" task.title
     @ labeled_lines "id" task.id
     @ goal_lines
@@ -163,7 +163,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
     | [] -> []
     | items ->
         [ "" ]
-        @ section_head "2. 작업 설명 · 대상 파일 (Description & Files)"
+        @ section_head "작업 설명 · 대상 파일 (Description & Files)"
         @ items
   in
   let handoff_and_contract_items =
@@ -192,7 +192,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
     | [] -> []
     | items ->
         [ "" ]
-        @ section_head "3. 인수인계 · 완료 계약 (Handoff & Completion Contract)"
+        @ section_head "인수인계 · 완료 계약 (Handoff & Completion Contract)"
         @ items
   in
   identity_section @ description_section @ contract_section

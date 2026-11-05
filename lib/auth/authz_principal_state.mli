@@ -15,8 +15,8 @@
     {b Uniqueness.} A user id names one principal, and an identity is bound to
     one principal. A second admission with either is refused, which is the 409
     of design 5.1-3. Design 4.1 also keeps the id of a deleted principal from
-    being given again. No layer deletes a principal yet (B3c-5 does), so every
-    id that was ever given is still held here. The writer draws a user id of 128
+    being given again: a deletion ({!apply_event}) frees the identity and keeps
+    the id ({!is_deleted}) and the namespace. The writer draws a user id of 128
     bits from the OS CSPRNG and draws again when {!admit} refuses it as taken.
 
     {b Admins.} An admission through an Admin invitation makes an Admin
@@ -25,7 +25,9 @@
     keeps one. An Admin whose revocation the store gave up writes nothing
     (design 8.3), so that Admin does not count as the one that remains. *)
 
-type status = Active
+type status =
+  | Active
+  | Disabled  (** Acts no more, and is not counted as an Admin (design 4.1). *)
 
 type principal = private
   { identity : Authz_external_identity.t
@@ -53,7 +55,14 @@ val find_membership : t -> Authz_types.User_id.t -> membership option
 (** The member a namespace was given to. *)
 val find_namespace : t -> Authz_types.Account_home_namespace.t -> Authz_types.User_id.t option
 
-(** Whether the principal has an Admin assignment that is in force. *)
+(** Whether the principal was deleted. Its id is never given again. *)
+val is_deleted : t -> Authz_types.User_id.t -> bool
+
+(** Whether the principal exists and is [Active]. *)
+val is_active : t -> Authz_types.User_id.t -> bool
+
+(** Whether the principal is [Active] and has an Admin assignment in force. A
+    disabled Admin keeps the assignment and does not act. *)
 val is_admin : t -> Authz_types.User_id.t -> bool
 
 type refusal =
@@ -107,20 +116,49 @@ type revocation_refusal =
   | Not_an_admin of Authz_types.User_id.t
       (** The principal has no Admin assignment in force. *)
   | Last_admin of Authz_types.User_id.t
-      (** Every other assignment in force is held, or there is none (design
+      (** No other assignment in force belongs to an Admin that acts (design
           5.1-5). *)
 
 val revocation_refusal_to_string : revocation_refusal -> string
 
 (** What one revocation of an Admin assignment does. The checks run in this
-    order: the author, the principal, the last Admin. An Admin may revoke their
-    own assignment while another Admin remains. [held] says whether the store
-    gave up a revocation of that principal (design 8.3), and an Admin it holds
-    is not one that remains. The cause changes nothing here in the first stage
-    (see {!Authz_admin_event}). *)
+    order: the author, the principal, the last Admin that acts. An Admin may
+    revoke their own assignment while another Admin acts. An Admin acts when it
+    is not disabled and [held] is false for it: [held] says whether the store
+    gave up a revocation of that principal (design 8.3). The cause changes
+    nothing here in the first stage (see {!Authz_admin_event}). *)
 val revoke_admin
   :  t
   -> author:Authz_records.Author.t
   -> held:(Authz_types.User_id.t -> bool)
   -> Authz_admin_event.t
   -> (t, revocation_refusal) result
+
+type principal_refusal =
+  | Writer_is_not_an_admin of Authz_records.Author.t
+  | No_principal of Authz_types.User_id.t
+      (** Never admitted, or deleted. *)
+  | Already_disabled of Authz_types.User_id.t
+  | Not_disabled of Authz_types.User_id.t
+  | Identity_differs of
+      { user_id : Authz_types.User_id.t
+      ; identity : Authz_external_identity.t  (** The identity the deletion named. *)
+      }
+  | Would_leave_no_admin of Authz_types.User_id.t
+      (** The event would leave no Admin that acts (design 5.1-5). *)
+
+val principal_refusal_to_string : principal_refusal -> string
+
+(** What one principal record does (plan B3c-5). Only an Admin that acts writes
+    one. A deletion takes the principal, its identity binding, its membership,
+    and its Admin assignment out: the identity may join again as a new
+    principal through a new invitation, and the user id and the namespace are
+    never given again (design 4.1). The checks run in this order: the author,
+    the principal, the identity of a deletion, the last Admin that acts, which
+    [held] tells as in {!revoke_admin}. *)
+val apply_event
+  :  t
+  -> author:Authz_records.Author.t
+  -> held:(Authz_types.User_id.t -> bool)
+  -> Authz_principal_event.t
+  -> (t, principal_refusal) result

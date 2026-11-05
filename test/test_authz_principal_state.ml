@@ -25,21 +25,20 @@ let github user_id = get (X.github ~user_id)
 let expires_at_ms = 100
 let at_ms = 50
 
-(* Two open Admin invitations. The local operator issues only Admin ones. *)
-let invites =
-  let issue t invite_id token =
-    match
-      I.apply
-        t
-        ~author:Author.Local_operator
-        ~is_admin:(fun _ -> false)
-        (E.Issued { invite_id; token_digest = E.Token_digest.of_token token; expires_at_ms; role = E.Admin })
-    with
-    | Ok t -> t
-    | Error refusal -> Alcotest.failf "fixture invite refused: %s" (I.refusal_to_string refusal)
-  in
-  issue (issue I.empty first "token-1") second "token-2"
+(* An open Admin invitation. The local operator issues only Admin ones. *)
+let issue t invite_id token =
+  match
+    I.apply
+      t
+      ~author:Author.Local_operator
+      ~is_admin:(fun _ -> false)
+      (E.Issued { invite_id; token_digest = E.Token_digest.of_token token; expires_at_ms; role = E.Admin })
+  with
+  | Ok t -> t
+  | Error refusal -> Alcotest.failf "fixture invite refused: %s" (I.refusal_to_string refusal)
 ;;
+
+let invites = issue (issue I.empty first "token-1") second "token-2"
 
 let as_person user_id = Author.Authenticated (Principal.Human user_id)
 
@@ -80,6 +79,7 @@ let an_admission_makes_an_admin () =
   (match P.find principals alice with
    | Some { P.identity; status = P.Active } ->
      Alcotest.(check string) "the identity" "google:111" (X.to_string identity)
+   | Some { P.status = P.Disabled; _ } -> Alcotest.fail "the principal is disabled"
    | None -> Alcotest.fail "no principal was made");
   Alcotest.(check (option string))
     "the identity names the principal"
@@ -90,6 +90,7 @@ let an_admission_makes_an_admin () =
    | Some { P.workspace_id; account_home_namespace; status = P.Active } ->
      Alcotest.(check string) "the workspace" "workspace-1" (Workspace_id.to_string workspace_id);
      Alcotest.(check string) "the namespace" "ns-alice" (Account_home_namespace.to_string account_home_namespace)
+   | Some { P.status = P.Disabled; _ } -> Alcotest.fail "the membership is disabled"
    | None -> Alcotest.fail "no membership was made");
   Alcotest.(check (option string))
     "the namespace names the member"
@@ -267,10 +268,36 @@ let an_admin_revokes_their_own_while_another_remains () =
     Alcotest.(check bool) "bob still is" true (P.is_admin after bob)
 ;;
 
+module Pe = Authz_principal_event
+
+let event ?(held = nobody_held) t ~by principal_event = P.apply_event t ~author:(as_person by) ~held principal_event
+
+let applied_ok = function
+  | Ok t -> t
+  | Error refusal -> Alcotest.failf "refused: %s" (P.principal_refusal_to_string refusal)
+;;
+
+let check_event_refused label expected result =
+  match result with
+  | Ok _ -> Alcotest.failf "%s: the event was taken" label
+  | Error refusal -> Alcotest.(check string) label expected (P.principal_refusal_to_string refusal)
+;;
+
+let status_name t user_id =
+  match P.find t user_id with
+  | Some { P.status = P.Active; _ } -> "active"
+  | Some { P.status = P.Disabled; _ } -> "disabled"
+  | None -> if P.is_deleted t user_id then "deleted" else "none"
+;;
+
 (* bob is held: the store gave up a revocation of bob, so bob writes nothing,
    and alice is the last Admin who can. *)
 let a_held_admin_is_not_the_one_that_remains () =
   let held id = User_id.equal id bob in
+  check_event_refused
+    "alice disables herself"
+    "alice is the last Admin that acts, so it stays"
+    (event ~held (two_admins ()) ~by:alice (Pe.Disabled { user_id = alice }));
   check_revocation_refused
     "alice revokes her own"
     "alice is the last Admin, so the assignment stays"
@@ -278,6 +305,89 @@ let a_held_admin_is_not_the_one_that_remains () =
   match revoke ~held (two_admins ()) ~by:alice bob with
   | Error refusal -> Alcotest.failf "the held Admin was kept: %s" (P.revocation_refusal_to_string refusal)
   | Ok after -> Alcotest.(check bool) "bob is no longer an Admin" false (P.is_admin after bob)
+;;
+
+(* A disabled Admin keeps the assignment and does not act, and an enable gives
+   back what the disable took. *)
+let a_disable_and_an_enable () =
+  let t = two_admins () in
+  let disabled = applied_ok (event t ~by:alice (Pe.Disabled { user_id = bob })) in
+  Alcotest.(check string) "bob" "disabled" (status_name disabled bob);
+  Alcotest.(check bool) "bob does not act as an Admin" false (P.is_admin disabled bob);
+  Alcotest.(check string) "the state before is as it was" "active" (status_name t bob);
+  check_event_refused "twice" "bob is disabled already" (event disabled ~by:alice (Pe.Disabled { user_id = bob }));
+  check_event_refused
+    "bob writes"
+    "the principal human:bob is not an Admin, and only an Admin disables, enables, or deletes a principal"
+    (event disabled ~by:bob (Pe.Enabled { user_id = bob }));
+  check_event_refused
+    "alice disables herself"
+    "alice is the last Admin that acts, so it stays"
+    (event disabled ~by:alice (Pe.Disabled { user_id = alice }));
+  check_revocation_refused
+    "alice revokes her own"
+    "alice is the last Admin, so the assignment stays"
+    (revoke disabled ~by:alice alice);
+  let enabled = applied_ok (event disabled ~by:alice (Pe.Enabled { user_id = bob })) in
+  Alcotest.(check string) "bob again" "active" (status_name enabled bob);
+  Alcotest.(check bool) "bob acts as an Admin again" true (P.is_admin enabled bob);
+  check_event_refused "an enable of someone active" "bob is not disabled" (event enabled ~by:alice (Pe.Enabled { user_id = bob }));
+  check_event_refused
+    "someone who never joined"
+    "there is no principal carol"
+    (event t ~by:alice (Pe.Disabled { user_id = get (User_id.of_string "carol") }));
+  check_event_refused
+    "the local operator"
+    "the local operator is not an Admin, and only an Admin disables, enables, or deletes a principal"
+    (P.apply_event t ~author:Author.Local_operator ~held:nobody_held (Pe.Disabled { user_id = bob }))
+;;
+
+let third = get (Invite_id.of_string "invite-3")
+
+(* A deletion frees the identity, which may join again as a new principal
+   through a new invitation. The user id and the namespace stay given. *)
+let a_deletion () =
+  let t = two_admins () in
+  check_event_refused
+    "another identity"
+    "the deletion of bob names the identity google:999, which is not the one it is bound to"
+    (event t ~by:alice (Pe.Deleted { user_id = bob; identity = google "999" }));
+  let deleted = applied_ok (event t ~by:alice (Pe.Deleted { user_id = bob; identity = google "222" })) in
+  Alcotest.(check string) "bob" "deleted" (status_name deleted bob);
+  Alcotest.(check bool) "no Admin assignment" false (P.is_admin deleted bob);
+  Alcotest.(check bool) "not active" false (P.is_active deleted bob);
+  Alcotest.(check bool) "the identity is free" true (Option.is_none (P.find_identity deleted (google "222")));
+  Alcotest.(check bool) "no membership" true (Option.is_none (P.find_membership deleted bob));
+  Alcotest.(check (option string))
+    "the namespace stays given"
+    (Some "bob")
+    (Option.map User_id.to_string (P.find_namespace deleted (get (Account_home_namespace.of_string "ns-bob"))));
+  check_event_refused
+    "twice"
+    "there is no principal bob"
+    (event deleted ~by:alice (Pe.Deleted { user_id = bob; identity = google "222" }));
+  check_event_refused
+    "alice deletes herself"
+    "alice is the last Admin that acts, so it stays"
+    (event deleted ~by:alice (Pe.Deleted { user_id = alice; identity = google "111" }));
+  let open_third = issue invites third "token-3" in
+  let bob_again = get (User_id.of_string "bob-2") in
+  check_refused
+    "the id of the deleted principal"
+    "the user id bob was given before"
+    (admit deleted ~invites:open_third ~namespace:"ns-bob-new" ~user_id:bob ~identity:(google "222") ~invite_id:third);
+  check_refused
+    "the namespace of the deleted principal"
+    "the account home namespace ns-bob was given to bob"
+    (admit deleted ~invites:open_third ~namespace:"ns-bob" ~user_id:bob_again ~identity:(google "222") ~invite_id:third);
+  let { P.principals = rejoined; _ } =
+    admitted_ok (admit deleted ~invites:open_third ~user_id:bob_again ~identity:(google "222") ~invite_id:third)
+  in
+  Alcotest.(check (option string))
+    "the identity names the new principal"
+    (Some "bob-2")
+    (Option.map User_id.to_string (P.find_identity rejoined (google "222")));
+  Alcotest.(check bool) "the new principal is an Admin" true (P.is_admin rejoined bob_again)
 ;;
 
 let who_may_revoke () =
@@ -319,6 +429,10 @@ let () =
         ; Alcotest.test_case "revokes their own" `Quick an_admin_revokes_their_own_while_another_remains
         ; Alcotest.test_case "a held Admin does not remain" `Quick a_held_admin_is_not_the_one_that_remains
         ; Alcotest.test_case "who may revoke" `Quick who_may_revoke
+        ] )
+    ; ( "principal records"
+      , [ Alcotest.test_case "disable and enable" `Quick a_disable_and_an_enable
+        ; Alcotest.test_case "deletion" `Quick a_deletion
         ] )
     ]
 ;;

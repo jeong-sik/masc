@@ -67,6 +67,10 @@ type refusal =
           (design 8.3). *)
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
+  | Principal_unreadable of Authz_principal_event.error
+  | Principal_event of Authz_principal_state.principal_refusal
+  | Author_inactive of Authz_types.User_id.t
+      (** The author is a disabled or deleted principal (design 4.1). *)
   | Accounts_off of Authz_record.Kind.t
       (** The mode is [Off], and a record of this kind is not written while the
           accounts are off (design 10.5). *)
@@ -84,7 +88,9 @@ val refusal_to_string : refusal -> string
     again (design 5.1-4). An admission has one, a [Grant] on the principal it
     makes: it spends a token that opens once (design 5.1-3), and an Admin
     invitation also raises the role epoch of that principal. The revocation
-    of an Admin assignment is a [Revoke] on its principal. *)
+    of an Admin assignment is a [Revoke] on its principal, a disable a
+    [Disable], and a deletion a [Delete]. An enable has none: a log restored
+    from before it leaves the principal disabled. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

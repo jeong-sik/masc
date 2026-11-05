@@ -57,7 +57,11 @@ let mode_record event workspace_id =
 let other_kinds =
   List.filter
     (fun kind ->
-      kind <> K.Mode_event && kind <> K.Invite && kind <> K.Admission && kind <> K.Admin_assignment)
+      kind <> K.Mode_event
+      && kind <> K.Invite
+      && kind <> K.Admission
+      && kind <> K.Admin_assignment
+      && kind <> K.Principal)
     K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
@@ -392,6 +396,7 @@ let test_an_admission_through_an_admin_invitation () =
     (match People.find state.S.principals user with
      | Some { People.status = People.Active; identity } ->
        Alcotest.(check bool) "the identity" true (X.equal identity alice_identity)
+     | Some { People.status = People.Disabled; _ } -> Alcotest.fail "the principal is disabled"
      | None -> Alcotest.fail "no principal was made");
     Alcotest.(check bool) "an Admin" true (People.is_admin state.S.principals user);
     Alcotest.(check (option string)) "the identity finds the principal" (Some "user-1")
@@ -561,6 +566,91 @@ let test_an_admin_assignment_by_mode () =
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
 
+(* ---- principal records ---- *)
+
+module Pe = Authz_principal_event
+
+let principal_record ~by event =
+  match Pe.to_body event with
+  | Error _ -> Alcotest.fail "fixture principal event refused"
+  | Ok body ->
+    (match
+       R.make
+         ~head:R.genesis
+         ~at_ms
+         ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human by))
+         ~kind:K.Principal
+         ~body
+     with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture principal record refused")
+;;
+
+let applied_change label state record expected =
+  match S.apply state record with
+  | Error refusal -> Alcotest.failf "%s: refused: %s" label (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.(check (option string))
+      label
+      expected
+      (Option.map Authz_external_store.Change.to_string high_water);
+    state
+;;
+
+let check_inactive label state record =
+  match S.step state record with
+  | Error (S.Author_inactive id) ->
+    Alcotest.(check string) label "user-2" (Authz_types.User_id.to_string id)
+  | other -> Alcotest.failf "%s: %s" label (step_label other)
+;;
+
+(* A disable and a deletion are intents on the principal, and an enable has
+   none. A disabled or deleted principal writes nothing. *)
+let test_a_principal_record () =
+  let disabled =
+    applied_change
+      "a disable"
+      (two_admins ())
+      (principal_record ~by:user (Pe.Disabled { user_id = bob }))
+      (Some "disable of principal:human:user-2")
+  in
+  check_inactive "bob writes while disabled" disabled (admin_record ~by:bob ~user_id:user);
+  (match S.step disabled (admin_record ~by:user ~user_id:user) with
+   | Error refusal ->
+     Alcotest.(check string)
+       "a disabled Admin does not count as the one that remains"
+       "user-1 is the last Admin, so the assignment stays"
+       (S.refusal_to_string refusal)
+   | Ok _ -> Alcotest.fail "the last Admin that acts was revoked");
+  let enabled =
+    applied_change
+      "an enable"
+      disabled
+      (principal_record ~by:user (Pe.Enabled { user_id = bob }))
+      None
+  in
+  let deleted =
+    applied_change
+      "a deletion"
+      enabled
+      (principal_record ~by:user (Pe.Deleted { user_id = bob; identity = identity_of "222" }))
+      (Some "delete of principal:human:user-2")
+  in
+  check_inactive "bob writes once deleted" deleted (admin_record ~by:bob ~user_id:user);
+  Alcotest.(check bool) "the identity is free" true
+    (Option.is_none (People.find_identity deleted.S.principals (identity_of "222")))
+;;
+
+let test_a_principal_record_by_mode () =
+  let disable = principal_record ~by:user (Pe.Disabled { user_id = bob }) in
+  (match S.step S.empty disable with
+   | Error (S.Before_bootstrap K.Principal) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) disable with
+  | Error (S.Accounts_off K.Principal) -> ()
+  | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
 (* ---- the log of a real bootstrap ---- *)
 
 let rec remove_tree path =
@@ -634,6 +724,10 @@ let () =
             test_a_principal_whose_revocation_was_given_up_writes_nothing
         ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
         ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
+        ] )
+    ; ( "principal records"
+      , [ Alcotest.test_case "disable, enable, delete" `Quick test_a_principal_record
+        ; Alcotest.test_case "by mode" `Quick test_a_principal_record_by_mode
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

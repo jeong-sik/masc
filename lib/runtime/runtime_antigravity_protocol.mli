@@ -53,6 +53,11 @@ type stream_event =
       }
   | Turn_finished of { text : string }
 
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
 type noncompletion_result =
   { status : noncompletion_status
   ; conversation_id : string option
@@ -60,19 +65,18 @@ type noncompletion_result =
   ; error : string option
   ; num_turns : int
   ; usage : usage
-  }
-
-type denied_actions =
-  { first : string
-  ; rest : string list
+  ; denied : denied_actions option
   }
 
 type denied_result =
   { conversation_id : string
+  ; model : string
   ; denied : denied_actions
   ; response : string
   ; num_turns : int
   ; usage : usage
+  ; tool_steps : int
+  ; stderr_tail : string
   }
 
 type error =

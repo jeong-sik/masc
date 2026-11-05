@@ -165,6 +165,16 @@ type stream_event = Runtime_antigravity_protocol.stream_event =
           still reports it. *)
   | Turn_finished of { text : string }
 
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+(** The actions print mode refused, as the result's [denied_actions] names
+    them, in the CLI's order. Never empty: a result without refusals has no
+    value of this type. *)
+
+val denied_action_names : denied_actions -> string list
+
 type noncompletion_result =
   { status : noncompletion_status
   ; conversation_id : string option
@@ -172,33 +182,30 @@ type noncompletion_result =
   ; error : string option
   ; num_turns : int
   ; usage : usage
+  ; denied : denied_actions option
   }
 (** Raw result evidence, including unbound pre-init counts. These fields do not
     grant session admission, usage attribution or successful completion. *)
 
 val noncompletion_result_to_json : noncompletion_result -> Yojson.Safe.t
 (** Diagnostic evidence with [completed=false] and [partial_response], never a
-    completed assistant reply. Usage retains the CLI's exclusive raw counts. *)
-
-type denied_actions =
-  { first : string
-  ; rest : string list
-  }
-(** The actions print mode refused, as the result's [denied_actions] names
-    them. Never empty: a result without refusals has no value of this type. *)
+    completed assistant reply. Usage retains the CLI's exclusive raw counts;
+    [denied_actions] is the refusal list or [null]. *)
 
 type denied_result =
   { conversation_id : string
+  ; model : string
   ; denied : denied_actions
   ; response : string
   ; num_turns : int
   ; usage : usage
+  ; tool_steps : int
+  ; stderr_tail : string
   }
-(** A SUCCESS result that named refusals. Print mode cannot ask for approval,
-    so agy refuses the action and ends the run; [response] is only the text
-    written before the refused call. *)
-
-val denied_action_names : denied_actions -> string list
+(** A SUCCESS or ERROR result that named refusals. Print mode cannot ask for
+    approval, so agy refuses the action and ends the run; [response] is only
+    the text written before the refused call. [stderr_tail] is the redacted
+    end of the CLI's stderr, cut at a UTF-8 boundary. *)
 
 type error =
   | Invalid_config of string

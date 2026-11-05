@@ -3113,6 +3113,7 @@
 
 (include stanzas/test_keeper_context_isolation.inc)
 
+(include stanzas/test_keeper_turn_system.inc)
 (include stanzas/test_keeper_turn_up_args.inc)
 (include stanzas/test_keeper_turn_up_create_response.inc)
 

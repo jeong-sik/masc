@@ -28,7 +28,3 @@ let resolve_provider_config_of_label (label : string)
       label;
     Error (Invalid_model_label label)
 ;;
-
-let invalid_runtime_config field detail =
-  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
-;;

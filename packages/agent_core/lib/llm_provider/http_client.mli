@@ -391,12 +391,23 @@ val with_explicit_deadline : _ Eio.Time.clock explicit_deadline -> (unit -> 'a) 
     @since 0.208.0 *)
 type cache
 
+(** Connections a request ended with a [Close] verdict, by
+    {!Reuse_verdict.close_reason}. A connection closed because its origin
+    already held [max_idle_per_host] idle connections is not counted. *)
+type cache_close_counts =
+  { request_failed : int
+  ; not_persistent : int
+  ; body_not_drained : int
+  ; transport_ended : int
+  }
+
 (** Statistics snapshot for observability. *)
 type cache_stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
+  ; closed_total : cache_close_counts
   }
 
 (** Create a connection cache.

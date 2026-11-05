@@ -19,12 +19,24 @@ end
 
 type t
 
+(** Connections that {!release} closed on a [Close] verdict, by
+    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full or the
+    cache stopped closes the connection without a reason and is not counted
+    here. *)
+type close_counts =
+  { request_failed : int
+  ; not_persistent : int
+  ; body_not_drained : int
+  ; transport_ended : int
+  }
+
 (** Snapshot of the cache for observability. *)
 type stats =
   { idle_per_host : (string * int) list
   ; total_idle : int
   ; reuse_count_total : int
   ; create_count_total : int
+  ; closed_total : close_counts
   }
 
 (** Create a cache bound to [sw]. [max_idle_per_host] caps the idle
@@ -59,6 +71,8 @@ val checkout
   -> create:(sw:Eio.Switch.t -> (connection, 'e) result)
   -> (connection, 'e) result
 
-(** Parks the connection for later reuse, or closes it when the origin already
-    holds [max_idle_per_host] idle connections or the cache is stopped. *)
-val return : t -> Key.t -> connection -> unit
+(** Ends a checked-out connection. [Park] parks it for later reuse, or closes
+    it when the origin already holds [max_idle_per_host] idle connections or
+    the cache is stopped. [Close reason] closes it and counts [reason] in
+    {!stats}. Cancellation does not interrupt it. *)
+val release : t -> Key.t -> connection -> Reuse_verdict.t -> unit

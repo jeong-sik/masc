@@ -875,8 +875,9 @@ let test_private_addon_events_are_scoped_to_their_readers () =
         drain []
       in
       let ids deliveries = List.map (fun (delivery : Sse.delivery) -> delivery.payload) deliveries in
-      check (list bool) "owner reads only owner and shared" [ true; true ]
-        (List.map (fun payload -> List.mem payload (ids (received owner_stream))) [ owner_only; shared ]);
+      check (list bool) "owner reads only owner and shared" [ true; false; true ]
+        (List.map (fun payload -> List.mem payload (ids (received owner_stream)))
+          [ owner_only; operator_only; shared ]);
       check (list bool) "another Keeper reads neither private event" [ false; false ]
         (List.map (fun payload -> List.mem payload (ids (received other_stream))) [ owner_only; operator_only ]);
       check (list bool) "operator reads all events" [ true; true; true ]

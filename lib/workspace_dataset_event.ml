@@ -263,14 +263,14 @@ let of_fields fields =
   | Some _ | None -> Error (event_type ^ " carries no dataset name")
 ;;
 
-let announce ~base_path dataset =
+let announce_with_fields ~base_path fields dataset =
   let name = dataset_name dataset in
   match
     let authority = Sse.runtime_authority_exn ~base_path in
     Sse.broadcast_to (Sse.Runtime_observers authority)
       (`Assoc
         ([ "type", `String event_type; "dataset", `String name ]
-         @ keeper_field dataset
+         @ keeper_field dataset @ fields
          @ [ "ts_unix", `Float (Time_compat.now ()) ]))
   with
   | () -> ()
@@ -282,6 +282,12 @@ let announce ~base_path dataset =
     Log.Keeper.warn "workspace_dataset_event: %s %s failed: %s" event_type name
       (Printexc.to_string exn)
 ;;
+
+let announce ~base_path dataset = announce_with_fields ~base_path [] dataset
+
+let announce_lane_addon ~base_path ~instance_id ~visibility =
+  announce_with_fields ~base_path [ "visibility", visibility ]
+    (Lane_addons { instance_id })
 
 let install_store_observers () =
   Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);

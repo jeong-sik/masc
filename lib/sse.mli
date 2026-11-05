@@ -61,6 +61,8 @@ type delivery_stream
 type client = {
   id : int;
   kind : session_kind;
+  agent_name : string;
+  role : Masc_domain.agent_role;
   runtime_authority : runtime_authority;
   observer_scope : observer_scope option;
   event_stream : delivery_stream;

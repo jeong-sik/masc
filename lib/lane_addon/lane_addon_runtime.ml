@@ -763,8 +763,8 @@ let notify_commit m e =
   notify_inventory m Observation_commit;
   announce_machine m e Machine_lane.Msx "masc_msx_screen";
   announce_machine m e Machine_lane.Dos "masc_dos_screen";
-  Workspace_dataset_event.announce ~base_path:m.base_path
-    (Workspace_dataset_event.Lane_addons { instance_id = e.instance_id })
+  Workspace_dataset_event.announce_lane_addon ~base_path:m.base_path
+    ~instance_id:e.instance_id ~visibility:(visibility_to_json e.visibility)
 
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.

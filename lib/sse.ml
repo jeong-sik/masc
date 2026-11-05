@@ -168,6 +168,8 @@ type delivery_stream = {
 type client = {
   id: int;
   kind: session_kind;
+  agent_name: string;
+  role: Masc_domain.agent_role;
   runtime_authority: runtime_authority;
   observer_scope: observer_scope option;
   event_stream: delivery_stream;
@@ -352,7 +354,43 @@ let session_kind_matches_target target ~runtime_authority ~observer_scope ~jsonr
   | Runtime_presence authority ->
       kind = Presence && Option.exists (equal_runtime_authority authority) runtime_authority
 
-let event_matches_session ~runtime_authority ~observer_scope ~session_id ~kind event =
+type event_visibility =
+  | Unrestricted
+  | Shared
+  | Operator_only
+  | Keeper_only of string
+  | Invalid_visibility
+
+let event_visibility = function
+  | `Assoc fields ->
+      (match List.assoc_opt "type" fields, List.assoc_opt "dataset" fields with
+       | Some (`String "workspace_dataset_changed"), Some (`String "lane_addons") ->
+           (match List.filter (fun (key, _) -> String.equal key "visibility") fields with
+            | [ _, `Assoc visibility ] ->
+                (match List.sort (fun (left, _) (right, _) -> String.compare left right) visibility with
+                 | [ "kind", `String "shared" ] -> Shared
+                 | [ "kind", `String "operator" ] -> Operator_only
+                 | [ "keeper", `String keeper; "kind", `String "keeper" ]
+                   when String.trim keeper <> "" -> Keeper_only keeper
+                 | _ -> Invalid_visibility)
+            | [] | _ :: _ :: _ | [ _, _ ] -> Invalid_visibility)
+       | _ -> Unrestricted)
+  | _ -> Unrestricted
+
+let visibility_permitted identity = function
+  | Unrestricted | Shared -> true
+  | Invalid_visibility -> false
+  | Operator_only ->
+      (match identity with
+       | Some (_, Masc_domain.Admin) -> true
+       | Some (_, (Masc_domain.Worker | Masc_domain.Player)) | None -> false)
+  | Keeper_only owner ->
+      (match identity with
+       | Some (_, Masc_domain.Admin) -> true
+       | Some (agent_name, Masc_domain.Worker) -> String.equal agent_name owner
+       | Some (_, Masc_domain.Player) | None -> false)
+
+let event_matches_session ?identity ~runtime_authority ~observer_scope ~session_id ~kind event =
   match event.audience with
   | Session_audience target_session_id ->
     kind = Agent_stream && String.equal target_session_id session_id
@@ -366,6 +404,7 @@ let event_matches_session ~runtime_authority ~observer_scope ~session_id ~kind e
       Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream event.payload
     in
     session_kind_matches_target target ~runtime_authority ~observer_scope ~jsonrpc_payload kind
+    && visibility_permitted identity (event_visibility event.payload)
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after_raw last_id =
@@ -387,11 +426,14 @@ let replay_after_for_session ?runtime_authority ?observer_instance_id ~session_i
   let observer_scope = match runtime_authority, observer_instance_id with
     | Some runtime_authority, Some instance_id -> Some (observer_scope ~runtime_authority ~instance_id)
     | (None, _ | _, None) -> None in
+  let identity = match SMap.find_opt session_id (Atomic.get clients).entries with
+    | Some client when client.kind = kind -> Some (client.agent_name, client.role)
+    | Some _ | None -> None in
   let state = Atomic.get event_buffer in
   let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
   let deliveries =
     newer |> IntMap.bindings |> List.map snd
-    |> List.filter (event_matches_session ~runtime_authority ~observer_scope ~session_id ~kind)
+    |> List.filter (event_matches_session ?identity ~runtime_authority ~observer_scope ~session_id ~kind)
   in
   let continuity =
     if state.evicted_through > last_id
@@ -536,7 +578,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
     ~(auth : registration_auth) session_id ~last_event_id =
   match validate_registration ~auth session_id with
   | Error e -> Error e
-  | Ok _credential ->
+  | Ok credential ->
   let runtime_authority = runtime_authority_exn ~base_path:auth.config in
   let observer_scope = Option.map
       (fun instance_id -> observer_scope ~runtime_authority ~instance_id) observer_instance_id in
@@ -553,6 +595,8 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
   let base_client = {
     id = client_id;
     kind;
+    agent_name = credential.Masc_domain.agent_name;
+    role = credential.Masc_domain.role;
     runtime_authority;
     observer_scope;
     event_stream;
@@ -706,9 +750,10 @@ let touch session_id =
   | Some client -> mark_seen client; observe_queue client.event_stream
   | None -> ()
 
-let client_matches_target target ~jsonrpc_payload (client : client) =
+let client_matches_target target ~jsonrpc_payload ~visibility (client : client) =
   session_kind_matches_target target ~runtime_authority:(Some client.runtime_authority)
     ~observer_scope:client.observer_scope ~jsonrpc_payload client.kind
+  && visibility_permitted (Some (client.agent_name, client.role)) visibility
 
 (** {1 External Subscriber Hook}
 
@@ -874,6 +919,7 @@ let notify_external_subscribers ~target event =
     Log.Misc.warn "External subscriber %s failed: %s" sub.sub_id
       (Printexc.to_string exn)
   in
+  let visibility = event_visibility event.ext_payload in
   try
     (* [Atomic.get] returns an immutable [SMap.t] snapshot — concurrent
        subscribe/unsubscribe builds a new map via [Lockfree_atomic.update_with_commit]
@@ -889,7 +935,9 @@ let notify_external_subscribers ~target event =
         try
           if not (sub.is_alive ())
           then dead := sub.sub_id :: !dead
-          else if external_matches_target target sub then sub.callback event
+          else if external_matches_target target sub
+                  && visibility_permitted None visibility
+          then sub.callback event
         with
         | Eio.Cancel.Cancelled _ as exn ->
             (* A subscriber can raise its own cancellation even when the
@@ -1016,6 +1064,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_commit
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
+  let visibility = event_visibility json in
   let target_label = match target with
     | All -> "all"
     | Observers | Runtime_observers _ | Scoped_runtime_observers _ -> "observers"
@@ -1053,7 +1102,7 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_commit
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
   SMap.iter (fun session_id client ->
-    if client_matches_target target ~jsonrpc_payload client
+    if client_matches_target target ~jsonrpc_payload ~visibility client
        && current_event_id > Atomic.get client.last_event_id then begin
       (* Pre-check stream capacity to avoid blocking broadcast.
          No producer can fill the stream between [length] and [add] because

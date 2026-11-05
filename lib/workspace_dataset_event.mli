@@ -113,7 +113,8 @@ type dataset =
           memory, continuity or progress write. *)
   | Lane_addons of { instance_id : string }
       (** The open Add-on Inspect of [instance_id] has a newly committed
-          observation. The event carries the instance only, never its rows. *)
+          observation. The event carries the instance and its reader
+          visibility, never its rows. *)
   | Browser_observation of browser_observation
       (** The selected browser target has a changed observation revision.
           Carries identity only: no page contents or image bytes. *)
@@ -135,6 +136,12 @@ val announce : base_path:string -> dataset -> unit
     [keeper_sse_broadcast_failures] under the site
     [workspace_dataset_changed:<name>] and logged at WARN; the caller's next
     suspension point still sees a cancellation. *)
+
+val announce_lane_addon :
+  base_path:string -> instance_id:string -> visibility:Yojson.Safe.t -> unit
+(** Announce an open Add-on with its durable reader visibility. Live and replay
+    delivery rejects a missing or malformed visibility instead of exposing the
+    instance. The failure metric and non-raising contract match {!announce}. *)
 
 val install_store_observers : unit -> unit
 (** Make the stores that live in libraries below this one report their writes

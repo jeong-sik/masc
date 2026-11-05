@@ -117,6 +117,17 @@ let footer_spellings =
   ; "Ctrl-L", "\012"
   ; "Ctrl-]", "\029"
   ; "Ctrl-^", "\030"
+  ; "Ctrl-O", "\015"
+  ; "^T", "\020"
+  ; "^]", "\029"
+  ; "^^", "\030"
+  ; "←", "\027[D"
+  ; "→", "\027[C"
+  ; "↑", "\027[A"
+  ; "↓", "\027[B"
+  ; "Shift-Left", "\027[1;2D"
+  ; "Shift+←", "\027[1;2D"
+  ; "Shift-Right", "\027[1;2C"
   ]
 
 let named ~advertised raw =
@@ -142,6 +153,46 @@ let test_the_footer_and_the_decoder_name_one_key_alike () =
       | [] | _ :: _ -> Alcotest.fail (atom ^ " is not one decoder key"))
     footer_spellings
 
+(* Tab, Enter and its line-feed twin are named for what they do; every other
+   control letter has the name the decoder gives the byte, in both spellings the
+   footer uses. *)
+let test_a_control_letter_has_one_name_in_both_spellings () =
+  List.iter
+    (fun letter ->
+      let byte = String.make 1 (Char.chr (Char.code letter - 64)) in
+      let expected = "ctrl-" ^ String.make 1 (Char.lowercase_ascii letter) in
+      List.iter
+        (fun atom ->
+          let advertised = Masc_tui_footer.advertised_key_atoms (atom ^ ":act") in
+          match keys_of byte with
+          | [ raw ] ->
+            (match named ~advertised raw with
+             | Some (name, true) -> Alcotest.(check string) atom expected name
+             | Some (_, false) | None -> Alcotest.fail (atom ^ " is not announced as a named key"))
+          | [] | _ :: _ -> Alcotest.fail (atom ^ " is not one decoder key"))
+        [ Printf.sprintf "Ctrl-%c" letter; Printf.sprintf "^%c" letter ])
+    (List.filter
+       (fun letter -> not (List.mem letter [ 'I'; 'J'; 'M' ]))
+       (List.init 26 (fun offset -> Char.chr (Char.code 'A' + offset))))
+
+let test_a_digit_range_names_each_digit () =
+  let nine = [ "1"; "2"; "3"; "4"; "5"; "6"; "7"; "8"; "9" ] in
+  List.iter
+    (fun (hints, expected) ->
+      Alcotest.(check (list string)) hints expected (Masc_tui_footer.advertised_key_atoms hints))
+    [ "1-9:jump", nine
+    ; "1\xe2\x80\x939:jump", nine (* an en dash between the digits *)
+    ; "3-3:one", [ "3" ]
+    ; "9-1:backwards", [ "9-1" ]
+    ; "a-z:letters", [ "a-z" ]
+    ; "j/k:move  +/-:zoom", [ "j"; "k"; "+"; "-" ]
+    ];
+  let advertised = Masc_tui_footer.advertised_key_atoms "1-9:jump" in
+  List.iter
+    (fun (typed, expected) ->
+      Alcotest.(check bool) typed true (key_of_press ~advertised typed = expected))
+    [ "5", Trace.Advertised_char "5"; "0", Trace.Other_char ]
+
 let test_a_character_is_kept_only_as_the_footer_spells_it () =
   let advertised = Masc_tui_footer.advertised_key_atoms "j/k:move  [ / ]:ask  G:end" in
   List.iter
@@ -155,7 +206,12 @@ let test_a_character_is_kept_only_as_the_footer_spells_it () =
     ; "g", Trace.Other_char
     ; "x", Trace.Other_char
     ; "\xed\x95\x9c", Trace.Other_char
-    ]
+    ];
+  let with_space = Masc_tui_footer.advertised_key_atoms "Space:toggle  q:quit" in
+  Alcotest.(check bool) "the space bar, as the footer spells it" true
+    (key_of_press ~advertised:with_space " " = Trace.Advertised_char "Space");
+  Alcotest.(check bool) "the space bar, not announced" true
+    (key_of_press ~advertised " " = Trace.Other_char)
 
 (* Every byte, and a few strings no key carries, as the key: whatever the line
    holds for it is the word "char", a spelling the footer announced, or a word
@@ -215,6 +271,10 @@ let () =
       , [ Alcotest.test_case "typed text is never a name" `Quick test_typed_text_is_never_a_name
         ; Alcotest.test_case "the footer and the decoder name one key alike" `Quick
             test_the_footer_and_the_decoder_name_one_key_alike
+        ; Alcotest.test_case "a control letter has one name in both spellings" `Quick
+            test_a_control_letter_has_one_name_in_both_spellings
+        ; Alcotest.test_case "a digit range names each digit" `Quick
+            test_a_digit_range_names_each_digit
         ; Alcotest.test_case "a character is kept only as the footer spells it" `Quick
             test_a_character_is_kept_only_as_the_footer_spells_it
         ; Alcotest.test_case "no typed text reaches the line" `Quick

@@ -42,7 +42,10 @@ val observe :
     ([None] when the input was a paste, a mouse report, a terminal reply or
     nothing). [advertised] holds the keys the footer announced for the frame,
     one atom each, in the footer's spelling (the atoms
-    [Masc_tui_footer.advertised_key_atoms] reads out of a hint string).
+    [Masc_tui_footer.advertised_key_atoms] reads out of a hint string). The
+    footer and the decoder spell some keys differently -- [PgUp] and
+    [pageup], [←] and [left], [^T] and [ctrl-t], [Shift+←] and [shift-left]
+    -- and an atom announces the key the decoder names alike.
 
     The surface event comes first. A key is reported only when the frame
     presented nothing: a key that changed the screen needs no line. *)

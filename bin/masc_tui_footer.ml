@@ -446,13 +446,33 @@ let item_key item =
   | None -> None
   | Some i -> Some (String.trim (String.sub plain 0 i))
 
+let en_dash = "\xe2\x80\x93"
+
+(* [1-9] and [1–9] name nine keys. The trace compares one key at a time. *)
+let digit_range atom =
+  let length = String.length atom in
+  let is_digit c = c >= '0' && c <= '9' in
+  if length >= 3
+     && is_digit atom.[0]
+     && is_digit atom.[length - 1]
+     && atom.[0] <= atom.[length - 1]
+     && (let dash = String.sub atom 1 (length - 2) in
+         String.equal dash "-" || String.equal dash en_dash)
+  then
+    List.init
+      (Char.code atom.[length - 1] - Char.code atom.[0] + 1)
+      (fun offset -> String.make 1 (Char.chr (Char.code atom.[0] + offset)))
+  else [ atom ]
+
 (* Every key a hint string names, one atom each: [Right / Enter:open] names
-   Right and Enter, [j/k:move] names j and k. The navigation trace asks this of
-   the hints a screen was drawn with. *)
+   Right and Enter, [j/k:move] names j and k, [1-9:jump] names the nine
+   digits. The navigation trace asks this of the hints a screen was drawn
+   with. *)
 let advertised_key_atoms hints =
   split_on_double_space hints
   |> List.filter_map item_key
   |> List.concat_map key_atoms
+  |> List.concat_map digit_range
 
 let item_is_pinned item =
   match item_key item with

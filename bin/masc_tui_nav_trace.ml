@@ -56,11 +56,33 @@ let footer_aliases =
   ; "ctrl-_", "ctrl-underscore"
   ]
 
+let arrow_glyphs = [ "←", "left"; "↑", "up"; "→", "right"; "↓", "down" ]
+
+(* [^T] is [Ctrl-T]. *)
+let caret_as_ctrl atom =
+  if String.length atom = 2 && Char.equal atom.[0] '^'
+  then "Ctrl-" ^ String.make 1 atom.[1]
+  else atom
+
+(* [Shift+←] is [Shift-←]. *)
+let plus_as_hyphen atom = String.concat "-" (String.split_on_char '+' atom)
+
+(* An arrow drawn as a glyph, alone or after a modifier, is the word. *)
+let glyph_as_word atom =
+  List.fold_left
+    (fun atom (glyph, word) ->
+      if String.ends_with ~suffix:glyph atom
+      then String.sub atom 0 (String.length atom - String.length glyph) ^ word
+      else atom)
+    atom arrow_glyphs
+
 let footer_word atom =
   if String.length atom = 1 && atom.[0] >= 'A' && atom.[0] <= 'Z'
   then "shift-" ^ String.lowercase_ascii atom
   else (
-    let lowered = String.lowercase_ascii atom in
+    let lowered =
+      atom |> caret_as_ctrl |> plus_as_hyphen |> glyph_as_word |> String.lowercase_ascii
+    in
     match List.assoc_opt lowered footer_aliases with
     | Some word -> word
     | None -> lowered)

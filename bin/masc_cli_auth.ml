@@ -119,6 +119,8 @@ let invite ~base_path =
   | Error reason -> refused "invite" reason
   | Ok (base_url, invitation) ->
     (* No flush here: [print_link] flushes once and reports a failure. *)
-    print_string "One more Admin is invited.\n";
+    print_string
+      "One more Admin is invited. Earlier invitations stay open until they are spent or \
+       expire.\n";
     print_link ~command:"invite" ~base_url invitation
 ;;

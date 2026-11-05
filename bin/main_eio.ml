@@ -1484,8 +1484,10 @@ let auth_cmd =
       ; `P
           "For a first invitation that expired before it was spent, or whose \
            link was lost. The workspace must be activated with masc auth \
-           bootstrap. Member invitations, and the revocation of an invitation, \
-           are written by an Admin through the server."
+           bootstrap. It adds one Admin invitation each time and revokes none: \
+           an earlier link stays usable until it is spent or expires, even when \
+           it was lost. This build has no command that revokes an invitation or \
+           writes a Member invitation."
       ; `P
           "MASC_HTTP_BASE_URL must be the http(s) address the person opens, as \
            for masc auth bootstrap. The command takes the workspace lease, so \

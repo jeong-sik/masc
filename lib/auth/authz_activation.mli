@@ -118,8 +118,9 @@ val invite_error_to_string : invite_error -> string
     may expire before it is spent, or its link may be lost. It goes on only
     where a boot finds [Multi_account] with an external store that matches the
     log, and writes through the zone over the store that the install record
-    names. Member invitations, and the revocation of an invitation, are written
-    by an Admin through the server. The caller holds the BasePath lease, as for
+    names. It revokes no invitation, so an earlier link stays open until it is
+    spent or expires. Revoking an invitation and inviting a Member are not in
+    this build (plan C6). The caller holds the BasePath lease, as for
     {!activate}. *)
 val invite
   :  base_path:string

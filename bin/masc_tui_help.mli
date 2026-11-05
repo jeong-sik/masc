@@ -31,3 +31,51 @@ val sheet : ?header:string list -> cols:int -> string list -> string list
     columns -- the sections between blank lines set side by side two at a
     time, each whole, with a blank row between pairs. *)
 
+val filter_sections :
+  query:string ->
+  heading:(string -> string) ->
+  (string * (string * string) list) list ->
+  (string * (string * string) list) list
+(** The sections a typed query leaves, as (title, (key, action) entries). An
+    entry stays when its key or its action holds [query], ignoring case. A
+    section whose [heading title] holds [query] stays whole, and a section left
+    with no entry goes. [heading] is the part of a title a reader would type: a
+    title that carries a mark beside its name gives the name back, so the mark
+    does not answer a query. An empty [query] leaves every section as it was. *)
+
+(** {1 The [/] filter}
+
+    The sheet filters its rows by a typed query. While the query is typed every
+    printable key is text, so [h], [j], [g] and [?] reach the query and the
+    sheet's own keys wait for Enter or Esc. *)
+
+type filter =
+  | Off
+  | Typing of string
+      (** The reader is typing the query; each printable key belongs to it. *)
+  | Kept of string
+      (** Enter settled the query; the sheet's own keys work again. *)
+
+val filter_query : filter -> string
+(** The query the filter holds; empty when it is [Off]. *)
+
+type step =
+  | Set_filter of { filter : filter; scroll_to_top : bool }
+      (** The filter becomes [filter]. A different query is a different sheet,
+          so [scroll_to_top] is set when the query changed or cleared. *)
+  | Close  (** Close the sheet. *)
+  | Toggle_hints  (** Show or hide the footer hints for this session. *)
+  | Scroll
+      (** Move the sheet by the key itself: one row, or a page for the page
+          keys, up or down. *)
+  | Scroll_to_top
+  | Scroll_to_end
+  | Ignore  (** The key does nothing in this state. *)
+
+val step : filter -> key:string -> step
+(** What one key does to the open sheet. Esc clears a kept query before it
+    closes the sheet. A Hangul key typed into the query is read back as the
+    letters that were pressed (see {!Masc_tui_key_ime.latin_text}); the sheet's
+    keys and nearly all of its wording are English. Enter, or a line feed from
+    a terminal that sends one for Return, settles a non-empty query and clears
+    an empty one. *)

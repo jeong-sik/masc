@@ -21,7 +21,7 @@ The command palette is `:`.
 | `:` | command palette |
 | `;` | agenda: what is coming, and who is waiting on you; Enter opens a row |
 | `@` | answering: who is mid-turn or just finished; Enter opens their chat |
-| `?` | this help |
+| `?` | this help; `/` filters its keys and commands |
 | `&` | Collab: watch MSX/DOS and manage play links (also `:` go Collab) |
 | `Ctrl-B` | show or hide the Keeper roster; it starts hidden and the choice persists across navigation and resizing |
 | `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |

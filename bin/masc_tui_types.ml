@@ -9722,6 +9722,10 @@ type state = {
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
+  (* The cheat sheet's [/] filter. The sheet is longer than any terminal, so
+     a reader looking for one key types a piece of its name or of what it
+     does. *)
+  mutable help_filter: Masc_tui_help.filter;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
      it in its own layer, and the frame presenter redraws only the rows that
@@ -19515,6 +19519,7 @@ let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
+  state.help_filter <- Masc_tui_help.Off;
   state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
@@ -19837,6 +19842,7 @@ let create_state
      then Workspace_identity_match
      else Workspace_identity_unread);
   help_scroll = 0;
+  help_filter = Masc_tui_help.Off;
   image_open = false;
   image_inspection = None;
   image_cell_view = None;

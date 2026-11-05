@@ -3894,6 +3894,17 @@ let help_entry_rows ~width ~lead ~lead_cells ~column text =
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines ~width (state : state) =
+  (* What the reader typed after [/]. An empty query matches everything, so
+     the sheet is whole until something is typed. *)
+  let query = Masc_tui_help.filter_query state.help_filter in
+  let matches_query text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
+  (* A section's name without the mark that says it is the reader's own. *)
+  let heading title =
+    if String.ends_with ~suffix:Masc_tui_keys.here_marker title then
+      String.sub title 0
+        (String.length title - String.length Masc_tui_keys.here_marker)
+    else title
+  in
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -3906,9 +3917,7 @@ let help_lines ~width (state : state) =
        only one of them. *)
     let header_line =
       if is_current then
-        let marker_len = String.length Masc_tui_keys.here_marker in
-        let base_title = String.sub title 0 (String.length title - marker_len) in
-        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ base_title ^ Ansi.reset
+        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ heading title ^ Ansi.reset
       else
         Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
     in
@@ -3944,7 +3953,16 @@ let help_lines ~width (state : state) =
          entries
     @ [ "" ]
   in
+  let commands =
+    List.filter
+      (fun (cmd : Masc_tui_command.command_help) ->
+        matches_query (Masc_tui_command.help_usage cmd) || matches_query cmd.summary)
+      Masc_tui_command.catalog
+  in
   let slash_commands =
+    match commands with
+    | [] -> []
+    | _ :: _ ->
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
@@ -3972,7 +3990,7 @@ let help_lines ~width (state : state) =
              summary_rows
                (Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
                (2 + Message_layout.display_width (text ^ padding)))
-         Masc_tui_command.catalog
+         commands
     @ [ "" ]
   in
   (* After any live Candle details, the first key section is the reader's
@@ -3986,6 +4004,7 @@ let help_lines ~width (state : state) =
   let candle =
     match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
     | [] -> []
+    | _ :: _ when not (String.equal query "") -> []
     | lines ->
       (Ansi.bold ^ "Candle details" ^ Ansi.reset)
       :: (List.concat_map
@@ -3993,10 +4012,21 @@ let help_lines ~width (state : state) =
               (Terminal_text.single_line line)) lines @ [ "" ])
   in
   let _, cols = get_terminal_size () in
-  candle @ (match Masc_tui_keys.help_sections_for_state ~cols state with
-  | [] -> slash_commands
-  | first :: rest ->
-      section first @ slash_commands @ List.concat_map section rest)
+  let rows =
+    candle
+    @ (match
+         Masc_tui_help.filter_sections ~query ~heading
+           (Masc_tui_keys.help_sections_for_state ~cols state)
+       with
+       | [] -> slash_commands
+       | first :: rest ->
+           section first @ slash_commands @ List.concat_map section rest)
+  in
+  match rows with
+  | _ :: _ -> rows
+  | [] ->
+      [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
+          (Terminal_text.single_line query) Ansi.reset ]
 
 
 module Context_bars = Masc_tui_context_bars

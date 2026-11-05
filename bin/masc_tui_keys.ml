@@ -317,6 +317,7 @@ let global =
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+      ~help:"this help; `/` filters its keys and commands"
   ; b Meta "&"
       "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"

@@ -139,3 +139,8 @@ let single_latin_key name =
   match latin_keys name with
   | Some [key] -> Some key
   | Some ([] | _ :: _ :: _) | None -> None
+
+let latin_text name =
+  match latin_keys name with
+  | Some keys -> String.concat "" keys
+  | None -> name

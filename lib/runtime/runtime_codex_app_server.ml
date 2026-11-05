@@ -95,12 +95,14 @@ type thread_mode =
 (* The per-turn counts the app-server reports on thread/tokenUsage/updated,
    its [last] breakdown. OpenAI counting: [input_tokens] already includes the
    cached prefix and [output_tokens] already includes reasoning, the same
-   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
-   defaults to 0 on the wire. *)
+   reading Backend_openai_parse makes of the API wire.
+   [cache_write_input_tokens] is [None] when the breakdown has no
+   [cacheWriteInputTokens]: rust-v0.150.0 and later write it on every
+   breakdown, an older app-server does not report cache writes. *)
 type token_usage =
   { input_tokens : int
   ; cached_input_tokens : int
-  ; cache_write_input_tokens : int
+  ; cache_write_input_tokens : int option
   ; output_tokens : int
   ; reasoning_output_tokens : int
   ; total_tokens : int
@@ -134,7 +136,9 @@ type turn_usage =
 let only_total_tokens (usage : token_usage) =
   usage.input_tokens = 0
   && usage.cached_input_tokens = 0
-  && usage.cache_write_input_tokens = 0
+  && (match usage.cache_write_input_tokens with
+      | None | Some 0 -> true
+      | Some _ -> false)
   && usage.output_tokens = 0
   && usage.reasoning_output_tokens = 0
   && usage.total_tokens > 0
@@ -1605,11 +1609,12 @@ let token_usage_breakdown stage usage_fields name =
   let* total_tokens = required_count stage "totalTokens" breakdown in
   let* cache_write_input_tokens =
     match List.assoc_opt "cacheWriteInputTokens" breakdown with
-    | None -> Ok 0
-    | Some _ -> required_count stage "cacheWriteInputTokens" breakdown
+    | None -> Ok None
+    | Some _ ->
+      Result.map Option.some (required_count stage "cacheWriteInputTokens" breakdown)
   in
   let* () =
-    if cached_input_tokens + cache_write_input_tokens > input_tokens
+    if cached_input_tokens + Option.value cache_write_input_tokens ~default:0 > input_tokens
     then
       protocol_error
         stage

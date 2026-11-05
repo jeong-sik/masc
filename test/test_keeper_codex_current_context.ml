@@ -90,8 +90,8 @@ for line in sys.stdin:
         if compact_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.compacted'):
             with open(capture+'.compacted', 'w') as out:
                 out.write('compaction followed by another model response')
-            request_usage = {'inputTokens':100,'cachedInputTokens':0,'outputTokens':10,'reasoningOutputTokens':0,'totalTokens':110}
-            estimate = {'inputTokens':0,'cachedInputTokens':0,'outputTokens':0,'reasoningOutputTokens':0,'totalTokens':50}
+            request_usage = {'inputTokens':100,'cachedInputTokens':0,'cacheWriteInputTokens':0,'outputTokens':10,'reasoningOutputTokens':0,'totalTokens':110}
+            estimate = {'inputTokens':0,'cachedInputTokens':0,'cacheWriteInputTokens':0,'outputTokens':0,'reasoningOutputTokens':0,'totalTokens':50}
             if compact_item:
                 emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,
                      'item':{'type':'contextCompaction','id':'compact-1'}}})

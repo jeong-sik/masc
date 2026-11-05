@@ -4,13 +4,14 @@ type activity =
 
 type snapshot =
   { activity : activity
+  ; attention : int
   ; keeper_name : string option
   ; runtime_id : string option
   ; workspace : string
   }
 
-let make ~activity ~keeper_name ~runtime_id ~workspace =
-  { activity; keeper_name; runtime_id; workspace }
+let make ~activity ~attention ~keeper_name ~runtime_id ~workspace =
+  { activity; attention; keeper_name; runtime_id; workspace }
 ;;
 
 let maximum_scalars = 240
@@ -132,9 +133,12 @@ let text snapshot =
     | None, None -> None
   in
   let workspace = Option.value ~default:"MASC" (nonblank snapshot.workspace) in
-  activity_text snapshot.activity :: Option.to_list identity @ [ workspace ]
-  |> String.concat " \xc2\xb7 "
-  |> truncate_scalars
+  (* A tab strip cuts a title from the right, so the count leads. *)
+  let attention =
+    if snapshot.attention > 0 then Printf.sprintf "(%d) " snapshot.attention else ""
+  in
+  let parts = activity_text snapshot.activity :: Option.to_list identity @ [ workspace ] in
+  truncate_scalars (attention ^ String.concat " \xc2\xb7 " parts)
 ;;
 
 type t =

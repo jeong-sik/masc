@@ -164,20 +164,18 @@ let partition ~store ~config ~reserved ~owner part evidence =
       ~parent:part ~evidence ~partition_id:(id ()) ~left_id:(id ()) ~right_id:(id ())
       ~admit:(local_admit actual)))
   |> Result.map (fun (left,right) -> Children (left,right))
-(* The retained refusal of an execution that ended at the execution stage.
-   Submit returns Refused for these phases only; others carry no evidence. *)
+(* The retained refusal of an execution the execution stage rejected. A
+   subdivision names a successor, so it is not read here; admission writes
+   none. Other phases carry no refusal. *)
 let execution_refusal original =
   match Progress.phase original.record.Owner.progress with
-  | Progress.Rejected {stage=Progress.Execution;evidence}
-  | Subdividing ({stage=Progress.Execution;evidence},_)
-  | Subdivided ({stage=Progress.Execution;evidence},_) ->
+  | Progress.Rejected {stage=Progress.Execution;evidence} ->
     let* exact=Capture.request original.capture in
     let* schema=Option.to_result ~none:"Original admission schema is absent" exact.schema in
     let+ retained=Exact.retained_final_of_json ~schema evidence in Some retained
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
-  | Subdividing ({stage=Progress.Before_dispatch;_},_)
-  | Subdivided ({stage=Progress.Before_dispatch;_},_) -> Ok None
+  | Subdividing _ | Subdivided _ -> Ok None
 let refusal_label = function
   | Exact.Retained_unknown Exact.Interrupted -> "outcome_unknown interrupted"
   | Retained_unknown Exact.Cut -> "outcome_unknown cut"
@@ -261,13 +259,13 @@ let answered ~store ~config ~reserved ~owner ~inventory part original =
    a size proof, and the forest check of [discover] refuses any other.
    An interrupted execution repeats only if the server stops again: one that
    this process cuts is [Cut] and keeps blocking. *)
-let settle_interrupted ~store ~owner original =
+let settle_interrupted ~store ~owner part original =
   let* date=Capture.minted_on original.record.request_id in
   let* ()=io (fun () -> Owner.settle ~store ~date (Owner.listed original.record))
     |> Result.map_error Owner.settle_error_to_string in
   Log.Keeper.info ~keeper_name:(Capture.keeper_id owner)
-    "Librarian explicit admission settled interrupted execution %s; its part is prepared again"
-    original.record.request_id;
+    "Librarian explicit admission settled interrupted execution %s; part %s is prepared again"
+    original.record.request_id (Parts.part_id part);
   Ok Reprepared
 (* A part with no original yet, or one still before admission, can only move
    through a live worker read and submit. *)
@@ -300,7 +298,7 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
     let original={original with record} in
     let* refusal=execution_refusal original in
     (match refusal with
-     | Some (Exact.Retained_unknown Exact.Interrupted) -> settle_interrupted ~store ~owner original
+     | Some (Exact.Retained_unknown Exact.Interrupted) -> settle_interrupted ~store ~owner part original
      | Some (Exact.Retained_unknown (Exact.Cut | Exact.Raised)
          | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
          | Retained_not_allowed _ | Retained_request_id_reused)

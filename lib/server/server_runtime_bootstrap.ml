@@ -731,8 +731,8 @@ let owner_initialization_error_to_string = function
       (Server_startup_state.phase_to_string observed_phase)
 
 (* Shorter than the first provider to close an idle connection in RFC-0492
-   §1.2 (api.z.ai, 25 s), so a parked connection is evicted before its server
-   closes it. *)
+   §1.2 (api.z.ai, 25 s). A request takes no connection idle for longer, so it
+   does not take one api.z.ai has already closed. *)
 let provider_connection_idle_ttl_s = 20.0
 
 let initialize_owner_state_blocking

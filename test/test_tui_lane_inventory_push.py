@@ -263,6 +263,22 @@ class LaneInventoryPushTest(unittest.TestCase):
             step("drain", 0.7)
             self.assertEqual(lane.response_count("hidden-lanes", LANES), 0)
 
+            lane.set_phase("reopen")
+            step("keys", ":go Features\r")
+            step("keys", "o")
+            step("wait", lambda: lane.response_count("reopen", ADDONS) >= 1,
+                 "the Add-on detail did not reopen")
+            lane.set_phase("manual")
+            step("keys", "r")
+            step("wait", lambda: lane.response_count("manual", ADDONS) >= 1,
+                 "manual refresh did not revalidate the open Add-on")
+            lane.observer_restart_on_resume = False
+            lane.observer_gap_on_resume = True
+            lane.set_phase("reconnect")
+            lane.events.put("close")
+            step("wait", lambda: lane.response_count("reconnect", ADDONS) >= 1,
+                 "observer replay gap did not revalidate the open Add-on")
+
         owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
 
 

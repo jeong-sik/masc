@@ -76,6 +76,7 @@ class ChatServer(FixtureServer):
         self.events = ObserverEvents()
         self.observer_connections = 0
         self.observer_restart_on_resume = True
+        self.observer_gap_on_resume = False
 
 
 class ChatHandler(FixtureHandler):
@@ -104,9 +105,17 @@ class ChatHandler(FixtureHandler):
             "chat-fixture-successor" if restarted else "chat-fixture-instance",
         )
         replay = (
-            "reset-instance-changed" if restarted else "resumed" if resuming else "fresh"
+            "reset-instance-changed"
+            if restarted
+            else "resumed-after-gap"
+            if resuming and server.observer_gap_on_resume
+            else "resumed"
+            if resuming
+            else "fresh"
         )
         self.send_header("x-masc-sse-replay", replay)
+        if replay == "resumed-after-gap":
+            self.send_header("x-masc-sse-replay-missed-through", "1")
         self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()

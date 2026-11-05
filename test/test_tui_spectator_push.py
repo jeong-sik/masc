@@ -108,6 +108,16 @@ class SpectatorPushTest(unittest.TestCase):
                  "Watch did not remove the machine query")
             self.assertEqual(spectator.count("watch", "legacy-tick"), 0)
 
+            spectator.set_phase("manual")
+            step("keys", "r")
+            step("wait", lambda: spectator.response_count("manual", "live:msx_capture") >= 1,
+                 "manual refresh did not revalidate the visible machine")
+            spectator.observer_gap_on_resume = True
+            spectator.set_phase("reconnect")
+            spectator.events.put("close")
+            step("wait", lambda: spectator.response_count("reconnect", "live:msx_capture") >= 1,
+                 "observer replay gap did not revalidate the visible machine")
+
         owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
 
 

@@ -190,14 +190,6 @@ async function loadKeeperMetrics(window: number) {
   keeperState.value = { status: 'loading' }
   try {
     const resp = await fetchKeeperCostMetrics(window)
-    if (resp.state === 'pending') {
-      keeperState.value = { status: 'pending', windowMinutes: resp.window_minutes }
-      return
-    }
-    if (resp.state === 'failed') {
-      keeperState.value = { status: 'error', message: resp.message }
-      return
-    }
     keeperState.value = {
       status: 'loaded',
       data: resp.keepers,
@@ -1124,17 +1116,6 @@ function CostDashboardContent({ view }: { view: CostView }) {
     }
     if (activeState.status === 'loading') {
       return html`<${LoadingState}>cost / latency metrics 불러오는 중...<//>`
-    }
-    if (activeState.status === 'pending') {
-      return html`
-        <section class="flex flex-col gap-3">
-          <${LoadingState}>최근 ${activeState.windowMinutes}분 Keeper 비용 집계 중...<//>
-          <button type="button" class="self-start text-sm text-accent-fg hover:underline"
-            onClick=${() => void loadKeeperMetrics(activeState.windowMinutes)}>
-            집계 다시 확인
-          </button>
-        </section>
-      `
     }
     if (activeState.status === 'error') {
       return html`

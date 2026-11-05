@@ -1259,17 +1259,7 @@ let usage_lines ~cols ~rows (state : state) =
     | Keeper_usage_unread -> [ " Keeper usage (24h) · not observed" ]
     | Keeper_usage_error reason ->
         [ " Keeper usage (24h) · unavailable: " ^ Terminal_text.single_line reason ]
-    | Keeper_usage_read Keeper_usage_loading ->
-        [ " Keeper usage (24h) · collecting" ]
-    | Keeper_usage_read (Keeper_usage_window { kuw_rows; kuw_window_minutes; kuw_freshness; kuw_generated_at }) ->
-        let freshness = match kuw_freshness with
-          | Keeper_usage_fresh -> ""
-          | Keeper_usage_stale { age_s; last_error } ->
-              Printf.sprintf " · %.0fs old%s" age_s
-                (Option.fold ~none:" · refreshing"
-                   ~some:(fun reason -> " · refresh failed: " ^ Terminal_text.single_line reason)
-                   last_error)
-        in
+    | Keeper_usage_read { kuw_rows; kuw_window_minutes; kuw_generated_at } ->
         let readable row = match row.kur_coverage with
           | Keeper_usage_failed _ | Keeper_usage_partial _ -> false
           | Keeper_usage_complete -> true
@@ -1335,8 +1325,8 @@ let usage_lines ~cols ~rows (state : state) =
           | _ -> None
         in
         let generated = Unix.gmtime kuw_generated_at in
-        [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics%s"
-            (Overview_providers.minutes_label kuw_window_minutes) freshness
+        [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics"
+            (Overview_providers.minutes_label kuw_window_minutes)
         ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
             (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
             generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min

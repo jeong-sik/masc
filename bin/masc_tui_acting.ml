@@ -443,7 +443,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Dataset_changed
       Masc.Workspace_dataset_event.(
         Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
-        | Provider_usage | Provider_standing)
+        | Provider_usage | Provider_standing | Keeper_costs)
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -505,6 +505,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails -> "accounts"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> "provider usage"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> "provider standing"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> "keeper costs"
   | Observer.Dataset_changed
       (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
@@ -683,6 +684,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a provider usage report was recorded" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime's quota or rate-limit standing changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Keeper cost window took or dropped a row" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

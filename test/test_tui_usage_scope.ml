@@ -71,6 +71,10 @@ let test_email_search_keeps_exact_target () =
     (List.exists (fun (_,action) -> action=Masc_tui_palette.Palette_usage_scope (Some "B"))
        (Masc_tui_palette.palette_matches state))
 
+(* A Keeper usage answer with no rows: an observation the workspace owns. *)
+let keeper_usage : Usage.keeper_usage_window =
+  { Usage.kuw_generated_at = 0.; kuw_window_minutes = 1440; kuw_rows = [] }
+
 let test_workspace_replacement_retires_usage () =
   let state = state () in
   let transport : Masc.Tui_decode.transport_health =
@@ -78,7 +82,7 @@ let test_workspace_replacement_retires_usage () =
       th_sse_sessions=1; th_websocket_sessions=None; th_grpc_port=None; th_events_dropped=0 } in
   state.transport <- Some transport;
   state.overview_quota <- Quota_read [];
-  state.keeper_usage <- Keeper_usage_read Usage.Keeper_usage_loading;
+  state.keeper_usage <- Keeper_usage_read keeper_usage;
   state.overview_account_emails <- Account_emails_read
       {emails=["provider-B", "fictional@example.test"]; unreadable_rows=0};
   state.usage_section <- Usage_trend;
@@ -98,7 +102,7 @@ let test_workspace_replacement_retires_usage () =
      && state.overview_account_emails == previous_emails
      && state.transport = Some transport
      && state.overview_quota = Quota_read []
-     && state.keeper_usage = Keeper_usage_read Usage.Keeper_usage_loading);
+     && state.keeper_usage = Keeper_usage_read keeper_usage);
   check bool "an unconfirmed identity retires old read authority" true
     (state.workspace_read_authority != previous_reading);
   withdraw_usage_workspace state;

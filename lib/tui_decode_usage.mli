@@ -117,21 +117,15 @@ type keeper_usage_row = {
   kur_coverage : keeper_usage_coverage;
 }
 
-type keeper_usage_freshness =
-  | Keeper_usage_fresh
-  | Keeper_usage_stale of { age_s : float; last_error : string option }
-
-type keeper_usage_window =
-  | Keeper_usage_loading
-  | Keeper_usage_window of {
-      kuw_generated_at : float;
-      kuw_window_minutes : int;
-      kuw_rows : keeper_usage_row list;
-      kuw_freshness : keeper_usage_freshness;
-    }
+type keeper_usage_window = {
+  kuw_generated_at : float;
+  kuw_window_minutes : int;
+  kuw_rows : keeper_usage_row list;
+}
 
 val decode_keeper_usage_window :
   Yojson.Safe.t -> (keeper_usage_window, string) result
-(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
-    A null sum stays absent, and a loading placeholder never reads as zero.
-    [generated_at] must fit Ptime's supported civil-time range before rendering. *)
+(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection,
+    which the server answers from the rows it keeps, at the time it was asked.
+    A null sum stays absent. [generated_at] must fit Ptime's supported
+    civil-time range before rendering. *)

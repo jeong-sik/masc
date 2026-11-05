@@ -35,6 +35,10 @@ type dataset =
       (** A runtime's quota or rate-limit standing in the resolved document
           changed, a reset passing included, or the standing stopped or
           started building. The history does not move with it. *)
+  | Keeper_costs
+      (** What [GET /api/v1/dashboard/keeper-costs] answers for its default
+          window: a Keeper metrics row other than a heartbeat was written, or
+          a kept row or day file left the window. *)
   | Keeper_oauth_attempts of { keeper : string }
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
@@ -56,6 +60,7 @@ module Kind : sig
     | Account_emails
     | Provider_usage
     | Provider_standing
+    | Keeper_costs
     | Keeper_oauth_attempts
 
   val to_wire : t -> string

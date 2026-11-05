@@ -2,8 +2,7 @@
    RFC-keeper-vision-delegation-tool §2.5.
 
    The load-bearing property is round-trip durability: store -> load returns the
-   exact bytes. This is precisely what Payload.of_json (Lazy_payload) fails — it
-   rebuilds an empty closure — so this store is the durable alternative. *)
+   exact bytes. *)
 
 module S = Multimodal.Vision_artifact_store
 

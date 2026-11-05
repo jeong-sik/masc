@@ -3,9 +3,8 @@
 
     Image bytes are written to a content-addressed file under a store directory;
     the handle is the content hash — a plain string that survives JSON and
-    checkpoint round-trips. This keeps the bytes off the lossy {!Payload}
-    [Lazy_payload] path ([Payload.of_json] rebuilds an empty closure): a
-    checkpoint persists only the handle and the bytes are reloaded on demand.
+    checkpoint round-trips. A checkpoint persists only the handle and the
+    bytes are reloaded on demand.
     Content addressing is SHA-256 hashing over the raw bytes, written through
     [Fs_compat.save_file_atomic]. *)
 

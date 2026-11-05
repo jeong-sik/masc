@@ -3429,6 +3429,12 @@
  (wrapped false)
  (modules masc_tui_system_logs)
  (libraries masc masc.masc_log yojson))
+
+(library
+ (name masc_tui_system_log_stream)
+ (wrapped false)
+ (modules masc_tui_system_log_stream)
+ (libraries masc masc_tui_sse_lines yojson))
 (executable
  (name masc_native_addon_launcher)
  (modules masc_native_addon_launcher)

@@ -218,6 +218,67 @@ let test_each_store_write_tells_the_signal () =
       told_as "a turn record" [ runtime_dir, "largo" ] (take ())))
 ;;
 
+(* The writers have already committed and some still have bookkeeping to do,
+   so a subscriber that raises, a cancellation included, stops neither the
+   other subscribers nor the writer. *)
+let test_a_failing_subscriber_stops_nothing () =
+  with_workspace
+  @@ fun ~config:_ ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_ ~runtime_keepers_dir ~heard:_ ->
+  Fs_compat.mkdir_p runtime_keepers_dir;
+  let told = ref 0 in
+  let unsubscribers =
+    [ Keeper_memory_health_input.subscribe (fun _ -> failwith "subscriber fault")
+    ; Keeper_memory_health_input.subscribe (fun _ ->
+        raise (Eio.Cancel.Cancelled (Failure "subscriber cancellation")))
+    ; Keeper_memory_health_input.subscribe (fun _ -> incr told)
+    ]
+  in
+  Fun.protect ~finally:(fun () -> List.iter (fun unsubscribe -> unsubscribe ()) unsubscribers)
+    (fun () ->
+      Keeper_memory_health_input.written ~keepers_dir:runtime_keepers_dir ~keeper_id:"largo";
+      check int "the other subscriber still heard it, and the writer went on" 1 !told)
+;;
+
+(* The retention pass tells the row's readers about each Keeper whose turn
+   records lost a day file (RFC-0487 §2.7), and about no other store's. *)
+let test_a_turn_record_prune_tells_its_keeper () =
+  with_workspace
+  @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_ ~runtime_keepers_dir ~heard:_ ->
+  let module Store = Dated_jsonl.Store in
+  let masc_root = Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path in
+  let root = Store.root_of_masc_dir masc_root in
+  let turn_records = Store.keeper root ~keeper:"largo" Store.Keeper.Turn_records in
+  check bool "a per-keeper location names its Keeper and store" true
+    (Store.keeper_store turn_records = Some ("largo", Store.Keeper.Turn_records));
+  check bool "a workspace store names no Keeper" true
+    (Option.is_none (Store.keeper_store (Store.at root Store.Root.Costs)));
+  let old_day_file location =
+    let dated = Store.dated_path location ~ts:(Unix.gettimeofday () -. (400. *. 86_400.)) in
+    Fs_compat.mkdir_p (Filename.dirname dated.path);
+    Out_channel.with_open_text dated.path (fun oc -> output_string oc "{}\n");
+    dated.path
+  in
+  let files =
+    [ old_day_file turn_records
+    ; old_day_file (Store.keeper root ~keeper:"largo" Store.Keeper.Execution_receipts)
+    ; old_day_file (Store.keeper root ~keeper:"piano" Store.Keeper.Metrics)
+    ]
+  in
+  let told = ref [] in
+  let unsubscribe =
+    Keeper_memory_health_input.subscribe
+      (fun { Keeper_memory_health_input.keepers_dir; keeper_id } ->
+         told := (keepers_dir, keeper_id) :: !told)
+  in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    ignore (Server_runtime_startup_maintenance.prune_shared_jsonl_stores ~days:30 ~masc_root
+            : int));
+  check (list bool) "every old day file is gone" [ false; false; false ]
+    (List.map Sys.file_exists files);
+  check (list (pair string string)) "only the turn records' Keeper is told, once"
+    [ Unix.realpath runtime_keepers_dir, "largo" ] (List.rev !told)
+;;
+
 let () =
   run "memory_health_input_announce"
     [ ( "workspace"
@@ -227,6 +288,10 @@ let () =
     ; ( "stores"
       , [ test_case "each store write tells the signal once" `Quick
             test_each_store_write_tells_the_signal
+        ; test_case "a turn record prune tells its Keeper" `Quick
+            test_a_turn_record_prune_tells_its_keeper
+        ; test_case "a failing subscriber stops nothing" `Quick
+            test_a_failing_subscriber_stops_nothing
         ] )
     ]
 ;;

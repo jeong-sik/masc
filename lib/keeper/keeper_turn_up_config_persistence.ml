@@ -602,19 +602,22 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                 | Publication_exception _) as other) -> Error other)
         | Error reconciliation -> Error reconciliation
       in
-      let write_result =
-        (match write_manifest with
-         | Some write -> write path
-         | None -> if created
-         then
-           Keeper_toml_loader.create_keeper_toml_file_strict_staged
-             ~path
-             (full_fields parsed meta)
-         else
-           let edits = explicit_edits parsed in
-           if edits = [] then Ok ()
-           else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
-        |> strict_write_result
+      let manifest_written, write_result =
+        let manifest_written, written =
+          match write_manifest with
+          | Some write -> true, write path
+          | None -> if created
+          then
+            true,
+            Keeper_toml_loader.create_keeper_toml_file_strict_staged
+              ~path
+              (full_fields parsed meta)
+          else
+            let edits = explicit_edits parsed in
+            if edits = [] then false, Ok ()
+            else true, Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits
+        in
+        manifest_written, strict_write_result written
       in
       match write_result with
       | Error error -> rollback error
@@ -665,6 +668,12 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
            | None | Some (Lock_release_unconfirmed _)
            | Some (Runtime_config_lock_release_unconfirmed _) ->
              Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+             (* The memory health row lists the Keepers whose manifest is on
+                disk, under the name it declares (RFC-0487). *)
+             if manifest_written
+             then
+               Keeper_memory_health_input.written
+                 ~keepers_dir:(Filename.dirname path) ~keeper_id:meta.name;
              let* () = clear_journal () in
              Ok { value = after_commit (); warnings = write_warnings @ publication_warnings }
          in

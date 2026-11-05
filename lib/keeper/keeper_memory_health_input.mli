@@ -5,10 +5,13 @@
     the memory journal for the lines written outside a publication (an
     unchanged commit, a Librarian failure, a snapshot quarantine), the unread
     ledger when the archive changed it, the continuity snapshot, the Librarian
-    progress, the turn boundaries and the turn records. The memory and source
-    snapshots, and the journal lines a publication writes, are announced by
-    {!Keeper_memory_commit_notifications}, which a reader of this signal also
-    subscribes to.
+    progress, the turn boundaries and the turn records. The writes that add a
+    Keeper's row or take it away say so too: a committed keepers.toml, its
+    removal, a Keeper purge, the retention pass that removes a Keeper's old
+    turn records, and the Owner when the meta is created, removed or moves to a
+    new trace. The memory and source snapshots, and the journal lines a
+    publication writes, are announced by {!Keeper_memory_commit_notifications},
+    which a reader of this signal also subscribes to.
 
     It is a wake signal: it names the Keeper and the keepers directory the
     file lives under, not what was written. A reader reads the row again. *)
@@ -29,7 +32,9 @@ val subscribe : (event -> unit) -> (unit -> unit)
 val written : keepers_dir:string -> keeper_id:string -> unit
 (** Run every callback for [keeper_id]'s file under [keepers_dir]. With no
     subscriber it does nothing, so a process that does not serve the health
-    row pays nothing. A callback that raises is logged at WARN and does not
-    stop the others; a cancellation is raised again once all of them ran. A
+    row pays nothing. Never raises: the callers have already committed and
+    some still have bookkeeping to do. A callback that raises, a cancellation
+    included, is logged at WARN and does not stop the others; the caller's
+    next suspension point still sees a cancellation of its own fiber. A
     directory that no longer resolves, removed since the write, is logged at
-    WARN and calls nothing. Never raises otherwise. *)
+    WARN and calls nothing. *)

@@ -916,12 +916,22 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
     in
     remove artifacts
   in
-  match Eio_context.run_on_owner_domain (fun () ->
-    Keeper_memory_lane.with_librarian_purge
-      ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
-        Keeper_memory_os_current.with_program_reset
-          ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
-            ~base_path:config.Workspace.base_path) ~keeper_id:keeper_name remove_artifacts))
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  (* The files go one by one, so a purge that stopped part way, by an error or
+     an exception, has still changed the Keeper's memory health row
+     (RFC-0487). The signal never raises. *)
+  match
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_memory_health_input.written ~keepers_dir ~keeper_id:keeper_name)
+      (fun () ->
+        Eio_context.run_on_owner_domain (fun () ->
+          Keeper_memory_lane.with_librarian_purge
+            ~base_path:config.Workspace.base_path ~keeper_name (fun () ->
+              Keeper_memory_os_current.with_program_reset
+                ~keepers_dir ~keeper_id:keeper_name remove_artifacts)))
   with
   | Ok result -> result
   | Error error -> Error ("Librarian lane could not be stopped before purge: "

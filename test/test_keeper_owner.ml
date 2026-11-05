@@ -85,13 +85,15 @@ let usage_delta ?(turns = 1) () : Reducer.usage_delta =
 (* A turn commit that adds one usage delta and keeps every other runtime
    field. [meta] is the snapshot the owner holds, so the trace id matches and
    the identity check passes. *)
-let usage_commit (meta : Keeper_meta_contract.keeper_meta) : Reducer.meta_command =
+let usage_commit ?next_trace_id (meta : Keeper_meta_contract.keeper_meta)
+  : Reducer.meta_command
+  =
   Commit_turn_runtime
     { expected_trace_id = meta.runtime.trace_id
     ; usage = usage_delta ()
     ; counters = { proactive_count = 0; proactive_visible_count = 0 }
     ; next_keeper_id = meta.keeper_id
-    ; next_trace_id = meta.runtime.trace_id
+    ; next_trace_id = Option.value next_trace_id ~default:meta.runtime.trace_id
     ; proactive_observation = Unchanged
     ; usage_cursor = Unchanged
     ; last_usage_resolution = Unchanged
@@ -718,6 +720,58 @@ let test_identity_and_delete_guards () =
   in
   ignore (owner_ok (Owner.apply_meta empty (Delete_if_snapshot expected_digest)));
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
+;;
+
+(* RFC-0487: a Keeper's memory health row measures the Librarian gap on the
+   meta's trace and has none to measure without a meta. The Owner tells the
+   row's readers when the meta is created, removed or moves to a new trace,
+   and not for a change that keeps the trace. *)
+let test_memory_health_hears_a_new_trace_or_meta () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Unix.realpath (Filename.temp_dir "keeper-owner-memory-health-" "") in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let runtime_keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  Fs_compat.mkdir_p runtime_keepers_dir;
+  let told = ref [] in
+  Eio.Switch.on_release sw
+    (Keeper_memory_health_input.subscribe
+       (fun { Keeper_memory_health_input.keepers_dir; keeper_id } ->
+          told := (keepers_dir, keeper_id) :: !told));
+  let take () =
+    let seen = List.rev !told in
+    told := [];
+    seen
+  in
+  let told_as = check (list (pair string string)) in
+  let path = Filename.concat base_path "operations.sqlite3" in
+  let owner =
+    owner_ok
+      (Owner.start ~base_path ~sw
+         ~store:{ Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path ~session_root:(Filename.concat base_path "traces")
+         ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+         ~keeper_name:"heard" ~initial_meta:None)
+  in
+  let current () = Option.get (Owner.projection owner).meta in
+  ignore (owner_ok (Owner.apply_meta owner (Create (make_meta "heard"))));
+  told_as "a created meta" [ runtime_keepers_dir, "heard" ] (take ());
+  ignore (owner_ok (Owner.apply_meta owner (assign_task "same-trace")));
+  ignore (owner_ok (Owner.apply_meta owner (usage_commit (current ()))));
+  told_as "changes that keep the trace say nothing" [] (take ());
+  let next_trace_id =
+    match Keeper_id.Trace_id.of_string "trace-heard-next" with
+    | Ok trace_id -> trace_id
+    | Error detail -> fail detail
+  in
+  ignore (owner_ok (Owner.apply_meta owner (usage_commit ~next_trace_id (current ()))));
+  told_as "a new trace" [ runtime_keepers_dir, "heard" ] (take ());
+  ignore
+    (owner_ok
+       (Owner.apply_meta owner
+          (Delete_if_snapshot (Keeper_meta_json.Snapshot_digest.of_meta (current ())))));
+  told_as "a removed meta" [ runtime_keepers_dir, "heard" ] (take ())
 ;;
 
 (* A full mailbox takes the command in the same scheduler pass the owner
@@ -6754,6 +6808,10 @@ let () =
             "identity and delete guards"
             `Quick
             test_identity_and_delete_guards
+        ; test_case
+            "memory health hears a new trace or meta"
+            `Quick
+            test_memory_health_hears_a_new_trace_or_meta
         ; test_case
             "shutdown releases full mailbox requests"
             `Quick

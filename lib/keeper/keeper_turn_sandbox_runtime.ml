@@ -926,16 +926,6 @@ let run_argv_with_status_split
         argv)
 ;;
 
-let run_argv_with_stdin_and_status ?timeout_sec ~stdin_content argv =
-  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-    Process_eio.run_argv_with_stdin_and_status
-      ?timeout_sec
-      ~env:(sandbox_environment ())
-      ~cwd:(Config_dir_resolver.current_working_dir ())
-      ~stdin_content
-      argv)
-;;
-
 (* A failed transport can leave a guest effect running. Do not start another
    process in response to an Eio bind error for these requests. *)
 let run_build_link_effect ?timeout_sec ~stdin_content argv =
@@ -4264,47 +4254,6 @@ let run_command_with_status
           in
           Ok (st, body)
         | Unix.WSIGNALED _ | Unix.WSTOPPED _ | WEXITED _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
-;;
-
-let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
-  =
-  let cmd =
-    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
-      ~host_root:t.host_root
-      ~container_root:t.container_root
-      cmd
-  in
-  let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
-  let docker_exec_argv ~container_name =
-    exec_prefix t ~container_cwd ~stdin:true
-    @ [ container_name; "bash"; "-l"; "-s" ]
-  in
-  match Result.bind (docker_exec_only t) (fun () -> ensure_started t ~timeout_sec) with
-  | Error _ as err -> err
-  | Ok container_name ->
-    let argv = docker_exec_argv ~container_name in
-    let st, out =
-      run_argv_with_stdin_and_status
-        ~stdin_content:cmd
-        argv
-    in
-    (match st with
-     | (Unix.WEXITED (126 | 127) as status) ->
-       (match failed_exec_recovery t with
-        | Preserve_failed_exec -> Ok (st, out)
-        | Restart_failed_exec ->
-        set_state t Not_started;
-        (match ensure_started t ~timeout_sec with
-         | Error _ as err -> err
-         | Ok container_name ->
-           let argv = docker_exec_argv ~container_name in
-           Ok
-             (run_argv_with_stdin_and_status
-                ~stdin_content:cmd
-                argv))
-        | Failed_exec_state_probe_error detail ->
-          Error (failed_exec_state_probe_error ~status ~output:out detail))
-     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Ok (st, out))
 ;;
 
 let cleanup (t : t) =

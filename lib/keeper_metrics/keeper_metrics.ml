@@ -165,7 +165,6 @@ type t =
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
-  | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressStreak
   | UsageTrust
@@ -383,7 +382,6 @@ let to_string = function
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
   | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
   | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
-  | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
   | NoProgressStreak -> "masc_keeper_no_progress_streak"
   | UsageTrust -> "masc_keeper_usage_trust_total"
@@ -485,7 +483,7 @@ let collection = function
   | RegistryInvalidEntry | StimulusConsumed | UnsupportedStimulus | RestartAttempts
   | RestartOutcomes | Agent_coreRunTimeout | RuntimeSelected | ToolUseFailure | ToolNotAllowed
   | ReceiptUnmappedDisposition | ExecuteNetworkUpgrade | ExecuteLocalExecution
-  | DockerRuntimeDiscarded | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
+  | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
   | ConfigEnvParseFailures | PostTurnWireinFailures | TurnCleanupFailures
   | MemoryRecallHistorySwallowedExceptions | MemoryRecallReadErrors | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite | MemorySearch | RuntimeRequestWireBytes

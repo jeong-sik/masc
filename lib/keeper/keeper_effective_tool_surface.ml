@@ -337,12 +337,22 @@ let project
       }
 ;;
 
+(* No route means no runtime is loaded and the keeper has no assignment. A
+   workspace whose model setup is unfinished stays in that state, so the
+   answer names what to fix instead of failing the read (#47124). *)
+let no_loaded_route () =
+  match Runtime_startup_state.get () with
+  | Runtime_startup_state.Setup_required reason ->
+    "runtime_setup_required", Runtime_startup_state.message reason
+  | Runtime_startup_state.Not_initialized | Runtime_startup_state.Available ->
+    ( "runtime_not_loaded"
+    , "no runtime is loaded and this keeper has no runtime assignment" )
+;;
+
 let resolve_runtime keeper_name =
-  let route =
-    Option.value
-      (Runtime.runtime_id_for_keeper keeper_name)
-      ~default:(Runtime.get_default_runtime_id ())
-  in
+  match Keeper_meta_contract.runtime_route_of_keeper_name keeper_name with
+  | None -> Error (no_loaded_route ())
+  | Some route ->
   (* The assignment is a routing label. A posture belongs to a binding, and the
      binding this keeper opens first is the route's entry candidate — the same
      rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution] uses to

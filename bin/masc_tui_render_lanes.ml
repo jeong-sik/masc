@@ -8,6 +8,7 @@ open Masc_tui_press
 
 module Hint_lines = Masc_tui_hint_lines
 module Message_layout = Masc_tui_message_layout
+module Numbered_list = Masc_tui_numbered_list
 module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
@@ -149,6 +150,22 @@ let wrap_indented_line ~max_cells style text =
 
 let wrap_indented_lines ~max_cells style lines =
   List.concat_map (wrap_indented_line ~max_cells style) lines
+
+(* A candidate list as its label and one numbered row per candidate, nested two
+   cells under the label, so a long model id wraps under its own number and is
+   not read as the next candidate. A list with no candidates stays on the
+   label's row. *)
+let numbered_slot_lines ~max_cells style ~label values =
+  match values with
+  | [] -> wrap_indented_line ~max_cells style (label ^ ": (없음)")
+  | values ->
+    let nested = "  " in
+    wrap_indented_line ~max_cells style (label ^ ":")
+    @ List.map
+        (fun row -> style, "  " ^ nested ^ row)
+        (Numbered_list.rows
+           ~max_cells:(max 1 (max_cells - String.length nested))
+           (List.map Terminal_text.single_line values))
 
 let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
     ~right_title ~right_rows ~actions =
@@ -436,13 +453,13 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
   @ wrap Ansi.dim
       (Printf.sprintf "TOML 섹션: [runtime.exact_output_lanes.%s]"
          (Standalone_lane.to_id lane.sl_lane))
-  @ wrap Ansi.reset
-      ("1차 HTTP 후보 (순서대로 시도): " ^ ordered_slot_list lane.sl_admitted_slots)
-  @ wrap Ansi.reset
-      ("2차 CLI 후보 (HTTP 모두 실패 시): " ^ ordered_slot_list lane.sl_cli_slots)
-  @ wrap
+  @ numbered_slot_lines ~max_cells Ansi.reset
+      ~label:"1차 HTTP 후보 (순서대로 시도)" lane.sl_admitted_slots
+  @ numbered_slot_lines ~max_cells Ansi.reset
+      ~label:"2차 CLI 후보 (HTTP 모두 실패 시)" lane.sl_cli_slots
+  @ numbered_slot_lines ~max_cells
       (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
-      ("실행 전 탈락한 후보: " ^ ordered_slot_list lane.sl_dropped_slots)
+      ~label:"실행 전 탈락한 후보" lane.sl_dropped_slots
   @ detail_section_heading "3. 모델별 누적 응답 횟수 (Slot Selection History)"
   @ slot_history_lines
   @ detail_section_heading "4. 레인 출력 의미 · 실행 증거 (Contract)"

@@ -1387,7 +1387,7 @@ let recovered_source_map registered_names calls =
     registered_names in
   let blocks = List.map (fun (id, name, input) ->
     Agent_core.Llm_provider.Types.ToolUse {id; name; input}) calls in
-  let admission = Agent_core.Agent_tools.admit_tool_use_names
+  let admission = Agent_core.Agent_tools.admit_tool_use_names ~unreadable_tool_uses:[]
     (Agent_core.Agent_tools.build_index tools) blocks in
   admission.tool_source_map
 ;;
@@ -1414,6 +1414,60 @@ let rec remove_chat_fixture path =
     Unix.rmdir path
   | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
     Unix.unlink path
+;;
+
+(* The 11-05 shape: three calls stream, the middle one with arguments that are
+   not one JSON object. Agent Core keeps it out of the response content but
+   counts it at its place, so the keeper's stream inventory and the admission
+   map agree and each admitted call binds its own block. *)
+let test_unreadable_call_keeps_its_streamed_place_in_the_seal () =
+  let t = A.create () in
+  let events =
+    [ message_start "unreadable-message"
+    ; start ~index:0 ~tool_id:(Some "c0") ~tool_name:(Some "Read")
+    ; json_snapshot ~index:0 "{}"
+    ; stop ~index:0
+    ; start ~index:1 ~tool_id:(Some "c1") ~tool_name:(Some "Read")
+    ; json_snapshot ~index:1 {|{"path": "a""b"}|}
+    ; stop ~index:1
+    ; start ~index:2 ~tool_id:(Some "c2") ~tool_name:(Some "Read")
+    ; json_snapshot ~index:2 "{}"
+    ; stop ~index:2
+    ; message_stop_reason
+    ]
+  in
+  List.iter (A.on_event t) events;
+  let module Acc = Agent_core.Llm_provider.Complete_stream_acc in
+  let acc = Acc.create_stream_acc () in
+  List.iter (Acc.accumulate_event acc) events;
+  let response =
+    match Acc.finalize_stream_acc acc with
+    | Ok response -> response
+    | Error _ -> fail "the stream must stand without the unreadable call"
+  in
+  let read_tool =
+    Agent_core.Tool.create ~name:"Read" ~description:"admission fixture" ~parameters:[]
+      (fun _ -> Ok {Agent_core.Types.content="not executed"; content_blocks=None; _meta=None})
+  in
+  let admission =
+    Agent_core.Agent_tools.admit_tool_use_names
+      ~unreadable_tool_uses:response.unreadable_tool_uses
+      (Agent_core.Agent_tools.build_index [ read_tool ])
+      response.content
+  in
+  check int "inventory counts all three calls" 3
+    admission.tool_source_map.source_tool_use_count;
+  ignore (seal_admitted t ~turn:0 ~tool_source_map:admission.tool_source_map);
+  let block_of ~planned_index ~tool_call_id =
+    match
+      A.record_execution_id t ~turn:0 ~planned_index ~tool_call_id
+        ~execution_id:(Ids.Execution_id.of_string ("execution-" ^ tool_call_id))
+    with
+    | Ok occurrence -> occurrence.Masc.Keeper_chat_events.block_index
+    | Error detail -> fail detail
+  in
+  check int "first admitted call binds block 0" 0 (block_of ~planned_index:0 ~tool_call_id:"c0");
+  check int "second admitted call binds block 2" 2 (block_of ~planned_index:1 ~tool_call_id:"c2")
 ;;
 
 let test_recovered_name_seals_exact_event_and_durable_row () =
@@ -1596,6 +1650,8 @@ let () =
     ; ( "execution identity"
       , [ test_case "recovered admission emits exact source and persists registered name" `Quick
             test_recovered_name_seals_exact_event_and_durable_row
+        ; test_case "an unreadable call keeps its streamed place in the seal" `Quick
+            test_unreadable_call_keeps_its_streamed_place_in_the_seal
         ; test_case "recovery identity mismatches refuse the whole seal" `Quick
             test_recovery_identity_mismatch_refuses_atomically
         ; test_case "recovered provider ids remain separate across scopes" `Quick

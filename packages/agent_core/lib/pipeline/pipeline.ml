@@ -271,6 +271,7 @@ let stage_collect
           transcript replays. *)
        let admission =
          Agent_tools.admit_tool_use_names
+           ~unreadable_tool_uses:response.unreadable_tool_uses
            (Agent_tools.build_index (Tool_set.to_list agent.tools))
            response.content
        in
@@ -310,8 +311,12 @@ let stage_collect
             ]);
        List.iter
          (fun (call : Llm_provider.Types.unreadable_tool_use) ->
-            (* Name, place and how the stream built the text; never the
-               argument text, which the raw trace already holds. *)
+            (* What a reader needs to tell a model slip from a broken
+               stream: the parser's account, the size, how the stream built the
+               text and a redacted, bounded excerpt of it. The call is cut from
+               history and the provider response record, so this line is where
+               the text survives, in the same form the wire error used to
+               carry. *)
             Log.warn
               _log
               "tool call with unreadable arguments dropped before history"
@@ -323,6 +328,9 @@ let stage_collect
                     | Llm_provider.Tool_call_input.Not_object -> "not_object"
                     | Llm_provider.Tool_call_input.Invalid_json message -> message )
               ; Log.I ("argument_bytes", String.length call.arguments)
+              ; Log.S
+                  ( "arguments_excerpt"
+                  , Llm_provider.Secret_redactor.redacted_excerpt call.arguments )
               ; Log.S
                   ( "assembly"
                   , match call.arguments_assembly with

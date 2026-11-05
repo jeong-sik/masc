@@ -1,20 +1,9 @@
 (** Typed stream-error projection at the HTTP boundary. *)
 
-(* Scrub-then-bound the offending payload echoed into a parse-failure message.
-   Tool arguments can carry credentials (Bearer tokens, API keys, URL userinfo),
-   so the buffer passes through the [Secret_redactor] SSOT before it reaches the
-   operator-facing message. Redaction runs first so truncation cannot split a
-   token past the redactor and leak a partial. *)
-let max_parse_error_raw_excerpt = 256
-
-let parse_error_raw_excerpt raw =
-  let redacted = Secret_redactor.redact_string raw in
-  if String.length redacted <= max_parse_error_raw_excerpt
-  then redacted
-  else
-    Agent_core_strings.utf8_prefix ~max_bytes:max_parse_error_raw_excerpt redacted
-    ^ "...(truncated)"
-;;
+(* An offending payload echoed into a parse-failure message goes through
+   [Secret_redactor.redacted_excerpt] first. Tool arguments can carry
+   credentials (Bearer tokens, API keys, URL userinfo), and the excerpt redacts
+   before it bounds. *)
 
 type refused_frame =
   { wire_format : Http_client.provider_wire_format
@@ -43,7 +32,7 @@ let malformed_projection ~wire_format ~reason ~raw =
              | "" -> Printf.sprintf "%s parse failed: %s" wire_label reason
              | raw ->
                Printf.sprintf "%s parse failed: %s raw=%S"
-                 wire_label reason (parse_error_raw_excerpt raw))
+                 wire_label reason (Secret_redactor.redacted_excerpt raw))
         }
   ; diagnostic = Some { wire_format; reason; raw }
   }
@@ -230,7 +219,7 @@ let project_stream_error
             "%s stream error: %s raw=%S"
             wire_label
             message
-            (parse_error_raw_excerpt raw)
+            (Secret_redactor.redacted_excerpt raw)
       })
   (* The choice said the generation failed and no error object arrived with
      it: nothing declares a type or a status, and the answer stopped part-way
@@ -249,7 +238,7 @@ let project_stream_error
             "%s stream error: %s raw=%S"
             wire_label
             message
-            (parse_error_raw_excerpt raw)
+            (Secret_redactor.redacted_excerpt raw)
       })
   | Types.Stream_parse_failed { reason; raw } ->
     malformed_projection ~wire_format ~reason ~raw
@@ -280,7 +269,7 @@ let project_stream_error
         Printf.sprintf
           "provider emitted an unsupported content part: %s raw=%S"
           capability
-          (parse_error_raw_excerpt raw)
+          (Secret_redactor.redacted_excerpt raw)
     in
     without_diagnostic (Http_client.ProviderFailure
       { kind = Http_client.Capability_mismatch { capability = Some capability }; message })
@@ -295,7 +284,7 @@ let project_stream_error
         Printf.sprintf
           "provider emitted an unsupported response: %s raw=%S"
           capability
-          (parse_error_raw_excerpt raw)
+          (Secret_redactor.redacted_excerpt raw)
     in
     without_diagnostic (Http_client.ProviderFailure
       { kind = Http_client.Capability_mismatch { capability = Some capability }; message })

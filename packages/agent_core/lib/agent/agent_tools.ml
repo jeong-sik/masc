@@ -261,11 +261,22 @@ type tool_use_admission =
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
-let admit_tool_use_names tool_index blocks =
+let admit_tool_use_names ~unreadable_tool_uses tool_index blocks =
   let rejected_names = ref [] in
   let retained_content_indices = ref [] in
   let next_planned_index = ref 0 in
   let next_source_tool_use_ordinal = ref 0 in
+  let readable_tool_uses = ref 0 in
+  (* An unreadable call keeps the place the response gave it among the tool
+     calls; a readable one takes the next place no unreadable call holds. *)
+  let unreadable_ordinals =
+    List.map
+      (fun (call : Llm_provider.Types.unreadable_tool_use) -> call.tool_use_ordinal)
+      unreadable_tool_uses
+  in
+  let rec free_ordinal ordinal =
+    if List.mem ordinal unreadable_ordinals then free_ordinal (ordinal + 1) else ordinal
+  in
   let admitted_tool_sources = ref [] in
   let admitted =
     List.filter_map
@@ -275,8 +286,9 @@ let admit_tool_use_names tool_index blocks =
            Some block in
          match block with
          | ToolUse { id; name; input } ->
-           let source_tool_use_ordinal = !next_source_tool_use_ordinal in
-           incr next_source_tool_use_ordinal;
+           let source_tool_use_ordinal = free_ordinal !next_source_tool_use_ordinal in
+           next_source_tool_use_ordinal := source_tool_use_ordinal + 1;
+           incr readable_tool_uses;
            (match resolve_tool_call tool_index name input with
             | resolved, resolved_input, Some _ ->
               let planned_index = !next_planned_index in
@@ -308,7 +320,7 @@ let admit_tool_use_names tool_index blocks =
   ; rejected_names = List.rev !rejected_names
   ; tool_source_map =
       { Hooks.admitted_tool_sources = List.rev !admitted_tool_sources
-      ; source_tool_use_count = !next_source_tool_use_ordinal
+      ; source_tool_use_count = !readable_tool_uses + List.length unreadable_tool_uses
       }
   }
 ;;

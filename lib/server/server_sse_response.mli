@@ -29,12 +29,15 @@ type outcome =
 val respond :
   clock:_ Eio.Time.clock ->
   stalled_after_s:float ->
+  ?flush_headers_immediately:bool ->
   Httpun.Reqd.t ->
   Httpun.Response.t ->
   t
 (** [respond ~clock ~stalled_after_s reqd response] starts the streaming
     response. Production routes pass
-    {!Server_mcp_transport_http_headers.sse_stalled_after_s}. *)
+    {!Server_mcp_transport_http_headers.sse_stalled_after_s}.
+    [flush_headers_immediately] is httpun's: the head is written before the
+    first frame, for a stream whose first frame can wait. *)
 
 val send : t -> string -> outcome
 (** [send t frame] writes the whole [frame] and waits for it. Several fibers

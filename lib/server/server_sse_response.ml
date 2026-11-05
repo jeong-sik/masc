@@ -12,9 +12,9 @@ type outcome =
   | Closed
   | Stalled
 
-let respond ~clock ~stalled_after_s reqd response =
+let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
-  { writer = Httpun.Reqd.respond_with_streaming reqd response
+  { writer = Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response
   ; closed
   ; resolve_closed
   ; stall = (fun () -> Eio.Time.sleep clock stalled_after_s)

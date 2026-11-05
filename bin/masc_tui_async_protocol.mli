@@ -264,48 +264,12 @@ type memory_health_read =
       }
 
 (* The answers of one domain share one type named after it, and [async_msg]
-   carries that type in one constructor: [code_msg] in [Code_msg],
-   [keeper_msg] in [Keeper_msg]. One variant takes at most 244 constructors
-   with arguments (#48617). A domain with a single answer keeps it in
-   [async_msg], and so does a constructor that carries another [async_msg]. *)
-type code_msg =
-  (* The scope travels with the directory. Without it a reply names a
-     relative path, which two scopes can both have, and the handler had no
-     way to tell a late answer for the scope just left from an answer for the
-     scope now open (#33946). *)
-  | Code_catalog_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_catalog, string) result
-  | Code_branches_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_branches, string) result
-  | Code_worktrees_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_worktrees, string) result
-  | Code_finder_file_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
-  | Code_entries_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_draft_saved of code_save_request * Masc_tui_code_draft.outcome
-  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (Masc.Tui_decode.workspace_file_source, string) result
-  | Code_history_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc_tui_types.code_history_listing, string) result
-  | Code_diff_loaded of
-      Masc_tui_types.code_diff_target Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_diff, string) result
-  (* The path the margin describes; stamped so a late answer cannot caption
-     another file. *)
-  | Code_blame_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode.blame_block list, string) result
-  (* The path the note anchored to; success re-reads the listing. *)
-  (* (question, symbol, answer) — the note the pane shows names both. *)
-  | Code_lsp_answered of
-      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
-      * (Masc.Tui_decode.lsp_answer, string) result
+   carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
+   domain whose module applies its own answers declares the type there:
+   [Code_msg] carries [Masc_tui_code_results.msg]. One variant takes at most
+   244 constructors with arguments (#48617). A domain with a single answer
+   keeps it in [async_msg], and so does a constructor that carries another
+   [async_msg]. *)
 
 type keeper_msg =
   | Keeper_queue_resume_confirmed of string * int * resume_confirmation * string list
@@ -962,7 +926,7 @@ type async_msg =
   | Play_msg of play_msg
   | Librarian_input_loaded of string * (string list, string) result
   | Artifact_msg of artifact_msg
-  | Code_msg of code_msg
+  | Code_msg of Masc_tui_code_results.msg
   (* The Activity pane's Changes tab: the selected keeper's recorded file
      changes, stamped with the request so an answer for a keeper the
      cursor has left is dropped. *)

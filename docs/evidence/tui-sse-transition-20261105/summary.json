@@ -1,0 +1,151 @@
+{
+  "schema": "masc.tui.sse-transition-evidence.v2",
+  "captured_on": "2026-11-05",
+  "pr": 48180,
+  "pr_state": "CLOSED",
+  "open_replacement_pr": null,
+  "complete": false,
+  "fully_sse_converted": false,
+  "production_source": "473386e4609917d3129867a895637bb9ed969879",
+  "native_proof_run": 41960928980,
+  "native_binary_sha256": "02f9cec046fdd0f07b5ba0abc762c460ce3eef716b4695f842fba745796394b2",
+  "type_check": {
+    "run": 41960925440,
+    "source": "473386e4609917d3129867a895637bb9ed969879",
+    "result": "success"
+  },
+  "targeted_remote_behavior": {
+    "run": 41963750774,
+    "source": "5c1420fb9703c78ff403929d3f04563539a4a478",
+    "suite_count": 20,
+    "result": "in_progress",
+    "previous": {
+      "run": 41961038163,
+      "result": "failure",
+      "browser": "hidden notification raced the Escape transition",
+      "lane_inventory": "the first cold Dune build exceeded 600 seconds before the PTY executed"
+    }
+  },
+  "browser_fixed_idle": {
+    "scenario": "One 35x200 PTY run per binary; go Browser Lane; wait initial selected-tab read; one 2.4-second drain",
+    "before": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "idle_elapsed_seconds": 2.434741875011241,
+      "selected_tab_read_posts": 2,
+      "clients_gets": 3,
+      "scoped_observer_opens": 0
+    },
+    "after": {
+      "build_commit": "473386e4609917d3129867a895637bb9ed969879",
+      "idle_elapsed_seconds": 2.4011407080106437,
+      "selected_tab_read_posts": 1,
+      "clients_gets": 2,
+      "scoped_observer_opens": 1
+    },
+    "comparison": "The initial read remains. The baseline made one additional selected-tab read during the drain; the candidate made none. One sample per side, not a latency estimate."
+  },
+  "pty": {
+    "source": "473386e4609917d3129867a895637bb9ed969879",
+    "browser": {
+      "result": "pass",
+      "seconds": 11.571,
+      "open_selected_reads": 1,
+      "unrelated_selected_reads": 0,
+      "changed_selected_reads": 1,
+      "trailing_selected_reads": 2,
+      "retry_selected_reads": 2,
+      "reconnect_selected_reads": 2,
+      "hidden_selected_reads": 0,
+      "observer_connections": 7
+    },
+    "memory": {
+      "result": "pass",
+      "seconds": 13.698,
+      "open_health_reads": 1,
+      "unrelated_health_reads": 0,
+      "changed_health_reads": 1,
+      "trailing_health_reads": 2,
+      "retry_health_reads": 2,
+      "reconnect_health_reads": 2,
+      "hidden_health_reads": 0,
+      "observer_connections": 3
+    },
+    "machine": {
+      "result": "pass",
+      "seconds": 7.204,
+      "open_msx_live_reads": 1,
+      "push_msx_live_reads": 1,
+      "dos_live_reads": 0,
+      "control_scoped_observers": 1,
+      "watch_unscoped_observers": 1,
+      "legacy_msx_tick_posts": 0,
+      "observer_connections": 3
+    },
+    "lane_inventory": {
+      "result": "pass",
+      "seconds": 13.240,
+      "open_lane_reads": 1,
+      "open_addon_reads_including_detail": 2,
+      "matching_inspect_addon_reads": 1,
+      "trailing_lane_reads": 2,
+      "retry_lane_reads": 2,
+      "hidden_lane_or_addon_reads": 0,
+      "observer_connections": 1
+    }
+  },
+  "baselines": {
+    "machine": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "initial_window_seconds": 1.2,
+      "live_msx_capture_responses": 4
+    },
+    "memory": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "fixed_idle_health_responses": 2
+    }
+  },
+  "cli": {
+    "baseline_help_refresh": "--refresh Refresh interval in seconds (default: 2)",
+    "candidate_help_refresh_present": false
+  },
+  "native_behavior": {
+    "behavior_passed": false,
+    "failed_suites": [
+      "test_browser_addon_tool",
+      "test_browser_ego_peer",
+      "test_browser_native_workflow",
+      "test_keeper_vision_tool"
+    ],
+    "passing_directly_relevant_suites": [
+      "test_browser_lane",
+      "test_browser_lane_watched_work",
+      "test_browser_addon_observation",
+      "test_tui_browser_lane",
+      "test_browser_addon_live_ego",
+      "test_browser_addon_wire",
+      "test_browser_selection",
+      "test_server_lane_inventory"
+    ],
+    "use_of_artifact": "Exact-source macOS executable for isolated PTY measurements only; not an all-suite green claim or installation proof."
+  },
+  "rendering_performance": {
+    "evidence": "docs/evidence/tui-smoothness-20261104/summary.json",
+    "scroll_samples": 80,
+    "mean_ms": { "before": 5.06, "after": 3.86 },
+    "p95_ms": { "before": 16.41, "after": 11.74 },
+    "p99_ms": { "before": 60.0, "after": 23.23 },
+    "max_ms": { "before": 84.37, "after": 33.22 },
+    "estimated_words": { "before": 261360000, "after": 228560000 },
+    "limit": "Frame Build/Present timings, not causal key-to-physical-display latency; observation caps are retained in the linked bundle."
+  },
+  "remaining_work": [
+    "Play room still polls POST /api/v1/play/room every two seconds while active, including presence renewal; server-owned presence and change notification design is still required.",
+    "Browser change detection is server sampling every two seconds, not backend-native browser events.",
+    "The targeted 20-suite run and independent whole-branch review are not yet complete at this capture.",
+    "Real Browser backends were not exercised; PTY peers are HTTP/SSE fixtures.",
+    "Native browser-lane proof retains the four failed suites named above; missing Node fixture modules and Browser tool/vision assertion failures are not claimed to be pre-existing.",
+    "PR #48180 is closed with no open replacement at capture time; merge/conflict handling belongs to another owner.",
+    "No merge, rebase, production installation, restart, or ~/me/.masc change was performed.",
+    "One final PTY run per surface and one fixed-idle sample per binary bound the measurement; no statistical latency or universal request-rate claim is made."
+  ]
+}

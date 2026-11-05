@@ -1,0 +1,11 @@
+masc-tui [OPTIONS]
+  --version Print this executable's build version and exit
+  --build-commit Print the Git commit embedded at build time and exit
+  --port MASC server port (environment or saved workspace value when omitted)
+  --workspace Workspace name (default: from base path)
+  --base-path Workspace/base path; .masc lives below it (default: MASC_BASE_PATH, then a cwd holding .masc/config, then the recorded default)
+  --base Alias for --base-path
+  --reasoning {hidden|folded|full}Keeper chat reasoning default: hidden, folded, or full
+  --tool-view {compact|results|full}Keeper chat tool-call default: compact, results, or full
+  -help  Display this list of options
+  --help  Display this list of options

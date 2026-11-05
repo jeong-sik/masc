@@ -1,0 +1,22 @@
+F
+======================================================================
+FAIL: test_visible_reads_trailing_retry_and_reconnect (__main__.MemoryPushTest.test_visible_reads_trailing_retry_and_reconnect)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_memory_push.py", line 205, in test_visible_reads_trailing_retry_and_reconnect
+    owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_chat_owed_history.py", line 254, in run_chat
+    scenario(server, step)
+    ~~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-lane-inventory-announce-20261104/test/test_tui_memory_push.py", line 160, in scenario
+    self.assertEqual(memory.response_count("open", "health"), 1,
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     "Memory kept reading while idle")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 2 != 1 : Memory kept reading while idle
+
+----------------------------------------------------------------------
+Ran 1 test in 7.343s
+
+FAILED (failures=1)

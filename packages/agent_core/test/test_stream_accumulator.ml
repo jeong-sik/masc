@@ -1182,6 +1182,13 @@ let test_media_chunks_do_not_retain_empty_deltas () =
     ]
 ;;
 
+let expect_one_unreadable label response =
+  match response.unreadable_tool_uses with
+  | [ call ] -> call
+  | calls ->
+    Alcotest.failf "%s: expected one unreadable tool use, got %d" label (List.length calls)
+;;
+
 let test_finalize_tool_use_invalid_json () =
   let acc = Streaming.create_stream_acc () in
   acc_events
@@ -1197,16 +1204,23 @@ let test_finalize_tool_use_invalid_json () =
     ; MessageDelta { stop_reason = Some EndTurn; usage = None }
     ];
   match Streaming.finalize_stream_acc acc with
-  | Error (Stream_parse_failed { reason; raw }) ->
-    (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis; structural failures intentionally omit provider payloads. *)
-    Alcotest.(check string) "raw preserved" "not json{" raw;
-    Alcotest.(check bool)
-      "malformed tool args"
-      true
-      (String.starts_with ~prefix:"malformed_tool_use_arguments:index:0" reason)
+  | Ok response ->
+    let call = expect_one_unreadable "invalid json" response in
+    Alcotest.(check string) "id" "tu_2" call.tool_use_id;
+    Alcotest.(check string) "name" "bad" call.tool_name;
+    Alcotest.(check string) "arguments kept whole" "not json{" call.arguments;
+    (match call.arguments_problem with
+     | Llm_provider.Tool_call_input.Invalid_json _ -> ()
+     | Llm_provider.Tool_call_input.Not_object ->
+       Alcotest.fail "expected an invalid JSON problem");
+    Alcotest.(check int) "no content block for the call" 0 (List.length response.content);
+    (* The model made a tool call, so the label EndTurn does not end the turn
+       before the agent can answer it. *)
+    Alcotest.(check string)
+      "tool stop"
+      "tool_use"
+      (stop_reason_to_string response.stop_reason)
   | Error err -> fail_unexpected_stream_error err
-  | Ok _ -> Alcotest.fail "expected malformed tool_use arguments to fail closed"
 ;;
 
 let test_finalize_tool_use_invalid_json_preserves_assembly_boundaries () =
@@ -1227,20 +1241,17 @@ let test_finalize_tool_use_invalid_json_preserves_assembly_boundaries () =
     ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
     ];
   match Streaming.finalize_stream_acc acc with
-  | Error (Stream_parse_failed { reason; raw }) ->
-    Alcotest.(check string) "raw remains exact" (first ^ second) raw;
-    Alcotest.(check bool)
-      "delta byte boundaries retained"
-      true
-      (String.ends_with
-         ~suffix:
-           (Printf.sprintf
-              ":assembly=delta:%d,delta:%d"
-              (String.length first)
-              (String.length second))
-         reason)
+  | Ok response ->
+    let call = expect_one_unreadable "assembly" response in
+    Alcotest.(check string) "arguments remain exact" (first ^ second) call.arguments;
+    (match call.arguments_assembly with
+     | Some assembly ->
+       Alcotest.(check string)
+         "delta byte boundaries retained"
+         (Printf.sprintf "delta:%d,delta:%d" (String.length first) (String.length second))
+         (tool_argument_assembly_to_string assembly)
+     | None -> Alcotest.fail "a streamed call keeps its assembly")
   | Error err -> fail_unexpected_stream_error err
-  | Ok _ -> Alcotest.fail "expected malformed assembled arguments to fail closed"
 ;;
 
 let test_finalize_tool_use_rejects_non_object_json () =
@@ -1260,20 +1271,58 @@ let test_finalize_tool_use_rejects_non_object_json () =
          ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
          ];
        match Streaming.finalize_stream_acc acc with
-       | Error (Stream_parse_failed { reason; raw = observed_raw }) ->
-         Alcotest.(check string) (label ^ " raw") raw observed_raw;
-         Alcotest.(check string)
-           (label ^ " reason")
-           "malformed_tool_use_arguments:index:0:not_object"
-           reason
-       | Error err -> fail_unexpected_stream_error err
-       | Ok _ -> Alcotest.fail (label ^ " tool input must fail closed"))
+       | Ok response ->
+         let call = expect_one_unreadable label response in
+         Alcotest.(check string) (label ^ " arguments") raw call.arguments;
+         (match call.arguments_problem with
+          | Llm_provider.Tool_call_input.Not_object -> ()
+          | Llm_provider.Tool_call_input.Invalid_json message ->
+            Alcotest.failf "%s: expected not_object, got invalid json %s" label message)
+       | Error err -> fail_unexpected_stream_error err)
     [ "number", "42"
     ; "array", "[]"
     ; "boolean", "true"
     ; "null", "null"
     ; "string", {|"value"|}
     ]
+;;
+
+(* The live shape of 11-05: three calls in one response, the third with
+   argument text the model broke. The two readable calls stay runnable. *)
+let test_finalize_unreadable_call_keeps_its_readable_siblings () =
+  let acc = Streaming.create_stream_acc () in
+  let call index id arguments =
+    [ ContentBlockStart
+        { index; content_type = "tool_use"; tool_id = Some id; tool_name = Some "Execute" }
+    ; ContentBlockDelta { index; delta = InputJsonDelta arguments }
+    ; ContentBlockStop { index }
+    ]
+  in
+  acc_events
+    acc
+    ([ MessageStart { id = "m"; model = "deepseek"; usage = None } ]
+     @ call 0 "c0" {|{"argv":["ls"],"cwd":"."}|}
+     @ call 1 "c1" {|{"argv":["pwd"],"cwd":"."}|}
+     @ call 2 "c2" {|{"argv":["bash","-lc","true"]"timeout_sec": 120}|}
+     @ [ MessageDelta { stop_reason = Some StopToolUse; usage = None } ]);
+  match Streaming.finalize_stream_acc acc with
+  | Ok response ->
+    let runnable =
+      List.filter_map
+        (function
+          | ToolUse { id; _ } -> Some id
+          | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
+          | Image _ | Document _ | Audio _ -> None)
+        response.content
+    in
+    Alcotest.(check (list string)) "readable calls" [ "c0"; "c1" ] runnable;
+    let call = expect_one_unreadable "sibling" response in
+    Alcotest.(check string) "unreadable call" "c2" call.tool_use_id;
+    Alcotest.(check string)
+      "tool stop"
+      "tool_use"
+      (stop_reason_to_string response.stop_reason)
+  | Error err -> fail_unexpected_stream_error err
 ;;
 
 let test_finalize_multi_block_ordering () =
@@ -1659,6 +1708,10 @@ let () =
             "tool_use non-object json"
             `Quick
             test_finalize_tool_use_rejects_non_object_json
+        ; Alcotest.test_case
+            "unreadable call keeps readable siblings"
+            `Quick
+            test_finalize_unreadable_call_keeps_its_readable_siblings
         ; Alcotest.test_case
             "multi block ordering"
             `Quick

@@ -1209,6 +1209,117 @@ let test_play_observer_reconnect_keeps_replacement_presence env =
           Alcotest.(check int) "Play metadata never steps Control" 0 !control_steps))))
 ;;
 
+module Play_fixture = Play_observer_fixture
+
+let open_play ~sw ~clock ~port ~session_id ~token ~instance_id =
+  Play_fixture.open_observer ~sw ~clock ~port ~session_id ~token ~instance_id "tab-1"
+
+let http_play_action workspace operation =
+  let action = Masc.Play_room.parse_action (`Assoc [
+    "action", `String operation; "client_id", `String "tab-1"; "machine", `String "msx"
+  ]) |> Result.get_ok in
+  Server_play_room_events.perform_http ~base_path:workspace ~agent_name:"play-observer"
+    ~role:Masc_domain.Player action |> Result.get_ok
+
+let assert_http_join_available workspace =
+  ignore (http_play_action workspace "join");
+  Alcotest.(check (list string)) "HTTP Join remains available after cleanup"
+    ["play-observer"] (Play_fixture.member_names workspace);
+  ignore (http_play_action workspace "leave")
+
+let test_stale_reconnect_cannot_replace_successor env =
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    let calls = ref 0 in
+    let paused, resume = Eio.Promise.create () in
+    Server_play_room_events.For_testing.with_perform
+      (fun ~base_path ~who ~speaker ~now action ->
+        incr calls;
+        if !calls = 1 then begin
+          Eio.Promise.resolve paused ();
+          Eio.Promise.await resume
+        end;
+        Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
+      (fun () ->
+        let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+        Play_fixture.await clock paused;
+        let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+        Alcotest.(check int) "the successor publishes before the stale connect resumes"
+          200 (Play_fixture.await clock second.response);
+        Eio.Promise.resolve resume ();
+        Play_fixture.await clock first.ended;
+        Alcotest.(check bool) "the successor remains connected" false
+          (Eio.Promise.is_resolved second.ended);
+        Alcotest.(check bool) "the successor remains registered" true
+          (Masc.Sse.exists session_id && Server_mcp_transport_http_conn.is_active_sse_session session_id);
+        Masc.Sse.broadcast_to
+          (Masc.Sse.Runtime_observers (Masc.Sse.runtime_authority_exn ~base_path:workspace))
+          (`Assoc ["type", `String "successor-live"]);
+        Play_fixture.await_condition clock (fun () ->
+          List.exists (fun chunk -> Play_fixture.contains chunk "successor-live") !(second.chunks));
+        Alcotest.(check (list string)) "the successor lease remains present"
+          ["play-observer"] (Play_fixture.member_names workspace);
+        Server_mcp_transport_http.stop_sse_session session_id;
+        Play_fixture.await clock second.ended))
+
+let test_disconnect_before_lease_install_cleans_up env =
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    let paused, resume = Eio.Promise.create () in
+    let entered = ref false in
+    Server_play_room_events.For_testing.with_perform
+      (fun ~base_path ~who ~speaker ~now action ->
+        if not !entered then begin
+          entered := true;
+          Eio.Promise.resolve paused ();
+          Eio.Promise.await resume
+        end;
+        Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
+      (fun () ->
+        let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+        Play_fixture.await clock paused;
+        Masc.Sse.unregister session_id;
+        Eio.Promise.resolve resume ();
+        Play_fixture.await clock first.ended;
+        Alcotest.(check (list string)) "a disconnected Observer cannot leave an orphaned lease"
+          [] (Play_fixture.member_names workspace);
+        assert_http_join_available workspace))
+
+let test_aborted_replacement_cleans_predecessor_presence env =
+  Play_fixture.with_fixture env (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+    let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+    Alcotest.(check int) "the established Observer opens" 200 (Play_fixture.await clock first.response);
+    Alcotest.(check (list string)) "the established Observer owns presence"
+      ["play-observer"] (Play_fixture.member_names workspace);
+    Server_play_room_events.For_testing.with_perform
+      (fun ~base_path ~who ~speaker ~now action ->
+        match Masc.Play_room.presence action with
+        | Some (Masc.Play_room.Join, _) -> Error (Masc.Play_room.Unavailable "injected connect failure")
+        | Some (Masc.Play_room.Leave, _) | None ->
+          Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
+      (fun () ->
+        let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+        ignore (Play_fixture.await clock second.response);
+        Play_fixture.await clock second.ended);
+    Play_fixture.await clock first.ended;
+    Alcotest.(check (list string)) "an aborted replacement removes the predecessor"
+      [] (Play_fixture.member_names workspace);
+    assert_http_join_available workspace)
+
+let test_readiness_loss_cleans_predecessor_presence env =
+  let ready = ref true in
+  Play_fixture.with_fixture env ~ready:(fun () -> !ready)
+    (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
+      let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+      Alcotest.(check int) "the established Observer opens" 200 (Play_fixture.await clock first.response);
+      Alcotest.(check (list string)) "the established Observer owns presence"
+        ["play-observer"] (Play_fixture.member_names workspace);
+      ready := false;
+      let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
+      Alcotest.(check int) "readiness loss is refused" 503 (Play_fixture.await clock second.response);
+      Play_fixture.await clock first.ended;
+      Alcotest.(check (list string)) "readiness loss removes the predecessor"
+        [] (Play_fixture.member_names workspace);
+      assert_http_join_available workspace)
+
 let test_mcp_future_cursor_resets_before_live_delivery env =
   let module Transport = Server_mcp_transport_http in
   let workspace = Masc_test_deps.setup_test_workspace () in
@@ -1438,6 +1549,10 @@ let () =
         ; case "MCP refuses foreign and retired workspaces" test_mcp_observer_refuses_foreign_and_retired_workspaces
         ; case "retired observer cannot close its successor" test_retired_observer_close_keeps_successor
         ; case "Play observer reconnect keeps replacement presence" test_play_observer_reconnect_keeps_replacement_presence
+        ; case "stale reconnect cannot replace its successor" test_stale_reconnect_cannot_replace_successor
+        ; case "disconnect before lease installation cleans up" test_disconnect_before_lease_install_cleans_up
+        ; case "aborted replacement cleans predecessor presence" test_aborted_replacement_cleans_predecessor_presence
+        ; case "readiness loss cleans predecessor presence" test_readiness_loss_cleans_predecessor_presence
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
     ; ( "SSE response"

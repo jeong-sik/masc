@@ -36,6 +36,17 @@ type previous_comparison =
   ; now_live : previous_now_live
   }
 
+type previous =
+  | No_previous_record  (** The first scan of this workspace. *)
+  | Previous_record_invalid of
+      { line : int
+      ; detail : string
+      }
+      (** The record does not parse. This scan compares nothing and writes a
+          new record in its place, so nothing becomes deletable before the
+          next scan. *)
+  | Compared_with_previous of previous_comparison
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -47,7 +58,7 @@ type report =
   ; unstatable : int
       (** Candidates of both scans whose file was neither a regular file nor
           absent; never deletable. *)
-  ; previous : previous_comparison option  (** [None] on the first scan. *)
+  ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
 
@@ -56,11 +67,6 @@ type error =
   | Listing_failed of Tool_blob_store.list_error
   | Record_unreadable of
       { path : string
-      ; detail : string
-      }
-  | Record_invalid of
-      { path : string
-      ; line : int
       ; detail : string
       }
   | Record_write_failed of

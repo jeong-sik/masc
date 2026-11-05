@@ -78,7 +78,16 @@ val validate_all_with_thinking_control
   -> Provider_config.t
   -> (unit, Http_client.http_error) result
 
+val request_admission : Provider_config.t -> (unit, string) result
+(** The admission every non-exact request meets before dispatch: request path,
+    output schema, tool choice, reasoning effort, the thinking control routed by
+    provider kind, and the admission declaration. [Error] carries the
+    operator-facing reason. Runtime configuration loading asks it of the request
+    a binding's own thinking declaration makes, so a binding the turn would
+    refuse is refused when its configuration is read. *)
+
 val validate_all : Provider_config.t -> (unit, Http_client.http_error) result
+(** [request_admission] with its reason as [Http_client.AcceptRejected]. *)
 
 (** {1 Request serialization} *)
 
